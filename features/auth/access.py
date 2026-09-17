@@ -277,12 +277,19 @@ def require_permission_when_auth_required(permission: str):
 
 def is_elevated(request: Request) -> bool:
     """Return whether this request has a live re-authenticated elevation."""
-    # Elevation lives on a human *cookie* session. An
-    # agent_token principal must never inherit the elevation of a leftover
-    # browser/CLI cookie that happens to ride along in the same request —
-    # that would collapse the agent's scope isolation. Bearer and elevation
-    # are mutually exclusive by definition.
-    if getattr(request.state, "auth_method", None) == "agent_token":
+    # Elevation lives on a human *cookie* session. A Bearer principal
+    # (agent token or machine capability, valid or not) must never inherit
+    # the elevation of a leftover browser/CLI cookie that happens to ride
+    # along in the same request — that would let a machine capability
+    # combine with a human admin elevation and amplify its authority far
+    # beyond the snapshotted run plan (ADR 0010 / ADR 0012). Bearer and
+    # elevation are mutually exclusive by definition.
+    if getattr(request.state, "auth_method", None) in {
+        "agent_token",
+        "machine_authority",
+        "invalid_agent_token",
+        "invalid_capability_token",
+    }:
         return False
     if getattr(request.state, "is_elevated", None) is not None:
         return bool(request.state.is_elevated)

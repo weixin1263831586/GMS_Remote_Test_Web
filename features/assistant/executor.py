@@ -614,7 +614,7 @@ class ActionExecutor:
         from features.auth import require_authenticated_user
         from features.reports import test_report_db
 
-        owner_id = require_authenticated_user(request).id
+        owner_id = require_authenticated_user(request).resource_owner_id  # ADR 0010: 报告按账号分区
         reports = test_report_db.get_reports(limit=10, owner_id=owner_id)
         stats = test_report_db.get_statistics(owner_id=owner_id)
         lines = [

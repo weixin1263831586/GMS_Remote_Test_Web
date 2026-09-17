@@ -213,6 +213,81 @@ def test_operation_claim_borrows_existing_claim_for_same_owner():
             )
 
 
+def _request_with_owner(actor_id: str, owner_id: str) -> Request:
+    """ATS machine principal: actor != resource owner (ADR 0010/0012)."""
+    request = Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/api/devices/remount",
+        "headers": [],
+        "client": ("127.0.0.1", 1234),
+    })
+    request.state.current_user = CurrentUser(
+        id=actor_id,
+        username=actor_id,
+        role="agent_service",
+        extra_permissions=frozenset({"devices.use_leased"}),
+        resource_owner_id=owner_id,
+    )
+    return request
+
+
+def test_machine_principal_reuses_its_owner_reservation():
+    """ADR 0010 回归：machine actor=automation:run-1，owner=user-alice。
+
+    设备被 alice 的 cluster-reservation 占有时，ATS machine 执行
+    remount/flash 必须按 resource_owner_id 复用同一预约；按 actor id
+    fencing 会把"自己的预约"判成别人占用（409），整个 run 中途失败。
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        manager = DeviceLockManager(
+            Path(directory) / "claims.sqlite3",
+            local_worker_id="ats-worker-controller",
+        )
+        machine = _request_with_owner("automation:run-1", "user-alice")
+        with patch.object(operation_claims, "device_lock_manager", manager):
+            ok, _first = manager.lock_devices(
+                ["SERIAL-1"], "user-alice", "alice",
+                source_id="reservation:res-1", source_type="cluster-reservation",
+                ttl_seconds=3600, allow_existing_source=True,
+            )
+            assert ok
+
+            source_id, records, conflict = (
+                support.acquire_device_operation_claim(
+                    machine, ["SERIAL-1"], "remount"
+                )
+            )
+            assert conflict is None
+            assert records[0]["source_id"] == "reservation:res-1"
+            assert support.release_device_operation_claim(source_id) == 0
+
+
+def test_machine_principal_from_another_owner_still_conflicts():
+    """别人的 machine principal（不同 owner）不得复用预约。"""
+    with tempfile.TemporaryDirectory() as directory:
+        manager = DeviceLockManager(
+            Path(directory) / "claims.sqlite3",
+            local_worker_id="ats-worker-controller",
+        )
+        machine = _request_with_owner("automation:run-2", "user-bob")
+        with patch.object(operation_claims, "device_lock_manager", manager):
+            ok, _first = manager.lock_devices(
+                ["SERIAL-1"], "user-alice", "alice",
+                source_id="reservation:res-1", source_type="cluster-reservation",
+                ttl_seconds=3600, allow_existing_source=True,
+            )
+            assert ok
+
+            _source_id, _records, conflict = (
+                support.acquire_device_operation_claim(
+                    machine, ["SERIAL-1"], "remount"
+                )
+            )
+            assert conflict is not None
+            assert conflict.status_code == 409
+
+
 def test_operation_claim_does_not_borrow_running_cluster_job_claim():
     """同 owner 的运行中 cluster-job claim 不得被直接操作借用。
 

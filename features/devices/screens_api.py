@@ -14,6 +14,7 @@ from . import runtime
 from .models import DeviceActionRequest
 from .support import (
     device_claim_conflict_response,
+    device_fencing_owner_id,
     device_mutation_guard,
     ssh_connection_failed_response,
 )
@@ -83,7 +84,7 @@ async def show_device_screens(req: DeviceActionRequest, request: Request):
             )
         conflict = device_claim_conflict_response(
             devices,
-            runtime.get_client_id_from_request(request),
+            device_fencing_owner_id(request),
             allow_owner=True,
         )
         if conflict:

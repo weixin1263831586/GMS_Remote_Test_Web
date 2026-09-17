@@ -96,7 +96,12 @@ def acquire_device_operation_claim(
     # 归属冲突由下方 409 fencing 兜底；高危操作（bootloader/verity/
     # override）已在路由层挂 require_elevated_admin_when_auth_required，
     # 普通用户到不了那一步。
-    owned = _owned_local_device_keys(user.id, device_keys)
+    # Fencing is keyed by the RESOURCE owner (ADR 0010): an ATS machine
+    # principal executes on devices its creating human account reserved
+    # (reservation owner = created_by, machine actor = automation:<run>),
+    # and an agent token reuses its enrolling account's claims. The
+    # synthetic actor id must never fight its own owner's reservation.
+    owned = _owned_local_device_keys(user.resource_owner_id, device_keys)
     if user.role == "agent_service" and not _has_permission(user, "devices.use_leased"):
         return "", [], JSONResponse(
             content={
@@ -123,7 +128,7 @@ def acquire_device_operation_claim(
     if missing:
         acquired, new_records = device_lock_manager.lock_devices(
             missing,
-            user.id,
+            user.resource_owner_id,
             user.username,
             source_id=source_id,
             source_type=f"local-{operation}",
@@ -154,7 +159,7 @@ def acquire_device_operation_claim(
             "lease_id": row["id"],
             "device_id": row["device_key"],
             "generation": row["generation"],
-            "owner_id": user.id,
+            "owner_id": user.resource_owner_id,
         }
         for row in records
     ]
@@ -191,7 +196,11 @@ def audit_device_operation(
         "method": getattr(request, "method", ""),
         "path": str(getattr(getattr(request, "url", None), "path", "")),
         "status_code": int(status_code),
-        "owner_id": user.id,
+        # 两个身份都要记（ADR 0010）：owner 是资源归属账号（与 fencing 一致），
+        # actor 是实际执行的 principal（human 账号 / agent:<token> /
+        # automation:<run>），只记其一就无法回答“谁在谁的设备上做了什么”。
+        "owner_id": user.resource_owner_id,
+        "actor_id": user.actor_id,
         "username": user.username,
         "leases": [
             {

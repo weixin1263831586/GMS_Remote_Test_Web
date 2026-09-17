@@ -81,9 +81,11 @@ class DeviceScreensApiTests(unittest.IsolatedAsyncioTestCase):
                 "check_scrcpy_healthy",
                 side_effect=lambda *_args, **_kw: next(health_states),
             ),
+            # fencing 身份接缝改为 device_fencing_owner_id（ADR 0010）：
+            # 生产代码不再走 runtime.get_client_id_from_request。
             patch.object(
-                screens_api.runtime,
-                "get_client_id_from_request",
+                screens_api,
+                "device_fencing_owner_id",
                 return_value="user-id",
             ),
             patch.object(
@@ -139,9 +141,11 @@ class DeviceScreensApiTests(unittest.IsolatedAsyncioTestCase):
                 "_scrcpy_log_tail",
                 return_value="[server] ERROR: Could not open video stream: Device is offline",
             ),
+            # fencing 身份接缝改为 device_fencing_owner_id（ADR 0010）：
+            # 生产代码不再走 runtime.get_client_id_from_request。
             patch.object(
-                screens_api.runtime,
-                "get_client_id_from_request",
+                screens_api,
+                "device_fencing_owner_id",
                 return_value="user-id",
             ),
             patch.object(

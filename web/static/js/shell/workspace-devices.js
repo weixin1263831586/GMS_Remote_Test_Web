@@ -228,6 +228,7 @@ function clearActiveTestContext() {
     state.clusterJobId = '';
     resetClusterEventCursor();
     state.testing = false;
+    state.testStarting = false;
     state.testStopping = false;
     sessionStorage.removeItem('active_cluster_job');
     updateTestToggleButton(false);
@@ -382,6 +383,7 @@ async function switchTestWorker() {
     state.clusterJobId = '';
     resetClusterEventCursor();
     state.testing = false;
+    state.testStarting = false;
     state.testStopping = false;
     sessionStorage.removeItem('active_cluster_job');
     updateTestToggleButton(false);
@@ -443,6 +445,7 @@ async function refreshTestStatusForWorker(workerId) {
             // 当前主机没有活跃测试，恢复空闲状态并清掉持久层的旧 job 绑定
             // （否则 F5 后 active_cluster_job 会恢复别的 Worker 的任务）。
             state.testing = false;
+            state.testStarting = false;
             state.testStopping = false;
             state.clusterJobId = '';
             resetClusterEventCursor();

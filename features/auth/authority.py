@@ -29,8 +29,11 @@ apply, while every owner/scope check applies unchanged.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
+import json
 import secrets
 import time
 from typing import Any
@@ -90,11 +93,16 @@ def automation_granted_capabilities(
         return []
     plan = test_plan if isinstance(test_plan, dict) else {}
     granted: list[str] = []
-    if plan.get("flash") if isinstance(plan.get("flash"), dict) else False:
-        if not isinstance(plan.get("flash"), dict) or (
-            plan["flash"].get("mode") != "skip"
-        ):
-            granted.append("firmware.stage")
+    # Executor semantics (executors.flash): ONLY flash.mode == "skip" skips
+    # flashing — a missing/empty flash plan defaults to firmware flashing.
+    # The capability compiler must mirror that exactly, otherwise a bare
+    # {"test_type": "CTS"} plan passes preflight/create but the flash stage
+    # later fails with 403 firmware.stage (preflight/create/worker must all
+    # agree through this single compiler, ADR 0012).
+    flash = plan.get("flash")
+    flash_mode = flash.get("mode") if isinstance(flash, dict) else None
+    if flash_mode != "skip":
+        granted.append("firmware.stage")
     if isinstance(plan.get("build"), dict):
         granted.append("build.execute")
         granted.append("build.cancel")
@@ -154,6 +162,20 @@ def _signing_key() -> bytes:
     return derive_application_key(_HMAC_PURPOSE)
 
 
+def _encode_field(value: str) -> str:
+    """URL-safe Base64 for one variable token field (no ``.`` padding chars)."""
+
+    return base64.urlsafe_b64encode(value.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _decode_field(value: str) -> str | None:
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        return base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+    except (ValueError, UnicodeDecodeError, binascii.Error):
+        return None
+
+
 def mint_capability_token(
     principal: CurrentUser,
     *,
@@ -162,9 +184,14 @@ def mint_capability_token(
     """Mint a short-TTL signed bearer token FOR a machine principal.
 
     Called in-process by the automation worker only — no HTTP surface can
-    mint tokens. Verification accepts the token back into the same
-    principal with a bounded lifetime, so loopback HTTP calls authenticate
-    without cookies or long-lived credentials.
+    mint tokens. The signed payload carries the FULL capability snapshot:
+    ``verify_capability_token`` must be able to rebuild the exact principal
+    the worker started with. Signing only principal/owner ids and
+    recomputing capabilities at verify time silently strips every plan
+    capability (build.execute, devices.lease, tests.execute,
+    firmware.stage) — the run then 403s mid-workflow even though creation
+    passed. Variable fields are URL-safe Base64 so ids containing ``.``
+    (agent ids, e-mail-like account names) cannot corrupt the framing.
     """
 
     principal_id = str(principal.id or "")
@@ -173,9 +200,22 @@ def mint_capability_token(
         raise MachineAuthorityError(
             "capability tokens can only be minted for automation principals"
         )
+    if not owner_id:
+        raise MachineAuthorityError(
+            "capability tokens require the creating account (resource owner)"
+        )
     expires = int(time.time()) + max(60, int(ttl_seconds))
     nonce = secrets.token_hex(8)
-    payload = f"{expires}.{nonce}.{principal_id}.{owner_id}"
+    capabilities = sorted(
+        str(item) for item in (principal.extra_permissions or frozenset())
+    )
+    payload = ".".join([
+        _encode_field(str(expires)),
+        _encode_field(nonce),
+        _encode_field(principal_id),
+        _encode_field(owner_id),
+        _encode_field(json.dumps(capabilities, separators=(",", ":"))),
+    ])
     digest = hmac.new(
         _signing_key(), payload.encode("utf-8"), hashlib.sha256
     ).hexdigest()
@@ -187,32 +227,46 @@ def verify_capability_token(token: str) -> CurrentUser | None:
 
     Returns None for anything malformed, expired, or wrongly signed; never
     raises into request handling (an invalid capability is just anonymous).
+    The signed capability snapshot is restored verbatim — verification must
+    never widen it (unknown names are dropped by ``automation_authority``)
+    nor narrow it to the MACHINE_PERMISSIONS floor.
     """
 
     value = str(token or "")
     if not value.startswith(CAPABILITY_TOKEN_PREFIX):
         return None
     parts = value[len(CAPABILITY_TOKEN_PREFIX):].split(".")
-    if len(parts) != 5:
+    if len(parts) != 6:
         return None
-    expires_raw, nonce, principal_id, owner_id, digest = parts
-    payload = f"{expires_raw}.{nonce}.{principal_id}.{owner_id}"
+    payload = ".".join(parts[:5])
+    digest = parts[5]
     expected = hmac.new(
         _signing_key(), payload.encode("utf-8"), hashlib.sha256
     ).hexdigest()
     if not hmac.compare_digest(expected, digest):
         return None
+    fields = [_decode_field(part) for part in parts[:5]]
+    if any(field is None for field in fields):
+        return None
+    expires_raw, _nonce, principal_id, owner_id, capabilities_raw = fields
     try:
         expires = int(expires_raw)
     except ValueError:
         return None
     if expires < int(time.time()):
         return None
-    if not principal_id.startswith("automation:"):
+    if not principal_id.startswith("automation:") or not owner_id:
+        return None
+    try:
+        capabilities = json.loads(capabilities_raw)
+    except ValueError:
+        return None
+    if not isinstance(capabilities, list):
         return None
     return automation_authority(
         principal_id[len("automation:"):],
         owner_id,
+        [str(item) for item in capabilities],
     )
 
 

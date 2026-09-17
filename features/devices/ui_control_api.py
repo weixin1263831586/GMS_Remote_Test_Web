@@ -28,6 +28,7 @@ from . import runtime
 from .support import (
     SSHConnection,
     device_claim_conflict_response,
+    device_fencing_owner_id,
     device_mutation_guard,
 )
 
@@ -220,7 +221,7 @@ async def ui_screenshot(req: UiControlRequest, request: Request):
         return error_response("serial is required", 400)
     conflict = device_claim_conflict_response(
         [serial],
-        runtime.get_client_id_from_request(request),
+        device_fencing_owner_id(request),
         allow_owner=True,
     )
     if conflict:
@@ -270,7 +271,7 @@ async def ui_layout(req: UiControlRequest, request: Request):
         return error_response("serial is required", 400)
     conflict = device_claim_conflict_response(
         [serial],
-        runtime.get_client_id_from_request(request),
+        device_fencing_owner_id(request),
         allow_owner=True,
     )
     if conflict:
@@ -370,9 +371,8 @@ async def ui_tap(req: UiTapRequest, request: Request):
     if req.x is None or req.y is None:
         return error_response("x and y are required", 400)
 
-    client_id = runtime.get_client_id_from_request(request)
     conflict = device_claim_conflict_response(
-        [serial], client_id, allow_owner=True
+        [serial], device_fencing_owner_id(request), allow_owner=True
     )
     if conflict:
         return conflict

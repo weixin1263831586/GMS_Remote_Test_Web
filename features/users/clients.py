@@ -24,18 +24,20 @@ def get_client_id_from_request(request) -> str:
 
 
 def owner_id_from_request(request) -> str:
-    """Return an account id, or the stable anonymous client id in development.
+    """Return the RESOURCE owner account id (ADR 0010), or the stable
+    anonymous client id in development.
 
-    Agent Service Token principals inherit their token's owner account
-    (``owner_user_id``) instead of the synthetic ``agent:<token_id>`` id, so
-    owner-scoped data (Redmine credentials, evidence stores, ...) configured
-    under the enrolling account is visible to its agents.
+    Human, Agent Service Token and automation machine principals all
+    resolve through ``resource_owner_id``: agent tokens map to their
+    enrolling account (``owner_user_id``), machine capabilities map to the
+    run's ``created_by`` account — never the synthetic
+    ``agent:<token_id>`` / ``automation:<run_id>`` actor id. Owner-scoped
+    data (Redmine credentials, evidence stores, APK artifacts, ...) then
+    survives token rotation and is shared by the run that created it.
     """
     user = get_authenticated_user(request)
     if user is not None:
-        record = getattr(request.state, 'agent_token_record', None)
-        owner_user_id = str((record or {}).get('owner_user_id') or '').strip()
-        return owner_user_id or user.id
+        return user.resource_owner_id
     return get_client_display_id_from_request(request)
 
 

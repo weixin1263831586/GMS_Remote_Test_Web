@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from features.auth import require_elevated_admin_when_auth_required
-from features.users import get_client_id_from_request
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 
@@ -27,7 +26,11 @@ from .config_override import (
     reboot_device,
     revert_all,
 )
-from .support import device_claim_conflict_response, device_mutation_guard
+from .support import (
+    device_claim_conflict_response,
+    device_fencing_owner_id,
+    device_mutation_guard,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -49,7 +52,8 @@ class UpsertEntryRequest(BaseModel):
 
 
 def _store_for_request(request: Request) -> OverrideStore:
-    return OverrideStore(owner_id=get_client_id_from_request(request))
+    # RRO 覆盖项按设备归属账号分区（ADR 0010 ResourceOwner）。
+    return OverrideStore(owner_id=device_fencing_owner_id(request))
 
 
 def _mutation_claim_error(request: Request, device_id: str):
@@ -57,7 +61,7 @@ def _mutation_claim_error(request: Request, device_id: str):
         return error_response("device_id is required for device changes", status_code=400)
     return device_claim_conflict_response(
         [device_id],
-        get_client_id_from_request(request),
+        device_fencing_owner_id(request),
         allow_owner=True,
     )
 
@@ -66,7 +70,7 @@ def _read_claim_error(request: Request, device_id: str):
     if not str(device_id or "").strip():
         return error_response("device_id is required", status_code=400)
     return device_claim_conflict_response(
-        [device_id], get_client_id_from_request(request), allow_owner=True
+        [device_id], device_fencing_owner_id(request), allow_owner=True
     )
 
 

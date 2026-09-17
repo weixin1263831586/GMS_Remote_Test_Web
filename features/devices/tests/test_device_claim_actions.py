@@ -106,7 +106,8 @@ def test_config_explorer_allows_owner_but_rejects_other_user():
 def test_config_override_mutation_rejects_active_claim_before_reboot():
     with patch.object(
         config_override_api,
-        "get_client_id_from_request",
+        # fencing 身份接缝改为 device_fencing_owner_id（ADR 0010）。
+        "device_fencing_owner_id",
         return_value="bob",
     ), patch.object(config_override_api, "reboot_device") as reboot:
         response = asyncio.run(config_override_api.api_reboot(

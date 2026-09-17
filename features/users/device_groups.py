@@ -196,9 +196,15 @@ def cluster_device_properties(service: Any = None) -> dict[str, dict[str, str]]:
 
 
 def current_username_for_request(request: Request) -> str:
-    """Return the authenticated owner or the anonymous development client id."""
+    """Return the authenticated RESOURCE owner or the anonymous client id.
+
+    Device groups are per-user preferences (account resources, ADR 0010):
+    key them by ``resource_owner_id`` so an agent token and its enrolling
+    account (or an ATS run and its creator) share one group layout instead
+    of fragmenting per synthetic actor id on every rotation.
+    """
     user = get_authenticated_user(request)
-    return user.id if user else get_client_id_from_request(request)
+    return user.resource_owner_id if user else get_client_id_from_request(request)
 
 
 def _owner_storage_key(username: str) -> str:

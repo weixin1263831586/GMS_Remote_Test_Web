@@ -17,11 +17,19 @@ from features.users.clients import owner_id_from_request
 
 
 def _agent_request(owner_user_id: str | None, *, with_record: bool = True):
+    # ADR 0010: the production principal builder
+    # (features/auth/agent_tokens.py) stores the token's owner account on
+    # ``resource_owner_id``; ``owner_id_from_request`` resolves through
+    # that canonical accessor (Human / Agent / Machine principals alike).
     state = SimpleNamespace(
         current_user=CurrentUser(
             id="agent:agt_4f8fbaad8550c451",
             username="agent:kkagent",
             role="agent",
+            # 生产 builder（agent_tokens.py）始终把 owner 账号写进
+            # resource_owner_id；只有记录缺失时才为空（此时 CurrentUser
+            # 会回退为 actor id，等价于旧行为的 fallback）。
+            resource_owner_id=(owner_user_id or "") if with_record else "",
         ),
         auth_method="agent_token",
     )

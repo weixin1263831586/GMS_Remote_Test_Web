@@ -44,8 +44,7 @@ MAX_APK_UPLOAD_CHUNKS = 1_000
 
 
 def _owner_id(request: Request) -> str:
-    return require_authenticated_user(request).id
-
+    return require_authenticated_user(request).resource_owner_id  # ADR 0010: APK 工件按账号分区
 
 def _require_apk_scope(request: Request) -> None:
     """APK 全链路统一 scope：上传/分析/读取结果

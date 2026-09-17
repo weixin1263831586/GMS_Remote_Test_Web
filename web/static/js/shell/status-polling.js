@@ -278,6 +278,7 @@ async function checkInitialTestStatus() {
                 sessionStorage.removeItem('active_cluster_job');
                 state.clusterJobId = '';
                 state.testing = false;
+                state.testStarting = false;
                 state.testStopping = false;
                 updateTestToggleButton(false);
                 window.GmsWorkspace?.update(
@@ -292,6 +293,7 @@ async function checkInitialTestStatus() {
                 sessionStorage.removeItem('active_cluster_job');
                 state.clusterJobId = '';
                 state.testing = false;
+                state.testStarting = false;
                 state.testStopping = false;
                 updateTestToggleButton(false);
                 window.GmsWorkspace?.update(
@@ -350,6 +352,7 @@ async function checkInitialTestStatus() {
         const initialWorkerActiveJobs = activeJobs.filter(j => j.worker_id === workspaceWorkerId());
         const initialWorkerRunning = initialWorkerActiveJobs.length > 0;
         state.testing = initialWorkerRunning;
+        state.testStarting = false;
         state.testStopping = false;
         updateTestToggleButton(initialWorkerRunning);
         if (initialWorkerRunning) wakeTestStatusPolling();

@@ -3,6 +3,10 @@
 const state = {
     connected: false,
     testing: false,
+    // Start/Stop 按钮状态机（IDLE → STARTING → RUNNING → STOPPING → IDLE）：
+    // testing 只表示 RUNNING；testStarting/testStopping 是过渡态，必须在
+    // await 发请求【之前】置位，否则快速双击会重复 POST start/stop。
+    testStarting: false,
     testStopping: false,
     devices: [],
     selectedDevices: new Set(),

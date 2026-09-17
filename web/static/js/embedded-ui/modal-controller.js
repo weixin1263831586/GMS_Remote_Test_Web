@@ -57,8 +57,10 @@
             }
             var index = this._stack.indexOf(modalId);
             if (index !== -1) this._stack.splice(index, 1);
-            this._restoreFocus(modalId);
+            // 先释放自己的 background inert（sync），再恢复焦点：origin 若
+            // 仍处于 inert，浏览器会直接拒绝 .focus()。
             this.sync();
+            this._restoreFocus(modalId);
         },
 
         // 动态创建后随取消/关闭从 DOM 移除的 modal（Redmine 弹框模式）。
@@ -67,8 +69,8 @@
             if (modal) modal.remove();
             var index = this._stack.indexOf(modalId);
             if (index !== -1) this._stack.splice(index, 1);
-            this._restoreFocus(modalId);
             this.sync();
+            this._restoreFocus(modalId);
         },
 
         closeTopmost: function () {
@@ -99,6 +101,7 @@
             document.documentElement.classList.toggle('modal-open', this._stack.length > 0);
             document.body.classList.toggle('modal-open', this._stack.length > 0);
             this._syncBackgroundInert();
+            this._maybeCleanupListeners();
         },
 
         _ensureListeners: function () {
@@ -163,17 +166,22 @@
         _maybeCleanupListeners: function () {
             var self = this;
             if (this._stack.length) return;
-            ['_escListener', '_trapListener', '_clickListener'].forEach(function (key) {
+            ['_escListener', '_trapListener'].forEach(function (key) {
                 if (self[key]) {
                     document.removeEventListener('keydown', self[key]);
-                    document.removeEventListener('click', self[key]);
                     self[key] = null;
                 }
             });
+            if (this._clickListener) {
+                document.removeEventListener('click', this._clickListener);
+                this._clickListener = null;
+            }
         },
 
         _syncBackgroundInert: function () {
             // modal 打开期间，body 下除 modal 顶层祖先之外一律 inert。
+            // 只接管本控制器自己置的 inert：页面/嵌套组件可能本来就处于
+            // inert（另一种 UI 状态），关闭时只释放自己的，不能清别人的。
             var modalRoots = new Set();
             var self = this;
             this._stack.forEach(function (modalId) {
@@ -197,6 +205,7 @@
                 var tag = child.tagName;
                 if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'LINK'
                     || tag === 'TEMPLATE' || tag === 'NOSCRIPT') return;
+                if (child.inert) return;
                 child.inert = true;
                 self._inertedRoots.add(child);
             });
@@ -217,7 +226,11 @@
         _restoreFocus: function (modalId) {
             var origin = this._focusOrigins.get(modalId);
             this._focusOrigins.delete(modalId);
-            if (origin && origin.isConnected && typeof origin.focus === 'function') {
+            if (this._stack.length) {
+                // 嵌套 modal 关闭：焦点回到剩余栈顶 modal，而不是跳回背景
+                //（背景此刻仍在 inert，直接 focus(origin) 会被拒绝）。
+                this._focusModal(this._stack[this._stack.length - 1]);
+            } else if (origin && origin.isConnected && typeof origin.focus === 'function') {
                 origin.focus({ preventScroll: true });
             }
         }
