@@ -62,7 +62,7 @@ class VNCManagerTests(unittest.TestCase):
         manager = VNCManager()
         manager.ssh_manager = FakeSshManager()
 
-        with patch("features.system.vnc.time.sleep"):
+        with patch("features.system.vnc_remote.time.sleep"):
             result = manager._start_remote_vnc(
                 "user@192.168.0.2",
                 password="",
