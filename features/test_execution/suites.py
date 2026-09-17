@@ -29,9 +29,25 @@ SPECIAL_TEST_TYPES = {
 }
 
 TRADEFED_BINARY_REVERSE_MAP = {v: k for k, v in TRADEFED_BINARY_MAP.items()}
-SUITE_TYPE_PATTERN = re.compile(r'/android-([a-z]+)')
 TRADEFED_BINARY_LIST = list(set(TRADEFED_BINARY_MAP.values()))
 TEST_TYPE_DETECTION_PRIORITY = ['vts', 'gts', 'sts', 'cts']
+
+# Path names are not a one-to-one mirror of launcher names. In particular,
+# CTS Verifier commonly lives below android-cts-verifier*/.../android-cts-v-host,
+# so the old ``/android-([a-z]+)`` regex collapsed it to plain ``cts`` and
+# could never return hyphenated suite types. Keep path detection explicit and
+# ordered from the most-specific names to the generic android-cts/gts forms.
+_SUITE_PATH_MARKERS = (
+    ('android-cts-v-host', 'cts-v'),
+    ('android-cts-verifier', 'cts-v'),
+    ('android-gts-root', 'gts-root'),
+    ('android-apts', 'apts'),
+    ('android-vts', 'vts'),
+    ('android-gts', 'gts'),
+    ('android-sts', 'sts'),
+    ('android-cts', 'cts'),
+    ('android-xts', 'xts'),
+)
 
 
 def get_test_type_from_binary(binary_name: str) -> str:
@@ -44,15 +60,17 @@ def get_test_type_from_binary(binary_name: str) -> str:
 
 
 def detect_test_type_from_suite_path(suite_path: str) -> str | None:
-    """Detect suite type from a suite tools path."""
-    if not suite_path:
-        return None
+    """Detect suite type from a suite tools/root path.
 
-    suite_match = SUITE_TYPE_PATTERN.search(suite_path.lower())
-    if suite_match:
-        detected_type = suite_match.group(1)
-        if detected_type in TRADEFED_BINARY_MAP or detected_type in SPECIAL_TEST_TYPES:
-            return detected_type
+    Prefer specific path markers (CTS Verifier, GTS root, APTS) before their
+    generic parents so nested layouts cannot be misclassified as CTS/GTS.
+    """
+    normalized = str(suite_path or '').replace('\\', '/').lower()
+    if not normalized:
+        return None
+    for marker, suite_type in _SUITE_PATH_MARKERS:
+        if marker in normalized:
+            return suite_type
     return None
 
 
