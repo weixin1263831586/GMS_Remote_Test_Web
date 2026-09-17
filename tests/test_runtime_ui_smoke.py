@@ -1302,6 +1302,11 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
             cluster = self.frame_for(page, "#cluster-frame")
             self.close_initial_modals(page)
+            cluster.locator('[data-dash-tab="dashboard"]').focus()
+            cluster.locator('[data-dash-tab="dashboard"]').press("ArrowRight")
+            expect(cluster.locator("#tab-management")).to_be_visible()
+            cluster.locator('[data-dash-tab="management"]').press("Home")
+            expect(cluster.locator("#tab-dashboard")).to_be_visible()
             cluster.locator('[data-dash-tab="management"]').click()
             expect(cluster.locator("#tab-management")).to_be_visible()
             expect(cluster.locator("#tab-dashboard")).to_be_hidden()
@@ -1398,6 +1403,19 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         try:
             page.goto(f"{self.base_url}/automation", wait_until="domcontentloaded")
             page.wait_for_function("document.body.dataset.automationReady === 'true'")
+            page.locator('[data-workflow="overview"]').focus()
+            page.locator('[data-workflow="overview"]').press("ArrowRight")
+            expect(page.locator('[data-workflow="create"]')).to_have_attribute(
+                "aria-selected", "true"
+            )
+            page.locator('[data-workflow="create"]').press("End")
+            expect(page.locator('[data-workflow="reports"]')).to_have_attribute(
+                "aria-selected", "true"
+            )
+            page.locator('[data-workflow="reports"]').press("Home")
+            expect(page.locator('[data-workflow="overview"]')).to_have_attribute(
+                "aria-selected", "true"
+            )
             page.evaluate("switchWorkflowPane('runs'); setStatusFilter('queued')")
             expect(page.locator('[data-workflow="runs"]')).to_have_class(
                 re.compile(r"\bactive\b")
@@ -1424,6 +1442,49 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             )
             self.assertIn("tab=runs", page.url)
             self.assertIn("status=queued", page.url)
+        finally:
+            page.close()
+
+    def test_devices_console_tabs_support_keyboard_navigation(self):
+        page = self.new_page()
+
+        def fulfill_ports(route):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "data": {"ports": [{
+                    "port_key": "ttyUSB0",
+                    "devname": "/dev/ttyUSB0",
+                    "online": True,
+                    "binding": {
+                        "label": "Keyboard test device",
+                        "baudrate": 115200,
+                        "capture_enabled": False,
+                    },
+                }]}}),
+            )
+
+        page.route("**/api/devices/console/ports", fulfill_ports)
+        page.route(
+            "**/api/devices/console/ports/ttyUSB0/logs?*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"data":{"content":"","available_dates":[]}}',
+            ),
+        )
+        try:
+            page.goto(f"{self.base_url}/devices-console", wait_until="domcontentloaded")
+            page.get_by_role("button", name="打开控制台").click()
+            expect(page.locator("#console-section")).to_be_visible()
+
+            page.locator("#console-tab").focus()
+            page.locator("#console-tab").press("ArrowLeft")
+            expect(page.locator("#ports-section")).to_be_visible()
+            page.locator("#ports-tab").press("ArrowRight")
+            expect(page.locator("#console-section")).to_be_visible()
+            page.locator("#console-tab").press("Home")
+            expect(page.locator("#ports-section")).to_be_visible()
         finally:
             page.close()
 
@@ -2567,6 +2628,70 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.wait_for_function("typeof window.switchPage === 'function'")
             expect(page.locator("#page-desktop")).to_have_class(re.compile(r"active"))
             self.assertEqual(page.evaluate("localStorage.getItem('gms_current_page')"), "desktop")
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_sidebar_arrow_navigation_focuses_embedded_active_tab(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof window.switchPage === 'function'")
+            # 保持用户实际的侧栏排序：从 Gerrit 的真实上一个可见页面按
+            # Down 到 Gerrit，验证完整跨 iframe 焦点链路。
+            previous_page = page.evaluate(
+                """() => {
+                    const pages = Array.from(document.querySelectorAll('.sidebar-item'))
+                        .filter(item => item.style.display !== 'none')
+                        .map(item => item.dataset.page);
+                    const index = pages.indexOf('gerrit-dashboard');
+                    if (index === -1) throw new Error('Gerrit sidebar item is hidden');
+                    return pages[(index - 1 + pages.length) % pages.length];
+                }"""
+            )
+            page.evaluate("target => switchPage(target, null)", previous_page)
+            page.wait_for_function(f"currentPage === {json.dumps(previous_page)}")
+            page.locator("body").focus()
+            page.keyboard.press("ArrowDown")
+            page.wait_for_function("currentPage === 'gerrit-dashboard'")
+
+            gerrit = self.frame_for(page, "#gerrit-dashboard-frame")
+            gerrit.wait_for_function(
+                """() => document.activeElement?.matches(
+                    '[role=tab][aria-selected="true"]:not([disabled])'
+                )"""
+            )
+            gerrit.locator('[role="tab"][aria-selected="true"]').press("ArrowRight")
+            expect(gerrit.locator('[data-tab="query"]')).to_have_attribute(
+                "aria-selected", "true"
+            )
+            # 离开 Tab iframe 到普通页面时，焦点必须归还给 Shell；随后
+            # 无需点击即可继续上下切换，不能残留在已隐藏的 Gerrit iframe。
+            next_page = page.evaluate(
+                """() => {
+                    const pages = Array.from(document.querySelectorAll('.sidebar-item'))
+                        .filter(item => item.style.display !== 'none')
+                        .map(item => item.dataset.page);
+                    return pages[(pages.indexOf(currentPage) + 1) % pages.length];
+                }"""
+            )
+            gerrit.locator('[data-tab="query"]').press("ArrowDown")
+            page.wait_for_function(f"currentPage === {json.dumps(next_page)}")
+            self.assertEqual(
+                page.evaluate("document.activeElement.id"), f"page-{next_page}"
+            )
+            following_page = page.evaluate(
+                """() => {
+                    const pages = Array.from(document.querySelectorAll('.sidebar-item'))
+                        .filter(item => item.style.display !== 'none')
+                        .map(item => item.dataset.page);
+                    return pages[(pages.indexOf(currentPage) + 1) % pages.length];
+                }"""
+            )
+            page.keyboard.press("ArrowDown")
+            page.wait_for_function(f"currentPage === {json.dumps(following_page)}")
             self.assert_no_page_errors(page_errors)
         finally:
             page.close()
@@ -6648,6 +6773,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     startupFailed: instance.startupFailed,
                     shellReady: instance.shellReady,
                     initialData: instance.initialData,
+                    startupFailureStatus: instance.startupFailureStatus,
                   };
                 }"""
             )
@@ -6659,6 +6785,8 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             self.assertEqual(len(result["writes"]), 1)
             self.assertIn("ADB Shell 启动失败", result["writes"][0])
             self.assertIn("device unauthorized", result["writes"][0])
+            self.assertIn("ADB Shell 启动失败", result["startupFailureStatus"])
+            self.assertIn("device unauthorized", result["startupFailureStatus"])
             self.assertNotIn("Welcome to host", result["writes"][0])
             self.assertNotIn("host@controller", result["writes"][0])
             self.assertNotIn("host-only-output", result["writes"][0])
@@ -8891,6 +9019,14 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 redmine.evaluate("tab => switchTab(tab)", tab_name)
                 expect(redmine.locator(f'.tab[data-tab="{tab_name}"]')).to_have_class(re.compile(r"active"))
 
+            redmine.locator('.tab[data-tab="stats"]').focus()
+            redmine.locator('.tab[data-tab="stats"]').press("ArrowRight")
+            expect(redmine.locator('.tab[data-tab="project"]')).to_have_class(re.compile(r"active"))
+            redmine.locator('.tab[data-tab="project"]').press("End")
+            expect(redmine.locator('.tab[data-tab="runs"]')).to_have_class(re.compile(r"active"))
+            redmine.locator('.tab[data-tab="runs"]').press("Home")
+            expect(redmine.locator('.tab[data-tab="department"]')).to_have_class(re.compile(r"active"))
+
             self.assert_frame_modal_closes_with_escape(redmine, "showSettingsModal()", "#settingsModal")
             self.assert_frame_modal_closes_with_escape(redmine, "showAddUserModal()", "#addUserModal")
             self.assert_frame_modal_closes_with_escape(redmine, "showAddDepartmentModal()", "#addDepartmentModal")
@@ -8920,6 +9056,12 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             for tab_name in ["personal", "department", "query"]:
                 gerrit.evaluate("tab => switchTab(tab)", tab_name)
                 expect(gerrit.locator(f'.tab[data-tab="{tab_name}"]')).to_have_class(re.compile(r"active"))
+
+            gerrit.locator('.tab[data-tab="personal"]').focus()
+            gerrit.locator('.tab[data-tab="personal"]').press("ArrowRight")
+            expect(gerrit.locator('.tab[data-tab="query"]')).to_have_class(re.compile(r"active"))
+            gerrit.locator('.tab[data-tab="query"]').press("Home")
+            expect(gerrit.locator('.tab[data-tab="department"]')).to_have_class(re.compile(r"active"))
 
             self.assert_frame_modal_closes_with_escape(gerrit, "showSettings()", "#settingsModal")
             self.assert_frame_modal_closes_with_escape(gerrit, "showAddPersonalModal()", "#addPersonalModal")

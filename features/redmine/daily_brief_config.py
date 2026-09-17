@@ -20,6 +20,10 @@ DEFAULT_BRIEF_CONFIG: dict[str, Any] = {
     # 每个 owner 的夜间全量晨报触发时间（Controller 所在主机本地时间）。
     # 固定为 HH:MM，供 systemd 的每分钟调度入口按 owner 筛选。
     "trigger_time": "00:00",
+    # 增量刷新沿用已启用晨报的 owner，默认每天 06:00 执行；可
+    # 在同一设置页单独关闭或改时刻。
+    "delta_enabled": True,
+    "delta_trigger_time": "06:00",
     # 当前唯一实现的分析后端。历史上允许 "direct" 但从未实现，已从枚举
     # 移除；旧配置里的 "direct" 会被规范化回 "kkagent"。
     "analysis_backend": "kkagent",
@@ -47,13 +51,10 @@ _DEVICE_SERIAL_RE = re.compile(r"^[A-Za-z0-9:._-]{2,64}$")
 _TRIGGER_TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 # Compatibility export; unbudgeted analysis does not need additional rounds.
 TEST_FAILURE_EXTRA_TURNS = 0
-# kkagent's global thinking configuration is shared by interactive sessions and
-# Daily Brief.  Some OpenAI-compatible local gateways deliberately reject the
-# generic ``high`` spelling; set a process-local compatible value instead of
-# mutating the operator's ~/.kkagent/config.toml.
-MODEL_THINKING_EFFORTS = {
-    "glm-5.3-flash": "xhigh",
-}
+# 注意：kkagent 0.4.x 不提供按次覆盖 reasoning effort 的环境变量或 CLI
+# 参数（仅 config.toml 的 [thinking].effort 与 models.<name>.default_effort，
+# 且无 KKAGENT_THINKING_EFFORT）。per-model effort 必须由运维在该文件里
+# 配置，这里不做任何进程内/env 覆盖，避免出现从未生效的假配置项。
 
 
 def list_daily_brief_model_options(
@@ -129,7 +130,7 @@ def list_daily_brief_agent_profiles(
 
 
 def analyzer_env_extra(
-    profile: Any, device_serial: str = "", model: str = ""
+    profile: Any, device_serial: str = ""
 ) -> dict[str, str]:
     """kkagent 子进程的 MCP 身份环境；未绑定 profile 时返回空。
 
@@ -146,9 +147,6 @@ def analyzer_env_extra(
     }
     if str(device_serial or "").strip():
         env["GMS_MCP_TOOLSETS"] = "evidence,device_evidence"
-    effort = MODEL_THINKING_EFFORTS.get(str(model or "").strip())
-    if effort:
-        env["KKAGENT_THINKING_EFFORT"] = effort
     return env
 
 
@@ -177,6 +175,22 @@ def normalize_daily_brief_config(payload: dict[str, Any] | None) -> dict[str, An
         trigger_time if _TRIGGER_TIME_RE.fullmatch(trigger_time)
         else DEFAULT_BRIEF_CONFIG["trigger_time"]
     )
+    delta_enabled = payload.get("delta_enabled", config["delta_enabled"])
+    if isinstance(delta_enabled, bool):
+        config["delta_enabled"] = delta_enabled
+    elif isinstance(delta_enabled, str):
+        normalized = delta_enabled.strip().lower()
+        if normalized in ("1", "true", "yes", "on"):
+            config["delta_enabled"] = True
+        elif normalized in ("0", "false", "no", "off"):
+            config["delta_enabled"] = False
+    delta_trigger_time = str(
+        payload.get("delta_trigger_time") or config["delta_trigger_time"]
+    ).strip()
+    config["delta_trigger_time"] = (
+        delta_trigger_time if _TRIGGER_TIME_RE.fullmatch(delta_trigger_time)
+        else DEFAULT_BRIEF_CONFIG["delta_trigger_time"]
+    )
     backend = str(payload.get("analysis_backend") or config["analysis_backend"]).strip()
     config["analysis_backend"] = backend if backend in ("kkagent",) else "kkagent"
     config["model"] = str(payload.get("model") or "").strip()
@@ -202,7 +216,7 @@ def build_brief_analyzer(
         timeout_seconds=0,
         model=str(config.get("model") or ""),
         env_extra=analyzer_env_extra(
-            config.get("agent_profile"), config.get("device_serial"), config.get("model")
+            config.get("agent_profile"), config.get("device_serial")
         ),
     )
 

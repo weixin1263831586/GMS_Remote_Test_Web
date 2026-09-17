@@ -259,6 +259,44 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_stale_saved_single_issue_run_is_not_requested_after_reload(self):
+        page = self.new_page()
+        run_requests = []
+
+        def respond(route):
+            if route.request.url.endswith('/daily-brief/runs/missing-run'):
+                run_requests.append(route.request.url)
+                route.fulfill(
+                    status=404, content_type='application/json',
+                    body=json.dumps({'success': False, 'error': '分析任务不存在。'}),
+                )
+                return
+            route.fulfill(
+                status=200, content_type='application/json',
+                body=json.dumps({'success': True, 'data': {}}),
+            )
+
+        page.route('**/api/redmine-agent/**', respond)
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            state = page.evaluate("""async () => {
+                sessionStorage.setItem('gms-redmine-single-issue-run-id', 'missing-run');
+                await restoreSingleIssueAnalysis();
+                return {
+                    runId: singleIssueAnalysisRunId,
+                    storedRunId: sessionStorage.getItem('gms-redmine-single-issue-run-id'),
+                    startDisabled: document.getElementById('singleIssueAnalysisStart').disabled,
+                    stopHidden: document.getElementById('singleIssueAnalysisStop').hidden,
+                };
+            }""")
+            self.assertEqual(state['runId'], '')
+            self.assertIsNone(state['storedRunId'])
+            self.assertFalse(state['startDisabled'])
+            self.assertTrue(state['stopHidden'])
+            self.assertEqual(run_requests, [])
+        finally:
+            page.close()
+
     def test_single_issue_input_submits_only_one_issue_on_repeated_navigation(self):
         page = self.new_page()
         submissions = []

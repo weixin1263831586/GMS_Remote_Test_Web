@@ -69,7 +69,9 @@ async function api(url, options) {
   }
   if (!r.ok) {
     const detail = data.error || data.detail || ('HTTP ' + r.status);
-    throw new Error(r.status === 401 ? '登录状态已失效，请刷新后重新登录' : detail);
+    const error = new Error(r.status === 401 ? '登录状态已失效，请刷新后重新登录' : detail);
+    error.status = r.status;
+    throw error;
   }
   if (!data.success) throw new Error(data.error || '请求失败');
   return data.data || data;
@@ -1003,6 +1005,8 @@ function showSettingsModal() {
         dailyBriefConfigCache = await api('/api/redmine-agent/daily-brief/config') || {};
         dailyBriefSetting('enabled').checked = dailyBriefConfigCache.enabled === true;
         dailyBriefSetting('trigger_time').value = dailyBriefConfigCache.trigger_time || '00:00';
+        dailyBriefSetting('delta_enabled').checked = dailyBriefConfigCache.delta_enabled !== false;
+        dailyBriefSetting('delta_trigger_time').value = dailyBriefConfigCache.delta_trigger_time || '06:00';
         await loadDailyBriefAgentProfiles(dailyBriefConfigCache.agent_profile || '');
         await loadDailyBriefModelOptions(dailyBriefConfigCache.model || '');
         dailyBriefSetting('max_parallel_issues').value = dailyBriefConfigCache.max_parallel_issues || 1;
@@ -1082,6 +1086,8 @@ async function saveSettings() {
     var briefConfig = Object.assign({}, dailyBriefConfigCache || {});
     briefConfig.enabled = dailyBriefSetting('enabled').checked;
     briefConfig.trigger_time = dailyBriefSetting('trigger_time').value || '00:00';
+    briefConfig.delta_enabled = dailyBriefSetting('delta_enabled').checked;
+    briefConfig.delta_trigger_time = dailyBriefSetting('delta_trigger_time').value || '06:00';
     briefConfig.agent_profile = dailyBriefSetting('agent_profile').value.trim();
     briefConfig.model = dailyBriefSetting('model').value.trim();
     briefConfig.max_parallel_issues = parseInt(dailyBriefSetting('max_parallel_issues').value) || 1;
@@ -2763,7 +2769,6 @@ var singleIssueIndexedHistoryTimer = null;
 var singleIssueHistoryRunTimers = {};
 var singleIssueStopRequested = {};
 var SINGLE_ISSUE_ANALYSIS_PAGE_SIZE = 8;
-var SINGLE_ISSUE_ANALYSIS_STORAGE_KEY = 'gms-redmine-single-issue-run-id';
 var singleIssueAnalysisHint = '';
 
 function updateSingleIssueAnalysisHintButton() {
@@ -2800,10 +2805,6 @@ window.openSingleIssueAnalysisHint = openSingleIssueAnalysisHint;
 
 function rememberSingleIssueAnalysisRun(runId) {
   singleIssueAnalysisRunId = String(runId || '');
-  try {
-    if (singleIssueAnalysisRunId) sessionStorage.setItem(SINGLE_ISSUE_ANALYSIS_STORAGE_KEY, singleIssueAnalysisRunId);
-    else sessionStorage.removeItem(SINGLE_ISSUE_ANALYSIS_STORAGE_KEY);
-  } catch (_) {}
 }
 
 function setSingleIssueAnalysisBusy(busy) {
@@ -3047,13 +3048,17 @@ async function loadSingleIssueAnalysis() {
     setSingleIssueAnalysisBusy(busy);
     if (busy) {
       singleIssueAnalysisTimer = setTimeout(loadSingleIssueAnalysis, 5000);
-    } else if (issue.status === 'completed' && (issue.result || {}).detailed_report) {
-      rememberSingleIssueAnalysisRun(runId);
-    } else {
-      rememberSingleIssueAnalysisRun(runId);
     }
   } catch (e) {
     if (singleIssueAnalysisRunId !== runId) return;
+    if (e && e.status === 404) {
+      // A saved run may have been removed or become inaccessible after an
+      // ownership change.  It is permanent for this browser session, not a
+      // transient network error, so do not retry it forever.
+      rememberSingleIssueAnalysisRun('');
+      setSingleIssueAnalysisBusy(false);
+      return;
+    }
     singleIssueAnalysisTimer = setTimeout(loadSingleIssueAnalysis, 5000);
   }
 }
@@ -3063,14 +3068,10 @@ async function restoreSingleIssueAnalysis() {
     await loadSingleIssueAnalysis();
     return;
   }
-  try {
-    var storedRunId = sessionStorage.getItem(SINGLE_ISSUE_ANALYSIS_STORAGE_KEY);
-    if (storedRunId) {
-      rememberSingleIssueAnalysisRun(storedRunId);
-      await loadSingleIssueAnalysis();
-      return;
-    }
-  } catch (_) {}
+  // Prior releases persisted completed run IDs.  A run is owner-scoped and
+  // can legitimately disappear, so use the server's active-run query as the
+  // sole cross-reload source of truth and discard old browser state.
+  try { sessionStorage.removeItem('gms-redmine-single-issue-run-id'); } catch (_) {}
   try {
     var data = await api('/api/redmine-agent/daily-brief/active-issue') || {};
     var run = data.run || {};
@@ -3764,6 +3765,16 @@ function showDailyBriefIssueModal(issueId) {
     : (sourceRequired === false
       ? (gate.analysis_mode === 'triage' ? '待办分析无需源码取证' : '未要求（无 SDK 源配置）')
       : (gate.test_failure_subject === true ? '0 次（测试类失败要求 ≥1）' : '—'));
+  // 与列表 singleIssueAnalysisMeta 的六态保持一致（device_evidence_status
+  // 由 Controller 端 _tool_status 从真实 trace 推导，非模型自报）。
+  var deviceText = ({
+    succeeded: '✓ 实机取证成功',
+    service_unavailable: '✗ 取证服务暂不可用',
+    invalid_request: '✗ 取证请求无效',
+    device_unavailable: '✗ 设备取证未完成',
+    unavailable: '✗ 实机取证失败',
+    collecting: '… 实机取证中'
+  })[String(execution.device_evidence_status || '')] || '— 未执行实机取证';
   var auditRows = [
     ['最终格式', schemaText],
     ['Redmine Issue', mark(gate.issue_fetched != null ? gate.issue_fetched : execution.issue_fetched)],
@@ -3771,6 +3782,7 @@ function showDailyBriefIssueModal(issueId) {
     ['附件内容检查', mark(gate.attachments_checked != null ? gate.attachments_checked : execution.attachments_checked)],
     ['历史检索', historyDistinct + ' 个不同查询' + (historyTotal !== historyDistinct ? ' / ' + historyTotal + ' 次调用' : '')],
     ['源码取证', sourceText],
+    ['实机取证', deviceText],
     ['工具调用', execution.tool_call_count != null ? String(execution.tool_call_count) + ' 次' : '—'],
     ['自动修复', execution.repair_attempts ? String(execution.repair_attempts) + ' 次' : '未触发'],
     ['Session', execution.session_id || gate.session_id || '—'],
@@ -3785,7 +3797,7 @@ function showDailyBriefIssueModal(issueId) {
     // CLI calls are visible as Bash events; do not report absent MCP events as unread evidence.
     auditBody = '原始总结已返回。CLI 取证无法由 MCP 调用名自动判定完整性。\n'
       + auditRows.filter(function (item) {
-        return ['工具调用', '自动修复', 'Session', '耗时', 'Tokens'].indexOf(item[0]) >= 0;
+        return ['工具调用', '自动修复', '实机取证', 'Session', '耗时', 'Tokens'].indexOf(item[0]) >= 0;
       }).map(function (item) { return item[0] + '：' + item[1]; }).join('\n');
   }
   var hasReport = !!(r.detailed_report && String(r.detailed_report).trim());

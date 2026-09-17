@@ -16,7 +16,7 @@
     <!-- 加载全局状态 - 必须在通知中心和app.js之前加载 -->
     <script src="/static/js/state.js?v=20260902-adbproxy-state" defer></script>
     <!-- 用户级 Worker/设备/套件/任务上下文，供主页面与各 iframe 共用。 -->
-    <script src="/static/js/workspace-context.js?v=20260826-auth-ready" defer></script>
+    <script src="/static/js/workspace-context.js?v=20260917-embedded-arrow-forward-v2" defer></script>
     <!-- Shell 模块（navigation.js 第二轮拆分）：日志/轮询/通用 UI 反馈，
          依赖 state.js 与 api.js，必须在 navigation.js 之前加载 -->
     <!-- 运行时配置以 JSON 数据标签注入：type="application/json" 不被
@@ -46,7 +46,7 @@
     <script src="/static/js/shell/esc-close.js?v=20260905-extract" defer></script>
     <script src="/static/js/shell/utility-tools.js?v=20260905-extract" defer></script>
     <script src="/static/js/shell/weekly-report.js?v=20260905-extract" defer></script>
-    <script src="/static/js/shell/arrow-nav.js?v=20260905-extract" defer></script>
+    <script src="/static/js/shell/arrow-nav.js?v=20260917-navigation-focus-anchor" defer></script>
     <script src="/static/js/shell/shell-terminal.js?v=20260905-extract" defer></script>
     <script src="/static/js/shell/sidebar-dnd.js?v=20260910-device-console-order" defer></script>
     <script src="/static/js/shell/workspace-devices.js?v=20260902-diagnostics-scope" defer></script>
@@ -3205,7 +3205,7 @@
         </div>
     </div>
 
-<script src="/static/js/shell/shell-main.js"></script>
+<script src="/static/js/shell/shell-main.js?v=20260917-navigation-focus-anchor"></script>
 
 <style>
 /* 使用实例弹框重复内联样式收敛（.copy-chip 的 hover/transition 仍在 common.css） */

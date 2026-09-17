@@ -67,7 +67,7 @@ class EvidencePreflightTests(unittest.TestCase):
 
         trace, sleep = asyncio.run(scenario())
         self.assertEqual(trace.status, "succeeded")
-        sleep.assert_awaited_once_with(0.5)
+        sleep.assert_awaited_once_with(1.0)
 
         async def usage_scenario():
             with patch.object(
@@ -83,3 +83,59 @@ class EvidencePreflightTests(unittest.TestCase):
         (failed, _), run = asyncio.run(usage_scenario())
         self.assertEqual(failed.status, "failed")
         self.assertEqual(run.await_count, 1)
+
+    def test_attachments_preflight_records_manifest_metadata(self):
+        """附件清单元数据必须记账：否则 gate 对预采集的"成功"调用误报
+        manifest 未解析，与修复提示"不要重复取证"互相矛盾，烧光修复轮。"""
+
+        async def scenario():
+            fetched = ToolTrace(tool_name="gms_rt_redmine_issue_fetch", status="succeeded")
+            journals = ToolTrace(tool_name="gms_rt_redmine_journals", status="succeeded")
+            attachments = ToolTrace(tool_name="gms_rt_redmine_attachments", status="succeeded")
+            device = ToolTrace(tool_name="gms_rt_devices_snapshot", status="succeeded")
+            manifest = {"artifacts": [
+                {"artifact_id": "a1", "kind": "log", "status": "ready"},
+                {"artifact_id": "a2", "kind": "image", "status": "ready"},
+            ]}
+            with patch.object(
+                evidence_preflight, "_collect",
+                AsyncMock(side_effect=[
+                    (fetched, {"snapshot_id": "ev_9"}), (journals, {}),
+                    (attachments, manifest), (device, {}),
+                ]),
+            ):
+                return await evidence_preflight.collect_deep_analysis_evidence(
+                    issue_id=7, device_serial="S1", env_extra={"GMS_RT_PROFILE": "p"},
+                )
+
+        result = asyncio.run(scenario())
+        attachments = next(
+            trace for trace in result.traces
+            if trace.tool_name == "gms_rt_redmine_attachments"
+        )
+        self.assertTrue(attachments.attachment_manifest_parsed)
+        self.assertEqual(attachments.attachment_count, 2)
+        self.assertEqual(attachments.text_artifact_ids, ["a1"])
+        self.assertEqual(attachments.all_artifact_ids, ["a1", "a2"])
+
+    def test_cancel_poll_short_circuits_before_new_attempt(self):
+        async def scenario():
+            with patch.object(
+                evidence_preflight, "_gms_command",
+                return_value=["gms-rt-devices-snapshot", "RK3576GMS1"],
+            ), patch.object(
+                evidence_preflight, "_run_readonly_command",
+                AsyncMock(return_value=(6, b"", "connection refused")),
+            ) as run:
+                trace, _ = await evidence_preflight._collect(
+                    tool_name="gms_rt_devices_snapshot",
+                    arguments=["RK3576GMS1", "--json"],
+                    tool_input={"device": "RK3576GMS1"}, env_extra={},
+                    should_cancel=lambda: True,
+                )
+            return trace, run
+
+        trace, run = asyncio.run(scenario())
+        self.assertEqual(trace.status, "failed")
+        self.assertIn("cancelled", trace.output_preview)
+        run.assert_not_awaited()

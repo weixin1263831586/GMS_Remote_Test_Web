@@ -1077,7 +1077,7 @@
             const term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'Consolas, "Courier New", monospace',theme:createTerminalTheme(),scrollback:2000,termName:'xterm-256color'});
             const fit=new FitAddon.FitAddon();term.loadAddon(fit);term.open(el);fit.fit();
             const workerId=pane.workerId||host.worker_id||(host.id==='default'?workspaceLocalWorkerId():'');
-            const instance={type:'terminal',mode:terminalMode,paneIndex:index,hostId:host.id,workerId,serialNo,terminal:term,fit,socket:null,resizeObserver:null,disposed:false,initialData:'',shellReady:false,startupFailed:false,startupTimer:null,lastResizeCols:0,lastResizeRows:0};terminalWorkspace.instances.set(index,instance);
+            const instance={type:'terminal',mode:terminalMode,paneIndex:index,hostId:host.id,workerId,serialNo,terminal:term,fit,socket:null,resizeObserver:null,disposed:false,initialData:'',shellReady:false,startupFailed:false,startupFailureStatus:'',startupTimer:null,lastResizeCols:0,lastResizeRows:0};terminalWorkspace.instances.set(index,instance);
             const parts=String(host.connection||'').split('@'),user=parts.shift()||'',address=parts.join('@');
             body.addEventListener('dragover',event=>{event.preventDefault();body.style.outline='2px dashed var(--primary-color)';});
             body.addEventListener('dragleave',()=>{body.style.outline='';});
@@ -1097,9 +1097,9 @@
             el.addEventListener('paste',event=>{if(Date.now()<suppressPasteUntil){event.preventDefault();event.stopPropagation();return;}const text=event.clipboardData?.getData('text/plain');if(text){event.preventDefault();event.stopPropagation();pasteText(text);term.focus();}},true);
             el.addEventListener('contextmenu',event=>{if(navigator.clipboard?.readText){event.preventDefault();event.stopPropagation();pasteClipboard();}});
             socket.onopen=()=>{if(!instance.disposed)socket.send(JSON.stringify({type:'terminal_connect',mode:terminalMode,worker_id:workerId,...(terminalMode==='adb'?{serial_no:serialNo}:{})}));};
-            socket.onmessage=e=>{if(instance.disposed)return;try{const m=JSON.parse(e.data);if(m.type==='terminal_data')writeTerminalWorkspaceData(instance,m.data||'');else if(m.type==='terminal_connected'){if(terminalMode==='adb'){terminalWorkspaceStatus(index,'正在进入 ADB Shell…');clearTerminalWorkspaceStartupTimer(instance);if(!instance.shellReady)instance.startupTimer=setTimeout(()=>failTerminalWorkspaceStartup(instance,'ADB Shell 启动超时'),15000);}else{terminalWorkspaceStatus(index,`${user}@${address}`,true);}setTimeout(()=>resizeHostWorkspaceTerminal(instance),0);}else if(m.type==='terminal_error'||m.type==='error'){clearTerminalWorkspaceStartupTimer(instance);term.writeln(`\r\n\x1b[31m${m.error||m.message||'连接失败'}\x1b[0m`);if(m.elevation_required){terminalWorkspaceStatus(index,'等待管理员认证');recoverTerminalElevation(instance,'重新连接主机终端',()=>refreshTerminalWorkspacePane(index));}else if(m.credential_required&&m.device_host&&typeof showDevicePasswordModal==='function'){terminalWorkspaceStatus(index,'等待 SSH 凭据');showDevicePasswordModal(m.device_host,'terminal',()=>refreshTerminalWorkspacePane(index));}else{terminalWorkspaceStatus(index,'连接失败');}}}catch(_){}};
-            socket.onclose=()=>{if(!instance.disposed){clearTerminalWorkspaceStartupTimer(instance);if(instance.startupFailed){terminalWorkspaceStatus(index,'ADB Shell 启动失败');return;}term.writeln('\r\n\x1b[31m⚠️ 连接已断开\x1b[0m');terminalWorkspaceStatus(index,'已断开');}};
-            socket.onerror=()=>{if(!instance.disposed)terminalWorkspaceStatus(index,instance.startupFailed?'ADB Shell 启动失败':'连接错误');};instance.resizeObserver=new ResizeObserver(()=>resizeHostWorkspaceTerminal(instance));instance.resizeObserver.observe(body);
+            socket.onmessage=e=>{if(instance.disposed)return;try{const m=JSON.parse(e.data);if(m.type==='terminal_data')writeTerminalWorkspaceData(instance,m.data||'');else if(m.type==='terminal_connected'){if(terminalMode==='adb'){terminalWorkspaceStatus(index,'正在进入 ADB Shell…');clearTerminalWorkspaceStartupTimer(instance);if(!instance.shellReady)instance.startupTimer=setTimeout(()=>failTerminalWorkspaceStartup(instance,'ADB Shell 启动超时'),15000);}else{terminalWorkspaceStatus(index,`${user}@${address}`,true);}setTimeout(()=>resizeHostWorkspaceTerminal(instance),0);}else if(m.type==='terminal_error'||m.type==='error'){clearTerminalWorkspaceStartupTimer(instance);const error=m.error||m.message||'连接失败';if(terminalMode==='adb'&&!m.elevation_required&&!m.credential_required){failTerminalWorkspaceStartup(instance,'ADB Shell 连接失败',error);return;}term.writeln(`\r\n\x1b[31m${error}\x1b[0m`);if(m.elevation_required){terminalWorkspaceStatus(index,'等待管理员认证');recoverTerminalElevation(instance,'重新连接主机终端',()=>refreshTerminalWorkspacePane(index));}else if(m.credential_required&&m.device_host&&typeof showDevicePasswordModal==='function'){terminalWorkspaceStatus(index,'等待 SSH 凭据');showDevicePasswordModal(m.device_host,'terminal',()=>refreshTerminalWorkspacePane(index));}else{terminalWorkspaceStatus(index,'连接失败');}}}catch(_){}};
+            socket.onclose=()=>{if(!instance.disposed){clearTerminalWorkspaceStartupTimer(instance);if(instance.startupFailed){terminalWorkspaceStatus(index,instance.startupFailureStatus||'ADB Shell 启动失败');return;}term.writeln('\r\n\x1b[31m⚠️ 连接已断开\x1b[0m');terminalWorkspaceStatus(index,'已断开');}};
+            socket.onerror=()=>{if(!instance.disposed)terminalWorkspaceStatus(index,instance.startupFailed?(instance.startupFailureStatus||'ADB Shell 启动失败'):'连接错误');};instance.resizeObserver=new ResizeObserver(()=>resizeHostWorkspaceTerminal(instance));instance.resizeObserver.observe(body);
         }
         function clearTerminalWorkspaceStartupTimer(instance){
             if(instance?.startupTimer){clearTimeout(instance.startupTimer);instance.startupTimer=null;}
@@ -1116,14 +1116,19 @@
                 .map(line=>line.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g,'').trim())
                 .filter(Boolean).join('\r\n').slice(-4096);
         }
+        function terminalWorkspaceFailureStatus(reason,detail){
+            const summary=String(detail||'').replace(/[\x00-\x1f\x7f]/g,' ').replace(/\s+/g,' ').trim();
+            return summary?`${reason}：${summary.slice(0,180)}`:reason;
+        }
         function failTerminalWorkspaceStartup(instance,reason,detail=''){
             if(!instance||instance.disposed||instance.shellReady||instance.startupFailed)return;
             clearTerminalWorkspaceStartupTimer(instance);
             instance.startupFailed=true;
             const failureDetail=detail||terminalWorkspaceAdbStartupDetail(instance);
+            instance.startupFailureStatus=terminalWorkspaceFailureStatus(reason,failureDetail);
             instance.initialData='';
             instance.terminal.write(`\x1b[31m❌ ${reason}\x1b[0m${failureDetail?`\r\n\r\n${failureDetail}`:''}`);
-            terminalWorkspaceStatus(instance.paneIndex,'ADB Shell 启动失败');
+            terminalWorkspaceStatus(instance.paneIndex,instance.startupFailureStatus);
             if(instance.socket?.readyState===WebSocket.OPEN)instance.socket.close();
         }
         function writeTerminalWorkspaceData(instance,data){
@@ -4157,8 +4162,66 @@
             // 子页主动发出的 ready 表示它的稳定首帧已经完成布局，比 iframe
             // load（可能被图表/CDN/慢接口拖延）更可靠；收到后即可揭示。
             revealLazyFrame(frame, false);
+            flushEmbeddedActiveTabFocus(frame);
         }
         window.markLazyFrameReady = markLazyFrameReady;
+
+        const EMBEDDED_TAB_FOCUS_FRAMES = Object.freeze({
+            automation: 'automation-frame',
+            cluster: 'cluster-frame',
+            'devices-console': 'devices-console-frame',
+            'redmine-agent': 'redmine-agent-frame',
+            'gerrit-dashboard': 'gerrit-dashboard-frame'
+        });
+
+        function pageForEmbeddedTabFrame(frame) {
+            return Object.keys(EMBEDDED_TAB_FOCUS_FRAMES).find(
+                page => document.getElementById(EMBEDDED_TAB_FOCUS_FRAMES[page]) === frame
+            ) || '';
+        }
+
+        function flushEmbeddedActiveTabFocus(frame) {
+            if (frame?.dataset.pendingActiveTabFocus !== 'true') return;
+            const pageName = pageForEmbeddedTabFrame(frame);
+            if (!pageName || currentPage !== pageName || !frame.contentWindow) {
+                delete frame.dataset.pendingActiveTabFocus;
+                return;
+            }
+            delete frame.dataset.pendingActiveTabFocus;
+            requestAnimationFrame(() => {
+                if (currentPage === pageName && frame.contentWindow) {
+                    frame.contentWindow.postMessage(
+                        {type: 'embedded-focus-active-tab'}, window.location.origin
+                    );
+                }
+            });
+        }
+
+        function focusEmbeddedActiveTab(pageName) {
+            const frameId = EMBEDDED_TAB_FOCUS_FRAMES[pageName];
+            const frame = frameId && document.getElementById(frameId);
+            if (!frame) return;
+            frame.dataset.pendingActiveTabFocus = 'true';
+            if (frame.dataset.surfaceReadyReceived === 'true'
+                    || frame.dataset.documentLoaded === 'true') {
+                flushEmbeddedActiveTabFocus(frame);
+            }
+        }
+        window.focusEmbeddedActiveTab = focusEmbeddedActiveTab;
+
+        function focusSidebarNavigationTarget(pageName) {
+            if (EMBEDDED_TAB_FOCUS_FRAMES[pageName]) {
+                focusEmbeddedActiveTab(pageName);
+                return;
+            }
+            // 非 Tab 页面不能保留上一页 iframe 的焦点；页面容器作为
+            // 稳定的键盘导航锚点，不抢占页面内输入框或终端的用户焦点。
+            const page = document.getElementById(`page-${pageName}`);
+            if (!page) return;
+            page.tabIndex = -1;
+            page.focus({preventScroll: true});
+        }
+        window.focusSidebarNavigationTarget = focusSidebarNavigationTarget;
 
         function bindLazyFrameState(frame) {
             if (!frame || frame.dataset.frameStateBound === 'true') return;

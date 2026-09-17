@@ -37,8 +37,10 @@ def _owner_service(owner_id: str):
     return DailyBriefService(owner_id, config_manager=service.agent.config_manager)
 
 
-def _enabled_owner_ids(trigger_time: str | None = None) -> list[str]:
-    """列出启用晨报的 owner；指定时间时仅返回恰好到点的 owner。"""
+def _enabled_owner_ids(
+    trigger_time: str | None = None, *, mode: str = "nightly"
+) -> list[str]:
+    """列出指定调度模式已启用且到点的 owner。"""
     from features.redmine.daily_brief_owner_policy import is_daily_brief_owner_eligible
     from foundation.config import settings
 
@@ -56,8 +58,12 @@ def _enabled_owner_ids(trigger_time: str | None = None) -> list[str]:
         try:
             service = _owner_service(owner_id)
             config = service.get_config()
-            if config.get("enabled") and (
-                trigger_time is None or config.get("trigger_time") == trigger_time
+            enabled_key = "delta_enabled" if mode == "delta" else "enabled"
+            time_key = "delta_trigger_time" if mode == "delta" else "trigger_time"
+            if (
+                config.get("enabled")
+                and config.get(enabled_key)
+                and (trigger_time is None or config.get(time_key) == trigger_time)
             ):
                 owners.append(owner_id)
         except Exception as exc:
@@ -82,10 +88,10 @@ def _run_mode(mode: str, owner_ids: list[str]) -> int:
     """
     from features.redmine.daily_brief_owner_policy import is_daily_brief_owner_eligible
 
-    # 定时入口每分钟调用一次，因此无 --owner 的 nightly 只投递当前分钟
-    # 配置的 owner。显式 --owner 是人工试跑，必须不受时刻筛选影响。
-    due_time = datetime.now().strftime("%H:%M") if mode == "nightly" and not owner_ids else None
-    owners = owner_ids or _enabled_owner_ids(trigger_time=due_time)
+    # 两类定时入口每分钟调用一次，因此无 --owner 时只投递当前分钟配置的
+    # owner。显式 --owner 是人工试跑，必须不受时刻筛选影响。
+    due_time = datetime.now().strftime("%H:%M") if not owner_ids else None
+    owners = owner_ids or _enabled_owner_ids(trigger_time=due_time, mode=mode)
     if not owners:
         logger.warning("no enabled daily-brief owners; nothing to do")
         return 0

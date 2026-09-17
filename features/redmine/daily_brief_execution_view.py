@@ -78,7 +78,14 @@ def issue_payload(
         "failure_message": execution.get("failure_message") or "",
         "schema_status": schema_status,
         "issue_fetched": _tool_succeeded(tools, "redmine_issue_fetch"),
-        "device_evidence_status": _tool_status(tools, "gms_rt_devices_snapshot"),
+        "device_evidence_status": (
+            # 终态失败的 execution 里残留 pending 取证 trace 只说明进程在
+            # 取证完成前死亡；"collecting" 仅对仍在运行的 run 有意义，
+            # 否则 UI 会把已结束的 run 永久标成"实机取证中"。
+            "unavailable"
+            if (_tool_status(tools, "gms_rt_devices_snapshot") == "collecting" and not final_ok)
+            else _tool_status(tools, "gms_rt_devices_snapshot")
+        ),
         "journals_checked": _tool_succeeded(tools, "redmine_journals"),
         "attachments_checked": gate.get("attachments_checked") is True,
         "source_evidence_checked": bool(

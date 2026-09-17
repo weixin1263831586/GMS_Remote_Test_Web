@@ -9,6 +9,7 @@
     });
     const EMBEDDED_FRAMES = Object.freeze({
         automation: 'automation-frame', cluster: 'cluster-frame',
+        'devices-console': 'devices-console-frame',
         'redmine-agent': 'redmine-agent-frame', 'gerrit-dashboard': 'gerrit-dashboard-frame'
     });
     let persistTimer = null;

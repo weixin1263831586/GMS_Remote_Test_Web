@@ -79,6 +79,9 @@ class DailyBriefCancellationTests(unittest.TestCase):
         with self._patch_snapshot(), patch.object(
             self.service, "_build_analyzer"
         ) as builder:
+            # 假 analyzer 必须带空 env_extra：否则 Mock 的 env_extra 会被
+            # 深度分析取证预采集当成已绑定 profile，真实拉起 gms-rt CLI。
+            builder.return_value.env_extra = {}
             builder.return_value.analyze = initial_analyze
             completed = asyncio.run(self.service.execute_run(run_id))
 
@@ -102,6 +105,7 @@ class DailyBriefCancellationTests(unittest.TestCase):
 
         async def scenario():
             with patch.object(self.service, "_build_analyzer") as builder:
+                builder.return_value.env_extra = {}
                 builder.return_value.analyze = slow_analyze
                 task = asyncio.create_task(
                     self.service.reanalyze_issue(completed.brief_date, 101)
@@ -114,8 +118,10 @@ class DailyBriefCancellationTests(unittest.TestCase):
         self.assertEqual(result["status"], "cancelled")
         self.assertTrue(analyzer_cancelled.is_set())
         self.assertEqual(self.service.repository.get_run(run_id).status, "cancelled")
+        # 2850cff 定版语义：被停止的单条分析收敛为 cancelled 终态
+        #（与 worker issue-job 路径一致）；重新分析会覆盖该状态。
         self.assertEqual(
-            self.service.repository.get_issue(run_id, 101).status, "pending"
+            self.service.repository.get_issue(run_id, 101).status, "cancelled"
         )
 
 

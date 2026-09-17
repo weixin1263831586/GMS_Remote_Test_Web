@@ -73,7 +73,12 @@ def reset_cancelled_issue(repository: Any, record: Any) -> None:
 
 
 def mark_reanalysis_cancelled(repository: Any, run: Any, issue_id: int) -> dict[str, Any]:
-    """Converge a cancelled single-issue job without classifying it as failure."""
+    """Converge a cancelled single-issue job without classifying it as failure.
+
+    语义（2850cff 定版）：被停止的单条分析收敛为 ``cancelled``——它与
+    run 终态一致，明确表达"最新一次尝试被用户停止"，且不会把已取消 run
+    下的条目伪装成待执行；重新分析会新建 issue job 并覆盖该状态。
+    """
     record = repository.get_issue(run.run_id, issue_id)
     if record is not None:
         record.status = "cancelled"

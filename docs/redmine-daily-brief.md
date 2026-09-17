@@ -18,7 +18,8 @@ systemd timer 每分钟检查一次（Persistent=true；按 owner trigger_time �
       → 聚合报告 + Markdown → daily_brief.sqlite3（per-owner）
 Web 手动触发 → SQLite 持久 job 队列 → 独立 daily_brief_worker
       → 同一套 DailyBriefService / KkAgentRedmineAnalyzer
-08:40 timer → run-delta：fingerprint 未变的 issue 跳过，只重分析变化项
+独立 delta timer 每分钟检查一次（按 owner delta_enabled/delta_trigger_time 筛选）
+  → run-delta：fingerprint 未变的 issue 跳过，只重分析变化项
 09:00 → 个人看板顶部「每日晨报」卡片
 ```
 
@@ -49,6 +50,8 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
 {
   "enabled": false,
   "trigger_time": "00:00",
+  "delta_enabled": true,
+  "delta_trigger_time": "06:00",
   "analysis_backend": "kkagent",
   "model": "",
   "agent_profile": "",
@@ -66,6 +69,9 @@ Daily Brief、triage 工具、前端均不得重新实现筛选规则。
 - `trigger_time` 是 Controller 服务器本地时区的每天触发时间，格式为 `HH:MM`，
   默认 `00:00`。定时入口每分钟检查一次，并只为恰好到点的 owner 入队；以
   `--owner` 手动试跑不受此设置限制。
+- `delta_enabled` 默认 `true`；`delta_trigger_time` 默认 `06:00`。它们同样是每个
+  owner 独立设置，且只有已启用每日晨报的 owner 才会
+  进入 delta 调度。
 - `model` 为空时使用 kkagent 当前默认模型；
 - 分析和同会话修复不设步数、耗时或 Token 预算，以证据充分、结论可用为
   目标。旧 `max_turns` / `issue_timeout_seconds` 配置仍兼容读取，但统一
@@ -190,5 +196,5 @@ schema 迁移（建表、补列）必须满足：
 
 ## 已知限制（第一阶段）
 
-- 08:40 delta、历史每日晨报趋势、persistent issue 连续天数统计已具备数据
+- 可配置 delta、历史每日晨报趋势、persistent issue 连续天数统计已具备数据
   基础，UI 聚合视图后续迭代。

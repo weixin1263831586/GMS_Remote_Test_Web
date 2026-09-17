@@ -17,6 +17,7 @@ import time
 from typing import Any
 
 from . import daily_brief_cancellation as cancellation
+from .daily_brief_deep_analysis import precollect_deep_evidence
 from .daily_brief_execution_statistics import summarize_execution_statistics
 from .daily_brief_execution_view import issue_payload
 from .daily_brief_models import (
@@ -38,7 +39,6 @@ from .daily_brief_snapshot import (
     build_daily_triage_snapshot,
     detect_delta,
 )
-from .kkagent.evidence_preflight import collect_deep_analysis_evidence
 from .kkagent_analyzer import (
     PROMPT_VERSION,
     KkAgentRedmineAnalyzer,
@@ -56,7 +56,6 @@ from features.system import sdk_sources_available as _sdk_sources_available  # n
 from .daily_brief_config import (  # noqa: E402
     DEFAULT_BRIEF_CONFIG,
     RUNTIME_CONFIG_KEY,
-    TEST_FAILURE_EXTRA_TURNS,
     analyzer_env_extra,
     build_brief_analyzer,
     normalize_daily_brief_config,
@@ -453,19 +452,10 @@ class DailyBriefService(DailyBriefRunStarterMixin):
             [_one(issue_id) for issue_id in pending_ids]
         )
 
-    def _build_analyzer(
-        self, config: dict[str, Any], *, extra_turns: int = 0
-    ) -> KkAgentRedmineAnalyzer:
+    def _build_analyzer(self, config: dict[str, Any]) -> KkAgentRedmineAnalyzer:
         # 构建细节统一在 daily_brief_config.build_brief_analyzer（含 MCP
-        # toolset / 设备绑定 env 注入）；轮次放宽按 entry 特征逐 issue 加。
-        return build_brief_analyzer(config, extra_turns=extra_turns)
-
-    @staticmethod
-    def _extra_turns_for_entry(entry: dict[str, Any]) -> int:
-        """仅单条深度诊断追加源码取证步数。"""
-        from .kkagent.evidence_gate import is_test_failure_subject
-
-        return TEST_FAILURE_EXTRA_TURNS if entry.get("analysis_mode") != "triage" and is_test_failure_subject(entry) else 0
+        # toolset / 设备绑定 env 注入）；分析不设轮次预算。
+        return build_brief_analyzer(config)
 
     def _recover_interrupted_runs(self, config: dict[str, Any]) -> int:
         """Recover orphan runs without judging live jobs by their elapsed time."""
@@ -507,22 +497,12 @@ class DailyBriefService(DailyBriefRunStarterMixin):
                 analyze_entry.setdefault("device_serial", config["device_serial"])
             if config.get("analysis_hint"):
                 analyze_entry.setdefault("analysis_hint", config["analysis_hint"])
-            # Deep analysis owns a deterministic read-only baseline.  The
-            # model receives the persisted provenance but cannot omit the
-            # serial or turn a transient Controller disconnect into a device
-            # failure by improvising CLI/Bash commands.
-            evidence_env = dict(getattr(analyzer, "env_extra", {}) or {})
-            if (
-                analyze_entry.get("analysis_mode") != "triage"
-                and str(evidence_env.get("GMS_RT_PROFILE") or "").strip()
-            ):
-                preflight = await collect_deep_analysis_evidence(
-                    issue_id=issue_id,
-                    device_serial=str(analyze_entry.get("device_serial") or ""),
-                    env_extra=evidence_env,
-                )
-                analyze_entry["_precollected_tool_traces"] = preflight.traces
-                analyze_entry["_evidence_preflight"] = preflight.prompt_context()
+            # Deep analysis owns a deterministic read-only baseline（含取消
+            # 轮询与 profile 判定，编排拆在 daily_brief_deep_analysis）。
+            await precollect_deep_evidence(
+                repository=self.repository, run=run, issue_id=issue_id,
+                analyzer=analyzer, entry=analyze_entry,
+            )
             # 部署事实 hint：SDK 源可用性决定源码取证门禁是否强制
             #（evidence_gate 降级依据），只进本次调用，不回写快照。
             analyze_entry["sdk_sources_available"] = _sdk_sources_available()

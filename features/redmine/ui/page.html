@@ -11,7 +11,7 @@
 </head>
 <body>
 <header>
-  <div class="tabs" role="tablist" aria-label="看板视图" data-keydown="redmineTabKeydown" data-key="ArrowLeft,ArrowRight,Home,End">
+  <div class="tabs" role="tablist" aria-label="看板视图" data-keydown="redmineTabKeydown" data-key="ArrowLeft,ArrowRight,Home,End" data-r0="event">
     <button type="button" class="tab" role="tab" aria-selected="false" data-tab="department" data-click="switchTab" data-a0="department">🏢 部门看板</button>
     <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="stats" data-click="switchTab" data-a0="stats">📈 个人看板</button>
     <button type="button" class="tab" role="tab" aria-selected="false" data-tab="project" data-click="switchTab" data-a0="project">🧩 项目看板</button>
@@ -303,6 +303,15 @@
         <input type="time" data-daily-brief-setting="trigger_time" value="00:00" required aria-describedby="dailyBriefTriggerTimeHelp">
         <div class="setting-help" id="dailyBriefTriggerTimeHelp">按 Controller 服务器本地时间每天触发；默认凌晨 00:00。</div>
       </div>
+      <label class="setting-checkbox-row">
+        <input type="checkbox" data-daily-brief-setting="delta_enabled">
+        <span>启用晨报增量刷新</span>
+      </label>
+      <div>
+        <label>增量刷新时间</label>
+        <input type="time" data-daily-brief-setting="delta_trigger_time" value="06:00" required aria-describedby="dailyBriefDeltaTriggerTimeHelp">
+        <div class="setting-help" id="dailyBriefDeltaTriggerTimeHelp">仅分析凌晨晨报之后有变化的事项；按 Controller 服务器本地时间每天触发，默认 06:00。</div>
+      </div>
       <div>
         <label>取证 Agent Profile</label>
         <select data-daily-brief-setting="agent_profile" aria-describedby="dailyBriefProfileHelp">
@@ -392,7 +401,7 @@
 </div>
 
 <script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script>
-<script src="/static/js/embedded-workspace.js?v=20260813-frame-visibility"></script>
+<script src="/static/js/embedded-workspace.js?v=20260917-arrow-forward-v2"></script>
 <script src="/static/js/embedded-ui/modal-controller.js?v=20260916-modal-controller"></script>
 <script src="/redmine-agent/page.js"></script>
 
