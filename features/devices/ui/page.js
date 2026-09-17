@@ -7,6 +7,9 @@
         editingKey: '',
         socket: null,
         socketGeneration: 0,
+        portsRequestGeneration: 0,
+        portsRequestsInFlight: 0,
+        historyRequestGeneration: 0,
         paused: false,
         pendingOutput: '',
         writable: false,
@@ -136,18 +139,34 @@
     }
 
     async function loadPorts(silent = false) {
+        if (silent && state.portsRequestsInFlight > 0) return;
+        const generation = ++state.portsRequestGeneration;
+        state.portsRequestsInFlight += 1;
         if (!silent) $('refresh-status').textContent = '扫描中…';
         try {
             const data = await api('/api/devices/console/ports');
+            if (generation !== state.portsRequestGeneration) return;
             state.ports = data.ports || [];
             renderPorts();
             $('refresh-status').textContent = `更新于 ${new Date().toLocaleTimeString()}`;
             const selected = state.ports.find(item => item.port_key === state.selectedKey);
             if (selected) updateConsoleHeading(selected);
         } catch (error) {
+            if (generation !== state.portsRequestGeneration) return;
             $('refresh-status').textContent = '刷新失败';
             if (!silent) notice(error.message, 'error');
+        } finally {
+            state.portsRequestsInFlight = Math.max(0, state.portsRequestsInFlight - 1);
         }
+    }
+
+    function syncPortAutoRefresh(visible) {
+        if (state.refreshTimer) {
+            clearInterval(state.refreshTimer);
+            state.refreshTimer = null;
+        }
+        if (!visible) return;
+        state.refreshTimer = setInterval(() => void loadPorts(true), 3000);
     }
 
     async function loadBindingDeviceOptions(selectedLabel, editingKey) {
@@ -260,6 +279,13 @@
         node.className = `status-pill ${className}`;
     }
 
+    function setWritable(writable) {
+        state.writable = Boolean(writable);
+        $('terminal-input').disabled = !state.writable;
+        $('send-input').disabled = !state.writable;
+        $('send-ctrl-c').disabled = !state.writable;
+    }
+
     function ensureTerminal() {
         if (state.terminal) return true;
         if (typeof Terminal === 'undefined' || typeof FitAddon === 'undefined') {
@@ -322,6 +348,7 @@
         state.socketGeneration += 1;
         const generation = state.socketGeneration;
         if (state.socket) state.socket.close();
+        setWritable(false);
         setSocketStatus('连接中', 'waiting');
         const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
         const socket = new WebSocket(`${protocol}//${location.host}/api/devices/console/ws/${encodeURIComponent(portKey)}`);
@@ -335,20 +362,18 @@
             let message;
             try { message = JSON.parse(event.data); } catch { return; }
             if (message.type === 'data' || message.type === 'backlog') appendOutput(message.data || '');
-            if (message.type === 'backlog') {
-                state.writable = Boolean(message.writable);
-                $('terminal-input').disabled = !state.writable;
-                $('send-input').disabled = !state.writable;
-                $('send-ctrl-c').disabled = !state.writable;
-            }
+            if (message.type === 'backlog') setWritable(Boolean(message.writable));
             if (message.type === 'error') notice(friendlySerialError(message.error) || '串口操作失败', 'error');
         };
         socket.onerror = () => {
-            if (generation === state.socketGeneration) setSocketStatus('连接失败', 'offline');
+            if (generation !== state.socketGeneration) return;
+            setWritable(false);
+            setSocketStatus('连接失败', 'offline');
         };
         socket.onclose = event => {
             if (generation !== state.socketGeneration) return;
             state.socket = null;
+            setWritable(false);
             setSocketStatus(event.code === 4404 ? '请先绑定' : '已断开', 'offline');
         };
     }
@@ -371,10 +396,11 @@
 
     function closeConsole() {
         state.socketGeneration += 1;
+        state.historyRequestGeneration += 1;
         if (state.socket) state.socket.close();
         state.socket = null;
         state.selectedKey = '';
-        state.writable = false;
+        setWritable(false);
         $('console-tab').disabled = true;
         $('console-tab').textContent = '控制台';
         switchView('ports');
@@ -383,26 +409,36 @@
 
     function sendInput(data, appendNewline) {
         if (!state.socket || state.socket.readyState !== WebSocket.OPEN) {
+            setWritable(false);
             notice('串口尚未连接', 'error');
-            return;
+            return false;
         }
-        state.socket.send(JSON.stringify({type: 'input', data, append_newline: appendNewline}));
+        try {
+            state.socket.send(JSON.stringify({type: 'input', data, append_newline: appendNewline}));
+            return true;
+        } catch (error) {
+            setWritable(false);
+            notice(`串口发送失败：${error.message}`, 'error');
+            return false;
+        }
     }
 
     function sendInputField() {
         const input = $('terminal-input');
-        sendInput(input.value, true);
-        input.value = '';
+        if (sendInput(input.value, true)) input.value = '';
         input.focus();
     }
 
     async function loadHistory() {
-        if (!state.selectedKey) return;
+        const portKey = state.selectedKey;
+        if (!portKey) return;
+        const generation = ++state.historyRequestGeneration;
         const selectedDate = $('log-date').value;
         const params = new URLSearchParams({tail: $('log-tail').value});
         if (selectedDate) params.set('date', selectedDate);
         try {
-            const data = await api(`/api/devices/console/ports/${encodeURIComponent(state.selectedKey)}/logs?${params}`);
+            const data = await api(`/api/devices/console/ports/${encodeURIComponent(portKey)}/logs?${params}`);
+            if (generation !== state.historyRequestGeneration || state.selectedKey !== portKey) return;
             $('history-output').textContent = data.content || '暂无日志';
             const dateSelect = $('log-date');
             const effectiveDate = selectedDate || data.date || '';
@@ -411,6 +447,7 @@
             if (selectedDate && (data.available_dates || []).includes(selectedDate)) dateSelect.value = selectedDate;
             dateSelect.dataset.effectiveDate = effectiveDate;
         } catch (error) {
+            if (generation !== state.historyRequestGeneration || state.selectedKey !== portKey) return;
             $('history-output').textContent = `日志读取失败：${error.message}`;
         }
     }
@@ -480,7 +517,16 @@
         $('log-tail').addEventListener('change', loadHistory);
         $('download-log').addEventListener('click', downloadLog);
         $('clear-logs').addEventListener('click', clearLogs);
+        window.addEventListener('gms:embedded-visibility', event => {
+            syncPortAutoRefresh(event.detail?.visible !== false);
+        });
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) syncPortAutoRefresh(false);
+            else if (!window.GmsEmbeddedWorkspace) syncPortAutoRefresh(true);
+        });
         window.addEventListener('beforeunload', () => {
+            syncPortAutoRefresh(false);
+            state.historyRequestGeneration += 1;
             if (state.socket) state.socket.close();
             state.terminalResizeObserver?.disconnect();
             state.terminal?.dispose();
@@ -491,7 +537,7 @@
         bindEvents();
         try { await loadPorts(); }
         finally { window.GmsEmbeddedWorkspace?.markReady(); }
-        state.refreshTimer = setInterval(() => loadPorts(true), 3000);
+        syncPortAutoRefresh(!document.hidden);
     }
 
     initialize();
