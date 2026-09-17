@@ -643,5 +643,60 @@ class ResourceOwnerIdentityHygieneTests(unittest.TestCase):
         )
 
 
+class OwnerIdentityTaintCheckTests(unittest.TestCase):
+    """Business modules must never read the raw principal ``.id`` attribute.
+
+    升级 ResourceOwnerIdentityHygieneTests 的语法扫描（审计意见十五）：
+    只要业务代码出现 ``user.id`` 这类原始读，AST 就已丢失"这个值之后会
+    流向 owner 字段还是 audit 归因"的语义，别名/转发/位置参数都能逃过
+    sink 匹配。因此直接把"未分类的主体身份读"整体设为违规——调用方必须
+    显式声明身份类别：
+
+    - actor（audit / WebSocket session / 运行时锁持有者）：
+      ``principal_actor_id(request)`` 或 ``principal.actor_id``
+    - resource owner（落库的 owner/claim/report/artifact 分区键）：
+      ``principal_owner_id(request)`` 或 ``principal.resource_owner_id``
+
+    身份的定义与装配管道（``features/auth/**``、
+    ``features/users/clients.py`` 的 ``get_client_id_from_request``）豁免；
+    tests 目录沿用既有卫生测试的排除规则。
+    """
+
+    _PRINCIPAL_ID_PIPELINES = (
+        "features/auth/",
+        "features/users/clients.py",
+    )
+
+    def test_business_modules_never_read_raw_principal_id(self):
+        offenders = []
+        for base in ("features", "foundation", "bootstrap", "worker_agent"):
+            for path in sorted((ROOT / base).rglob("*.py")):
+                relative = str(path.relative_to(ROOT))
+                if "/tests/" in relative or "__pycache__" in relative:
+                    continue
+                if any(
+                    relative.startswith(prefix)
+                    for prefix in self._PRINCIPAL_ID_PIPELINES
+                ):
+                    continue
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+                for node in ast.walk(tree):
+                    if (
+                        isinstance(node, ast.Attribute)
+                        and node.attr == "id"
+                        and isinstance(node.value, ast.Name)
+                        and node.value.id in _PRINCIPAL_RECEIVERS
+                    ):
+                        offenders.append((relative, node.lineno))
+        self.assertEqual(
+            offenders,
+            [],
+            "raw principal .id reads are forbidden outside the identity "
+            "pipelines — classify the identity explicitly: actor → "
+            "principal_actor_id(request)/.actor_id, resource owner → "
+            f"principal_owner_id(request)/.resource_owner_id: {offenders}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

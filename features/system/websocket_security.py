@@ -38,9 +38,11 @@ def get_websocket_client_identity(
     client_ip = get_websocket_client_ip(websocket)
     if user:
         display_id = format_client_display_id(user.username, client_ip)
+        # WS 房间键是"运行时主体"（actor）语义：.id 的显式别名，与
+        # principal_actor_id() 同值（ADR 0010）。
         if path_client_id.startswith("terminal_"):
-            return f"{user.id}:{path_client_id}", display_id, user.username
-        return user.id, display_id, user.username
+            return f"{user.actor_id}:{path_client_id}", display_id, user.username
+        return user.actor_id, display_id, user.username
 
     username = "unknown"
     try:

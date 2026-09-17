@@ -228,6 +228,73 @@ def _device_groups_path(username: str) -> Path:
     return directory / 'device_groups.json'
 
 
+def _agent_token_ids_for_owner(owner: str) -> list[str]:
+    """Token ids enrolled by this account (cross-feature public surface)."""
+    try:
+        from features.auth import auth_service
+
+        records = auth_service.list_agent_tokens()
+    except Exception:  # 注册表不可用时按无历史数据处理（迁移是尽力而为）
+        return []
+    return [
+        str(record.get('id') or '')
+        for record in records
+        if str(record.get('owner_user_id') or '') == str(owner)
+    ]
+
+
+def _migrate_legacy_agent_groups(username: str, target: Path) -> None:
+    """One-time lazy migration for the ADR 0010 owner-key switch.
+
+    设备分组曾按 ``user.id`` 落盘：人类账号 id 不变无需迁移；agent 令牌
+    的合成 actor id（``agent:<token_id>``）在切换后会让账号看不到旧分
+    组。这里借 agent_tokens 注册表把该账号名下每个 token 的历史 key 反
+   查出来，取 mtime 最新的分组文件复制到账号 key 下。幂等：仅在目标
+    文件缺失时执行；任何失败都按"无历史数据"处理（fail-open）。
+    """
+    if target.is_file():
+        return
+    data_root = Path(runtime.data_root) / 'user_prefs'
+    candidates = []
+    for token_id in _agent_token_ids_for_owner(username):
+        if not token_id:
+            continue
+        legacy = (
+            data_root
+            / _owner_storage_key(f'agent:{token_id}')
+            / 'device_groups.json'
+        )
+        try:
+            if legacy.is_file():
+                candidates.append(legacy)
+        except OSError:
+            continue
+    if not candidates:
+        return
+    legacy_path = max(candidates, key=lambda candidate: candidate.stat().st_mtime)
+    try:
+        data = json.loads(legacy_path.read_text(encoding='utf-8'))
+        groups = normalize_device_groups(
+            data.get('groups', []) if isinstance(data, dict) else data
+        )
+    except (OSError, json.JSONDecodeError, HTTPException):
+        return
+    if not groups:
+        return
+    try:
+        temporary = target.with_suffix(f'{target.suffix}.tmp')
+        temporary.write_text(
+            json.dumps({'groups': groups}, ensure_ascii=False, indent=2),
+            encoding='utf-8',
+        )
+        temporary.replace(target)
+    except OSError:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def load_device_groups(username: str | None) -> list[dict[str, Any]]:
     """Load groups for one immutable authenticated owner id."""
     if not username:
@@ -235,6 +302,7 @@ def load_device_groups(username: str | None) -> list[dict[str, Any]]:
 
     path = _device_groups_path(username)
     with _storage_lock:
+        _migrate_legacy_agent_groups(username, path)
         try:
             data = json.loads(path.read_text(encoding='utf-8'))
             return normalize_device_groups(

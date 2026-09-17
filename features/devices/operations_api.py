@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from features.auth import (
     CurrentUser,
+    principal_actor_id,
     require_authenticated_user,
     require_elevated_admin,
 )
@@ -66,7 +67,9 @@ async def list_user_locks(request: Request):
     current_user = require_authenticated_user(request)
     locks = device_lock_manager.get_all_locks()
     if current_user.role != "admin":
-        client_id = current_user.id
+        # 锁持有者是"操作主体"（actor）语义：agent 令牌的锁应跟 token 走，
+        # 不能误用 resource_owner_id 混入账号分区（ADR 0010）。
+        client_id = principal_actor_id(request)
         locks = {
             key: value
             for key, value in locks.items()

@@ -96,7 +96,9 @@ class NoVNCAccessService:
                 """,
                 (
                     _hash(token),
-                    user.id,
+                    # 会话授权是短时运行时状态，记 actor 而非资源 owner
+                    # （ADR 0010）；.actor_id 是 .id 的显式别名。
+                    user.actor_id,
                     normalized_worker,
                     _hash(session_token),
                     _iso(now),
@@ -130,7 +132,7 @@ class NoVNCAccessService:
                 """,
                 (
                     _hash(token),
-                    user.id,
+                    user.actor_id,
                     str(worker_id or "").strip(),
                     _hash(session_token),
                     now,
