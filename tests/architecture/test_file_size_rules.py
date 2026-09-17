@@ -72,7 +72,6 @@ MIGRATION_LINE_LIMITS = {
     'features/devices/usbip_linux_source.py': 818,
     'features/devices/usbip.py': 939,  # 协议/来源会话/清单拆至 usbip_protocol/_source_sessions/_source_inventory
     'features/firmware/firmware_api.py': 962,  # agent burn gate；h 参数收敛后按实际规模收紧
-    'features/system/vnc.py': 613,
 }
 
 
