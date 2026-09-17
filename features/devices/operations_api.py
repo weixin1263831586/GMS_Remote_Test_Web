@@ -123,7 +123,8 @@ async def force_release_device_locks(
         "method": request.method,
         "path": request.url.path,
         "status_code": 200 if all(item["success"] for item in results) else 409,
-        "client_id": admin.id,
+        # Security audit attribution is an ACTOR identity, not a resource owner.
+        "client_id": principal_actor_id(request),
         "username": admin.username,
         "devices": device_ids,
         "results": results,
@@ -200,7 +201,7 @@ async def remount_devices(req: DeviceActionRequest, request: Request):
     # fencing 用 resource_owner_id（ADR 0010）；client_id 仅用于运行时
     # WebSocket 日志路由（actor 身份），两个身份不许混用。
     fencing_owner_id = device_fencing_owner_id(request)
-    client_id = require_authenticated_user(request).id
+    client_id = principal_actor_id(request)
     devices = sanitize_device_ids(req.devices)
     if not devices:
         return error_response("No valid device serials", status_code=400)
@@ -308,7 +309,7 @@ async def open_device_shell(req: DeviceShellRequest, request: Request):
     try:
         # device_shells 是运行时会话状态（actor 身份）；conflict 复查用
         # fencing owner（ADR 0010），两者分开。
-        client_id = require_authenticated_user(request).id
+        client_id = principal_actor_id(request)
         conflict = device_claim_conflict_response(
             [req.serial_no],
             device_fencing_owner_id(request),
