@@ -11,6 +11,7 @@ from foundation.responses import error_response
 
 
 logger = logging.getLogger(__name__)
+_INTERNAL_ERROR_MESSAGE = "Internal server error"
 
 
 def handle_api_errors(function):
@@ -27,9 +28,13 @@ def handle_api_errors(function):
                 'API error in %s: %s %s', function.__name__, exc.code, exc.message
             )
             return exc.to_response()
-        except Exception as exc:
+        except Exception:
+            # Unexpected exceptions are programming/internal failures. Keep the
+            # traceback in server logs, but never expose exception strings to
+            # API clients: they can contain filesystem paths, remote command
+            # text, credentials or dependency internals.
             logger.exception('Error in %s', function.__name__)
-            return error_response(str(exc), status_code=500)
+            return error_response(_INTERNAL_ERROR_MESSAGE, status_code=500)
 
     @wraps(function)
     def sync_wrapper(*args, **kwargs):
@@ -42,8 +47,8 @@ def handle_api_errors(function):
                 'API error in %s: %s %s', function.__name__, exc.code, exc.message
             )
             return exc.to_response()
-        except Exception as exc:
+        except Exception:
             logger.exception('Error in %s', function.__name__)
-            return error_response(str(exc), status_code=500)
+            return error_response(_INTERNAL_ERROR_MESSAGE, status_code=500)
 
     return async_wrapper if asyncio.iscoroutinefunction(function) else sync_wrapper
