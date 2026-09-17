@@ -528,7 +528,10 @@ function switchTab(tab) {
   if (target === 'runs') return loadRuns();
   if (target === 'department') return loadDepartmentOverdue(false);
   if (target === 'project') return loadProjectDashboard(false);
-  if (target === 'daily-brief') return loadDailyBrief();
+  if (target === 'daily-brief') {
+    loadSingleIssueDevices();
+    return loadDailyBrief();
+  }
   if (target === 'stats') return loadStatistics();
   return Promise.resolve();
 }
@@ -3003,10 +3006,12 @@ function showSingleIssueAnalysis(runId, statisticsOnly) {
     ? '<div class="daily-brief-warning">最新一次分析已停止，以下展示最近一次已保存的分析结论'
       + (previousAt ? '（' + esc(previousAt) + '）' : '') + '。</div>'
     : '';
+  var subject = String(issue.subject || '').trim();
+  var statusText = singleIssueAnalysisStatus(issue.status || item.run.status);
   var body = statisticsOnly
     ? (statistics || '<div class="muted">本单号尚未保存可展示的 AI 统计。</div>')
     : (report
-      ? previousNotice + '<div class="daily-brief-section daily-brief-section-md"><div class="daily-brief-section-body">'
+      ? previousNotice + '<div class="daily-brief-section daily-brief-section-md"><div class="daily-brief-section-body analysis-doc">'
         + renderMarkdownDoc(report) + '</div></div>'
       : '<div class="muted">' + esc(issue.error || singleIssueAnalysisStatus(issue.status || item.run.status)) + '</div>');
   var modalId = 'singleIssueAnalysisModal-' + Date.now();
@@ -3014,8 +3019,11 @@ function showSingleIssueAnalysis(runId, statisticsOnly) {
   modal.id = modalId;
   modal.className = 'modal';
   modal.innerHTML = '<div class="modal-content daily-brief-modal' + (statisticsOnly ? ' daily-brief-statistics-modal' : '') + '">'
-    + '<div class="modal-header"><span class="modal-title">' + (statisticsOnly ? '📊 AI 统计' : '🤖 AI 分析')
-    + ' · #' + esc(issue.issue_id) + '</span><button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
+    + '<div class="modal-header"><span class="modal-title daily-brief-modal-title"><span>'
+    + (statisticsOnly ? '📊 AI 统计' : '🤖 AI 分析') + ' · #' + esc(issue.issue_id)
+    + (statusText ? ' · ' + esc(statusText) : '') + '</span>'
+    + (subject ? '<span class="daily-brief-modal-subject">' + esc(subject) + '</span>' : '')
+    + '</span><button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
     + '<div class="modal-body daily-brief-modal-body">' + body + '</div>'
     + '<div class="modal-buttons daily-brief-modal-footer"><button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">关闭</button></div></div>';
   document.body.appendChild(modal);
@@ -3104,12 +3112,11 @@ async function analyzeSingleIssueFromInput(skipHistoryLookup) {
       return String(issue.issue_id) === value;
     });
     var analysisMode = hasHistory && modeSelect && modeSelect.value === 'incremental' ? 'incremental' : 'full';
-    var deviceSelect = document.getElementById('singleIssueAnalysisDevice');
-    var deviceSerial = String((deviceSelect && deviceSelect.value) || '').trim();
+    var deviceSerials = selectedSingleIssueDevices();
     var analysisHint = singleIssueAnalysisHint.trim();
     var payload = {issue_id: Number(value)};
     if (analysisMode === 'full') payload.analysis_mode = analysisMode;
-    if (deviceSerial) payload.device_serial = deviceSerial;
+    if (deviceSerials.length) payload.device_serials = deviceSerials;
     if (analysisHint) payload.analysis_hint = analysisHint;
     var queued = await api('/api/redmine-agent/daily-brief/analyze-issue', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -3129,14 +3136,13 @@ async function reanalyzeSavedSingleIssue(runId, issueId) {
   var button = document.querySelector('[data-single-issue-reanalyze="' + String(runId).replace(/"/g, '\\"') + '"]');
   var modeSelect = button && button.parentElement.querySelector('[data-single-issue-reanalysis-mode]');
   var analysisMode = String((modeSelect && modeSelect.value) || 'incremental');
-  var deviceSelect = document.getElementById('singleIssueAnalysisDevice');
-  var deviceSerial = String((deviceSelect && deviceSelect.value) || '').trim();
+  var deviceSerials = selectedSingleIssueDevices();
   var analysisHint = singleIssueAnalysisHint.trim();
   var originalText = button && button.textContent;
   if (button) { button.disabled = true; button.textContent = '⏳ 分析中'; }
   try {
     var payload = {issue_id: Number(issueId), analysis_mode: analysisMode};
-    if (deviceSerial) payload.device_serial = deviceSerial;
+    if (deviceSerials.length) payload.device_serials = deviceSerials;
     if (analysisHint) payload.analysis_hint = analysisHint;
     var queued = await api('/api/redmine-agent/daily-brief/analyze-issue', {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
@@ -3145,7 +3151,7 @@ async function reanalyzeSavedSingleIssue(runId, issueId) {
     // 条目级重分析与顶部的“开始分析”彼此独立：只更新和轮询当前行，
     // 不能把顶部控件切成运行/停止状态。
     upsertSingleIssueAnalysis({
-      run: {run_id: queued.run_id, status: queued.status || 'pending', device_serial: deviceSerial},
+      run: {run_id: queued.run_id, status: queued.status || 'pending', device_serial: deviceSerials.join(',')},
       issues: [{issue_id: Number(issueId), status: 'pending'}],
     });
     renderSingleIssueAnalysisHistory();
@@ -3256,16 +3262,39 @@ function findSingleIssueAnalysisByIssueId(issueId) {
   }) || null;
 }
 
+function selectedSingleIssueDevices() {
+  var picker = document.getElementById('singleIssueAnalysisDevice');
+  return Array.from((picker && picker.querySelectorAll('input[data-device-serial]:checked')) || [])
+    .map(function (input) { return String(input.value || '').trim(); }).filter(Boolean);
+}
+
+function syncSingleIssueDevicePickerLabel() {
+  var picker = document.getElementById('singleIssueAnalysisDevice');
+  var label = picker && picker.querySelector('[data-device-label]');
+  if (!label) return;
+  var devices = selectedSingleIssueDevices();
+  label.textContent = devices.length ? (devices.length === 1 ? devices[0] : '已选 ' + devices.length + ' 台设备') : '不使用实机验证';
+}
+
+function setSingleIssueDevicePickerOpen(open) {
+  var picker = document.getElementById('singleIssueAnalysisDevice');
+  if (!picker) return;
+  var toggle = picker.querySelector('[data-device-toggle]');
+  var options = picker.querySelector('[data-device-options]');
+  if (!toggle || !options) return;
+  options.hidden = !open;
+  toggle.setAttribute('aria-expanded', String(open));
+  var card = picker.closest('.daily-brief-card');
+  if (card) card.toggleAttribute('data-device-picker-open', open);
+}
+
 async function loadSingleIssueDevices() {
   if (singleIssueDevicesLoading) return singleIssueDevicesLoading;
-  var select = document.getElementById('singleIssueAnalysisDevice');
-  if (!select) return;
+  var picker = document.getElementById('singleIssueAnalysisDevice');
+  if (!picker) return;
   singleIssueDevicesLoading = (async function () {
-    var oldValue = select.value;
-    // Keep the selector usable while refreshing. Disabling it on pointerdown
-    // prevents the native option list from opening on the very click that
-    // requested the refresh.
-    select.setAttribute('aria-busy', 'true');
+    var oldValues = selectedSingleIssueDevices();
+    picker.setAttribute('aria-busy', 'true');
     try {
       var response = await fetch('/api/devices/list?force_refresh=true', {credentials: 'same-origin'});
       if (!response.ok) throw new Error('设备列表读取失败（HTTP ' + response.status + '）');
@@ -3275,22 +3304,25 @@ async function loadSingleIssueDevices() {
         return device && device.protocol === 'adb' && device.status === 'online'
           && (!device.locked || device.locked_by_self);
       });
-      select.replaceChildren();
-      var empty = document.createElement('option');
-      empty.value = '';
-      empty.textContent = '不使用实机验证';
-      select.appendChild(empty);
+      var listRoot = picker.querySelector('[data-device-list]');
+      if (!listRoot) return;
+      listRoot.replaceChildren();
       options.forEach(function (device) {
-        var option = document.createElement('option');
+        var label = document.createElement('label');
+        var option = document.createElement('input');
+        option.type = 'checkbox';
+        option.dataset.deviceSerial = 'true';
         option.value = String(device.device_id || '');
-        option.textContent = String(device.device_id || '') + (device.transport ? ' · ' + device.transport : '');
-        select.appendChild(option);
+        option.checked = oldValues.indexOf(option.value) >= 0;
+        label.append(option, document.createTextNode(' ' + option.value + (device.transport ? ' · ' + device.transport : '')));
+        listRoot.appendChild(label);
       });
-      select.value = Array.from(select.options).some(function (option) { return option.value === oldValue; }) ? oldValue : '';
+      var none = picker.querySelector('[data-device-none]');
+      if (none) none.checked = oldValues.length === 0;
     } catch (error) {
       notifyUser('读取 ADB 设备失败', error.message, 'warning');
     } finally {
-      select.removeAttribute('aria-busy');
+      picker.removeAttribute('aria-busy');
       singleIssueDevicesLoading = null;
     }
   })();
@@ -3298,14 +3330,34 @@ async function loadSingleIssueDevices() {
 }
 window.loadSingleIssueDevices = loadSingleIssueDevices;
 
-document.addEventListener('focusin', function (event) {
-  if (event.target.id !== 'singleIssueAnalysisDevice') return;
-  loadSingleIssueDevices();
+document.addEventListener('change', function (event) {
+  var picker = event.target.closest && event.target.closest('#singleIssueAnalysisDevice');
+  if (!picker) return;
+  var none = picker.querySelector('[data-device-none]');
+  if (event.target === none && none.checked) {
+    picker.querySelectorAll('input[data-device-serial]').forEach(function (input) { input.checked = false; });
+  } else if (event.target.matches && event.target.matches('input[data-device-serial]')) {
+    if (none) none.checked = false;
+  }
+  syncSingleIssueDevicePickerLabel();
 });
 
-document.addEventListener('pointerdown', function (event) {
-  if (event.target.id !== 'singleIssueAnalysisDevice') return;
-  loadSingleIssueDevices();
+document.addEventListener('click', function (event) {
+  var picker = document.getElementById('singleIssueAnalysisDevice');
+  if (!picker) return;
+  var toggle = event.target.closest && event.target.closest('[data-device-toggle]');
+  if (toggle && picker.contains(toggle)) {
+    var options = picker.querySelector('[data-device-options]');
+    var open = !!(options && options.hidden);
+    setSingleIssueDevicePickerOpen(open);
+    if (open) loadSingleIssueDevices();
+    return;
+  }
+  if (!picker.contains(event.target)) setSingleIssueDevicePickerOpen(false);
+});
+
+document.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape') setSingleIssueDevicePickerOpen(false);
 });
 
 async function stopSingleIssueAnalysis() {
@@ -3719,7 +3771,7 @@ function showDailyBriefIssueModal(issueId) {
   // 深度报告是 Markdown（表格/标题/代码块），走已有的轻量渲染器。
   var mdSection = function (body) {
     if (!body) return '';
-    return '<div class="daily-brief-section daily-brief-section-md"><div class="daily-brief-section-body">'
+    return '<div class="daily-brief-section daily-brief-section-md"><div class="daily-brief-section-body analysis-doc">'
       + renderMarkdownDoc(String(body)) + '</div></div>';
   };
   var ev = dailyBriefList(r.evidence).map(function (entry) {

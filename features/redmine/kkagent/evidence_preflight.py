@@ -233,15 +233,22 @@ async def collect_deep_analysis_evidence(
                 attachments.all_artifact_ids,
             ) = _attachment_manifest(data)
         result.traces.extend([journals, attachments])
-    if device_serial:
-        device, _ = await _collect(
-            tool_name="gms_rt_devices_snapshot",
-            arguments=[device_serial, "--json", "--non-interactive"],
-            tool_input={"device": device_serial}, env_extra=env_extra,
-            should_cancel=should_cancel,
+    devices = [item.strip() for item in str(device_serial or "").split(",") if item.strip()]
+    if devices:
+        statuses: list[str] = []
+        for serial in devices:
+            device, _ = await _collect(
+                tool_name="gms_rt_devices_snapshot",
+                arguments=[serial, "--json", "--non-interactive"],
+                tool_input={"device": serial}, env_extra=env_extra,
+                should_cancel=should_cancel,
+            )
+            result.traces.append(device)
+            statuses.append(str(device.status))
+        result.device_status = (
+            statuses[0] if len(statuses) == 1
+            else ", ".join(f"{serial}:{status}" for serial, status in zip(devices, statuses))
         )
-        result.traces.append(device)
-        result.device_status = device.status
     return result
 
 

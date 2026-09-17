@@ -1940,6 +1940,13 @@
             "title": "Device Serial",
             "type": "string"
           },
+          "device_serials": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Device Serials",
+            "type": "array"
+          },
           "issue_id": {
             "exclusiveMinimum": 0.0,
             "maximum": 9.223372036854776e+18,
@@ -20437,13 +20444,13 @@
             }
           },
           {
-            "description": "逗号分隔套件类型，例如 cts,vts,gts,sts",
+            "description": "逗号分隔套件类型，例如 cts,cts-v,vts,gts,sts",
             "in": "query",
             "name": "suite_types",
             "required": false,
             "schema": {
-              "default": "cts,vts,gts,sts",
-              "description": "逗号分隔套件类型，例如 cts,vts,gts,sts",
+              "default": "cts,cts-v,vts,gts,sts",
+              "description": "逗号分隔套件类型，例如 cts,cts-v,vts,gts,sts",
               "title": "Suite Types",
               "type": "string"
             }
@@ -20457,6 +20464,18 @@
               "default": "apk",
               "description": "优先产物类型：apk 或 jar",
               "title": "Prefer",
+              "type": "string"
+            }
+          },
+          {
+            "description": "可选：显式套件根目录（含 testcases/ 的目录，绝对路径），指定后只搜索该套件",
+            "in": "query",
+            "name": "suite_path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "可选：显式套件根目录（含 testcases/ 的目录，绝对路径），指定后只搜索该套件",
+              "title": "Suite Path",
               "type": "string"
             }
           }

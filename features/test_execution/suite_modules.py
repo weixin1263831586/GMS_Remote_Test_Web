@@ -8,10 +8,16 @@ from typing import Any
 
 from . import runtime
 from .suite_helpers import get_available_test_suites
-from .suites import get_default_suites_path, is_config_host_local, list_local_test_suites
+from .suites import (
+    build_suite_info,
+    get_default_suites_path,
+    is_config_host_local,
+    list_local_test_suites,
+)
+from .tradefed import find_tradefed_binary_local
 
 
-DEFAULT_SUITE_TYPES = ("cts", "vts", "gts", "sts")
+DEFAULT_SUITE_TYPES = ("cts", "cts-v", "vts", "gts", "sts")
 MODULE_EXTENSIONS = (".apk", ".jar", ".config", ".xml")
 
 
@@ -183,13 +189,54 @@ def _dedupe_module_results(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(grouped.values())
 
 
+def _suite_entry_for_path(base_path: str, suite_path: str) -> dict[str, Any] | None:
+    """Build a suite entry for an explicit suite root (or tools) directory.
+
+    Accepts either "<suite_root>/tools" or the directory that contains
+    testcases/ directly.  Type and version are derived from the nearest
+    "android-*" path segment so results stay compatible with the inventory
+    payload shape used by the normal type-filtered flow.
+    """
+    raw = str(suite_path or "").replace("\\", "/").strip().rstrip("/")
+    if not raw:
+        return None
+    tools_path = raw if raw.endswith("/tools") else f"{raw}/tools"
+    launcher = find_tradefed_binary_local(tools_path)
+    if not launcher:
+        return None
+    suite = build_suite_info(launcher)
+    if not suite:
+        return None
+    base_real = os.path.realpath(os.path.expanduser(base_path)) if base_path else ""
+    tools_real = os.path.realpath(os.path.expanduser(tools_path))
+    if base_real:
+        try:
+            if os.path.commonpath([base_real, tools_real]) != base_real:
+                return None
+        except ValueError:
+            return None
+    return {
+        "test_type": suite.get("test_type") or "",
+        "version": suite.get("version") or "",
+        "tools_path": tools_path,
+        "full_path": launcher,
+        "binary": os.path.basename(launcher),
+    }
+
+
 def search_latest_suite_modules(
     config: dict[str, Any],
     query: str,
     suite_types: list[str] | None = None,
     per_suite_limit: int = 30,
+    suite_path: str = "",
 ) -> dict[str, Any]:
-    """Search latest CTS/VTS/GTS/STS testcases for modules matching query."""
+    """Search latest CTS/CTS-V/VTS/GTS/STS testcases for modules matching query.
+
+    When ``suite_path`` is given, only that suite is scanned (bypassing the
+    latest-per-type selection), which lets callers address older or coexisting
+    suite copies directly.
+    """
     normalized_query = normalize_module_query(query)
     requested_types = [
         str(item).strip().lower()
@@ -198,8 +245,38 @@ def search_latest_suite_modules(
     ]
     base_path = config.get("suites_path") or get_default_suites_path(config)
     local = os.path.isdir(base_path) or is_config_host_local(config)
-    suites = list_local_test_suites(base_path) if os.path.isdir(base_path) else get_available_test_suites(config, base_path)
-    latest_suites = _select_latest_suites(suites, requested_types)
+    if suite_path:
+        if not local:
+            return {
+                "query": query,
+                "normalized_query": normalized_query,
+                "base_path": base_path,
+                "source": "ssh",
+                "suite_types": [item.upper() for item in requested_types],
+                "suite_path": suite_path,
+                "searched_suites": [],
+                "modules": [],
+                "count": 0,
+                "error": "suite_path lookup is only supported on the local suites host",
+            }
+        explicit = _suite_entry_for_path(base_path, suite_path)
+        if explicit is None:
+            return {
+                "query": query,
+                "normalized_query": normalized_query,
+                "base_path": base_path,
+                "source": "local",
+                "suite_types": [item.upper() for item in requested_types],
+                "suite_path": suite_path,
+                "searched_suites": [],
+                "modules": [],
+                "count": 0,
+                "error": f"Suite path not found or no tradefed launcher: {suite_path}",
+            }
+        latest_suites = [explicit]
+    else:
+        suites = list_local_test_suites(base_path) if os.path.isdir(base_path) else get_available_test_suites(config, base_path)
+        latest_suites = _select_latest_suites(suites, requested_types)
 
     results = []
     if local:

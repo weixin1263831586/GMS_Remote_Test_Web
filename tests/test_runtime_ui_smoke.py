@@ -7231,6 +7231,124 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_device_shell_waits_for_host_directory_before_mounting_adb(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            elevated = page.request.post(
+                f"{self.base_url}/api/auth/elevate",
+                data={
+                    "username": "ui-admin",
+                    "password": "UiSmokeAdmin-2026!",
+                },
+            )
+            self.assertTrue(elevated.ok, elevated.text())
+            result = page.evaluate(
+                """async () => {
+                  state.elevated = true;
+                  state.elevatedUntil = Date.now() + 60000;
+                  const originalInitDesktopHosts = initDesktopHosts;
+                  const localWorkerId = workspaceLocalWorkerId();
+                  let resolveHosts;
+                  try {
+                    // initDesktopHosts creates the local placeholder first,
+                    // then its asynchronous directory merge assigns worker_id.
+                    // Keep that merge pending to exercise the click-time race.
+                    desktopHosts = [];
+                    window.desktopHostsInitialized = false;
+                    initDesktopHosts = () => {
+                      desktopHosts = [{
+                        id: 'default',
+                        name: 'Controller',
+                        connection: 'ui-smoke@127.0.0.1',
+                      }];
+                      return new Promise(resolve => {
+                        resolveHosts = () => {
+                          desktopHosts[0].worker_id = localWorkerId;
+                          resolve();
+                        };
+                      });
+                    };
+                    allDevices = [{
+                      device_id: 'RACE-ADB-1',
+                      serial_no: 'RACE-ADB-1',
+                      worker_id: localWorkerId,
+                      status: 'online',
+                    }];
+                    const opening = openDeviceShell('RACE-ADB-1');
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                    const beforeDirectoryReady = {
+                      currentPage,
+                      pane: terminalWorkspace.panes[0] || null,
+                    };
+                    resolveHosts();
+                    await opening;
+                    return {
+                      beforeDirectoryReady,
+                      currentPage,
+                      pane: terminalWorkspace.panes[0],
+                    };
+                  } finally {
+                    initDesktopHosts = originalInitDesktopHosts;
+                  }
+                }"""
+            )
+            self.assertNotEqual(result["beforeDirectoryReady"]["currentPage"], "terminal")
+            self.assertEqual(result["currentPage"], "terminal")
+            self.assertEqual(
+                result["pane"],
+                {
+                    "hostId": "default",
+                    "mode": "adb",
+                    "serialNo": "RACE-ADB-1",
+                    "workerId": page.evaluate("workspaceLocalWorkerId()"),
+                },
+            )
+        finally:
+            page.close()
+
+    def test_scope_initialization_preserves_pending_adb_target(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate(
+                """() => {
+                  const localWorkerId = workspaceLocalWorkerId();
+                  desktopHosts = [{
+                    id: 'default',
+                    worker_id: localWorkerId,
+                    connection: 'ui-smoke@127.0.0.1',
+                  }];
+                  hostWorkspaceScopeModeInitialized = false;
+                  hostWorkspaceClusterEnabled = false;
+                  window.terminalWorkspaceInitialized = false;
+                  terminalWorkspace.panes = [{
+                    hostId: 'default',
+                    mode: 'adb',
+                    serialNo: 'PENDING-ADB-1',
+                    workerId: localWorkerId,
+                  }];
+                  terminalWorkspace.clusterState = {
+                    layout: 'single',
+                    panes: [{hostId: 'default'}],
+                    maximized: null,
+                  };
+                  applyHostWorkspaceScopeMode(true);
+                  return terminalWorkspace.panes[0];
+                }"""
+            )
+            self.assertEqual(
+                result,
+                {
+                    "hostId": "default",
+                    "mode": "adb",
+                    "serialNo": "PENDING-ADB-1",
+                    "workerId": page.evaluate("workspaceLocalWorkerId()"),
+                },
+            )
+        finally:
+            page.close()
+
     def test_hidden_host_workspaces_resume_automatically_on_page_entry(self):
         page = self.new_page()
         page.route(

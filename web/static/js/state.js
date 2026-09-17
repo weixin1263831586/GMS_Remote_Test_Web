@@ -18,6 +18,10 @@ const state = {
     clientId: null,
     clientDisplayId: null,
     currentUser: null,
+    // 在“切换账号 → 输入密码”尚未成功的过渡期，保留最近确认身份，
+    // 供左下角和切换弹框稳定显示；不能用于权限判断。
+    lastConfirmedUser: null,
+    defaultAdminUsername: '',
     authRequired: false,
     authSetupRequired: false,
     // null 表示后端版本尚未声明；首次初始化时按“需要令牌”安全降级。

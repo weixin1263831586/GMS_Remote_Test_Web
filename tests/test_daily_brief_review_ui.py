@@ -345,7 +345,7 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
         finally:
             page.close()
 
-    def test_single_issue_device_picker_only_offers_available_adb_devices(self):
+    def test_single_issue_device_picker_selects_multiple_available_adb_devices(self):
         page = self.new_page()
         submissions = []
 
@@ -364,6 +364,9 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
         page.route('**/api/devices/list?force_refresh=true', lambda route: route.fulfill(
             status=200, content_type='application/json', body=json.dumps([
                 {'device_id': 'ADB-OWN', 'protocol': 'adb', 'status': 'online', 'locked': False},
+                {'device_id': 'ADB-SECOND', 'protocol': 'adb', 'status': 'online', 'locked': False},
+                {'device_id': 'ADB-THIRD', 'protocol': 'adb', 'status': 'online', 'locked': False},
+                {'device_id': 'ADB-FOURTH', 'protocol': 'adb', 'status': 'online', 'locked': False},
                 {'device_id': 'ADB-OTHER', 'protocol': 'adb', 'status': 'online', 'locked': True, 'locked_by_self': False},
                 {'device_id': 'FASTBOOT', 'protocol': 'fastboot', 'status': 'fastboot', 'locked': False},
             ]),
@@ -371,15 +374,45 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
         try:
             page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
             page.evaluate("switchTab('daily-brief')")
-            page.locator('#singleIssueAnalysisDevice').focus()
-            expect(page.locator('#singleIssueAnalysisDevice')).to_contain_text('ADB-OWN')
-            self.assertNotIn('ADB-OTHER', page.locator('#singleIssueAnalysisDevice').inner_text())
-            page.locator('#singleIssueAnalysisDevice').select_option('ADB-OWN')
+            page.wait_for_function(
+                "() => document.querySelectorAll('#singleIssueAnalysisDevice input[data-device-serial]').length === 4"
+            )
+            picker = page.locator('#singleIssueAnalysisDevice')
+            expect(picker.locator('[data-device-options]')).to_be_hidden()
+            picker.locator('[data-device-toggle]').click()
+            expect(picker.locator('[data-device-options]')).to_be_visible()
+            expect(picker).to_contain_text('ADB-OWN')
+            expect(picker).to_contain_text('ADB-SECOND')
+            self.assertNotIn('ADB-OTHER', picker.inner_text())
+            expect(picker.locator('input[value="ADB-FOURTH"]')).to_be_visible()
+            dimensions = page.evaluate("""() => {
+                const picker = document.querySelector('#singleIssueAnalysisDevice');
+                const options = picker.querySelector('[data-device-options]');
+                return {pickerWidth: picker.getBoundingClientRect().width,
+                    optionsWidth: options.getBoundingClientRect().width,
+                    pickerLeft: picker.getBoundingClientRect().left,
+                    optionsLeft: options.getBoundingClientRect().left};
+            }""")
+            self.assertEqual(dimensions['pickerWidth'], dimensions['optionsWidth'])
+            self.assertEqual(dimensions['pickerLeft'], dimensions['optionsLeft'])
+            top_layer = page.evaluate("""() => {
+                const input = document.querySelector('#singleIssueAnalysisDevice input[value="ADB-FOURTH"]');
+                const rect = input.getBoundingClientRect();
+                const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+                return {visible: top === input || !!top.closest('#singleIssueAnalysisDevice'),
+                    point: {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2},
+                    top: top && {tag: top.tagName, id: top.id, className: top.className}};
+            }""")
+            self.assertTrue(top_layer['visible'], top_layer)
+            page.locator('#singleIssueAnalysisDevice input[data-device-serial][value="ADB-OWN"]').check()
+            page.locator('#singleIssueAnalysisDevice input[data-device-serial][value="ADB-SECOND"]').check()
+            expect(picker.locator('[data-device-label]')).to_have_text('已选 2 台设备')
             page.locator('#singleIssueAnalysisId').fill('652654')
             page.locator('#singleIssueAnalysisId').press('Enter')
             expect(page.locator('#singleIssueAnalysisHistory')).to_contain_text('#652654')
             self.assertEqual(submissions, [{
-                'issue_id': 652654, 'analysis_mode': 'full', 'device_serial': 'ADB-OWN',
+                'issue_id': 652654, 'analysis_mode': 'full',
+                'device_serials': ['ADB-OWN', 'ADB-SECOND'],
             }])
         finally:
             page.close()

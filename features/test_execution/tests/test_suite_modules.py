@@ -95,6 +95,82 @@ class SuiteModuleSearchTests(unittest.TestCase):
         self.assertEqual(payload["modules"][0]["module"], "CtsCameraTestCases")
         self.assertEqual(payload["modules"][0]["suite_type"], "CTS")
 
+    def test_cts_verifier_nested_layout_is_searchable_and_latest_not_truncated(self):
+        """CTS Verifier (cts-v) modules resolve on the nested 17_r1 layout.
+
+        Regression: cts-v used to be excluded from DEFAULT_SUITE_TYPES and
+        build_suite_info truncated tools_path to the outer android-cts-verifier*
+        directory, so testcases resolution missed
+        android-cts-verifier/android-cts-v-host/testcases.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            # Replicate GMS-Suite/android-cts-verifier-17_r1-linux_x86-arm layout.
+            suite_root = (base / "android-cts-verifier-17_r1-linux_x86-arm"
+                          / "android-cts-verifier" / "android-cts-v-host")
+            tools = suite_root / "tools"
+            testcases = suite_root / "testcases"
+            tools.mkdir(parents=True)
+            testcases.mkdir(parents=True)
+            module_dir = testcases / "CtsNotificationSizeVerifierHostTest"
+            module_dir.mkdir()
+            launcher = tools / "cts-v-host-tradefed"
+            launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+            launcher.chmod(launcher.stat().st_mode | 0o111)
+            (module_dir / "CtsNotificationSizeVerifierDeviceTest.apk").write_text("", encoding="utf-8")
+            (module_dir / "CtsNotificationSizeVerifierHostTest.jar").write_text("", encoding="utf-8")
+
+            config = {"suites_path": str(base), "ubuntu_host": "127.0.0.1"}
+            with patch("features.test_execution.suite_helpers.is_config_host_local", return_value=True), \
+                    patch("features.test_execution.suite_modules.is_config_host_local", return_value=True):
+                payload = search_latest_suite_modules(config, "NotificationSizeVerifier", ["cts-v"], per_suite_limit=10)
+
+            searched = payload["searched_suites"]
+            self.assertEqual(len(searched), 1)
+            # tools_path keeps the <root>/tools convention; testcases derives correctly.
+            self.assertTrue(searched[0]["suite_path"].endswith("android-cts-v-host/tools"))
+            self.assertTrue(searched[0]["testcases_path"].endswith("android-cts-v-host/testcases"))
+            modules = {item["module"] for item in payload["modules"]}
+            self.assertIn("CtsNotificationSizeVerifierDeviceTest", modules)
+            self.assertIn("CtsNotificationSizeVerifierHostTest", modules)
+
+    def test_explicit_suite_path_scans_only_that_suite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            old_suite = self._make_suite(base, "android-cts-16_r6", "android-cts", "cts-tradefed", ["CtsOldModule.apk"])
+            self._make_suite(base, "android-cts-17_r1", "android-cts", "cts-tradefed", ["CtsNewModule.apk"])
+            # Make the 17_r1 copy clearly the newest so the default flow picks it.
+            future = time.time() + 100
+            os.utime(base / "android-cts-17_r1" / "android-cts", (future, future))
+
+            config = {"suites_path": str(base), "ubuntu_host": "127.0.0.1"}
+            with patch("features.test_execution.suite_helpers.is_config_host_local", return_value=True), \
+                    patch("features.test_execution.suite_modules.is_config_host_local", return_value=True):
+                payload = search_latest_suite_modules(
+                    config, "Cts", ["cts"], per_suite_limit=10,
+                    suite_path=str(old_suite.parent),
+                )
+
+            modules = {item["module"] for item in payload["modules"]}
+            self.assertIn("CtsOldModule", modules)
+            self.assertNotIn("CtsNewModule", modules)
+
+    def test_explicit_suite_path_outside_base_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            self._make_suite(base, "android-cts-17_r1", "android-cts", "cts-tradefed", ["CtsModule.apk"])
+            with tempfile.TemporaryDirectory() as outside:
+                rogue = self._make_suite(Path(outside), "android-cts-rogue", "android-cts", "cts-tradefed", ["CtsRogue.apk"])
+                config = {"suites_path": str(base), "ubuntu_host": "127.0.0.1"}
+                with patch("features.test_execution.suite_helpers.is_config_host_local", return_value=True), \
+                        patch("features.test_execution.suite_modules.is_config_host_local", return_value=True):
+                    payload = search_latest_suite_modules(
+                        config, "Cts", ["cts"], per_suite_limit=10,
+                        suite_path=str(rogue.parent),
+                    )
+            self.assertEqual(payload["modules"], [])
+            self.assertIn("error", payload)
+
 
 if __name__ == "__main__":
     unittest.main()
