@@ -169,19 +169,21 @@ async def _current_redmine_user(service) -> Any | None:
 
 
 async def _current_redmine_user_mapping(service) -> dict[str, Any] | None:
-    user = await _current_redmine_user(service)
-    if user is None:
+    # redmine_user 是 Redmine 远端用户资源，与平台 CurrentUser 无关；
+    # 其 .id 仅作 Redmine 侧映射，不参与资源 owner 分区。
+    redmine_user = await _current_redmine_user(service)
+    if redmine_user is None:
         return None
     try:
-        user_id = int(user.id)
+        user_id = int(redmine_user.id)
     except (TypeError, ValueError):
         return None
-    names = _redmine_user_names(user)
+    names = _redmine_user_names(redmine_user)
     return {
         "id": user_id,
         "name": names[0] if names else str(user_id),
         "aliases": names[1:],
-        "email": str(getattr(user, "mail", "") or getattr(user, "email", "") or "").strip(),
+        "email": str(getattr(redmine_user, "mail", "") or getattr(redmine_user, "email", "") or "").strip(),
     }
 
 

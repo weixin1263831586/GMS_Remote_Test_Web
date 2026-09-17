@@ -157,17 +157,19 @@ class RedmineClient(RedmineAttachmentMixin):
         limit = max(1, min(int(limit or 10), 50))
 
         def _search():
-            users = self._redmine.user.filter(name=term, limit=limit)
+            # redmine_user 是 Redmine 远端用户资源，与平台 CurrentUser
+            # 无关；避免与 owner 语义的 user.id 混淆。
+            remote_users = self._redmine.user.filter(name=term, limit=limit)
             return [
                 {
-                    "id": int(user.id),
-                    "login": str(getattr(user, "login", "") or ""),
-                    "firstname": str(getattr(user, "firstname", "") or ""),
-                    "lastname": str(getattr(user, "lastname", "") or ""),
-                    "mail": str(getattr(user, "mail", "") or ""),
-                    "name": f"{getattr(user, 'firstname', '')} {getattr(user, 'lastname', '')}".strip(),
+                    "id": int(redmine_user.id),
+                    "login": str(getattr(redmine_user, "login", "") or ""),
+                    "firstname": str(getattr(redmine_user, "firstname", "") or ""),
+                    "lastname": str(getattr(redmine_user, "lastname", "") or ""),
+                    "mail": str(getattr(redmine_user, "mail", "") or ""),
+                    "name": f"{getattr(redmine_user, 'firstname', '')} {getattr(redmine_user, 'lastname', '')}".strip(),
                 }
-                for user in users
+                for redmine_user in remote_users
             ]
 
         return await asyncio.to_thread(_search)

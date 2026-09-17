@@ -1,3 +1,4 @@
+import json
 import tempfile
 import threading
 import unittest
@@ -72,6 +73,63 @@ class DeviceGroupPersistenceTests(unittest.TestCase):
         path.write_text('{"groups": {"not": "a list"}}', encoding='utf-8')
 
         self.assertEqual(device_groups.load_device_groups('alice'), [])
+
+    def test_legacy_agent_key_groups_migrate_to_account_key(self):
+        """ADR 0010 切换后，agent 合成 actor id 落盘的旧分组应惰性迁入账号 key。"""
+        from unittest.mock import patch
+
+        legacy_groups = [
+            {
+                'id': 'lab',
+                'name': 'Lab',
+                'color': '#000000',
+                'device_ids': ['SERIAL1'],
+                'followed': False,
+            }
+        ]
+        token_id = 'agt_legacy01'
+        legacy_dir = (
+            Path(self.runtime_dir.name)
+            / 'user_prefs'
+            / device_groups._owner_storage_key(f'agent:{token_id}')
+        )
+        legacy_dir.mkdir(parents=True)
+        (legacy_dir / 'device_groups.json').write_text(
+            json.dumps({'groups': legacy_groups}, ensure_ascii=False),
+            encoding='utf-8',
+        )
+
+        account_path = device_groups._device_groups_path('account-1')
+        self.assertFalse(account_path.is_file())
+
+        with patch.object(
+            device_groups, '_agent_token_ids_for_owner', return_value=[token_id]
+        ):
+            self.assertEqual(
+                device_groups.load_device_groups('account-1'), legacy_groups
+            )
+
+        # 迁移是复制而非移动：目标 key 就位后不再读旧目录（幂等），旧文件
+        # 保持原样以便回滚；随后保存只写账号 key。
+        self.assertTrue(account_path.is_file())
+        self.assertTrue((legacy_dir / 'device_groups.json').is_file())
+        updated = [dict(legacy_groups[0], device_ids=['SERIAL2'])]
+        self.assertTrue(device_groups.save_device_groups('account-1', updated))
+        with patch.object(
+            device_groups, '_agent_token_ids_for_owner', return_value=[token_id]
+        ):
+            self.assertEqual(device_groups.load_device_groups('account-1'), updated)
+
+    def test_migration_without_registry_records_stays_empty(self):
+        from unittest.mock import patch
+
+        with patch.object(
+            device_groups, '_agent_token_ids_for_owner', return_value=[]
+        ):
+            self.assertEqual(device_groups.load_device_groups('account-2'), [])
+        self.assertFalse(
+            device_groups._device_groups_path('account-2').is_file()
+        )
 
     def test_concurrent_updates_do_not_lose_groups(self):
         barrier = threading.Barrier(2)

@@ -2,6 +2,7 @@ import sqlite3
 
 from features.auth import (
     authentication_required,
+    principal_actor_id,
     require_authenticated_user,
     require_authenticated_user_when_auth_required,
 )
@@ -713,7 +714,7 @@ async def delete_report(
         if not can_access_report(request, report):
             logger.warning(
                 "[DELETE] Permission denied: %s tried to delete report %s",
-                principal.id,
+                principal_actor_id(request),  # 审计归因记 actor（ADR 0010）
                 timestamp,
             )
             return error_response("Report not found", 404)

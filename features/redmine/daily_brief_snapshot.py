@@ -79,23 +79,25 @@ async def resolve_daily_brief_owner_identity(
 
     client = svc.agent._make_client()
     try:
-        user = await client.get_current_user()
+        redmine_user = await client.get_current_user()
     finally:
         await client.close()
-    if user is None:
+    if redmine_user is None:
         raise DailyBriefIdentityError(
             f"cannot resolve Redmine identity for owner {owner_id!r}: "
             "configure Redmine credentials or the user-map entry first"
         )
-    first = str(getattr(user, "firstname", "") or "").strip()
-    last = str(getattr(user, "lastname", "") or "").strip()
-    login = str(getattr(user, "login", "") or "").strip()
-    mail = str(getattr(user, "mail", "") or getattr(user, "email", "") or "").strip()
+    # redmine_user 是 Redmine 远端用户资源，与平台 CurrentUser 无关；
+    # 其 .id 不能用于资源 owner 分区（owner 一律来自 owner_id 参数）。
+    first = str(getattr(redmine_user, "firstname", "") or "").strip()
+    last = str(getattr(redmine_user, "lastname", "") or "").strip()
+    login = str(getattr(redmine_user, "login", "") or "").strip()
+    mail = str(getattr(redmine_user, "mail", "") or getattr(redmine_user, "email", "") or "").strip()
     names = list(dict.fromkeys(name for name in (
         f"{last} {first}".strip(), f"{first} {last}".strip(), mail, login,
     ) if name))
     try:
-        user_id = int(user.id)
+        user_id = int(redmine_user.id)
     except (TypeError, ValueError):
         user_id = None
     return {"user_id": user_id, "names": names}

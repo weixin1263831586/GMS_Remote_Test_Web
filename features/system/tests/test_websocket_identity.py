@@ -11,7 +11,12 @@ class WebSocketIdentityTests(unittest.TestCase):
             headers={},
             client=SimpleNamespace(host="172.16.14.66"),
         )
-        user = SimpleNamespace(id="opaque-user-id", username="hcq")
+        user = SimpleNamespace(
+            id="opaque-user-id",
+            # 对齐 CurrentUser：actor_id 是 .id 的显式别名（ADR 0010）。
+            actor_id="opaque-user-id",
+            username="hcq",
+        )
 
         client_id, display_id, username = websocket_security.get_websocket_client_identity(
             websocket,
@@ -29,7 +34,12 @@ class WebSocketIdentityTests(unittest.TestCase):
             headers={},
             client=SimpleNamespace(host="172.16.14.66"),
         )
-        user = SimpleNamespace(id="opaque-user-id", username="hcq")
+        user = SimpleNamespace(
+            id="opaque-user-id",
+            # 对齐 CurrentUser：actor_id 是 .id 的显式别名（ADR 0010）。
+            actor_id="opaque-user-id",
+            username="hcq",
+        )
 
         client_id, _display_id, _username = websocket_security.get_websocket_client_identity(
             websocket,
