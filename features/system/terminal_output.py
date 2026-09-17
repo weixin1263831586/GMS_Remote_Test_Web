@@ -55,6 +55,7 @@ def start_terminal_output_pump(
         decoder = codecs.getincrementaldecoder("utf-8")(errors=encoding_errors)
         next_maintenance = time.monotonic() + maintenance_interval
         ended_by_backend = False
+        first_payload_logged = False
 
         def send_payload(data: str) -> None:
             if not data:
@@ -73,13 +74,26 @@ def start_terminal_output_pump(
                 with global_state.terminal_lock:
                     session = global_state.terminal_ssh_sessions.get(session_id)
                 if not session:
+                    # 会话被外部清理（正常关闭/接管）。仅在外部还保留着
+                    # 会话行时才可能走到 notify 分支，这里只留诊断痕迹。
+                    logger.info(
+                        "[TERMINAL] Output pump exit %s: session gone", session_id
+                    )
                     break
                 if validate_session and not validate_session(session):
                     ended_by_backend = True
+                    logger.warning(
+                        "[TERMINAL] Output pump exit %s: device claim revoked",
+                        session_id,
+                    )
                     break
                 if maintain_session and time.monotonic() >= next_maintenance:
                     if not maintain_session(session):
                         ended_by_backend = True
+                        logger.warning(
+                            "[TERMINAL] Output pump exit %s: claim renew failed",
+                            session_id,
+                        )
                         break
                     next_maintenance = time.monotonic() + maintenance_interval
 
@@ -88,15 +102,32 @@ def start_terminal_output_pump(
                     # PTY reads may split a UTF-8 code point across batches.
                     # Preserve decoder state instead of replacing/dropping the
                     # character at each arbitrary read boundary.
-                    send_payload(decoder.decode(payload, final=False))
+                    decoded = decoder.decode(payload, final=False)
+                    if not first_payload_logged:
+                        first_payload_logged = True
+                        # ADB 会话排障关键证据：设备/宿主在服务环境里到底回显
+                        # 了什么（浏览器侧的启动判定完全依赖这段字节）。
+                        if session.get("mode") in {"adb", "local_adb"}:
+                            logger.info(
+                                "[TERMINAL] First ADB payload %s: %r",
+                                session_id,
+                                decoded[:240],
+                            )
+                    send_payload(decoded)
                 if eof:
                     send_payload(decoder.decode(b"", final=True))
                     ended_by_backend = True
+                    logger.info(
+                        "[TERMINAL] Output pump exit %s: channel EOF", session_id
+                    )
                     break
                 if not payload:
                     time.sleep(TERMINAL_IDLE_SECONDS)
         except (OSError, TimeoutError, WebSocketDisconnect, ConnectionError, KeyError):
             ended_by_backend = True
+            logger.info(
+                "[TERMINAL] Output pump exit %s: transport error", session_id
+            )
         except Exception as exc:
             ended_by_backend = True
             logger.error("[TERMINAL] Output pump failed for %s: %s", session_id, exc)

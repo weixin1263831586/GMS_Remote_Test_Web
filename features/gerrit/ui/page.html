@@ -10,20 +10,21 @@
     * { box-sizing:border-box; }
     body { margin:0; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
     html { scrollbar-gutter:stable; overflow-y:scroll; scroll-padding-top:86px; }
-    header { position:sticky; top:0; z-index:1000; display:grid; grid-template-columns:max-content minmax(0, 1fr) max-content; align-items:center; column-gap:16px; padding:8px 16px; border-bottom:1px solid var(--border); background:var(--panel); box-shadow:0 8px 18px rgba(0,0,0,.22); }
+    header { position:sticky; top:0; z-index:1000; min-height:44px; display:flex; align-items:center; gap:16px; padding:0 16px; border-bottom:0; background:var(--panel); box-shadow:0 8px 18px rgba(0,0,0,.22); }
     .header-title { font-size:18px; font-weight:700; white-space:nowrap; margin:0; }
     select,input { height:30px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:0 8px; font-size:13px; }
     input { min-width:260px; }
     button { height:30px; border:0; border-radius:6px; padding:0 10px; color:white; background:var(--primary); font-weight:650; cursor:pointer; font-size:13px; }
     button.secondary { background:#30394a; }
     main { padding:0; }
-    .tabs { display:flex; gap:0; }
+    .tabs { display:flex; align-self:stretch; gap:0; }
     /* 页签是原生 <button role="tab">（a11y 契约）：重置按钮外观，保留底部指示条。 */
-    .tab { padding:8px 16px; cursor:pointer; font:inherit; font-size:13px; font-weight:600; color:var(--muted); background:none; border:none; border-bottom:2px solid transparent; transition:all .15s; }
+    .tab { position:relative; flex:0 0 112px; width:112px; height:44px; padding:0 14px; cursor:pointer; font:inherit; font-size:13px; font-weight:600; color:var(--muted); background:none; border:none; border-radius:0; transition:all .15s; white-space:nowrap; }
     .tab:hover { color:var(--text); }
-    .tab:focus-visible { outline:2px solid var(--primary); outline-offset:-2px; }
-    .tab.active { color:var(--primary); border-bottom-color:var(--primary); }
-    .btn-group { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+    .tab:focus-visible { outline:0; background:rgb(59 130 246 / 12%); }
+    .tab.active { color:var(--primary); }
+    .tab.active::after { content:''; position:absolute; right:0; bottom:-1px; left:0; height:2px; background:var(--primary); }
+    .btn-group { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; margin-left:auto; }
     .toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
     .select-with-add { position:relative; display:inline-flex; align-items:center; }
     .select-with-add select { padding-right:28px; min-width:180px; }

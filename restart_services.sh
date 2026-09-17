@@ -65,7 +65,9 @@ systemctl_admin() {
 restart_local_vnc() {
     # x11vnc/websockify are application-managed processes rather than systemd
     # units.  Reuse the canonical VNC manager so this script cannot drift from
-    # the Web UI's display, keyboard, and loopback-binding settings.
+    # the Web UI's display, keyboard, and loopback-binding settings.  The Web
+    # service starts VNC during its own startup; force-killing here races with
+    # that lifecycle hook and can leave only websockify running.
     if [[ ! -f "${PROJECT_DIR}/features/system/vnc.py" ]]; then
         echo -e "${YELLOW}  ℹ VNC 运行时未随当前部署提供，跳过本地 VNC 重启${NC}"
         return 0
@@ -82,7 +84,7 @@ restart_local_vnc() {
 import sys
 from features.system.vnc import vnc_manager
 
-result = vnc_manager._start_local_vnc(force_restart=True)
+result = vnc_manager._start_local_vnc(force_restart=False)
 message = result.get("message") if result.get("success") else result.get("error")
 print(message or "VNC restart returned no status")
 raise SystemExit(0 if result.get("success") else 1)
@@ -273,10 +275,10 @@ else
     exit 1
 fi
 
-# 5. Web 已恢复后再重启本机 VNC/noVNC，避免旧进程继续使用过期参数。
-echo -e "${YELLOW}[5/6] 重启本机 VNC（x11vnc / websockify）...${NC}"
-restart_local_vnc || fail_service_action "无法重启本机 VNC（x11vnc / websockify）"
-echo -e "${GREEN}  ✓ 本机 VNC（x11vnc / websockify）已重启${NC}"
+# 5. Web 启动钩子已经拉起 VNC；这里只确认状态或补启动，避免并发强制重启。
+echo -e "${YELLOW}[5/6] 确认本机 VNC（x11vnc / websockify）...${NC}"
+restart_local_vnc || fail_service_action "无法确认本机 VNC（x11vnc / websockify）"
+echo -e "${GREEN}  ✓ 本机 VNC（x11vnc / websockify）已就绪${NC}"
 
 # 6. 重启本地 Worker Agent
 echo -e "${YELLOW}[6/6] 重启本地 Worker Agent...${NC}"

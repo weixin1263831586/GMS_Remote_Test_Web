@@ -575,11 +575,18 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
                 };
                 document.getElementById('dailyBriefCard').innerHTML = renderDailyBriefInner(dailyBriefCache);
             }""")
-            for width in (360, 390, 768):
+            for width in (360, 390, 768, 1440):
                 page.set_viewport_size({"width": width, "height": 800})
                 page.locator('#dailyBriefCard [data-click="showDailyBriefIssue"]').click()
                 modal = page.locator('[id^="dailyBriefIssueModal-"].show')
                 expect(modal).to_be_visible()
+                if width >= 1000:
+                    header_bottom = page.locator('body > header').bounding_box()['y'] + page.locator('body > header').bounding_box()['height']
+                    reader_box = modal.locator('.daily-brief-modal').bounding_box()
+                    self.assertAlmostEqual(reader_box['x'], 16, delta=1)
+                    self.assertAlmostEqual(reader_box['y'], header_bottom, delta=1)
+                    self.assertAlmostEqual(reader_box['width'], width - 32, delta=1)
+                    self.assertAlmostEqual(reader_box['height'], 800 - header_bottom - 16, delta=1)
                 self.assertEqual(modal.locator('.daily-brief-section-md summary').count(), 0)
                 self.assertEqual(modal.locator('[data-daily-brief-save-case]').count(), 0)
                 self.assertNotIn('结构化明细', modal.inner_text())

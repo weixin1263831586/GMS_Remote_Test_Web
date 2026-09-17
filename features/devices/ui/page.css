@@ -61,14 +61,16 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue);box-shadow:0 0 
 
 /* iframe 内采用单层工作区：Tab 切换列表/控制台，控制台自身填满可视高度。 */
 html,body{height:100%;min-height:0;overflow:hidden}
-.page-shell{height:100%;min-height:0;max-width:none;margin:0;padding:4px 6px;gap:6px}
-.toolbar{min-height:46px;padding:4px 6px;border-bottom:1px solid var(--border)}
-.view-tabs{display:flex;align-self:stretch;align-items:stretch;gap:4px}
-.view-tab{border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;color:var(--muted);padding:8px 14px}
+.page-shell{height:100%;min-height:0;max-width:none;margin:0;padding:0;gap:0}
+.toolbar{height:44px;min-height:44px;padding:0 16px;border-bottom:0}
+.view-tabs{display:flex;align-self:stretch;align-items:stretch;gap:0}
+.view-tab{position:relative;width:112px;min-width:112px;height:44px;border:0;border-radius:0;background:transparent;color:var(--muted);padding:0 14px;font-size:13px;font-weight:600;white-space:nowrap}
 .view-tab:hover{border-color:transparent;background:rgba(87,145,255,.08)}
-.view-tab.active{border-bottom-color:var(--blue);background:transparent;color:var(--text)}
+.view-tab:focus-visible{outline:0;background:rgba(87,145,255,.12)}
+.view-tab.active{background:rgba(87,145,255,.12);color:var(--text)}
+.view-tab.active::after{content:"";position:absolute;right:0;bottom:-1px;left:0;height:2px;background:var(--blue)}
 .view-tab:disabled{opacity:.38}
-.view-panel{flex:1;min-height:0;overflow:auto;padding:8px 6px}
+.view-panel{flex:1;min-height:0;overflow:auto;padding:12px 16px}
 .section-heading{margin-bottom:8px}
 .console-panel{display:flex;min-height:0;flex-direction:column;overflow:hidden}
 .console-layout{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:8px;flex:1;min-height:0}
@@ -79,4 +81,4 @@ html,body{height:100%;min-height:0;overflow:hidden}
 .history-column{min-height:0;gap:7px;padding:8px;border:0;border-left:1px solid var(--border);border-radius:0;background:#151b23}
 .history-output{height:auto;min-height:120px;flex:1;padding:8px}.history-actions{margin-top:0}
 @media(max-width:850px){html,body{overflow:auto}.page-shell{height:auto;min-height:100%}.console-layout{grid-template-columns:1fr}.history-column{border-left:0;border-top:1px solid var(--border)}.history-output{height:220px;flex:none}.terminal{height:55vh}.input-dock{position:sticky;bottom:0;padding-bottom:4px}}
-@media(max-width:600px){.page-shell{padding:3px}.toolbar{gap:6px}.view-tab{padding:8px}.toolbar-actions{flex-direction:column;align-items:flex-end}}
+@media(max-width:600px){.toolbar{height:auto;min-height:40px;padding:0 10px;gap:6px}.view-tab{min-height:40px;height:40px;padding:0 10px}.view-panel{padding:10px}.toolbar-actions{flex-direction:column;align-items:flex-end}}

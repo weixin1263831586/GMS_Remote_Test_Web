@@ -37,8 +37,8 @@ def test_restart_reports_actual_worker_outcome(tmp_path, layout, service_case):
         """
 class _VNCManager:
     def _start_local_vnc(self, *, force_restart):
-        assert force_restart is True
-        return {"success": True, "message": "VNC fixture restarted"}
+        assert force_restart is False
+        return {"success": True, "message": "VNC fixture ready"}
 
 
 vnc_manager = _VNCManager()
@@ -125,8 +125,8 @@ fi
         return
     assert result.returncode == 0, result.stderr
     assert "[3/6]" in result.stdout
-    assert "[5/6] 重启本机 VNC" in result.stdout
-    assert "VNC fixture restarted" in result.stdout
+    assert "[5/6] 确认本机 VNC" in result.stdout
+    assert "VNC fixture ready" in result.stdout
     assert "服务管理完成" in result.stdout
     assert "unbound variable" not in result.stderr
     assert "private-fixture" not in result.stdout + result.stderr

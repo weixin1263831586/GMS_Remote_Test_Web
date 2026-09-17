@@ -27,10 +27,10 @@ body {
 }
 .ats-shell {
     height: 100%;
-    padding: 8px 12px;
+    padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 0;
     overflow: hidden;
 }
 .ats-toolbar {
@@ -39,8 +39,9 @@ body {
     flex-direction: column;
     padding: 0 16px;
     background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 8px;
+    border: 0;
+    border-bottom: 0;
+    border-radius: 0;
 }
 .ats-toolbar-main {
     display: flex;
@@ -51,7 +52,7 @@ body {
 .workflow-tabs {
     display: flex;
     align-items: center;
-    gap: 18px;
+    gap: 0;
     min-height: 44px;
     overflow-x: auto;
     scrollbar-width: none;
@@ -123,23 +124,34 @@ button:hover { border-color: var(--primary); color: #fff; }
 button.primary { background: var(--primary); border-color: var(--primary); }
 button.danger { background: rgb(239 68 68 / 18%); border-color: var(--danger); }
 .workflow-tab {
-    flex: 0 0 auto;
-    min-width: 0;
-    padding: 10px 3px 9px;
+    flex: 0 0 112px;
+    height: 44px;
+    width: 112px;
+    min-width: 112px;
+    padding: 0 14px;
     border: 0;
-    border-bottom: 2px solid transparent;
     border-radius: 0;
     background: transparent;
     color: var(--muted);
     text-align: center;
+    font-size: 13px;
     font-weight: 600;
+    position: relative;
 }
-.workflow-tab:hover { border-bottom-color: var(--line-strong); color: var(--text); }
-.workflow-tab:focus-visible { outline: 2px solid var(--primary-hover); outline-offset: 1px; }
+.workflow-tab:hover { color: var(--text); }
+.workflow-tab:focus-visible { outline: 0; background: rgb(79 140 255 / 12%); }
 .workflow-tab.active {
-    background: transparent;
-    border-bottom-color: var(--primary);
+    background: rgb(79 140 255 / 12%);
     color: var(--primary-hover);
+}
+.workflow-tab.active::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: -1px;
+    left: 0;
+    height: 2px;
+    background: var(--primary);
 }
 .workflow-divider {
     flex: 0 0 1px;
@@ -152,6 +164,7 @@ button.danger { background: rgb(239 68 68 / 18%); border-color: var(--danger); }
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
+    margin: 6px 12px;
 }
 .workflow-pane {
     height: 100%;
@@ -979,10 +992,6 @@ body.overlay-open { overflow: hidden; }
 }
 
 @media (max-height: 820px) and (min-width: 981px) {
-    .ats-shell { padding: 8px; gap: 6px; }
-    .ats-toolbar { gap: 7px; padding: 8px 10px; }
-    .workflow-tabs { padding-top: 6px; }
-    .workflow-tab { padding-block: 6px; }
     .panel-header { padding: 8px 10px; }
     .panel-body { padding: 9px; }
     .compact-stack,

@@ -3,7 +3,7 @@
     html { scrollbar-gutter: stable; overflow-y: scroll; overflow-x: hidden; scroll-padding-top:56px; }
     body { min-height:100vh; margin:0; display:flex; flex-direction:column; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
     /* Tabs 与工具栏同一行：Tabs 靠左，搜索/筛选/按钮靠右；窄屏时回退为两行。 */
-    header { position:sticky; top:0; z-index:1000; flex:0 0 auto; display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; gap:14px; padding:6px 16px; border-bottom:1px solid var(--border); background:var(--panel); box-shadow:0 8px 18px rgba(0,0,0,.22); }
+    header { position:sticky; top:0; z-index:1000; min-height:44px; flex:0 0 auto; display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; gap:14px; padding:0 16px; border-bottom:0; background:var(--panel); box-shadow:0 8px 18px rgba(0,0,0,.22); }
     .header-title { font-size:18px; font-weight:700; white-space:nowrap; margin:0; }
     .header-right { display:flex; align-items:center; gap:12px; flex-shrink:0; flex-wrap:wrap; }
     .muted { color:var(--muted); font-size:13px; line-height:1.6; }
@@ -75,13 +75,14 @@
     #settingsModal .modal-title { font-size:16px; }
 
     /* Tabs — inline in header, left side */
-    .tabs { display:flex; gap:0; flex:0 1 auto; min-width:min-content; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; }
+    .tabs { display:flex; align-self:stretch; gap:0; flex:0 1 auto; min-width:min-content; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; }
     /* 页签是原生 <button role="tab">（a11y 契约）：重置按钮外观，
        保留底部指示条；:focus-visible 提供键盘焦点可见性。 */
-    .tab { flex:0 0 auto; padding:8px 10px; cursor:pointer; font:inherit; font-size:13px; font-weight:600; color:var(--muted); background:none; border:none; border-bottom:2px solid transparent; transition:all .15s; white-space:nowrap; }
+    .tab { position:relative; flex:0 0 112px; width:112px; height:44px; padding:0 14px; cursor:pointer; font:inherit; font-size:13px; font-weight:600; color:var(--muted); background:none; border:none; border-radius:0; transition:all .15s; white-space:nowrap; }
     .tab:hover { color:var(--text); }
-    .tab:focus-visible { outline:2px solid var(--primary); outline-offset:-2px; }
-    .tab.active { color:var(--primary); border-bottom-color:var(--primary); }
+    .tab:focus-visible { outline:0; background:rgb(59 130 246 / 12%); }
+    .tab.active { color:var(--primary); }
+    .tab.active::after { content:''; position:absolute; right:0; bottom:-1px; left:0; height:2px; background:var(--primary); }
 
     /* Panels */
     .tab-content { display:none; padding:16px; }
@@ -382,6 +383,11 @@
     .daily-brief-state.failed { color:#fca5a5; }
     .daily-brief-row-actions { display:flex; align-items:center; gap:6px; }
     .daily-brief-modal { width:min(1180px,calc(100vw - 32px)); max-width:none; height:min(860px,calc(100dvh - 32px)); max-height:calc(100dvh - 32px); border-radius:12px; }
+    /* 单号 AI 报告是 Redmine 页内的主阅读面，而非小型确认弹框。它从
+       Tabs 下方开始，填满当前页的剩余空间；顶部高度由打开时的实际
+       header 高度写入，窄屏 Tabs 换行时也不会覆盖导航。 */
+    .daily-brief-analysis-overlay { inset:var(--daily-brief-modal-top,44px) 0 0; align-items:stretch; padding:0 16px 16px; }
+    .daily-brief-analysis-overlay .daily-brief-modal { width:100%; max-width:none; height:100%; max-height:none; border-radius:0 0 12px 12px; }
     .daily-brief-modal.daily-brief-statistics-modal { width:min(1280px,calc(100vw - 32px)); height:auto; max-height:min(800px,calc(100dvh - 32px)); }
     .daily-brief-modal .modal-header { flex:0 0 auto; padding:14px 20px; }
     .daily-brief-modal-title { display:flex; flex-direction:column; min-width:0; align-items:flex-start; gap:2px; line-height:1.35; white-space:normal; }
@@ -430,6 +436,8 @@
         .daily-brief-action .ka-btn { width:100%; }
         .daily-brief-warning { align-items:flex-start; flex-wrap:wrap; }
         .daily-brief-modal { width:calc(100vw - 16px); height:calc(100dvh - 16px); max-height:calc(100dvh - 16px); }
+        .daily-brief-analysis-overlay { padding:0 8px 8px; }
+        .daily-brief-analysis-overlay .daily-brief-modal { width:100%; height:100%; max-height:none; }
         .daily-brief-modal.daily-brief-statistics-modal { width:calc(100vw - 16px); height:auto; max-height:calc(100dvh - 16px); }
         .daily-brief-modal-body { padding:14px 12px 18px; }
         .daily-brief-modal-footer { padding:10px 12px; }
