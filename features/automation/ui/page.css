@@ -37,8 +37,7 @@ body {
     flex: 0 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 12px 16px 0;
+    padding: 0 16px;
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 8px;
@@ -53,15 +52,12 @@ body {
     display: flex;
     align-items: center;
     gap: 18px;
-    padding-top: 4px;
-    border-top: 1px solid var(--line);
+    min-height: 44px;
     overflow-x: auto;
     scrollbar-width: none;
 }
 .workflow-tabs::-webkit-scrollbar { display: none; }
-.ats-title { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: .01em; }
-.ats-subtitle { color: var(--muted); font-size: 12px; margin-top: 2px; }
-.ats-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-items: center; }
+.ats-actions { display: flex; flex: 0 0 auto; gap: 8px; margin-left: auto; align-items: center; }
 .ats-more-menu { position: relative; }
 .ats-more-btn {
     border: 1px solid var(--line);
@@ -754,18 +750,6 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
     overflow: auto;
     padding: 2px;
 }
-.overview-actions {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 12px 14px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--panel);
-}
-.overview-action-copy { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.overview-action-buttons { display: flex; flex: 0 0 auto; gap: 8px; }
 .pipeline-map {
     display: grid;
     grid-template-columns: repeat(11, auto);
@@ -964,8 +948,8 @@ body.overlay-open { overflow: hidden; }
     .monitor-events-body { min-height: 0; overflow: visible; }
     .run-list { flex: none; min-height: 200px; }
     .events { max-height: none; }
-    .ats-toolbar { align-items: flex-start; flex-direction: column; }
-    .ats-actions { justify-content: flex-start; }
+    .ats-toolbar { align-items: flex-start; }
+    .ats-actions { margin-left: 0; }
     .form-row { grid-template-columns: 1fr; }
     .build-panel-header { align-items: flex-start; }
     .build-panel-actions { flex-wrap: wrap; justify-content: flex-end; }
@@ -986,9 +970,6 @@ body.overlay-open { overflow: hidden; }
     .event-line-message { grid-column: 1 / -1; }
     .log-view { height: 60vh; min-height: 360px; }
     .overview-breakdowns { grid-template-columns: 1fr; }
-    .overview-actions { align-items: flex-start; flex-direction: column; }
-    .overview-action-copy { flex-wrap: wrap; }
-    .overview-action-buttons { flex-wrap: wrap; }
     .workflow-divider { display: none; }
     .event { grid-template-columns: 1fr; gap: 6px; }
     .report-card { grid-template-columns: 1fr; }

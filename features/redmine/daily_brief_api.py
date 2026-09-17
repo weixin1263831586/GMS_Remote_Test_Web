@@ -92,10 +92,18 @@ async def analyze_single_issue(request: Request, payload: SingleIssueAnalysisReq
         subject = str((metadata.get("data") or {}).get("issue", {}).get("subject") or "").strip()
     except Exception:
         logger.info("single issue %s metadata refresh unavailable", payload.issue_id, exc_info=True)
-    return {"success": True, "data": _service_for_request(request).start_issue_analysis(
+    result = _service_for_request(request).start_issue_analysis(
         payload.issue_id, analysis_mode=payload.analysis_mode, device_serial=device_serial,
         analysis_hint=payload.analysis_hint.strip(), subject=subject,
-    )}
+    )
+    if result.get("error"):
+        # 资格/排队失败必须走统一错误信封：把 error 包进 success 信封
+        # 会让调用方按正常成功路径渲染（错误码表唯一真源，见
+        # foundation.error_model）。
+        if str(result.get("code") or "") == "ADMIN_OWNER_FORBIDDEN":
+            return ApiError.forbidden(str(result["error"])).to_response()
+        return ApiError.malformed_request(str(result["error"])).to_response()
+    return {"success": True, "data": result}
 
 
 @router.get("/daily-brief/issue-analyses")
@@ -148,7 +156,7 @@ async def get_daily_triage(
         )
     except Exception as exc:
         logger.error("daily triage failed: %s", exc)
-        return JSONResponse(content={"success": False, "error": str(exc)}, status_code=500)
+        return ApiError.internal(f"每日待办构建失败: {exc}").to_response()
     return {"success": True, "data": snapshot}
 
 

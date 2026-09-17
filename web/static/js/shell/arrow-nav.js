@@ -1,14 +1,13 @@
 // Shell 模块：方向键导航（从 shell.html 内联脚本尾部提取）。
 // ==================== 方向键导航支持 ====================
-document.addEventListener('keydown', function(e) {
-    // 只处理方向键
-    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+function navigateSidebarByArrow(key, target = document.activeElement) {
+    if (key !== 'ArrowUp' && key !== 'ArrowDown') return false;
+    target = target || document.body;
 
     // 在输入框、文本域等元素中不拦截
-    const target = e.target;
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' ||
         target.tagName === 'SELECT' || target.isContentEditable) {
-        return;
+        return false;
     }
 
     // 在终端页面，检查终端是否获得焦点
@@ -16,7 +15,7 @@ document.addEventListener('keydown', function(e) {
         const terminalElement = document.getElementById('terminal');
         // 如果点击的是终端区域或者终端内有焦点，则不拦截方向键
         if (terminalElement && (target === terminalElement || terminalElement.contains(target))) {
-            return;
+            return false;
         }
     }
 
@@ -31,10 +30,10 @@ document.addEventListener('keydown', function(e) {
     const pages = navItems.map(item => item.dataset.page);
     const currentIndex = pages.indexOf(currentPage);
 
-    if (currentIndex === -1 || pages.length === 0) return;
+    if (currentIndex === -1 || pages.length === 0) return false;
 
     let newIndex;
-    if (e.key === 'ArrowUp') {
+    if (key === 'ArrowUp') {
         // 向上：前一个可见页面
         newIndex = (currentIndex - 1 + pages.length) % pages.length;
     } else {
@@ -45,7 +44,30 @@ document.addEventListener('keydown', function(e) {
     // 切换页面
     const targetPage = pages[newIndex];
     switchPage(targetPage, null);
-    e.preventDefault();
+    // 切换后必须由 Shell 重新声明焦点归属：Tab iframe 进入当前 Tab，
+    // 普通页面留在外层容器。否则焦点会残留在刚被隐藏的 iframe，后续
+    // 上下键只能落入旧页面而无法继续导航。
+    window.focusSidebarNavigationTarget?.(targetPage);
+    return true;
+}
+window.navigateSidebarByArrow = navigateSidebarByArrow;
+
+// iframe 内的键盘事件不能冒泡到此 document。仅接收来自当前活动页面
+// iframe 的同源转发，避免隐藏页面或其他嵌入内容改变侧栏导航。
+window.addEventListener('message', function(event) {
+    if (event.origin !== window.location.origin
+            || event.data?.type !== 'embedded-sidebar-arrow') return;
+    const activeFrame = document.getElementById(`page-${currentPage}`)?.querySelector('iframe');
+    if (activeFrame?.contentWindow !== event.source) return;
+    navigateSidebarByArrow(event.data.key);
+});
+
+document.addEventListener('keydown', function(e) {
+    // 只处理方向键
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    if (navigateSidebarByArrow(e.key, e.target)) {
+        e.preventDefault();
+    }
 });
 
 function updateCategorySelect() {

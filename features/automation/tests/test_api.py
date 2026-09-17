@@ -418,10 +418,8 @@ class AutomationApiTests(unittest.TestCase):
     def test_automation_page_exposes_workflow_controls(self):
         response = asyncio.run(automation_api.automation_page())
         html = response.body.decode('utf-8')
-        self.assertIn(
-            '配置 → 预检 → 固件编译 → 安全烧写 → GMS 测试 → 报告分析',
-            html,
-        )
+        self.assertIn('role="tablist" aria-label="GMS ATS workflow"', html)
+        self.assertIn('data-workflow="create"', html)
         self.assertIn('id="automation-preflight-run"', html)
         self.assertIn('id="automation-flash-mode"', html)
         self.assertIn('id="automation-create-run"', html)

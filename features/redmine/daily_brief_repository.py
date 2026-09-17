@@ -324,18 +324,25 @@ class DailyBriefRepository:
             return self._row_to_run(row) if row else None
 
     def latest_run(self, owner_id: str, brief_date: str | None = None) -> DailyBriefRun | None:
-        """Latest morning brief; independent issue diagnostics do not replace it."""
+        """Latest morning brief; prefer the full nightly run over its delta.
+
+        A delta is an incremental refresh, not a replacement report.  In
+        particular, a zero-change delta must not hide the day's full nightly
+        brief from the dashboard.
+        """
         with self._connect() as conn:
             if brief_date:
                 row = conn.execute(
                     "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? AND brief_date=? AND mode NOT LIKE 'issue:%' "
-                    "ORDER BY brief_date DESC, started_at DESC, rowid DESC LIMIT 1",
+                    "ORDER BY CASE mode WHEN 'nightly' THEN 0 WHEN 'delta' THEN 1 ELSE 2 END, "
+                    "started_at DESC, rowid DESC LIMIT 1",
                     (owner_id, brief_date),
                 ).fetchone()
             else:
                 row = conn.execute(
                     "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? AND mode NOT LIKE 'issue:%' "
-                    "ORDER BY brief_date DESC, started_at DESC, rowid DESC LIMIT 1",
+                    "ORDER BY brief_date DESC, CASE mode WHEN 'nightly' THEN 0 WHEN 'delta' THEN 1 ELSE 2 END, "
+                    "started_at DESC, rowid DESC LIMIT 1",
                     (owner_id,),
                 ).fetchone()
             return self._row_to_run(row) if row else None

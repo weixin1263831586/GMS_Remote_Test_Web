@@ -1,8 +1,9 @@
 [Unit]
-Description=Refresh GMS Redmine Daily Brief at 08:40 (delta)
+Description=Check due GMS Redmine Daily Brief delta schedules every minute
 
 [Timer]
-OnCalendar=*-*-* 08:40:00
+# Each owner's delta_enabled/delta_trigger_time is checked by the CLI.
+OnCalendar=*-*-* *:*:00
 Persistent=true
 Unit=gms-redmine-daily-brief-delta.service
 

@@ -125,6 +125,8 @@
         $('console-tab').classList.toggle('active', !isPorts);
         $('ports-tab').setAttribute('aria-selected', String(isPorts));
         $('console-tab').setAttribute('aria-selected', String(!isPorts));
+        $('ports-tab').tabIndex = isPorts ? 0 : -1;
+        $('console-tab').tabIndex = isPorts ? -1 : 0;
         if (!isPorts) {
             requestAnimationFrame(() => {
                 state.fitAddon?.fit();
@@ -435,6 +437,18 @@
     function bindEvents() {
         $('ports-tab').addEventListener('click', () => switchView('ports'));
         $('console-tab').addEventListener('click', () => switchView('console'));
+        $('console-view-tabs').addEventListener('keydown', event => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            const tabs = [$('ports-tab'), $('console-tab')].filter(tab => !tab.disabled);
+            const index = tabs.indexOf(document.activeElement);
+            if (index === -1 || !tabs.length) return;
+            const nextIndex = event.key === 'Home' ? 0
+                : event.key === 'End' ? tabs.length - 1
+                    : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+            event.preventDefault();
+            tabs[nextIndex].focus();
+            switchView(tabs[nextIndex] === $('ports-tab') ? 'ports' : 'console');
+        });
         $('refresh-ports').addEventListener('click', () => loadPorts());
         $('binding-form').addEventListener('submit', saveBinding);
         $('close-binding').addEventListener('click', closeBinding);

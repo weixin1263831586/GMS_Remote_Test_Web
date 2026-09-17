@@ -65,15 +65,13 @@ def test_device_serial_normalized_and_env_sets_toolsets():
     assert env["GMS_MCP_TOOLSETS"] == "evidence,device_evidence"
     # 无 serial 时保持 evidence-only
     assert "GMS_MCP_TOOLSETS" not in analyzer_env_extra("kk")
+    # 不存在 thinking-effort 覆盖通道：env 里绝不出现假配置键
+    #（kkagent 0.4.x 只认 config.toml 的 [thinking].effort /
+    # models.<name>.default_effort，无任何按次 env/CLI 覆盖）。
+    assert "KKAGENT_THINKING_EFFORT" not in analyzer_env_extra("kk")
     # 非法 serial（注入字符）被拒绝
     assert normalize_daily_brief_config({"device_serial": "a; rm -rf"})["device_serial"] == ""
     assert normalize_daily_brief_config({"device_serial": ""})["device_serial"] == ""
-
-
-def test_glm_flash_uses_a_process_local_compatible_thinking_effort():
-    env = analyzer_env_extra("kk", model="glm-5.3-flash")
-    assert env["KKAGENT_THINKING_EFFORT"] == "xhigh"
-    assert "KKAGENT_THINKING_EFFORT" not in analyzer_env_extra("kk", model="other")
 
 
 def test_legacy_budgets_do_not_limit_analysis():
@@ -93,3 +91,17 @@ def test_trigger_time_defaults_to_midnight_and_rejects_invalid_values():
     assert normalize_daily_brief_config({"trigger_time": "08:30"})["trigger_time"] == "08:30"
     assert normalize_daily_brief_config({"trigger_time": "24:00"})["trigger_time"] == "00:00"
     assert normalize_daily_brief_config({"trigger_time": "8:30"})["trigger_time"] == "00:00"
+
+
+def test_delta_schedule_defaults_and_normalization():
+    assert normalize_daily_brief_config({})["delta_enabled"] is True
+    assert normalize_daily_brief_config({})["delta_trigger_time"] == "06:00"
+    assert normalize_daily_brief_config({
+        "delta_enabled": False, "delta_trigger_time": "09:15",
+    })["delta_enabled"] is False
+    assert normalize_daily_brief_config({
+        "delta_enabled": False, "delta_trigger_time": "09:15",
+    })["delta_trigger_time"] == "09:15"
+    assert normalize_daily_brief_config({"delta_trigger_time": "9:15"})[
+        "delta_trigger_time"
+    ] == "06:00"

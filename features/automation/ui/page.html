@@ -11,11 +11,15 @@
 <body data-automation-ready="false">
     <main class="ats-shell">
 <section class="ats-toolbar">
-    <div class="ats-toolbar-main">
-        <div>
-            <h1 class="ats-title">GMS ATS</h1>
-            <div class="ats-subtitle">配置 → 预检 → 固件编译 → 安全烧写 → GMS 测试 → 报告分析</div>
-        </div>
+    <div class="workflow-tabs" role="tablist" aria-label="GMS ATS workflow">
+        <button type="button" role="tab" aria-selected="true" class="workflow-tab active" data-workflow="overview" data-click="switchWorkflowPane" data-a0="overview">概览</button>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="create" data-click="switchWorkflowPane" data-a0="create">创建运行</button>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="runs" data-click="switchWorkflowPane" data-a0="runs">运行监控</button>
+        <span class="workflow-divider" aria-hidden="true"></span>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="build" data-click="switchWorkflowPane" data-a0="build">构建日志</button>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="events" data-click="switchWorkflowPane" data-a0="events">事件诊断</button>
+        <span class="workflow-divider" aria-hidden="true"></span>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="reports" data-click="switchWorkflowPane" data-a0="reports">测试报告</button>
         <div class="ats-actions">
             <span id="worker-indicator" class="worker-dot down" title="Worker 状态">Worker</span>
             <button type="button" data-click="loadAll">刷新</button>
@@ -27,16 +31,6 @@
                 </div>
             </details>
         </div>
-    </div>
-    <div class="workflow-tabs" role="tablist" aria-label="GMS ATS workflow">
-        <button type="button" role="tab" aria-selected="true" class="workflow-tab active" data-workflow="overview" data-click="switchWorkflowPane" data-a0="overview">概览</button>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="create" data-click="switchWorkflowPane" data-a0="create">创建运行</button>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="runs" data-click="switchWorkflowPane" data-a0="runs">运行监控</button>
-        <span class="workflow-divider" aria-hidden="true"></span>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="build" data-click="switchWorkflowPane" data-a0="build">构建日志</button>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="events" data-click="switchWorkflowPane" data-a0="events">事件诊断</button>
-        <span class="workflow-divider" aria-hidden="true"></span>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="reports" data-click="switchWorkflowPane" data-a0="reports">测试报告</button>
         <div id="automation-toast" class="toast" role="status" aria-live="polite"></div>
     </div>
 </section>
@@ -44,17 +38,6 @@
 <section class="workflow-surface">
     <section id="workflow-pane-overview" class="workflow-pane active" aria-hidden="false">
         <div class="overview-layout">
-            <div class="overview-actions">
-                <div class="overview-action-copy">
-                    <strong>ATS 工作台</strong>
-                    <span class="muted">从创建运行开始，在监控页跟踪进度，异常时进入构建日志或事件诊断。</span>
-                </div>
-                <div class="overview-action-buttons">
-                    <button type="button" class="primary" data-click="switchWorkflowPane" data-a0="create">创建运行</button>
-                    <button type="button" data-click="switchWorkflowPane" data-a0="runs">查看监控</button>
-                    <button type="button" data-click="switchWorkflowPane" data-a0="reports">查看报告</button>
-                </div>
-            </div>
             <div class="pipeline-map" aria-label="GMS ATS 一条龙流程">
                 <div><span>01</span><strong>运行配置</strong><small>Profile / Gerrit</small></div>
                 <i>→</i>
@@ -418,7 +401,7 @@
 
     <script src="/static/js/utils.js?v=20260826-escape-html"></script>
     <script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script>
-    <script src="/static/js/embedded-workspace.js?v=20260813-frame-visibility"></script>
+    <script src="/static/js/embedded-workspace.js?v=20260917-arrow-forward-v2"></script>
     <script src="/automation/page.js"></script>
 </body>
 </html>

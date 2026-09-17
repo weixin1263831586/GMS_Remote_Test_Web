@@ -723,6 +723,7 @@ function selectClusterDashboardTab(tab,{persist=true}={}){
   const active=button.dataset.dashTab===target;
   button.classList.toggle('active',active);
   button.setAttribute('aria-selected',active?'true':'false');
+  button.tabIndex=active?0:-1;
  });
  document.getElementById('tab-dashboard').hidden=target!=='dashboard';
  document.getElementById('tab-management').hidden=target!=='management';
@@ -736,6 +737,18 @@ function selectClusterDashboardTab(tab,{persist=true}={}){
  return target;
 }
 document.querySelectorAll('.dash-tab').forEach(button=>button.addEventListener('click',()=>selectClusterDashboardTab(button.dataset.dashTab)));
+// 页签获得焦点后，遵循 WAI-ARIA Tabs 键盘模式：左右循环，Home/End 跳至首尾。
+document.querySelector('.dash-tabs')?.addEventListener('keydown',event=>{
+ const keys=['ArrowLeft','ArrowRight','Home','End'];
+ if(!keys.includes(event.key))return;
+ const tabs=Array.from(document.querySelectorAll('.dash-tab')).filter(button=>!button.disabled&&button.offsetParent!==null);
+ const index=tabs.indexOf(document.activeElement);
+ if(index===-1||!tabs.length)return;
+ const nextIndex=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
+ event.preventDefault();
+ tabs[nextIndex].focus();
+ selectClusterDashboardTab(tabs[nextIndex].dataset.dashTab);
+});
 let initialClusterDashboardTab=new URLSearchParams(window.location.search).get('tab')||'';
 if(!CLUSTER_DASHBOARD_TABS.has(initialClusterDashboardTab)){
  try{initialClusterDashboardTab=window.sessionStorage.getItem(CLUSTER_DASHBOARD_TAB_STORAGE_KEY)||''}catch(_error){}

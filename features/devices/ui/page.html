@@ -10,9 +10,9 @@
 <body>
 <main class="page-shell">
     <header class="toolbar">
-        <div class="view-tabs" role="tablist" aria-label="设备串口视图">
-            <button id="ports-tab" class="view-tab active" type="button" role="tab" aria-selected="true">本机串口 <span id="ports-count" class="count-badge">0</span></button>
-            <button id="console-tab" class="view-tab" type="button" role="tab" aria-selected="false" disabled>控制台</button>
+        <div id="console-view-tabs" class="view-tabs" role="tablist" aria-label="设备串口视图">
+            <button id="ports-tab" class="view-tab active" type="button" role="tab" aria-selected="true" aria-controls="ports-section">本机串口 <span id="ports-count" class="count-badge">0</span></button>
+            <button id="console-tab" class="view-tab" type="button" role="tab" aria-selected="false" aria-controls="console-section" disabled>控制台</button>
         </div>
         <div class="toolbar-actions">
             <span id="refresh-status" class="muted">准备中</span>
@@ -21,14 +21,14 @@
     </header>
 
     <div id="page-notice" class="notice" hidden></div>
-    <section id="ports-section" class="view-panel">
+    <section id="ports-section" class="view-panel" role="tabpanel">
         <div class="section-heading">
             <div><h2>本机串口</h2><p>支持 /dev/ttyUSB*、/dev/ttyACM*，优先使用 by-id 稳定标识。</p></div>
         </div>
         <div id="ports-list" class="ports-grid"><div class="empty">正在扫描串口…</div></div>
     </section>
 
-    <section id="console-section" class="view-panel console-panel" hidden>
+    <section id="console-section" class="view-panel console-panel" role="tabpanel" hidden>
         <div class="section-heading console-heading">
             <div>
                 <h2 id="console-title">串口控制台</h2>
@@ -89,7 +89,7 @@
     </form>
 </div>
 
-<script src="/static/js/embedded-workspace.js?v=20260813-frame-visibility"></script>
+<script src="/static/js/embedded-workspace.js?v=20260917-arrow-forward-v2"></script>
 <script src="/static/vendor/xterm/xterm.min.js"></script>
 <script src="/static/vendor/xterm/xterm-addon-fit.min.js"></script>
 <script src="/devices-console/page.js"></script>

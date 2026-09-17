@@ -40,14 +40,21 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertEqual(loaded.snapshot_hash, "sha")
 
     def test_find_and_latest_run(self):
-        nightly = make_run(mode="nightly", date="2026-09-13")
-        delta = make_run(mode="delta", date="2026-09-13")
+        nightly = make_run(
+            mode="nightly", date="2026-09-13", started_at="2026-09-13T00:00:00"
+        )
+        delta = make_run(
+            mode="delta", date="2026-09-13", started_at="2026-09-13T06:00:00"
+        )
         older = make_run(mode="nightly", date="2026-09-12")
         for run in (older, nightly, delta):
             self.repo.create_run(run)
         self.assertEqual(self.repo.find_run("u1", "2026-09-13", "delta").run_id, delta.run_id)
         latest = self.repo.latest_run("u1")
-        self.assertIn(latest.run_id, {nightly.run_id, delta.run_id})
+        self.assertEqual(latest.run_id, nightly.run_id)
+        # A same-day delta is incremental data, so it must not replace the
+        # full nightly report even when it starts later.
+        self.assertEqual(self.repo.latest_run("u1", "2026-09-13").run_id, nightly.run_id)
         self.assertEqual(self.repo.latest_run("u1", "2026-09-12").run_id, older.run_id)
         self.assertIsNone(self.repo.latest_run("other-owner"))
 

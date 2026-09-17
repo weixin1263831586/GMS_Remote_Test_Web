@@ -299,6 +299,24 @@ class DailyBriefApiTests(unittest.TestCase):
         self.assertEqual(self.client.get(url).status_code, 200)
         self.assertEqual(self.client.get(url, headers={'x-test-owner': 'owner-b'}).status_code, 404)
 
+    def test_single_issue_owner_ineligibility_uses_api_error_envelope(self):
+        """资格错误必须走统一错误信封（HTTP 403），不得包进 success 响应。"""
+        from unittest.mock import patch
+
+        with patch(
+            "features.redmine.daily_brief_run_starter.is_daily_brief_owner_eligible",
+            return_value=False,
+        ):
+            response = self.client.post(
+                '/api/redmine-agent/daily-brief/analyze-issue',
+                json={'issue_id': 647338},
+            )
+        self.assertEqual(response.status_code, 403)
+        body = response.json()
+        self.assertFalse(body['success'])
+        self.assertEqual(body['code'], 'FORBIDDEN')
+        self.assertIn('error', body)
+
     def test_active_single_issue_is_available_after_page_reload(self):
         queued = self.client.post(
             '/api/redmine-agent/daily-brief/analyze-issue',
@@ -440,13 +458,18 @@ class DailyBriefApiTests(unittest.TestCase):
     def test_config_get_put_roundtrip(self):
         resp = self.client.put(
             "/api/redmine-agent/daily-brief/config",
-            json={"model": "glm-4", "trigger_time": "08:30", "max_parallel_issues": 3},
+            json={
+                "model": "glm-4", "trigger_time": "08:30", "max_parallel_issues": 3,
+                "delta_enabled": False, "delta_trigger_time": "09:15",
+            },
         )
         self.assertEqual(resp.status_code, 200)
         got = self.client.get("/api/redmine-agent/daily-brief/config").json()["data"]
         self.assertEqual(got["model"], "glm-4")
         self.assertEqual(got["trigger_time"], "08:30")
         self.assertEqual(got["max_parallel_issues"], 3)
+        self.assertFalse(got["delta_enabled"])
+        self.assertEqual(got["delta_trigger_time"], "09:15")
 
     def test_config_rejects_unknown_keys(self):
         resp = self.client.put(

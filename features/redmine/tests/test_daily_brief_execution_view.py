@@ -109,6 +109,23 @@ class RunPayloadExecutionViewTests(unittest.TestCase):
             payload["ai_execution"]["device_evidence_status"], "service_unavailable"
         )
 
+    def test_pending_device_trace_on_failed_run_is_not_presented_as_collecting(self):
+        from features.redmine.daily_brief_execution_view import issue_payload
+        from features.redmine.daily_brief_models import DailyBriefIssue
+
+        payload = issue_payload(DailyBriefIssue(
+            run_id="db", issue_id=1, buckets=[]
+        ), {
+            "final_ok": False,
+            "failure_stage": "kkagent_error",
+            "tools": [{
+                "tool_name": "gms_rt_devices_snapshot", "status": "pending",
+            }],
+        })
+        self.assertEqual(
+            payload["ai_execution"]["device_evidence_status"], "unavailable"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

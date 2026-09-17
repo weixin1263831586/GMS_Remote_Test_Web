@@ -271,9 +271,27 @@ class KkAgentRedmineAnalyzer:
         try:
             assert process.stdout is not None
             while True:
-                line = await asyncio.wait_for(
-                    process.stdout.readline(), timeout=self.timeout_seconds or None
-                )
+                try:
+                    line = await asyncio.wait_for(
+                        process.stdout.readline(), timeout=self.timeout_seconds or None
+                    )
+                except ValueError:
+                    # 单行超过 STREAM_LINE_LIMIT_BYTES 时 StreamReader.readline
+                    # 抛 ValueError。此时必须整树终止 kkagent（含 stdio MCP
+                    # 子进程），否则它会带着活跃 LLM 会话继续在后台运行。
+                    logger.warning(
+                        "terminating kkagent pid=%s after an oversized stdout line",
+                        process.pid,
+                    )
+                    await terminate_process_tree(process)
+                    readers.cancel()
+                    await settle_reader_future(readers)
+                    trace.status = trace.error_type = "oversized_output"
+                    trace.error = (
+                        "kkagent emitted a stdout line exceeding "
+                        f"{STREAM_LINE_LIMIT_BYTES} bytes"
+                    )
+                    return trace, raw, False
                 if not line:
                     break
                 raw.feed_stdout(line)
@@ -320,6 +338,8 @@ class KkAgentRedmineAnalyzer:
         _merge_precollected_traces(trace, entry)
 
         if trace.error_type == "kkagent_unavailable":
+            return self._failure(trace, raw)
+        if trace.error_type == "oversized_output":
             return self._failure(trace, raw)
         if timed_out:
             return self._failure(trace, raw)

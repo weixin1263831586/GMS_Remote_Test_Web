@@ -279,6 +279,40 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn("gms_rt_devices_snapshot with device=`RK3576-ADB-01`", prompt)
         self.assertIn("never run gms-rt CLI through Bash", prompt)
 
+    def test_oversized_stdout_line_terminates_process_tree(self):
+        class _OversizedStream:
+            async def read(self, size=-1):
+                return b""
+
+            async def readline(self):
+                # StreamReader.readline() 超过 limit 时抛 ValueError；
+                # 若不终止进程树，kkagent 会带病继续烧 LLM token。
+                raise ValueError("Separator is not found, and chunk exceed the limit")
+
+        class Process:
+            pid = 12345
+            returncode = None
+            stdout = _OversizedStream()
+            stderr = _OversizedStream()
+
+        async def scenario():
+            analyzer = KkAgentRedmineAnalyzer(interrupted_retries=0)
+            with patch(
+                "asyncio.create_subprocess_exec",
+                AsyncMock(return_value=Process()),
+            ), patch(
+                "features.redmine.kkagent.analyzer.terminate_process_tree",
+                AsyncMock(),
+            ) as terminate:
+                outcome = await analyzer.analyze(ENTRY)
+            return outcome, terminate
+
+        outcome, terminate = asyncio.run(scenario())
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.error_type, "oversized_output")
+        self.assertIn("exceeding", outcome.error)
+        terminate.assert_awaited_once()
+
     def test_cancellation_cleans_up_process_tree(self):
         class _HangingStream:
             async def read(self, size=-1):
