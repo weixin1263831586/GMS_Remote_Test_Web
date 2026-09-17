@@ -323,6 +323,12 @@ const ModalManager = {
                 || tag === 'TEMPLATE' || tag === 'NOSCRIPT') {
                 continue;
             }
+            // 只接管"由本管理器置为 inert"的元素：页面/嵌套组件可能本来
+            // 就把自己的根置为 inert（另一种 UI 状态），关闭 modal 时只
+            // 释放自己的 inert，绝不能把别人的状态强制清成 false。
+            if (child.inert) {
+                continue;
+            }
             child.inert = true;
             this._inertedRoots.add(child);
         }

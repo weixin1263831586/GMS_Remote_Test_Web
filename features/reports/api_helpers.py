@@ -149,7 +149,7 @@ def _resolve_redmine_knowledge_service(request: Request | None = None):
     if request is None:
         return None
     user = require_authenticated_user(request)
-    return get_redmine_service_for_owner(user.id).knowledge
+    return get_redmine_service_for_owner(user.resource_owner_id).knowledge  # ADR 0010: KB 按创建者账号分区
 
 
 def _get_knowledge_base(request: Request | None = None):

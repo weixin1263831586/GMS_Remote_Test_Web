@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from bootstrap.application import create_app
-from features.auth import CurrentUser
+from features.auth import AUTOMATION_PLAN_CAPABILITIES, CurrentUser
 from features.automation import api as automation_api
 from features.automation.executors import HttpAutomationExecutor
 from features.automation.profiles import save_profiles
@@ -52,13 +52,13 @@ def online_worker_cluster(repository, **extra) -> SimpleNamespace:
 
 class AutomationApiTests(unittest.TestCase):
     @staticmethod
-    def request_for(username: str, role: str = 'user') -> Request:
-        request = Request({
-            'type': 'http', 'method': 'GET', 'path': '/',
-            'headers': [], 'client': ('127.0.0.1', 1234),
-        })
+    def request_for(username: str, role: str = 'user', extra_permissions: frozenset[str] = frozenset()) -> Request:
+        request = Request({'type': 'http', 'method': 'GET', 'path': '/', 'headers': [], 'client': ('127.0.0.1', 1234)})
+        if role == 'device_operator' and not extra_permissions:
+            # 缺省 flash 即烧写（ADR 0012）：device_operator 需要完整 plan 能力并集；显式传入 extra_permissions 时不覆盖。
+            extra_permissions = frozenset(AUTOMATION_PLAN_CAPABILITIES)
         request.state.current_user = CurrentUser(
-            id=f'id-{username}', username=username, role=role
+            id=f'id-{username}', username=username, role=role, extra_permissions=extra_permissions,
         )
         return request
 
@@ -155,9 +155,7 @@ class AutomationApiTests(unittest.TestCase):
                             'devices': ['ABC123'],
                             'test_plan': {'test_type': 'CTS'},
                         },
-                        # ADR 0012: run creation compiles the plan's capability
-                        # union; the creator needs devices.lease/read, so the
-                        # operator here holds the device_operator role.
+                        # ADR 0012: 创建即编译 plan 能力并集（见 request_for）。
                         self.request_for('alice', role='device_operator'),
                     )
                 )
@@ -228,7 +226,6 @@ class AutomationApiTests(unittest.TestCase):
                             'devices': ['ABC123'],
                             'test_plan': {'test_type': 'CTS'},
                         },
-                        # ADR 0012: creator needs the plan capability union.
                         self.request_for('alice', role='device_operator'),
                     )
                 )
@@ -260,8 +257,6 @@ class AutomationApiTests(unittest.TestCase):
                         'devices': ['ABC'],
                         'test_plan': {'test_type': 'CTS'},
                     },
-                    # ADR 0012: creator needs the plan capability union
-                    # (devices.lease/read) — see test above.
                     self.request_for('alice', role='device_operator'),
                 ))
                 denied = asyncio.run(automation_api.get_automation_run(
@@ -320,10 +315,7 @@ class AutomationApiTests(unittest.TestCase):
             )
             result = service.preflight({
                 'devices': ['ABC'],
-                'test_plan': {
-                    'worker_id': 'worker-1', 'test_type': 'CTS',
-                    'flash': {'mode': 'skip'},
-                },
+                'test_plan': {'worker_id': 'worker-1', 'test_type': 'CTS', 'flash': {'mode': 'skip'}},
             })
 
         self.assertTrue(result['ready'])
@@ -408,6 +400,12 @@ class AutomationApiTests(unittest.TestCase):
                         'jenkins': {'base_url': 'https://jenkins.example'},
                     },
                 })
+
+    def test_preflight_compiles_capabilities_like_create(self):
+        # ADR 0012：预检与创建同一 compiler——权限不足预检即 ValueError（路由 409）。
+        with TemporaryDirectory() as tmp, self.assertRaises(ValueError):
+            build_service(tmp).preflight({'artifact_path': '/tmp/update.img', 'test_plan': {'test_type': 'CTS'}},
+                                         principal=CurrentUser(id='u', username='u', role='user'))
 
     def test_index_template_has_gms_ats_nav_entry(self):
         # shell 脚本已外置：标记可能落在模板或外置脚本，统一走 bundle helper。

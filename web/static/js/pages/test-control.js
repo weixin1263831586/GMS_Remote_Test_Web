@@ -1,5 +1,11 @@
 // ==================== Test Control ====================
+// Start/Stop 按钮是四态状态机：IDLE → STARTING → RUNNING → STOPPING → IDLE。
+// 过渡态（testStarting/testStopping）必须在 await 之前置位：JS 事件循环下
+// “先 await 再置位”会留一个窗口，快速双击触发两次 click 时第二个 click
+// 看到的仍是旧状态，于是重复 POST /api/test/start（或重复 stop）。
+
 async function toggleTest() {
+    if (state.testStarting || state.testStopping) return;
     if (state.testing) {
         await stopTest();
     } else {
@@ -10,6 +16,10 @@ async function toggleTest() {
 async function startTest() {
     if (state.testing) {
         showToast('测试已在运行中', 'warning');
+        return;
+    }
+    if (state.testStarting) {
+        showToast('测试正在启动，请稍候', 'info');
         return;
     }
 
@@ -57,6 +67,9 @@ async function startTest() {
         return;
     }
 
+    // 进入 STARTING：先置过渡态再发请求，双击在这里被挡住。
+    state.testStarting = true;
+    updateTestToggleButton(false);
     try {
         if ('Notification' in window && Notification.permission === 'default' && !state.browserNotificationsEnabled) {
             void requestBrowserNotificationPermission();
@@ -76,6 +89,12 @@ async function startTest() {
             test_suite: suitePath,
             local_server: state.config?.local_server || state.clientDisplayId || state.clientId || ''
         });
+
+        // ---- 核心操作成功：立即 commit RUNNING，后续任何失败都不回滚 ----
+        state.testStarting = false;
+        state.testStopping = false;
+        state.testing = true;
+
         const clusterJobId = startResult?.data?.cluster_job_id || startResult?.cluster_job_id || '';
         if (clusterJobId) {
             state.clusterJobId = clusterJobId;
@@ -93,46 +112,57 @@ async function startTest() {
             addWorkerLog(workspaceWorkerId(), `分布式任务 ${clusterJobId} 已排队`, 'info');
         }
 
-        debugLog('[startTest] API call successful, setting testing = true');
-        state.testStopping = false;
-        state.testing = true;
         updateTestToggleButton(true);
         addWorkerLog(workspaceWorkerId(), '测试已启动', 'success');
         showToast('测试已启动', 'success');
         switchLogTab('module');
         wakeTestStatusPolling();
 
-        // 刷新设备列表以更新锁定状态
-        await refreshDevices();
+        // ---- 后置刷新：属于锦上添花，失败只警告。不能与上面的核心操作
+        // 共用 try/catch——refreshDevices 因瞬时 SSH/API 抖动抛错时，用户
+        // 会同时看到“测试已启动”和“启动测试失败”，然后再次点启动。
+        try {
+            await refreshDevices();
+        } catch (refreshError) {
+            addLogEntry('启动成功，但刷新设备列表失败: ' + refreshError.message, 'warning');
+        }
     } catch (error) {
+        // 只有核心 POST /api/test/start 失败才走到这里。
+        state.testStarting = false;
+        updateTestToggleButton(Boolean(state.testing));
         addLogEntry('启动测试失败: ' + error.message, 'error');
     }
 }
 
 async function stopTest() {
+    if (state.testStopping) {
+        showToast('停止请求已发送，请等待任务结束', 'info');
+        return;
+    }
     if (!state.testing) {
         showToast('没有正在运行的测试', 'warning');
         return;
     }
 
+    // 进入 STOPPING：同样先置过渡态再发请求。
+    state.testStopping = true;
+    updateTestToggleButton(true);
     try {
         addLogEntry('⏹ 用户请求停止测试...', 'info');
 
         if (state.clusterJobId) {
             const workerId = workspaceWorkerId();
             await apiCall(`/api/cluster/jobs/${encodeURIComponent(state.clusterJobId)}/cancel`, 'POST');
-            state.testStopping = true;
-            updateTestToggleButton(true);
             addWorkerLog(workerId, '停止请求已发送，正在等待 Worker 结束任务...', 'warning');
             showToast('停止请求已发送', 'warning');
             wakeTestStatusPolling();
-            return;
-        } else {
-            // 使用新的 stop 接口（支持多用户隔离）
-            await apiCall('/api/test/stop', 'POST');
+            return; // 保持 STOPPING，由状态轮询在 job 结束后回 IDLE
         }
 
-        // Update test state
+        // 使用新的 stop 接口（支持多用户隔离）
+        await apiCall('/api/test/stop', 'POST');
+
+        // ---- 核心操作成功：立即 commit IDLE ----
         state.testing = false;
         state.testStopping = false;
         state.clusterJobId = '';
@@ -144,9 +174,14 @@ async function stopTest() {
         addLogEntry('测试已停止', 'warning');
         showToast('测试已停止', 'warning');
 
-        // Refresh devices (强制刷新以获取最新状态)
-        await loadDevices(true);
+        // ---- 后置刷新：失败只警告，不说“停止失败” ----
+        try {
+            await loadDevices(true);
+        } catch (refreshError) {
+            addLogEntry('停止成功，但刷新设备列表失败: ' + refreshError.message, 'warning');
+        }
     } catch (error) {
+        // 只有 cancel/stop 请求本身失败才走到这里。
         state.testStopping = false;
         updateTestToggleButton(state.testing);
         addLogEntry('停止测试失败: ' + error.message, 'error');
@@ -154,17 +189,28 @@ async function stopTest() {
 }
 
 function updateTestToggleButton(isTesting) {
+    // 调用方传入的 boolean 只是 testing(RUNNING) 的同步；最终渲染完全由
+    // 状态机四态推导，避免轮询回调把过渡态（启动中/停止中）冲掉。
+    if (typeof isTesting === 'boolean') {
+        state.testing = isTesting;
+    }
     const btn = $('test-toggle-btn');
     if (!btn) return;
 
-    btn.disabled = Boolean(state.testStopping);
     if (state.testStopping) {
+        btn.disabled = true;
         btn.textContent = '⏳ 停止中';
         btn.className = 'btn-danger btn-lg';
-    } else if (isTesting) {
+    } else if (state.testStarting) {
+        btn.disabled = true;
+        btn.textContent = '⏳ 启动中';
+        btn.className = 'btn-primary btn-lg';
+    } else if (state.testing) {
+        btn.disabled = false;
         btn.textContent = '⏹ 停止测试';
         btn.className = 'btn-danger btn-lg';
     } else {
+        btn.disabled = false;
         btn.textContent = '▶ 开始测试';
         btn.className = 'btn-primary btn-lg';
     }
@@ -172,15 +218,17 @@ function updateTestToggleButton(isTesting) {
     // 禁用/启用测试配置控件（CSP 迁移后统一契约：data-test-config-control，
     // 覆盖测试类型/模块/用例/套件/报告输入及“📁 选择报告”浏览按钮；
     // 不再按 handler 名（onclick*=）猜测，避免 data-click 迁移后失配）。
+    // 三个非 IDLE 态（启动中/运行中/停止中）都保持禁用。
+    const controlsDisabled = Boolean(state.testStarting || state.testing || state.testStopping);
     document.querySelectorAll('[data-test-config-control]').forEach(element => {
-        element.disabled = isTesting;
+        element.disabled = controlsDisabled;
     });
 
     // 保留 id 兜底：历史 DOM（如测试快照）可能尚无统一标记。
     ['test-type', 'test-module', 'test-case', 'test-suite', 'retry-result']
         .forEach(id => {
             const element = document.getElementById(id);
-            if (element) element.disabled = isTesting;
+            if (element) element.disabled = controlsDisabled;
         });
 
     // 测试主机下拉框在测试期间也保持可用：切换主机不会中断正在运行的测试

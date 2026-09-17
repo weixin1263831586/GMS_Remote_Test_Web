@@ -189,10 +189,12 @@ async def create_automation_run(
 @router.post('/runs/preflight')
 async def preflight_automation_run(
     req: dict[str, Any],
-    _user: CurrentUser | None = Depends(require_human_principal_when_auth_required),
+    principal: CurrentUser | None = Depends(require_human_principal_when_auth_required),
 ):
     try:
-        data = automation_service.preflight(req)
+        # ADR 0012: 预检与创建共用同一 capability compiler（审计：Preflight
+        # 必须代表“权限层面确实能跑”，不能出现预检✅创建❌）。
+        data = automation_service.preflight(req, principal=principal)
     except ValueError as exc:
         return error_response(str(exc), 409)
     return {'success': True, 'data': data}

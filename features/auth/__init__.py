@@ -23,6 +23,7 @@ from .access import (
 )
 from .api import router
 from .authority import (
+    AUTOMATION_PLAN_CAPABILITIES,
     automation_authority,
     automation_granted_capabilities,
     is_machine_principal,
@@ -49,6 +50,7 @@ from .service import (
 __all__ = [
     "AGENT_ROLE",
     "AUTH_COOKIE_NAME",
+    "AUTOMATION_PLAN_CAPABILITIES",
     "ROLE_PERMISSIONS",
     "AuthService",
     "CurrentUser",

@@ -8,10 +8,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from features.auth import (
-    CurrentUser,
-    automation_granted_capabilities,
-)
+from features.auth import CurrentUser, automation_granted_capabilities
 from features.automation.executors import (
     HttpAutomationExecutor,
     StubAutomationExecutor,
@@ -158,8 +155,8 @@ class AutomationService:
         )
         return run
 
-    def preflight(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Validate a proposed run against live Worker inventory without creating it."""
+    def preflight(self, request: dict[str, Any], *, principal: CurrentUser | None = None) -> dict[str, Any]:
+        """Validate a proposed run without creating it (ADR 0012: same capability compiler as create)."""
         body = copy.deepcopy(request or {})
         body.pop('build_server_password', None)
         plan = body.get('test_plan') if isinstance(body.get('test_plan'), dict) else {}
@@ -177,6 +174,8 @@ class AutomationService:
             has_build or has_artifact or body.get('jenkins_job')
         ):
             raise ValueError('Firmware artifact or build configuration is required')
+        # ADR 0012: 与 create 同一 compiler；不可持有→ValueError→路由 409。
+        granted_capabilities = automation_granted_capabilities(principal, plan)
         cluster = self._prepare_cluster_plan(body, plan)
         return {
             'ready': True,
@@ -187,6 +186,7 @@ class AutomationService:
             'flash_mode': flash.get('mode') or 'firmware',
             'build_configured': has_build or bool(body.get('jenkins_job')),
             'artifact_configured': has_artifact,
+            'granted_capabilities': granted_capabilities,
             **cluster,
         }
 

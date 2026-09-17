@@ -116,6 +116,25 @@ def device_mutation_guard(
 
     return decorate
 
+def device_fencing_owner_id(request) -> str:
+    """Device fencing / claim identity for this request (ADR 0010).
+
+    Authenticated principals fence through their RESOURCE owner id — the
+    human account, the agent token's enrolling account, or the ATS run's
+    creating account — never the synthetic ``agent:<token_id>`` /
+    ``automation:<run_id>`` actor id, which would make a principal conflict
+    with its own owner's reservation. Dev/anonymous deployments fall back
+    to the stable anonymous client id. Audit records that also need the
+    acting principal should additionally store ``actor_id``.
+    """
+    from features.auth import get_authenticated_user
+
+    user = get_authenticated_user(request)
+    if user is not None:
+        return user.resource_owner_id
+    return runtime.get_client_id_from_request(request)
+
+
 def device_claim_conflict_response(
     device_ids: list[str],
     client_id: str,

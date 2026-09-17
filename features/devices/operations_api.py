@@ -33,6 +33,7 @@ from .support import (
     AsyncSSHConnection,
     broadcast_device_lock_update,
     device_claim_conflict_response,
+    device_fencing_owner_id,
     device_mutation_guard,
 )
 from .usbip import wait_for_adb_serial_ready
@@ -140,8 +141,12 @@ async def reboot_devices(req: DeviceActionRequest, request: Request):
     devices = sanitize_device_ids(req.devices)
     if not devices:
         return error_response("No valid device serials", status_code=400)
-    client_id = require_authenticated_user(request).id
-    conflict = device_claim_conflict_response(devices, client_id, allow_owner=True)
+    # 内层 conflict 复查必须与外层 @device_mutation_guard 同一 fencing
+    # 身份（resource_owner_id，ADR 0010）；再取一次 actor id 会让
+    # agent/machine principal 与自己 owner 的 claim 冲突（409 自己）。
+    conflict = device_claim_conflict_response(
+        devices, device_fencing_owner_id(request), allow_owner=True
+    )
     if conflict:
         return conflict
     usbip_device_ids = _known_usbip_device_ids()
@@ -189,11 +194,14 @@ async def reboot_devices(req: DeviceActionRequest, request: Request):
 @device_mutation_guard("remount")
 async def remount_devices(req: DeviceActionRequest, request: Request):
     """Remount devices."""
+    # fencing 用 resource_owner_id（ADR 0010）；client_id 仅用于运行时
+    # WebSocket 日志路由（actor 身份），两个身份不许混用。
+    fencing_owner_id = device_fencing_owner_id(request)
     client_id = require_authenticated_user(request).id
     devices = sanitize_device_ids(req.devices)
     if not devices:
         return error_response("No valid device serials", status_code=400)
-    conflict = device_claim_conflict_response(devices, client_id, allow_owner=True)
+    conflict = device_claim_conflict_response(devices, fencing_owner_id, allow_owner=True)
     if conflict:
         return conflict
 
@@ -243,8 +251,9 @@ async def connect_wifi(req: WifiConnectRequest, request: Request):
         devices = sanitize_device_ids(req.devices)
         if not devices:
             return error_response("No valid device serials", status_code=400)
-        client_id = require_authenticated_user(request).id
-        conflict = device_claim_conflict_response(devices, client_id, allow_owner=True)
+        conflict = device_claim_conflict_response(
+            devices, device_fencing_owner_id(request), allow_owner=True
+        )
         if conflict:
             return conflict
         config = runtime.config_manager.load_config()
@@ -294,10 +303,12 @@ async def connect_wifi(req: WifiConnectRequest, request: Request):
 async def open_device_shell(req: DeviceShellRequest, request: Request):
     """Open device ADB Shell - prepare device connection for terminal page."""
     try:
+        # device_shells 是运行时会话状态（actor 身份）；conflict 复查用
+        # fencing owner（ADR 0010），两者分开。
         client_id = require_authenticated_user(request).id
         conflict = device_claim_conflict_response(
             [req.serial_no],
-            client_id,
+            device_fencing_owner_id(request),
         )
         if conflict:
             return conflict

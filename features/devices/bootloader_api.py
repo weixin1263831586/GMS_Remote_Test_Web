@@ -24,6 +24,7 @@ from .models import DeviceActionRequest, DeviceLockRequest, VerifiedBootState
 from .support import (
     AsyncSSHConnection,
     device_claim_conflict_response,
+    device_fencing_owner_id,
     device_mutation_guard,
     get_device_properties_optimized,
 )
@@ -238,7 +239,7 @@ async def lock_bootloader(
     return await _manage_bootloader_lock(
         _resolve_device_lock_devices(req),
         "lock",
-        runtime.get_client_id_from_request(request),
+        device_fencing_owner_id(request),
     )
 
 
@@ -256,7 +257,7 @@ async def unlock_bootloader(
     return await _manage_bootloader_lock(
         _resolve_device_lock_devices(req),
         "unlock",
-        runtime.get_client_id_from_request(request),
+        device_fencing_owner_id(request),
     )
 
 
@@ -271,7 +272,7 @@ async def check_bootloader_status(
             return _api_error("No valid device serials", status_code=400)
         conflict = device_claim_conflict_response(
             devices,
-            runtime.get_client_id_from_request(request),
+            device_fencing_owner_id(request),
             allow_owner=True,
         )
         if conflict:
@@ -317,7 +318,7 @@ async def get_device_info(req: DeviceActionRequest, request: Request):
             return _api_error("No valid device serials", status_code=400)
         conflict = device_claim_conflict_response(
             devices,
-            runtime.get_client_id_from_request(request),
+            device_fencing_owner_id(request),
             allow_owner=True,
         )
         if conflict:

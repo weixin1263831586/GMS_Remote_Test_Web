@@ -22,13 +22,18 @@ router = APIRouter()
 def _request_log_scope(request: Request) -> tuple[str, bool]:
     """Resolve the log owner and admin flag.
 
-    Uses an authenticated user when available; in dev/anonymous deployments
-    (authentication_required() == False), falls back to the stable anonymous
-    client id so log save/get/list still work without a session.
+    Logs are owner-scoped account resources (ADR 0010): they must follow
+    the ``resource_owner_id`` (the enrolling account for agent tokens, the
+    creating account for automation runs) — never the synthetic
+    ``agent:<token_id>`` / ``automation:<run_id>`` actor id, which would
+    orphan every saved log on the next token rotation. In dev/anonymous
+    deployments (authentication_required() == False), falls back to the
+    stable anonymous client id so log save/get/list still work without a
+    session.
     """
     current_user = require_authenticated_user_when_auth_required(request)
     if current_user:
-        return current_user.id, current_user.role == "admin"
+        return current_user.resource_owner_id, current_user.role == "admin"
     return runtime.get_client_id_from_request(request), False
 
 
