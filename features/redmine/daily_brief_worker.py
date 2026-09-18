@@ -16,6 +16,7 @@ from typing import Any
 
 from foundation.config import settings
 
+from .daily_brief_analysis_events import event_store_for_repository
 from .daily_brief_owner_policy import is_daily_brief_owner_eligible
 from .daily_brief_repository import TERMINAL_RUN_STATUSES, DailyBriefRepository
 from .daily_brief_service import DailyBriefService
@@ -69,6 +70,30 @@ class OwnerFairnessCursor:
         offset = self._offset % len(items)
         self._offset = (self._offset + 1) % len(items)
         return items[offset:] + items[:offset]
+
+
+def _purge_expired_analysis_events(
+    fairness: OwnerFairnessCursor, data_root: Path | None
+) -> None:
+    """启动时清理过期分析进度事件（终态 run、保留期外）。
+
+    放在 Worker 启动而非每次任务后：清理是低频维护动作，失败只留日志，
+    绝不能让任何 owner 的分析任务被清理故障阻塞。
+    """
+    try:
+        for repository in fairness.rotate(discover_repositories(data_root)):
+            try:
+                store = event_store_for_repository(repository)
+                purged = store.purge_expired()
+                if purged:
+                    logger.info(
+                        "purged %d expired analysis progress events for %s",
+                        purged, repository.db_path.parent.name,
+                    )
+            except Exception:
+                logger.exception("analysis event purge failed; continuing")
+    except Exception:
+        logger.exception("analysis event purge sweep skipped")
 
 
 async def _execute_job(
@@ -257,6 +282,7 @@ async def worker_loop(
     worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
     logger.info("daily brief worker started as %s", worker_id)
     fairness = OwnerFairnessCursor()
+    _purge_expired_analysis_events(fairness, data_root)
     while not stop_event.is_set():
         claimed: tuple[DailyBriefRepository, dict[str, Any]] | None = None
         for repository in fairness.rotate(discover_repositories(data_root)):

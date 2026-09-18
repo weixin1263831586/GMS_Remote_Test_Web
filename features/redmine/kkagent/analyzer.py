@@ -33,6 +33,7 @@ from .process import (
     settle_reader_future,
     terminate_process_tree,
 )
+from .progress_tap import ProgressTap
 from .trace import KkAgentTrace, ToolTrace, consume_line
 
 
@@ -233,7 +234,7 @@ class KkAgentRedmineAnalyzer:
     # ------------------------------------------------------------ process
 
     async def _run_stream(
-        self, command: list[str]
+        self, command: list[str], progress: Any = None
     ) -> tuple[KkAgentTrace, _StreamFallback, bool]:
         """启动 kkagent 并实时消费 stream-json；返回 (轨迹, 原始兜底, 超时)。"""
         env = child_env(self.env_extra)
@@ -241,6 +242,7 @@ class KkAgentRedmineAnalyzer:
             env["KKAGENT_DEFAULT_MODEL"] = self.model
         trace = KkAgentTrace()
         raw = _StreamFallback()
+        tap = ProgressTap(progress)
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -295,7 +297,7 @@ class KkAgentRedmineAnalyzer:
                 if not line:
                     break
                 raw.feed_stdout(line)
-                if not consume_line(trace, line):
+                if not consume_line(trace, line, on_event=tap.on_event):
                     continue
             await process.wait()
         except asyncio.TimeoutError:
@@ -332,9 +334,10 @@ class KkAgentRedmineAnalyzer:
 
     async def _analyze_once(self, entry: dict[str, Any]) -> KkAgentAnalysisResult:
         """执行一次 headless 分析：stream → gate → （失败时）resume 修复。"""
+        progress = entry.get("_progress_recorder") if isinstance(entry, dict) else None
         prompt = self.build_prompt(entry)
         command = self.build_command(prompt)
-        trace, raw, timed_out = await self._run_stream(command)
+        trace, raw, timed_out = await self._run_stream(command, progress)
         _merge_precollected_traces(trace, entry)
 
         if trace.error_type == "kkagent_unavailable":
@@ -408,10 +411,13 @@ class KkAgentRedmineAnalyzer:
 
         findings = list(gate_errors_list)
         merged = trace
+        progress = entry.get("_progress_recorder") if isinstance(entry, dict) else None
         for _attempt in range(REPAIR_RESUME_RETRIES):
             repair_prompt = self.build_repair_prompt(findings)
+            if progress is not None:
+                progress.stage_changed("正在自动修复输出格式")
             repair_trace, raw, timed_out = await self._run_stream(
-                self.build_repair_command(repair_prompt, session_id)
+                self.build_repair_command(repair_prompt, session_id), progress
             )
             repair_trace.repair_attempts = 1
             if repair_trace.session_id and repair_trace.session_id != session_id:

@@ -508,10 +508,22 @@ function copyText(text, btn) {
 }
 
 // ---- Tab switching ----
+function syncDailyBriefStickyTop() {
+  // 区块工具栏（「Redmine 单号分析」/「每日晨报 · 待回复事项」）吸附点 =
+  // 真实页头（tabs+筛选行）的实测高度；页头 sticky/fixed 在视口顶部，
+  // 窄屏换行变高时 resize 后重算。
+  var header = document.querySelector('body > header');
+  var top = header ? Math.ceil(header.getBoundingClientRect().height) : 44;
+  document.querySelectorAll('.daily-brief-card').forEach(function (card) {
+    card.style.setProperty('--daily-brief-sticky-top', top + 'px');
+  });
+}
+
 function switchTab(tab) {
   var target = document.getElementById('tab-' + tab) ? tab : 'stats';
   currentTab = target;
   updateRedmineToolbar();
+  if (target === 'daily-brief') syncDailyBriefStickyTop();
   try { window.sessionStorage.setItem('redmineLastTab', target); } catch(_) {}
   var url = new URL(window.location.href);
   if (target === 'stats') url.searchParams.delete('tab');
@@ -531,8 +543,7 @@ function switchTab(tab) {
   if (target === 'daily-brief') {
     loadSingleIssueDevices();
     return loadDailyBrief();
-  }
-  if (target === 'stats') return loadStatistics();
+  }  if (target === 'stats') return loadStatistics();
   return Promise.resolve();
 }
 
@@ -991,6 +1002,8 @@ async function submitAddProject() {
 // ---- Settings Modal ----
 function showSettingsModal() {
   showModal('settingsModal');
+  // 每次打开都独立刷新晨报模型；统计/凭据设置失败不能让旧下拉选项残留。
+  void refreshDailyBriefSettings();
   (async function() {
     try {
       await loadStatsConfig();
@@ -1015,20 +1028,27 @@ function showSettingsModal() {
       } catch (_) { renderRedmineCredentialStatus(null); }
       document.getElementById('settingRedminePass').value = '';
       document.getElementById('settingRedmineApiKey').value = '';
-      try {
-        dailyBriefConfigCache = await api('/api/redmine-agent/daily-brief/config') || {};
-        dailyBriefSetting('enabled').checked = dailyBriefConfigCache.enabled === true;
-        dailyBriefSetting('trigger_time').value = dailyBriefConfigCache.trigger_time || '00:00';
-        dailyBriefSetting('delta_enabled').checked = dailyBriefConfigCache.delta_enabled !== false;
-        dailyBriefSetting('delta_trigger_time').value = dailyBriefConfigCache.delta_trigger_time || '06:00';
-        await loadDailyBriefAgentProfiles(dailyBriefConfigCache.agent_profile || '');
-        await loadDailyBriefModelOptions(dailyBriefConfigCache.model || '');
-        dailyBriefSetting('max_parallel_issues').value = dailyBriefConfigCache.max_parallel_issues || 1;
-      } catch (_) {}
     } catch (_) {}
   })();
 }
 function hideSettingsModal() { hideModal('settingsModal'); }
+
+async function refreshDailyBriefSettings() {
+  try {
+    dailyBriefConfigCache = await api('/api/redmine-agent/daily-brief/config') || {};
+    dailyBriefSetting('enabled').checked = dailyBriefConfigCache.enabled === true;
+    dailyBriefSetting('trigger_time').value = dailyBriefConfigCache.trigger_time || '00:00';
+    dailyBriefSetting('delta_enabled').checked = dailyBriefConfigCache.delta_enabled !== false;
+    dailyBriefSetting('delta_trigger_time').value = dailyBriefConfigCache.delta_trigger_time || '06:00';
+    await Promise.all([
+      loadDailyBriefAgentProfiles(dailyBriefConfigCache.agent_profile || ''),
+      loadDailyBriefModelOptions(dailyBriefConfigCache.model || ''),
+    ]);
+    dailyBriefSetting('max_parallel_issues').value = dailyBriefConfigCache.max_parallel_issues || 1;
+  } catch (_) {
+    // The individual selectors render a visible fallback option on failure.
+  }
+}
 
 function renderRedmineCredentialStatus(status) {
   var el = document.getElementById('settingRedmineCredentialStatus');
@@ -2765,6 +2785,10 @@ function syncRedmineStatusRefresh(event) {
 }
 window.addEventListener('gms:embedded-visibility', syncRedmineStatusRefresh);
 syncRedmineStatusRefresh();
+// 窄屏页头（tabs+筛选行）换行变高后，晨报工具栏吸附点需要重算。
+window.addEventListener('resize', function () {
+  if (currentTab === 'daily-brief') syncDailyBriefStickyTop();
+});
 
 // ==================== 每日晨报（Redmine Daily Brief） ====================
 // 数据源：GET /api/redmine-agent/daily-brief/latest（只读展示；生成/重分析走 POST）。
@@ -2822,9 +2846,26 @@ function rememberSingleIssueAnalysisRun(runId) {
 }
 
 function setSingleIssueAnalysisBusy(busy) {
-  document.getElementById('singleIssueAnalysisStart').disabled = busy;
-  document.getElementById('singleIssueAnalysisId').disabled = busy;
-  document.getElementById('singleIssueAnalysisStop').hidden = !busy;
+  // 已提交的任务在下方历史卡片中管理；表单始终可用于发起下一单分析。
+  document.getElementById('singleIssueAnalysisStart').disabled = false;
+  document.getElementById('singleIssueAnalysisId').disabled = false;
+}
+
+function resetSingleIssueAnalysisForm() {
+  var input = document.getElementById('singleIssueAnalysisId');
+  var mode = document.getElementById('singleIssueAnalysisMode');
+  var noDevice = document.querySelector('#singleIssueAnalysisDevice [data-device-none]');
+  if (input) input.value = '';
+  if (mode) mode.value = 'incremental';
+  singleIssueAnalysisHint = '';
+  updateSingleIssueAnalysisHintButton();
+  if (noDevice) noDevice.checked = true;
+  document.querySelectorAll('#singleIssueAnalysisDevice input[data-device-serial]').forEach(function (device) {
+    device.checked = false;
+  });
+  syncSingleIssueDevicePickerLabel();
+  setSingleIssueDevicePickerOpen(false);
+  if (input) input.focus();
 }
 
 function singleIssueAnalysisStatus(status) {
@@ -2844,6 +2885,21 @@ function singleIssueAnalysisIsRunning(run, issue) {
   var states = ['pending', 'snapshotting', 'analyzing', 'running'];
   return states.indexOf(singleIssueAnalysisEffectiveStatus(run, issue)) >= 0
     || states.indexOf(String((run || {}).status || '')) >= 0;
+}
+
+function isAnalysisTimelineWithinRetention(finishedAt) {
+  // 终态过程事件只保留 ANALYSIS_EVENT_RETENTION_DAYS 天（Worker 启动时
+  // 清理超期部分）。无时间戳的旧记录按仍在保留期处理，交给服务端兜底。
+  var stamp = Date.parse(String(finishedAt || ''));
+  if (!isFinite(stamp)) return true;
+  return Date.now() - stamp < ANALYSIS_EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+}
+
+function singleIssueAnalysisHasHistory(run, issue) {
+  // 终态且未超期的 run 才有可回看的执行过程；运行中走实时时间线。
+  if (!run || !run.run_id) return false;
+  if (singleIssueAnalysisIsRunning(run, issue)) return false;
+  return isAnalysisTimelineWithinRetention(run.finished_at || run.started_at);
 }
 
 function upsertSingleIssueAnalysis(item) {
@@ -2882,18 +2938,19 @@ function renderSingleIssueAnalysisHistory() {
   var items = singleIssueAnalysisHistory.filter(function (item) {
     return item && item.run && Array.isArray(item.issues) && item.issues.length;
   });
-  var query = String((document.getElementById('singleIssueAnalysisId') || {}).value || '').trim().toLowerCase();
-  if (query) items = items.filter(function (item) {
-    var issue = item.issues[0] || {};
-    return ('#' + issue.issue_id + ' ' + (issue.subject || '')).toLowerCase().indexOf(query) >= 0;
-  });
+  // 「Redmine 单号」输入框只做定位不过滤：命中时由 focusSingleIssueHistory
+  // 翻页/滚动/高亮，未命中时完整保留历史列表。
   var pageCount = Math.max(1, Math.ceil(items.length / SINGLE_ISSUE_ANALYSIS_PAGE_SIZE));
   singleIssueAnalysisPage = Math.max(1, Math.min(singleIssueAnalysisPage, pageCount));
   var pageItems = items.slice(
     (singleIssueAnalysisPage - 1) * SINGLE_ISSUE_ANALYSIS_PAGE_SIZE,
     singleIssueAnalysisPage * SINGLE_ISSUE_ANALYSIS_PAGE_SIZE,
   );
-  if (!items.length) { box.innerHTML = ''; if (pagination) pagination.innerHTML = ''; return; }
+  if (!items.length) {
+    box.innerHTML = '<div class="muted">暂无历史分析。输入 Redmine 单号可开始新的分析。</div>';
+    if (pagination) pagination.innerHTML = '';
+    return;
+  }
   box.innerHTML = pageItems.map(function (item) {
       var run = item.run || {};
       var issue = item.issues[0] || {};
@@ -2974,24 +3031,33 @@ async function lookupSingleIssueHistory(issueId) {
   return false;
 }
 
+// 单号分析与每日晨报行共用的实机取证六态标签。device_evidence_status 由
+// Controller 端 _tool_status 从真实 trace 推导，非模型自报。
+function dailyBriefEvidenceTag(evidenceStatus) {
+  var status = String(evidenceStatus || '').trim();
+  if (!status) return '';
+  var text = ({
+    succeeded: '实机取证成功',
+    service_unavailable: '取证服务暂不可用',
+    invalid_request: '取证请求无效',
+    device_unavailable: '设备取证未完成',
+    unavailable: '实机取证失败',
+    collecting: '实机取证中',
+    not_collected: '未执行实机取证'
+  })[status] || '未执行实机取证';
+  var evidenceClass = status === 'succeeded' ? 'evidence-ok'
+    : (['service_unavailable', 'invalid_request', 'device_unavailable', 'unavailable'].includes(status)
+      ? 'evidence-failed' : 'evidence-pending');
+  return '<span class="' + evidenceClass + '">' + esc(text) + '</span>';
+}
+
 function singleIssueAnalysisMeta(run, issue) {
   var timestamp = String(run.finished_at || run.started_at || '').replace('T', ' ').slice(0, 16);
   var tags = timestamp ? ['<span>分析时间 ' + esc(timestamp) + '</span>'] : [];
   var serial = String(run.device_serial || '').trim();
   if (serial) {
-    var evidenceStatus = String(((issue.ai_execution || {}).device_evidence_status) || 'not_collected');
-    var evidenceClass = evidenceStatus === 'succeeded' ? 'evidence-ok'
-      : (['service_unavailable', 'invalid_request', 'device_unavailable', 'unavailable'].includes(evidenceStatus)
-        ? 'evidence-failed' : 'evidence-pending');
-    var evidenceText = '未执行实机取证';
-    if (evidenceStatus === 'succeeded') evidenceText = '实机取证成功';
-    else if (evidenceStatus === 'service_unavailable') evidenceText = '取证服务暂不可用';
-    else if (evidenceStatus === 'invalid_request') evidenceText = '取证请求无效';
-    else if (evidenceStatus === 'device_unavailable') evidenceText = '设备取证未完成';
-    else if (evidenceStatus === 'unavailable') evidenceText = '实机取证失败';
-    else if (evidenceStatus === 'collecting') evidenceText = '实机取证中';
     tags.push('<span>设备 ' + esc(serial) + '</span>');
-    tags.push('<span class="' + evidenceClass + '">' + evidenceText + '</span>');
+    tags.push(dailyBriefEvidenceTag(((issue.ai_execution || {}).device_evidence_status) || 'not_collected'));
   }
   return tags.join('');
 }
@@ -3002,30 +3068,39 @@ function findSingleIssueAnalysis(runId) {
   }) || null;
 }
 
-function showSingleIssueAnalysis(runId, statisticsOnly) {
-  var item = findSingleIssueAnalysis(runId);
-  var issue = item && (item.issues || [])[0];
-  if (!item || !issue) return;
+function singleIssueAnalysisReportBody(item) {
+  // 「查看分析」静态报告弹框与实时进度弹框（终态切换）共用的正文构建。
+  var issue = (item.issues || [])[0] || {};
   var previousAnalysis = issue.previous_analysis || {};
   var report = String((issue.result || {}).detailed_report || '').trim();
   var previousReport = String((previousAnalysis.result || {}).detailed_report || '').trim();
   var usesPreviousReport = !report && Boolean(previousReport);
   if (!report) report = previousReport;
-  var statistics = renderDailyBriefIssueStatistics(issue.ai_statistics);
   var previousAt = String(previousAnalysis.finished_at || '').replace('T', ' ').slice(0, 16);
   var previousNotice = usesPreviousReport
     ? '<div class="daily-brief-warning">最新一次分析已停止，以下展示最近一次已保存的分析结论'
       + (previousAt ? '（' + esc(previousAt) + '）' : '') + '。</div>'
     : '';
+  if (report) {
+    return previousNotice + '<div class="daily-brief-section daily-brief-section-md"><div class="daily-brief-section-body analysis-doc">'
+      + renderMarkdownDoc(report) + '</div></div>';
+  }
+  return previousNotice + '<div class="muted">' + esc(issue.error || singleIssueAnalysisStatus(issue.status || item.run.status)) + '</div>';
+}
+
+function showSingleIssueAnalysis(runId, statisticsOnly) {
+  var item = findSingleIssueAnalysis(runId);
+  var issue = item && (item.issues || [])[0];
+  if (!item || !issue) return;
+  var statistics = renderDailyBriefIssueStatistics(issue.ai_statistics);
   var subject = String(issue.subject || '').trim();
   var statusText = singleIssueAnalysisStatus(issue.status || item.run.status);
   var body = statisticsOnly
     ? (statistics || '<div class="muted">本单号尚未保存可展示的 AI 统计。</div>')
-    : (report
-      ? previousNotice + '<div class="daily-brief-section daily-brief-section-md"><div class="daily-brief-section-body analysis-doc">'
-        + renderMarkdownDoc(report) + '</div></div>'
-      : '<div class="muted">' + esc(issue.error || singleIssueAnalysisStatus(issue.status || item.run.status)) + '</div>');
+    : singleIssueAnalysisReportBody(item);
   var modalId = 'singleIssueAnalysisModal-' + Date.now();
+  // 30 天保留期内的终态 run 提供执行过程回看；超期按钮禁用并提示。
+  var hasHistory = !statisticsOnly && singleIssueAnalysisHasHistory(item.run, issue);
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = statisticsOnly ? 'modal' : 'modal daily-brief-analysis-overlay';
@@ -3036,7 +3111,10 @@ function showSingleIssueAnalysis(runId, statisticsOnly) {
     + (subject ? '<span class="daily-brief-modal-subject">' + esc(subject) + '</span>' : '')
     + '</span><button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
     + '<div class="modal-body daily-brief-modal-body">' + body + '</div>'
-    + '<div class="modal-buttons daily-brief-modal-footer"><button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">关闭</button></div></div>';
+    + '<div class="modal-buttons daily-brief-modal-footer">'
+    + (statisticsOnly ? '' : '<button class="secondary" data-click="openSingleIssueAnalysisTimeline" data-a0="' + esc(issue.issue_id) + '"'
+      + (hasHistory ? '' : ' disabled title="过程事件已清理（终态过程仅保留 30 天）"') + '>执行过程</button>')
+    + '<button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">关闭</button></div></div>';
   if (statisticsOnly) {
     document.body.appendChild(modal);
     showModal(modalId);
@@ -3044,6 +3122,524 @@ function showSingleIssueAnalysis(runId, statisticsOnly) {
     showDailyBriefAnalysisModal(modal);
   }
 }
+
+function closeReplacedReportModal() {
+  // 单弹框语义：「执行过程」入口打开时间线前，先移除底下的报告弹框
+  // （AI 分析 / 每日晨报），避免叠两层要关两次。
+  var open = document.querySelectorAll('.modal.show');
+  for (var index = open.length - 1; index >= 0; index -= 1) {
+    var modalId = String(open[index].id || '');
+    if (/^(singleIssueAnalysisModal|dailyBriefIssueModal)-/.test(modalId)) {
+      removeDynamicModal(modalId);
+      return;
+    }
+  }
+}
+
+function openSingleIssueAnalysisTimeline(issueId) {
+  // 「执行过程」回看入口：历史条目用列表缓存定位 run；晨报条目回落到
+  // dailyBriefCache。终态走历史时间线（不自动切报告）；运行中走实时
+  // 时间线。事件超期清理时由时间线空态提示（按钮置灰仅覆盖能判断的场景）。
+  var id = String(issueId || '');
+  var item = findSingleIssueAnalysisByIssueId(id);
+  var run = (item || {}).run || {};
+  var issue = ((item || {}).issues || [])[0] || {};
+  if (!run.run_id && dailyBriefCache && dailyBriefCache.run) {
+    run = dailyBriefCache.run;
+    issue = findDailyBriefIssue(id) || issue;
+  }
+  if (!run.run_id || !id) return;
+  // 报告弹框被时间线弹框替换而非叠加；要回看报告用时间线里的「查看报告」。
+  closeReplacedReportModal();
+  if (singleIssueAnalysisIsRunning(run, issue)) {
+    showAnalysisTimelineModal(run.run_id, issue.issue_id || Number(id), { subject: issue.subject });
+    return;
+  }
+  showAnalysisTimelineModal(run.run_id, issue.issue_id || Number(id), {
+    subject: issue.subject, history: true,
+  });
+}
+
+// ---- 实时分析进度时间线（「查看分析」弹框优化） ----
+// Worker 在分析执行期把标准化进度事件落库（redmine_daily_brief_analysis_events，
+// consume_event 分流），这里以 2.5s 增量轮询（after_sequence 协议）渲染执行
+// 时间线；run 到达终态后原地切换为最终报告/失败状态。只更新弹框 body 的
+// innerHTML，显示控制仍归 ModalManager 单一所有者；轮询循环以
+// getElementById 检测弹框被移除并自行退出（abort + 停止调度）。
+// 过程事件保留天数（与 features/redmine/daily_brief_analysis_events.py 的
+// ANALYSIS_EVENT_RETENTION_DAYS 同步）：终态 run 的完整时间线在该窗口内
+// 可回看，超期由 Worker 启动时清理，前端据此提示「过程已清理」。
+var ANALYSIS_EVENT_RETENTION_DAYS = 30;
+
+var analysisTimelineState = {
+  modalId: '', runId: '', issueId: 0, after: 0, events: [],
+  timer: null, controller: null, openedAt: 0,
+  // history：历史回看模式（终态 run 的完整时间线，不轮询、不自动切报告）；
+  // terminal/runStatus：终态后保留在 state 上供报告 ↔ 执行过程切换复用。
+  history: false, terminal: false, runStatus: '',
+};
+
+function stopAnalysisTimelinePolling() {
+  var state = analysisTimelineState;
+  clearTimeout(state.timer);
+  if (state.controller) { try { state.controller.abort(); } catch (_) {} }
+  state.modalId = ''; state.runId = ''; state.issueId = 0; state.after = 0;
+  state.events = []; state.timer = null; state.controller = null;
+  state.history = false; state.terminal = false; state.runStatus = '';
+}
+
+function haltAnalysisTimelineLoop() {
+  // 终态收尾：只停调度与在途请求，保留 run/事件快照，供「报告 ↔ 执行
+  // 过程」原地切换；下一次 showAnalysisTimelineModal 会整体重置。
+  var state = analysisTimelineState;
+  clearTimeout(state.timer);
+  if (state.controller) { try { state.controller.abort(); } catch (_) {} }
+  state.timer = null; state.controller = null;
+  state.terminal = true;
+}
+
+function analysisTimelineRunStateLabel(runStatus) {
+  return ({ pending: '排队中', snapshotting: '准备中', analyzing: '分析中',
+    completed: '已完成', partial: '已完成（部分）', failed: '失败', cancelled: '已停止' })[runStatus] || runStatus || '—';
+}
+
+// 工具调用 → 人类可读动作短语：时间线正文用「在做什么」描述（参数摘要
+// 跟随其后），原始工具名保留为行尾小标签。按子串匹配以兼容
+// mcp__gms__x / gms_rt_x / 裸名等多种前缀；顺序即优先级，具体动作在前、
+// 泛化在后。未命中时回退为去掉 MCP 前缀的工具名。
+var ANALYSIS_TOOL_ACTIONS = [
+  ['redmine_issue_fetch', '读取 Redmine 工单详情'],
+  ['redmine_journals', '读取工单评论记录'],
+  ['redmine_attachments', '读取附件清单'],
+  ['artifact_search', '检索附件与日志内容'],
+  ['artifact_read', '读取附件内容'],
+  ['history_search', '检索历史相似工单'],
+  ['redmine_triage', '读取待回复清单'],
+  ['codesearch', '检索平台源码'],
+  ['sdk_search', '检索 SDK 源码'],
+  ['sdk_read', '读取 SDK 源码'],
+  ['sdk_sources', '枚举 SDK 源配置'],
+  ['apk_resolve', '定位测试模块 APK'],
+  ['apk_analyze', '解析测试 APK'],
+  ['apk_manifest', '读取 APK 权限清单'],
+  ['apk_source_read', '读取反编译源码'],
+  ['apk_source_search', '检索反编译源码'],
+  ['apk_source', '浏览反编译源码树'],
+  ['apk_search', '检索反编译源码'],
+  ['apk_status', '查询 APK 解析进度'],
+  ['shell_exec', '执行设备命令'],
+  ['devices_snapshot', '采集设备快照'],
+  ['screencap', '设备截屏取证'],
+  ['logcat', '读取设备日志'],
+  ['shell', '查询设备信息'],
+  ['devices_wait', '等待设备上线'],
+  ['devices_list', '枚举在线设备'],
+  ['cluster_devices', '枚举集群设备'],
+  ['cluster_workers', '枚举集群 Worker'],
+  ['jobs_events', '读取测试任务事件'],
+  ['jobs_follow', '跟踪测试任务进度'],
+  ['jobs_status', '查询测试任务状态'],
+  ['jobs_list', '枚举测试任务'],
+  ['test_suites_list', '枚举测试套件'],
+  ['reports_list', '查询测试报告'],
+  ['TodoWrite', '更新任务清单'],
+  ['TodoList', '更新任务清单'],
+  ['Bash', '执行本地命令'],
+  ['Grep', '搜索本地文件'],
+  ['Glob', '查找文件'],
+  ['Read', '读取本地文件'],
+  ['WebSearch', '网络搜索'],
+  ['WebFetch', '读取网页'],
+  ['Web', '网络检索'],
+];
+
+function analysisTimelineToolAction(toolName) {
+  var name = String(toolName || '').trim();
+  if (!name) return '';
+  for (var i = 0; i < ANALYSIS_TOOL_ACTIONS.length; i += 1) {
+    if (name.indexOf(ANALYSIS_TOOL_ACTIONS[i][0]) >= 0) return ANALYSIS_TOOL_ACTIONS[i][1];
+  }
+  return name.replace(/^mcp__[^_]+__/, '').replace(/^(gms_rt_|gms-rt-)/, '') || name;
+}
+
+// 把 summary（`tool(key=val, …)` 形态，失败事件带 ` · 原因` 尾巴）拆成
+// 「动作短语 + 参数摘要 (+ 失败原因)」，返回已转义好的 HTML 片段与原始
+// 工具名（供行尾标签展示）。
+function analysisTimelineEventText(event) {
+  var type = String(event.event_type || '');
+  var summary = String(event.summary || '');
+  if (['tool_started', 'tool_completed', 'tool_failed'].indexOf(type) < 0) {
+    return { text: esc(summary || type), tool: '' };
+  }
+  var tool = String(event.tool_name || '');
+  var args = summary;
+  var failedReason = '';
+  if (type === 'tool_failed') {
+    var sep = args.indexOf(' · ');
+    if (sep >= 0) { failedReason = args.slice(sep + 3); args = args.slice(0, sep); }
+  }
+  var openIdx = args.indexOf('(');
+  if (openIdx >= 0) args = args.slice(openIdx + 1);
+  if (args.slice(-1) === ')') args = args.slice(0, -1);
+  var action = analysisTimelineToolAction(tool) || tool || '工具调用';
+  return {
+    text: '<b>' + esc(action) + '</b>'
+      + (args ? ' <span class="analysis-timeline-args">' + esc(args) + '</span>' : '')
+      + (failedReason ? ' <span class="analysis-timeline-fail-reason">' + esc(failedReason) + '</span>' : ''),
+    tool: tool,
+  };
+}
+
+function analysisTimelineEventRow(event) {
+  var type = String(event.event_type || '');
+  var cancelled = type === 'analysis_failed' && String(event.status || '') === 'cancelled';
+  var cls = ({ tool_completed: 'done', analysis_completed: 'done',
+    tool_failed: 'failed', analysis_failed: cancelled ? 'stopped' : 'failed' })[type] || 'running';
+  var icon = ({ analysis_started: '▶', stage_changed: '◆', tool_started: '●',
+    tool_completed: '✓', tool_failed: '✗', progress: '●',
+    analysis_completed: '✓', analysis_failed: cancelled ? '■' : '✗' })[type] || '·';
+  var time = String(event.created_at || '').replace('T', ' ').slice(11, 19);
+  var duration = type === 'tool_completed' && Number(event.duration_ms) > 0
+    ? '<span class="analysis-timeline-duration">' + (Math.round(Number(event.duration_ms) / 100) / 10) + 's</span>'
+    : '';
+  var parts = analysisTimelineEventText(event);
+  return '<div class="analysis-timeline-item ' + cls + '">'
+    + '<span class="analysis-timeline-icon">' + icon + '</span>'
+    + (time ? '<span class="analysis-timeline-time">' + esc(time) + '</span>' : '')
+    + '<span class="analysis-timeline-text">' + parts.text + '</span>'
+    + (parts.tool ? '<span class="analysis-timeline-tool">' + esc(parts.tool) + '</span>' : '')
+    + duration + '</div>';
+}
+
+// 阶段分组标题：预采集（Controller 证据预采集）与 kkagent（AI 取证阶段）
+// 之间插一行分组行，长过程一眼可分辨「平台在做准备」和「模型在取证」。
+var ANALYSIS_STAGE_LABELS = { preflight: 'Controller 证据预采集', kkagent: 'AI 取证分析' };
+
+function renderAnalysisTimelineBody() {
+  var state = analysisTimelineState;
+  if (!state.events.length) {
+    var empty = state.terminal
+      ? '没有保存的过程事件（终态过程事件仅保留 ' + ANALYSIS_EVENT_RETENTION_DAYS + ' 天，超期会被清理）。'
+      : (state.history ? '正在读取执行过程…' : '排队中，等待 Worker 领取任务…');
+    return '<div class="analysis-timeline-queued"><span class="analysis-timeline-item '
+      + (state.terminal ? 'stopped' : 'running') + '">'
+      + '<span class="analysis-timeline-icon">' + (state.terminal ? '✕' : '⏳') + '</span>'
+      + '<span class="analysis-timeline-text">' + esc(empty) + '</span></span></div>';
+  }
+  var html = '';
+  var currentStage = null;
+  state.events.forEach(function (event) {
+    var stage = String(event.stage || '') || null;
+    if (ANALYSIS_STAGE_LABELS[stage] && stage !== currentStage) {
+      html += '<div class="analysis-timeline-stage">'
+        + '<span>' + esc(ANALYSIS_STAGE_LABELS[stage]) + '</span></div>';
+    }
+    currentStage = stage;
+    html += analysisTimelineEventRow(event);
+  });
+  return html;
+}
+
+function analysisTimelineMetaHtml(runStatus) {
+  var state = analysisTimelineState;
+  var started = state.events.filter(function (event) { return event.event_type === 'tool_started'; }).length;
+  var done = state.events.filter(function (event) { return event.event_type === 'tool_completed'; }).length;
+  var failed = state.events.filter(function (event) { return event.event_type === 'tool_failed'; }).length;
+  var elapsed = Math.max(0, Math.floor((Date.now() - state.openedAt) / 1000));
+  var elapsedText = elapsed >= 60
+    ? Math.floor(elapsed / 60) + 'm ' + (elapsed % 60) + 's'
+    : elapsed + 's';
+  var live = ['pending', 'snapshotting', 'analyzing'].indexOf(runStatus) >= 0;
+  return '<span>状态 ' + esc(analysisTimelineRunStateLabel(runStatus)) + '</span>'
+    + '<span>工具调用 ' + started + '</span>'
+    + '<span>成功 ' + done + '</span>'
+    + '<span>失败 ' + failed + '</span>'
+    + (live ? '<span>本次观察 ' + elapsedText + '</span>' : '');
+}
+
+function analysisTimelineSetTitle(view, statusText) {
+  // 弹框标题跟随当前视图：运行态「🔵 正在分析」，过程视图「🕐 执行过程」
+  // + 终态徽标，报告视图「📋 分析总结」（状态在 meta 行展示，不重复徽标）。
+  var state = analysisTimelineState;
+  var title = document.getElementById(state.modalId + '-title');
+  if (!title) return;
+  var prefix = ({ live: '🔵 正在分析 · #', timeline: '🕐 执行过程 · #',
+    report: '📋 分析总结 · #' })[view] || '🕐 执行过程 · #';
+  title.innerHTML = '<span>' + prefix + esc(state.issueId) + '</span>'
+    + (view === 'timeline' ? '<span class="analysis-timeline-badge">已结束'
+      + (statusText ? ' · ' + esc(statusText) : '') + '</span>' : '');
+}
+
+async function fetchAllAnalysisTimelineEvents() {
+  // 历史回看需要完整时间线，轮询只拿增量；终态 run 的事件不可变，按
+  // limit=200 翻页直到取完（events API 单页上限 200）。返回 null 表示
+  // 弹框已被关闭，调用方直接退出。
+  var state = analysisTimelineState;
+  var after = 0;
+  var events = [];
+  var runStatus = '';
+  var terminal = false;
+  for (var page = 0; page < 25; page += 1) {
+    var data = await api('/api/redmine-agent/daily-brief/runs/' + encodeURIComponent(state.runId)
+      + '/issues/' + encodeURIComponent(state.issueId)
+      + '/events?after_sequence=' + after + '&limit=200') || {};
+    if (!document.getElementById(state.modalId)) return null;
+    var pageEvents = Array.isArray(data.events) ? data.events : [];
+    events = events.concat(pageEvents);
+    after = Number(data.next_sequence) || after;
+    runStatus = String(data.run_status || runStatus);
+    terminal = Boolean(data.terminal);
+    if (pageEvents.length < 200) break;
+  }
+  return { events: events, runStatus: runStatus, terminal: terminal };
+}
+
+async function loadAnalysisTimelineHistory() {
+  var state = analysisTimelineState;
+  var modalId = state.modalId;
+  if (!state.runId || !document.getElementById(modalId)) { stopAnalysisTimelinePolling(); return; }
+  try {
+    var result = await fetchAllAnalysisTimelineEvents();
+    if (!result || !document.getElementById(modalId)) { stopAnalysisTimelinePolling(); return; }
+    if (!result.terminal) {
+      // 罕见竞态：历史入口打开瞬间 run 刚被重新分析置回运行态。退回实时
+      // 轮询，终态后照常原地切换报告。
+      state.history = false;
+      analysisTimelineSetTitle('live', '');
+      pollAnalysisTimeline();
+      return;
+    }
+    state.events = result.events;
+    state.runStatus = result.runStatus;
+    state.terminal = true;
+  } catch (error) {
+    if (!document.getElementById(modalId)) { stopAnalysisTimelinePolling(); return; }
+    state.terminal = true;
+    // 读取失败仍进入终态视图：渲染已取到的部分；空时间线显示「未保存」文案。
+  }
+  analysisTimelineSetTitle('timeline', analysisTimelineRunStateLabel(state.runStatus));
+  renderAnalysisTimelineBox();
+  var meta = document.getElementById(modalId + '-meta');
+  if (meta) meta.innerHTML = analysisTimelineMetaHtml(state.runStatus);
+  setAnalysisTimelineFooterView('timeline');
+}
+
+function analysisTimelineEnsureToggleButton() {
+  // 报告 ↔ 过程的唯一切换按钮：位置固定在关闭按钮左侧，只换文案，
+  // 视图切换时 footer 不跳动；终态/历史收尾时按需创建（运行态无此按钮）。
+  var modal = document.getElementById(analysisTimelineState.modalId);
+  var footer = modal && modal.querySelector('.modal-buttons');
+  if (!footer) return null;
+  var toggle = footer.querySelector('[data-analysis-timeline-toggle]');
+  if (!toggle) {
+    toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'ka-btn';
+    toggle.setAttribute('data-analysis-timeline-toggle', '1');
+    var close = footer.querySelector('[data-analysis-timeline-close]');
+    if (close) footer.insertBefore(toggle, close); else footer.appendChild(toggle);
+  }
+  return toggle;
+}
+
+function setAnalysisTimelineFooterView(view) {
+  var toggle = analysisTimelineEnsureToggleButton();
+  if (!toggle) return;
+  toggle.dataset.view = view;
+  toggle.textContent = view === 'timeline' ? '查看报告' : '查看过程';
+}
+
+async function setAnalysisTimelineView(view) {
+  // 终态/历史弹框的报告 ↔ 执行过程原地切换（不重建弹框，显示控制仍归
+  // ModalManager 单一所有者）。
+  var state = analysisTimelineState;
+  var modalId = state.modalId;
+  if (!state.runId || !document.getElementById(modalId)) return;
+  var box = document.getElementById(modalId + '-timeline');
+  var meta = document.getElementById(modalId + '-meta');
+  if (!box || !meta) return;
+  if (view === 'report') {
+    try {
+      var payload = await api('/api/redmine-agent/daily-brief/runs/'
+        + encodeURIComponent(state.runId)) || {};
+      if (!document.getElementById(modalId)) return;
+      var run = payload.run || {};
+      var issue = (payload.issues || [])[0] || {};
+      state.runStatus = String(run.status || state.runStatus || '');
+      box.innerHTML = '<div class="analysis-timeline-final">'
+        + analysisTimelineFinalBody(issue, run) + '</div>';
+      meta.innerHTML = '<span>状态 ' + esc(analysisTimelineRunStateLabel(state.runStatus)) + '</span>';
+      analysisTimelineSetTitle('report', analysisTimelineRunStateLabel(state.runStatus));
+      setAnalysisTimelineFooterView('report');
+    } catch (error) {
+      notifyUser('报告读取失败', (error && error.message) || '', 'error');
+    }
+    return;
+  }
+  if (!state.events.length) {
+    var result = await fetchAllAnalysisTimelineEvents();
+    if (!document.getElementById(modalId)) { stopAnalysisTimelinePolling(); return; }
+    if (result) {
+      state.events = result.events;
+      state.runStatus = result.runStatus || state.runStatus;
+    }
+    state.terminal = true;
+  }
+  renderAnalysisTimelineBox();
+  box.scrollTop = box.scrollHeight;
+  meta.innerHTML = analysisTimelineMetaHtml(state.runStatus);
+  analysisTimelineSetTitle('timeline', analysisTimelineRunStateLabel(state.runStatus));
+  setAnalysisTimelineFooterView('timeline');
+}
+
+function showAnalysisTimelineModal(runId, issueId, options) {
+  var state = analysisTimelineState;
+  stopAnalysisTimelinePolling();
+  options = options || {};
+  var modalId = 'analysisTimelineModal-' + Date.now();
+  state.modalId = modalId;
+  state.runId = String(runId || '');
+  state.issueId = Number(issueId) || 0;
+  state.openedAt = Date.now();
+  // 历史模式：终态 run 的完整时间线回看。不轮询、无停止按钮，终态时不
+  // 自动切换报告；「查看报告 / 查看过程」可互相切换。
+  state.history = Boolean(options.history);
+  var subject = String(options.subject || '').trim();
+  var modal = document.createElement('div');
+  modal.id = modalId;
+  modal.className = 'modal daily-brief-analysis-overlay';
+  modal.innerHTML = '<div class="modal-content daily-brief-modal">'
+    + '<div class="modal-header"><span class="modal-title daily-brief-modal-title">'
+    + '<span id="' + modalId + '-title"><span>'
+    + (state.history ? '🕐 执行过程 · #' : '🔵 正在分析 · #') + esc(state.issueId) + '</span>'
+    + (state.history ? '<span class="analysis-timeline-badge">已结束</span>' : '')
+    + '</span>'
+    + (subject ? '<span class="daily-brief-modal-subject">' + esc(subject) + '</span>' : '')
+    + '</span><button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '" data-analysis-timeline-close>&times;</button></div>'
+    + '<div class="modal-body daily-brief-modal-body"><div class="analysis-timeline" id="' + modalId + '-timeline">'
+    + renderAnalysisTimelineBody() + '</div></div>'
+    + '<div class="modal-buttons daily-brief-modal-footer"><div class="analysis-timeline-meta" id="' + modalId + '-meta">'
+    + analysisTimelineMetaHtml(state.history ? '' : 'pending') + '</div>'
+    + (state.history ? '' : '<button class="ka-btn" data-analysis-timeline-stop data-a0="' + esc(state.runId) + '">停止分析</button>')
+    + '<button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '" data-analysis-timeline-close>关闭</button></div></div>';
+  showDailyBriefAnalysisModal(modal);
+  if (state.history) loadAnalysisTimelineHistory(); else pollAnalysisTimeline();
+}
+
+function renderAnalysisTimelineBox() {
+  var state = analysisTimelineState;
+  var box = document.getElementById(state.modalId + '-timeline');
+  if (!box) return;
+  var stick = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  box.innerHTML = renderAnalysisTimelineBody();
+  if (stick) box.scrollTop = box.scrollHeight;
+}
+
+async function pollAnalysisTimeline() {
+  var state = analysisTimelineState;
+  if (!state.runId || !document.getElementById(state.modalId)) {
+    stopAnalysisTimelinePolling();
+    return;
+  }
+  try {
+    state.controller = new AbortController();
+    var data = await api('/api/redmine-agent/daily-brief/runs/' + encodeURIComponent(state.runId)
+      + '/issues/' + encodeURIComponent(state.issueId)
+      + '/events?after_sequence=' + state.after + '&limit=100', { signal: state.controller.signal }) || {};
+    if (!document.getElementById(state.modalId)) { stopAnalysisTimelinePolling(); return; }
+    if (Array.isArray(data.events) && data.events.length) {
+      state.events = state.events.concat(data.events).slice(-400);
+      state.after = Number(data.next_sequence) || state.after;
+      renderAnalysisTimelineBox();
+    }
+    var meta = document.getElementById(state.modalId + '-meta');
+    if (meta) meta.innerHTML = analysisTimelineMetaHtml(String(data.run_status || ''));
+    if (data.terminal) {
+      await finishAnalysisTimeline();
+      return;
+    }
+  } catch (error) {
+    if (!document.getElementById(state.modalId)) { stopAnalysisTimelinePolling(); return; }
+    if (error && (error.name === 'AbortError' || error.status === 404)) {
+      // 弹框已关（abort）或 run 永久不可达：停止轮询，不做无意义重试。
+      stopAnalysisTimelinePolling();
+      return;
+    }
+    // 网络瞬断：继续下一轮。
+  }
+  var interval = document.hidden ? 12000 : 2500;
+  analysisTimelineState.timer = setTimeout(pollAnalysisTimeline, interval);
+}
+
+function analysisTimelineFinalBody(issue, run) {
+  var banner = '';
+  var status = String((issue || {}).status || run.status || '');
+  if (status === 'failed') {
+    banner = '<div style="color:var(--bad,#ef4444)"><b>分析失败'
+      + (issue.error_type ? '（' + esc(issue.error_type) + '）' : '') + '</b>'
+      + '<div style="white-space:pre-wrap;margin-top:4px">' + esc(issue.error || run.error || '未知错误') + '</div></div>';
+  } else if (status === 'cancelled' || run.status === 'cancelled') {
+    banner = '<div class="daily-brief-warning">分析已停止。已完成的结果会保留，可稍后重新分析。</div>';
+  }
+  var body = '';
+  if (String(((issue || {}).result || {}).detailed_report || '').trim()) {
+    body = singleIssueAnalysisReportBody({ run: run, issues: [issue] });
+  }
+  return (banner || '<div class="muted">本次分析未生成报告。</div>') + body;
+}
+
+async function finishAnalysisTimeline() {
+  var state = analysisTimelineState;
+  if (!state.runId || !document.getElementById(state.modalId)) { stopAnalysisTimelinePolling(); return; }
+  var modalId = state.modalId;
+  try {
+    var payload = await api('/api/redmine-agent/daily-brief/runs/' + encodeURIComponent(state.runId)) || {};
+    if (!document.getElementById(modalId)) { stopAnalysisTimelinePolling(); return; }
+    var run = payload.run || {};
+    var issue = (payload.issues || [])[0] || {};
+    // 独立单号分析：把终态写回列表缓存；晨报 run 交给整卡刷新。
+    if (String(run.mode || '').indexOf('issue:') === 0) {
+      upsertSingleIssueAnalysis(payload);
+      renderSingleIssueAnalysisHistory();
+    } else {
+      loadDailyBrief();
+    }
+    state.runStatus = String(run.status || state.runStatus || '');
+    analysisTimelineSetTitle('report', analysisTimelineRunStateLabel(state.runStatus));
+    var box = document.getElementById(modalId + '-timeline');
+    if (box) box.innerHTML = '<div class="analysis-timeline-final">' + analysisTimelineFinalBody(issue, run) + '</div>';
+    var meta = document.getElementById(modalId + '-meta');
+    if (meta) meta.innerHTML = '<span>状态 ' + esc(analysisTimelineRunStateLabel(run.status)) + '</span>';
+    setAnalysisTimelineFooterView('report');
+    var stopButton = document.querySelector('[data-analysis-timeline-stop][data-a0="' + state.runId + '"]');
+    if (stopButton) stopButton.remove();
+  } catch (_) {
+    // 终态详情拉取失败不阻塞退出；列表轮询会自然收敛。
+  }
+  haltAnalysisTimelineLoop();
+}
+
+async function stopAnalysisTimelineRun(runId, button) {
+  if (!runId || !button || button.disabled) return;
+  button.disabled = true;
+  button.textContent = '停止中…';
+  try {
+    await api('/api/redmine-agent/daily-brief/runs/' + encodeURIComponent(runId) + '/cancel', { method: 'POST' });
+    // 不退出轮询：时间线会随后续事件/run 终态收敛为「已停止」。
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = '停止分析';
+    notifyUser('停止失败', error.message, 'error');
+  }
+}
+
+document.addEventListener('click', function (event) {
+  var stop = event.target.closest('[data-analysis-timeline-stop]');
+  if (stop) stopAnalysisTimelineRun(stop.dataset.a0, stop);
+  // 报告 ↔ 执行过程单按钮切换：点按钮即去另一个视图，按钮自身不移动。
+  var toggle = event.target.closest('[data-analysis-timeline-toggle]');
+  if (toggle) setAnalysisTimelineView(toggle.dataset.view === 'timeline' ? 'report' : 'timeline');
+});
 
 async function loadSingleIssueAnalysisHistory() {
   try {
@@ -3101,8 +3697,6 @@ async function restoreSingleIssueAnalysis() {
     if (!run.run_id) return;
     rememberSingleIssueAnalysisRun(run.run_id);
     var issue = (data.issues || [])[0] || {};
-    var input = document.getElementById('singleIssueAnalysisId');
-    if (input && issue.issue_id) input.value = String(issue.issue_id);
     await loadSingleIssueAnalysis();
   } catch (_) {}
 }
@@ -3118,8 +3712,7 @@ async function analyzeSingleIssueFromInput(skipHistoryLookup) {
   // checks remote history first so older records receive the default
   // incremental mode; Enter handles lookup before it reaches this path.
   if (!skipHistoryLookup) await lookupSingleIssueHistory(value);
-  setSingleIssueAnalysisBusy(true);
-  document.getElementById('singleIssueAnalysisStop').hidden = true;
+  document.getElementById('singleIssueAnalysisStart').disabled = true;
   try {
     var modeSelect = document.getElementById('singleIssueAnalysisMode');
     var hasHistory = singleIssueAnalysisHistory.some(function (item) {
@@ -3139,7 +3732,7 @@ async function analyzeSingleIssueFromInput(skipHistoryLookup) {
     }) || {};
     if (!queued.run_id) throw new Error(queued.error || '未创建分析任务');
     rememberSingleIssueAnalysisRun(queued.run_id);
-    setSingleIssueAnalysisBusy(true);
+    resetSingleIssueAnalysisForm();
     await loadSingleIssueAnalysis();
   } catch (e) {
     setSingleIssueAnalysisBusy(false);
@@ -3246,7 +3839,19 @@ document.addEventListener('click', function (event) {
     return;
   }
   var view = event.target.closest('[data-single-issue-view]');
-  if (view) { showSingleIssueAnalysis(view.dataset.singleIssueView, false); return; }
+  if (view) {
+    // 运行中的分析打开实时进度时间线（终态后原地切换报告，可再切回过程）；
+    // 历史条目仍默认静态报告弹框，30 天内可在其中经「执行过程」回看时间线。
+    var item = findSingleIssueAnalysis(view.dataset.singleIssueView);
+    var run = (item || {}).run || {};
+    var issue = ((item || {}).issues || [])[0] || {};
+    if (item && singleIssueAnalysisIsRunning(run, issue)) {
+      showAnalysisTimelineModal(run.run_id, issue.issue_id, { subject: issue.subject });
+    } else {
+      showSingleIssueAnalysis(view.dataset.singleIssueView, false);
+    }
+    return;
+  }
   var statistics = event.target.closest('[data-single-issue-statistics]');
   if (statistics) { showSingleIssueAnalysis(statistics.dataset.singleIssueStatistics, true); return; }
   var page = event.target.closest('[data-single-issue-page]');
@@ -3257,8 +3862,8 @@ document.addEventListener('click', function (event) {
 
 document.addEventListener('input', function (event) {
   if (event.target.id !== 'singleIssueAnalysisId') return;
-  singleIssueAnalysisPage = 1;
-  renderSingleIssueAnalysisHistory();
+  // 只定位不过滤：不重绘列表；纯数字输入按单号翻页/滚动/高亮，
+  // 未命中时历史列表保持原样。
   clearTimeout(singleIssueHistoryLookupTimer);
   var value = String(event.target.value || '').trim();
   if (!/^[0-9]+$/.test(value)) return;
@@ -3374,17 +3979,6 @@ document.addEventListener('click', function (event) {
 document.addEventListener('keydown', function (event) {
   if (event.key === 'Escape') setSingleIssueDevicePickerOpen(false);
 });
-
-async function stopSingleIssueAnalysis() {
-  if (!singleIssueAnalysisRunId) return;
-  try {
-    await api('/api/redmine-agent/daily-brief/runs/' + encodeURIComponent(singleIssueAnalysisRunId) + '/cancel', {method: 'POST'});
-    await loadSingleIssueAnalysis();
-  } catch (e) {
-    notifyUser('停止失败', e.message, 'error');
-  }
-}
-window.stopSingleIssueAnalysis = stopSingleIssueAnalysis;
 
 if (!window.singleIssueAnalysisSubmitBound) {
   window.singleIssueAnalysisSubmitBound = true;
@@ -3531,6 +4125,17 @@ function dailyBriefDuration(value) {
   return minutes.toLocaleString('zh-CN') + ' 分 ' + (seconds % 60) + ' 秒';
 }
 
+// 每日晨报行的 meta 标签：与「Redmine 单号分析」行同构（分析时间 / 实机
+// 取证状态）。晨报按天聚合，附上分析时间便于区分增量重跑与隔天批次。
+function dailyBriefIssueMetaTags(issue) {
+  var tags = [];
+  var analyzedAt = String(issue.finished_at || issue.started_at || '').replace('T', ' ').slice(0, 16);
+  if (analyzedAt) tags.push('<span>分析时间 ' + esc(analyzedAt) + '</span>');
+  var evidenceTag = dailyBriefEvidenceTag(dailyBriefObject(issue.ai_execution).device_evidence_status);
+  if (evidenceTag) tags.push(evidenceTag);
+  return tags.join('');
+}
+
 function renderDailyBriefIssueStatistics(statistics) {
   var stats = dailyBriefObject(statistics);
   if (!Number(stats.execution_count || 0)) return '';
@@ -3645,7 +4250,7 @@ function renderDailyBriefInner(data) {
     if (issue.status === 'failed') {
       var etype = String(issue.error_type || '').trim();
       var err = String(issue.error || '').trim();
-      var errorLabel = ({ schema_mismatch: '返回格式不兼容', invalid_ai_output: 'AI 返回无法解析', kkagent_error: '分析服务异常', interrupted: '分析进程被中断', timeout: '分析超时', kkagent_unavailable: '分析服务不可用', max_turns: '步数预算耗尽', llm_timeout: '模型服务超时' })[etype] || etype;
+      var errorLabel = ({ schema_mismatch: '返回格式不兼容', invalid_ai_output: 'AI 返回无法解析', evidence_gate_failed: '证据门禁未通过', kkagent_error: '分析服务异常', interrupted: '分析进程被中断', timeout: '分析超时', llm_timeout: '模型服务超时', kkagent_unavailable: '分析服务不可用', oversized_output: '输出超限被终止', repair_failed: '同会话自动修复失败', max_turns: '步数预算耗尽' })[etype] || etype;
       return '<span class="daily-brief-state failed" title="' + esc(err) + '">❌ 分析失败'
         + (errorLabel ? ' · ' + esc(errorLabel) : '') + '</span>';
     }
@@ -3662,17 +4267,36 @@ function renderDailyBriefInner(data) {
     var subject = String(issue.subject || '').trim();
     var titleFull = '#' + issue.issue_id + (subject ? ' ' + subject : '');
     var hover = r.problem_summary ? titleFull + ' — ' + r.problem_summary : titleFull;
+    // 与「Redmine 单号分析」条目同构：标题行只放 #单号 + 标题 + meta 标签
+    // （分析时间 / 实机取证状态），problem_summary / suggested_solution 收进
+    // 「查看分析」弹框（悬停 title 仍给一行摘要）。按钮集一致：查看分析 /
+    // 打开 Redmine / AI 统计 / 增量-全量选择 / 重新分析 ↔ 停止分析。增量在
+    // 晨报 run 上重跑（结论原地更新）；全量走 analyze-issue 新建独立 run
+    // （晨报记录保留可审计，新结论进「Redmine 单号分析」历史）。行级停止走
+    // run 级精确取消（stopDailyBriefRun）。
+    var issueRunning = ['pending', 'snapshotting', 'analyzing', 'running']
+      .indexOf(String(issue.status || '')) >= 0;
     return '<div class="daily-brief-row">'
       + '<div class="daily-brief-main"><span class="daily-brief-priority">' + prio + '</span>'
       + '<span class="daily-brief-issue-title" title="' + esc(hover) + '">'
       + '<b>#' + esc(issue.issue_id) + '</b>' + (subject ? ' ' + esc(subject) : '')
-      + (r.problem_summary ? '<span style="display:block;white-space:normal">' + esc(r.problem_summary) + '</span>' : '')
-      + (r.suggested_solution ? '<span class="muted" style="display:block;white-space:normal">下一步：' + esc(r.suggested_solution) + '</span>' : '') + '</span>'
+      + '<span class="single-issue-analysis-meta">' + dailyBriefIssueMetaTags(issue) + '</span></span>'
       + '</div>'
-      + issueStateHtml(issue)
+      + (stopping && issueRunning
+        ? '<span class="daily-brief-state">⏳ 停止中…</span>'
+        : issueStateHtml(issue))
       + '<div class="daily-brief-row-actions"><button type="button" class="ka-btn" data-click="showDailyBriefIssue" data-a0="' + esc(issue.issue_id) + '" data-prevent data-stop>查看分析</button>'
       + '<button class="ka-btn" data-click="openRedmineIssue" data-a0="' + esc(issue.issue_id) + '">打开 Redmine</button>'
-      + '<button class="ka-btn" data-click="showDailyBriefIssueStatistics" data-a0="' + esc(issue.issue_id) + '">AI 统计</button></div>'
+      + '<button class="ka-btn" data-click="showDailyBriefIssueStatistics" data-a0="' + esc(issue.issue_id) + '">AI 统计</button>'
+      + (issueRunning
+        ? '<button class="ka-btn" data-click="stopDailyBriefRun"' + (stopping ? ' disabled' : '') + '>' + (stopping ? '⏳ 停止中…' : '停止分析') + '</button>'
+        : '<select class="single-issue-reanalysis-mode" data-daily-brief-reanalysis-mode'
+          + ' aria-label="#' + esc(issue.issue_id) + ' 重新分析方式"'
+          + (inflight ? ' disabled title="晨报批次仍在执行，等待结束后再重分析此项"' : '') + '>'
+          + '<option value="incremental">增量</option><option value="full">全量</option></select>'
+          + '<button class="ka-btn" data-daily-brief-reanalyze="' + esc(issue.issue_id) + '"'
+          + (inflight ? ' disabled title="晨报批次仍在执行，等待结束后再重分析此项"' : '') + '>重新分析</button>')
+      + '</div>'
       + '</div>';
   }).join('');
   return head + rows;
@@ -3696,6 +4320,16 @@ function findDailyBriefIssue(issueId) {
 }
 
 function showDailyBriefIssue(issueId) {
+  // 运行中的分析展示实时进度时间线（含晨报批量 run 内的单条分析）；
+  // 完成后原地切换为报告，并保留「执行过程」入口回看 30 天内的时间线。
+  var run = (dailyBriefCache && dailyBriefCache.run) || {};
+  var issue = findDailyBriefIssue(issueId) || {};
+  var busyStates = ['pending', 'snapshotting', 'analyzing', 'running'];
+  if (run.run_id && (busyStates.indexOf(String(run.status || '')) >= 0
+    || busyStates.indexOf(String(issue.status || '')) >= 0)) {
+    showAnalysisTimelineModal(run.run_id, issueId, { subject: issue.subject });
+    return;
+  }
   try {
     showDailyBriefIssueModal(issueId);
   } catch (error) {
@@ -3754,8 +4388,8 @@ function showDailyBriefIssueFallback(issueId) {
     + '<div class="modal-header"><span class="modal-title">每日晨报 · #' + esc(issueId) + '</span>'
     + '<button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
     + '<div class="modal-body daily-brief-modal-body"><div class="muted">该历史分析结果包含旧格式字段，暂无法完整呈现。重新分析此项后会生成兼容的完整结果。</div></div>'
-    + '<div class="modal-buttons daily-brief-modal-footer"><button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">关闭</button>'
-    + '<button data-daily-brief-reanalyze="' + esc(issueId) + '">深度分析此项</button></div></div>';
+    + '<div class="modal-buttons daily-brief-modal-footer"><button data-daily-brief-reanalyze="' + esc(issueId) + '">深度分析此项</button>'
+    + '<button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">关闭</button></div></div>';
   showDailyBriefAnalysisModal(modal);
 }
 
@@ -3913,12 +4547,14 @@ function showDailyBriefIssueModal(issueId) {
         ${hasReport ? '' : section('✉️ 回复草稿（EN / 中文）', [r.suggested_reply_en, r.suggested_reply_zh].filter(Boolean).join('\n\n—— 中文 ——\n\n'), false)}
       </div>
       <div class="modal-buttons daily-brief-modal-footer">
-        <button class="secondary" data-click="removeDynamicModal" data-a0="${modalId}">关闭</button>
+        ${(dailyBriefCache.run && dailyBriefCache.run.run_id) ? '<button class="secondary" data-click="openSingleIssueAnalysisTimeline" data-a0="' + esc(issueId) + '"'
+          + (singleIssueAnalysisHasHistory(dailyBriefCache.run, issue) ? '' : ' disabled title="过程事件已清理（终态过程仅保留 30 天）"') + '>执行过程</button>' : ''}
         ${Number(dailyBriefObject(issue.ai_statistics).execution_count || 0) ? '<button class="secondary" data-click="showDailyBriefIssueStatistics" data-a0="' + esc(issueId) + '">AI 统计</button>' : ''}
         <button class="secondary" data-daily-brief-reanalyze="${esc(issueId)}">深度分析此项</button>
         ${issue.status === 'completed' && dailyBriefAnalysisMode(r, gate) === 'diagnostic' && r.result_format !== 'kkagent_markdown' ? '<button class="secondary" data-daily-brief-save-case="' + esc(issueId) + '">存为案例</button>' : ''}
         ${r.suggested_reply_en ? '<button class="secondary" data-click="copyDailyBriefReply" data-a0="' + esc(issueId) + '" data-a1="en">复制英文回复</button>' : ''}
         ${r.suggested_reply_zh ? '<button data-click="copyDailyBriefReply" data-a0="' + esc(issueId) + '" data-a1="zh">复制中文回复</button>' : ''}
+        <button class="secondary" data-click="removeDynamicModal" data-a0="${modalId}">关闭</button>
       </div>
     </div>`;
   showDailyBriefAnalysisModal(modal);
@@ -3927,28 +4563,61 @@ function showDailyBriefIssueModal(issueId) {
 // 「查看分析」成为静默无响应的按钮。
 window.showDailyBriefIssue = showDailyBriefIssue;
 window.showDailyBriefIssueStatistics = showDailyBriefIssueStatistics;
+window.openSingleIssueAnalysisTimeline = openSingleIssueAnalysisTimeline;
+
+function briefRowReanalysisMode(button) {
+  // 晨报行「重新分析」读同行选择器；报告弹框按钮无选择器，默认增量。
+  var actions = button.closest('.daily-brief-row-actions');
+  var select = actions && actions.querySelector('[data-daily-brief-reanalysis-mode]');
+  return String((select && select.value) || 'incremental') === 'full' ? 'full' : 'incremental';
+}
 
 async function reanalyzeDailyBriefIssue(issueId, button) {
   var run = dailyBriefCache && dailyBriefCache.run;
   if (!run || !run.brief_date) return;
+  var mode = briefRowReanalysisMode(button);
   var original = button.textContent;
   button.disabled = true;
   button.textContent = '⏳ 分析中…';
   try {
-    var runId = run.run_id || '';
     var base = '/api/redmine-agent/daily-brief';
+    if (mode === 'full') {
+      // 全量：与单号分析同语义——新建独立 run 保留完整审计链，不覆盖
+      // 晨报 run 里这条的历史结论；结果出现在「Redmine 单号分析」列表。
+      // 晨报行不翻转状态（批量 run 未变），由单号分析历史轮询新任务。
+      var payload = {issue_id: Number(issueId), analysis_mode: 'full'};
+      if (String(run.device_serial || '').trim()) payload.device_serial = String(run.device_serial).trim();
+      if (String(run.analysis_hint || '').trim()) payload.analysis_hint = String(run.analysis_hint).trim();
+      var queued = await api(base + '/analyze-issue', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
+      }) || {};
+      if (!queued.run_id) throw new Error(queued.error || '未创建全量分析任务');
+      button.disabled = false;
+      button.textContent = original;
+      notifyUser('已加入全量分析队列', '#' + issueId + ' 将在独立 run 中重新分析；完成后可在下方 Redmine 单号分析中查看', 'success');
+      upsertSingleIssueAnalysis({
+        run: {run_id: queued.run_id, status: queued.status || 'pending', device_serial: String(payload.device_serial || '')},
+        issues: [{issue_id: Number(issueId), status: 'pending'}],
+      });
+      renderSingleIssueAnalysisHistory();
+      loadSingleIssueHistoryRun(queued.run_id);
+      return;
+    }
+    var runId = run.run_id || '';
     var url = runId
       ? base + '/runs/' + encodeURIComponent(runId) + '/issues/' + encodeURIComponent(issueId) + '/reanalyze'
       : base + '/' + encodeURIComponent(run.brief_date) + '/issues/' + encodeURIComponent(issueId) + '/reanalyze';
-    var queued = await api(url, {method: 'POST'}) || {};
-    if (dailyBriefCache && dailyBriefCache.run) dailyBriefCache.run.status = queued.status || 'pending';
+    var incremental = await api(url, {method: 'POST'}) || {};
+    if (dailyBriefCache && dailyBriefCache.run) dailyBriefCache.run.status = incremental.status || 'pending';
     var issue = dailyBriefCache && (dailyBriefCache.issues || []).find(function (item) { return String(item.issue_id) === String(issueId); });
     if (issue) issue.status = 'pending';
     dailyBriefManualPoll = true;
     await loadDailyBrief();
-    removeDynamicModal(button.closest('.modal').id);
+    // 晨报行内的「重新分析」不在弹框里（closest 为 null），只关弹框场景。
+    var modal = button.closest('.modal');
+    if (modal) removeDynamicModal(modal.id);
     notifyUser('已加入分析队列', '#' + issueId + ' 将由独立 Worker 重新分析', 'success');
-    pollDailyBriefRun(queued.run_id || run.run_id);
+    pollDailyBriefRun(incremental.run_id || run.run_id);
   } catch (e) {
     button.disabled = false;
     button.textContent = original;

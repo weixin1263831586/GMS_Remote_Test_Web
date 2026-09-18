@@ -132,22 +132,23 @@ class GlobalState:
             expired_progress = self._cleanup_expired(
                 self.firmware_upload_progress, self.firmware_upload_progress_lock, UPLOAD_PROGRESS_MAX_AGE_SECONDS)
 
-            # 清理断开的终端SSH会话
+            # 清理断开的终端SSH会话：锁内只摘除过期会话引用，资源回收
+            # （SSH/channel close 含信号等待）在锁外执行，避免阻塞
+            # 其他用户的终端输入/输出。
+            expired_sessions = []
             with self.terminal_lock:
-                expired_sessions = []
                 for sid, session in list(self.terminal_ssh_sessions.items()):
                     ws = session.get('websocket')
                     if ws is None or (hasattr(ws, 'client_state') and ws.client_state == WebSocketState.DISCONNECTED):
-                        expired_sessions.append(sid)
-                for sid in expired_sessions:
-                    session = self.terminal_ssh_sessions.pop(sid)
-                    self._close_ssh_safely(session.get('ssh'))
-                    channel = session.get('channel')
-                    if channel:
-                        try:
-                            channel.close()
-                        except Exception:
-                            pass
+                        expired_sessions.append(self.terminal_ssh_sessions.pop(sid))
+            for session in expired_sessions:
+                self._close_ssh_safely(session.get('ssh'))
+                channel = session.get('channel')
+                if channel:
+                    try:
+                        channel.close()
+                    except Exception:
+                        pass
 
             # 清理USB/IP过期状态（超过24小时的）
             expired_usbip = self._cleanup_expired(

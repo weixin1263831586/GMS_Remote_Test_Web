@@ -133,6 +133,52 @@ class DailyBriefApiAuthzTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn("run_id", resp.json()["data"])
 
+    def test_analysis_events_increment_and_owner_acl(self):
+        """events 端点：after_sequence 增量协议 + 跨 owner 一律 404。"""
+        from features.redmine.daily_brief_analysis_events import (
+            event_store_for_repository,
+        )
+
+        service = daily_brief_api.DailyBriefService("owner-a")
+        run = service.repository.get_run(
+            service.start_issue_analysis(652654, subject="#652654")["run_id"]
+        )
+        store = event_store_for_repository(service.repository)
+        store.append(run.run_id, 652654, {"event_type": "analysis_started"})
+        store.append(
+            run.run_id, 652654,
+            {"event_type": "tool_started", "tool_name": "gms_rt_redmine_journals"},
+        )
+        headers = {"x-test-scopes": "redmine.read"}
+        first = self.client.get(
+            f"/api/redmine-agent/daily-brief/runs/{run.run_id}/issues/652654/events",
+            headers=headers,
+        )
+        self.assertEqual(first.status_code, 200)
+        payload = first.json()["data"]
+        self.assertEqual([event["sequence"] for event in payload["events"]], [1, 2])
+        self.assertEqual(payload["next_sequence"], 2)
+        self.assertFalse(payload["terminal"])
+        self.assertEqual(
+            set(payload["events"][0]),
+            {"sequence", "event_type", "stage", "tool_name", "status",
+             "summary", "duration_ms", "created_at"},
+        )
+        incremental = self.client.get(
+            f"/api/redmine-agent/daily-brief/runs/{run.run_id}/issues/652654/events"
+            "?after_sequence=2",
+            headers=headers,
+        )
+        self.assertEqual(incremental.json()["data"]["events"], [])
+        self.assertEqual(incremental.json()["data"]["next_sequence"], 2)
+        # 其他 owner（以及不存在的 run）一律 404，不泄露存在性。
+        for owner, run_id in (("owner-b", run.run_id), ("owner-a", "db_missing")):
+            response = self.client.get(
+                f"/api/redmine-agent/daily-brief/runs/{run_id}/issues/652654/events",
+                headers={**headers, "x-test-owner": owner},
+            )
+            self.assertEqual(response.status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,7 @@ import time
 from typing import Any
 
 from . import daily_brief_cancellation as cancellation
+from .daily_brief_analysis_events import start_analysis_progress
 from .daily_brief_deep_analysis import precollect_deep_evidence
 from .daily_brief_execution_statistics import summarize_execution_statistics
 from .daily_brief_execution_view import issue_payload
@@ -29,6 +30,7 @@ from .daily_brief_report import summarize_daily_brief
 from .daily_brief_repository import (
     TERMINAL_RUN_STATUSES,
     DailyBriefRepository,
+    canonical_owner_id,
     owner_daily_brief_repository,
 )
 from .daily_brief_run_starter import DailyBriefRunStarterMixin
@@ -70,7 +72,10 @@ class DailyBriefService(DailyBriefRunStarterMixin):
     _RUN_EXECUTIONS: dict[str, asyncio.Task[DailyBriefRun | None]] = {}
 
     def __init__(self, owner_id: str, config_manager: Any | None = None):
-        self.owner_id = str(owner_id or "anonymous")
+        # owner 身份统一收敛为 sanitize 目录名：Web 匿名会话传入原始
+        # display id（user@ip），systemd/CLI 传入目录名，两者必须指向同
+        # 一份 per-owner 数据（run.owner_id 比较与库路径都依赖这一点）。
+        self.owner_id = canonical_owner_id(str(owner_id or "anonymous"))
         self.config_manager = config_manager
         self.repository: DailyBriefRepository = owner_daily_brief_repository(self.owner_id)
 
@@ -488,6 +493,9 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         record.started_at = _now()
         record.attempt_count += 1
         self.repository.upsert_issue(record)
+        # 实时进度时间线（preflight/kkagent/终态统一落库点；终态事件由
+        # analyze_with_persisted_cancel 收敛为完成/已停止）。
+        progress = start_analysis_progress(self.repository, run, issue_id, record)
 
         started = time.monotonic()
         try:
@@ -499,6 +507,7 @@ class DailyBriefService(DailyBriefRunStarterMixin):
                 analyze_entry.setdefault("analysis_hint", config["analysis_hint"])
             # Deep analysis owns a deterministic read-only baseline（含取消
             # 轮询与 profile 判定，编排拆在 daily_brief_deep_analysis）。
+            analyze_entry["_progress_recorder"] = progress
             await precollect_deep_evidence(
                 repository=self.repository, run=run, issue_id=issue_id,
                 analyzer=analyzer, entry=analyze_entry,

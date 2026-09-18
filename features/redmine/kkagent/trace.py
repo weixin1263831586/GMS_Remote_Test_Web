@@ -532,11 +532,15 @@ def consume_event(trace: KkAgentTrace, event: dict[str, Any]) -> None:
             _apply_usage(trace, event.get("usage"), override=True)
 
 
-def consume_line(trace: KkAgentTrace, raw_line: str | bytes) -> bool:
+def consume_line(trace: KkAgentTrace, raw_line: str | bytes, *, on_event: Any = None) -> bool:
     """消费一行 NDJSON；返回是否为可解析 JSON。
 
     非法行（二进制杂讯、截断行）返回 False 并留给调用方进入 raw 兜底
     解析路径——不做猜测修复。
+
+    ``on_event``：可选的实时事件分流回调（分析进度时间线的接入点）。
+    每条可解析事件在并入轨迹后原样回调；回调自身异常只吞掉并继续——
+    进度观测永远不得影响取证轨迹的完整性。
     """
     text = raw_line.decode("utf-8", errors="replace") if isinstance(raw_line, bytes) else raw_line
     text = text.strip()
@@ -549,6 +553,11 @@ def consume_line(trace: KkAgentTrace, raw_line: str | bytes) -> bool:
     if not isinstance(event, dict):
         return False
     consume_event(trace, event)
+    if on_event is not None:
+        try:
+            on_event(event)
+        except Exception:
+            pass
     return True
 
 

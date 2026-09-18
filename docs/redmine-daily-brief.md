@@ -44,6 +44,19 @@ Web 手动触发 → SQLite 持久 job 队列 → 独立 daily_brief_worker
 `RedmineAgentDB.get_workload_statistics()` 判定（与个人看板同源）；
 Daily Brief、triage 工具、前端均不得重新实现筛选规则。
 
+## owner 身份规范（canonical owner id）
+
+Web 匿名会话的请求 owner 是原始 display id（`user@ip`），而
+systemd/CLI/Worker 用 sanitize 后的目录名（`user_ip`）。晨报的
+per-owner 库按目录落盘，runs 表的 `owner_id` 必须**始终**写 sanitize
+后的 canonical 值：入库（`create_run` / `update_run`）与所有按 owner
+查询的仓库方法统一经 `canonical_owner_id()` 规范化，
+`DailyBriefService.__init__` 同样收敛入口。禁止调用方直接用原始
+display id 比对 `run.owner_id`。schema v5 迁移会把存量库里的 legacy
+`owner_id` 一次性改写为 canonical；与既有 canonical 行
+`(owner_id, brief_date, mode)` 冲突的孪生 run 连同子表记录删除
+（保留 canonical 孪生，即定时任务写入的权威报告）。
+
 ## 配置（owner runtime `redmine_daily_brief` 段）
 
 ```json
@@ -193,6 +206,41 @@ schema 迁移（建表、补列）必须满足：
   `CrossProcessConsistencyTests`（含 8 进程并发初始化用例）与
   `test_migration_stamps_user_version_and_fast_paths` /
   `test_user_version_rollback_is_safe_on_reopen`。
+
+### 分析进度时间线（realtime progress）
+
+「查看分析」弹框在分析运行中展示实时执行时间线，数据链路（ADR：轮询而非
+SSE/WebSocket）：
+
+```
+kkagent --output-format stream-json
+    → consume_line(on_event=…)            features/redmine/kkagent/trace.py
+    → ProgressTap（tool_call/tool_result 归一化）  kkagent/progress_tap.py
+    → AnalysisProgressRecorder（脱敏/白名单摘要）  daily_brief_analysis_events.py
+    → redmine_daily_brief_analysis_events 表（per-owner SQLite）
+    → GET /daily-brief/runs/{run_id}/issues/{issue_id}/events?after_sequence=N
+    → 前端 2.5s 增量轮询，终态后原地切换最终报告
+```
+
+- 事件词表固定 8 种（analysis_started / stage_changed / tool_started /
+  tool_completed / tool_failed / progress / analysis_completed /
+  analysis_failed），UI 不消费 kkagent 原始协议；
+- 只落 allowlist 字段（tool_name/stage/status/summary/duration/时间），
+  工具输出与 reasoning 一律不落库；summary 仅含身份字段摘录并经
+  `scrub_secrets` 清洗；
+- preflight（Controller 证据预采集）与 kkagent 工具调用都会产生事件；
+  取消/失败同样收敛出终态事件；
+- 表通过幂等 `CREATE TABLE/INDEX IF NOT EXISTS` 自举（写锁内执行），不
+  占用 `user_version` 快路径；终态 run 的事件保留 30 天，Worker 启动时
+  清理（`purge_expired`，含 run 行已消失的孤儿事件）。
+- 每日晨报行与「Redmine 单号分析」条目的按钮集一致：查看分析 / 打开
+  Redmine / AI 统计 / 增量-全量选择 / 重新分析 ↔ 停止分析。行级停止走
+  run 级精确取消（`POST /daily-brief/runs/{run_id}/cancel`）。「增量」在
+  晨报 run 上按单重跑（结论原地更新）；「全量」走 `analyze-issue` 新建
+  独立 `issue:` run（晨报记录保留可审计，新结论进入单号分析历史）。
+- 终态 run 在 30 天保留期内可从报告弹框「执行过程」回看完整时间线
+  （历史模式：不轮询、终态徽标，报告 ↔ 执行过程原地互切）；超期后
+  按钮禁用并提示已清理。
 
 ## 已知限制（第一阶段）
 

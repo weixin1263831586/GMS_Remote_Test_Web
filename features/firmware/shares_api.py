@@ -4,6 +4,7 @@ import getpass
 import json
 import os
 import re
+import stat as stat_module
 import threading
 import time
 import uuid
@@ -129,6 +130,35 @@ def _validate_remote_path(
         raise ValueError(f"远端路径不在允许范围内: {path}")
 
 
+def _canonicalize_remote_path(
+    sftp: paramiko.SFTPClient,
+    path: str,
+    config: dict[str, Any],
+    additional_roots: tuple[str, ...] = (),
+) -> str:
+    """Resolve the path with the server's realpath and re-run the root check.
+
+    词法校验看不见符号链接：SFTP 的 ``stat``/``open`` 都会跟随 symlink，
+    共享目录里一个指向 allowed root 之外的链接即可让词法检查形同虚设
+    （读任意文件，如 /etc/shadow）。``sftp.normalize`` 由服务端完成
+    realpath 归一化，归一化结果必须再过一次允许范围校验，两段一致
+    才放行；调用方应持久化返回的 canonical 路径。
+    """
+    resolved = str(PurePosixPath(sftp.normalize(path)))
+    _validate_remote_path(resolved, config, additional_roots)
+    return resolved
+
+
+def _reject_symlink_leaf(sftp: paramiko.SFTPClient, path: str) -> None:
+    """末组件不允许是符号链接：canonical 目录 + 真实末组件双保险。"""
+    try:
+        leaf = sftp.lstat(path)
+    except FileNotFoundError:
+        return
+    if leaf.st_mode and stat_module.S_ISLNK(leaf.st_mode):
+        raise ValueError("远端路径不允许是符号链接")
+
+
 def _safe_filename(path: str) -> str:
     name = PurePosixPath(path).name or "firmware.bin"
     return re.sub(r'[\r\n"/\\]', "_", name)
@@ -222,16 +252,20 @@ def _stat_remote(host: str, user: str | None, path: str, config: dict[str, Any],
         with _sftp_client(host, user, config, password) as (sftp, creds):
             remote_home = str(PurePosixPath(sftp.normalize(".")))
             _validate_remote_path(path, config, (remote_home,))
-            stat = sftp.stat(path)
-            if stat.st_size is None or stat.st_size <= 0:
+            # 服务端 realpath 归一化 + 二次校验：阻止共享目录里的 symlink
+            # 把真实读路径带出 allowed root；末组件本身也不允许是链接。
+            resolved = _canonicalize_remote_path(sftp, path, config, (remote_home,))
+            _reject_symlink_leaf(sftp, resolved)
+            remote_stat = sftp.stat(resolved)
+            if remote_stat.st_size is None or remote_stat.st_size <= 0:
                 raise ValueError("远端固件文件为空")
             return {
                 "host": host,
                 "user": creds["username"],
-                "path": path,
-                "filename": _safe_filename(path),
-                "size": int(stat.st_size),
-                "mtime": int(stat.st_mtime or 0),
+                "path": resolved,
+                "filename": _safe_filename(resolved),
+                "size": int(remote_stat.st_size),
+                "mtime": int(remote_stat.st_mtime or 0),
             }
     except FileNotFoundError as exc:
         raise ValueError(f"远端固件不存在: {path}") from exc
@@ -257,6 +291,10 @@ def _list_remote_dir(host: str, user: str | None, path: str, config: dict[str, A
                 raise ValueError("无法解析远端用户HOME目录")
             normalized_path = normalized_path or remote_home
             _validate_remote_path(normalized_path, config, (remote_home,))
+            # 与 _stat_remote 同一边界：目录浏览同样可能走进 symlink 出根。
+            normalized_path = _canonicalize_remote_path(
+                sftp, normalized_path, config, (remote_home,),
+            )
             entries = []
             for attr in sftp.listdir_attr(normalized_path):
                 name = attr.filename
@@ -324,16 +362,22 @@ def _remote_file_iterator(
 ) -> Iterator[bytes]:
     with (
         _sftp_client(host, user, config, password=password) as (sftp, _creds),
-        sftp.open(path, "rb") as remote_file,
     ):
-        remote_file.seek(start)
-        remaining = length
-        while remaining > 0:
-            chunk = remote_file.read(min(_DOWNLOAD_CHUNK_SIZE, remaining))
-            if not chunk:
-                break
-            remaining -= len(chunk)
-            yield chunk
+        # 下载会话内的最终防线：record 里存的是 canonical 路径，但到真正
+        # open 之前仍存在被替换的窗口（TOCTOU）。这里在同一个 SFTP 会话
+        # 内重做 realpath 归一化与允许范围校验，再打开文件。
+        remote_home = str(PurePosixPath(sftp.normalize(".")))
+        _validate_remote_path(path, config, (remote_home,))
+        resolved = _canonicalize_remote_path(sftp, path, config, (remote_home,))
+        with sftp.open(resolved, "rb") as remote_file:
+            remote_file.seek(start)
+            remaining = length
+            while remaining > 0:
+                chunk = remote_file.read(min(_DOWNLOAD_CHUNK_SIZE, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
 
 
 @router.get("/api/firmware-shares")

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260917-client-account-switch-v6">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260918-focus-anchor-no-ring">
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <!-- 分块上传优化 -->
     <script src="/static/js/chunk-upload.js?v=20260910-elev-recovery" defer></script>
@@ -76,6 +76,7 @@
         .btn-xs { padding: 4px 10px; font-size: 11px; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 3px; color: var(--text-primary); cursor: pointer; transition: all 0.2s; font-weight: 500; }
         .btn-xs:hover { background: var(--border-color); transform: translateY(-1px); }
         .terminal-status.connected { background: rgba(76, 175, 80, 0.2); color: var(--success-color); }
+        .terminal-status.connecting { background: rgba(255, 193, 7, 0.2); color: var(--warning-color); }
         .terminal-status.disconnected { background: rgba(244, 67, 54, 0.2); color: var(--danger-color); }
         .sidebar-brand { cursor: pointer; user-select: none; }
         .sidebar-brand:focus { outline: 2px solid var(--primary-color); outline-offset: 3px; border-radius: 4px; }
@@ -112,15 +113,18 @@
         .host-workspace-single-bar { display: none; }
         body.workspace-scope-single .host-workspace-single-bar { display: flex; align-items: center; gap: 6px; }
         .host-workspace-mode-pending { display: none; }
-        /* 与其他页面标题保持相同的 6px 内容间距。 */
-        .host-workspace-title-row { position: relative; min-height: 24px; margin-bottom: 6px; }
+        /* 与其他页面标题保持相同的 6px 内容间距。标题行保留 24px 供右侧
+           按钮（page-title-actions）使用；左侧标题回归公共几何
+           （line-height 1.6，自然高度约 19px）并与行顶对齐，不再为迁就
+           右侧按钮把文字垂直居中到 24px 行盒里（那会整体下沉约 2px）。 */
+        .host-workspace-title-row { position: relative; min-height: 24px; margin-bottom: 6px; display: flex; align-items: flex-start; }
         .main-container > #page-desktop.page-content,
         .main-container > #page-terminal.page-content { --page-body-frame-top: 45px; }
         @media (max-width: 600px) {
             .main-container > #page-desktop.page-content,
             .main-container > #page-terminal.page-content { --page-body-frame-top: 38px; }
         }
-        .host-workspace-title-row > .section-title { height: 24px; line-height: 24px; }
+        .host-workspace-title-row > .section-title { height: auto; min-height: 19px; line-height: 1.6; }
         .host-workspace-title-state { height: 24px; align-items: center; }
         .host-workspace-title-state > .host-workspace-pane-status {
             flex: 0 0 150px;
