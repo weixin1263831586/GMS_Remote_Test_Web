@@ -136,6 +136,18 @@ async def get_issue_analysis(request: Request, issue_id: int = Path(ge=1)):
     return {"success": True, "data": item}
 
 
+@router.post("/daily-brief/sync-subjects")
+async def sync_display_subjects(request: Request):
+    """刷新前同步展示标题：把晨报/单号分析条目的 subject 与 Redmine 对齐。
+
+    subject 在分析入队时冻结，Redmine 上改标题后本地不会自动跟随；前端
+    刷新按钮先调用本端点，再重新拉取展示数据。
+    """
+    _require_human(request)
+    summary = await _service_for_request(request).sync_display_subjects()
+    return {"success": True, "data": summary}
+
+
 @router.get("/daily-brief/runs/{run_id}")
 async def get_brief_run(request: Request, run_id: str):
     _require_read(request)

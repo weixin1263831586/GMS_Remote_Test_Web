@@ -76,7 +76,17 @@ def summarize_execution_statistics(
         for tool in execution.get("tools") or []:
             if not isinstance(tool, dict):
                 continue
+            # Controller 侧预检探针（tool_call_id 带 preflight: 前缀）不是
+            # agent 的真实调用，不计入工具用量统计。
+            if str(tool.get("tool_call_id") or "").startswith("preflight:"):
+                continue
+            # kkagent 子进程记录的 MCP 工具名是 mcp__<server>__<tool> 形式
+            # （如 mcp__gms__gms_rt_redmine_issue_fetch）；归一到 CLI 工具名
+            # 后再匹配，否则真实调用会被整体漏计，只剩预检探针的计数。
             tool_name = str(tool.get("tool_name") or "").strip()
+            if tool_name.startswith("mcp__"):
+                parts = tool_name.split("__", 2)
+                tool_name = parts[2] if len(parts) == 3 else tool_name
             if not tool_name.startswith("gms_rt_"):
                 continue
             row = tools.setdefault(tool_name, {

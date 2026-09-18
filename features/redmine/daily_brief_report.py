@@ -104,9 +104,17 @@ def render_daily_brief_markdown(
             f"## {issue.priority} #{issue.issue_id} "
             f"{result.get('problem_summary', '')}"
         )
-        lines.append(f"- 客户诉求：{result.get('customer_request', '')}")
-        lines.append(f"- 当前阻塞：{result.get('current_blocker') or '未确认'}")
-        lines.append(f"- 建议：{result.get('suggested_solution', '')}")
+        # native 深度诊断（kkagent_markdown）没有 triage schema 的
+        # customer_request/suggested_solution 字段；按 schema 取值会渲染出
+        # 空行和误导性的"置信度：None"（#653167 复盘）。native 格式只输出
+        # 模式说明 + 详细分析指引。
+        native_summary = result.get("result_format") == "kkagent_markdown"
+        if not native_summary:
+            lines.append(f"- 客户诉求：{result.get('customer_request', '')}")
+            lines.append(f"- 当前阻塞：{result.get('current_blocker') or '未确认'}")
+            lines.append(f"- 建议：{result.get('suggested_solution', '')}")
+        else:
+            lines.append("- 模式：kkagent 深度诊断（无结构化摘要字段）")
         detailed = str(result.get("detailed_report") or "").strip()
         if detailed:
             lines.append("- 详细分析：请在工单详情中查看。")
@@ -126,7 +134,11 @@ def render_daily_brief_markdown(
             lines.append("- 相似工单：未检索（历史库不可用或未执行）")
         confidence = result.get("confidence")
         review = "（需人工确认）" if result.get("needs_human_review") else ""
-        lines.extend([f"- 置信度：{confidence}{review}", ""])
+        if native_summary and confidence is None:
+            lines.append("- 置信度：未提供（见详细分析）")
+        else:
+            lines.append(f"- 置信度：{confidence}{review}")
+        lines.append("")
     if failed:
         lines.append("## 分析失败")
         lines.extend(f"- #{issue.issue_id}: {issue.error}" for issue in failed)

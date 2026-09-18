@@ -125,6 +125,53 @@ class DailyBriefExecutionStatisticsTests(unittest.TestCase):
 
         self.assertEqual(statistics["models"][0]["model_name"], DEFAULT_MODEL_LABEL)
 
+    def test_counts_real_mcp_calls_and_excludes_controller_preflight_probes(self):
+        """kkagent 轨迹里真实调用是 mcp__gms__gms_rt_* 命名；Controller 预检
+        探针（tool_call_id=preflight:*）不是 agent 调用，不得计入或顶替真实
+        用量（否则统计表永远只显示 3 次探针）。"""
+        statistics = summarize_execution_statistics(
+            [
+                {
+                    "issue_id": 653167,
+                    "tools": [
+                        {
+                            "tool_name": "gms_rt_redmine_issue_fetch",
+                            "tool_call_id": "preflight:gms_rt_redmine_issue_fetch:abc",
+                            "status": "succeeded",
+                            "output_sha256": "preflight",
+                        },
+                        {
+                            "tool_name": "mcp__gms__gms_rt_redmine_issue_fetch",
+                            "tool_call_id": "call_1",
+                            "status": "succeeded",
+                            "output_sha256": "a",
+                        },
+                        {
+                            "tool_name": "mcp__gms__gms_rt_redmine_journals",
+                            "tool_call_id": "call_2",
+                            "status": "succeeded",
+                            "output_sha256": "b",
+                        },
+                        {
+                            "tool_name": "mcp__gms__gms_rt_redmine_journals",
+                            "tool_call_id": "call_3",
+                            "status": "failed",
+                            "is_error": True,
+                        },
+                        {"tool_name": "TodoList", "tool_call_id": "call_4", "status": "succeeded"},
+                    ],
+                },
+            ],
+            fallback_model="configured-model",
+        )
+
+        tools = {row["tool_name"]: row for row in statistics["gms_tools"]}
+        self.assertEqual(statistics["gms_tool_call_count"], 3)
+        self.assertEqual(tools["gms_rt_redmine_issue_fetch"]["call_count"], 1)
+        self.assertEqual(tools["gms_rt_redmine_journals"]["call_count"], 2)
+        self.assertEqual(tools["gms_rt_redmine_journals"]["failed_count"], 1)
+        self.assertNotIn("TodoList", tools)
+
 
 if __name__ == "__main__":
     unittest.main()

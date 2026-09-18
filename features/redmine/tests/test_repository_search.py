@@ -126,3 +126,35 @@ class HistorySearchTests(unittest.TestCase):
     def test_search_history_empty_query(self):
         repo = self._repo_with_issues()
         self.assertEqual(repo.search_history("   "), [])
+
+    def test_search_history_flags_background_only_hits(self):
+        """只命中 SoC 型号等背景词的条目 distinctive_matches 必须为空。"""
+        repo = self._repo_with_issues()
+        # 补 3 条 RK3588 工单让 RK3588 df 占比超线，同时保持 power_ext 稀缺。
+        for i in (649356, 647558, 643254):
+            repo.upsert_issue({
+                "issue_id": i, "run_id": "t", "status_name": "Closed",
+                "subject": f"RK3588 Android16 EDLA GTS 用例{i}",
+                "description": "RK3588 平台通用测试问题", "journals_json": [],
+                "attachments_json": [], "failures_json": [], "references_json": [],
+                "ai_json": {}, "is_resolved": 1, "solution": "通用适配",
+            })
+        repo.upsert_issue({
+            "issue_id": 598972, "run_id": "t", "status_name": "Closed",
+            "subject": "RK3576 Android16 VtsHalPowerTargetTest power_ext 不支持",
+            "description": "power_ext FIXED_PERFORMANCE 签名",
+            "journals_json": [], "attachments_json": [], "failures_json": [],
+            "references_json": [], "ai_json": {}, "is_resolved": 1,
+            "solution": "补齐 power_ext fixed performance 配置",
+        })
+        hits = repo.search_history("RK3588 power_ext", exclude_issue_id=650761, limit=10)
+        by_id = {h["issue_id"]: h for h in hits}
+        # 仅命中背景词（SoC 型号）→ 无区分词；命中故障签名词 → 有区分词。
+        self.assertEqual(by_id[649356]["matched_terms"], ["RK3588"])
+        self.assertEqual(by_id[649356]["distinctive_matches"], [])
+        self.assertIn("power_ext", by_id[598972]["distinctive_matches"])
+        # IDF 加权重排：同为已解决时，命中区分词的排在前。
+        self.assertLess(
+            hits.index(by_id[598972]),
+            hits.index(by_id[649356]),
+        )

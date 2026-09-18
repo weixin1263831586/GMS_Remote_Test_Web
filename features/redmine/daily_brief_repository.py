@@ -608,6 +608,26 @@ class DailyBriefRepository:
             ).fetchall()
             return [self._row_to_issue(row) for row in rows]
 
+    def update_issue_display_subjects(self, subjects: dict[int, str]) -> int:
+        """刷新展示层标题（当前 owner 库内该单号的全部展示记录）。
+
+        晨报/单号分析条目按 run 各存一份 subject；同一单号可能出现在多个
+        历史 run 里，这里一次全部换新。返回更新的行数。
+        """
+        changed = 0
+        with self._lock, self._connect() as conn:
+            for issue_id, subject in subjects.items():
+                subject = str(subject or "").strip()
+                if not subject:
+                    continue
+                cursor = conn.execute(
+                    "UPDATE redmine_daily_brief_issues SET subject=? "
+                    "WHERE issue_id=? AND TRIM(subject)<>?",
+                    (subject, int(issue_id), subject),
+                )
+                changed += max(cursor.rowcount, 0)
+        return changed
+
     def get_issue(self, run_id: str, issue_id: int) -> DailyBriefIssue | None:
         with self._connect() as conn:
             row = conn.execute(

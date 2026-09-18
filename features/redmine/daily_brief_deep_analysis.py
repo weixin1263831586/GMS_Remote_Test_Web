@@ -1,7 +1,9 @@
-"""单条深度诊断的执行编排（从 DailyBriefService 拆出）。
+"""单条分析的确定性取证预采集编排（从 DailyBriefService 拆出）。
 
-取证预采集（evidence preflight）只服务 issue: 深度分析路径；晨报批量
-triage 的证据门禁模型不同（不要求实机/源码取证），不经过这里。
+深度诊断（issue: 模式）采集 Redmine 三件套 + 设备快照基线；晨报批量
+triage 同样预采集 Redmine 基线（#653167 nightly 复盘：triage 无兜底时，
+模型取证失败直接变成 gate 失败，没有任何确定性证据可用），只是不含设备
+取证——triage 的证据门禁没有设备维度。
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ async def precollect_deep_evidence(
     *, repository: Any, run: Any, issue_id: int,
     analyzer: Any, entry: dict[str, Any],
 ) -> None:
-    """Deterministic read-only evidence baseline for one deep analysis.
+    """Deterministic read-only evidence baseline for one analysis.
 
     成功时写入 ``entry["_precollected_tool_traces"]`` 与
     ``entry["_evidence_preflight"]``（模型可见的持久化溯源，原样输出不落
@@ -24,23 +26,24 @@ async def precollect_deep_evidence(
     停止时抛 ``RunCancelledError``，不再启动 kkagent 子进程。
 
     未绑定 agent profile 时跳过：认证预检已按 fail-closed 拦截该配置，
-    preflight 不承担重复报错职责。
+    preflight 不承担重复报错职责。triage 只收 Redmine 基线
+    （``include_device=False``），设备取证仍是深度诊断专属。
 
     ``entry["_progress_recorder"]`` 存在时，preflight 每步 CLI 调用同步
     写入实时进度时间线（tool_started / tool_completed / tool_failed），
     让「查看分析」弹框覆盖 Controller 证据预采集阶段而不只 kkagent。
     """
-    if entry.get("analysis_mode") == "triage":
-        return
     evidence_env = dict(getattr(analyzer, "env_extra", {}) or {})
     if not str(evidence_env.get("GMS_RT_PROFILE") or "").strip():
         return
+    triage = entry.get("analysis_mode") == "triage"
     progress = entry.get("_progress_recorder")
     if progress is not None:
         progress.stage_changed("正在执行 Controller 证据预采集（Redmine/设备快照）")
     preflight = await collect_deep_analysis_evidence(
         issue_id=issue_id,
-        device_serial=str(entry.get("device_serial") or ""),
+        device_serial="" if triage else str(entry.get("device_serial") or ""),
+        include_device=not triage,
         env_extra=evidence_env,
         should_cancel=lambda: repository.is_cancel_requested(run.run_id),
         on_tool_event=(

@@ -118,6 +118,55 @@ class EvidencePreflightTests(unittest.TestCase):
         self.assertEqual(attachments.text_artifact_ids, ["a1"])
         self.assertEqual(attachments.all_artifact_ids, ["a1", "a2"])
 
+    def test_triage_baseline_collects_redmine_without_device(self):
+        """#653167 复盘：triage 也要有确定性 Redmine 基线兜底，但不含设备
+        取证（triage 证据门禁没有设备维度）。"""
+
+        async def scenario():
+            fetched = ToolTrace(tool_name="gms_rt_redmine_issue_fetch", status="succeeded")
+            journals = ToolTrace(tool_name="gms_rt_redmine_journals", status="succeeded")
+            attachments = ToolTrace(tool_name="gms_rt_redmine_attachments", status="succeeded")
+            with patch.object(
+                evidence_preflight, "_collect",
+                AsyncMock(side_effect=[
+                    (fetched, {"snapshot_id": "ev_t1"}), (journals, {}), (attachments, {}),
+                ]),
+            ) as collect:
+                result = await evidence_preflight.collect_deep_analysis_evidence(
+                    issue_id=653167, device_serial="RK3576GMS1",
+                    env_extra={"GMS_RT_PROFILE": "p"}, include_device=False,
+                )
+            return result, collect
+
+        result, collect = asyncio.run(scenario())
+        self.assertEqual(result.snapshot_id, "ev_t1")
+        self.assertEqual(result.device_status, "not_requested")
+        self.assertEqual([call.kwargs["tool_name"] for call in collect.call_args_list], [
+            "gms_rt_redmine_issue_fetch", "gms_rt_redmine_journals",
+            "gms_rt_redmine_attachments",
+        ])
+
+    def test_diagnostic_keeps_device_snapshot_by_default(self):
+        async def scenario():
+            fetched = ToolTrace(tool_name="gms_rt_redmine_issue_fetch", status="succeeded")
+            journals = ToolTrace(tool_name="gms_rt_redmine_journals", status="succeeded")
+            attachments = ToolTrace(tool_name="gms_rt_redmine_attachments", status="succeeded")
+            device = ToolTrace(tool_name="gms_rt_devices_snapshot", status="succeeded")
+            with patch.object(
+                evidence_preflight, "_collect",
+                AsyncMock(side_effect=[
+                    (fetched, {"snapshot_id": "ev_1"}), (journals, {}),
+                    (attachments, {}), (device, {}),
+                ]),
+            ):
+                return await evidence_preflight.collect_deep_analysis_evidence(
+                    issue_id=1, device_serial="RK3576GMS1",
+                    env_extra={"GMS_RT_PROFILE": "p"},
+                )
+
+        result = asyncio.run(scenario())
+        self.assertEqual(result.device_status, "succeeded")
+
     def test_cancel_poll_short_circuits_before_new_attempt(self):
         async def scenario():
             with patch.object(

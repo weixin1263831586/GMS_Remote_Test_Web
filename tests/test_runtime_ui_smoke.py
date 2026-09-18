@@ -1478,13 +1478,141 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.get_by_role("button", name="打开控制台").click()
             expect(page.locator("#console-section")).to_be_visible()
 
-            page.locator("#console-tab").focus()
-            page.locator("#console-tab").press("ArrowLeft")
+            page.locator(".console-tab").focus()
+            page.locator(".console-tab").press("ArrowLeft")
             expect(page.locator("#ports-section")).to_be_visible()
             page.locator("#ports-tab").press("ArrowRight")
             expect(page.locator("#console-section")).to_be_visible()
-            page.locator("#console-tab").press("Home")
+            page.locator(".console-tab").press("Home")
             expect(page.locator("#ports-section")).to_be_visible()
+        finally:
+            page.close()
+
+    def test_devices_console_tabs_keep_multiple_console_sessions(self):
+        page = self.new_page()
+
+        def fulfill_ports(route):
+            ports = [
+                {
+                    "port_key": key,
+                    "devname": f"/dev/{key}",
+                    "online": True,
+                    "binding": {
+                        "label": f"Device {key}",
+                        "baudrate": 115200,
+                        "capture_enabled": False,
+                    },
+                }
+                for key in ("ttyUSB0", "ttyUSB1")
+            ]
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "data": {"ports": ports}}),
+            )
+
+        page.route("**/api/devices/console/ports", fulfill_ports)
+        page.route(
+            "**/api/devices/console/ports/*/logs?*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"data":{"content":"","available_dates":[]}}',
+            ),
+        )
+        try:
+            page.goto(f"{self.base_url}/devices-console", wait_until="domcontentloaded")
+            expect(page.get_by_role("button", name="打开控制台")).to_have_count(2)
+            page.locator(".port-card").nth(0).get_by_role(
+                "button", name="打开控制台"
+            ).click()
+            expect(page.locator(".console-tab")).to_have_count(1)
+            # 控制台1激活时本机串口视图被隐藏，先切回再打开第二个控制台。
+            page.locator("#ports-tab").click()
+            expect(page.locator("#ports-section")).to_be_visible()
+            page.locator(".port-card").nth(1).get_by_role(
+                "button", name="打开控制台"
+            ).click()
+            tabs = page.locator(".console-tab")
+            expect(tabs).to_have_count(2)
+            expect(tabs.nth(0)).to_contain_text("控制台1")
+            expect(tabs.nth(1)).to_contain_text("控制台2")
+            expect(tabs.nth(1)).to_have_class(re.compile(r"\bactive\b"))
+            # 切回控制台1：各会话面板独立保留，切换不互相覆盖。
+            tabs.nth(0).click()
+            expect(tabs.nth(0)).to_have_class(re.compile(r"\bactive\b"))
+            expect(page.locator("#console-pane-1")).to_be_visible()
+            expect(page.locator("#console-pane-2")).to_be_hidden()
+            # 关闭当前 tab 后自动切到剩余控制台。
+            page.locator("#console-pane-1 .close-console").click()
+            expect(page.locator(".console-tab")).to_have_count(1)
+            expect(page.locator(".console-tab").nth(0)).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+            expect(page.locator("#console-pane-2")).to_be_visible()
+            # 关闭最后一个控制台回到本机串口视图。
+            page.locator("#console-pane-2 .close-console").click()
+            expect(page.locator(".console-tab")).to_have_count(0)
+            expect(page.locator("#ports-section")).to_be_visible()
+        finally:
+            page.close()
+
+    def test_devices_console_hides_write_actions_for_plain_user_role(self):
+        page = self.new_page()
+        # 普通 user 角色没有 devices.inventory：绑定/采集/清空日志是必 403
+        # 的写操作，页面应隐藏；打开控制台与终端只读输出保持可用。
+        page.route(
+            "**/api/auth/status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "authenticated": True,
+                    "auth_required": True,
+                    "elevated": False,
+                    "user": {
+                        "id": "u1", "username": "op", "role": "user",
+                        "permissions": ["tests.execute", "jobs.read"],
+                    },
+                }),
+            ),
+        )
+
+        def fulfill_ports(route):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "data": {"ports": [{
+                    "port_key": "ttyUSB0",
+                    "devname": "/dev/ttyUSB0",
+                    "online": True,
+                    "binding": {
+                        "label": "RO device",
+                        "baudrate": 115200,
+                        "capture_enabled": False,
+                    },
+                }]}}),
+            )
+
+        page.route("**/api/devices/console/ports", fulfill_ports)
+        page.route(
+            "**/api/devices/console/ports/*/logs?*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"data":{"content":"","available_dates":[]}}',
+            ),
+        )
+        try:
+            page.goto(f"{self.base_url}/devices-console", wait_until="domcontentloaded")
+            card = page.locator(".port-card").first
+            expect(card.get_by_role("button", name="打开控制台")).to_have_count(1)
+            expect(card.get_by_role("button", name="启动采集")).to_have_count(0)
+            expect(card.get_by_role("button", name="编辑绑定")).to_have_count(0)
+            card.get_by_role("button", name="打开控制台").click()
+            expect(page.locator(".console-tab")).to_have_count(1)
+            clear_logs = page.locator(".clear-logs")
+            expect(clear_logs).to_be_disabled()
         finally:
             page.close()
 
@@ -5706,7 +5834,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             frame.locator("#cancel-binding").click()
             frame.get_by_role("button", name="打开控制台").click()
             expect(frame.locator("#console-section")).to_be_visible()
-            expect(frame.locator("#console-tab")).to_have_class(re.compile(r"active"))
+            expect(frame.locator(".console-tab")).to_have_class(re.compile(r"active"))
             self.assertTrue(frame.locator(".terminal-column").evaluate(
                 """column => {
                     const dock = column.querySelector('.input-dock');

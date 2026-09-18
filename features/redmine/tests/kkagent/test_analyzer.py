@@ -8,13 +8,19 @@ import os
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from features.redmine.kkagent import (
     PROMPT_VERSION,
     KkAgentAnalysisResult,
     KkAgentRedmineAnalyzer,
 )
+from features.redmine.kkagent.analyzer import (
+    _StreamFallback,
+    classify_gate_failure,
+)
+from features.redmine.kkagent.mcp_health import McpHealthProbe
+from features.redmine.kkagent.trace import KkAgentTrace, ToolTrace
 from features.redmine.tests.kkagent.test_process import (
     _valid_result,
     _write_fake_kkagent,
@@ -106,12 +112,26 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertNotIn("Do not call tools", prompt)
 
     def test_env_identity_dump_preserves_explicit_owner(self):
+        from features.redmine.kkagent.mcp_health import McpHealthProbe
+
         analyzer = self._analyzer(
             "env-dump", timeout_seconds=30, env_extra={"GMS_RT_PROFILE": "owner-a"}
         )
-        outcome = asyncio.run(analyzer.analyze(ENTRY))
+        # E2E 只测 kkagent 子进程身份；doctor 探活 mock 成健康态，避免
+        # 单测依赖真机 agent 安装状态。
+        healthy = McpHealthProbe(
+            ok=True, command=["gms-agent", "doctor"], output_sha256="ab" * 32,
+        )
+        with patch(
+            "features.redmine.kkagent.analyzer.probe_kkagent_mcp_health",
+            AsyncMock(return_value=healthy),
+        ):
+            outcome = asyncio.run(analyzer.analyze(ENTRY))
         self.assertTrue(outcome.ok, outcome.error)
-        env = json.loads(outcome.trace["tools"][0]["output_preview"])
+        tools = outcome.trace["tools"]
+        # 探活成功也入库溯源（tools[0]），env 断言取业务工具调用。
+        self.assertEqual(tools[0]["tool_name"], "mcp_doctor")
+        env = json.loads(tools[1]["output_preview"])
         self.assertEqual(env["GMS_RT_PROFILE"], "owner-a")
         self.assertNotEqual(env["GMS_AGENT_CLIENT"], "kimi")  # 他人身份被剥离
         self.assertEqual(env["GMS_MCP_TOOLSETS"], "evidence")  # toolset 收敛
@@ -255,7 +275,7 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v15")
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v17")
 
     def test_prompt_includes_operator_observation_as_verifiable_context(self):
         prompt = KkAgentRedmineAnalyzer().build_prompt({
@@ -387,6 +407,97 @@ class MergeTracesReplayTests(unittest.TestCase):
         ]
         merged = _merge_traces(first, second)
         self.assertEqual(merged.tool_calls[0].status, "succeeded")
+
+
+class McpHealthPreflightTests(unittest.TestCase):
+    """会话启动前的 doctor 探活失败必须快速失败，不启动 kkagent。"""
+
+    def test_failed_probe_blocks_session_before_kkagent_starts(self):
+        analyzer = KkAgentRedmineAnalyzer(env_extra={"GMS_RT_PROFILE": "p"})
+        blocked = McpHealthProbe(ok=False, reason="gms MCP 健康预检未通过：x")
+        stream = Mock()
+        with patch.object(
+            analyzer, "_run_stream", stream
+        ), patch(
+            "features.redmine.kkagent.analyzer.probe_kkagent_mcp_health",
+            AsyncMock(return_value=blocked),
+        ):
+            outcome = asyncio.run(analyzer.analyze({"issue_id": 653167}))
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.error_type, "mcp_unavailable")
+        self.assertIn("gms MCP 健康预检未通过", outcome.error)
+        tools = (outcome.trace or {}).get("tools") or []
+        self.assertEqual([item.get("tool_name") for item in tools], ["mcp_doctor"])
+        self.assertEqual(tools[0].get("failure_kind"), "mcp_unavailable")
+        stream.assert_not_called()
+
+    def test_skipped_probe_keeps_trace_untouched(self):
+        analyzer = KkAgentRedmineAnalyzer(env_extra={})
+        skipped = McpHealthProbe(ok=True, skipped=True)
+        trace = KkAgentTrace(session_id="s", exit_code=0, final_event={
+            "type": "result", "subtype": "success", "exit_code": 0,
+            "session_id": "s", "message": "## 结论",
+        })
+        with patch.object(
+            analyzer, "_run_stream",
+            AsyncMock(return_value=(trace, _StreamFallback(), False)),
+        ), patch(
+            "features.redmine.kkagent.analyzer.probe_kkagent_mcp_health",
+            AsyncMock(return_value=skipped),
+        ):
+            outcome = asyncio.run(
+                analyzer.analyze({"issue_id": 1, "analysis_mode": "diagnostic"})
+            )
+        self.assertTrue(outcome.ok)
+        self.assertFalse(
+            any(call.tool_name == "mcp_doctor" for call in trace.tool_calls)
+        )
+
+
+class GateFailureClassificationTests(unittest.TestCase):
+    """#653167 nightly 复盘：gms MCP 未连接时的终态要可诊断、可恢复。"""
+
+    def test_no_mcp_evidence_is_classified_as_mcp_unavailable(self):
+        trace = KkAgentTrace(session_id="s1")
+        status, error_type, error = classify_gate_failure(
+            trace, ["issue was not fetched (gms_rt_redmine_issue_fetch missing)"]
+        )
+        self.assertEqual(error_type, "mcp_evidence_unavailable")
+        self.assertEqual(status, "mcp_evidence_unavailable")
+        self.assertIn("gms-agent doctor", error)
+        self.assertIn("sync_agent_package", error)
+        self.assertIn("原始 findings", error)
+
+    def test_cli_only_session_is_also_mcp_unavailable(self):
+        trace = KkAgentTrace(session_id="s1")
+        trace.tool_calls = [
+            ToolTrace(
+                tool_call_id="c1",
+                tool_name="Bash",
+                tool_input={"command": "gms-rt-redmine-issue-fetch 1 --json"},
+                status="succeeded",
+            ),
+        ]
+        _, error_type, _ = classify_gate_failure(
+            trace, ["journals were not checked (gms_rt_redmine_journals missing)"]
+        )
+        self.assertEqual(error_type, "mcp_evidence_unavailable")
+
+    def test_partial_mcp_evidence_stays_gate_failed(self):
+        trace = KkAgentTrace(session_id="s1")
+        trace.tool_calls = [
+            ToolTrace(
+                tool_call_id="c1",
+                tool_name="gms_rt_redmine_issue_fetch",
+                tool_input={"issue": 1},
+                status="succeeded",
+            ),
+        ]
+        findings = ["journals were not checked (gms_rt_redmine_journals missing)"]
+        status, error_type, error = classify_gate_failure(trace, findings)
+        self.assertEqual(error_type, "evidence_gate_failed")
+        self.assertEqual(status, "evidence_gate_failed")
+        self.assertEqual(error, "; ".join(findings))
 
 
 if __name__ == "__main__":

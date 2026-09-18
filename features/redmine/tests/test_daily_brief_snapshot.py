@@ -82,6 +82,31 @@ class IdentityResolutionTests(unittest.TestCase):
             )
 
 
+class SnapshotAuthorTests(unittest.TestCase):
+    """triage 快照必须携带 author_name（报告人），供分析 prompt 直接引用。"""
+
+    def test_merge_buckets_keeps_author_name(self):
+        from features.redmine.daily_brief_snapshot import _merge_buckets
+
+        waiting = [{
+            "issue_id": 653167, "subject": "rk3588 POWER", "status_name": "进行中",
+            "priority_name": "High", "assigned_to_name": "黄超群",
+            "author_name": "张三", "created_on": "2026-09-16", "updated_on": "2026-09-18",
+            "last_external_reply_at": "", "last_external_reply_by": "", "last_owner_reply_at": "",
+            "attachment_count": 2,
+        }]
+        merged = _merge_buckets(waiting, [])
+        self.assertEqual(merged[653167]["author_name"], "张三")
+
+    def test_issue_summary_includes_author_name(self):
+        from features.redmine.repository_queries import RepositoryQueryMixin
+
+        summary = RepositoryQueryMixin._issue_summary({
+            "issue_id": 653167, "subject": "x", "author_name": "张三",
+        })
+        self.assertEqual(summary["author_name"], "张三")
+
+
 class SnapshotScopingTests(unittest.TestCase):
     def test_snapshot_uses_single_owner_names_never_none(self):
         captured: dict = {}

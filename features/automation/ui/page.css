@@ -54,8 +54,10 @@ body {
     align-items: center;
     gap: 0;
     min-height: 44px;
-    overflow-x: auto;
-    scrollbar-width: none;
+    /* overflow-x:auto 会让 Chromium 把纵向滚轮转成 tab 栏横向滚动，
+    劫持页面滚动（设备串口页同款问题已修）。hidden 不劫持；
+    溢出 tab 仍可由方向键聚焦滚入。 */
+    overflow: hidden;
 }
 .workflow-tabs::-webkit-scrollbar { display: none; }
 .ats-actions { display: flex; flex: 0 0 auto; gap: 8px; margin-left: auto; align-items: center; }
