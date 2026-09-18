@@ -315,9 +315,10 @@ async def handle_adb_shell_connect(
         # 本机会话显式使用与设备轮询/实时探测相同的 adb 二进制：登录
         # shell 的 profile 可能指向另一个 platform-tools 版本，混用客户端
         # 会互相杀掉共享 adb server，令刚建立的 shell 瞬间断开。
-        # 绝对路径是常量（环境变量/配置钉死），序列号仍经 shlex.quote，
-        # shell 执行边界属性不变。远程 Worker 上保持 `adb` 由其自身环境
-        # 解析。前端 shell-main.js 的 `\badb\s+-s` 正则对绝对路径同样
+        # 绝对路径与环境变量取值仍按不可信字符串处理：shlex.quote 同时
+        # 覆盖 executable 与序列号，含空格/元字符的 GMS_ADB_PATH 不会
+        # 破坏命令边界。远程 Worker 上保持 `adb` 由其自身环境解析。
+        # 前端 shell-main.js 的 `\badb\s+-s` 正则对绝对路径同样
         # 命中（路径末尾的 adb 与 -s 之间存在词边界），启动判定不受影响。
         adb_cmd = "adb"
         if backend_mode == "local_adb":
@@ -337,18 +338,16 @@ async def handle_adb_shell_connect(
         for cmd in ('\n\n\n', 'clear\n'):
             channel.send(cmd)
             await _wait_for_shell_prompt(channel)
-        channel.send(f'{adb_cmd} -s {shlex.quote(serial_no)} shell\n')
+        channel.send(f'{shlex.quote(adb_cmd)} -s {shlex.quote(serial_no)} shell\n')
 
         loop = asyncio.get_event_loop()
         session_id = connection_id
 
+        # 锁内只做旧会话移除与新会话登记（O(1)）；旧会话资源回收含
+        # 最长 ~0.7s 的信号等待，必须放在锁外，避免阻塞其他终端。
+        stale_session = None
         with global_state.terminal_lock:
-            if session_id in global_state.terminal_ssh_sessions:
-                try:
-                    close_terminal_session_resources(global_state.terminal_ssh_sessions[session_id])
-                except (WebSocketDisconnect, ConnectionError, KeyError):
-                    pass
-
+            stale_session = global_state.terminal_ssh_sessions.pop(session_id, None)
             global_state.terminal_ssh_sessions[session_id] = {
                 'ssh': ssh,
                 'channel': channel,
@@ -368,6 +367,11 @@ async def handle_adb_shell_connect(
                 'websocket': websocket,
                 'event_loop': loop
             }
+        if stale_session is not None:
+            try:
+                close_terminal_session_resources(stale_session)
+            except (WebSocketDisconnect, ConnectionError, KeyError):
+                pass
 
         logger.info(f"[TERMINAL] ADB Shell session created for device {serial_no}")
         await websocket.send_json({
@@ -400,7 +404,7 @@ async def handle_adb_shell_connect(
         logger.error(f"[TERMINAL] ADB Shell connection error: {e}")
         await websocket.send_json({
             'type': 'terminal_error',
-            'error': f'ADB Shell连接失败: {e!s}'
+            'error': 'ADB Shell 连接失败，请确认设备在线后重试',
         })
 
 
@@ -491,10 +495,10 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
             channel.resize_pty(width=80, height=24)
             loop = asyncio.get_event_loop()
 
+            # 锁内只做登记（O(1)），旧会话资源回收在锁外执行。
+            stale_session = None
             with global_state.terminal_lock:
-                if session_id in global_state.terminal_ssh_sessions:
-                    close_terminal_session_resources(global_state.terminal_ssh_sessions[session_id])
-
+                stale_session = global_state.terminal_ssh_sessions.pop(session_id, None)
                 global_state.terminal_ssh_sessions[session_id] = {
                     'ssh': None,
                     'channel': channel,
@@ -507,6 +511,8 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                     'websocket': websocket,
                     'event_loop': loop
                 }
+            if stale_session is not None:
+                close_terminal_session_resources(stale_session)
 
             await websocket.send_json({
                 'type': 'terminal_connected',
@@ -570,10 +576,10 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
             return
 
         loop = asyncio.get_event_loop()
+        # 锁内只做登记（O(1)），旧会话资源回收在锁外执行。
+        stale_session = None
         with global_state.terminal_lock:
-            if session_id in global_state.terminal_ssh_sessions:
-                close_terminal_session_resources(global_state.terminal_ssh_sessions[session_id])
-
+            stale_session = global_state.terminal_ssh_sessions.pop(session_id, None)
             global_state.terminal_ssh_sessions[session_id] = {
                 'ssh': ssh,
                 'channel': channel,
@@ -585,6 +591,8 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
                 'websocket': websocket,
                 'event_loop': loop
             }
+        if stale_session is not None:
+            close_terminal_session_resources(stale_session)
 
         await websocket.send_json({
             'type': 'terminal_connected',
@@ -605,11 +613,12 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
         await websocket.send_json({'type': 'terminal_error', 'error': 'SSH认证失败：用户名或密码错误'})
     except paramiko.SSHException as e:
         close_websocket_terminal(websocket)
-        await websocket.send_json({'type': 'terminal_error', 'error': f'SSH连接错误：{e!s}'})
+        logger.error(f"[TERMINAL] SSH error: {e}")
+        await websocket.send_json({'type': 'terminal_error', 'error': 'SSH连接错误，请检查主机网络与凭据'})
     except Exception as e:
         close_websocket_terminal(websocket)
         logger.error(f"[TERMINAL] Connection error: {e}")
-        await websocket.send_json({'type': 'terminal_error', 'error': f'连接失败：{e!s}'})
+        await websocket.send_json({'type': 'terminal_error', 'error': '连接失败，请检查主机网络与凭据'})
 
 
 async def handle_terminal_input(client_id: str, websocket: WebSocket, data: dict):
@@ -618,26 +627,34 @@ async def handle_terminal_input(client_id: str, websocket: WebSocket, data: dict
     if supplied_id and supplied_id != session_id:
         await websocket.send_json({'type': 'terminal_error', 'error': '终端连接标识无效'})
         return
-    claim_revoked = False
+    # terminal_lock 是全体用户共享的单把锁：锁内只允许会话表的 O(1)
+    # get/del。设备租约校验（SQLite 读）、PTY 写（阻塞）、会话资源回收
+    # （内部有最长 ~0.7s 的信号等待）与 websocket 发送全部留在锁外，
+    # 否则一个用户的输入/断开会阻塞所有终端并卡住事件循环——与输出泵
+    # 的"锁内取引用、锁外做 I/O"范式保持一致。
     with global_state.terminal_lock:
-        if session_id in global_state.terminal_ssh_sessions:
-            try:
-                session_info = global_state.terminal_ssh_sessions[session_id]
-                if not _terminal_device_claim_valid(session_info):
-                    close_terminal_session_resources(session_info)
-                    del global_state.terminal_ssh_sessions[session_id]
-                    claim_revoked = True
-                else:
-                    input_data = data.get('input', data.get('data', ''))
-                    session_info['channel'].send(input_data)
-            except Exception as e:
-                logger.error(f"[TERMINAL] Input error for {session_id}: {e}")
-                await websocket.send_json({'type': 'terminal_error', 'error': f'发送数据失败：{e!s}'})
-    if claim_revoked:
+        session_info = global_state.terminal_ssh_sessions.get(session_id)
+    if session_info is None:
+        return
+    if not _terminal_device_claim_valid(session_info):
+        with global_state.terminal_lock:
+            if global_state.terminal_ssh_sessions.get(session_id) is session_info:
+                del global_state.terminal_ssh_sessions[session_id]
+        close_terminal_session_resources(session_info)
         close_websocket_terminal(websocket)
         await websocket.send_json({
             'type': 'terminal_error',
             'error': '设备租约已失效，终端已关闭',
+        })
+        return
+    input_data = data.get('input', data.get('data', ''))
+    try:
+        session_info['channel'].send(input_data)
+    except Exception as e:
+        logger.error(f"[TERMINAL] Input error for {session_id}: {e}")
+        await websocket.send_json({
+            'type': 'terminal_error',
+            'error': '输入发送失败，终端会话可能已断开，请重连',
         })
 
 
@@ -647,11 +664,14 @@ async def handle_terminal_resize(client_id: str, websocket: WebSocket, data: dic
     if supplied_id and supplied_id != session_id:
         await websocket.send_json({'type': 'terminal_error', 'error': '终端连接标识无效'})
         return
+    # 锁内只取会话引用，resize_pty 的阻塞 I/O 在锁外执行。
     with global_state.terminal_lock:
-        if session_id in global_state.terminal_ssh_sessions:
-            try:
-                cols = data.get('cols', 120)
-                rows = data.get('rows', 30)
-                global_state.terminal_ssh_sessions[session_id]['channel'].resize_pty(width=cols, height=rows)
-            except Exception as e:
-                logger.error(f"[TERMINAL] Resize error for session {session_id}: {e}")
+        session_info = global_state.terminal_ssh_sessions.get(session_id)
+    if session_info is None:
+        return
+    try:
+        cols = data.get('cols', 120)
+        rows = data.get('rows', 30)
+        session_info['channel'].resize_pty(width=cols, height=rows)
+    except Exception as e:
+        logger.error(f"[TERMINAL] Resize error for session {session_id}: {e}")

@@ -58,6 +58,68 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertEqual(self.repo.latest_run("u1", "2026-09-12").run_id, older.run_id)
         self.assertIsNone(self.repo.latest_run("other-owner"))
 
+    def test_run_owner_id_normalized_to_canonical(self):
+        """Web 原始 display id 与 sanitize 目录名必须读写同一份数据。"""
+        created = self.repo.create_run(make_run(owner="hcq@172.16.14.66", mode="issue:1"))
+        self.assertEqual(created.owner_id, "hcq_172_16_14_66")
+        self.assertIsNotNone(self.repo.latest_issue_run("hcq@172.16.14.66", 1))
+        self.assertIsNotNone(self.repo.latest_issue_run("hcq_172_16_14_66", 1))
+
+    def test_v5_migration_canonicalizes_legacy_owner_ids(self):
+        """v5 回填：legacy owner 改写为 canonical；与既有 canonical 行冲突
+        的孪生 run 连同子表记录删除（保留定时任务写入的权威报告）。"""
+        import sqlite3
+
+        conn = sqlite3.connect(self.repo.db_path)
+        try:
+            # 回拨版本模拟 v4 旧库：canonical 孪生 + legacy 冲突行 + 无孪生 legacy 行
+            conn.execute("PRAGMA user_version = 4")
+            conn.executemany(
+                "INSERT INTO redmine_daily_brief_runs "
+                "(run_id, owner_id, brief_date, mode, status) VALUES (?,?,?,?,?)",
+                [
+                    ("db_twin", "hcq_172_16_14_66", "2026-09-18", "nightly", "partial"),
+                    ("db_web_dup", "hcq@172.16.14.66", "2026-09-18", "nightly", "completed"),
+                    ("db_web_only", "hcq@172.16.14.66", "2026-09-17", "issue:648526", "completed"),
+                ],
+            )
+            conn.execute(
+                "INSERT INTO redmine_daily_brief_issues (run_id, issue_id) "
+                "VALUES ('db_web_only', 648526)"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        reopened = DailyBriefRepository(Path(self._tmp.name))
+        conn = sqlite3.connect(reopened.db_path)
+        try:
+            rows = dict(conn.execute(
+                "SELECT run_id, owner_id FROM redmine_daily_brief_runs"
+            ).fetchall())
+            issue_run_ids = [r[0] for r in conn.execute(
+                "SELECT run_id FROM redmine_daily_brief_issues"
+            ).fetchall()]
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+
+        self.assertEqual(version, DailyBriefRepository._SCHEMA_VERSION)
+        # 孪生行被删除，其余改写为 canonical
+        self.assertEqual(
+            rows,
+            {
+                "db_twin": "hcq_172_16_14_66",
+                "db_web_only": "hcq_172_16_14_66",
+            },
+        )
+        self.assertEqual(issue_run_ids, ["db_web_only"])
+        self.assertIsNone(reopened.get_run("db_web_dup"))
+        # canonical 视角可读到 Web 写入的历史单号分析
+        found = reopened.find_run("hcq_172_16_14_66", "2026-09-17", "issue:648526")
+        self.assertIsNotNone(found)
+        self.assertEqual(found.run_id, "db_web_only")
+
     def test_latest_active_issue_run_excludes_batch_and_terminal_runs(self):
         batch = make_run(mode="manual", status="analyzing", started_at="2026-09-13T09:00:00")
         completed = make_run(mode="issue:100", status="completed", started_at="2026-09-13T10:00:00")

@@ -48,7 +48,11 @@ async def refresh_devices_websocket(
             ssh_manager.return_connection(ssh)
     except Exception as exc:
         logger.error("Error refreshing devices: %s", exc)
-        await websocket.send_json({"type": "error", "message": str(exc)})
+        # 异常详情只留服务端日志；原始 SSH/系统错误串不透传给浏览器。
+        await websocket.send_json({
+            "type": "error",
+            "message": "设备列表刷新失败，请稍后重试",
+        })
 
 
 async def handle_tradefed_list_results(

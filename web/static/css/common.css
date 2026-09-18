@@ -13,6 +13,17 @@
     outline-offset: 2px;
 }
 
+/* 页面容器只是方向键导航的键盘锚点（tabIndex=-1，由
+   focusSidebarNavigationTarget 在方向键切换后程序化聚焦），自身不是
+   交互元素：必须抑制它的焦点外圈——容器右缘紧贴侧栏，2px outline 会
+   在侧栏/内容分界处形成一条全高「蓝线」（当前位置已有 sidebar-item
+   .active 高亮指示，容器级外圈纯属视觉噪音）。容器内的真实交互元素
+   仍保留各自的 :focus-visible 外圈，键盘可达性不受影响。 */
+.page-content:focus,
+.page-content:focus-visible {
+    outline: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
         animation-duration: 0.01ms !important;
@@ -354,6 +365,33 @@ body {
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
+    /* 侧栏很窄且滚动条紧贴导航/内容分界线，全局 8px thumb 在非交互
+       状态下常被误认为一条彩色 UI 线（颜色还随系统主题变化）。非 hover
+       时隐藏 thumb，hover 时才显示 4px 细滚动条；保留 auto 滚动能力，
+       小分辨率/浏览器缩放/菜单增删后仍可滚动访问全部菜单项。 */
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+}
+
+.sidebar-nav:hover {
+    scrollbar-color: var(--border-color) transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+    width: 4px;
+}
+
+.sidebar-nav::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 2px;
+}
+
+.sidebar-nav:hover::-webkit-scrollbar-thumb {
+    background: var(--border-color);
 }
 
 /* 拖拽手柄 */

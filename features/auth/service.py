@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import os
 import secrets
 import sqlite3
@@ -29,6 +30,25 @@ from .schema import initialize_auth_schema
 AUTH_COOKIE_NAME = "gms_session"
 PASSWORD_ALGORITHM = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 260_000
+
+
+def is_client_form_username(username: str) -> bool:
+    """Return whether a username uses the ``SSH_USER@CLIENT_IP`` client form.
+
+    Client principals authenticate with their host-scoped SSH credential. A
+    local PBKDF2 password must never answer for a client-form username,
+    otherwise any password that once landed in the local table (admin reset,
+    legacy row) would silently bypass the SSH credential verifier.
+    """
+    cleaned = (username or "").strip()
+    if "@" not in cleaned:
+        return False
+    _, host = cleaned.rsplit("@", 1)
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
 # Fixed dummy hash for the unknown-username login branch —
 # precomputed once at import (format matches _verify_password's parser) so
 # that branch runs exactly one PBKDF2 like the known-user branch.
@@ -180,8 +200,13 @@ class AuthService(
         *,
         role: str = "user",
         display_name: str = "",
+        allow_client_form: bool = False,
     ) -> CurrentUser:
         username = self._validate_username(username)
+        if is_client_form_username(username) and not allow_client_form:
+            # client 形态账号的凭据语义是 SSH 凭据；浏览器可登录的本地
+            # 密码只属于 admin / device_operator 等平台账号。
+            raise ValueError("客户端账号使用 SSH 凭据登录，不能设置本地密码")
         self._validate_password(password)
         if role not in {"admin", "device_operator", "user"}:
             raise ValueError("角色必须是 admin、device_operator 或 user")
@@ -245,6 +270,13 @@ class AuthService(
         return CurrentUser(user_id, username, 'admin', cleaned_display_name)
 
     def authenticate(self, username: str, password: str) -> CurrentUser | None:
+        if is_client_form_username(username):
+            # 凭据语义硬边界：client 形态账号的密码是 SSH 凭据，绝不走本地
+            # PBKDF2 表——否则一旦本地表里存在可校验的密码（管理员重置、
+            # 历史遗留行），它就会绕过 SSH credential verifier。保留哑哈希
+            # 校验以维持与未知用户分支一致的时序特征。
+            self._verify_password(password or "", _UNKNOWN_USER_DUMMY_HASH)
+            return None
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM platform_users WHERE username = ? AND disabled = 0",
@@ -295,6 +327,7 @@ class AuthService(
                 secrets.token_urlsafe(32),
                 role="user",
                 display_name=username,
+                allow_client_form=True,
             )
         except ValueError:
             existing = self.get_enabled_user(username)
@@ -436,6 +469,14 @@ class AuthService(
     def set_user_password(self, user_id: str, password: str) -> None:
         self._validate_password(password)
         with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT username FROM platform_users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+            if row is not None and is_client_form_username(str(row["username"] or "")):
+                # 与 create_user 同一边界：client 账号的凭据只能是其主机的
+                # SSH 凭据，绝不能被重置成可用于浏览器登录的本地密码。
+                raise ValueError("客户端账号使用 SSH 凭据登录，不能设置本地密码")
             cursor = conn.execute(
                 """
                 UPDATE platform_users

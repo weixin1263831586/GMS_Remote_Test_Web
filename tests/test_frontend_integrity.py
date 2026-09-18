@@ -710,6 +710,35 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("rows === instance.lastResizeRows", main_text)
         self.assertIn("applyTerminalHost(select.value, false, false)", main_text)
 
+    def test_terminal_input_gate_uses_backend_ready_signal(self):
+        terminal = read_text("web/static/js/shell/shell-terminal.js")
+
+        # WebSocket 传输层打开 ≠ 后端会话就绪：onopen 只能进入"连接中"，
+        # terminal_ready 由服务端 terminal_connected 消息唯一置位。
+        self.assertIn("let terminalReady = false;", terminal)
+        self.assertIn("let terminalSessionGeneration = 0;", terminal)
+        self.assertIn("updateTerminalTransportStatus();", terminal)
+        connected_index = terminal.index("msg.type === 'terminal_connected'")
+        self.assertIn(
+            "terminalReady = true;",
+            terminal[connected_index:connected_index + 400],
+        )
+        # 输入门控必须检查 terminalReady，而不是 isTerminalConnected/OPEN。
+        self.assertIn(
+            "if (!terminalReady || !terminalSocket || terminalSocket.readyState !== WebSocket.OPEN) {",
+            terminal,
+        )
+        self.assertNotIn("if (isTerminalConnected && terminalSocket", terminal)
+
+        # silentMode.buffer 必须跟会话代际绑定：复位入口统一清空，
+        # 旧会话残留不得污染下一次提示符检测。
+        self.assertIn("function resetTerminalSessionState()", terminal)
+        self.assertEqual(terminal.count("silentMode.buffer = [];"), 2)
+        self.assertIn(
+            "silentMode.active && silentMode.generation === terminalSessionGeneration",
+            terminal,
+        )
+
     def test_device_management_inventory_is_scoped_by_single_cluster_mode(self):
         main_text = read_shell_bundle()
         navigation_text = read_all_frontend_js()

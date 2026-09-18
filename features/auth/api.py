@@ -29,6 +29,7 @@ from .service import (
     ROLE_PERMISSIONS,
     CurrentUser,
     auth_service,
+    is_client_form_username,
 )
 
 
@@ -338,60 +339,66 @@ async def auth_login(request: Request, req: dict):
     if retry_after:
         return _rate_limit_response(retry_after)
 
-    user = auth_service.authenticate(
-        username,
-        str(req.get("password", "")),
-    )
+    password = str(req.get("password", ""))
+    # 凭据语义边界：client 形态账号（SSH用户@客户端IP）的密码是宿主机
+    # SSH 凭据，只能经 SSH credential verifier 校验——本地 PBKDF2 表
+    # 绝不能替它做认证（否则库里任何可本地校验的密码都会绕过 SSH 验证）。
+    # service.authenticate 入口同样拒绝 client 形态，两层互为防漂移。
     client_ssh_error = None
-    if switch_target == "admin":
-        # The account-picker's admin option must not become a back door to
-        # another ordinary account, even if its credentials are known.
-        if user is None or user.role != "admin":
-            retry_after = auth_service.record_auth_failure(
-                "login", username, source_ip,
+    if switch_target == "client" or is_client_form_username(username):
+        if switch_target == "client":
+            # 账号选择器的 client 选项只服务当前这台客户端机的身份。
+            expected_client_login = _configured_client_login(source_ip)
+            is_source_bound_login = (
+                "@" in username and username.rsplit("@", 1)[1] == source_ip
             )
-            if retry_after:
-                return _rate_limit_response(retry_after)
-            return error_response("用户名或密码错误", status_code=401)
-    elif switch_target == "client":
-        expected_client_login = _configured_client_login(source_ip)
-        is_source_bound_login = (
-            "@" in username and username.rsplit("@", 1)[1] == source_ip
-        )
-        if (expected_client_login and not hmac.compare_digest(
-            username, expected_client_login,
-        )) or (not expected_client_login and not is_source_bound_login):
-            retry_after = auth_service.record_auth_failure(
-                "login", username, source_ip,
-            )
-            if retry_after:
-                return _rate_limit_response(retry_after)
-            return error_response("当前客户端账号不匹配", status_code=403)
-    if not user:
-        try:
-            ipaddress.ip_address(username)
-        except ValueError:
-            pass
-        else:
-            retry_after = auth_service.record_auth_failure(
-                "login",
-                username,
-                source_ip,
-            )
-            if retry_after:
-                return _rate_limit_response(retry_after)
-            return error_response(
-                "客户端账号格式错误，请使用 SSH用户名@客户端IP，例如 gms@192.0.2.10",
-                status_code=401,
-            )
+            if (expected_client_login and not hmac.compare_digest(
+                username, expected_client_login,
+            )) or (not expected_client_login and not is_source_bound_login):
+                retry_after = auth_service.record_auth_failure(
+                    "login", username, source_ip,
+                )
+                if retry_after:
+                    return _rate_limit_response(retry_after)
+                return error_response("当前客户端账号不匹配", status_code=403)
         from fastapi.concurrency import run_in_threadpool
 
         user, client_ssh_error = await run_in_threadpool(
             _authenticate_client_ssh_user,
             username,
-            str(req.get("password", "")),
+            password,
             source_ip,
         )
+    else:
+        user = auth_service.authenticate(username, password)
+        if switch_target == "admin":
+            # The account-picker's admin option must not become a back door to
+            # another ordinary account, even if its credentials are known.
+            if user is None or user.role != "admin":
+                retry_after = auth_service.record_auth_failure(
+                    "login", username, source_ip,
+                )
+                if retry_after:
+                    return _rate_limit_response(retry_after)
+                return error_response("用户名或密码错误", status_code=401)
+    if not user:
+        if not is_client_form_username(username):
+            try:
+                ipaddress.ip_address(username)
+            except ValueError:
+                pass
+            else:
+                retry_after = auth_service.record_auth_failure(
+                    "login",
+                    username,
+                    source_ip,
+                )
+                if retry_after:
+                    return _rate_limit_response(retry_after)
+                return error_response(
+                    "客户端账号格式错误，请使用 SSH用户名@客户端IP，例如 gms@192.0.2.10",
+                    status_code=401,
+                )
     if not user:
         retry_after = auth_service.record_auth_failure(
             "login",

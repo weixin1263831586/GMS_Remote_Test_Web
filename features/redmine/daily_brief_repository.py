@@ -18,6 +18,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from foundation.config_paths import sanitize_owner_id
+
 from .daily_brief_jobs import JOB_KINDS as JOB_KINDS
 from .daily_brief_jobs import DailyBriefJobStore
 from .daily_brief_models import (
@@ -45,6 +47,17 @@ ISSUE_COLUMNS = (
 TERMINAL_RUN_STATUSES = frozenset({"completed", "partial", "failed", "cancelled"})
 
 
+def canonical_owner_id(owner_id: str) -> str:
+    """owner 身份统一收敛为 sanitize 后的目录名（与库所在目录一致）。
+
+    历史上 Web 匿名会话以原始 display id（``user@ip``）写 runs，而
+    systemd/CLI 以 sanitize 后的目录名写入——同一 per-owner 库出现两种
+    owner_id 字符串，按 owner_id 过滤的读端点因此查不到定时任务写入的
+    晨报（UI 显示「暂无每日晨报」）。所有读写一律先经此函数规范化。
+    """
+    return sanitize_owner_id(owner_id)
+
+
 def new_run_id() -> str:
     return "db_" + uuid.uuid4().hex
 
@@ -55,7 +68,7 @@ class DailyBriefRepository:
     # 当前 schema 版本（PRAGMA user_version）。每次改 _init_db 的表结构
     # 都必须 +1，让旧库在下一次启动时重放迁移；版本历史见
     # docs/redmine-daily-brief.md 的 schema migration 契约一节。
-    _SCHEMA_VERSION = 4
+    _SCHEMA_VERSION = 5
 
     def __init__(self, owner_root: Path):
         self.owner_root = Path(owner_root)
@@ -277,6 +290,47 @@ class DailyBriefRepository:
                 ON redmine_daily_brief_ai_executions(run_id, issue_id)
                 """
             )
+            # v5：owner 身份收敛回填。同一 per-owner 库里历史上混有原始
+            # display id（`user@ip`，Web 写入）与 sanitize 目录名
+            # （systemd/CLI 写入）两种 owner_id，导致按 owner 过滤的查询
+            # 丢失对方写入的 run。统一改写为 canonical；与既有 canonical
+            # 行 (owner_id, brief_date, mode) 冲突的 legacy run 连同子表
+            # 记录一起删除（保留 canonical 孪生）。
+            for (raw_owner,) in conn.execute(
+                "SELECT DISTINCT owner_id FROM redmine_daily_brief_runs"
+            ).fetchall():
+                canon = sanitize_owner_id(raw_owner)
+                if canon == raw_owner:
+                    continue
+                stale_run_ids = [
+                    row[0] for row in conn.execute(
+                        "SELECT run_id FROM redmine_daily_brief_runs AS legacy "
+                        "WHERE legacy.owner_id=? AND EXISTS ("
+                        "SELECT 1 FROM redmine_daily_brief_runs AS twin "
+                        "WHERE twin.owner_id=? "
+                        "AND twin.brief_date=legacy.brief_date "
+                        "AND twin.mode=legacy.mode)",
+                        (raw_owner, canon),
+                    )
+                ]
+                for stale_run_id in stale_run_ids:
+                    for table in (
+                        "redmine_daily_brief_issues",
+                        "redmine_daily_brief_snapshots",
+                        "redmine_daily_brief_jobs",
+                        "redmine_daily_brief_ai_executions",
+                    ):
+                        conn.execute(
+                            f"DELETE FROM {table} WHERE run_id=?", (stale_run_id,)
+                        )
+                    conn.execute(
+                        "DELETE FROM redmine_daily_brief_runs WHERE run_id=?",
+                        (stale_run_id,),
+                    )
+                conn.execute(
+                    "UPDATE redmine_daily_brief_runs SET owner_id=? WHERE owner_id=?",
+                    (canon, raw_owner),
+                )
             # 全部迁移完成后盖章：后续启动走快路径，不再重复 DDL。
             # user_version 在同一写事务内设置，崩溃回滚后自然重放迁移。
             conn.execute(f"PRAGMA user_version = {self._SCHEMA_VERSION}")
@@ -291,6 +345,7 @@ class DailyBriefRepository:
         代替 SELECT→判断→INSERT（Web 进程、Worker、nightly/delta CLI 可能
         并发创建同一 owner+date+mode 的 run，Python 进程内锁无法覆盖）。
         """
+        run.owner_id = canonical_owner_id(run.owner_id)
         now = _now()
         with self._lock, self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -316,6 +371,7 @@ class DailyBriefRepository:
             return self._row_to_run(row) if row else None
 
     def find_run(self, owner_id: str, brief_date: str, mode: str) -> DailyBriefRun | None:
+        owner_id = canonical_owner_id(owner_id)
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? AND brief_date=? AND mode=?",
@@ -330,6 +386,7 @@ class DailyBriefRepository:
         particular, a zero-change delta must not hide the day's full nightly
         brief from the dashboard.
         """
+        owner_id = canonical_owner_id(owner_id)
         with self._connect() as conn:
             if brief_date:
                 row = conn.execute(
@@ -349,6 +406,7 @@ class DailyBriefRepository:
 
     def latest_active_issue_run(self, owner_id: str) -> DailyBriefRun | None:
         """Return the owner's newest in-flight standalone issue analysis."""
+        owner_id = canonical_owner_id(owner_id)
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? "
@@ -369,6 +427,7 @@ class DailyBriefRepository:
         while earlier installations used ``issue:<id>``.  Grouping here keeps
         both formats visible as one history entry per Redmine number.
         """
+        owner_id = canonical_owner_id(owner_id)
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? "
@@ -392,6 +451,7 @@ class DailyBriefRepository:
         """Newest standalone analysis for one issue, including legacy runs."""
         # Do not route this through the bounded history view: an older issue
         # must still be found when a user enters its exact Redmine number.
+        owner_id = canonical_owner_id(owner_id)
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? "
@@ -440,6 +500,7 @@ class DailyBriefRepository:
         return None
 
     def update_run(self, run: DailyBriefRun) -> bool:
+        run.owner_id = canonical_owner_id(run.owner_id)
         now = _now()
         with self._lock, self._connect() as conn:
             cursor = conn.execute(

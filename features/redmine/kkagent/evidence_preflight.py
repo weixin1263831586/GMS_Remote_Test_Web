@@ -110,11 +110,15 @@ async def _collect(
     *, tool_name: str, arguments: list[str], tool_input: dict[str, Any],
     env_extra: dict[str, str], evidence_issue_ids: list[int] | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    on_tool_event: Callable[[str, dict[str, Any], str, bool], None] | None = None,
 ) -> tuple[ToolTrace, dict[str, Any]]:
     """Run one preflight command; retry only documented network failures.
 
     ``should_cancel`` 在每次尝试与退避间隙被轮询：返回 True 时立即返回
     ``failed/cancelled`` 轨迹（等价 run 级停止），不再启动新的 CLI 进程。
+    ``on_tool_event(tool_name, tool_input, phase, ok)`` 在调用开始
+    （``started``）与结束（``finished``）时回调，供实时进度时间线使用；
+    回调异常不影响 preflight 本身。
     """
     command = _gms_command(tool_name.replace("gms_rt_", "gms-rt-").replace("_", "-"), arguments)
     if command is None:
@@ -122,16 +126,28 @@ async def _collect(
             tool_name=tool_name, tool_input=tool_input, status="failed",
             error="GMS evidence CLI is unavailable", evidence_issue_ids=evidence_issue_ids,
         ), {}
+
+    def _notify(phase: str, ok: bool = False) -> None:
+        if on_tool_event is None:
+            return
+        try:
+            on_tool_event(tool_name, tool_input, phase, ok)
+        except Exception:
+            pass
+
+    _notify("started")
     output = b""
     error = ""
     exit_code = NETWORK_EXIT_CODE
     for attempt in range(NETWORK_RETRY_ATTEMPTS):
         if should_cancel is not None and should_cancel():
-            return _summary_trace(
+            trace, payload = _summary_trace(
                 tool_name=tool_name, tool_input=tool_input, status="failed",
                 error="cancelled before evidence preflight attempt",
                 evidence_issue_ids=evidence_issue_ids,
             ), {}
+            _notify("finished", False)
+            return trace, payload
         if attempt:
             await asyncio.sleep(NETWORK_RETRY_BACKOFF_SECONDS[attempt - 1])
         exit_code, output, error = await _run_readonly_command(
@@ -164,6 +180,7 @@ async def _collect(
             if tool_name == "gms_rt_devices_snapshot" else "operation_failed"
         ),
     )
+    _notify("finished", success)
     return trace, data if success and isinstance(data, dict) else {}
 
 
@@ -185,6 +202,7 @@ class EvidencePreflight:
 async def collect_deep_analysis_evidence(
     *, issue_id: int, device_serial: str, env_extra: dict[str, str],
     should_cancel: Callable[[], bool] | None = None,
+    on_tool_event: Callable[[str, dict[str, Any], str, bool], None] | None = None,
 ) -> EvidencePreflight:
     """Collect the mandatory immutable evidence baseline for a single issue.
 
@@ -194,6 +212,7 @@ async def collect_deep_analysis_evidence(
     state which source was unavailable.
     ``should_cancel``（run 级取消标志轮询）在每次 CLI 尝试与退避间隙被
     检查；用户请求停止时立即返回已收集的部分，而不是继续排队后续命令。
+    ``on_tool_event`` 透传给每次 ``_collect``（实时进度时间线）。
     """
     result = EvidencePreflight()
     fetched, data = await _collect(
@@ -202,6 +221,7 @@ async def collect_deep_analysis_evidence(
         tool_input={"issue_id": issue_id}, env_extra=env_extra,
         evidence_issue_ids=[issue_id],
         should_cancel=should_cancel,
+        on_tool_event=on_tool_event,
     )
     result.traces.append(fetched)
     result.snapshot_id = str(data.get("snapshot_id") or "")
@@ -212,6 +232,7 @@ async def collect_deep_analysis_evidence(
             tool_input={"snapshot_id": result.snapshot_id}, env_extra=env_extra,
             evidence_issue_ids=[issue_id],
             should_cancel=should_cancel,
+            on_tool_event=on_tool_event,
         )
         attachments, data = await _collect(
             tool_name="gms_rt_redmine_attachments",
@@ -219,6 +240,7 @@ async def collect_deep_analysis_evidence(
             tool_input={"snapshot_id": result.snapshot_id}, env_extra=env_extra,
             evidence_issue_ids=[issue_id],
             should_cancel=should_cancel,
+            on_tool_event=on_tool_event,
         )
         if attachments.succeeded and isinstance(data, dict):
             # 把清单元数据记入 trace：否则 Evidence Gate 会对这条"成功"
@@ -242,6 +264,7 @@ async def collect_deep_analysis_evidence(
                 arguments=[serial, "--json", "--non-interactive"],
                 tool_input={"device": serial}, env_extra=env_extra,
                 should_cancel=should_cancel,
+                on_tool_event=on_tool_event,
             )
             result.traces.append(device)
             statuses.append(str(device.status))

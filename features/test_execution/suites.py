@@ -2,7 +2,6 @@
 
 import logging
 import os
-import re
 from typing import Any
 
 from foundation.config import config_manager as default_config_manager
@@ -29,7 +28,30 @@ SPECIAL_TEST_TYPES = {
 }
 
 TRADEFED_BINARY_REVERSE_MAP = {v: k for k, v in TRADEFED_BINARY_MAP.items()}
-SUITE_TYPE_PATTERN = re.compile(r'/android-([a-z]+)')
+# Path markers ordered from the most specific to the most generic.  A single
+# ``/android-([a-z]+)`` regex cannot represent nested CTS Verifier layouts
+# (android-cts-verifier*/android-cts-verifier/android-cts-v-host/tools): the
+# first /android-cts hit would classify the path as plain "cts".  Matching
+# explicit markers in priority order keeps cts-v / gts-root / apts ahead of
+# their generic prefixes.
+SUITE_PATH_TYPE_MARKERS = (
+    ('cts-v-host-tradefed', 'cts-v'),
+    ('android-cts-v-host', 'cts-v'),
+    ('android-cts-verifier', 'cts-v'),
+    ('gts-root-tradefed', 'gts-root'),
+    ('android-gts-root', 'gts-root'),
+    ('apts-tradefed', 'apts'),
+    ('android-apts', 'apts'),
+    ('android-cts', 'cts'),
+    ('android-vts', 'vts'),
+    ('android-gts', 'gts'),
+    ('android-sts', 'sts'),
+    ('android-xts', 'xts'),
+    ('android-gsi', 'gsi'),
+)
+DETECTABLE_SUITE_TYPES = (
+    frozenset(TRADEFED_BINARY_MAP) | frozenset(SPECIAL_TEST_TYPES.values())
+)
 TRADEFED_BINARY_LIST = list(set(TRADEFED_BINARY_MAP.values()))
 TEST_TYPE_DETECTION_PRIORITY = ['vts', 'gts', 'sts', 'cts']
 
@@ -48,11 +70,10 @@ def detect_test_type_from_suite_path(suite_path: str) -> str | None:
     if not suite_path:
         return None
 
-    suite_match = SUITE_TYPE_PATTERN.search(suite_path.lower())
-    if suite_match:
-        detected_type = suite_match.group(1)
-        if detected_type in TRADEFED_BINARY_MAP or detected_type in SPECIAL_TEST_TYPES:
-            return detected_type
+    suite_path_lower = suite_path.lower()
+    for marker, suite_type in SUITE_PATH_TYPE_MARKERS:
+        if marker in suite_path_lower and suite_type in DETECTABLE_SUITE_TYPES:
+            return suite_type
     return None
 
 

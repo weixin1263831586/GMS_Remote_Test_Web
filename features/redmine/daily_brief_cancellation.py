@@ -7,6 +7,7 @@ import logging
 from contextlib import suppress
 from typing import Any
 
+from .daily_brief_analysis_events import finish_analysis_progress
 from .users import _now
 
 
@@ -24,7 +25,12 @@ async def analyze_with_persisted_cancel(
     analyzer: Any,
     entry: dict[str, Any],
 ) -> Any:
-    """Run one analysis while polling the cross-process cancellation flag."""
+    """Run one analysis while polling the cross-process cancellation flag.
+
+    ``entry["_progress_recorder"]`` 存在时，本包装器同时负责进度时间线的
+    终态事件（完成 / 已停止）：终态收敛只有这一处，调用方无需重复落库。
+    """
+    progress = entry.get("_progress_recorder") if isinstance(entry, dict) else None
     analysis_task = asyncio.create_task(analyzer.analyze(entry))
     try:
         while True:
@@ -32,18 +38,25 @@ async def analyze_with_persisted_cancel(
                 {analysis_task}, timeout=CANCEL_POLL_SECONDS
             )
             if analysis_task in done:
-                return await analysis_task
+                outcome = await analysis_task
+                finish_analysis_progress(
+                    progress, ok=bool(outcome.ok), error_type=getattr(outcome, "error_type", ""),
+                    model_name=getattr(progress, "model_name", ""),
+                )
+                return outcome
             if repository.is_cancel_requested(run_id):
                 logger.info("cancelling active KkAgent for daily brief run %s", run_id)
                 analysis_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await analysis_task
+                finish_analysis_progress(progress, ok=False, cancelled=True)
                 raise RunCancelledError()
     except asyncio.CancelledError:
         if not analysis_task.done():
             analysis_task.cancel()
         with suppress(asyncio.CancelledError):
             await analysis_task
+        finish_analysis_progress(progress, ok=False, cancelled=True)
         raise
 
 

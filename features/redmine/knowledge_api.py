@@ -17,7 +17,7 @@ from features.users import owner_id_from_request
 from foundation.error_model import ApiError
 
 from .api import get_redmine_service_for_request
-from .daily_brief_repository import owner_daily_brief_repository
+from .daily_brief_repository import canonical_owner_id, owner_daily_brief_repository
 
 
 router = APIRouter()
@@ -237,7 +237,7 @@ async def save_daily_brief_case(brief_date: str, issue_id: int, request: Request
     from .kkagent.evidence_gate import result_analysis_mode
 
     require_human_principal_when_auth_required(request)
-    owner_id = owner_id_from_request(request)
+    owner_id = canonical_owner_id(owner_id_from_request(request))
     repository = owner_daily_brief_repository(owner_id)
     run = repository.get_run(run_id) if run_id else repository.latest_run(owner_id, brief_date)
     if run is None or run.owner_id != owner_id or run.brief_date != brief_date:

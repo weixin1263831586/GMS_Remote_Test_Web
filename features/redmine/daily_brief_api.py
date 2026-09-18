@@ -27,12 +27,14 @@ from features.users import owner_id_from_request
 from foundation.error_model import ApiError
 
 from .api import get_redmine_config_for_request
+from .daily_brief_analysis_events import event_store_for_repository, progress_to_payload
 from .daily_brief_config import (
     list_daily_brief_agent_profiles,
     list_daily_brief_model_options,
 )
 from .daily_brief_dispatch import enqueue_reanalysis, enqueue_refresh, enqueue_run
 from .daily_brief_models import BRIEF_MODES
+from .daily_brief_repository import TERMINAL_RUN_STATUSES
 from .daily_brief_service import (
     DEFAULT_BRIEF_CONFIG,
     DailyBriefService,
@@ -142,6 +144,43 @@ async def get_brief_run(request: Request, run_id: str):
     if run is None or run.owner_id != service.owner_id:
         return ApiError.not_found("分析任务不存在。").to_response()
     return {"success": True, "data": service.run_payload(run)}
+
+
+@router.get("/daily-brief/runs/{run_id}/issues/{issue_id}/events")
+async def get_issue_analysis_events(
+    request: Request,
+    run_id: str,
+    issue_id: int = Path(ge=1),
+    after_sequence: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
+):
+    """单 issue 分析进度时间线的增量读取（「查看分析」实时弹框数据源）。
+
+    - owner ACL：run 不存在或不属于当前 owner 一律 404，不泄露存在性
+      （与 get_brief_run 同一判定）。
+    - 增量协议：调用方携带上次响应的 ``next_sequence`` 作为
+      ``after_sequence``，只拿新事件；2~3 秒粒度轮询足够（ADR：无 SSE）。
+    - ``terminal``：run 已终态时为 true，前端据此停止轮询并切换到
+      最终报告/失败/已停止视图。
+    """
+    _require_read(request)
+    service = _service_for_request(request)
+    run = service.repository.get_run(run_id)
+    if run is None or run.owner_id != service.owner_id:
+        return ApiError.not_found("分析任务不存在。").to_response()
+    events = event_store_for_repository(service.repository).list_after(
+        run_id, issue_id, after_sequence=after_sequence, limit=limit,
+    )
+    next_sequence = int(events[-1]["sequence"]) if events else int(after_sequence)
+    return {
+        "success": True,
+        "data": {
+            "events": progress_to_payload(events),
+            "next_sequence": next_sequence,
+            "run_status": run.status,
+            "terminal": run.status in TERMINAL_RUN_STATUSES,
+        },
+    }
 
 
 @router.get("/daily-brief/triage")

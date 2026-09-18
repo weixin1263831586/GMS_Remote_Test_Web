@@ -75,12 +75,32 @@ let silentMode = {
 };
 
 let isReconnecting = false;
+// WebSocket 传输层打开 ≠ 后端会话就绪。terminalReady 只有在收到服务端
+// terminal_connected（PTY/SSH/ADB 会话真正创建完成）后才置 true；所有
+// 终端输入必须以 terminalReady 为门控，否则握手期间的按键会被服务端
+// 静默丢弃（与串口控制台同一类状态机 bug）。
+let terminalReady = false;
+let terminalSessionGeneration = 0;
+
+// 会话级状态统一复位入口：新连接、断连、出错都必须走这里，
+// 避免旧 session 的 silentMode.buffer / ready 标志污染下一次会话。
+function resetTerminalSessionState() {
+    terminalReady = false;
+    silentMode.active = false;
+    silentMode.type = null;
+    silentMode.pendingCommand = null;
+    silentMode.buffer = [];
+}
 
 // 同步函数
 function updateSilentMode(active, type = null, command = null) {
     silentMode.active = active;
     silentMode.type = type;
     silentMode.pendingCommand = command;
+    // buffer 与当前会话同生命周期：任何模式切换/退出都清空，
+    // 防止旧 ADB 会话残留字节污染下一次提示符检测。
+    silentMode.buffer = [];
+    silentMode.generation = terminalSessionGeneration;
 }
 
 function updateTerminalStatus(connected) {
@@ -92,8 +112,20 @@ function updateTerminalStatus(connected) {
     }
 }
 
+// 传输层已打开但后端会话尚未就绪：提示用户仍在握手，而不是“已连接”。
+function updateTerminalTransportStatus() {
+    isTerminalConnected = false;
+    const statusElement = document.getElementById('terminal-status');
+    if (statusElement) {
+        statusElement.textContent = '连接中…';
+        statusElement.className = 'terminal-status connecting';
+    }
+}
+
 function connectTerminalSocket() {
     debugLog('Connecting to terminal WebSocket...');
+    terminalSessionGeneration++;
+    resetTerminalSessionState();
     updateTerminalStatus(false);
 
     // 生成唯一的client_id
@@ -107,9 +139,11 @@ function connectTerminalSocket() {
 
     socket.onopen = () => {
         if (socket !== terminalSocket) return;
-        debugLog('Terminal WebSocket connected');
+        debugLog('Terminal WebSocket transport connected');
         isReconnecting = false;
-        updateTerminalStatus(true);
+        // 传输层打开只说明可以发控制消息，后端 PTY/SSH/ADB 会话
+        // 还未创建，等 terminal_connected 才算真正就绪。
+        updateTerminalTransportStatus();
 
         // 检查是否为路由命令模式
         if (silentMode.type === 'route' && silentMode.pendingCommand) {
@@ -150,6 +184,7 @@ function connectTerminalSocket() {
     socket.onclose = () => {
         if (socket !== terminalSocket) return;
         debugLog('Terminal WebSocket disconnected');
+        resetTerminalSessionState();
         updateTerminalStatus(false);
         // 只有在非重新连接时才显示断开消息
         if (terminal && !isReconnecting) {
@@ -160,6 +195,7 @@ function connectTerminalSocket() {
     socket.onerror = (error) => {
         if (socket !== terminalSocket) return;
         console.error('WebSocket error:', error);
+        resetTerminalSessionState();
         updateTerminalStatus(false);
     };
 
@@ -170,8 +206,8 @@ function connectTerminalSocket() {
 
             if (msg.type === 'terminal_data') {
                 if (terminal) {
-                    // 静默模式:缓冲输出,等待提示符
-                    if (silentMode.active) {
+                    // 静默模式:缓冲输出,等待提示符（丢弃旧会话代际的残留数据）
+                    if (silentMode.active && silentMode.generation === terminalSessionGeneration) {
                         silentMode.buffer.push(msg.data);
 
                         // 优化：只检查最后10条消息，避免O(n²)性能问题
@@ -228,10 +264,12 @@ function connectTerminalSocket() {
                 if (terminal) {
                     terminal.writeln(`\r\n\x1b[31m❌ 错误: ${msg.error}\x1b[0m\r\n`);
                 }
+                resetTerminalSessionState();
                 updateTerminalStatus(false);
-                updateSilentMode(false);  // 出错时退出静默模式
             } else if (msg.type === 'terminal_connected') {
                 debugLog('Terminal connected, mode:', msg.mode);
+                // 后端会话真正创建完成：这是唯一的 ready 信号。
+                terminalReady = true;
                 // 路由命令模式和ADB模式:不显示连接消息,让输出直接显示
                 if (msg.mode !== 'adb' && silentMode.type !== 'route') {
                     if (terminal) {
@@ -347,7 +385,7 @@ function initTerminal() {
 
     // 设置数据处理器
     terminal.onData((data) => {
-        if (isTerminalConnected && terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
+        if (terminalReady && terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
             // 确保正确处理方向键等特殊按键的ANSI转义序列
             // onData已经正确地将方向键转换为转义序列（如\x1b[A）
             // 直接发送原始数据，不做任何额外处理
@@ -359,7 +397,9 @@ function initTerminal() {
     let lastPasteSentAt = 0;
 
     function sendTerminalInput(input, source = 'keyboard') {
-        if (!isTerminalConnected || !terminalSocket || terminalSocket.readyState !== WebSocket.OPEN) {
+        // 门控必须是会话就绪标志，而不是 WebSocket OPEN：
+        // 传输层打开但后端会话未建时发送的输入会被服务端静默丢弃。
+        if (!terminalReady || !terminalSocket || terminalSocket.readyState !== WebSocket.OPEN) {
             return false;
         }
         if (source !== 'paste' && input && input === lastPasteText && Date.now() - lastPasteSentAt < 700) {
@@ -576,7 +616,7 @@ function initTerminal() {
             terminal.writeln(`\x1b[90m示例: adb push ${result.remote_path} /data/local/tmp/\x1b[0m`);
 
             // 发送回车键,刷新提示符
-            if (typeof terminalSocket !== 'undefined' && terminalSocket.readyState === WebSocket.OPEN) {
+            if (terminalReady && typeof terminalSocket !== 'undefined' && terminalSocket.readyState === WebSocket.OPEN) {
                 terminalSocket.send(JSON.stringify({
                     type: 'terminal_input',
                     input: '\r'
@@ -585,7 +625,7 @@ function initTerminal() {
         } catch (error) {
             terminal.writeln(`\x1b[31m❌ 上传失败: ${error.message}\x1b[0m`);
             // 发送回车键
-            if (typeof terminalSocket !== 'undefined' && terminalSocket.readyState === WebSocket.OPEN) {
+            if (terminalReady && typeof terminalSocket !== 'undefined' && terminalSocket.readyState === WebSocket.OPEN) {
                 terminalSocket.send(JSON.stringify({
                     type: 'terminal_input',
                     data: '\r'

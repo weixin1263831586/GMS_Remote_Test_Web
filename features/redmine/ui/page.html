@@ -122,31 +122,35 @@
 <div id="tab-daily-brief" class="tab-content">
   <section class="stats-section" id="sec-daily-brief">
     <div class="card daily-brief-card">
-      <div class="daily-brief-toolbar">
-        <span class="daily-brief-title">🤖 Redmine 单号分析</span>
-        <form id="singleIssueAnalysisForm" class="daily-brief-single-form">
-          <label for="singleIssueAnalysisId" class="sr-only">Redmine 单号</label>
-          <input id="singleIssueAnalysisId" type="text" inputmode="numeric" pattern="[0-9]+" required placeholder="Redmine 单号，如 647338" style="width:200px;max-width:100%">
-          <button id="singleIssueAnalysisHintButton" type="button" class="ka-btn" data-click="openSingleIssueAnalysisHint" aria-haspopup="dialog">辅助说明</button>
-          <select id="singleIssueAnalysisMode" aria-label="分析方式">
-            <option value="incremental">增量分析</option>
-            <option value="full">全量分析</option>
-          </select>
-          <div id="singleIssueAnalysisDevice" class="daily-brief-device-picker">
-            <button type="button" data-device-toggle aria-expanded="false" aria-controls="singleIssueAnalysisDeviceOptions">
-              <span data-device-label>不使用实机验证</span><span aria-hidden="true">▾</span>
-            </button>
-            <div id="singleIssueAnalysisDeviceOptions" data-device-options aria-label="实机验证设备（可多选）" hidden>
-              <label><input type="checkbox" value="" data-device-none checked> 不使用实机验证</label>
-              <span data-device-list></span>
+      <!-- 各区块自成一节：工具栏 sticky 的范围被限制在本节内，滚动到
+           每日晨报时「单号分析」工具栏随本节滚走，始终只有当前视口区块
+           的工具栏吸附在页头下缘。 -->
+      <div class="daily-brief-single-section">
+        <div class="daily-brief-toolbar">
+          <span class="daily-brief-title">🤖 Redmine 单号分析</span>
+          <form id="singleIssueAnalysisForm" class="daily-brief-single-form">
+            <label for="singleIssueAnalysisId" class="sr-only">Redmine 单号</label>
+            <input id="singleIssueAnalysisId" type="text" inputmode="numeric" pattern="[0-9]+" required placeholder="Redmine 单号，如 647338" style="width:200px;max-width:100%">
+            <button id="singleIssueAnalysisHintButton" type="button" class="ka-btn" data-click="openSingleIssueAnalysisHint" aria-haspopup="dialog">辅助说明</button>
+            <select id="singleIssueAnalysisMode" aria-label="分析方式">
+              <option value="incremental">增量分析</option>
+              <option value="full">全量分析</option>
+            </select>
+            <div id="singleIssueAnalysisDevice" class="daily-brief-device-picker">
+              <button type="button" data-device-toggle aria-expanded="false" aria-controls="singleIssueAnalysisDeviceOptions">
+                <span data-device-label>不使用实机验证</span><span aria-hidden="true">▾</span>
+              </button>
+              <div id="singleIssueAnalysisDeviceOptions" data-device-options aria-label="实机验证设备（可多选）" hidden>
+                <label><input type="checkbox" value="" data-device-none checked> 不使用实机验证</label>
+                <span data-device-list></span>
+              </div>
             </div>
-          </div>
-          <button id="singleIssueAnalysisStart" type="submit" class="ka-btn primary">开始分析</button>
-          <button id="singleIssueAnalysisStop" type="button" class="ka-btn" data-click="stopSingleIssueAnalysis" hidden>停止此项</button>
-        </form>
+            <button id="singleIssueAnalysisStart" type="submit" class="ka-btn primary">开始分析</button>
+          </form>
+        </div>
+        <div id="singleIssueAnalysisPagination" class="pagination single-issue-analysis-pagination"></div>
+        <div id="singleIssueAnalysisHistory" class="single-issue-analysis-history" aria-live="polite"></div>
       </div>
-      <div id="singleIssueAnalysisPagination" class="pagination single-issue-analysis-pagination"></div>
-      <div id="singleIssueAnalysisHistory" class="single-issue-analysis-history" aria-live="polite"></div>
       <section class="daily-brief-summary" aria-label="每日晨报">
         <div class="daily-brief-toolbar">
           <span class="daily-brief-title">🤖 每日晨报 · 待回复事项</span>
@@ -331,7 +335,7 @@
           <select data-daily-brief-setting="model" aria-describedby="dailyBriefModelHelp">
             <option value="">正在读取系统模型…</option>
           </select>
-          <div class="setting-help" id="dailyBriefModelHelp">从系统已启用的本地模型中选择；保存后每日晨报会将所选模型传给 kkagent。</div>
+          <div class="setting-help" id="dailyBriefModelHelp">自动列出系统中已启用且可供 kkagent 使用的模型；保存后每日晨报会将所选模型传给 kkagent。</div>
         </div>
         <div>
           <label>并发分析数</label>
