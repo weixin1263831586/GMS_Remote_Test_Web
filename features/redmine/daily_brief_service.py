@@ -121,6 +121,58 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         run = self.repository.latest_issue_run(self.owner_id, issue_id)
         return self.run_payload(run) if run is not None else None
 
+    async def sync_display_subjects(self) -> dict[str, Any]:
+        """Pull latest Redmine subjects and refresh display titles.
+
+        晨报行与单号分析条目的 subject 在入队时冻结；用户点击刷新时把当前
+        展示的单号标题与 Redmine 现值同步一次（镜像库与展示记录一起更新）。
+        任一步失败都不阻断刷新，返回同步摘要供前端提示。
+        """
+        runs_by_issue: dict[int, DailyBriefRun] = {}
+        for run in self.repository.latest_issue_runs(self.owner_id, limit=30):
+            for issue in self.repository.list_issues(run.run_id):
+                runs_by_issue.setdefault(issue.issue_id, run)
+        latest = self.repository.latest_run(self.owner_id)
+        if latest is not None:
+            for issue in self.repository.list_issues(latest.run_id):
+                runs_by_issue.setdefault(issue.issue_id, latest)
+        issue_ids = sorted(runs_by_issue)
+        if not issue_ids:
+            return {"checked": 0, "updated": 0}
+        try:
+            from .api import get_redmine_service_for_owner
+
+            redmine = get_redmine_service_for_owner(self.owner_id)
+            client = redmine.agent._make_client()
+            try:
+                subjects = await client.fetch_issue_subjects(issue_ids)
+            finally:
+                await client.close()
+        except Exception:
+            logger.info("subject fetch unavailable", exc_info=True)
+            return {"checked": len(issue_ids), "updated": 0, "error": "redmine_unavailable"}
+        try:
+            mirror_changed = redmine.repository.update_issue_subjects(subjects)
+        except Exception:
+            mirror_changed = 0
+            logger.info("redmine mirror subject update failed", exc_info=True)
+        try:
+            display_changed = self.repository.update_issue_display_subjects(subjects)
+        except Exception:
+            display_changed = 0
+            logger.info("display subject update failed", exc_info=True)
+        renamed = [
+            {"issue_id": issue_id, "subject": subject}
+            for issue_id, subject in sorted(subjects.items())
+            if str(subject or "").strip()
+        ]
+        return {
+            "checked": len(issue_ids),
+            "updated": display_changed,
+            "mirror_updated": mirror_changed,
+            "issues": renamed,
+        }
+
     def find_run(self, brief_date: str, mode: str = "nightly") -> DailyBriefRun | None:
         return self.repository.find_run(self.owner_id, brief_date, mode)
 
@@ -607,6 +659,25 @@ class DailyBriefService(DailyBriefRunStarterMixin):
             "buckets": record.buckets,
             "priority_name": record.priority,
         }
+        if not str(entry.get("author_name") or "").strip():
+            # 单号 run 没有晨报快照，entry 缺报告人/指派/建单时间会让分析
+            # prompt 只能去附件里翻 author（历史失败现场）。本地 Redmine
+            # 镜像已有这些列，直接补齐；镜像不可用时保持缺省。
+            try:
+                from .api import get_redmine_service_for_owner
+
+                stored = get_redmine_service_for_owner(self.owner_id).repository.get_issue(
+                    issue_id
+                ) or {}
+                for key in (
+                    "author_name", "assigned_to_name", "created_on",
+                    "updated_on", "status_name",
+                ):
+                    value = str(stored.get(key) or "").strip()
+                    if value and not str(entry.get(key) or "").strip():
+                        entry[key] = value
+            except Exception:
+                logger.debug("local Redmine metadata unavailable for #%s", issue_id)
         if run.device_serial:
             entry = {**entry, "device_serial": run.device_serial}
         if run.analysis_hint:

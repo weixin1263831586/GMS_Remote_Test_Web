@@ -25,6 +25,7 @@ from typing import Any
 from ..daily_brief_prompt import issue_result_schema_json, prompt_template_for
 from .errors import classify_failure
 from .evidence_gate import gate_and_errors
+from .mcp_health import probe_kkagent_mcp_health
 from .native_summary import native_summary_result
 from .output import parse_issue_result
 from .process import (
@@ -44,7 +45,8 @@ DAILY_BRIEF_MCP_TOOLSETS = "evidence"
 logger = logging.getLogger(__name__)
 
 # Prompt 版本随 runtime-owned evidence/schema repair 语义升级。
-PROMPT_VERSION = "redmine_daily_triage_v15"
+# v17: triage 同样注入 Controller 预采集上下文（Redmine 基线无设备维度）。
+PROMPT_VERSION = "redmine_daily_triage_v17"
 
 REPAIR_MAX_TURNS = 0
 # 首次修复仍可能被模型原样重放（线上曾出现完整取证后连续漏掉
@@ -102,6 +104,31 @@ class KkAgentAnalysisResult:
     session_id: str = ""
 
 
+def classify_gate_failure(
+    trace: KkAgentTrace, gate_errors_list: list[str]
+) -> tuple[str, str, str]:
+    """Gate 修复失败后的终态分类 (status, error_type, error)。
+
+    会话内没有任何成功的 ``gms_rt_*`` MCP 调用时，"缺 issue/journals/历史
+    证据"几乎必然不是模型能力问题，而是 gms MCP server 未连接（#653167
+    nightly 复盘：模型全程 CLI 兜底取证，gate 按工具名判失败，修复轮原样
+    重放也无法恢复）。此时终态标记为 ``mcp_evidence_unavailable`` 并给出
+    可操作的恢复步骤，而不是把 findings 原样抛给晨报。
+    """
+    findings = "; ".join(gate_errors_list)
+    if any("gms_rt_" in name for name in trace.successful_tool_names()):
+        return ("evidence_gate_failed", "evidence_gate_failed", findings)
+    recovery = (
+        "kkagent 会话内没有任何成功的 gms_rt_* MCP 取证调用（gms MCP server "
+        "未连接或插件缺失）。恢复步骤：① 运行 gms-agent doctor --client "
+        "kkagent --json 检查插件与认证；② 核对 ~/.kkagent/config.toml 的 "
+        "[mcp_servers.gms] 与已安装插件 payload（在仓库内运行 python "
+        "tools/sync_agent_package.py . 后重装插件）；③ 修复后重跑本分析。"
+        f"原始 findings: {findings}"
+    )
+    return ("mcp_evidence_unavailable", "mcp_evidence_unavailable", recovery)
+
+
 class KkAgentRedmineAnalyzer:
     """单 issue 分析器。无状态，可被多个 run 并发复用。"""
 
@@ -142,10 +169,43 @@ class KkAgentRedmineAnalyzer:
             attachment_count=entry.get("attachment_count", 0),
         )
         serial = str(entry.get("device_serial") or "").strip()
+        # 预采集上下文对 triage 同样注入（#653167 nightly 复盘）：快照里
+        # 已有完整 issue JSON/journals/附件清单时，模型不必再赌 MCP。
+        preflight = entry.get("_evidence_preflight") or {}
+        preflight_snapshot = str(preflight.get("snapshot_id") or "")
+        if preflight_snapshot:
+            prompt += (
+                f"\n\nCONTROLLER EVIDENCE PRECOLLECTED: snapshot "
+                f"`{preflight_snapshot}` already contains this issue's full "
+                f"JSON, complete journals and attachment manifest, collected "
+                f"moments ago by the Controller. Read it with "
+                f"gms_rt_redmine_issue / gms_rt_redmine_journals / "
+                f"gms_rt_redmine_artifact_search / gms_rt_redmine_artifact_read "
+                f"on THIS snapshot_id. Do NOT call gms_rt_redmine_issue_fetch "
+                f"for #{entry.get('issue_id')} again unless you have concrete evidence the "
+                f"issue changed after the preflight."
+            )
+        if entry.get("analysis_mode") != "triage":
+            metadata = {
+                "reporter(author)": entry.get("author_name"),
+                "assignee": entry.get("assigned_to_name"),
+                "created_on": entry.get("created_on"),
+                "status": entry.get("status_name"),
+                "last_external_reply_by": entry.get("last_external_reply_by"),
+                "last_external_reply_at": entry.get("last_external_reply_at"),
+                "attachments": entry.get("attachment_count"),
+            }
+            known = {key: value for key, value in metadata.items() if str(value or "").strip()}
+            if known:
+                lines = "\n".join(f"- {key}: {value}" for key, value in known.items())
+                prompt += (
+                    "\n\nISSUE METADATA (from today's triage snapshot; cite it as "
+                    "the authoritative reporter/assignee instead of searching "
+                    f"artifacts for author fields):\n{lines}"
+                )
         if serial and entry.get("analysis_mode") != "triage":
             preflight = entry.get("_evidence_preflight") or {}
             device_status = str(preflight.get("device_status") or "")
-            snapshot_id = str(preflight.get("snapshot_id") or "")
             prompt += (
                 f"\n\nLOCAL DEVICE (read-only diagnosis allowed): serial "
                 f"`{serial}` is selected for this analysis. Controller preflight "
@@ -160,12 +220,6 @@ class KkAgentRedmineAnalyzer:
                 f"actually observed; write 未检查本地设备 only if every "
                 f"call failed. Never attempt to modify the device."
             )
-            if snapshot_id:
-                prompt += (
-                    f" Controller evidence snapshot `{snapshot_id}` was collected "
-                    "before this session; use native MCP tools for any additional "
-                    "artifact reads instead of creating a Bash workaround."
-                )
         analysis_hint = str(entry.get("analysis_hint") or "").strip()
         if analysis_hint:
             prompt += (
@@ -333,12 +387,37 @@ class KkAgentRedmineAnalyzer:
         return trace, raw, False
 
     async def _analyze_once(self, entry: dict[str, Any]) -> KkAgentAnalysisResult:
-        """执行一次 headless 分析：stream → gate → （失败时）resume 修复。"""
+        """执行一次 headless 分析：MCP 健康/证据预检 → stream → gate → 修复。"""
         progress = entry.get("_progress_recorder") if isinstance(entry, dict) else None
+        # MCP 健康前置检查（#653167 nightly 复盘）：gms MCP server 未连接
+        # 时 LLM 会话注定以 evidence_gate_failed 收场（CLI 兜底取证不被
+        # gate 记分），9 分钟 + 40 万 tokens 纯浪费。doctor 探活失败直接
+        # 快速失败并给出恢复步骤。
+        health = await probe_kkagent_mcp_health(self.env_extra)
+        if progress is not None:
+            progress.tool_started(
+                "gms-agent doctor", {"--client": "kkagent"}, stage="preflight"
+            )
+            progress.tool_finished(
+                "gms-agent doctor", None, ok=health.ok, stage="preflight"
+            )
+        if not health.ok:
+            trace = KkAgentTrace()
+            trace.tool_calls.append(health.tool_trace())
+            trace.status = trace.error_type = "mcp_unavailable"
+            trace.error = health.reason
+            logger.warning(
+                "kkagent session for issue %s blocked before start: %s",
+                entry.get("issue_id"),
+                health.reason,
+            )
+            return self._failure(trace, _StreamFallback())
         prompt = self.build_prompt(entry)
         command = self.build_command(prompt)
         trace, raw, timed_out = await self._run_stream(command, progress)
         _merge_precollected_traces(trace, entry)
+        if not health.skipped:
+            trace.tool_calls.insert(0, health.tool_trace())
 
         if trace.error_type == "kkagent_unavailable":
             return self._failure(trace, raw)
@@ -386,9 +465,9 @@ class KkAgentRedmineAnalyzer:
         if repaired is not None:
             return repaired
         gate, gate_errors_list = gate_and_errors(trace, entry, result)
-        trace.status = "evidence_gate_failed"
-        trace.error_type = "evidence_gate_failed"
-        trace.error = "; ".join(gate_errors_list)
+        trace.status, trace.error_type, trace.error = classify_gate_failure(
+            trace, gate_errors_list
+        )
         result["history_checked"] = bool(gate.get("history_checked"))
         return self._failure(trace, raw)
 

@@ -749,6 +749,18 @@ document.querySelector('.dash-tabs')?.addEventListener('keydown',event=>{
  tabs[nextIndex].focus();
  selectClusterDashboardTab(tabs[nextIndex].dataset.dashTab);
 });
+// 滚轮落在 tab 栏时转发给激活 dash 面板：main 容器 overflow:hidden，
+// 页面滚动由面板自身承载。不转发时滚轮冒泡到 main 被吞，“滚不动”，
+// 与 Gerrit/Redmine 的滚动语义不一致。
+document.querySelector('.dash-tabs')?.addEventListener('wheel',event=>{
+ if(Math.abs(event.deltaY)<=Math.abs(event.deltaX))return;
+ const pane=document.querySelector('.dash-tab-pane:not([hidden])');
+ if(!pane)return;
+ const delta=event.deltaMode===1?event.deltaY*40:event.deltaY;
+ const layers=[pane,...pane.querySelectorAll(':scope > *'),...pane.querySelectorAll(':scope > * > *'),...pane.querySelectorAll(':scope > * > * > *')];
+ const scroller=layers.find(node=>node.scrollHeight>node.clientHeight+1&&['auto','scroll'].includes(getComputedStyle(node).overflowY));
+ if(scroller)scroller.scrollTop+=delta;
+},{passive:true});
 let initialClusterDashboardTab=new URLSearchParams(window.location.search).get('tab')||'';
 if(!CLUSTER_DASHBOARD_TABS.has(initialClusterDashboardTab)){
  try{initialClusterDashboardTab=window.sessionStorage.getItem(CLUSTER_DASHBOARD_TAB_STORAGE_KEY)||''}catch(_error){}

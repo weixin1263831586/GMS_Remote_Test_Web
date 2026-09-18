@@ -193,7 +193,7 @@ def _merge_buckets(
                     "buckets": [],
                     **{k: item.get(k) or "" for k in (
                         "subject", "status_name", "priority_name", "assigned_to_name",
-                        "created_on", "updated_on", "last_external_reply_at",
+                        "author_name", "created_on", "updated_on", "last_external_reply_at",
                         "last_external_reply_by", "last_owner_reply_at",
                     )},
                     "attachment_count": int(item.get("attachment_count") or 0),

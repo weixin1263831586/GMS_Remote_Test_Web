@@ -1,24 +1,20 @@
 (() => {
     'use strict';
 
+    // 每个控制台 tab 对应一个 session（终端、WebSocket、输入、历史日志各自独立），
+    // 同一串口同一时刻只保留一个 session，重复“打开控制台”只会切换到已有 tab。
     const state = {
         ports: [],
-        selectedKey: '',
         editingKey: '',
-        socket: null,
-        socketGeneration: 0,
+        sessions: [],
+        sessionCounter: 0,
+        activeKey: '',
         portsRequestGeneration: 0,
         portsRequestsInFlight: 0,
-        historyRequestGeneration: 0,
-        paused: false,
-        pendingOutput: '',
-        writable: false,
         refreshTimer: null,
         noticeTimer: null,
         activeView: 'ports',
-        terminal: null,
-        fitAddon: null,
-        terminalResizeObserver: null,
+        canManageDevices: true,
     };
 
     const $ = id => document.getElementById(id);
@@ -33,9 +29,16 @@
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || payload.success === false) {
             const detail = payload.error || payload.detail?.message || payload.detail || response.statusText;
-            throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+            throw new Error(friendlyError(typeof detail === 'string' ? detail : JSON.stringify(detail)));
         }
         return payload.data || payload;
+    }
+
+    function friendlyError(message) {
+        if (/permission denied/i.test(message)) {
+            return '权限不足：此操作需要 devices.inventory 权限（device_operator 或 admin 角色，或先完成管理员二次验证）';
+        }
+        return message;
     }
 
     function notice(message, type = '') {
@@ -77,16 +80,41 @@
         return text;
     }
 
+    function sessionByKey(portKey) {
+        return state.sessions.find(session => session.portKey === portKey) || null;
+    }
+
+    function computeManagePermission(status) {
+        // 服务端才是安全边界（无权限请求仍会被 403）；这里只决定 UI 显示
+        // 哪些写操作按钮，避免普通 user 角色点击后必然 403。
+        if (!status?.auth_required) return true;
+        const user = status.user;
+        if (!user) return false;
+        if (status.elevated) return true;
+        const permissions = Array.isArray(user.permissions) ? user.permissions : [];
+        return permissions.includes('*') || permissions.includes('devices.inventory');
+    }
+
+    async function loadAuthStatus() {
+        try {
+            const status = await api('/api/auth/status');
+            state.canManageDevices = computeManagePermission(status);
+        } catch {
+            // 状态读取失败时保持完整视图：可见性只是体验优化，
+            // 越权操作由服务端 403 兜底。
+        }
+    }
+
     function renderPorts() {
         const list = $('ports-list');
         list.replaceChildren();
-        $('ports-count').textContent = String(state.ports.length);
         if (!state.ports.length) {
             list.append(element('div', 'empty', '未发现 ttyUSB/ttyACM 串口。插入 USB 转串口线后点击刷新。'));
             return;
         }
         state.ports.forEach(port => {
-            const card = element('article', `port-card${port.port_key === state.selectedKey ? ' selected' : ''}`);
+            const session = sessionByKey(port.port_key);
+            const card = element('article', `port-card${session ? ' selected' : ''}`);
             const head = element('div', 'port-card-head');
             head.append(element('div', 'port-title', portTitle(port)));
             head.append(element('span', `port-state ${port.online ? 'online' : ''}`, port.online ? '在线' : '离线'));
@@ -104,36 +132,56 @@
             if (port.error) card.append(element('div', 'port-error', friendlySerialError(port.error)));
 
             const actions = element('div', 'port-actions');
-            actions.append(button(port.binding ? '编辑绑定' : '绑定', () => openBinding(port)));
-            if (port.binding) {
+            if (state.canManageDevices) {
+                actions.append(button(port.binding ? '编辑绑定' : '绑定', () => openBinding(port)));
+            }
+            if (session) {
+                actions.append(button('切换控制台', () => switchView('console', session.portKey), 'primary'));
+                if (state.canManageDevices) {
+                    actions.append(button(
+                        port.capture_enabled ? '停止采集' : '启动采集',
+                        () => toggleCapture(port),
+                        port.capture_enabled ? 'capture-on' : ''
+                    ));
+                }
+            } else if (port.binding) {
                 actions.append(button('打开控制台', () => openConsole(port), 'primary'));
-                actions.append(button(
-                    port.capture_enabled ? '停止采集' : '启动采集',
-                    () => toggleCapture(port),
-                    port.capture_enabled ? 'capture-on' : ''
-                ));
+                if (state.canManageDevices) {
+                    actions.append(button(
+                        port.capture_enabled ? '停止采集' : '启动采集',
+                        () => toggleCapture(port),
+                        port.capture_enabled ? 'capture-on' : ''
+                    ));
+                }
             }
             card.append(actions);
             list.append(card);
         });
     }
 
-    function switchView(view) {
-        if (view === 'console' && !state.selectedKey) return;
+    function switchView(view, portKey = '') {
+        const target = view === 'console' ? sessionByKey(portKey) : null;
+        if (view === 'console' && !target) return;
         state.activeView = view;
+        state.activeKey = target ? target.portKey : '';
         const isPorts = view === 'ports';
         $('ports-section').hidden = !isPorts;
         $('console-section').hidden = isPorts;
         $('ports-tab').classList.toggle('active', isPorts);
-        $('console-tab').classList.toggle('active', !isPorts);
         $('ports-tab').setAttribute('aria-selected', String(isPorts));
-        $('console-tab').setAttribute('aria-selected', String(!isPorts));
         $('ports-tab').tabIndex = isPorts ? 0 : -1;
-        $('console-tab').tabIndex = isPorts ? -1 : 0;
-        if (!isPorts) {
+        state.sessions.forEach(session => {
+            const active = session === target;
+            session.tab.classList.toggle('active', active);
+            session.tab.setAttribute('aria-selected', String(active));
+            session.tab.tabIndex = active ? 0 : -1;
+            session.pane.hidden = !active;
+        });
+        renderPorts();
+        if (target) {
             requestAnimationFrame(() => {
-                state.fitAddon?.fit();
-                state.terminal?.scrollToBottom();
+                target.fitAddon?.fit();
+                target.terminal?.scrollToBottom();
             });
         }
     }
@@ -148,9 +196,8 @@
             if (generation !== state.portsRequestGeneration) return;
             state.ports = data.ports || [];
             renderPorts();
-            $('refresh-status').textContent = `更新于 ${new Date().toLocaleTimeString()}`;
-            const selected = state.ports.find(item => item.port_key === state.selectedKey);
-            if (selected) updateConsoleHeading(selected);
+            syncSessionHeadings();
+            $('refresh-status').textContent = `串口更新于 ${new Date().toLocaleTimeString()}`;
         } catch (error) {
             if (generation !== state.portsRequestGeneration) return;
             $('refresh-status').textContent = '刷新失败';
@@ -249,7 +296,8 @@
         try {
             await api(`/api/devices/console/bindings/${encodeURIComponent(key)}`, {method: 'DELETE'});
             closeBinding();
-            if (state.selectedKey === key) closeConsole();
+            const session = sessionByKey(key);
+            if (session) closeConsole(key);
             notice('串口绑定已删除', 'success');
             await loadPorts(true);
         } catch (error) {
@@ -268,26 +316,37 @@
         }
     }
 
-    function updateConsoleHeading(port) {
-        $('console-title').textContent = portTitle(port);
-        $('console-subtitle').textContent = `${port.devname || '当前离线'} · ${port.binding?.baudrate || ''} baud · ${port.port_key}`;
+    function syncSessionHeading(session, port) {
+        session.title = portTitle(port);
+        session.pane.querySelector('.console-title').textContent = session.title;
+        session.pane.querySelector('.console-subtitle').textContent =
+            `${port.devname || '当前离线'} · ${port.binding?.baudrate || ''} baud · ${port.port_key}`;
+        const tabTitle = session.tab?.querySelector('.tab-title');
+        if (tabTitle) tabTitle.textContent = `控制台${session.id}`;
     }
 
-    function setSocketStatus(text, className) {
-        const node = $('socket-status');
+    function syncSessionHeadings() {
+        state.sessions.forEach(session => {
+            const port = state.ports.find(item => item.port_key === session.portKey);
+            if (port) syncSessionHeading(session, port);
+        });
+    }
+
+    function setWritable(session, writable) {
+        const pane = session.pane;
+        pane.querySelector('.terminal-input').disabled = !writable;
+        pane.querySelector('.send-input').disabled = !writable;
+        pane.querySelector('.send-ctrl-c').disabled = !writable;
+    }
+
+    function setSocketStatus(session, text, className) {
+        const node = session.pane.querySelector('.socket-status');
         node.textContent = text;
-        node.className = `status-pill ${className}`;
+        node.className = `socket-status status-pill ${className}`;
     }
 
-    function setWritable(writable) {
-        state.writable = Boolean(writable);
-        $('terminal-input').disabled = !state.writable;
-        $('send-input').disabled = !state.writable;
-        $('send-ctrl-c').disabled = !state.writable;
-    }
-
-    function ensureTerminal() {
-        if (state.terminal) return true;
+    function ensureTerminal(session) {
+        if (session.terminal) return true;
         if (typeof Terminal === 'undefined' || typeof FitAddon === 'undefined') {
             notice('终端渲染组件加载失败，请刷新页面重试', 'error');
             return false;
@@ -303,188 +362,347 @@
         });
         const fitAddon = new FitAddon.FitAddon();
         terminal.loadAddon(fitAddon);
-        terminal.open($('terminal-output'));
-        state.terminal = terminal;
-        state.fitAddon = fitAddon;
-        state.terminalResizeObserver = new ResizeObserver(() => {
-            if (state.activeView === 'console') fitAddon.fit();
+        const output = session.pane.querySelector('.terminal-output');
+        terminal.open(output);
+        session.terminal = terminal;
+        session.fitAddon = fitAddon;
+        session.resizeObserver = new ResizeObserver(() => {
+            if (state.activeView === 'console' && state.activeKey === session.portKey) fitAddon.fit();
         });
-        state.terminalResizeObserver.observe($('terminal-output'));
+        session.resizeObserver.observe(output);
         fitAddon.fit();
         return true;
     }
 
-    function clearTerminal() {
-        if (state.terminal) state.terminal.reset();
-        else $('terminal-output').textContent = '';
+    function clearTerminal(session) {
+        if (session.terminal) session.terminal.reset();
+        else session.pane.querySelector('.terminal-output').textContent = '';
     }
 
-    function terminalText() {
-        if (!state.terminal) return $('terminal-output').textContent;
-        if (state.terminal.hasSelection()) return state.terminal.getSelection();
-        state.terminal.selectAll();
-        const text = state.terminal.getSelection();
-        state.terminal.clearSelection();
+    function terminalText(session) {
+        const output = session.pane.querySelector('.terminal-output');
+        if (!session.terminal) return output.textContent;
+        if (session.terminal.hasSelection()) return session.terminal.getSelection();
+        session.terminal.selectAll();
+        const text = session.terminal.getSelection();
+        session.terminal.clearSelection();
         return text;
     }
 
-    function appendOutput(text) {
+    function appendOutput(session, text) {
         if (!text) return;
-        if (state.paused) {
-            state.pendingOutput += text;
-            if (state.pendingOutput.length > 2_000_000) state.pendingOutput = state.pendingOutput.slice(-2_000_000);
+        if (session.paused) {
+            session.pendingOutput += text;
+            if (session.pendingOutput.length > 2_000_000) session.pendingOutput = session.pendingOutput.slice(-2_000_000);
             return;
         }
-        if (state.terminal) {
-            state.terminal.write(text);
+        if (session.terminal) {
+            session.terminal.write(text);
             return;
         }
-        const output = $('terminal-output');
+        const output = session.pane.querySelector('.terminal-output');
         output.textContent = `${output.textContent}${text}`.slice(-2_000_000);
         output.scrollTop = output.scrollHeight;
     }
 
-    function connectSocket(portKey) {
-        state.socketGeneration += 1;
-        const generation = state.socketGeneration;
-        if (state.socket) state.socket.close();
-        setWritable(false);
-        setSocketStatus('连接中', 'waiting');
+    function connectSocket(session) {
+        session.socketGeneration += 1;
+        const generation = session.socketGeneration;
+        if (session.socket) session.socket.close();
+        setWritable(session, false);
+        setSocketStatus(session, '连接中', 'waiting');
         const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const socket = new WebSocket(`${protocol}//${location.host}/api/devices/console/ws/${encodeURIComponent(portKey)}`);
-        state.socket = socket;
+        const socket = new WebSocket(`${protocol}//${location.host}/api/devices/console/ws/${encodeURIComponent(session.portKey)}`);
+        session.socket = socket;
         socket.onopen = () => {
-            if (generation !== state.socketGeneration) return;
-            setSocketStatus('已连接', 'online');
+            if (generation !== session.socketGeneration || session.closed) return;
+            setSocketStatus(session, '已连接', 'online');
         };
         socket.onmessage = event => {
-            if (generation !== state.socketGeneration) return;
+            if (generation !== session.socketGeneration || session.closed) return;
             let message;
             try { message = JSON.parse(event.data); } catch { return; }
-            if (message.type === 'data' || message.type === 'backlog') appendOutput(message.data || '');
-            if (message.type === 'backlog') setWritable(Boolean(message.writable));
+            if (message.type === 'data' || message.type === 'backlog') appendOutput(session, message.data || '');
+            if (message.type === 'backlog') setWritable(session, Boolean(message.writable));
             if (message.type === 'error') notice(friendlySerialError(message.error) || '串口操作失败', 'error');
         };
         socket.onerror = () => {
-            if (generation !== state.socketGeneration) return;
-            setWritable(false);
-            setSocketStatus('连接失败', 'offline');
+            if (generation !== session.socketGeneration || session.closed) return;
+            setWritable(session, false);
+            setSocketStatus(session, '连接失败', 'offline');
         };
         socket.onclose = event => {
-            if (generation !== state.socketGeneration) return;
-            state.socket = null;
-            setWritable(false);
-            setSocketStatus(event.code === 4404 ? '请先绑定' : '已断开', 'offline');
+            if (generation !== session.socketGeneration || session.closed) return;
+            session.socket = null;
+            setWritable(session, false);
+            setSocketStatus(session, event.code === 4404 ? '请先绑定' : '已断开', 'offline');
         };
     }
 
-    async function openConsole(port) {
-        state.selectedKey = port.port_key;
-        state.paused = false;
-        state.pendingOutput = '';
-        $('pause-output').textContent = '暂停';
-        $('console-tab').disabled = false;
-        $('console-tab').textContent = `控制台 · ${portTitle(port)}`;
-        updateConsoleHeading(port);
-        renderPorts();
-        switchView('console');
-        ensureTerminal();
-        clearTerminal();
-        connectSocket(port.port_key);
-        await loadHistory();
-    }
-
-    function closeConsole() {
-        state.socketGeneration += 1;
-        state.historyRequestGeneration += 1;
-        if (state.socket) state.socket.close();
-        state.socket = null;
-        state.selectedKey = '';
-        setWritable(false);
-        $('console-tab').disabled = true;
-        $('console-tab').textContent = '控制台';
-        switchView('ports');
-        renderPorts();
-    }
-
-    function sendInput(data, appendNewline) {
-        if (!state.socket || state.socket.readyState !== WebSocket.OPEN) {
-            setWritable(false);
+    function sendInput(session, data, appendNewline) {
+        if (!session.socket || session.socket.readyState !== WebSocket.OPEN) {
+            setWritable(session, false);
             notice('串口尚未连接', 'error');
             return false;
         }
         try {
-            state.socket.send(JSON.stringify({type: 'input', data, append_newline: appendNewline}));
+            session.socket.send(JSON.stringify({type: 'input', data, append_newline: appendNewline}));
             return true;
         } catch (error) {
-            setWritable(false);
+            setWritable(session, false);
             notice(`串口发送失败：${error.message}`, 'error');
             return false;
         }
     }
 
-    function sendInputField() {
-        const input = $('terminal-input');
-        if (sendInput(input.value, true)) input.value = '';
+    function sendInputField(session) {
+        const input = session.pane.querySelector('.terminal-input');
+        if (sendInput(session, input.value, true)) input.value = '';
         input.focus();
     }
 
-    async function loadHistory() {
-        const portKey = state.selectedKey;
-        if (!portKey) return;
-        const generation = ++state.historyRequestGeneration;
-        const selectedDate = $('log-date').value;
-        const params = new URLSearchParams({tail: $('log-tail').value});
+    async function loadHistory(session) {
+        if (!session || session.closed) return;
+        const portKey = session.portKey;
+        const generation = ++session.historyGeneration;
+        const dateSelect = session.pane.querySelector('.log-date');
+        const selectedDate = dateSelect.value;
+        const params = new URLSearchParams({tail: session.pane.querySelector('.log-tail').value});
         if (selectedDate) params.set('date', selectedDate);
         try {
             const data = await api(`/api/devices/console/ports/${encodeURIComponent(portKey)}/logs?${params}`);
-            if (generation !== state.historyRequestGeneration || state.selectedKey !== portKey) return;
-            $('history-output').textContent = data.content || '暂无日志';
-            const dateSelect = $('log-date');
+            if (generation !== session.historyGeneration || session.closed) return;
+            session.pane.querySelector('.history-output').textContent = data.content || '暂无日志';
             const effectiveDate = selectedDate || data.date || '';
             dateSelect.replaceChildren(new Option('最新', ''));
             (data.available_dates || []).forEach(date => dateSelect.add(new Option(date, date)));
             if (selectedDate && (data.available_dates || []).includes(selectedDate)) dateSelect.value = selectedDate;
             dateSelect.dataset.effectiveDate = effectiveDate;
         } catch (error) {
-            if (generation !== state.historyRequestGeneration || state.selectedKey !== portKey) return;
-            $('history-output').textContent = `日志读取失败：${error.message}`;
+            if (generation !== session.historyGeneration || session.closed) return;
+            session.pane.querySelector('.history-output').textContent = `日志读取失败：${error.message}`;
         }
     }
 
-    function downloadLog() {
-        if (!state.selectedKey) return;
+    function downloadLog(session) {
+        if (!session || session.closed) return;
         const params = new URLSearchParams();
-        const date = $('log-date').value || $('log-date').dataset.effectiveDate;
+        const dateSelect = session.pane.querySelector('.log-date');
+        const date = dateSelect.value || dateSelect.dataset.effectiveDate;
         if (date) params.set('date', date);
-        location.href = `/api/devices/console/ports/${encodeURIComponent(state.selectedKey)}/logs/download?${params}`;
+        location.href = `/api/devices/console/ports/${encodeURIComponent(session.portKey)}/logs/download?${params}`;
     }
 
-    async function clearLogs() {
-        if (!state.selectedKey || !window.confirm('清空该串口的全部历史日志？此操作不可恢复。')) return;
+    async function clearLogs(session) {
+        if (!session || session.closed) return;
+        if (!window.confirm(`清空控制台${session.id}（${session.title}）的全部历史日志？此操作不可恢复。`)) return;
         try {
-            await api(`/api/devices/console/ports/${encodeURIComponent(state.selectedKey)}/logs`, {method: 'DELETE'});
+            await api(`/api/devices/console/ports/${encodeURIComponent(session.portKey)}/logs`, {method: 'DELETE'});
             notice('串口日志已清空', 'success');
-            await loadHistory();
+            await loadHistory(session);
         } catch (error) {
             notice(error.message, 'error');
         }
     }
 
+    function renderConsoleTabs() {
+        const tablist = $('console-view-tabs');
+        tablist.querySelectorAll('.console-tab').forEach(node => node.remove());
+        let anchor = $('ports-tab');
+        state.sessions.forEach(session => {
+            const tab = element('button', 'view-tab console-tab');
+            tab.type = 'button';
+            tab.setAttribute('role', 'tab');
+            tab.dataset.portKey = session.portKey;
+            tab.setAttribute('aria-controls', session.pane.id);
+            const active = state.activeView === 'console' && state.activeKey === session.portKey;
+            tab.classList.toggle('active', active);
+            tab.setAttribute('aria-selected', String(active));
+            tab.tabIndex = active ? 0 : -1;
+            tab.append(element('span', 'tab-title', `控制台${session.id}`));
+            const close = element('span', 'tab-close', '×');
+            close.title = '关闭控制台';
+            close.setAttribute('aria-label', `关闭控制台${session.id}`);
+            close.addEventListener('click', event => {
+                event.stopPropagation();
+                closeConsole(session.portKey);
+            });
+            tab.append(close);
+            tab.addEventListener('click', () => switchView('console', session.portKey));
+            anchor.after(tab);
+            anchor = tab;
+            session.tab = tab;
+            session.pane.hidden = !active;
+        });
+    }
+
+    function buildConsolePane(session, port) {
+        const pane = element('section', 'console-session');
+        pane.dataset.portKey = session.portKey;
+        pane.id = `console-pane-${session.id}`;
+        pane.setAttribute('role', 'tabpanel');
+        pane.hidden = true;
+        pane.innerHTML = `
+            <div class="section-heading console-heading">
+                <div class="heading-main">
+                    <h2 class="console-title"></h2>
+                    <p class="console-subtitle"></p>
+                </div>
+                <div class="console-actions">
+                    <span class="socket-status status-pill offline">未连接</span>
+                    <button class="pause-output" type="button">暂停</button>
+                    <button class="clear-screen" type="button">清屏</button>
+                    <button class="copy-output" type="button">复制</button>
+                    <button class="close-console" type="button">关闭</button>
+                </div>
+            </div>
+            <div class="console-layout">
+                <div class="terminal-column">
+                    <div class="terminal-output terminal" tabindex="0" aria-label="串口输出"></div>
+                    <div class="input-dock">
+                        <div class="input-row">
+                            <input class="terminal-input" type="text" autocomplete="off" placeholder="输入命令，按 Enter 发送">
+                            <button class="send-input primary" type="button">发送</button>
+                            <button class="send-ctrl-c" type="button" title="发送 0x03">Ctrl+C</button>
+                        </div>
+                    </div>
+                </div>
+                <aside class="history-column">
+                    <div class="history-head">
+                        <h3>历史日志</h3>
+                        <button class="reload-log" type="button">刷新</button>
+                    </div>
+                    <label>日期<select class="log-date"><option value="">最新</option></select></label>
+                    <label>尾部行数<select class="log-tail"><option>200</option><option selected>500</option><option>2000</option><option>10000</option></select></label>
+                    <pre class="history-output">暂无日志</pre>
+                    <div class="history-actions">
+                        <button class="download-log" type="button">下载</button>
+                        <button class="clear-logs danger" type="button">清空日志</button>
+                    </div>
+                </aside>
+            </div>`;
+        $('console-section').append(pane);
+        session.pane = pane;
+        syncSessionHeading(session, port);
+        if (!state.canManageDevices) {
+            const clearButton = pane.querySelector('.clear-logs');
+            clearButton.disabled = true;
+            clearButton.title = '权限不足：清空日志需要 devices.inventory 权限';
+        }
+        bindConsolePaneEvents(session);
+    }
+
+    function bindConsolePaneEvents(session) {
+        const pane = session.pane;
+        pane.querySelector('.close-console').addEventListener('click', () => closeConsole(session.portKey));
+        pane.querySelector('.clear-screen').addEventListener('click', () => clearTerminal(session));
+        pane.querySelector('.copy-output').addEventListener('click', async () => {
+            try { await navigator.clipboard.writeText(terminalText(session)); notice('控制台内容已复制', 'success'); }
+            catch (error) { notice(`复制失败：${error.message}`, 'error'); }
+        });
+        pane.querySelector('.pause-output').addEventListener('click', () => {
+            session.paused = !session.paused;
+            pane.querySelector('.pause-output').textContent = session.paused ? '继续' : '暂停';
+            if (!session.paused && session.pendingOutput) {
+                const pending = session.pendingOutput;
+                session.pendingOutput = '';
+                appendOutput(session, pending);
+            }
+        });
+        pane.querySelector('.send-input').addEventListener('click', () => sendInputField(session));
+        pane.querySelector('.terminal-input').addEventListener('keydown', event => {
+            if (event.key === 'Enter') { event.preventDefault(); sendInputField(session); }
+        });
+        pane.querySelector('.send-ctrl-c').addEventListener('click', () => sendInput(session, '\u0003', false));
+        pane.querySelector('.reload-log').addEventListener('click', () => loadHistory(session));
+        pane.querySelector('.log-date').addEventListener('change', () => loadHistory(session));
+        pane.querySelector('.log-tail').addEventListener('change', () => loadHistory(session));
+        pane.querySelector('.download-log').addEventListener('click', () => downloadLog(session));
+        pane.querySelector('.clear-logs').addEventListener('click', () => clearLogs(session));
+    }
+
+    function createSession(port) {
+        state.sessionCounter += 1;
+        const session = {
+            id: state.sessionCounter,
+            portKey: port.port_key,
+            title: portTitle(port),
+            closed: false,
+            socket: null,
+            socketGeneration: 0,
+            historyGeneration: 0,
+            paused: false,
+            pendingOutput: '',
+            terminal: null,
+            fitAddon: null,
+            resizeObserver: null,
+            tab: null,
+            pane: null,
+        };
+        state.sessions.push(session);
+        buildConsolePane(session, port);
+        renderConsoleTabs();
+        return session;
+    }
+
+    function openConsole(port) {
+        const existing = sessionByKey(port.port_key);
+        if (!existing) {
+            const session = createSession(port);
+            // 先切换视图让面板可见，再创建 xterm：在 display:none 的容器里
+            // open/fit 会拿到 0 尺寸，渲染出默认 80x24 的“半屏”终端且不自愈。
+            switchView('console', session.portKey);
+            ensureTerminal(session);
+            session.fitAddon?.fit();
+            connectSocket(session);
+            void loadHistory(session);
+            return;
+        }
+        syncSessionHeading(existing, port);
+        switchView('console', existing.portKey);
+    }
+
+    function closeConsole(portKey) {
+        const session = sessionByKey(portKey);
+        if (!session) return;
+        session.closed = true;
+        session.socketGeneration += 1;
+        session.historyGeneration += 1;
+        if (session.socket) session.socket.close();
+        session.socket = null;
+        session.resizeObserver?.disconnect();
+        session.terminal?.dispose();
+        session.pane.remove();
+        const index = state.sessions.indexOf(session);
+        state.sessions = state.sessions.filter(item => item !== session);
+        renderConsoleTabs();
+        if (state.activeKey === portKey && state.activeView === 'console') {
+            const next = state.sessions[index] || state.sessions[index - 1];
+            if (next) switchView('console', next.portKey);
+            else switchView('ports');
+        } else {
+            renderPorts();
+        }
+    }
+
     function bindEvents() {
         $('ports-tab').addEventListener('click', () => switchView('ports'));
-        $('console-tab').addEventListener('click', () => switchView('console'));
         $('console-view-tabs').addEventListener('keydown', event => {
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-            const tabs = [$('ports-tab'), $('console-tab')].filter(tab => !tab.disabled);
+            const portsTab = $('ports-tab');
+            const tabs = [portsTab, ...state.sessions.map(session => session.tab)].filter(Boolean);
             const index = tabs.indexOf(document.activeElement);
-            if (index === -1 || !tabs.length) return;
+            if (index === -1) return;
             const nextIndex = event.key === 'Home' ? 0
                 : event.key === 'End' ? tabs.length - 1
                     : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
             event.preventDefault();
-            tabs[nextIndex].focus();
-            switchView(tabs[nextIndex] === $('ports-tab') ? 'ports' : 'console');
+            const nextTab = tabs[nextIndex];
+            nextTab.focus();
+            // overflow:hidden 的 tab 栏不响应滚轮（避免劫持页面滚动），
+            // 键盘切换到视口外的 tab 时显式滚入可视区。
+            nextTab.scrollIntoView({block: 'nearest', inline: 'nearest'});
+            switchView(nextTab === portsTab ? 'ports' : 'console', nextTab.dataset.portKey || '');
         });
         $('refresh-ports').addEventListener('click', () => loadPorts());
         $('binding-form').addEventListener('submit', saveBinding);
@@ -492,31 +710,6 @@
         $('cancel-binding').addEventListener('click', closeBinding);
         $('delete-binding').addEventListener('click', deleteBinding);
         $('binding-modal').addEventListener('click', event => { if (event.target === $('binding-modal')) closeBinding(); });
-        $('close-console').addEventListener('click', closeConsole);
-        $('clear-screen').addEventListener('click', clearTerminal);
-        $('copy-output').addEventListener('click', async () => {
-            try { await navigator.clipboard.writeText(terminalText()); notice('控制台内容已复制', 'success'); }
-            catch (error) { notice(`复制失败：${error.message}`, 'error'); }
-        });
-        $('pause-output').addEventListener('click', () => {
-            state.paused = !state.paused;
-            $('pause-output').textContent = state.paused ? '继续' : '暂停';
-            if (!state.paused && state.pendingOutput) {
-                const pending = state.pendingOutput;
-                state.pendingOutput = '';
-                appendOutput(pending);
-            }
-        });
-        $('send-input').addEventListener('click', sendInputField);
-        $('terminal-input').addEventListener('keydown', event => {
-            if (event.key === 'Enter') { event.preventDefault(); sendInputField(); }
-        });
-        $('send-ctrl-c').addEventListener('click', () => sendInput('\u0003', false));
-        $('reload-log').addEventListener('click', loadHistory);
-        $('log-date').addEventListener('change', loadHistory);
-        $('log-tail').addEventListener('change', loadHistory);
-        $('download-log').addEventListener('click', downloadLog);
-        $('clear-logs').addEventListener('click', clearLogs);
         window.addEventListener('gms:embedded-visibility', event => {
             syncPortAutoRefresh(event.detail?.visible !== false);
         });
@@ -526,15 +719,18 @@
         });
         window.addEventListener('beforeunload', () => {
             syncPortAutoRefresh(false);
-            state.historyRequestGeneration += 1;
-            if (state.socket) state.socket.close();
-            state.terminalResizeObserver?.disconnect();
-            state.terminal?.dispose();
+            state.sessions.forEach(session => {
+                session.closed = true;
+                if (session.socket) session.socket.close();
+                session.resizeObserver?.disconnect();
+                session.terminal?.dispose();
+            });
         });
     }
 
     async function initialize() {
         bindEvents();
+        await loadAuthStatus();
         try { await loadPorts(); }
         finally { window.GmsEmbeddedWorkspace?.markReady(); }
         syncPortAutoRefresh(!document.hidden);

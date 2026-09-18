@@ -38,6 +38,14 @@ async def search_issue_history(
     seen = {int(item["issue_id"]) for item in items}
     remote_error = ""
     remaining = max(0, limit - len(items))
+    # 远端条目同样标注 matched_terms/distinctive_matches：语料统计来自本地
+    # 归档库（DF 是检索语料属性，与单条结果来源无关），命中判定按条目自身
+    # 文本。统计不可用时保持字段缺省，消费方按无区分度信息处理。
+    token_stats = (
+        service.repository.corpus_token_stats(service.repository.history_query_tokens(q))
+        if remaining
+        else {}
+    )
     if remaining:
         try:
             client = service.agent._make_client()
@@ -52,7 +60,7 @@ async def search_issue_history(
                 ref_id = int(row.get("issue_id") or 0)
                 if not ref_id or ref_id == exclude_issue_id or ref_id in seen:
                     continue
-                items.append({
+                item = {
                     "issue_id": ref_id,
                     "subject": row.get("subject") or "",
                     "status_name": row.get("status_name") or "",
@@ -68,7 +76,10 @@ async def search_issue_history(
                     "updated_on": row.get("updated_on") or "",
                     "closed_on": "",
                     "source": "redmine_search",
-                })
+                }
+                if token_stats:
+                    service.repository.annotate_match_terms(item, token_stats)
+                items.append(item)
         except Exception as exc:
             remote_error = str(exc)[:200]
     return {"query": q, "items": items, "remote_search_error": remote_error}

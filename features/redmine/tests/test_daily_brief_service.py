@@ -10,6 +10,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from features.redmine.config import RedmineConfig
@@ -425,6 +426,203 @@ class RunLifecycleTests(unittest.TestCase):
         self.assertEqual(seen["_precollected_tool_traces"], evidence.traces)
         self.assertEqual(collector_mock.await_args.kwargs["issue_id"], 652654)
         self.assertEqual(collector_mock.await_args.kwargs["device_serial"], "RK3576GMS1")
+
+    def test_triage_precollects_redmine_baseline_without_device(self):
+        """#653167 nightly 复盘：晨报批量 triage 不能裸奔——MCP 断连时
+        模型取证全灭、gate 失败且无任何确定性证据。triage 现在同样预采集
+        Redmine 基线（无设备维度），profile 未绑定时保持跳过。"""
+        from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
+        from features.redmine.kkagent.trace import ToolTrace
+
+        run = DailyBriefRun(
+            owner_id="u1", brief_date="2026-09-18", mode="nightly",
+            run_id="db_triage", device_serial="RK3576GMS1", status="analyzing",
+        )
+        self.service.repository.create_run(run)
+        self.service.repository.upsert_issue(DailyBriefIssue(
+            run_id=run.run_id, issue_id=653167, buckets=["waiting_my_reply"],
+            subject="rk3588 POWER",
+        ))
+        evidence = EvidencePreflight(
+            traces=[ToolTrace(
+                tool_name="gms_rt_redmine_issue_fetch", status="succeeded",
+                tool_input={"issue_id": 653167}, snapshot_ids=["ev_t"],
+            )],
+            snapshot_id="ev_t",
+        )
+        self.evidence_preflight.stop()
+        collector = patch(
+            "features.redmine.daily_brief_deep_analysis.collect_deep_analysis_evidence",
+            AsyncMock(return_value=evidence),
+        )
+        collector_mock = collector.start()
+        self.addCleanup(collector.stop)
+        seen: dict = {}
+
+        class Analyzer:
+            env_extra = {"GMS_RT_PROFILE": "kkagent-profile"}
+
+            async def analyze(self, entry):
+                seen.update(entry)
+                return KkAgentAnalysisResult(ok=True, result=dict(VALID))
+
+        import asyncio
+        asyncio.run(self.service._analyze_one(
+            run, 653167, {
+                "issue_id": 653167, "analysis_mode": "triage",
+                "device_serial": "RK3576GMS1",
+            },
+            Analyzer(), {},
+        ))
+
+        self.assertEqual(seen["_evidence_preflight"], {
+            "snapshot_id": "ev_t", "device_status": "not_requested",
+        })
+        self.assertEqual(seen["_precollected_tool_traces"], evidence.traces)
+        kwargs = collector_mock.await_args.kwargs
+        self.assertTrue("include_device" in kwargs or "device_serial" in kwargs)
+        # triage 不做设备取证：序列号为空 + include_device=False（任一信号）。
+        self.assertFalse(kwargs.get("include_device", True))
+        self.assertEqual(kwargs.get("device_serial", ""), "")
+
+class ReanalyzeMetadataTests(unittest.TestCase):
+    """单号 run 无晨报快照时，fallback entry 须从本地镜像补齐报告人等元数据。"""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.service = make_service(self.root)
+        preflight = patch_preflight_ok()
+        preflight.start()
+        self.addCleanup(preflight.stop)
+        evidence_preflight = patch(
+            "features.redmine.daily_brief_deep_analysis.collect_deep_analysis_evidence",
+            AsyncMock(return_value=EvidencePreflight()),
+        )
+        evidence_preflight.start()
+        self.addCleanup(evidence_preflight.stop)
+
+    def test_reanalyze_fallback_entry_enriches_local_metadata(self):
+        import asyncio
+
+        from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
+
+        run = DailyBriefRun(
+            owner_id="u1", brief_date="2026-09-18", mode="issue:653167",
+            run_id="db_meta", status="pending",
+        )
+        self.service.repository.create_run(run)
+        self.service.repository.upsert_issue(DailyBriefIssue(
+            run_id=run.run_id, issue_id=653167, buckets=[], subject="rk3588 POWER",
+        ))
+        stored = {
+            "author_name": "张三", "assigned_to_name": "黄超群",
+            "created_on": "2026-09-16", "updated_on": "2026-09-18",
+            "status_name": "进行中",
+        }
+        seen: dict = {}
+
+        class Analyzer:
+            async def analyze(self, entry):
+                seen.update(entry)
+                return KkAgentAnalysisResult(ok=True, result={"detailed_report": "ok"})
+
+        async def scenario():
+            with patch(
+                "features.redmine.api.get_redmine_service_for_owner",
+                lambda owner: SimpleNamespace(
+                    repository=SimpleNamespace(get_issue=lambda iid: stored),
+                ),
+            ), patch.object(self.service, "_build_analyzer") as builder:
+                builder.return_value = Analyzer()
+                await self.service.reanalyze_issue("2026-09-18", 653167, run_id="db_meta")
+
+        asyncio.run(scenario())
+        self.assertEqual(seen.get("author_name"), "张三")
+        self.assertEqual(seen.get("assigned_to_name"), "黄超群")
+        self.assertEqual(seen.get("created_on"), "2026-09-16")
+        self.assertEqual(seen.get("status_name"), "进行中")
+
+
+class SyncDisplaySubjectsTests(unittest.TestCase):
+    """刷新时同步 Redmine 最新标题：展示记录与本地镜像一起换新。"""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.service = make_service(self.root)
+
+    def test_sync_updates_display_records_and_mirror(self):
+        import asyncio
+
+        from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
+
+        run = DailyBriefRun(
+            owner_id="u1", brief_date="2026-09-18", mode="issue:653167",
+            run_id="db_subj", status="completed",
+        )
+        self.service.repository.create_run(run)
+        self.service.repository.upsert_issue(DailyBriefIssue(
+            run_id=run.run_id, issue_id=653167, buckets=[], subject="rk3588 POWER",
+        ))
+        new_subject = "rk3588 Android16 SSI GMS测试项支持----POWER问题"
+        mirror_updates: dict = {}
+        fake_client = SimpleNamespace(
+            fetch_issue_subjects=AsyncMock(return_value={653167: new_subject}),
+            close=AsyncMock(),
+        )
+        fake_redmine = SimpleNamespace(
+            agent=SimpleNamespace(_make_client=lambda: fake_client),
+            repository=SimpleNamespace(
+                update_issue_subjects=lambda subjects: mirror_updates.update(subjects) or 1,
+            ),
+        )
+
+        async def scenario():
+            with patch(
+                "features.redmine.api.get_redmine_service_for_owner",
+                lambda owner: fake_redmine,
+            ):
+                return await self.service.sync_display_subjects()
+
+        summary = asyncio.run(scenario())
+        self.assertEqual(summary["checked"], 1)
+        self.assertEqual(summary["updated"], 1)
+        self.assertEqual(mirror_updates, {653167: new_subject})
+        self.assertEqual(
+            self.service.repository.get_issue(run.run_id, 653167).subject,
+            new_subject,
+        )
+
+    def test_sync_survives_redmine_unavailability(self):
+        from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
+
+        run = DailyBriefRun(
+            owner_id="u1", brief_date="2026-09-18", mode="nightly",
+            run_id="db_subj2", status="completed",
+        )
+        self.service.repository.create_run(run)
+        self.service.repository.upsert_issue(DailyBriefIssue(
+            run_id=run.run_id, issue_id=652135, buckets=[], subject="旧标题",
+        ))
+
+        async def scenario():
+            with patch(
+                "features.redmine.api.get_redmine_service_for_owner",
+                side_effect=RuntimeError("no credentials"),
+            ):
+                return await self.service.sync_display_subjects()
+
+        summary = __import__("asyncio").run(scenario())
+        self.assertEqual(summary["updated"], 0)
+        self.assertIn("error", summary)
+        # Redmine 不可用时本地标题保持原样，不阻断刷新。
+        self.assertEqual(
+            self.service.repository.get_issue(run.run_id, 652135).subject, "旧标题",
+        )
+
 
 class FrozenSnapshotTests(unittest.TestCase):
     """冻结快照持久化：崩溃重试不得改变同一 run 的输入事实。"""

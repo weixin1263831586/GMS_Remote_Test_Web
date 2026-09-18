@@ -42,6 +42,16 @@ def test_diagnostic_prompt_requests_native_answer_and_correct_cli_signatures():
     assert "matching this schema" not in prompt
 
 
+def test_diagnostic_prompt_sets_read_only_boundary_and_cli_fallback_stop():
+    """#653167 nightly 复盘：MCP 缺失时模型曾执行 gms-agent install 并把
+    轮次烧在诊断环境上。prompt 必须钉死只读边界与 CLI 兜底快停策略。"""
+    prompt = KkAgentRedmineAnalyzer().build_prompt(ENTRY)
+    assert "READ-ONLY ANALYSIS BOUNDARY" in prompt
+    assert "gms-agent install" in prompt
+    assert "a finding, not something to fix in-session" in prompt
+    assert "GMS MCP/CLI 取证不可用" in prompt
+
+
 def test_native_summary_needs_no_schema_or_evidence_repair():
     analyzer = KkAgentRedmineAnalyzer()
     stream = AsyncMock(return_value=(final_trace(), _StreamFallback(), False))

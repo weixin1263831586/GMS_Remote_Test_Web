@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import re
 import sqlite3
 from typing import Any
 
@@ -139,6 +141,66 @@ class RepositoryStorageMixin:
         "updated_on", "closed_on",
     )
     HISTORY_TEXT_LIMITS = {"solution": 400, "patch_direction": 200, "summary": 300}
+    # 命中词标注（matched_terms / distinctive_matches）扫描的文本字段。
+    HISTORY_MATCH_TEXT_KEYS = ("subject", "description", "summary", "solution", "doc_content")
+    # 命中词 df/语料总数 ≤ 该比例才可能成为“区分词”。实测语料（101 归档）：
+    # RK3576(df=50)、Android16(df=42) 远超此线；RK3588(df=9)、power_ext(df=3)
+    # 在线内。比例阈值不随语料规模漂移。
+    DISTINCTIVE_DF_RATIO = 0.25
+    # SoC 型号 / Android 版本即使占比低也只是背景词（如本例 RK3588 8%），
+    # 不计入 distinctive_matches，避免“只命中芯片名”被当成同型问题。
+    CONTEXT_TERM_RE = re.compile(r"^(?:rk\d{3,5}\w*|android\d*)$", re.IGNORECASE)
+
+    @staticmethod
+    def history_query_tokens(query: str) -> list[str]:
+        """与 _fts_query 一致的查询分词（供命中标注与远端结果标注复用）。"""
+        return [token for token in query.replace('"', " ").split() if len(token) >= 2][:12]
+
+    def corpus_token_stats(self, tokens: list[str], conn: sqlite3.Connection | None = None) -> dict[str, dict[str, float]]:
+        """每个 token 在归档 FTS 语料中的 idf 与 df 占比。
+
+        idf = ln(1 + N / (1 + df))；df_ratio = df / N。FTS 不可用时返回空表，
+        调用方按“无区分度信息”处理（结果退化为 bm25 原序）。
+        """
+        try:
+            if conn is None:
+                with self.connect() as own:
+                    return self.corpus_token_stats(tokens, conn=own)
+            total = conn.execute("SELECT count(*) FROM redmine_agent_issue_fts").fetchone()[0]
+            if total <= 0:
+                return {}
+            stats: dict[str, dict[str, float]] = {}
+            for token in tokens:
+                df = conn.execute(
+                    "SELECT count(*) FROM redmine_agent_issue_fts WHERE redmine_agent_issue_fts MATCH ?",
+                    (f'"{token}"',),
+                ).fetchone()[0]
+                stats[token] = {
+                    "idf": math.log(1 + total / (1 + df)),
+                    "df_ratio": df / total,
+                }
+            return stats
+        except Exception as exc:
+            logger.warning("corpus_token_stats failed: %s", exc)
+            return {}
+
+    def annotate_match_terms(self, item: dict[str, Any], stats: dict[str, dict[str, float]]) -> None:
+        """就地标注 matched_terms / distinctive_matches（命中词透明化）。
+
+        matched_terms：该文档文本里实际出现的查询词；distinctive_matches：
+        其中的高区分度词（低 df 占比且非 SoC/Android 版本背景词）。
+        """
+        haystack = " ".join(
+            str(item.get(key) or "") for key in self.HISTORY_MATCH_TEXT_KEYS
+        ).lower()
+        matched = [token for token in stats if token.lower() in haystack]
+        item["matched_terms"] = matched
+        item["distinctive_matches"] = [
+            token
+            for token in matched
+            if stats[token]["df_ratio"] <= self.DISTINCTIVE_DF_RATIO
+            and not self.CONTEXT_TERM_RE.match(token)
+        ]
 
     def search_history(
         self,
@@ -152,6 +214,11 @@ class RepositoryStorageMixin:
         Daily Brief 相似参考与 gms-rt-redmine-history-search 共用。FTS 优先
         （bm25 相关性），失败降级 LIKE；排序“已解决优先、相关性次之”，
         让“可参考修复”的工单排前面。
+
+        bm25 是 OR 弱匹配：只命中 SoC 型号等背景词（如 RK3588）的短文档可能
+        压过命中故障签名词（如 power_ext）的长文档——长文档 bm25 被长度归一化
+        稀释。因此按命中词的语料 IDF 加权重排，并为每条结果标注 matched_terms
+        与 distinctive_matches，让模型能自行核对弱相关命中。
         """
         query = (query or "").strip()
         if not query:
@@ -159,8 +226,10 @@ class RepositoryStorageMixin:
         exclude = int(exclude_issue_id or 0)
         limit = max(1, min(int(limit or 8), 20))
         resolved_filter = " AND i.is_resolved = 1" if resolved_only else ""
+        query_tokens = self.history_query_tokens(query)
         with self.connect() as conn:
             try:
+                stats = self.corpus_token_stats(query_tokens, conn=conn)
                 rows = conn.execute(
                     f"""
                     SELECT i.*, bm25(redmine_agent_issue_fts) AS rank
@@ -175,6 +244,7 @@ class RepositoryStorageMixin:
             except Exception as exc:
                 logger.warning("search_history FTS failed, falling back to LIKE: %s", exc)
                 like = f"%{query[:80]}%"
+                stats = {}
                 rows = conn.execute(
                     f"""
                     SELECT * FROM redmine_agent_issues
@@ -186,11 +256,32 @@ class RepositoryStorageMixin:
                     (exclude, like, like, like, like, like, limit * 3),
                 ).fetchall()
         items = [dict(row) for row in rows]
-        items.sort(key=lambda row: (not bool(row.get("is_resolved")), row.get("rank") or 0))
+        for item in items:
+            self.annotate_match_terms(item, stats)
+            distinctive = item["distinctive_matches"]
+            # IDF 加权重排：命中高 idf（区分）词权重高的文档在前，其次比对
+            # 上区分度阈值的词数、总命中词数；bm25 rank 作为尾序稳定项。
+            # 四元组统一升序 = 最相关在前。stats 为空（LIKE 降级）时退化为
+            # 原有 updated_on 序（此处 sort 稳定，不改相对顺序）。
+            item["_sort"] = (
+                -sum(stats[token]["idf"] for token in item["matched_terms"]),
+                -len(distinctive),
+                -len(item["matched_terms"]),
+                item.get("rank") or 0,
+            )
+        items.sort(
+            key=lambda row: (
+                not bool(row.get("is_resolved")),
+                not bool(stats),
+                row["_sort"],
+            )
+        )
         trimmed: list[dict[str, Any]] = []
         for row in items[:limit]:
             item = {key: row.get(key) for key in self.HISTORY_RESULT_FIELDS}
             item["is_resolved"] = bool(row.get("is_resolved"))
+            item["matched_terms"] = row.get("matched_terms") or []
+            item["distinctive_matches"] = row.get("distinctive_matches") or []
             for key, cap in self.HISTORY_TEXT_LIMITS.items():
                 text = str(item.get(key) or "")
                 item[key] = text if len(text) <= cap else text[:cap] + "…"

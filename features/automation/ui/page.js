@@ -1780,8 +1780,29 @@ document.querySelector('.workflow-tabs')?.addEventListener('keydown', event => {
     else nextIndex = (activeIndex + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
     event.preventDefault();
     tabs[nextIndex].focus();
+    tabs[nextIndex].scrollIntoView({ block: 'nearest', inline: 'nearest' });
     switchWorkflowPane(tabs[nextIndex].dataset.workflow);
 });
+
+// 滚轮落在 tab 栏时转发给激活 workflow 面板的滚动容器：
+// 页面本体 overflow:hidden，“页面滚动”由面板内层承载，与
+// Gerrit/Redmine 的滚动语义保持一致；tab 栏自身永远不动。
+document.querySelector('.workflow-tabs')?.addEventListener('wheel', event => {
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    const pane = document.querySelector('.workflow-pane.active');
+    if (!pane) return;
+    const delta = event.deltaMode === 1 ? event.deltaY * 40 : event.deltaY;
+    const layers = [
+        pane,
+        ...pane.querySelectorAll(':scope > *'),
+        ...pane.querySelectorAll(':scope > * > *'),
+        ...pane.querySelectorAll(':scope > * > * > *'),
+    ];
+    const scroller = layers.find(node =>
+        node.scrollHeight > node.clientHeight + 1
+        && ['auto', 'scroll'].includes(getComputedStyle(node).overflowY));
+    if (scroller) scroller.scrollTop += delta;
+}, { passive: true });
 
 async function dryRunProfile() {
     try {

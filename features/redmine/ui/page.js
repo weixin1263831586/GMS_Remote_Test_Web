@@ -620,6 +620,13 @@ async function refreshCurrentTab() {
     } else if (currentTab === 'project') {
       await loadProjectDashboard(true);
     } else if (currentTab === 'daily-brief') {
+      // 先同步 Redmine 最新标题（subject 在分析入队时冻结，改标题后本地
+      // 不会自动跟随），再重拉晨报与单号分析历史。
+      try {
+        var synced = await api('/api/redmine-agent/daily-brief/sync-subjects', {method: 'POST'}) || {};
+        var renamed = (synced.issues || []).length;
+        if (renamed) notifyUser('标题已同步', renamed + ' 个单号的 Redmine 标题已更新', 'success');
+      } catch (_) { /* 标题同步失败不阻断刷新 */ }
       await loadDailyBrief();
     } else {
       await loadStatistics(true);
@@ -2825,7 +2832,7 @@ function openSingleIssueAnalysisHint() {
   modal.innerHTML = '<div class="modal-content single-issue-analysis-hint-modal">'
     + '<div class="modal-header"><span class="modal-title">🤖 辅助分析说明</span>'
     + '<button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
-    + '<div class="modal-body"><label for="' + modalId + '-text">提供已观察的现象、复现结果或希望重点核查的实际值；KkAgent 会将其作为待验证线索。</label>'
+    + '<div class="modal-body"><label for="' + modalId + '-text">提供已观察的现象、复现结果或希望重点核查的实际值；kkagent 会将其作为待验证线索。</label>'
     + '<textarea id="' + modalId + '-text" maxlength="4000" placeholder="例如：经验证补丁无效，需要查看设备上的实际值 notification_custom_view_max_image_width。">' + esc(singleIssueAnalysisHint) + '</textarea>'
     + '<div class="muted">最多 4000 个字符。</div></div>'
     + '<div class="modal-footer"><button type="button" class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">取消</button>'
@@ -2902,6 +2909,32 @@ function singleIssueAnalysisHasHistory(run, issue) {
   return isAnalysisTimelineWithinRetention(run.finished_at || run.started_at);
 }
 
+function latestSingleIssueRunForIssue(issueId) {
+  // 同单号状态联动：取「Redmine 单号分析」历史中该 issue 最新的 run。
+  // 历史数组本身就是最新在前，started_at 只用来比较轮询插入后的顺序。
+  var wanted = String(issueId == null ? '' : issueId);
+  if (!wanted || !singleIssueAnalysisHistory.length) return null;
+  var best = null;
+  var bestKey = '';
+  singleIssueAnalysisHistory.forEach(function (entry) {
+    if (!entry || !entry.run || !entry.run.run_id) return;
+    var issue = (entry.issues || [])[0] || {};
+    if (String(issue.issue_id) !== wanted) return;
+    var key = String(entry.run.started_at || '');
+    if (!best || (key && (!bestKey || key > bestKey))) {
+      best = entry;
+      bestKey = key;
+    }
+  });
+  return best;
+}
+
+function renderDailyBriefFromCache() {
+  // 单号分析状态变化时同步刷新晨报卡片（同单号状态联动），无晨报数据则跳过。
+  var card = document.getElementById('dailyBriefCard');
+  if (card && dailyBriefCache) card.innerHTML = renderDailyBriefInner(dailyBriefCache);
+}
+
 function upsertSingleIssueAnalysis(item) {
   if (!item || !item.run || !item.run.run_id) return;
   var id = String(item.run.run_id);
@@ -2932,6 +2965,8 @@ function upsertSingleIssueAnalysis(item) {
 }
 
 function renderSingleIssueAnalysisHistory() {
+  // 单号分析历史变化（轮询/停止/完成）时，晨报行的同单号状态联动随之刷新。
+  renderDailyBriefFromCache();
   var box = document.getElementById('singleIssueAnalysisHistory');
   var pagination = document.getElementById('singleIssueAnalysisPagination');
   if (!box) return;
@@ -4273,29 +4308,56 @@ function renderDailyBriefInner(data) {
     // 打开 Redmine / AI 统计 / 增量-全量选择 / 重新分析 ↔ 停止分析。增量在
     // 晨报 run 上重跑（结论原地更新）；全量走 analyze-issue 新建独立 run
     // （晨报记录保留可审计，新结论进「Redmine 单号分析」历史）。行级停止走
-    // run 级精确取消（stopDailyBriefRun）。
+    // run 级精确取消（stopDailyBriefRun）。同单号在单号分析中运行时，行状态
+    // 与其联动（见 overlay*），行级停止指向该独立 run。
     var issueRunning = ['pending', 'snapshotting', 'analyzing', 'running']
       .indexOf(String(issue.status || '')) >= 0;
+    // 同单号状态联动：单号分析存在该 issue 的 run 时镜像其状态（运行中/
+    // 停止中实时一致）；该 run 终态且晚于晨报记录时，展示其结论，避免两个
+    // 区块对同一单号各说各话。终态覆盖要求 started_at 晚于晨报记录时间，
+    // 缺时间戳时保持晨报自身结论（只联动实时状态）。
+    var overlayEntry = latestSingleIssueRunForIssue(issue.issue_id) || {};
+    var overlayRun = overlayEntry.run || {};
+    var overlayIssue = (overlayEntry.issues || [])[0] || {};
+    var overlayStatus = overlayRun.run_id ? singleIssueAnalysisEffectiveStatus(overlayRun, overlayIssue) : '';
+    var overlayRunning = Boolean(overlayRun.run_id) && singleIssueAnalysisIsRunning(overlayRun, overlayIssue);
+    var overlayStopping = overlayRunning
+      && Boolean(singleIssueStopRequested[String(overlayRun.run_id)] || overlayRun.cancel_requested);
+    var briefFinishedAt = String(issue.finished_at || issue.started_at || '');
+    var overlayNewerThanBrief = Boolean(overlayRun.run_id) && !overlayRunning
+      && Boolean(String(overlayRun.started_at || ''))
+      && (!briefFinishedAt || String(overlayRun.started_at) > briefFinishedAt);
     return '<div class="daily-brief-row">'
       + '<div class="daily-brief-main"><span class="daily-brief-priority">' + prio + '</span>'
       + '<span class="daily-brief-issue-title" title="' + esc(hover) + '">'
       + '<b>#' + esc(issue.issue_id) + '</b>' + (subject ? ' ' + esc(subject) : '')
       + '<span class="single-issue-analysis-meta">' + dailyBriefIssueMetaTags(issue) + '</span></span>'
       + '</div>'
-      + (stopping && issueRunning
+      + (overlayStopping
         ? '<span class="daily-brief-state">⏳ 停止中…</span>'
-        : issueStateHtml(issue))
+        : overlayRunning
+          ? '<span class="daily-brief-state" title="同单号的「Redmine 单号分析」正在运行">⏳ 分析中…</span>'
+          : overlayNewerThanBrief
+            ? '<span class="daily-brief-state' + (overlayStatus === 'failed' ? ' failed' : '')
+              + '" title="最新结论来自「Redmine 单号分析」">' + esc(singleIssueAnalysisStatus(overlayStatus)) + '</span>'
+            : (stopping && issueRunning
+              ? '<span class="daily-brief-state">⏳ 停止中…</span>'
+              : issueStateHtml(issue)))
       + '<div class="daily-brief-row-actions"><button type="button" class="ka-btn" data-click="showDailyBriefIssue" data-a0="' + esc(issue.issue_id) + '" data-prevent data-stop>查看分析</button>'
       + '<button class="ka-btn" data-click="openRedmineIssue" data-a0="' + esc(issue.issue_id) + '">打开 Redmine</button>'
       + '<button class="ka-btn" data-click="showDailyBriefIssueStatistics" data-a0="' + esc(issue.issue_id) + '">AI 统计</button>'
-      + (issueRunning
-        ? '<button class="ka-btn" data-click="stopDailyBriefRun"' + (stopping ? ' disabled' : '') + '>' + (stopping ? '⏳ 停止中…' : '停止分析') + '</button>'
-        : '<select class="single-issue-reanalysis-mode" data-daily-brief-reanalysis-mode'
-          + ' aria-label="#' + esc(issue.issue_id) + ' 重新分析方式"'
-          + (inflight ? ' disabled title="晨报批次仍在执行，等待结束后再重分析此项"' : '') + '>'
-          + '<option value="incremental">增量</option><option value="full">全量</option></select>'
-          + '<button class="ka-btn" data-daily-brief-reanalyze="' + esc(issue.issue_id) + '"'
-          + (inflight ? ' disabled title="晨报批次仍在执行，等待结束后再重分析此项"' : '') + '>重新分析</button>')
+      + (overlayRunning
+        ? // 联动的单号分析 run：停止必须指向该独立 run，而不是晨报 run。
+          '<button class="ka-btn" data-daily-brief-overlay-stop="' + esc(overlayRun.run_id) + '"'
+          + (overlayStopping ? ' disabled' : '') + '>' + (overlayStopping ? '⏳ 停止中…' : '停止分析') + '</button>'
+        : issueRunning
+          ? '<button class="ka-btn" data-click="stopDailyBriefRun"' + (stopping ? ' disabled' : '') + '>' + (stopping ? '⏳ 停止中…' : '停止分析') + '</button>'
+          : '<select class="single-issue-reanalysis-mode" data-daily-brief-reanalysis-mode'
+            + ' aria-label="#' + esc(issue.issue_id) + ' 重新分析方式"'
+            + (inflight ? ' disabled title="晨报批次仍在执行，等待结束后再重分析此项"' : '') + '>'
+            + '<option value="incremental">增量</option><option value="full">全量</option></select>'
+            + '<button class="ka-btn" data-daily-brief-reanalyze="' + esc(issue.issue_id) + '"'
+            + (inflight ? ' disabled title="晨报批次仍在执行，等待结束后再重分析此项"' : '') + '>重新分析</button>')
       + '</div>'
       + '</div>';
   }).join('');
@@ -4584,7 +4646,8 @@ async function reanalyzeDailyBriefIssue(issueId, button) {
     if (mode === 'full') {
       // 全量：与单号分析同语义——新建独立 run 保留完整审计链，不覆盖
       // 晨报 run 里这条的历史结论；结果出现在「Redmine 单号分析」列表。
-      // 晨报行不翻转状态（批量 run 未变），由单号分析历史轮询新任务。
+      // 晨报行与该独立 run 状态联动（运行中/终态镜像），由单号分析历史
+      // 轮询驱动刷新。
       var payload = {issue_id: Number(issueId), analysis_mode: 'full'};
       if (String(run.device_serial || '').trim()) payload.device_serial = String(run.device_serial).trim();
       if (String(run.analysis_hint || '').trim()) payload.analysis_hint = String(run.analysis_hint).trim();
@@ -4626,6 +4689,12 @@ async function reanalyzeDailyBriefIssue(issueId, button) {
 }
 
 document.addEventListener('click', function (event) {
+  // 晨报行联动的是「单号分析」独立 run，行级停止精确指向该 run。
+  var overlayStop = event.target.closest('[data-daily-brief-overlay-stop]');
+  if (overlayStop) {
+    stopSavedSingleIssueAnalysis(overlayStop.dataset.dailyBriefOverlayStop, overlayStop);
+    return;
+  }
   var button = event.target.closest('[data-daily-brief-reanalyze]');
   if (!button) return;
   reanalyzeDailyBriefIssue(button.dataset.dailyBriefReanalyze, button);

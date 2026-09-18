@@ -201,6 +201,7 @@ class EvidencePreflight:
 
 async def collect_deep_analysis_evidence(
     *, issue_id: int, device_serial: str, env_extra: dict[str, str],
+    include_device: bool = True,
     should_cancel: Callable[[], bool] | None = None,
     on_tool_event: Callable[[str, dict[str, Any], str, bool], None] | None = None,
 ) -> EvidencePreflight:
@@ -213,6 +214,8 @@ async def collect_deep_analysis_evidence(
     ``should_cancel``（run 级取消标志轮询）在每次 CLI 尝试与退避间隙被
     检查；用户请求停止时立即返回已收集的部分，而不是继续排队后续命令。
     ``on_tool_event`` 透传给每次 ``_collect``（实时进度时间线）。
+    ``include_device=False``（晨报批量 triage）只收 Redmine 三件套基线：
+    triage 证据门禁不含设备取证，模型也没有设备写入契约。
     """
     result = EvidencePreflight()
     fetched, data = await _collect(
@@ -255,7 +258,10 @@ async def collect_deep_analysis_evidence(
                 attachments.all_artifact_ids,
             ) = _attachment_manifest(data)
         result.traces.extend([journals, attachments])
-    devices = [item.strip() for item in str(device_serial or "").split(",") if item.strip()]
+    devices = (
+        [item.strip() for item in str(device_serial or "").split(",") if item.strip()]
+        if include_device else []
+    )
     if devices:
         statuses: list[str] = []
         for serial in devices:

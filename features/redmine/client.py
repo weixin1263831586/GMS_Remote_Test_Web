@@ -92,6 +92,43 @@ class RedmineClient(RedmineAttachmentMixin):
         issue = await self.get_issue(issue_id, include=["journals"])
         return list(getattr(issue, "journals", []) or [])
 
+    async def fetch_issue_subjects(self, issue_ids: list[int]) -> dict[int, str]:
+        """Fetch only each issue's current subject (cheap display refresh).
+
+        展示层标题同步入口：单号分析/晨报记录在入队时冻结了 subject，刷新时
+        只需要拿回最新标题，不必抓 journals/附件等完整元数据。优先一次批量
+        请求（Redmine /issues.json 的 issue_id 过滤），缺失项逐个兜底。
+        """
+        ids = sorted({int(i) for i in issue_ids if i})
+        subjects: dict[int, str] = {}
+        if not ids:
+            return subjects
+
+        def _fetch_batch() -> dict[int, str]:
+            result: dict[int, str] = {}
+            for issue in self._redmine.issue.filter(issue_id=ids, limit=len(ids)):
+                result[int(getattr(issue, "id", 0) or 0)] = str(
+                    getattr(issue, "subject", "") or ""
+                ).strip()
+            return result
+
+        def _fetch_one(issue_id: int) -> str:
+            issue = self._redmine.issue.get(int(issue_id))
+            return str(getattr(issue, "subject", "") or "").strip()
+
+        try:
+            subjects.update(await asyncio.to_thread(_fetch_batch))
+        except Exception:
+            logger.warning("batch subject fetch failed", exc_info=True)
+        for issue_id in ids:
+            if issue_id in subjects:
+                continue
+            try:
+                subjects[issue_id] = await asyncio.to_thread(_fetch_one, issue_id)
+            except Exception:
+                logger.warning("fetch subject failed for issue #%s", issue_id, exc_info=True)
+        return subjects
+
     async def fetch_issue_metadata_snapshot(self, issue_id: int) -> dict[str, Any]:
         """Fetch one issue's current metadata and journals for live dashboards."""
 

@@ -64,6 +64,27 @@ def test_zero_stale_report_is_short_and_keeps_detail_separate():
     assert "长" * 2000 not in report
 
 
+def test_native_summary_report_has_no_empty_triage_fields():
+    """#653167 复盘：kkagent_markdown 结果按 triage schema 渲染出空
+    「客户诉求/建议」与误导性的「置信度：None」。native 格式不得再走
+    schema 字段渲染。"""
+    run = DailyBriefRun(owner_id="u", brief_date="2026-09-18", mode="manual", run_id="r")
+    issue = DailyBriefIssue(run_id="r", issue_id=653167, buckets=[], result={
+        "result_format": "kkagent_markdown",
+        "problem_summary": "Power HAL FIXED_PERFORMANCE 不支持",
+        "detailed_report": "# 653167 分析报告\n\n## 一、问题概况",
+        "history_checked": True,
+    })
+    report = render_daily_brief_markdown(run, [issue], [])
+    assert "客户诉求：" not in report
+    assert "当前阻塞：" not in report
+    assert "建议：" not in report
+    assert "置信度：None" not in report
+    assert "置信度：未提供（见详细分析）" in report
+    assert "kkagent 深度诊断" in report
+    assert "详细分析：请在工单详情中查看。" in report
+
+
 def test_triage_does_not_require_history_or_source():
     entry = {"issue_id": 1, "subject": "CTS failure", "analysis_mode": "triage"}
     gate = evaluate_evidence_gate(_full_trace(history_searches=0), entry)
@@ -74,6 +95,26 @@ def test_triage_does_not_require_history_or_source():
     assert "DAILY TRIAGE ONLY" in prompt
     assert "HISTORY SEARCH (mandatory" not in prompt
     assert "EXACTLY these level-2 sections" not in prompt
+
+
+def test_triage_prompt_includes_precollected_snapshot_hint():
+    """#653167 复盘：triage 预采集到 Redmine 基线时，prompt 必须告诉模型
+    直接读该 snapshot，不要重复 fetch；但不得携带设备取证块。"""
+    entry = {
+        "issue_id": 653167, "subject": "rk3588 POWER",
+        "analysis_mode": "triage",
+        "_evidence_preflight": {"snapshot_id": "ev_t", "device_status": "not_requested"},
+    }
+    prompt = KkAgentRedmineAnalyzer().build_prompt(entry)
+    assert "CONTROLLER EVIDENCE PRECOLLECTED: snapshot `ev_t`" in prompt
+    assert "Do NOT call gms_rt_redmine_issue_fetch" in prompt
+    assert "LOCAL DEVICE" not in prompt
+
+
+def test_triage_prompt_has_no_precollect_block_without_preflight():
+    entry = {"issue_id": 1, "subject": "x", "analysis_mode": "triage"}
+    prompt = KkAgentRedmineAnalyzer().build_prompt(entry)
+    assert "CONTROLLER EVIDENCE PRECOLLECTED" not in prompt
 
 
 def test_attachment_listing_is_not_reading():

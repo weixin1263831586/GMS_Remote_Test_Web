@@ -11,8 +11,8 @@
 <main class="page-shell">
     <header class="toolbar">
         <div id="console-view-tabs" class="view-tabs" role="tablist" aria-label="设备串口视图">
-            <button id="ports-tab" class="view-tab active" type="button" role="tab" aria-selected="true" aria-controls="ports-section">本机串口 <span id="ports-count" class="count-badge">0</span></button>
-            <button id="console-tab" class="view-tab" type="button" role="tab" aria-selected="false" aria-controls="console-section" disabled>控制台</button>
+            <button id="ports-tab" class="view-tab active" type="button" role="tab" aria-selected="true" aria-controls="ports-section">本机串口</button>
+            <!-- 控制台 tab 由 page.js 依据打开的会话动态渲染（支持多个控制台并存）。 -->
         </div>
         <div class="toolbar-actions">
             <span id="refresh-status" class="muted">准备中</span>
@@ -23,51 +23,13 @@
     <div id="page-notice" class="notice" hidden></div>
     <section id="ports-section" class="view-panel" role="tabpanel">
         <div class="section-heading">
-            <div><h2>本机串口</h2><p>支持 /dev/ttyUSB*、/dev/ttyACM*，优先使用 by-id 稳定标识。</p></div>
+            <div class="heading-main"><h2>本机串口</h2><p>支持 /dev/ttyUSB*、/dev/ttyACM*，优先使用 by-id 稳定标识。</p></div>
         </div>
         <div id="ports-list" class="ports-grid"><div class="empty">正在扫描串口…</div></div>
     </section>
 
-    <section id="console-section" class="view-panel console-panel" role="tabpanel" hidden>
-        <div class="section-heading console-heading">
-            <div>
-                <h2 id="console-title">串口控制台</h2>
-                <p id="console-subtitle"></p>
-            </div>
-            <div class="console-actions">
-                <span id="socket-status" class="status-pill offline">未连接</span>
-                <button id="pause-output" type="button">暂停</button>
-                <button id="clear-screen" type="button">清屏</button>
-                <button id="copy-output" type="button">复制</button>
-                <button id="close-console" type="button">关闭</button>
-            </div>
-        </div>
-        <div class="console-layout">
-            <div class="terminal-column">
-                <div id="terminal-output" class="terminal" tabindex="0" aria-label="串口输出"></div>
-                <div class="input-dock">
-                    <div class="input-row">
-                        <input id="terminal-input" type="text" autocomplete="off" placeholder="输入命令，按 Enter 发送">
-                        <button id="send-input" class="primary" type="button">发送</button>
-                        <button id="send-ctrl-c" type="button" title="发送 0x03">Ctrl+C</button>
-                    </div>
-                </div>
-            </div>
-            <aside class="history-column">
-                <div class="history-head">
-                    <h3>历史日志</h3>
-                    <button id="reload-log" type="button">刷新</button>
-                </div>
-                <label>日期<select id="log-date"><option value="">最新</option></select></label>
-                <label>尾部行数<select id="log-tail"><option>200</option><option selected>500</option><option>2000</option><option>10000</option></select></label>
-                <pre id="history-output" class="history-output">暂无日志</pre>
-                <div class="history-actions">
-                    <button id="download-log" type="button">下载</button>
-                    <button id="clear-logs" class="danger" type="button">清空日志</button>
-                </div>
-            </aside>
-        </div>
-    </section>
+    <!-- 控制台面板与 tab 由 page.js 依据打开的会话动态渲染（支持多个控制台并存）。 -->
+    <section id="console-section" class="view-panel console-panel" hidden></section>
 </main>
 
 <div id="binding-modal" class="modal-backdrop" hidden>

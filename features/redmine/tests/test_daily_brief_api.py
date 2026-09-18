@@ -98,7 +98,14 @@ class DailyBriefApiTests(unittest.TestCase):
         metadata_service = SimpleNamespace(
             refresh_issue_metadata=AsyncMock(side_effect=lambda issue_id: {
                 "data": {"issue": {"subject": f"Issue {issue_id}"}}
-            })
+            }),
+            agent=SimpleNamespace(_make_client=lambda: SimpleNamespace(
+                fetch_issue_subjects=AsyncMock(return_value={
+                    653167: "rk3588 Android16 SSI GMS测试项支持----POWER问题",
+                }),
+                close=AsyncMock(),
+            )),
+            repository=SimpleNamespace(update_issue_subjects=lambda subjects: len(subjects)),
         )
         metadata_patch = patch(
             "features.redmine.api.get_redmine_service_for_owner",
@@ -468,6 +475,35 @@ class DailyBriefApiTests(unittest.TestCase):
         self.assertEqual(bad.status_code, 400)
         missing = self.client.get("/api/redmine-agent/daily-brief/2020-01-01")
         self.assertEqual(missing.status_code, 404)
+
+    # ------------------------------------------------------------- sync-subjects
+
+    def test_sync_subjects_updates_display_titles(self):
+        """刷新前标题同步：改过 Redmine 标题的单号在刷新后展示新标题。"""
+        repo = brief_repo.owner_daily_brief_repository("owner-a")
+        queued = self.client.post("/api/redmine-agent/daily-brief/run").json()["data"]
+        run = repo.get_run(queued["run_id"])
+        repo.upsert_issue(brief_repo.DailyBriefIssue(
+            run_id=run.run_id, issue_id=653167, buckets=[], subject="rk3588 POWER",
+        ))
+        new_subject = "rk3588 Android16 SSI GMS测试项支持----POWER问题"
+
+        response = self.client.post("/api/redmine-agent/daily-brief/sync-subjects")
+
+        self.assertEqual(response.status_code, 200)
+        summary = response.json()["data"]
+        self.assertEqual(summary["checked"], 1)
+        self.assertEqual(summary["updated"], 1)
+        self.assertEqual(
+            repo.get_issue(run.run_id, 653167).subject, new_subject,
+        )
+
+    def test_sync_subjects_is_human_only(self):
+        response = self.client.post(
+            "/api/redmine-agent/daily-brief/sync-subjects",
+            headers={"x-test-auth-method": "agent_token"},
+        )
+        self.assertIn(response.status_code, (401, 403))
 
     # ------------------------------------------------------------------ config
 

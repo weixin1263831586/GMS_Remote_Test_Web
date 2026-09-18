@@ -688,5 +688,41 @@ class CrossProcessConsistencyTests(unittest.TestCase):
         self.assertEqual(repo.get_run(run.run_id).status, "pending")
 
 
+class UpdateDisplaySubjectsTests(unittest.TestCase):
+    """展示标题同步：同单号的多个历史 run 一次换新，未变化的不算更新。"""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = DailyBriefRepository(Path(self._tmp.name))
+
+    def test_updates_all_runs_and_counts_real_changes(self):
+        run_a = make_run()
+        run_b = make_run(date="2026-09-14", mode="issue:653167")
+        self.repo.create_run(run_a)
+        self.repo.create_run(run_b)
+        self.repo.upsert_issue(DailyBriefIssue(
+            run_id=run_a.run_id, issue_id=653167, buckets=[], subject="rk3588 POWER",
+        ))
+        self.repo.upsert_issue(DailyBriefIssue(
+            run_id=run_b.run_id, issue_id=653167, buckets=[], subject="rk3588 POWER",
+        ))
+        self.repo.upsert_issue(DailyBriefIssue(
+            run_id=run_a.run_id, issue_id=111, buckets=[], subject="same title",
+        ))
+        changed = self.repo.update_issue_display_subjects({
+            653167: "rk3588 Android16 SSI GMS测试项支持----POWER问题",
+            111: "same title",
+            222: "未镜像的单号",
+        })
+        self.assertEqual(changed, 2)
+        for run in (run_a, run_b):
+            self.assertEqual(
+                self.repo.get_issue(run.run_id, 653167).subject,
+                "rk3588 Android16 SSI GMS测试项支持----POWER问题",
+            )
+        self.assertEqual(self.repo.get_issue(run_a.run_id, 111).subject, "same title")
+
+
 if __name__ == "__main__":
     unittest.main()

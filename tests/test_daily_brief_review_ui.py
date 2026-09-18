@@ -78,6 +78,92 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_daily_brief_row_mirrors_single_issue_analysis_status(self):
+        """同单号状态联动：单号分析运行中/停止中 → 晨报行实时镜像；
+        其终态晚于晨报记录时，晨报行展示该最新结论。"""
+        page = self.new_page()
+
+        def respond(route):
+            url = route.request.url
+            if url.endswith('/daily-brief/latest'):
+                data = {'run': {'run_id': 'brief-1', 'brief_date': '2026-09-18', 'status': 'completed'},
+                        'issues': [{'issue_id': 652135, 'subject': '晨报单', 'status': 'failed',
+                                    'error_type': 'evidence_gate_failed', 'error': '证据门禁未通过'}]}
+            elif url.endswith('/daily-brief/issue-analyses?limit=30'):
+                data = {'items': [{'run': {'run_id': 'single-1', 'status': 'analyzing',
+                                           'started_at': '2026-09-18T20:05:50'},
+                                   'issues': [{'issue_id': 652135, 'status': 'running'}]}]}
+            else:
+                data = {}
+            route.fulfill(status=200, content_type='application/json',
+                          body=json.dumps({'success': True, 'data': data}))
+
+        page.route('**/api/redmine-agent/**', respond)
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("switchTab('daily-brief')")
+            row = page.locator('#dailyBriefCard .daily-brief-row', has_text='#652135')
+            # 单号分析运行中：晨报行同步显示分析中，行级停止指向该独立 run。
+            expect(row).to_contain_text('分析中')
+            expect(row.locator('[data-daily-brief-overlay-stop="single-1"]')).to_have_count(1)
+            page.evaluate("singleIssueStopRequested['single-1'] = true; renderSingleIssueAnalysisHistory();")
+            expect(row).to_contain_text('停止中')
+            page.evaluate("delete singleIssueStopRequested['single-1']; renderSingleIssueAnalysisHistory();")
+            # 单号分析完成（started_at 晚于晨报记录）→ 晨报行镜像最新结论，
+            # 并恢复 增量/全量 + 重新分析 按钮组。
+            page.evaluate("""() => {
+                upsertSingleIssueAnalysis({
+                    run: {run_id: 'single-1', status: 'completed', started_at: '2026-09-18T20:05:50'},
+                    issues: [{issue_id: 652135, status: 'completed'}],
+                });
+                renderSingleIssueAnalysisHistory();
+            }""")
+            expect(row).to_contain_text('已完成')
+            expect(row.locator('[data-daily-brief-overlay-stop]')).to_have_count(0)
+            expect(row.locator('[data-daily-brief-reanalyze="652135"]')).to_have_count(1)
+        finally:
+            page.close()
+
+    def test_refresh_on_daily_brief_syncs_redmine_subjects_first(self):
+        """刷新按钮先同步 Redmine 最新标题：改过标题的单号刷新后直接显示新标题。"""
+        page = self.new_page()
+        latest = {
+            'run': {'run_id': 'brief-1', 'brief_date': '2026-09-18', 'status': 'completed'},
+            'issues': [{'issue_id': 653167, 'subject': 'rk3588 POWER', 'status': 'completed',
+                        'result': {'confidence': 0.9}}],
+        }
+        sync_calls = {'count': 0}
+
+        def respond(route):
+            url = route.request.url
+            if url.endswith('/daily-brief/sync-subjects'):
+                sync_calls['count'] += 1
+                data = {'checked': 1, 'updated': 1,
+                        'issues': [{'issue_id': 653167, 'subject': 'rk3588 Android16 SSI GMS测试项支持----POWER问题'}]}
+            elif url.endswith('/daily-brief/latest'):
+                data = dict(latest)
+                if sync_calls['count']:
+                    latest['issues'][0]['subject'] = 'rk3588 Android16 SSI GMS测试项支持----POWER问题'
+            elif url.endswith('/daily-brief/issue-analyses?limit=30'):
+                data = {'items': []}
+            else:
+                data = {}
+            route.fulfill(status=200, content_type='application/json',
+                          body=json.dumps({'success': True, 'data': data}))
+
+        page.route('**/api/redmine-agent/**', respond)
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("switchTab('daily-brief')")
+            card = page.locator('#dailyBriefCard')
+            expect(card).to_contain_text('#653167')
+            self.assertIn('rk3588 POWER', card.inner_text())
+            page.locator('#refreshBtn').click()
+            expect(card).to_contain_text('rk3588 Android16 SSI GMS测试项支持----POWER问题')
+            self.assertEqual(sync_calls['count'], 1)
+        finally:
+            page.close()
+
     def test_enter_indexes_saved_issue_and_highlights_it_without_reanalysis(self):
         page = self.new_page()
         submissions = []
@@ -599,7 +685,8 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
             page.close()
 
     def test_daily_brief_row_full_reanalysis_creates_standalone_run(self):
-        """晨报行选「全量」：走 analyze-issue 新建独立 run，晨报行不翻转。"""
+        """晨报行选「全量」：走 analyze-issue 新建独立 run；晨报行与该独立
+        run 状态联动（分析中 + 行级停止指向独立 run）。"""
         page = self.new_page()
         posts = []
 
@@ -642,11 +729,12 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
             row.get_by_text("重新分析", exact=True).click()
             expect(page.locator("#singleIssueAnalysisHistory")).to_contain_text("#101")
             expect(page.locator("#singleIssueAnalysisHistory")).to_contain_text("分析中")
-            # 全量请求带批量 run 的取证上下文（设备），且不改晨报行状态。
+            # 全量请求带批量 run 的取证上下文（设备）；独立 run 运行中时
+            # 晨报行联动显示分析中，行级停止精确指向该独立 run。
             self.assertEqual(posts, [{"issue_id": 101, "analysis_mode": "full",
                                       "device_serial": "ADB-OWN"}])
-            expect(row.get_by_text("重新分析", exact=True)).to_be_visible()
-            self.assertEqual(row.locator("select").input_value(), "full")
+            expect(row).to_contain_text("分析中")
+            expect(row.locator('[data-daily-brief-overlay-stop="full-1"]')).to_have_count(1)
         finally:
             page.close()
 

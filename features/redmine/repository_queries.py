@@ -67,6 +67,36 @@ class RepositoryQueryMixin:
             )
             self._replace_fts(conn, payload)
 
+    def update_issue_subjects(self, subjects: dict[int, str]) -> int:
+        """Subject-only refresh of the local Redmine mirror.
+
+        返回标题真正发生变化的条数；未镜像的单号跳过（镜像由同步任务负责）。
+        subject 参与 FTS 索引，变化时同步重建该行索引。
+        """
+        changed = 0
+        with self.connect() as conn:
+            for issue_id, subject in subjects.items():
+                subject = str(subject or "").strip()
+                if not subject:
+                    continue
+                row = conn.execute(
+                    "SELECT * FROM redmine_agent_issues WHERE issue_id=?",
+                    (int(issue_id),),
+                ).fetchone()
+                if row is None:
+                    continue
+                payload = self._decode_row(row)
+                if str(payload.get("subject") or "").strip() == subject:
+                    continue
+                payload["subject"] = subject
+                conn.execute(
+                    "UPDATE redmine_agent_issues SET subject=? WHERE issue_id=?",
+                    (subject, int(issue_id)),
+                )
+                self._replace_fts(conn, payload)
+                changed += 1
+        return changed
+
     def get_issue(self, issue_id: int) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM redmine_agent_issues WHERE issue_id=?", (issue_id,)).fetchone()
@@ -224,7 +254,7 @@ class RepositoryQueryMixin:
             rows = conn.execute(
                 """
                 SELECT issue_id, subject, status_name, priority_name, assigned_to_name,
-                       created_on, updated_on, closed_on, description, category,
+                       author_name, created_on, updated_on, closed_on, description, category,
                        is_resolved, last_scanned_at, journals_json, attachments_json, failures_json
                 FROM redmine_agent_issues
                 ORDER BY COALESCE(updated_on, created_on) DESC, issue_id DESC
@@ -475,6 +505,7 @@ class RepositoryQueryMixin:
             "status_name": issue.get("status_name") or "",
             "priority_name": issue.get("priority_name") or "",
             "assigned_to_name": issue.get("assigned_to_name") or "",
+            "author_name": issue.get("author_name") or "",
             "updated_on": issue.get("updated_on") or "",
             "created_on": issue.get("created_on") or "",
             "closed_on": issue.get("closed_on") or "",

@@ -1902,9 +1902,21 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/daily-brief/runs/{run_id}/issues/{issue_id}/events"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/redmine-agent/daily-brief/runs/{run_id}/issues/{issue_id}/reanalyze"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/daily-brief/sync-subjects"
   },
   {
     "methods": [

@@ -15583,6 +15583,76 @@
         "summary": "Cancel Daily Brief Run"
       }
     },
+    "/api/redmine-agent/daily-brief/runs/{run_id}/issues/{issue_id}/events": {
+      "get": {
+        "description": "单 issue 分析进度时间线的增量读取（「查看分析」实时弹框数据源）。\n\n- owner ACL：run 不存在或不属于当前 owner 一律 404，不泄露存在性\n  （与 get_brief_run 同一判定）。\n- 增量协议：调用方携带上次响应的 ``next_sequence`` 作为\n  ``after_sequence``，只拿新事件；2~3 秒粒度轮询足够（ADR：无 SSE）。\n- ``terminal``：run 已终态时为 true，前端据此停止轮询并切换到\n  最终报告/失败/已停止视图。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_sequence",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After Sequence",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Issue Analysis Events"
+      }
+    },
     "/api/redmine-agent/daily-brief/runs/{run_id}/issues/{issue_id}/reanalyze": {
       "post": {
         "description": "按 run_id 精确重新分析单个 issue（优先入口；date 回落见下方兼容路由）。",
@@ -15627,6 +15697,22 @@
           }
         },
         "summary": "Reanalyze Issue In Run"
+      }
+    },
+    "/api/redmine-agent/daily-brief/sync-subjects": {
+      "post": {
+        "description": "刷新前同步展示标题：把晨报/单号分析条目的 subject 与 Redmine 对齐。\n\nsubject 在分析入队时冻结，Redmine 上改标题后本地不会自动跟随；前端\n刷新按钮先调用本端点，再重新拉取展示数据。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sync Display Subjects"
       }
     },
     "/api/redmine-agent/daily-brief/triage": {

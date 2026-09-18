@@ -82,3 +82,19 @@ html,body{height:100%;min-height:0;overflow:hidden}
 .history-output{height:auto;min-height:120px;flex:1;padding:8px}.history-actions{margin-top:0}
 @media(max-width:850px){html,body{overflow:auto}.page-shell{height:auto;min-height:100%}.console-layout{grid-template-columns:1fr}.history-column{border-left:0;border-top:1px solid var(--border)}.history-output{height:220px;flex:none}.terminal{height:55vh}.input-dock{position:sticky;bottom:0;padding-bottom:4px}}
 @media(max-width:600px){.toolbar{height:auto;min-height:40px;padding:0 10px;gap:6px}.view-tab{min-height:40px;height:40px;padding:0 10px}.view-panel{padding:10px}.toolbar-actions{flex-direction:column;align-items:flex-end}}
+
+/* 标题与说明同行显示；过长时允许折行，不挤压右侧操作按钮。 */
+.heading-main{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 10px;min-width:0}
+.heading-main p{margin-top:0;overflow-wrap:anywhere}
+
+/* 多控制台 tab：宽度自适应；不用 overflow-x:auto——Chromium 会把纵向
+滚轮转成 tab 栏横向滚动、抢走页面滚动（其它页面 tab 栏无此行为）。
+溢出的 tab 仍可通过键盘 ←/→ 聚焦自动滚入可视区（hidden 保留编程滚动）。 */
+.view-tabs{flex:1;min-width:0;overflow:hidden}
+.console-tab{width:auto;min-width:0;display:inline-flex;align-items:center;gap:6px;padding:0 10px}
+.console-tab .tab-title{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.console-tab .tab-close{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:4px;color:var(--muted);font-size:14px;line-height:1}
+.console-tab .tab-close:hover{background:rgba(240,106,117,.18);color:var(--red)}
+
+/* 每个控制台会话面板独立占满 console-panel，保证输入行不被 overflow 裁掉。 */
+.console-session{flex:1;min-height:0;display:flex;flex-direction:column}
