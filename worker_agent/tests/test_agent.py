@@ -39,6 +39,59 @@ def test_registration_only_advertises_novnc_when_both_ports_are_ready(tmp_path):
     assert "novnc_port" not in capabilities
 
 
+def test_registration_reports_tradefed_families_from_suite_roots(tmp_path):
+    """无套件盘的 Worker 不再谎报 cts/gts/vts/sts=True；有启动器时如实上报。"""
+    suites_root = tmp_path / "suites"
+    tools_dir = suites_root / "android-cts" / "android-cts" / "tools"
+    tools_dir.mkdir(parents=True)
+    launcher = tools_dir / "cts-tradefed"
+    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+    launcher.chmod(0o755)
+
+    agent = WorkerAgent(worker_config(tmp_path))
+    with patch("worker_agent.app.shutil.which", return_value="/bin/tool"), patch(
+        "worker_agent.app._port_listening", return_value=False,
+    ), patch(
+        "worker_agent.app._rfb_handshake_ok", return_value=False,
+    ):
+        capabilities = agent.registration()["capabilities"]
+
+    assert capabilities["cts"] is True
+    assert capabilities["gts"] is False
+    assert capabilities["vts"] is False
+    assert capabilities["sts"] is False
+    assert capabilities["tradefed"] is True
+
+    # 无套件盘：全部 False（旧行为恒为 True，Controller 会派发必败任务）。
+    empty = WorkerAgent(worker_config(tmp_path / "missing"))
+    with patch("worker_agent.app.shutil.which", return_value="/bin/tool"), patch(
+        "worker_agent.app._port_listening", return_value=False,
+    ), patch(
+        "worker_agent.app._rfb_handshake_ok", return_value=False,
+    ):
+        empty_capabilities = empty.registration()["capabilities"]
+    assert empty_capabilities["tradefed"] is False
+    assert empty_capabilities["cts"] is False
+
+
+def test_tradefed_launcher_detection_requires_exec_bit(tmp_path):
+    """存在文件但无执行位的启动器不算可用能力（与 scan_suites 的
+    available 判定一致）。"""
+    from worker_agent.suite_actions import tradefed_launcher_families
+
+    suites_root = tmp_path / "suites"
+    tools_dir = suites_root / "tools"
+    tools_dir.mkdir(parents=True)
+    launcher = tools_dir / "gts-tradefed"
+    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+    launcher.chmod(0o644)
+
+    assert tradefed_launcher_families([suites_root]) == set()
+
+    launcher.chmod(0o755)
+    assert tradefed_launcher_families([suites_root]) == {"gts"}
+
+
 def test_registration_advertises_novnc_when_rfb_handshake_succeeds(tmp_path):
     agent = WorkerAgent(worker_config(tmp_path))
 
@@ -110,6 +163,72 @@ def test_usbip_command_runs_in_background_so_heartbeats_are_not_blocked(tmp_path
     thread.start.assert_called_once_with()
     assert agent.runtime.previous_command("cmd-usbip")["status"] == "running"
     agent.client.ack.assert_called_once_with("cmd-usbip", "running", {}, "")
+
+
+def test_slow_commands_run_in_background_so_heartbeats_are_not_blocked(tmp_path):
+    """device_action / connect_vpn 同步执行可到 60-180s，会饿死主循环心跳
+    （Controller 默认 45s 判 worker_lost，打断运行中任务），必须后台化。"""
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+    thread = MagicMock()
+    vpn_command = {
+        "id": "cmd-vpn",
+        "command_type": "connect_vpn",
+        "payload": {"vpn_name": "office"},
+    }
+    action_command = {
+        "id": "cmd-dev",
+        "command_type": "device_action",
+        "payload": {"action": "reboot", "devices": []},
+    }
+
+    with patch("worker_agent.app.threading.Thread", return_value=thread) as thread_cls, \
+            patch("worker_agent.app.execute_device_action") as execute, \
+            patch("worker_agent.app.subprocess.run") as run:
+        agent.handle(vpn_command)
+        agent.handle(action_command)
+
+    execute.assert_not_called()
+    run.assert_not_called()
+    assert thread_cls.call_count == 2
+    assert agent.runtime.previous_command("cmd-vpn")["status"] == "running"
+    assert agent.runtime.previous_command("cmd-dev")["status"] == "running"
+
+
+def test_background_slow_command_reports_completion(tmp_path):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+    command = {
+        "id": "cmd-dev",
+        "command_type": "device_action",
+        "payload": {"action": "reboot", "devices": []},
+    }
+    result = {"rebooted": ["serial-1"]}
+
+    with patch("worker_agent.app.execute_device_action", return_value=result):
+        agent.run_slow_command(command)
+
+    saved = agent.runtime.previous_command("cmd-dev")
+    assert saved["status"] == "completed"
+    agent.client.ack.assert_called_once_with("cmd-dev", "completed", result, "")
+
+
+def test_background_slow_command_reports_failure(tmp_path):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+    command = {
+        "id": "cmd-vpn",
+        "command_type": "connect_vpn",
+        "payload": {"vpn_name": "missing"},
+    }
+
+    with patch("worker_agent.app.subprocess.run",
+               side_effect=OSError("nmcli missing")):
+        agent.run_slow_command(command)
+
+    saved = agent.runtime.previous_command("cmd-vpn")
+    assert saved["status"] == "failed"
+    assert agent.client.ack.call_args.args[1] == "failed"
 
 
 def test_background_usbip_command_reports_completion(tmp_path):

@@ -17,7 +17,7 @@ import time
 from typing import Any
 
 from . import daily_brief_cancellation as cancellation
-from .daily_brief_analysis_events import start_analysis_progress
+from .daily_brief_analysis_events import mask_secrets, start_analysis_progress
 from .daily_brief_deep_analysis import precollect_deep_evidence
 from .daily_brief_execution_statistics import summarize_execution_statistics
 from .daily_brief_execution_view import issue_payload
@@ -41,7 +41,7 @@ from .daily_brief_snapshot import (
     build_daily_triage_snapshot,
     detect_delta,
 )
-from .kkagent_analyzer import (
+from .kkagent import (
     PROMPT_VERSION,
     KkAgentRedmineAnalyzer,
     preflight_gms_auth,
@@ -69,6 +69,9 @@ class DailyBriefService(DailyBriefRunStarterMixin):
 
     # 同 run_id 的执行协调器（跨实例/跨请求共享）：防止 force 重试、
     # refresh、reanalyze 与仍在运行的旧任务并发写同一 run。
+    # 注意：仅本进程有效——Web/Worker/CLI 是多进程架构，跨进程的正确性
+    # 完全依赖 SQLite job/lease/run 状态与唯一约束；此 map 只做本进程
+    # 去重与取消加速，不得升级为跨进程锁。
     _RUN_EXECUTIONS: dict[str, asyncio.Task[DailyBriefRun | None]] = {}
 
     def __init__(self, owner_id: str, config_manager: Any | None = None):
@@ -356,7 +359,7 @@ class DailyBriefService(DailyBriefRunStarterMixin):
             )
             if not auth_ok:
                 run.status = "failed"
-                run.error = auth_reason[:1000]
+                run.error = mask_secrets(auth_reason, 1000)
                 run.finished_at = _now()
                 self.repository.update_run(run)
                 return self.repository.get_run(run_id)
@@ -389,7 +392,9 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         except Exception as exc:
             logger.exception("daily brief run %s failed", run_id)
             run.status = "failed"
-            run.error = str(exc)[:1000]
+            # 落库前打码：异常文本可能含 URL/header/token 片段（HTTP 层
+            # 已隐藏细节，DB 层是最后防线）。
+            run.error = mask_secrets(str(exc), 1000)
             run.finished_at = _now()
             self.repository.update_run(run)
         finally:
@@ -502,7 +507,11 @@ class DailyBriefService(DailyBriefRunStarterMixin):
 
         async def _one(issue_id: int) -> None:
             async with semaphore:
-                entry = {**entries.get(issue_id, {}), "analysis_mode": "triage"}
+                # 与「Redmine 单号分析」完全同语义（reanalyze_issue →
+                # _analyze_one，深度诊断 diagnostic）。晨报只是触发来源
+                # 不同（固定时间调度），逐 issue 分析不降级为轻量 triage；
+                # triage 分支仅保留用于渲染历史持久化结果。
+                entry = dict(entries.get(issue_id, {}))
                 await self._analyze_one(run, issue_id, entry, analyzer, config)
 
         await cancellation.gather_cancel_on_error(
@@ -588,7 +597,7 @@ class DailyBriefService(DailyBriefRunStarterMixin):
                     **(outcome.trace or {}),
                     "final_ok": bool(outcome.ok),
                     "failure_stage": outcome.error_type,
-                    "failure_message": outcome.error,
+                    "failure_message": mask_secrets(outcome.error, 1000),
                     "wall_duration_ms": record.duration_ms,
                 },
             )
@@ -604,7 +613,9 @@ class DailyBriefService(DailyBriefRunStarterMixin):
             record.result["priority"] = record.priority
         else:
             record.status = "failed"
-            record.error = outcome.error
+            # 与 run.error 同规：stderr/异常文本可能含 URL/header/token
+            # 片段，落库前打码（该字段会经 issue_payload 进 API）。
+            record.error = mask_secrets(outcome.error, 1000)
             record.error_type = outcome.error_type
         self.repository.upsert_issue(record)
 

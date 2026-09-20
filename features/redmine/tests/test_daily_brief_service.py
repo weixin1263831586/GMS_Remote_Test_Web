@@ -20,8 +20,8 @@ from features.redmine.daily_brief_service import (
     DailyBriefService,
     normalize_daily_brief_config,
 )
+from features.redmine.kkagent import KkAgentAnalysisResult
 from features.redmine.kkagent.evidence_preflight import EvidencePreflight
-from features.redmine.kkagent_analyzer import KkAgentAnalysisResult
 
 
 PASS_PREFLIGHT_TARGET = "features.redmine.daily_brief_service.preflight_gms_auth"
@@ -428,9 +428,10 @@ class RunLifecycleTests(unittest.TestCase):
         self.assertEqual(collector_mock.await_args.kwargs["device_serial"], "RK3576GMS1")
 
     def test_triage_precollects_redmine_baseline_without_device(self):
-        """#653167 nightly 复盘：晨报批量 triage 不能裸奔——MCP 断连时
-        模型取证全灭、gate 失败且无任何确定性证据。triage 现在同样预采集
-        Redmine 基线（无设备维度），profile 未绑定时保持跳过。"""
+        """triage 模式的预采集只收 Redmine 基线、不含设备维度（#653167
+        nightly 复盘的兜底产物）。批量晨报现已默认 diagnostic（与单号分析
+        同语义），此分支保留用于历史持久化结果的兼容渲染；profile 未绑定
+        时保持跳过。"""
         from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
         from features.redmine.kkagent.trace import ToolTrace
 
@@ -484,6 +485,34 @@ class RunLifecycleTests(unittest.TestCase):
         # triage 不做设备取证：序列号为空 + include_device=False（任一信号）。
         self.assertFalse(kwargs.get("include_device", True))
         self.assertEqual(kwargs.get("device_serial", ""), "")
+
+    def test_batch_phase_matches_single_issue_analysis_mode(self):
+        """晨报逐 issue 分析与「Redmine 单号分析」完全同语义：批量阶段
+        不再强制 triage，entry 不携带 analysis_mode，由 _analyze_one
+        统一 setdefault 成 diagnostic（晨报只差在固定时间触发）。"""
+        import asyncio
+
+        from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
+
+        run = DailyBriefRun(
+            owner_id="u1", brief_date="2026-09-18", mode="nightly",
+            run_id="db_deep_batch", status="analyzing",
+        )
+        self.service.repository.create_run(run)
+        self.service.repository.upsert_issue(DailyBriefIssue(
+            run_id=run.run_id, issue_id=652654, buckets=["waiting_my_reply"],
+            subject="CTS failure",
+        ))
+        seen: list[dict] = []
+
+        async def fake_analyze(run_arg, issue_id, entry, analyzer, config):
+            seen.append(dict(entry))
+
+        with patch.object(self.service, "_analyze_one", side_effect=fake_analyze):
+            asyncio.run(self.service._analyze_phase(run, {}))
+
+        self.assertEqual(len(seen), 1)
+        self.assertNotIn("analysis_mode", seen[0])
 
 class ReanalyzeMetadataTests(unittest.TestCase):
     """单号 run 无晨报快照时，fallback entry 须从本地镜像补齐报告人等元数据。"""

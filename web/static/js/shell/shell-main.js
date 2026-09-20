@@ -1305,16 +1305,12 @@
                 terminalWorkspace.maximized = null;
                 terminalWorkspace.panes = [{
                     ...activeAdbPane,
-<<<<<<< Updated upstream
                     // Preserve the pane identity while its WebSocket is
                     // mounting; changing hostId here changes the render
                     // signature and tears down the pending ADB connection.
                     ...(targetHost && !terminalWorkspace.instances.has(0)
                         && !terminalWorkspace.mountingPanes.has(0)
                         ? {hostId: targetHost.id} : {}),
-=======
-                    ...(targetHost ? {hostId: targetHost.id} : {}),
->>>>>>> Stashed changes
                 }];
             }
             if (window.hostWorkspaceInitialized) renderHostWorkspace();

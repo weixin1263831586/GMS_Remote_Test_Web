@@ -38,6 +38,41 @@ class LocalBridgeTests(unittest.TestCase):
         self.assertEqual(worker["connection_generation"], bridge.connection_generation)
         self.assertTrue(worker["session_id"].startswith("controller-bridge-session-"))
 
+    def test_bridge_reports_tradefed_capabilities_from_local_suites(self):
+        """本地 bridge 与真实 Worker 同规：按本机套件启动器如实上报
+        cts/gts/vts/sts，不再恒为 True。"""
+        from features.cluster.local_bridge import LocalWorkerBridge
+
+        suites_root = Path(self.temp.name) / "GMS-Suite"
+        tools_dir = suites_root / "android-gts" / "tools"
+        tools_dir.mkdir(parents=True)
+        launcher = tools_dir / "gts-tradefed"
+        launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+        launcher.chmod(0o755)
+
+        bridge = LocalWorkerBridge(self.repo, ClusterConfig(
+            enabled=False, local_worker_id="ats-worker-controller"))
+        with patch("features.cluster.local_bridge._suite_roots",
+                   return_value=[suites_root]):
+            bridge._register()
+
+        capabilities = self.repo.get_worker("ats-worker-controller")["capabilities"]
+        self.assertTrue(capabilities["tradefed"])
+        self.assertTrue(capabilities["gts"])
+        self.assertFalse(capabilities["cts"])
+
+        # 无套件根目录：能力位归 False（注册仍成功）。
+        empty_bridge = LocalWorkerBridge(
+            self.repo,
+            ClusterConfig(enabled=False, local_worker_id="ats-worker-controller"),
+        )
+        with patch("features.cluster.local_bridge._suite_roots",
+                   return_value=[Path(self.temp.name) / "nowhere"]):
+            empty_bridge._register()
+        empty = self.repo.get_worker("ats-worker-controller")["capabilities"]
+        self.assertFalse(empty["tradefed"])
+        self.assertFalse(empty["gts"])
+
     def test_bridge_heartbeat_updates_devices_and_metrics(self):
         from features.cluster.local_bridge import LocalWorkerBridge
 

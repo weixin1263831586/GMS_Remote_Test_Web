@@ -829,7 +829,6 @@ class FrontendIntegrityTests(unittest.TestCase):
                 [
                     "web/shell/shell.html",
                     "web/static/js/shell/shell-main.js",
-                    "web/static/js/shell/esc-close.js",
                 ],
             ),
             (

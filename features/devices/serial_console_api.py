@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
+import logging
 from pathlib import Path
 
 from fastapi import (
@@ -32,6 +32,7 @@ from .serial_console_storage import DEFAULT_BAUDRATE
 
 router = APIRouter(prefix="/api/devices/console", tags=["devices-console"])
 page_router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _require_console_read(request: Request) -> CurrentUser | None:
@@ -222,7 +223,10 @@ async def serial_console_websocket(websocket: WebSocket, port_key: str):
                 await websocket.send_json({"type": "error", "error": "当前账号仅可查看串口"})
                 continue
             try:
-                written = serial_console_service.write(
+                # pyserial write 最长阻塞 write_timeout(1s)（流控/驱动
+                # 卡顿），放线程池避免冻结事件循环上的其它 WS/HTTP。
+                written = await asyncio.to_thread(
+                    serial_console_service.write,
                     port_key,
                     str(message.get("data") or ""),
                     append_newline=bool(message.get("append_newline", False)),
@@ -244,8 +248,17 @@ async def serial_console_websocket(websocket: WebSocket, port_key: str):
     finally:
         if sender:
             sender.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            # 客户端断开后 sender 可能已因向关闭的 socket 写数据抛出
+            # ConnectionClosed（非 CancelledError），不能让它逃逸成
+            # ASGI 异常日志；其余异常也在此收敛，但留 debug 痕迹，
+            # 避免真正的编程错误被无声吞掉。
+            try:
                 await sender
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.debug(
+                    "sender teardown failed for %s", port_key, exc_info=True)
         if subscriber_id:
             await asyncio.to_thread(
                 serial_console_service.unsubscribe, port_key, subscriber_id

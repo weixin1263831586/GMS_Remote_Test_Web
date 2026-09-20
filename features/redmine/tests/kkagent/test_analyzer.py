@@ -275,7 +275,7 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v17")
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v18")
 
     def test_prompt_includes_operator_observation_as_verifiable_context(self):
         prompt = KkAgentRedmineAnalyzer().build_prompt({

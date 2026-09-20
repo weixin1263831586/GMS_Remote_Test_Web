@@ -16,6 +16,7 @@ from typing import Any
 
 from worker_agent.inventory import probe_devices
 from worker_agent.process_inventory import discover_tradefed_processes
+from worker_agent.suite_actions import tradefed_launcher_families
 from worker_agent.suite_detection import suite_details
 
 from .config import ClusterConfig
@@ -136,6 +137,9 @@ class LocalWorkerBridge:
         ubuntu_user = config_manager.get_ubuntu_user(config)
         ubuntu_host = config_manager.get_ubuntu_host(config) or socket.gethostname()
         adb_proxy = capability_status()
+        # 与真实 Worker 同规：注册期探测本机 tradefed 启动器，无套件时
+        # 如实上报 False（调度实际按 suites 表匹配，能力位仅展示用）。
+        families = tradefed_launcher_families(_suite_roots())
         return {
             "worker_id": self.worker_id,
             "name": self.worker_id,
@@ -145,8 +149,10 @@ class LocalWorkerBridge:
             "session_id": self.session_id,
             "max_jobs": int(os.getenv("GMS_LOCAL_WORKER_MAX_JOBS", str(ClusterConfig.load().default_max_jobs))),
             "capabilities": {
-                "adb": True, "fastboot": True, "tradefed": True,
-                "cts": True, "gts": True, "vts": True, "sts": True,
+                "adb": True, "fastboot": True,
+                "tradefed": bool(families),
+                "cts": "cts" in families, "gts": "gts" in families,
+                "vts": "vts" in families, "sts": "sts" in families,
                 "adb_proxy": bool(adb_proxy.get("installed")),
                 "adb_proxy_version": str(adb_proxy.get("version") or ""),
                 "adb_proxy_logs": True,

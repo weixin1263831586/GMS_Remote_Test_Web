@@ -284,6 +284,15 @@
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
       <div>
+        <label>个人身份绑定（我是谁）</label>
+        <div class="select-with-add" style="width:100%">
+          <select id="settingSelfBinding" style="width:100%"></select>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">从共享组织架构中绑定自己的 Redmine 身份；绑定后个人看板/每日晨报直接认人，不依赖姓名模糊匹配。别名/成员维护见「添加用户」（需管理员）。</div>
+        <button class="secondary" style="margin-top:6px" type="button" data-click="submitSelfBinding">保存绑定</button>
+      </div>
+      <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
+      <div>
         <label>Redmine 地址</label>
         <input type="url" id="settingRedmineBaseUrl" placeholder="例如：https://redmine.example.com">
         <div style="font-size:11px;color:var(--muted);margin-top:2px">请输入包含协议的完整地址，不要填写 /issues 等路径</div>

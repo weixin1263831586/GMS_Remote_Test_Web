@@ -8,7 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
 
-from features.redmine.kkagent_analyzer import KkAgentAnalysisResult
+from features.redmine.kkagent import KkAgentAnalysisResult
 from features.redmine.tests.test_daily_brief_service import (
     SNAPSHOT,
     VALID,

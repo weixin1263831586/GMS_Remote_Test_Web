@@ -9,7 +9,7 @@ from .daily_brief_owner_policy import (
 )
 from .daily_brief_repository import new_run_id
 from .daily_brief_snapshot import brief_date_today
-from .kkagent_analyzer import PROMPT_VERSION
+from .kkagent import PROMPT_VERSION
 from .users import _now
 
 

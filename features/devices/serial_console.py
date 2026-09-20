@@ -174,6 +174,9 @@ class SerialConsoleService:
         ports.sort(key=lambda item: (item["devname"], item["port_key"]))
         with self._lock:
             self._port_cache = {item["port_key"]: dict(item) for item in ports}
+            # 整体重建而非 update：设备拔出后其它设备可能复用同一
+            # /dev/ttyUSBn 节点名，陈旧映射会让 remove 事件误伤新占用者。
+            self._devname_to_key.clear()
             self._devname_to_key.update(
                 {item["devname"]: item["port_key"] for item in ports}
             )
@@ -395,7 +398,13 @@ class SerialConsoleService:
                 subscriber.loop.call_soon_threadsafe(self._offer, subscriber.queue, text)
         binding = self.store.get(port_key)
         if binding and binding.get("capture_enabled"):
-            self._append_log(port_key, runtime, data)
+            try:
+                self._append_log(port_key, runtime, data)
+            except OSError:
+                # 日志盘故障（磁盘满/目录被删）不应被捕获循环误判为串口
+                # 故障而拆掉连接；跳过本块落盘，串口采集继续。
+                logger.warning("serial log write failed for %s", port_key,
+                               exc_info=True)
 
     def _port_log_dir(self, port_key: str) -> Path:
         return self.logs_root / validate_port_key(port_key)
@@ -410,7 +419,12 @@ class SerialConsoleService:
             now = time.monotonic()
             if now - runtime.last_retention_check >= 60:
                 runtime.last_retention_check = now
-                self.cleanup_retention(port_key)
+                try:
+                    self.cleanup_retention(port_key)
+                except OSError:
+                    # retention 失败不影响本块数据（已落盘）与采集。
+                    logger.warning("serial log retention failed for %s",
+                                   port_key, exc_info=True)
 
     def cleanup_retention(self, port_key: str) -> None:
         runtime = self._runtime(port_key)
@@ -430,11 +444,21 @@ class SerialConsoleService:
                     files.remove(path)
             except (OSError, ValueError):
                 continue
-        total = sum(path.stat().st_size for path in files if path.exists())
+        total = 0
+        sizes: dict[Path, int] = {}
+        for path in files:
+            try:
+                sizes[path] = path.stat().st_size
+            except OSError:
+                # 文件被并发清空/外部删除：跳过统计，不中断清理。
+                continue
+        total = sum(sizes.values())
         for path in files:
             if total <= self.max_log_bytes:
                 break
-            size = path.stat().st_size
+            size = sizes.get(path)
+            if size is None:
+                continue
             if size >= total and size > self.max_log_bytes:
                 with open(path, "rb") as source:
                     source.seek(-self.max_log_bytes, os.SEEK_END)

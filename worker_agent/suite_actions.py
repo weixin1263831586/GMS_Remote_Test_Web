@@ -415,6 +415,37 @@ def import_suite_report(
     }
 
 
+TRAEFED_LAUNCHER_FAMILIES = {
+    "cts-tradefed": "cts",
+    "gts-tradefed": "gts",
+    "vts-tradefed": "vts",
+    "sts-tradefed": "sts",
+}
+
+
+def tradefed_launcher_families(suite_roots: list[Path]) -> set[str]:
+    """注册期如实探测 tradefed 启动器，避免无套件的 Worker 谎报能力。
+
+    与 ``scan_suites`` 相同的目录约定与遍历深度上限（suite_roots 下
+    ≤5 层），但只看文件名集合、不读版本，注册期开销可控。未挂载套件盘
+    的 Worker / 本地 bridge 因此上报 ``cts/gts/vts/sts=False``，
+    Controller 不会再向其派发必败任务。
+    """
+    found: set[str] = set()
+    for root in suite_roots:
+        if not root.exists():
+            continue
+        for current, dirs, files in os.walk(root):
+            depth = len(Path(current).relative_to(root).parts)
+            if depth > 5:
+                dirs[:] = []
+                continue
+            for filename in TRAEFED_LAUNCHER_FAMILIES.keys() & set(files):
+                if os.access(Path(current) / filename, os.X_OK):
+                    found.add(TRAEFED_LAUNCHER_FAMILIES[filename])
+    return found
+
+
 def scan_suites(config: WorkerConfig) -> list[dict[str, Any]]:
     suites = []
     seen = set()

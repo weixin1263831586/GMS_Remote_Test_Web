@@ -1,28 +1,28 @@
 # Redmine Daily Triage（每日晨报分析规范）
 
-版本：`redmine_daily_triage_v11`
+版本：`redmine_daily_triage_v12`
 
 用途：对当天个人看板待处理 Redmine issue（`waiting_my_reply` /
 `no_reply_3_days`）做只读取证与结构化分析，输出可直接进入 Daily Brief
-的 JSON。业务筛选（谁需要回复、几天算 stale）由 Controller 的 workload
+的结论。业务筛选（谁需要回复、几天算 stale）由 Controller 的 workload
 统计唯一决定，本流程不重新实现任何筛选规则。
 
-## 批量晨报：待办分析
+## 批量晨报 = 单条深度分析
 
-批量运行使用 `analysis_mode=triage`，只回答最新变化、当前行动方、阻塞和
-下一步。读取 issue、journals 和相关附件后，不强制历史检索、源码、设备
-诊断，也不猜测根因。`root_cause_type=unknown`、`similar_issues=[]`；
-`detailed_report` 最多 300 字。只有确实需要我回复时才填写双语草稿，
-否则回复字段保留空字符串。
+批量晨报与用户点「深度分析此项」执行**同一**分析工作流（下节第 1–9 步，
+diagnostic 深度诊断），二者唯一的区别是触发来源：晨报由 nightly 定时
+调度批量触发，单条分析由用户对指定 run 按需触发（ADR 0013）。历史版本
+曾把批量限制为轻量 triage（只答最新变化/行动方/阻塞，不查历史与源码），
+该模式已不再生成新分析，仅保留用于渲染历史持久化结果。
 
 首页显示摘要和下一步，完整结果在工单详情中查看。数据源仍是待回复和
 超时未回复事项，不代表全量新增、关闭或等待外部的工作清单。
 
 ## 单条深度分析工作流
 
-用户点击“深度分析此项”时，按指定 run_id 的冻结快照执行下列诊断。
-批量晨报不执行第 7–8 步；历史检索是否完成仍由实际成功调用决定，
-无需检索不会被标成“检索成功”。
+用户点击「深度分析此项」时，按指定 run_id 的冻结快照执行下列诊断
+（批量晨报逐 issue 执行完全相同的步骤）。历史检索是否完成仍由实际
+成功调用决定，无需检索不会被标成“检索成功”。
 
 1. `gms_rt_redmine_triage` 取当天待处理清单（去重后，含 buckets /
    priority / fingerprint）。
@@ -58,9 +58,14 @@ issue → journals → attachment metadata → parsed summary
 
 ## AI 输出契约
 
-Controller 的 `features/redmine/daily_brief_result.py::IssueResult` 是唯一
-Schema 定义。Prompt 使用其生成的 JSON Schema，运行时由同一模型严格
-校验，包括嵌套 evidence/action/similar issue。以下仅为字段示意，
+diagnostic（当前唯一新生成模式）的结果是最终中文 Markdown 报告：kkagent
+以 native summary 形式落库（`result_format=kkagent_markdown`，核心字段
+`detailed_report` / `problem_summary` / `evidence_gate`），取证完成状态
+仍由 Controller 从 stream-json 工具轨迹派生的 Evidence Gate 强制校验。
+
+`features/redmine/daily_brief_result.py::IssueResult` JSON Schema 现仅
+约束历史 triage 结果（含嵌套 evidence/action/similar issue），保留用于
+历史持久化结果的兼容渲染。以下仅为字段示意，
 不是可直接提交的示例（枚举须选一个值，相似工单 ID 必须为真实正整数）。
 
 ```json

@@ -16,7 +16,6 @@ from features.redmine.config import config_manager
 from features.redmine.dashboard import (
     add_department_profile,
     add_project_profile,
-    assign_user_to_profiles,
     denormalize_redmine_dashboard_config,
     issue_url_text,
     with_department_profiles_from_users,
@@ -34,8 +33,6 @@ from features.redmine.repository import (
     owner_db_path,
     owner_docs_dir,
     owner_knowledge_db_path,
-    owner_user_map_path,
-    save_user_map_payload_for_owner,
 )
 from features.redmine.scheduler import get_scheduler_config
 from features.redmine.service import RedmineService
@@ -146,14 +143,6 @@ def _load_user_map_for_request(request: Request) -> list[dict[str, Any]]:
 
 def _load_user_map_payload_for_request(request: Request) -> dict[str, Any]:
     return load_user_map_payload_for_owner(_owner_id_from_request(request))
-
-
-def _save_user_map_payload_for_request(request: Request, payload: dict[str, Any]) -> None:
-    save_user_map_payload_for_owner(_owner_id_from_request(request), payload)
-
-
-def _user_map_path_for_request(request: Request):
-    return owner_user_map_path(_owner_id_from_request(request))
 
 
 def get_redmine_dashboard_config_for_request(request: Request) -> dict[str, Any]:
@@ -622,6 +611,17 @@ async def resolve_owner_names(request: Request | None = None, service: RedmineSe
     except Exception:
         pass
 
+    # 方案 2：overlay「自我绑定」优先——显式指定「我是谁」时不依赖
+    # 名字模糊匹配（重名/邮箱变动都不会绑错人）。
+    try:
+        from .org_chart import get_self_binding
+
+        bound = get_self_binding(_owner_id_from_request(request))
+    except Exception:
+        bound = None
+    if bound:
+        names.extend(display_names_from_mapping(bound))
+
     configured_user = str(
         ((config.get("redmine_auth") or {}).get("username"))
         or ((config.get("redmine") or {}).get("username"))
@@ -680,66 +680,6 @@ async def list_stat_users(request: Request):
             users.insert(0, {"id": "me", "name": current_names[0], "aliases": current_names[1:]})
             current_name = current_names[0]
     return {"success": True, "data": {"items": users, "current_name": current_name}}
-
-
-@router.post("/users")
-async def add_stat_user(request: Request):
-    body = await request.json()
-    uid = body.get("id")
-    name = str(body.get("name") or "").strip()
-    email = str(body.get("email") or "").strip()
-    department_ids = _department_ids_from_body(body)
-    department = _department_from_profiles(department_ids)
-    if not uid or not name:
-        return {"success": False, "error": "id and name are required"}
-    uid_text = str(uid).strip()
-
-    user_map = _load_user_map_payload_for_request(request)
-    departments = user_map.setdefault("departments", [])
-    dept_id = str(department.get("department_id") or "").strip()
-    dept_name = str(department.get("department") or "").strip()
-    created = True
-    target_department = None
-    for dept in departments:
-        if not isinstance(dept, dict):
-            continue
-        if dept_id and str(dept.get("department_id") or "").strip() == dept_id:
-            target_department = dept
-            break
-        if not dept_id and dept_name and str(dept.get("department") or "").strip() == dept_name:
-            target_department = dept
-            break
-    if target_department is None:
-        target_department = {"department_id": dept_id, "department": dept_name, "members": []}
-        departments.append(target_department)
-    updated_member = {"id": uid, "name": name}
-    if email:
-        updated_member["email"] = email
-    for dept in departments:
-        if not isinstance(dept, dict):
-            continue
-        members = dept.setdefault("members", [])
-        kept = []
-        for item in members:
-            if isinstance(item, dict) and str(item.get("id") or "").strip() == uid_text:
-                created = False
-                if dept is target_department:
-                    kept.append(updated_member)
-                continue
-            kept.append(item)
-        dept["members"] = kept
-    if created:
-        target_department.setdefault("members", []).append(updated_member)
-    user_map.pop("users", None)
-    _save_user_map_payload_for_request(request, user_map)
-
-    if department_ids:
-        manager = get_redmine_config_for_request(request)
-        dashboard_cfg = assign_user_to_profiles(manager.get_redmine_dashboard_config(), uid_text, department_ids)
-        if not manager.save_redmine_dashboard_config(denormalize_redmine_dashboard_config(dashboard_cfg)):
-            return JSONResponse(status_code=500, content={"success": False, "error": "failed to save department membership"})
-        _clear_stats_caches()
-    return {"success": True, "data": {"created": created, "department_ids": department_ids}}
 
 
 @router.post("/dashboard/profiles")

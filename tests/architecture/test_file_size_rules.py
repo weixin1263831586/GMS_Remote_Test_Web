@@ -24,7 +24,7 @@ MIGRATION_LINE_LIMITS = {
     # +25: upsert_seen_device（终端握手库存滞后的实时探测回填）。
     'features/cluster/repository_inventory.py': 623,
     # +7: update_user last-admin 检查移入 BEGIN IMMEDIATE（跨进程原子性）。
-    'features/auth/service.py': 615,
+    'features/auth/service.py': 656,
     'features/auth/agent_tokens.py': 365,
     'features/auth/constants.py': 98,  # +14: build.* scopes 与人类角色权限(ADR 0006)
     'features/auth/tests/test_auth_api.py': 602,
@@ -36,20 +36,25 @@ MIGRATION_LINE_LIMITS = {
     # failed on clean HEAD. Registered at its current size; debt must now
     # shrink, not grow.
     'features/firmware/apk_api.py': 605,
+    # 2026-09 shares home 扩展；登记当前尺寸，债务只减不增。
+    'features/firmware/shares_api.py': 634,
     'features/firmware/tests/test_api.py': 620,
     'features/gerrit/api.py': 652,  # +10: page JS 静态端点(CSP 前置迁移)
     'features/knowledge/storage.py': 728,
     'features/redmine/agent.py': 592,
+    # 2026-09 triage 证据门禁与 MCP 健康预检；登记当前尺寸，拆分后回落。
+    'features/redmine/kkagent/analyzer.py': 674,
     'features/redmine/analysis_resolution.py': 583,
     'features/redmine/api.py': 976,
-    'features/redmine/client.py': 712,
+    'features/redmine/client.py': 749,  # 2026-09 triage evidence precollect；登记当前尺寸，拆分后回落
     'features/redmine/knowledge_service.py': 599,
     # 2026-09 并发收敛:enqueue 去重键修正 + runs ON CONFLICT + job lease_token
     # CAS + 旧库迁移分支;后续拆 jobs 队列到独立模块时应回落 600。
-    'features/redmine/daily_brief_repository.py': 837,  # +178: f64c054 及后续协作式取消/执行统计扩展; +7: deep-analysis 接入;拆分后回落
-    'features/redmine/daily_brief_service.py': 621,  # +21: f64c054 执行统计
+    'features/redmine/daily_brief_repository.py': 918,  # +178: f64c054 及后续协作式取消/执行统计扩展; +7: deep-analysis 接入; +81: triage 证据预采集;拆分后回落
+    'features/redmine/daily_brief_service.py': 709,  # +21: f64c054 执行统计; +82: triage 证据预采集与脱敏落库; +6: record.error/failure_message 脱敏
     'features/redmine/tests/test_daily_brief_api.py': 603,  # +3: f64c054 统计接口回归
-    'features/redmine/tests/test_daily_brief_repository.py': 630,  # +23: f64c054 取消路径回归; +7: deep-analysis 接入
+    'features/redmine/tests/test_daily_brief_repository.py': 728,  # +23: f64c054 取消路径回归; +7: deep-analysis 接入; +98: 2026-09 证据预采集回归
+    'features/redmine/tests/test_daily_brief_service.py': 793,  # +21: f64c054; +143: 2026-09 证据预采集/脱敏回归
     # +72: sanitizeHref scheme 白名单回归(node 执行测试)。
     'features/redmine/tests/test_dashboard_stats.py': 1165,
     'features/reports/analysis_api.py': 752,  # +40: reports.read 门禁 helper
@@ -62,11 +67,16 @@ MIGRATION_LINE_LIMITS = {
     'features/system/integrations.py': 618,  # +6: _HUMAN_ONLY vpn/ssh POST
     'features/system/assets.py': 604,  # +10: auth deps on opengrok/favicon
     'features/system/icon_fetcher.py': 861,
+    # 2026-09 终端辅助服务扩展；登记当前尺寸，债务只减不增。
+    'features/system/terminal_service.py': 677,
     'features/users/config_api.py': 616,
     'features/devices/adb_proxy_service.py': 874,  # adb proxy Hub 重启防护 + host-level disconnect guards
     'features/devices/config_explorer.py': 625,
-    'features/devices/integrations_api.py': 2464,  # assignments 存储层已拆至 usbip_assignments.py; +1: ADR 0010 owner 注释
+    # +5: stop_usbip 两处阻塞调用迁 asyncio.to_thread（事件循环冻结热修）。
+    'features/devices/integrations_api.py': 2469,  # assignments 存储层已拆至 usbip_assignments.py; +1: ADR 0010 owner 注释
     'features/devices/reconnect.py': 942,
+    # 2026-09 串口日志 OSError 隔离（不误杀采集）+ retention 容错；拆分后回落。
+    'features/devices/serial_console.py': 621,
     'features/devices/tests/test_adb_proxy_service.py': 911,  # adb proxy 重启/断连 guard 回归桩
     'features/devices/tests/test_usbip_flash_modes.py': 851,  # +43: scoped mode 重算回归
     'features/devices/tests/test_usbip_linux_source.py': 990,

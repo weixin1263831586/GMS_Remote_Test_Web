@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 import features.redmine.daily_brief_api as daily_brief_api
 import features.redmine.daily_brief_repository as brief_repo
 from features.auth import CurrentUser
-from features.redmine.kkagent_analyzer import KkAgentAnalysisResult
+from features.redmine.kkagent import KkAgentAnalysisResult
 from features.redmine.tests.test_daily_brief_api import TRIAGE, VALID
 
 

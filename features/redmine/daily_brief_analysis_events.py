@@ -85,9 +85,18 @@ _EVENT_COLUMNS = (
 
 # summary 清洗：任何疑似凭据赋值片段（token=... / password: ...）整体
 # 打码。进度 summary 理论上不含这些内容，这里做纵深防御。
+# 三个分支：key=value 单词值；authorization/cookie 类多词值吃到行尾后
+# 限两词（Bearer <cred> 形态）；无 key 前缀的裸 Bearer/Basic 凭据。
 _SECRET_PATTERN = re.compile(
-    r"(?i)\b(token|password|passwd|secret|api[_-]?key|authorization|cookie)\b\s*[=:]\s*\S+"
+    r"(?i)\b(token|password|passwd|secret|api[_-]?key|authorization|cookie)\b\s*[=:]\s*"
+    r"(?:(bearer|basic)\s+)?\S+"
+    r"|\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+"
 )
+
+
+def _mask_secret_match(match: re.Match) -> str:
+    keyword = match.group(1) or match.group(2) or match.group(3) or "secret"
+    return f"{keyword}=***"
 
 # describe_tool_call 的输入身份字段 allowlist：只有这些 key 的值会进入
 # 进度 summary（其余 input 内容——附件正文、快照参数全文等——不外显）。
@@ -99,10 +108,19 @@ _IDENTITY_INPUT_KEYS = (
 )
 
 
+def mask_secrets(text: str, limit: int = _SUMMARY_MAX_CHARS) -> str:
+    """打码疑似凭据片段并截断到 limit。
+
+    ``scrub_secrets``（进度 summary，160 字）与 run.error 等更长持久化
+    字段共用同一份凭据模式；区别只在截断上限。
+    """
+    cleaned = _SECRET_PATTERN.sub(_mask_secret_match, str(text or ""))
+    return cleaned[:limit]
+
+
 def scrub_secrets(text: str) -> str:
     """打码 summary 里疑似凭据的片段并截断到入库上限。"""
-    cleaned = _SECRET_PATTERN.sub(r"\1=***", str(text or ""))
-    return cleaned[:_SUMMARY_MAX_CHARS]
+    return mask_secrets(text)
 
 
 def describe_tool_call(tool_name: str, tool_input: Any) -> str:
@@ -403,6 +421,7 @@ __all__ = [
     "describe_tool_call",
     "event_store_for_repository",
     "finish_analysis_progress",
+    "mask_secrets",
     "progress_to_payload",
     "scrub_secrets",
     "start_analysis_progress",

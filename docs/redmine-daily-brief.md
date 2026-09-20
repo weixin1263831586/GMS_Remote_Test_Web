@@ -2,7 +2,7 @@
 
 每天在各用户设置的触发时间（默认 00:00）自动读取当前用户个人看板中的「待回复」「RK 3 天未回复客户」
 两类 issue，去重后冻结快照，用 kkagent headless 调本地大模型做逐 issue
-深度分析，09:00 上班在个人看板直接查看每日晨报。
+深度分析，在 Redmine 页面「每日晨报」标签页查看结果。
 
 ## 架构
 
@@ -20,7 +20,7 @@ Web 手动触发 → SQLite 持久 job 队列 → 独立 daily_brief_worker
       → 同一套 DailyBriefService / KkAgentRedmineAnalyzer
 独立 delta timer 每分钟检查一次（按 owner delta_enabled/delta_trigger_time 筛选）
   → run-delta：fingerprint 未变的 issue 跳过，只重分析变化项
-09:00 → 个人看板顶部「每日晨报」卡片
+结果在 Redmine 页面「每日晨报」独立标签页查看（与个人看板平级）
 ```
 
 关键文件：
@@ -32,10 +32,11 @@ Web 手动触发 → SQLite 持久 job 队列 → 独立 daily_brief_worker
 | `features/redmine/daily_brief_snapshot.py` | triage 快照（去重/bucket/fingerprint/delta） |
 | `features/redmine/daily_brief_service.py` | 编排：幂等 run、并发控制、失败隔离、聚合 |
 | `features/redmine/kkagent/` | stream-json 进程、轨迹、schema 与 runtime evidence gate、同会话修复 |
-| `features/redmine/daily_brief_api.py` | REST API（triage/run/config/latest/refresh） |
+| `features/redmine/daily_brief_api.py` | REST API（triage/run/config/latest/refresh/analyze-issue/事件时间线等） |
 | `features/redmine/daily_brief_worker.py` | Web 入队任务的独立 Worker、租约与优雅停止 |
+| `features/redmine/daily_brief_analysis_events.py` | 分析进度事件存储（脱敏白名单摘要、增量轮询） |
 | `features/redmine/daily_brief_cli.py` | systemd 入口（run-nightly/run-delta/doctor） |
-| `agent/gms-remote-test/skill/references/redmine-daily-triage.md` | Agent 分析规范（skill） |
+| `agent/gms-remote-test/skill/references/redmine-daily-triage.md` | Agent 分析规范（skill，批量晨报与单条深度分析同工作流） |
 | `deploy/systemd/gms-redmine-daily-brief*` | timer/service 单元 |
 
 ## 单一事实来源
@@ -102,7 +103,7 @@ display id 比对 `run.owner_id`。schema v5 迁移会把存量库里的 legacy
 
 ## 身份与安全边界
 
-在「每日晨报」顶部的「单号分析」输入 Redmine 单号，点击「分析此单号」
+在「每日晨报」顶部的「单号分析」输入 Redmine 单号，点击「开始分析」
 或按 Enter。该入口仅排队诊断输入的工单，不扫描待处理列表，也不要求
 工单先出现在晨报里。结果直接展示 kkagent 的原始 Markdown 总结，
 「停止此项」仅取消对应任务。单号任务与 nightly/delta 晨报分别保存。
@@ -126,10 +127,24 @@ API：`POST /api/redmine-agent/daily-brief/analyze-issue`，JSON 为
 | GET | `/api/redmine-agent/daily-brief/triage` | 当天待处理清单（CLI/MCP 同源） |
 | GET | `/api/redmine-agent/daily-brief/latest` | 最新每日晨报 |
 | GET | `/api/redmine-agent/daily-brief/{date}` | 指定日期每日晨报 |
+| GET | `/api/redmine-agent/daily-brief/active-issue` | 最近一次单号分析 run |
+| GET | `/api/redmine-agent/daily-brief/issue-analyses` | 单号分析历史列表 |
+| GET | `/api/redmine-agent/daily-brief/issue-analyses/{issue_id}` | 单个工单的分析历史 |
+| POST | `/api/redmine-agent/daily-brief/analyze-issue` | 单号分析（持久化入队，返回 run_id/job_id） |
+| POST | `/api/redmine-agent/daily-brief/sync-subjects` | 同步历史分析条目的工单标题 |
+| GET | `/api/redmine-agent/daily-brief/runs/{run_id}` | run 状态与结果 |
+| GET | `/api/redmine-agent/daily-brief/runs/{run_id}/issues/{issue_id}/events` | 分析进度事件增量（`after_sequence=N`） |
+| POST | `/api/redmine-agent/daily-brief/runs/{run_id}/cancel` | run 级取消 |
+| POST | `/api/redmine-agent/daily-brief/runs/{run_id}/issues/{issue_id}/reanalyze` | 按 run 重分析单 issue |
+| POST | `/api/redmine-agent/daily-brief/{date}/issues/{issue_id}/reanalyze` | 按日期重分析单 issue |
+| POST | `/api/redmine-agent/daily-brief/{date}/cancel` | 按日期取消当天 run |
 | POST | `/api/redmine-agent/daily-brief/run` | 手动触发（持久化入队，返回 run_id/job_id；请求体 `{"force": true}` 强制重跑当天结果） |
 | POST | `/api/redmine-agent/daily-brief/{date}/refresh` | delta 刷新 |
-| POST | `/api/redmine-agent/daily-brief/{date}/issues/{id}/reanalyze` | 单 issue 重分析 |
 | GET/PUT | `/api/redmine-agent/daily-brief/config` | 配置读写 |
+| GET | `/api/redmine-agent/daily-brief/model-options` | 可选模型列表 |
+| GET | `/api/redmine-agent/daily-brief/agent-profiles` | 可绑定 agent profile 列表 |
+
+读端点需 `redmine.read`；run/refresh/reanalyze/cancel/analyze-issue/config 等写端点仅限人工会话。
 
 Agent 侧 CLI/MCP：`gms-rt-redmine-triage` / `gms_rt_redmine_triage`
 （只读）。

@@ -49,6 +49,7 @@ from features.redmine import daily_brief_api as redmine_daily_brief
 from features.redmine import evidence_api as redmine_evidence
 from features.redmine import evidence_search_api as redmine_evidence_search
 from features.redmine import reply_api as redmine_reply
+from features.redmine import users_api as redmine_users_api
 from features.redmine.api import configure_redmine_service
 from features.redmine.dashboard import (
     denormalize_redmine_dashboard_config,
@@ -143,6 +144,7 @@ ALL_ROUTERS = [
     knowledge.page_router,
     redmine.router,
     redmine.page_router,
+    redmine_users_api.router,
     redmine_evidence.router,
     redmine_evidence_search.router,
     redmine_daily_brief.router,

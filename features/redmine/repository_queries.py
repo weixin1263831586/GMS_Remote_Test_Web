@@ -312,8 +312,6 @@ class RepositoryQueryMixin:
                             in_window = False
                     if in_window:
                         stale_my_reply.append(summary)
-                        if reply_info.get("last_reply_side") == "rk_colleague":
-                            stale_rk_colleague_reply.append(summary)
             elif reply_info.get("waiting_customer"):
                 summary = self._issue_summary(issue, reply_info=reply_info)
                 waiting_customer_reply.append(summary)
@@ -326,6 +324,8 @@ class RepositoryQueryMixin:
                             in_window = False
                     if in_window:
                         stale_customer_reply.append(summary)
+                        if summary.get("last_reply_side") == "rk_colleague":
+                            stale_rk_colleague_reply.append(summary)
 
             if self._is_missing_test_report(issue):
                 missing_test_report.append(self._issue_summary(issue))
@@ -436,6 +436,62 @@ class RepositoryQueryMixin:
             return {}
         return max(activity_journals, key=lambda item: _parse_dt(item.get("created_on")) or datetime.min)
 
+    # 助理/客服的程序性催办模板（如「客户，您好！请更新目前最新状况，
+    # 若问题已解决或无需继续跟进，请将状态改为Closed，谢谢！」）：这类
+    # 回复只是状态流转（Confirmed→Feedback 等），不构成「需要 owner 回复」
+    # 的实质请求，归因时应跳过并回溯上一条实质回复。
+    _ASSISTANT_TEMPLATE_MARKERS = (
+        "请更新目前最新状况",
+        "请更新下目前最新状况",
+        "请将状态改为closed",
+        "若问题已解决或无需继续跟进",
+    )
+    # 程序性 detail 变更白名单：纯状态流转类字段，不含实质内容。
+    _PROCEDURAL_DETAIL_ATTRS = {"status", "done_ratio", "assigned_to", "priority", "due_date"}
+
+    @classmethod
+    def _is_procedural_journal(cls, journal: dict[str, Any], owner_keys: set) -> bool:
+        """归因时跳过的「程序性」日志。
+
+        - 纯字段变更（无备注）：owner 本人改状态是实质动作（表示已接手
+          处理，锚定 test_owner_field_activity_is_not_counted_as_waiting_owner_reply）；
+          其他人（典型：部门助理）的纯状态流转不构成对 owner 的请求。
+        - 备注命中助理催办模板且变更仅状态类字段：只是 Confirmed→Feedback
+          式流转，不构成「需要 owner 回复」的实质请求。
+        """
+        notes = str(journal.get("notes") or "").strip()
+        if not notes:
+            if not journal.get("details"):
+                return True
+            return not _name_matches_keys(journal.get("user") or "", owner_keys)
+        normalized = "".join(notes.split()).lower()
+        if not any(marker in normalized for marker in cls._ASSISTANT_TEMPLATE_MARKERS):
+            return False
+        details = [
+            d for d in (journal.get("details") or [])
+            if isinstance(d, dict)
+        ]
+        if not details:
+            return True
+        return all(
+            str(d.get("name") or "").strip().lower() in cls._PROCEDURAL_DETAIL_ATTRS
+            for d in details
+        )
+
+    @classmethod
+    def _last_substantive_reply_journal(
+        cls, issue: dict[str, Any], owner_keys: set,
+    ) -> dict[str, Any]:
+        """最新一条「实质」日志：跳过程序性日志（助理模板/他人纯状态变更）。"""
+        journals = sorted(
+            (j for j in issue.get("journals_json") or []),
+            key=lambda item: _parse_dt(item.get("created_on")) or datetime.min,
+        )
+        for journal in reversed(journals):
+            if not cls._is_procedural_journal(journal, owner_keys):
+                return journal
+        return {}
+
     @classmethod
     def _reply_wait_info(
         cls,
@@ -443,33 +499,70 @@ class RepositoryQueryMixin:
         owner_keys: set,
         organization_user_map: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        last_activity = cls._last_activity_journal(issue)
-        if not last_activity:
-            return {"waiting": False, "reason": "no_journal_notes"}
-        last_user = last_activity.get("user") or ""
+        """按「最新一响」日志的作者身份归因工单等待方向。
+
+        - 最新日志是 owner：等待客户（owner 已回复）。
+        - 最新日志是公司员工（日志邮箱 @rock-chips.com，或命中
+          ``organization_user_map`` 注册成员，典型：部门助理的状态流转/
+          催办）：同样等待客户——RK 侧已接手，不计 owner 待回复。
+        - 最新日志是无法识别身份的程序性日志（纯状态流转/催办模板）：
+          球也不在 owner；仅当回溯到的上一条实质日志是 owner 时保留在
+          客户桶，避免把「owner 已回复、他人随后仅流转状态」的工单从
+          客户桶挤掉。
+        - 其余（客户实质回复）：等待 owner。
+        """
+        last_raw = cls._last_activity_journal(issue)
+        if not last_raw:
+            return {"waiting": False, "reason": "no_journal"}
+        last_user = last_raw.get("user") or ""
         if _name_matches_keys(last_user, owner_keys):
-            return {
-                "waiting": False,
-                "reason": "last_reply_is_rk",
-                "waiting_customer": True,
-                "last_owner_reply_at": last_activity.get("created_on") or issue.get("updated_on") or "",
-                "last_owner_reply_by": last_user,
-                "last_owner_reply": str(last_activity.get("notes") or "")[:260],
-            }
-        if _looks_like_rk_actor(last_activity, organization_user_map):
-            return {
-                "waiting": True,
-                "last_reply_side": "rk_colleague",
-                "last_external_reply_at": last_activity.get("created_on") or issue.get("updated_on") or "",
-                "last_external_reply_by": last_user,
-                "last_external_reply": str(last_activity.get("notes") or "")[:260],
-            }
+            return cls._customer_waiting_payload(
+                issue, last_raw, last_user, reason="last_reply_is_owner",
+            )
+        if _looks_like_rk_actor(last_raw, organization_user_map):
+            payload = cls._customer_waiting_payload(
+                issue, last_raw, last_user, reason="last_reply_is_rk_colleague",
+            )
+            payload["last_reply_side"] = "rk_colleague"
+            # last_external_reply_* 供 UI 展示「最后回复: <RK 同事>」。
+            payload["last_external_reply_at"] = payload["last_owner_reply_at"]
+            payload["last_external_reply_by"] = last_user
+            payload["last_external_reply"] = str(
+                last_raw.get("notes") or "")[:260]
+            return payload
+        if cls._is_procedural_journal(last_raw, owner_keys):
+            fallback = cls._last_substantive_reply_journal(issue, owner_keys)
+            if fallback and _name_matches_keys(
+                    fallback.get("user") or "", owner_keys):
+                return cls._customer_waiting_payload(
+                    issue, fallback, fallback.get("user") or "",
+                    reason="procedural_then_owner_substantive",
+                )
+            return {"waiting": False, "reason": "last_journal_is_procedural"}
         return {
             "waiting": True,
             "last_reply_side": "customer",
-            "last_external_reply_at": last_activity.get("created_on") or issue.get("updated_on") or "",
+            "last_external_reply_at": last_raw.get("created_on") or issue.get("updated_on") or "",
             "last_external_reply_by": last_user,
-            "last_external_reply": str(last_activity.get("notes") or "")[:260],
+            "last_external_reply": str(last_raw.get("notes") or "")[:260],
+        }
+
+    @staticmethod
+    def _customer_waiting_payload(
+        issue: dict[str, Any],
+        journal: dict[str, Any],
+        actor: str,
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        """owner / RK 同事已回复：等待客户侧的统一返回结构。"""
+        return {
+            "waiting": False,
+            "reason": reason,
+            "waiting_customer": True,
+            "last_owner_reply_at": journal.get("created_on") or issue.get("updated_on") or "",
+            "last_owner_reply_by": actor,
+            "last_owner_reply": str(journal.get("notes") or "")[:260],
         }
 
     @staticmethod
