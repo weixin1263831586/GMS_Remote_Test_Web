@@ -45,6 +45,10 @@ def dashboard():
                     ROOT / "web/static/js/embedded-workspace.js",
                     "text/javascript",
                 ),
+                "/static/js/embedded-ui/modal-controller.js": (
+                    ROOT / "web/static/js/embedded-ui/modal-controller.js",
+                    "text/javascript",
+                ),
                 "/static/js/shell/act-bridge.js": (
                     ROOT / "web/static/js/shell/act-bridge.js",
                     "text/javascript",
@@ -125,6 +129,25 @@ def test_failed_first_query_keeps_owner_and_can_retry(dashboard):
     page.evaluate("() => refreshCurrentTab()")
     playwright_api.expect(page.locator("#personalContent")).to_have_attribute("data-loaded", "true")
     assert len(statistics_requests(state)) == 2
+
+
+def test_summary_cards_delegate_to_section_scroll(dashboard):
+    """统计卡片经 act-bridge 委托跳转（此前把整条调用表达式塞进
+    data-click，act-bridge 按名查表失败，点击静默失效）。"""
+    page, state = dashboard
+    state["config"]["default_owner"] = "member@example.com"
+    open_dashboard(page)
+    sections = ("sec-merged", "sec-open", "sec-pending-review", "sec-abandoned")
+    for section in sections:
+        playwright_api.expect(
+            page.locator(f'.stat-card[data-click="scrollToSection"][data-a0="{section}"]')
+        ).to_have_count(1)
+    # 记录委托实际派发的 section id：点击「已合并」卡片必须以
+    # sec-merged 调 scrollToSection（渲染出的列表 section 一定存在）。
+    page.evaluate("() => { window.__scrollCalls = []; window.scrollToSection = (id) => window.__scrollCalls.push(id); }")
+    page.locator('.stat-card[data-a0="sec-merged"]').click()
+    page.wait_for_function("window.__scrollCalls.length > 0")
+    assert page.evaluate("window.__scrollCalls") == ["sec-merged"]
 
 
 @pytest.mark.parametrize("default_owner", ["", "default@example.com"])

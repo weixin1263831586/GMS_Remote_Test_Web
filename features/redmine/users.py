@@ -215,18 +215,40 @@ def _save_user_map_payload_to(path, payload: dict[str, Any]) -> None:
 
 
 def load_redmine_user_map_for_owner(owner_id: str) -> list[dict[str, Any]]:
-    return _flatten_departments(load_user_map_payload_for_owner(owner_id))
+    # 方案 2：全局组织架构（共享）+ 个人 overlay 别名合并；此函数是
+    # 全部读消费方（statistics/dashboard/api/daily-brief）的统一入口。
+    from .org_chart import effective_user_map
+
+    return effective_user_map(owner_id)
 
 
 def load_user_map_payload_for_owner(owner_id: str) -> dict[str, Any]:
-    owner_path = owner_user_map_path(owner_id)
-    if owner_path.exists():
-        return _load_user_map_payload_from(owner_path)
-    return {"departments": []}
+    """兼容保留：返回「该 owner 可见的」合并 payload（组织架构 + overlay）。
+
+    组织架构是共享只读的（管理员经 users_api 写全局文件）；写个人数据
+    走 :func:`save_user_map_payload_for_owner`（overlay 语义）。
+    """
+    from .org_chart import load_org_payload, load_user_overlay
+
+    payload = load_org_payload()
+    payload["overlay"] = load_user_overlay(owner_id)
+    return payload
 
 
 def save_user_map_payload_for_owner(owner_id: str, payload: dict[str, Any]) -> None:
-    _save_user_map_payload_to(owner_user_map_path(owner_id), payload)
+    """写 per-owner overlay（自我绑定 + 个人别名）。
+
+    传入 payload 里的 ``departments`` 会被剥离——组织架构不再按 owner
+    写入（该写路径收归管理员的全局端点）。
+    """
+    from .org_chart import load_user_overlay, save_user_overlay
+
+    merged = load_user_overlay(owner_id)
+    merged.update({
+        key: value for key, value in (payload or {}).items()
+        if key != "departments"
+    })
+    save_user_overlay(owner_id, merged)
 
 
 def display_names_from_mapping(item: dict[str, Any]) -> list[str]:

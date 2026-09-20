@@ -10,7 +10,10 @@ from cryptography.fernet import Fernet
 
 from features.redmine.config import RedmineConfig
 from features.redmine.repository import RedmineAgentDB
-from features.redmine.users import load_user_map_payload_for_owner
+from features.redmine.users import (
+    load_redmine_user_map_for_owner,
+    load_user_map_payload_for_owner,
+)
 
 
 def _issue(issue_id: int, subject: str) -> dict:
@@ -58,9 +61,10 @@ class RedmineUserIsolationTests(unittest.TestCase):
                 patch.object(redmine_api, "owner_docs_dir", lambda owner: root / owner / "docs"),
                 patch.object(redmine_api, "owner_attachments_dir", lambda owner: root / owner / "attachments"),
                 patch.object(redmine_api, "owner_knowledge_db_path", lambda owner: root / owner / "knowledge.sqlite3"),
-                # 避免迁移逻辑把全局 user_map 拷到真实 configs/。
+                # 组织架构改走 configs/local 共享文件（org_chart）；这里把
+                # 读路径隔离到临时目录，避免测试读写真实 configs/。
                 patch.object(redmine_users, "owner_user_map_path", lambda owner: root / owner / "redmine_user_map.json"),
-                patch.object(redmine_api, "owner_user_map_path", lambda owner: root / owner / "redmine_user_map.json"),
+                patch("features.redmine.org_chart.org_chart_path", lambda *a, **k: root / "org" / "redmine_org_chart.json"),
             ):
                 alice = redmine_api.get_redmine_service_for_owner("alice")
                 bob = redmine_api.get_redmine_service_for_owner("bob")
@@ -118,7 +122,9 @@ class RedmineUserIsolationTests(unittest.TestCase):
                 patch.object(redmine_api, "owner_docs_dir", lambda owner: root / owner / "docs"),
                 patch.object(redmine_api, "owner_attachments_dir", lambda owner: root / owner / "attachments"),
                 patch.object(redmine_api, "owner_knowledge_db_path", lambda owner: root / owner / "knowledge.sqlite3"),
-                patch.object(redmine_api, "owner_user_map_path", lambda owner: root / owner / "redmine_user_map.json"),
+                # 组织架构改走 configs/local 共享文件（org_chart）；这里把
+                # 读路径隔离到临时目录，避免测试读写真实 configs/。
+                patch("features.redmine.org_chart.org_chart_path", lambda *a, **k: root / "org" / "redmine_org_chart.json"),
                 # users 模块内部用自己导入的 path 函数落盘，必须一并 patch，
                 # 否则测试会向真实 configs/ 写入残留配置。
                 patch.object(redmine_users, "owner_runtime_config_path", lambda owner: root / owner / "config_runtime.json"),
@@ -148,11 +154,12 @@ class RedmineUserIsolationTests(unittest.TestCase):
 
             self.assertEqual(manager.load_redmine_credentials(), {})
 
-    def test_owner_user_map_does_not_fall_back_to_global_config(self):
+    def test_owner_overlay_does_not_shadow_org_chart(self):
+        """方案 2 语义：组织架构全局共享（org_chart 回退读旧扁平文件也行），
+        owner 文件只是 overlay；owner 文件不再需要、也不再提供 departments。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             global_map = root / "configs" / "redmine_user_map.json"
-            forbidden_dir = root / "configs/redmine_by_user"
             global_map.parent.mkdir(parents=True)
             global_map.write_text(
                 json.dumps({"departments": [{"department_id": "qa", "department": "QA", "members": [{"id": 1, "name": "Alice"}]}]}),
@@ -160,14 +167,21 @@ class RedmineUserIsolationTests(unittest.TestCase):
             )
             with (
                 patch(
-                    "features.redmine.users.owner_user_map_path",
+                    "features.redmine.org_chart.org_chart_path",
+                    lambda *a, **k: global_map,
+                ),
+                # org_chart 以「from .users import」持有自己的绑定，
+                # 必须 patch org_chart 侧的 owner_user_map_path。
+                patch(
+                    "features.redmine.org_chart.owner_user_map_path",
                     lambda owner: root / "data/redmine/by_user" / owner / "redmine_user_map.json",
                 ),
             ):
-                payload = load_user_map_payload_for_owner("alice")
-
-            self.assertEqual(payload, {"departments": []})
-            self.assertFalse(forbidden_dir.exists())
+                # 合并视图来自全局组织架构。
+                members = load_redmine_user_map_for_owner("alice")
+                self.assertEqual([m["name"] for m in members], ["Alice"])
+                # overlay 缺失时为空 dict（不再有 departments 副本）。
+                self.assertEqual(load_user_map_payload_for_owner("alice").get("overlay"), {})
 
 
 if __name__ == "__main__":

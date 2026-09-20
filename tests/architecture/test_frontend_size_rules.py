@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_BYTE_LIMITS = {
     # CSP 前置迁移后 shell 内联脚本外置(shell-main.js 等),html 大幅收缩。
     'web/shell/shell.html': 262103,          # 728210→262073→262103: +30 残留 onkeypress 迁移为 data-keypress 委托; target: < 100 KB after partials split
-    'web/static/css/common.css': 145100,      # +1092: inline hover 样式迁移为声明式 CSS; target: < 50 KB after split
+    'web/static/css/common.css': 147941,      # +1092: inline hover 样式迁移为声明式 CSS; +2841: 9月 UI 对齐; target: < 50 KB after split
     'web/static/js/navigation.js': 50 * 1024,
     'web/static/js/api-constants.js': 36286,
     'web/static/js/pages/test-suite-browser.js': 125721,   # target: < 50 KB (browser context isolation + direct local fetch & request generation)
@@ -28,7 +28,7 @@ MIGRATION_BYTE_LIMITS = {
     'web/static/js/pages/api-docs.js': 50304,              # +165: act-bridge 委托 helper
     'web/static/js/shell/weekly-report.js': 83553,         # +244: XSS 转义一致性; target: < 50 KB
     # 原 shell.html 内联主脚本外置(仅搬运,CSP 前置迁移);随 partials 拆分继续收缩。
-    'web/static/js/shell/shell-main.js': 283647,           # +lazy activation 早退(set-username); +2084: workflow tabs 页头统一迁移; target: < 100 KB after decomposition
+    'web/static/js/shell/shell-main.js': 288220,           # +lazy activation 早退(set-username); +2084: workflow tabs 页头统一迁移; +4573: 9月 shell/终端对齐; target: < 100 KB after decomposition
 }
 
 # Default budgets for anything not listed above.

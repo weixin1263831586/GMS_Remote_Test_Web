@@ -46,7 +46,9 @@ logger = logging.getLogger(__name__)
 
 # Prompt 版本随 runtime-owned evidence/schema repair 语义升级。
 # v17: triage 同样注入 Controller 预采集上下文（Redmine 基线无设备维度）。
-PROMPT_VERSION = "redmine_daily_triage_v17"
+# v18: 晨报批量阶段与单号分析统一走 diagnostic 深度诊断（ADR 0013），
+#      triage prompt 仅保留用于历史持久化结果渲染，新生成分析不再使用。
+PROMPT_VERSION = "redmine_daily_triage_v18"
 
 REPAIR_MAX_TURNS = 0
 # 首次修复仍可能被模型原样重放（线上曾出现完整取证后连续漏掉

@@ -13,7 +13,7 @@ from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
 from features.redmine.daily_brief_repository import DailyBriefRepository
 from features.redmine.daily_brief_service import DailyBriefService
 from features.redmine.daily_brief_worker import run_claimed_job
-from features.redmine.kkagent_analyzer import KkAgentAnalysisResult
+from features.redmine.kkagent import KkAgentAnalysisResult
 
 
 def patch_preflight_ok():

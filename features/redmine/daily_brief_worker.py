@@ -16,7 +16,7 @@ from typing import Any
 
 from foundation.config import settings
 
-from .daily_brief_analysis_events import event_store_for_repository
+from .daily_brief_analysis_events import event_store_for_repository, mask_secrets
 from .daily_brief_owner_policy import is_daily_brief_owner_eligible
 from .daily_brief_repository import TERMINAL_RUN_STATUSES, DailyBriefRepository
 from .daily_brief_service import DailyBriefService
@@ -233,7 +233,7 @@ async def run_claimed_job(
                 owns_run_terminal_state = job["kind"] == "run" or run.mode.startswith("issue:")
                 if run is not None and owns_run_terminal_state and run.status not in TERMINAL_RUN_STATUSES:
                     run.status = "failed"
-                    run.error = str(exc)[:1000]
+                    run.error = mask_secrets(str(exc), 1000)
                     run.finished_at = _now()
                     repository.update_run(run)
             else:

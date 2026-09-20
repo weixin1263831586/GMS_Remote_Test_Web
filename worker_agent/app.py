@@ -45,6 +45,7 @@ from .inventory import (
     prepare_suite_export,
     probe_devices,
     scan_suites,
+    tradefed_launcher_families,
 )
 from .process_inventory import (
     discover_tradefed_processes,
@@ -163,10 +164,14 @@ class WorkerAgent:
             has_aapt2 = False
         adb_proxy = adb_proxy_capability_status()
         process_inventory = process_inventory_capability_status()
+        tradefed_families = tradefed_launcher_families(self.config.suite_roots)
         capabilities = {"adb": shutil.which("adb") is not None,
                         "fastboot": shutil.which("fastboot") is not None,
-                        "tradefed": True,
-                        "cts": True, "gts": True, "vts": True, "sts": True,
+                        "tradefed": bool(tradefed_families),
+                        "cts": "cts" in tradefed_families,
+                        "gts": "gts" in tradefed_families,
+                        "vts": "vts" in tradefed_families,
+                        "sts": "sts" in tradefed_families,
                         "device_inspection": True,
                         "usbip_client": (
                             shutil.which("usbip") is not None
@@ -293,9 +298,22 @@ class WorkerAgent:
                 self.suites = scan_suites(self.config)
                 self.last_suite_scan = time.monotonic()
                 result = {"suites": self.suites}
-            elif kind == "device_action":
-                payload = command.get("payload", {})
-                result = execute_device_action(payload.get("action", ""), payload.get("devices", []), payload)
+            elif kind == "device_action" or kind == "connect_vpn":
+                # 长耗时命令（设备动作 adb 序列可到 120-180s、nmcli up
+                # 60s）：后台线程执行，主循环立即返回继续心跳/poll。
+                # 同步执行会让心跳缺口超过 Controller 的
+                # worker_offline_seconds（默认 45s），运行中的任务会被
+                # 误判 worker_lost（usbip 同款处理，
+                # 见 test_usbip_command_runs_in_background_so_heartbeats_are_not_blocked）。
+                self.runtime.save_command(command["id"], "running", {})
+                self._ack_command(command["id"], "running", {})
+                threading.Thread(
+                    target=self.run_slow_command,
+                    args=(command,),
+                    name=f"Slow-{kind}-{command['id']}",
+                    daemon=True,
+                ).start()
+                return
             elif kind == "adb_proxy":
                 payload = command.get("payload", {})
                 action = str(payload.get("action") or "")
@@ -445,26 +463,6 @@ class WorkerAgent:
                     result = {"connections": connections}
                 except (OSError, subprocess.TimeoutExpired) as exc:
                     raise RuntimeError("nmcli connection listing failed") from exc
-            elif kind == "connect_vpn":
-                # 在本机 NetworkManager 上激活指定 VPN 连接（凭据由
-                # NetworkManager 保存，无需回传密码）。
-                vpn_name = str((command.get("payload") or {}).get("vpn_name") or "").strip()
-                if not vpn_name:
-                    raise ValueError("vpn_name is required")
-                try:
-                    proc = subprocess.run(
-                        ['nmcli', 'connection', 'up', vpn_name],
-                        capture_output=True, text=True, timeout=60,
-                    )
-                    if proc.returncode != 0:
-                        raise RuntimeError(
-                            (proc.stderr or proc.stdout or "nmcli connect failed").strip()
-                        )
-                    result = {"connected": True, "vpn_connection_name": vpn_name}
-                except subprocess.TimeoutExpired as exc:
-                    raise RuntimeError(f"nmcli connect timed out: {vpn_name}") from exc
-                except OSError as exc:
-                    raise RuntimeError("nmcli connect failed") from exc
             elif kind == "uninstall_agent":
                 # 先确认回执，再停止服务，确保 Controller 能移除注册记录。
                 result = {"stopping": True, "removed_data": False}
@@ -492,6 +490,56 @@ class WorkerAgent:
             if release_after_command:
                 self.runtime.release_fencing(command)
             self._ack_command(command["id"], "failed", error=str(exc))
+
+    def run_slow_command(self, command: dict):
+        """后台执行长耗时命令（device_action / connect_vpn）。
+
+        fencing 已在 handle() 校验通过后才派发本线程；完成语义与
+        handle() 同步路径一致：save 终态 → （device_action 释放
+        fencing）→ ack 终态。任何异常都必须收敛终态，避免命令永久
+        停留在 running。
+        """
+        release_after = command.get("command_type") == "device_action"
+        try:
+            kind = command["command_type"]
+            if kind == "device_action":
+                payload = command.get("payload", {})
+                result = execute_device_action(
+                    payload.get("action", ""), payload.get("devices", []), payload)
+            else:
+                result = self._connect_vpn_result(command)
+            self.runtime.save_command(command["id"], "completed", result)
+            if release_after:
+                self.runtime.release_fencing(command)
+            self._ack_command(command["id"], "completed", result)
+        except Exception as exc:
+            logger.exception("slow command %s failed", command.get("id"))
+            self.runtime.save_command(command["id"], "failed", error=str(exc))
+            if release_after:
+                self.runtime.release_fencing(command)
+            self._ack_command(command["id"], "failed", error=str(exc))
+
+    @staticmethod
+    def _connect_vpn_result(command: dict) -> dict:
+        # 在本机 NetworkManager 上激活指定 VPN 连接（凭据由
+        # NetworkManager 保存，无需回传密码）。
+        vpn_name = str((command.get("payload") or {}).get("vpn_name") or "").strip()
+        if not vpn_name:
+            raise ValueError("vpn_name is required")
+        try:
+            proc = subprocess.run(
+                ['nmcli', 'connection', 'up', vpn_name],
+                capture_output=True, text=True, timeout=60,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    (proc.stderr or proc.stdout or "nmcli connect failed").strip()
+                )
+            return {"connected": True, "vpn_connection_name": vpn_name}
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"nmcli connect timed out: {vpn_name}") from exc
+        except OSError as exc:
+            raise RuntimeError("nmcli connect failed") from exc
 
     # ---- 可配置参数读写（通过 Controller 远程下发） ----
 
@@ -529,7 +577,17 @@ class WorkerAgent:
                     raise ValueError(f"invalid value for {key}") from None
         if changed:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+            # 原子替换：写临时文件后 os.replace，进程中途崩溃不会留下
+            # 截断的 config.json（读侧虽容忍坏 JSON，启动路径未必）。
+            tmp_path = path.with_suffix(path.suffix + f".tmp-{os.getpid()}")
+            try:
+                tmp_path.write_text(
+                    json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+                os.replace(tmp_path, path)
+            finally:
+                # write/replace 抛异常（磁盘满/权限）时不残留 .tmp-pid 垃圾
+                # 文件；成功路径 replace 后文件已不存在，unlink 为 no-op。
+                tmp_path.unlink(missing_ok=True)
             if "max_jobs" in changed:
                 self.config.max_jobs = changed["max_jobs"]
             logger.info("worker config updated and applied: %s", changed)
@@ -550,11 +608,25 @@ class WorkerAgent:
                 # 每条指纹占用一个 sequence，日志从其后继续编号。
                 sequence += self._report_device_fingerprints(row)
                 offsets = {"stdout.log": 0, "stderr.log": 0}
+                # 上传失败时指数退避（0.5s→8s 封顶），避免 Controller
+                # 不可达期间每 0.5s 一条 warning 刷屏。
+                log_backoff = 0.5
                 while self.runtime.process_poll(worker_job_id) is None:
                     try:
                         sequence = self._flush_log_events(row, offsets, sequence)
+                        log_backoff = 0.5
                     except Exception:
-                        logger.warning("log upload temporarily unavailable for %s", worker_job_id)
+                        if log_backoff <= 0.5:
+                            logger.warning(
+                                "log upload temporarily unavailable for %s",
+                                worker_job_id)
+                        else:
+                            logger.debug(
+                                "log upload retry in %.1fs for %s",
+                                log_backoff, worker_job_id)
+                        time.sleep(log_backoff)
+                        log_backoff = min(log_backoff * 4, 8.0)
+                        continue
                     time.sleep(0.5)
                 for _ in range(10):
                     try:
@@ -989,11 +1061,13 @@ class WorkerAgent:
     @staticmethod
     def _retry(action, attempts: int = 30, delay: float = 1.0):
         last_error = None
-        for _ in range(attempts):
+        for attempt in range(attempts):
             try:
                 return action()
             except Exception as exc:
                 last_error = exc
+                if attempt + 1 >= attempts:
+                    break
                 time.sleep(delay)
         raise last_error or RuntimeError("operation failed")
 
@@ -1191,13 +1265,48 @@ class WorkerAgent:
         row = {"job_id": job["job_id"], "attempt_id": job["attempt_id"],
                "work_dir": job["work_dir"], "trace_id": job.get("trace_id", ""),
                "operation_id": job.get("operation_id", "")}
+        status = "failed"
+        result: dict = {}
+        error = "recovered job monitor crashed"
+        try:
+            status, result, error = self._finish_recovered_job(job, row)
+        except Exception as exc:
+            # 恢复路径与常规 monitor_job 一样必须收敛终态：任何异常都不
+            # 能让命令停留在 running / attempt fencing 永久占用。
+            logger.exception("recovered job monitor failed for %s",
+                             job["worker_job_id"])
+            result, error = {}, f"recovered job monitor crashed: {exc}"
+        finally:
+            self.runtime.save_command(job["command_id"], status, result, error)
+            try:
+                self._retry(lambda: self._ack_command(
+                    job["command_id"], status, result, error))
+            except Exception:
+                logger.exception(
+                    "failed to report recovered job %s terminal state",
+                    job["command_id"])
+            self.runtime.release_attempt_fencing(str(job.get("attempt_id") or ""))
+
+    def _finish_recovered_job(self, job: dict, row: dict) -> tuple[str, dict, str]:
         offsets = {"stdout.log": 0, "stderr.log": 0}
-        sequence = 0
+        # 恢复重放与 monitor_job 一样先占用设备指纹 sequence 槽位：
+        # 事件表 UNIQUE(attempt_id, sequence) + INSERT OR IGNORE，若从 0
+        # 重放，任务开头的日志会被重启前已存在的指纹事件静默吞掉。
+        sequence = self._report_device_fingerprints(row)
+        # 与 monitor_job 相同的指数退避，Controller 不可达时不刷屏。
+        log_backoff = 0.5
         while self.runtime.pid_alive(int(job["pid"])):
             try:
                 sequence = self._flush_log_events(row, offsets, sequence)
+                log_backoff = 0.5
             except Exception:
-                logger.warning("recovered log upload unavailable for %s", job["worker_job_id"])
+                if log_backoff <= 0.5:
+                    logger.warning(
+                        "recovered log upload unavailable for %s",
+                        job["worker_job_id"])
+                time.sleep(log_backoff)
+                log_backoff = min(log_backoff * 4, 8.0)
+                continue
             time.sleep(0.5)
         for _ in range(10):
             if (Path(job["work_dir"]) / "exit_code").exists():
@@ -1213,9 +1322,7 @@ class WorkerAgent:
                 self._retry(lambda p=path: self.client.upload_artifact(
                     job["job_id"], job["attempt_id"], p, "log"))
         self._upload_tradefed_results(row, work_dir)
-        self.runtime.save_command(job["command_id"], status, result, error)
-        self._retry(lambda: self._ack_command(job["command_id"], status, result, error))
-        self.runtime.release_attempt_fencing(str(job.get("attempt_id") or ""))
+        return status, result, error
 
 
 def main():

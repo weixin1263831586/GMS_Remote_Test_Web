@@ -2166,6 +2166,48 @@
   },
   {
     "methods": [
+      "PUT"
+    ],
+    "path": "/api/redmine-agent/me/aliases"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/me/binding"
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "path": "/api/redmine-agent/me/binding"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/org-chart"
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "path": "/api/redmine-agent/org-chart"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/org-chart/import-legacy"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/org-chart/members"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/redmine-agent/reminders/email"
@@ -2251,12 +2293,6 @@
   {
     "methods": [
       "GET"
-    ],
-    "path": "/api/redmine-agent/users"
-  },
-  {
-    "methods": [
-      "POST"
     ],
     "path": "/api/redmine-agent/users"
   },

@@ -2298,7 +2298,10 @@ async def stop_usbip(
         ubuntu_ssh = runtime.ssh_manager.get_connection(config)
         if ubuntu_ssh:
             try:
-                detach_result = _detach_ubuntu_usbip_for_devices(
+                # 同步 SSH 往返 + settle sleep，放线程池避免冻结事件循环
+                # （同函数下方 _detach_source_bindings 同理）。
+                detach_result = await asyncio.to_thread(
+                    _detach_ubuntu_usbip_for_devices,
                     ubuntu_ssh,
                     device_host=config["device_host"],
                     usbip_attach_host=usbip_attach_host,
@@ -2363,7 +2366,9 @@ async def stop_usbip(
                 if verification_ssh:
                     try:
                         remaining_devices_after_detach = sorted(
-                            _wait_for_adb_devices_removed(
+                            # ADB 轮询等待含 sleep 循环 + SSH 往返，放线程池。
+                            await asyncio.to_thread(
+                                _wait_for_adb_devices_removed,
                                 verification_ssh,
                                 set(remaining_devices_after_detach),
                             )

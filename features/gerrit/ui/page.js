@@ -1,5 +1,8 @@
 // act-bridge 委托目标（替代历史 inline handler）。
-function loadDepartmentForced(){loadDepartment(true);}
+function loadDepartmentForced(){
+  // 切换部门强制重拉（refresh=true）；刷新按钮同步进入忙碌状态。
+  withRefreshButtonBusy(function() { return loadDepartment(true); });
+}
 function _actStopPropagation2(event){event.stopPropagation();}
 
 let config = {dashboard_profiles: [], personal_profiles: [], department_profiles: [], default_owner: ''};
@@ -178,7 +181,7 @@ function restoreGerritProfileState() {
     if (queryEl && savedQuery) queryEl.value = savedQuery;
   } catch(_) {}
 }
-function switchTab(tab) {
+function switchTab(tab, force) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(x => {
     var active = x.dataset.tab === tab;
@@ -187,9 +190,12 @@ function switchTab(tab) {
   });
   document.querySelectorAll('.tab-content').forEach(x => x.classList.toggle('active', x.id === 'tab-' + tab));
   saveGerritProfileState();
-  if (tab === 'personal') loadPersonal(false);
-  if (tab === 'department') loadDepartment(false);
-  if (tab === 'query') loadChanges();
+  // force=true 供成员跳转等场景绕过缓存直达目标数据；返回加载
+  // promise 供调用方（act-bridge / viewMemberInPersonal）跟踪完成。
+  if (tab === 'personal') return loadPersonal(force === true);
+  if (tab === 'department') return loadDepartment(force === true);
+  if (tab === 'query') return loadChanges();
+  return Promise.resolve();
 }
 
 // ARIA tablist 方向键导航（←/→ 循环，Home/End 跳转）。
@@ -213,7 +219,10 @@ function viewMemberInPersonal(owner) {
   if (!owner) return;
   requestedOwner = owner;
   currentPersonalProfileId = '';
-  switchTab('personal');
+  // 跳转即按目标成员强制重拉（switchTab 默认吃缓存）并让刷新按钮
+  // 进入忙碌态；立即回到个人看板顶部，不复用部门看板的滚动位置。
+  withRefreshButtonBusy(function() { return switchTab('personal', true); });
+  window.scrollTo({top: 0, behavior: 'smooth'});
 }
 // 将趋势标签转换为 Gerrit 日期查询范围。
 function utcDateText(date) {
@@ -290,19 +299,31 @@ async function showGerritTrendDetail(granularity, label) {
     body.innerHTML = '<span class="error">' + esc(e.message) + '</span>';
   }
 }
-async function refreshCurrentTab() {
-  var btn = null;
-  document.querySelectorAll('header .btn-group .secondary').forEach(function(b) {
-    if (b.textContent.indexOf('刷新') >= 0) btn = b;
-  });
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ 刷新中...'; }
+function setRefreshButtonBusy(busy) {
+  var btn = document.getElementById('refreshBtn');
+  if (!btn) return;
+  btn.disabled = busy;
+  // 忙碌文案不带省略号：与空闲态宽度尽量接近，避免按钮尺寸跳动。
+  btn.textContent = busy ? '⏳ 刷新中' : '🔄 刷新';
+}
+
+// 切换部门/统计身份、工具栏刷新共用同一忙碌语义：期间禁用并显示
+// 「⏳ 刷新中」，让切换触发的强制刷新有可见反馈。
+async function withRefreshButtonBusy(task) {
+  setRefreshButtonBusy(true);
   try {
+    await task();
+  } finally {
+    setRefreshButtonBusy(false);
+  }
+}
+
+async function refreshCurrentTab() {
+  await withRefreshButtonBusy(async function() {
     if (currentTab === 'personal') await loadPersonal(true);
     else if (currentTab === 'department') await loadDepartment(true);
     else await loadChanges();
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '刷新'; }
-  }
+  });
 }
 function findPersonalProfile(id) {
   return (config.personal_profiles || []).find(x => x.id === id);
@@ -314,7 +335,8 @@ function onPersonalProfileChange() {
   const profile = findPersonalProfile(id);
   if (profile && profile.owner) document.getElementById('owner').value = profile.owner;
   saveGerritProfileState();
-  loadPersonal(true);
+  // 切换统计身份强制绕过缓存重拉；刷新按钮同步进入忙碌状态。
+  withRefreshButtonBusy(function() { return loadPersonal(true); });
 }
 function onPersonalOwnerInput() {
   currentPersonalProfileId = '';
@@ -512,16 +534,19 @@ function renderDashboard(data, pendingMyReview) {
   const title = isPersonal ? 'Gerrit 个人提交汇总' : 'Gerrit 提交汇总';
   const s = data.summary || {};
   const reviewCount = (pendingMyReview && typeof pendingMyReview.count === 'number') ? pendingMyReview.count : null;
-  const cards = [
-    {label:'历史提交', value:s.total_count || 0},
-    {label:'已合并', value:s.merged_count || 0, className:'ok clickable-stat', onclick:"scrollToSection('sec-merged')"},
-    {label:'未合并', value:s.open_count || 0, className:'warn clickable-stat', onclick:"scrollToSection('sec-open')"},
-    {label:'待评审', value:s.pending_review_count || 0, className:'bad clickable-stat', onclick:"scrollToSection('sec-pending-review')"},
-  ];
+  // 汇总卡片按处理优先级排序：待我评审 → 待评审 → 未合并 → 已合并
+  // → 历史提交 → 已废弃（待我评审仅个人页有数据时出现）。
+  const cards = [];
   if (isPersonal && reviewCount != null) {
-    cards.push({label:'待我评审', value:reviewCount, className:'warn clickable-stat', onclick:"scrollToSection('sec-review-of-me')"});
+    cards.push({label:'待我评审', value:reviewCount, className:'warn clickable-stat', clickSection:'sec-review-of-me'});
   }
-  cards.push({label:'已废弃', value:s.abandoned_count || 0, className:'clickable-stat', onclick:"scrollToSection('sec-abandoned')"});
+  cards.push(
+    {label:'待评审', value:s.pending_review_count || 0, className:'bad clickable-stat', clickSection:'sec-pending-review'},
+    {label:'未合并', value:s.open_count || 0, className:'warn clickable-stat', clickSection:'sec-open'},
+    {label:'已合并', value:s.merged_count || 0, className:'ok clickable-stat', clickSection:'sec-merged'},
+    {label:'历史提交', value:s.total_count || 0},
+    {label:'已废弃', value:s.abandoned_count || 0, className:'clickable-stat', clickSection:'sec-abandoned'}
+  );
   return '<section class="list-section">'
     + renderSummaryHeader(title, controls)
     + renderCards(cards) + '</section><div class="trend-grid">'
@@ -529,15 +554,18 @@ function renderDashboard(data, pendingMyReview) {
     + renderTrend('每周提交', (data.trends || {}).weekly || [], 'week', 'personal_weekly')
     + renderTrend('每月提交', (data.trends || {}).monthly || [], 'month', 'personal_monthly')
     + renderTrend('每年提交', (data.trends || {}).yearly || [], 'year', 'personal_yearly')
-    + '</div>' + renderLists(data.lists || {})
-    + renderReviewOfMeList(pendingMyReview);
+    + '</div>' + renderReviewOfMeList(pendingMyReview)
+    + renderLists(data.lists || {});
 }
 function renderReviewOfMeList(pendingMyReview) {
   if (currentTab !== 'personal' || !pendingMyReview || !Array.isArray(pendingMyReview.items)) return '';
   return renderChangeList('待我评审', pendingMyReview.items, 'sec-review-of-me');
 }
 function renderCards(cards) {
-  return '<div class="stats-grid">' + cards.map(card => '<div class="stat-card ' + esc(card.className || '') + '"' + (card.onclick ? ' data-click="' + card.onclick + '"' : '') + '><div class="value">' + esc(card.value) + '</div><div class="label">' + esc(card.label) + '</div></div>').join('') + '</div>';
+  // 跳转锚点走 act-bridge 委托：data-click 只放 handler 名 + data-a0
+  // 放 section id（此前把整条调用表达式塞进 data-click，按名查表
+  // 查不到函数，点击静默失效）。
+  return '<div class="stats-grid">' + cards.map(card => '<div class="stat-card ' + esc(card.className || '') + '"' + (card.clickSection ? ' data-click="scrollToSection" data-a0="' + esc(card.clickSection) + '"' : '') + '><div class="value">' + esc(card.value) + '</div><div class="label">' + esc(card.label) + '</div></div>').join('') + '</div>';
 }
 function renderTrend(title, rows, key, chartKey) {
   chartKey = chartKey || title;

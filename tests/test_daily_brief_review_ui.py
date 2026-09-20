@@ -845,7 +845,7 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
             for width in (360, 390, 768, 1440):
                 page.set_viewport_size({"width": width, "height": 800})
                 page.locator('#dailyBriefCard [data-click="showDailyBriefIssue"]').click()
-                modal = page.locator('[id^="dailyBriefIssueModal-"].show')
+                modal = page.locator('[id^="singleIssueAnalysisModal-"].show')
                 expect(modal).to_be_visible()
                 if width >= 1000:
                     header_bottom = page.locator('body > header').bounding_box()['y'] + page.locator('body > header').bounding_box()['height']
@@ -855,9 +855,9 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
                     self.assertAlmostEqual(reader_box['width'], width - 16, delta=1)
                     self.assertAlmostEqual(reader_box['height'], 800 - header_bottom - 6, delta=1)
                 self.assertEqual(modal.locator('.daily-brief-section-md summary').count(), 0)
+                self.assertEqual(modal.locator('details').count(), 0)
                 self.assertEqual(modal.locator('[data-daily-brief-save-case]').count(), 0)
                 self.assertNotIn('结构化明细', modal.inner_text())
-                self.assertFalse(modal.locator('details').first.evaluate('(node) => node.open'))
                 title = modal.locator('.daily-brief-modal-title')
                 self.assertEqual(title.evaluate('(node) => getComputedStyle(node).whiteSpace'), 'nowrap')
                 self.assertEqual(title.evaluate('(node) => getComputedStyle(node).flexDirection'), 'row')
@@ -877,7 +877,7 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
                     footer_button.evaluate('(node) => getComputedStyle(node).height'),
                     '24px' if width < 760 else '26px',
                 )
-                action = modal.locator('[data-daily-brief-reanalyze]')
+                action = modal.locator('[data-click="openSingleIssueAnalysisTimeline"]')
                 for control in (close, action):
                     control.scroll_into_view_if_needed()
                     box = control.bounding_box()

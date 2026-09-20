@@ -1,6 +1,8 @@
 # ADR 0008: Daily Brief separates triage from diagnosis
 
-Status: Accepted
+Status: Superseded by ADR 0013 (batch analysis matches single-issue
+diagnosis). The triage prompt branch survives only for rendering historically
+persisted results.
 
 ## Context
 

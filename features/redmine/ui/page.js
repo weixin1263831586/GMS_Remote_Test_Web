@@ -519,7 +519,7 @@ function syncDailyBriefStickyTop() {
   });
 }
 
-function switchTab(tab) {
+function switchTab(tab, force) {
   var target = document.getElementById('tab-' + tab) ? tab : 'stats';
   currentTab = target;
   updateRedmineToolbar();
@@ -543,7 +543,7 @@ function switchTab(tab) {
   if (target === 'daily-brief') {
     loadSingleIssueDevices();
     return loadDailyBrief();
-  }  if (target === 'stats') return loadStatistics();
+  }  if (target === 'stats') return loadStatistics(force === true);
   return Promise.resolve();
 }
 
@@ -603,10 +603,27 @@ async function runRedmineContextAction() {
   return startScan();
 }
 
-async function refreshCurrentTab() {
-  var targetBtn = document.getElementById('refreshBtn');
-  if (targetBtn) { targetBtn.disabled = true; targetBtn.textContent = '⏳ 刷新中...'; }
+function setRefreshButtonBusy(busy) {
+  var btn = document.getElementById('refreshBtn');
+  if (!btn) return;
+  btn.disabled = busy;
+  // 忙碌文案不带省略号：与空闲态宽度尽量接近，避免按钮尺寸跳动。
+  btn.textContent = busy ? '⏳ 刷新中' : '🔃 刷新';
+}
+
+// 切换部门/统计身份、工具栏刷新共用同一忙碌语义：期间禁用并显示
+// 「⏳ 刷新中」，让切换触发的强制刷新有可见反馈。
+async function withRefreshButtonBusy(task) {
+  setRefreshButtonBusy(true);
   try {
+    await task();
+  } finally {
+    setRefreshButtonBusy(false);
+  }
+}
+
+async function refreshCurrentTab() {
+  await withRefreshButtonBusy(async function() {
     if (currentTab === 'issues') {
       await refreshRedmineSnapshots();
       await loadIssues();
@@ -631,9 +648,7 @@ async function refreshCurrentTab() {
     } else {
       await loadStatistics(true);
     }
-  } finally {
-    if (targetBtn) { targetBtn.disabled = false; targetBtn.textContent = '刷新'; }
-  }
+  });
 }
 
 async function refreshRedmineSnapshots() {
@@ -673,7 +688,9 @@ async function onStatsUserChange() {
   window.history.replaceState({}, '', url.toString());
   if (select) select.disabled = true;
   try {
-    await loadStatistics();
+    // 切换统计身份强制绕过缓存重拉（refresh=true），刷新按钮同步进入
+    // 刷新中状态，避免旧身份的数据滞留成「切换未生效」的错觉。
+    await withRefreshButtonBusy(function() { return loadStatistics(true); });
   } finally {
     if (select) select.disabled = false;
   }
@@ -933,7 +950,8 @@ async function submitAddUser() {
   var profileId = (document.getElementById('addUserDepartment') || {}).value || '';
   if (!id || !name) { notifyUser('添加用户失败', '请输入用户 ID 和姓名', 'warning'); return; }
   try {
-    await api('/api/redmine-agent/users', {
+    // 方案 2：成员写入共享组织架构（管理员权限；原 per-owner POST /users 已收编）。
+    await api('/api/redmine-agent/org-chart/members', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({id: Number(id), name: name, email: email, department_id: profileId})
@@ -945,7 +963,13 @@ async function submitAddUser() {
     document.getElementById('statsUserSelect').value = name;
     if (currentTab === 'department') loadDepartmentOverdue(true);
     else onStatsUserChange();
-  } catch (e) { notifyUser('添加用户失败', e.message, 'error'); }
+  } catch (e) {
+    if (e && /403|权限|admin/i.test(e.message)) {
+      notifyUser('添加用户失败', '需要管理员权限（组织架构为全组共享，由管理员统一维护）', 'error');
+    } else {
+      notifyUser('添加用户失败', e.message, 'error');
+    }
+  }
 }
 
 // ---- Add Department Modal ----
@@ -1011,6 +1035,7 @@ function showSettingsModal() {
   showModal('settingsModal');
   // 每次打开都独立刷新晨报模型；统计/凭据设置失败不能让旧下拉选项残留。
   void refreshDailyBriefSettings();
+  void initSelfBindingSelect();
   (async function() {
     try {
       await loadStatsConfig();
@@ -1039,6 +1064,41 @@ function showSettingsModal() {
   })();
 }
 function hideSettingsModal() { hideModal('settingsModal'); }
+
+// ---- 个人身份绑定（方案 2：全局组织架构共享，个人绑定/别名 per-owner）----
+async function initSelfBindingSelect() {
+  var select = document.getElementById('settingSelfBinding');
+  if (!select) return;
+  try {
+    var users = await api('/api/redmine-agent/users');
+    var binding = await api('/api/redmine-agent/me/binding').catch(function() { return {member: null}; });
+    var boundId = binding && binding.member ? String(binding.member.id || '') : '';
+    var items = (users.items || []).slice().sort(function(a, b) {
+      return (a.name || '').localeCompare(b.name || '', 'zh-Hans-CN-u-co-pinyin');
+    });
+    select.innerHTML = '<option value="">未绑定（按姓名/邮箱自动识别）</option>'
+      + items.map(function(item) {
+        var dept = item.department ? ' · ' + item.department : '';
+        return '<option value="' + esc(item.id) + '">#' + esc(item.id) + ' ' + esc(item.name) + dept + '</option>';
+      }).join('');
+    select.value = boundId;
+    if (select.value !== boundId) select.value = '';
+  } catch (_) { select.innerHTML = '<option value="">（组织架构不可用）</option>'; }
+}
+
+async function submitSelfBinding() {
+  var select = document.getElementById('settingSelfBinding');
+  if (!select) return;
+  var value = select.value || null;
+  try {
+    await api('/api/redmine-agent/me/binding', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({member_id: value}),
+    });
+    notifyUser(value ? '已绑定身份' : '已解除绑定', value ? '个人看板与每日晨报将按绑定的组织成员识别' : '恢复按姓名/邮箱自动识别', 'success');
+  } catch (e) { notifyUser('绑定失败', e.message, 'error'); }
+}
 
 async function refreshDailyBriefSettings() {
   try {
@@ -1753,8 +1813,11 @@ function renderSummaryHeader(title, controlsHtml, metaHtml) {
 function renderStatsCards(cards) {
   return '<div class="stats-grid">' + (cards || []).map(function(card) {
     var cls = card.className ? ' ' + card.className : '';
-    var onclick = card.onclick ? ' data-click="' + card.onclick + '"' : '';
-    return '<div class="stat-card' + cls + '"' + onclick + '><div class="value">' + esc(card.value == null ? 0 : card.value) + '</div><div class="label">' + esc(card.label || '') + '</div></div>';
+    // 跳转锚点走 act-bridge 委托：data-click 只放 handler 名 + data-a0
+    // 放 section id（此前把整条调用表达式塞进 data-click，按名查表
+    // 查不到函数，点击静默失效）。
+    var click = card.clickSection ? ' data-click="scrollToSection" data-a0="' + esc(card.clickSection) + '"' : '';
+    return '<div class="stat-card' + cls + '"' + click + '><div class="value">' + esc(card.value == null ? 0 : card.value) + '</div><div class="label">' + esc(card.label || '') + '</div></div>';
   }).join('') + '</div>';
 }
 
@@ -1848,22 +1911,30 @@ function onDepartmentProfileChange() {
   var select = document.getElementById('departmentProfileSelect');
   departmentProfileId = select ? select.value : '';
   saveRedmineProfileState();
-  loadDepartmentOverdue(true);
+  // 切换部门本就强制刷新（refresh=true）；补上刷新按钮忙碌态，
+  // 让「正在拉取新部门数据」有可见反馈。
+  withRefreshButtonBusy(function() { return loadDepartmentOverdue(true); });
 }
 
-function renderDepartmentIssue(item) {
-  const issueId = item.issue_id || '';
-  const lastAt = item.last_external_reply_at || item.updated_on || '-';
-  const days = Number(item.unreplied_days || 0);
-  const replyText = item.last_external_reply ? ' | ' + esc(trunc(item.last_external_reply, 140)) : '';
-  return `<div class="issue-mini">
-    <div>${renderRedmineIssueLink(issueId, {stopPropagation: false})}<div class="muted">${esc(item.status_name || '-')}</div></div>
-    <div class="issue-mini-title">
-      <strong title="${esc(item.subject || '')}">${esc(item.subject || '-')}</strong>
-      <span>最后回复: ${esc(item.last_external_reply_by || '-')} | 未回复 ${days} 天${replyText}</span>
-    </div>
-    <div class="issue-mini-meta">${esc(item.priority_name || '-')}<br>${esc(String(lastAt).slice(0, 16))}</div>
-  </div>`;
+async function openMemberDashboard(name) {
+  // 部门看板只承载统计数据；点击成员行跳转到该成员的个人看板
+  // （tab=stats + ?name=），不在部门看板内罗列个人问题明细。
+  var memberName = String(name || '').trim();
+  if (!memberName) return;
+  var url = new URL(window.location.href);
+  url.searchParams.set('name', memberName);
+  window.history.replaceState({}, '', url.toString());
+  var existingSelect = document.getElementById('statsUserSelect');
+  if (existingSelect) existingSelect.value = memberName;
+  // force=true：跳转即按新成员强制重拉，不展示上一位成员的缓存渲染；
+  // 与手动切换统计身份一致，刷新按钮进入刷新中状态。
+  await withRefreshButtonBusy(function() { return switchTab('stats', true); });
+  var select = document.getElementById('statsUserSelect');
+  if (select && select.value !== memberName) {
+    // 下拉选项尚未包含该成员（users 接口未就绪）时兜底对齐一次。
+    select.value = memberName;
+    await onStatsUserChange();
+  }
 }
 
 function renderProjectIssue(item) {
@@ -1934,7 +2005,7 @@ function renderDepartmentOverdue(data) {
     const subLine = names ? '<div class="muted">' + esc(names) + '</div>' : '';
     const ids = redmineIssueIds(user.overdue_issues || []);
     const copyDisabled = ids.length ? '' : ' disabled';
-    return `<tr style="cursor:pointer" data-click="scrollToSection" data-a0="dept-user-${esc(user.id || '')}">
+    return `<tr style="cursor:pointer" title="查看个人看板" data-click="openMemberDashboard" data-a0="${esc(user.name || '')}">
       <td class="col-person"><strong>${nameLine}</strong>${subLine}</td>
       <td>${user.total_owned || 0}</td>
       <td>${user.open_count || 0}</td>
@@ -1955,20 +2026,6 @@ function renderDepartmentOverdue(data) {
       <tbody>${rows || '<tr><td colspan="9" class="muted">暂无配置用户</td></tr>'}</tbody>
     </table>
   </div>`;
-  const detailUsers = users.filter(function(user) { return (user.overdue_issues || []).length > 0; });
-  const details = detailUsers.map(function(user) {
-    const issues = (user.overdue_issues || []).map(renderDepartmentIssue).join('');
-    const names = (user.owner_names || []).join(' / ');
-    return `<section class="dept-user-block" id="dept-user-${esc(user.id || '')}">
-      <div class="dept-user-title">
-        <h2>${esc(user.name || '-')} ${sd}天未回复问题 (${(user.overdue_issues || []).length})</h2>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <div class="muted">${esc(names || '-')} | 最长 ${user.max_unreplied_days || 0} 天 | 窗口 ${data.window_days || 0} 天</div>
-        </div>
-      </div>
-      <div class="issue-mini-list">${issues}</div>
-    </section>`;
-  }).join('');
   document.getElementById('departmentContent').innerHTML = `
     <section class="stats-section">
       ${renderSummaryHeader((profile.name || '部门') + ' Redmine 未回复汇总', '<div class="filter-bar">' + profileSelect + '</div>', '更新时间: ' + esc(generatedAt) + ' | 阈值: ' + esc(data.stale_days || 3) + ' 天 | 缓存: ' + (data.cache_hit ? '是' : '否'))}
@@ -1976,7 +2033,6 @@ function renderDepartmentOverdue(data) {
     </section>
     ${trendPanels}
     ${table}
-    ${details || '<div class="muted" style="padding:12px">当前配置用户暂无超过 ' + sd + ' 天未回复的问题。</div>'}
   `;
   document.getElementById('departmentContent').dataset.loaded = 'true';
 }
@@ -2064,10 +2120,10 @@ async function loadStatistics(force) {
         ${renderSummaryHeader('Redmine概览', '<div class="filter-bar">' + userSelectHtml + '</div>', '统计身份: ' + ((meta.owner_names || []).map(esc).join(' / ') || '未识别') + ' | 统计口径: ' + (meta.count_source === 'redmine_live' ? 'Redmine实时全历史' : '本地同步快照') + ' | 更新时间: ' + esc((meta.generated_at || '-').replace('T', ' ').replace(/:\d{2}$/, '')))}
         ${renderStatsCards([
           {value: workload.open_count || 0, label: '当前未关闭', className: 'warn'},
-          {value: workload.waiting_my_reply || 0, label: '待回复 ⬇', className: 'bad clickable-stat', onclick: "scrollToSection('sec-waiting-reply')"},
-          {value: workload.no_reply_3_days || 0, label: 'RK ' + sd + '天未回复客户 ⬇', className: 'bad clickable-stat', onclick: "scrollToSection('sec-no-reply-3d')"},
-          {value: workload.customer_no_reply_3_days || 0, label: '客户 ' + sd + '天未回复RK ⬇', className: 'warn clickable-stat', onclick: "scrollToSection('sec-customer-no-reply')"},
-          {value: workload.missing_test_report || 0, label: '缺失测试报告 ⬇', className: 'warn clickable-stat', onclick: "scrollToSection('sec-missing-report')"},
+          {value: workload.waiting_my_reply || 0, label: '待回复 ⬇', className: 'bad clickable-stat', clickSection: 'sec-waiting-reply'},
+          {value: workload.no_reply_3_days || 0, label: 'RK ' + sd + '天未回复客户 ⬇', className: 'bad clickable-stat', clickSection: 'sec-no-reply-3d'},
+          {value: workload.customer_no_reply_3_days || 0, label: '客户 ' + sd + '天未回复RK ⬇', className: 'warn clickable-stat', clickSection: 'sec-customer-no-reply'},
+          {value: workload.missing_test_report || 0, label: '缺失测试报告 ⬇', className: 'warn clickable-stat', clickSection: 'sec-missing-report'},
           {value: workload.closed_count || 0, label: '已解决 / 已关闭', className: 'ok'},
           {value: workload.total_owned || 0, label: '名下历史数量'},
         ])}
@@ -3126,7 +3182,16 @@ function singleIssueAnalysisReportBody(item) {
 function showSingleIssueAnalysis(runId, statisticsOnly) {
   var item = findSingleIssueAnalysis(runId);
   var issue = item && (item.issues || [])[0];
-  if (!item || !issue) return;
+  if (item && issue) openSingleIssueReportModal(item, statisticsOnly);
+}
+
+// 「查看分析」弹框统一构建：单号分析历史条目与每日晨报条目共用同一布局
+// （item = {run, issues: [issue]}；标题「🤖 AI 分析 · #id · 状态」+ 纯
+// Markdown 报告正文 + 底部「执行过程 / 关闭」）。AI 统计、重新分析入口
+// 都在行级按钮上，弹框内不再重复。
+function openSingleIssueReportModal(item, statisticsOnly) {
+  var issue = (item.issues || [])[0] || {};
+  if (!issue.issue_id) return;
   var statistics = renderDailyBriefIssueStatistics(issue.ai_statistics);
   var subject = String(issue.subject || '').trim();
   var statusText = singleIssueAnalysisStatus(issue.status || item.run.status);
@@ -4392,8 +4457,14 @@ function showDailyBriefIssue(issueId) {
     showAnalysisTimelineModal(run.run_id, issueId, { subject: issue.subject });
     return;
   }
+  if (!issue.issue_id) {
+    notifyUser('每日晨报数据已更新', '未找到 #' + issueId + '，正在刷新后重试。', 'warning');
+    loadDailyBrief();
+    return;
+  }
   try {
-    showDailyBriefIssueModal(issueId);
+    // 与「Redmine 单号分析」查看分析同一布局（纯报告正文 + 执行过程/关闭）。
+    openSingleIssueReportModal({ run: run, issues: [issue] }, false);
   } catch (error) {
     console.error('Failed to render daily brief analysis', error);
     showDailyBriefIssueFallback(issueId);
@@ -4455,177 +4526,12 @@ function showDailyBriefIssueFallback(issueId) {
   showDailyBriefAnalysisModal(modal);
 }
 
-function showDailyBriefIssueModal(issueId) {
-  var issue = findDailyBriefIssue(issueId);
-  if (!issue) {
-    notifyUser('每日晨报数据已更新', '未找到 #' + issueId + '，正在刷新后重试。', 'warning');
-    loadDailyBrief();
-    return;
-  }
-  var r = dailyBriefObject(issue.result);
-  // detailed_report 是 kkagent 最终分析结论（完整 Markdown 报告），作为弹窗
-  // 正文；其余字段只是同一份结论的机器可读分解，统一收进一个默认折叠的
-  // 「结构化明细」区，避免十来个并列展开的小节造成割裂感。
-  var section = function (title, body, open) {
-    if (!body) return '';
-    return '<details' + (open === true ? ' open' : '') + ' class="daily-brief-section">'
-      + '<summary>' + title + '</summary>'
-      + '<div class="daily-brief-section-body">' + esc(body) + '</div></details>';
-  };
-  // raw=true 时 body 已是调用方拼好的 HTML（条目各自 esc 过）。
-  var detailBlk = function (title, body, raw) {
-    if (!body) return '';
-    return '<div class="daily-brief-sub"><div class="daily-brief-sub-title">' + title + '</div>'
-      + '<div class="daily-brief-sub-body">' + (raw ? body : esc(body)) + '</div></div>';
-  };
-  // 深度报告是 Markdown（表格/标题/代码块），走已有的轻量渲染器。
-  var mdSection = function (body) {
-    if (!body) return '';
-    return '<div class="daily-brief-section daily-brief-section-md"><div class="daily-brief-section-body analysis-doc">'
-      + renderMarkdownDoc(String(body)) + '</div></div>';
-  };
-  var ev = dailyBriefList(r.evidence).map(function (entry) {
-    if (typeof entry === 'string') return '· ' + esc(entry);
-    var e = dailyBriefObject(entry);
-    return '· [' + esc(e.source || '') + '] ' + esc(e.reference || '') + '：' + esc(e.fact || '');
-  }).join('\n');
-  var actions = dailyBriefList(r.recommended_actions).map(function (entry) {
-    if (typeof entry === 'string') return '· ' + esc(entry);
-    var a = dailyBriefObject(entry);
-    return (a.step || '·') + '. ' + esc(a.action || '') + (a.reason ? '（' + esc(a.reason) + '）' : '');
-  }).join('\n');
-  var missing = dailyBriefList(r.missing_information).map(esc).join('、');
-  var similar = dailyBriefList(r.similar_issues).map(function (entry) {
-    if (typeof entry === 'string') return '· ' + esc(entry);
-    var s = dailyBriefObject(entry);
-    return '· #' + esc(s.issue_id) + '（' + esc(s.similarity || 'related') + '）' + (s.subject ? ' ' + esc(s.subject) : '')
-      + (s.reusable_fix ? '\n  ↳ 可参考：' + esc(s.reusable_fix) : '');
-  }).join('\n');
-  // 历史检索结论只对已完成的分析有意义：失败/中断的 issue 没有
-  // result,不能显示"未发现同题/类似工单"误导排障。
-  var similarSection = similar
-    ? detailBlk('🧭 相似历史工单', similar, true)
-    : (issue.status !== 'completed' ? '' : detailBlk('🧭 相似历史工单',
-      r.history_checked === false ? '未执行历史工单检索' : '历史检索未发现同题/类似工单', true));
-  var execution = dailyBriefObject(issue.ai_execution);
-  var gate = dailyBriefObject(r.evidence_gate);
-  var mark = function (value) {
-    return value === true ? '✓' : (value === false ? '✗' : '—');
-  };
-  var schemaText = ({ passed: '✓ 通过', failed: '✗ 失败', unknown: '— 未完成' })[execution.schema_status] || '— 未记录';
-  var durationText = execution.duration_ms ? (Math.round(Number(execution.duration_ms) / 100) / 10) + ' s' : '—';
-  var tokenTotal = Number(execution.input_tokens || 0) + Number(execution.output_tokens || 0);
-  var historyDistinct = Number(gate.distinct_history_search_count != null
-    ? gate.distinct_history_search_count : execution.distinct_history_search_count || 0);
-  var historyTotal = Number(gate.history_search_count != null
-    ? gate.history_search_count : execution.history_search_count || 0);
-  var sourceCount = Number(gate.source_evidence_tool_count != null
-    ? gate.source_evidence_tool_count : execution.source_evidence_tool_count || 0);
-  var sourceRequired = gate.source_evidence_required;
-  var sourceText = sourceCount
-    ? sourceCount + ' 次源码级取证调用'
-    : (sourceRequired === false
-      ? (gate.analysis_mode === 'triage' ? '待办分析无需源码取证' : '未要求（无 SDK 源配置）')
-      : (gate.test_failure_subject === true ? '0 次（测试类失败要求 ≥1）' : '—'));
-  // 与列表 singleIssueAnalysisMeta 的六态保持一致（device_evidence_status
-  // 由 Controller 端 _tool_status 从真实 trace 推导，非模型自报）。
-  var deviceText = ({
-    succeeded: '✓ 实机取证成功',
-    service_unavailable: '✗ 取证服务暂不可用',
-    invalid_request: '✗ 取证请求无效',
-    device_unavailable: '✗ 设备取证未完成',
-    unavailable: '✗ 实机取证失败',
-    collecting: '… 实机取证中'
-  })[String(execution.device_evidence_status || '')] || '— 未执行实机取证';
-  var auditRows = [
-    ['最终格式', schemaText],
-    ['Redmine Issue', mark(gate.issue_fetched != null ? gate.issue_fetched : execution.issue_fetched)],
-    ['Journals', mark(gate.journals_checked != null ? gate.journals_checked : execution.journals_checked)],
-    ['附件内容检查', mark(gate.attachments_checked != null ? gate.attachments_checked : execution.attachments_checked)],
-    ['历史检索', historyDistinct + ' 个不同查询' + (historyTotal !== historyDistinct ? ' / ' + historyTotal + ' 次调用' : '')],
-    ['源码取证', sourceText],
-    ['实机取证', deviceText],
-    ['工具调用', execution.tool_call_count != null ? String(execution.tool_call_count) + ' 次' : '—'],
-    ['自动修复', execution.repair_attempts ? String(execution.repair_attempts) + ' 次' : '未触发'],
-    ['Session', execution.session_id || gate.session_id || '—'],
-    ['耗时', durationText],
-    ['Tokens', tokenTotal ? String(tokenTotal) : '—']
-  ];
-  if (execution.failure_stage) auditRows.splice(1, 0, ['失败阶段', execution.failure_stage]);
-  var auditBody = auditRows.map(function (item) {
-    return item[0] + '：' + item[1];
-  }).join('\n');
-  if (r.result_format === 'kkagent_markdown') {
-    // CLI calls are visible as Bash events; do not report absent MCP events as unread evidence.
-    auditBody = '原始总结已返回。CLI 取证无法由 MCP 调用名自动判定完整性。\n'
-      + auditRows.filter(function (item) {
-        return ['工具调用', '自动修复', '实机取证', 'Session', '耗时', 'Tokens'].indexOf(item[0]) >= 0;
-      }).map(function (item) { return item[0] + '：' + item[1]; }).join('\n');
-  }
-  var hasReport = !!(r.detailed_report && String(r.detailed_report).trim());
-  var structured = ([
-    gate.analysis_mode === 'triage' ? '' : detailBlk('🧩 根因分析', r.root_cause),
-    detailBlk('💬 客户诉求', r.customer_request),
-    detailBlk('📌 当前状态', r.current_status || r.current_blocker),
-    detailBlk('🔍 关键证据', ev, true),
-    detailBlk('🛠️ 建议动作', actions, true),
-    detailBlk('💡 建议方案', r.suggested_solution),
-    similarSection,
-    detailBlk('❓ 缺失资料', missing, true),
-    (Object.keys(execution).length || Object.keys(gate).length)
-      ? detailBlk('🧾 执行与取证审计', auditBody) : ''
-  ]).filter(Boolean).join('');
-  var structuredTitle = gate.analysis_mode === 'triage'
-    ? '🧾 结构化明细（状态 / 证据 / 下一步）'
-    : '🧾 结构化明细（根因 / 证据 / 动作 / 建议方案）';
-  var subject = String(issue.subject || '').trim();
-  var chips = '<span style="display:inline-flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
-    + (r.confidence != null ? '<span style="padding:1px 8px;border-radius:10px;background:var(--chip-bg,rgba(59,130,246,.15))">模型自评 ' + esc(r.confidence) + '</span>' : '')
-    + (r.root_cause_type && r.root_cause_type !== 'unknown' ? '<span style="padding:1px 8px;border-radius:10px;background:var(--chip-bg,rgba(59,130,246,.15))">根因：' + esc(r.root_cause_type) + '</span>' : '')
-    + (r.risk && r.risk !== 'low' ? '<span style="padding:1px 8px;border-radius:10px;background:var(--chip-bg,rgba(239,68,68,.15))">风险：' + esc(r.risk) + '</span>' : '')
-    + (r.needs_human_review ? '<span style="padding:1px 8px;border-radius:10px;background:rgba(234,179,8,.2)">需人工确认</span>' : '')
-    + '</span>';
-  var modalId = 'dailyBriefIssueModal-' + Date.now();
-  var modal = document.createElement('div');
-  modal.id = modalId;
-  modal.className = 'modal daily-brief-analysis-overlay';
-  modal.innerHTML = `
-    <div class="modal-content daily-brief-modal">
-      <div class="modal-header">
-        <span class="modal-title daily-brief-modal-title"><span>🤖 AI 分析 · #${esc(issueId)}</span>${subject ? '<span class="daily-brief-modal-subject">' + esc(subject) + '</span>' : ''}</span>
-        <button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="${modalId}">&times;</button>
-      </div>
-      <div class="modal-body daily-brief-modal-body">
-        ${issue.status === 'failed' ? `<div style="color:var(--bad,#ef4444)"><b>分析失败${issue.error_type ? '（' + esc(issue.error_type) + '）' : ''}</b><div style="white-space:pre-wrap;margin-top:4px">${esc(issue.error || '未知错误')}</div></div>` : ''}
-        ${!hasReport && r.problem_summary ? '<div style="line-height:1.7;margin-bottom:4px">' + esc(r.problem_summary) + '</div>' : ''}
-        ${!r.problem_summary && issue.status !== 'failed' && !Object.keys(execution).length && !Object.keys(gate).length ? '<div class="muted" style="line-height:1.7">该项分析尚未生成可展示的结果，请稍后刷新每日晨报。</div>' : ''}
-        ${hasReport ? '' : chips}
-        ${mdSection(r.detailed_report)}
-        ${hasReport ? section('运行记录', auditBody, false) : (structured || Object.keys(execution).length || Object.keys(gate).length
-          ? '<details' + (hasReport ? '' : ' open') + ' class="daily-brief-section">'
-            + '<summary>' + structuredTitle + '</summary>'
-            + '<div class="daily-brief-structured">' + structured + '</div></details>'
-          : '')}
-        ${hasReport ? '' : section('✉️ 回复草稿（EN / 中文）', [r.suggested_reply_en, r.suggested_reply_zh].filter(Boolean).join('\n\n—— 中文 ——\n\n'), false)}
-      </div>
-      <div class="modal-buttons daily-brief-modal-footer">
-        ${(dailyBriefCache.run && dailyBriefCache.run.run_id) ? '<button class="secondary" data-click="openSingleIssueAnalysisTimeline" data-a0="' + esc(issueId) + '"'
-          + (singleIssueAnalysisHasHistory(dailyBriefCache.run, issue) ? '' : ' disabled title="过程事件已清理（终态过程仅保留 30 天）"') + '>执行过程</button>' : ''}
-        ${Number(dailyBriefObject(issue.ai_statistics).execution_count || 0) ? '<button class="secondary" data-click="showDailyBriefIssueStatistics" data-a0="' + esc(issueId) + '">AI 统计</button>' : ''}
-        <button class="secondary" data-daily-brief-reanalyze="${esc(issueId)}">深度分析此项</button>
-        ${issue.status === 'completed' && dailyBriefAnalysisMode(r, gate) === 'diagnostic' && r.result_format !== 'kkagent_markdown' ? '<button class="secondary" data-daily-brief-save-case="' + esc(issueId) + '">存为案例</button>' : ''}
-        ${r.suggested_reply_en ? '<button class="secondary" data-click="copyDailyBriefReply" data-a0="' + esc(issueId) + '" data-a1="en">复制英文回复</button>' : ''}
-        ${r.suggested_reply_zh ? '<button data-click="copyDailyBriefReply" data-a0="' + esc(issueId) + '" data-a1="zh">复制中文回复</button>' : ''}
-        <button class="secondary" data-click="removeDynamicModal" data-a0="${modalId}">关闭</button>
-      </div>
-    </div>`;
-  showDailyBriefAnalysisModal(modal);
-}
 // act-bridge 按 window 查找委托目标；显式导出避免页面脚本加载方式变化后
 // 「查看分析」成为静默无响应的按钮。
 window.showDailyBriefIssue = showDailyBriefIssue;
 window.showDailyBriefIssueStatistics = showDailyBriefIssueStatistics;
 window.openSingleIssueAnalysisTimeline = openSingleIssueAnalysisTimeline;
+window.openMemberDashboard = openMemberDashboard;
 
 function briefRowReanalysisMode(button) {
   // 晨报行「重新分析」读同行选择器；报告弹框按钮无选择器，默认增量。
@@ -4699,44 +4605,6 @@ document.addEventListener('click', function (event) {
   if (!button) return;
   reanalyzeDailyBriefIssue(button.dataset.dailyBriefReanalyze, button);
 });
-
-async function saveDailyBriefCase(issueId, button) {
-  var run = dailyBriefCache && dailyBriefCache.run;
-  if (!run || !run.brief_date) return;
-  var original = button.textContent;
-  button.disabled = true;
-  button.textContent = '⏳ 保存中…';
-  try {
-    var base = '/api/redmine-agent/daily-brief/' + encodeURIComponent(run.brief_date)
-      + '/issues/' + encodeURIComponent(issueId) + '/save-case';
-    if (run.run_id) base += '?run_id=' + encodeURIComponent(run.run_id);
-    var response = await api(base, {method: 'POST'}) || {};
-    if (response && response.success === false) throw new Error(response.error || '保存被拒绝');
-    button.textContent = '✓ 已存为案例';
-    notifyUser('已存为案例', '#' + issueId + ' 已保存到知识库', 'success');
-  } catch (e) {
-    button.disabled = false;
-    button.textContent = original;
-    notifyUser('存为案例失败', e.message, 'error');
-  }
-}
-
-document.addEventListener('click', function (event) {
-  var button = event.target.closest('[data-daily-brief-save-case]');
-  if (!button) return;
-  saveDailyBriefCase(button.dataset.dailyBriefSaveCase, button);
-});
-
-function copyDailyBriefReply(issueId, lang) {
-  var issue = (dailyBriefCache && (dailyBriefCache.issues || []).find(function (i) { return String(i.issue_id) === String(issueId); }));
-  var text = issue && issue.result && (lang === 'en' ? issue.result.suggested_reply_en : issue.result.suggested_reply_zh) || '';
-  if (!text) { notifyUser('无回复草稿', '该 issue 尚未生成回复草稿', 'warning'); return; }
-  navigator.clipboard.writeText(text).then(function () {
-    notifyUser('已复制', (lang === 'en' ? '英文' : '中文') + '回复草稿已复制到剪贴板', 'success');
-  }, function () {
-    notifyUser('复制失败', '浏览器拒绝了剪贴板权限', 'warning');
-  });
-}
 
 async function stopDailyBriefRun() {
   var run = dailyBriefCache && dailyBriefCache.run;

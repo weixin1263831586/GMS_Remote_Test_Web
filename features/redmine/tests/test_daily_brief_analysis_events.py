@@ -1,6 +1,6 @@
 """分析进度时间线（daily_brief_analysis_events）回归。
 
-覆盖评审意见的关键场景：
+覆盖要点：
 - 事件仓储生命周期（append/增量/reset/保留期/孤儿清理）；
 - 事件词表收敛（8 种标准化事件，不保存 kkagent 原始协议）；
 - 脱敏（summary 白名单 + scrub_secrets）；
@@ -24,6 +24,7 @@ from features.redmine.daily_brief_analysis_events import (
     AnalysisProgressRecorder,
     DailyBriefAnalysisEventStore,
     describe_tool_call,
+    mask_secrets,
     progress_to_payload,
     scrub_secrets,
 )
@@ -89,6 +90,25 @@ class AnalysisEventStoreTests(unittest.TestCase):
         self.assertNotIn("x" * 100, text)
         self.assertLessEqual(len(scrub_secrets("authorization: Bearer abc.def.ghi rest")), 160)
         self.assertIn("***", scrub_secrets("api_key=abcd1234 后续说明"))
+
+    def test_mask_secrets_covers_credential_shapes(self):
+        """Bearer 多词取值 / 裸 Bearer / 常规 key=value 都要打码凭据本体。"""
+        # authorization 类多词值：Bearer 与凭据本体一并打码。
+        self.assertEqual(
+            mask_secrets("authorization: Bearer sk-live-abc123"),
+            "authorization=***",
+        )
+        self.assertEqual(
+            mask_secrets("Authorization=Bearer eyJhbG.e30.sig"),
+            "Authorization=***",
+        )
+        # 无 key 前缀的裸 Bearer 凭据。
+        self.assertEqual(mask_secrets("GET /x Bearer abc123XYZ_def"), "GET /x Bearer=***")
+        # 常规 key=value 保留后续普通词。
+        self.assertEqual(mask_secrets("token = ghp_abcdef tail"), "token=*** tail")
+        self.assertEqual(mask_secrets("api_key=abcd1234 后续说明"), "api_key=*** 后续说明")
+        # 无凭据文本原样保留。
+        self.assertEqual(mask_secrets("no secrets here"), "no secrets here")
 
     def test_describe_tool_call_includes_keywords_before_path(self):
         """codesearch 类检索：keywords 是比 path 更强的身份信号，排在前面。"""

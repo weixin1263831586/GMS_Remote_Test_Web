@@ -17443,6 +17443,130 @@
         "summary": "Create Internal From Case"
       }
     },
+    "/api/redmine-agent/me/aliases": {
+      "put": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Put My Aliases",
+        "tags": [
+          "redmine-org"
+        ]
+      }
+    },
+    "/api/redmine-agent/me/binding": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get My Binding",
+        "tags": [
+          "redmine-org"
+        ]
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Put My Binding",
+        "tags": [
+          "redmine-org"
+        ]
+      }
+    },
+    "/api/redmine-agent/org-chart": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Org Chart",
+        "tags": [
+          "redmine-org"
+        ]
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Put Org Chart",
+        "tags": [
+          "redmine-org"
+        ]
+      }
+    },
+    "/api/redmine-agent/org-chart/import-legacy": {
+      "post": {
+        "description": "把旧扁平 configs/redmine_user_map.json 导入 canonical 组织架构文件。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Import Legacy Org Chart",
+        "tags": [
+          "redmine-org"
+        ]
+      }
+    },
+    "/api/redmine-agent/org-chart/members": {
+      "post": {
+        "description": "添加/更新组织架构成员（原 api.py POST /users 的全局写路径迁移）。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Add Org Member",
+        "tags": [
+          "redmine-org"
+        ]
+      }
+    },
     "/api/redmine-agent/reminders/email": {
       "post": {
         "responses": {
@@ -18072,19 +18196,6 @@
           }
         },
         "summary": "List Stat Users"
-      },
-      "post": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Add Stat User"
       }
     },
     "/api/redmine/reply": {

@@ -391,8 +391,8 @@ class ClaimEvidenceLedgerTests(unittest.TestCase):
             "sdk_sources_available": True,
         }
 
-    def _trace_with_reproducible_source(self) -> KkAgentTrace:
-        trace = _full_trace()
+    def _trace_with_reproducible_source(self, issue_id: int = 1) -> KkAgentTrace:
+        trace = _full_trace(issue_id=issue_id)
         from features.redmine.kkagent.trace import _source_reproducible_flag
 
         call = ToolTrace(
@@ -444,6 +444,48 @@ class ClaimEvidenceLedgerTests(unittest.TestCase):
             [item["evidence_id"] for item in ledger],
             [f"EV-{i:03d}" for i in range(1, len(ledger) + 1)],
         )
+
+    def test_numeric_reference_digit_boundary(self):
+        """引用 #1000 不得被子串匹配误绑到 #100 的证据（伪造引用不算已证实）。"""
+        trace = self._trace_with_reproducible_source(issue_id=100)
+        ledger = trace.evidence_ledger()
+        self.assertTrue(any("100" in ref for item in ledger for ref in item["refs"]),
+                        "前置条件：ledger 里存在 #100 引用")
+
+        def _result(extra_reference: str) -> dict:
+            return {
+                "root_cause_type": "confirmed",
+                "evidence": [
+                    {"source": "code", "reference": "kernel/mm/mmap.c",
+                     "fact": "缺少 upstream 修复"},
+                    {"source": "log", "reference": extra_reference,
+                     "fact": "相关工单引用"},
+                ],
+            }
+
+        def _bindings_for(reference: str, gate: dict) -> list[str]:
+            for binding in gate["claim_bindings"]:
+                if binding["reference"] == reference:
+                    return binding["evidence_ids"]
+            return []
+
+        # 正向控制：真实引用 #100（及裸数字 100）能绑定到 issue_fetch 证据，
+        # 同时 SDK 证据满足 confirmed 的可复现要求，无 integrity 错误。
+        for extra in ("#100", "issue 100 ref"):
+            gate, errors = gate_and_errors(trace, self._entry(), _result(extra))
+            self.assertFalse(any("cited evidence references" in e for e in errors),
+                             f"{extra!r} 应绑定到证据")
+            self.assertTrue(_bindings_for(extra, gate),
+                            f"{extra!r} 的 claim 绑定不应为空")
+        # 数字边界：#1000 / 1001 与 #100 是不同 issue，不得被子串匹配
+        # 静默绑定（旧子串匹配会把它绑到 #100 的证据上，伪造引用
+        # 借此伪装成「已对应真实调用」）。SDK 路径引用仍满足 confirmed
+        # 的可复现要求，因此不产生额外 gate 错误——缺陷的可见面是
+        # claim_bindings 的误绑。
+        for extra in ("#1000", "issue 1001 ref"):
+            gate, _errors = gate_and_errors(trace, self._entry(), _result(extra))
+            self.assertFalse(_bindings_for(extra, gate),
+                             f"{extra!r} 不应绑定到 #100 的证据")
 
 
 if __name__ == "__main__":

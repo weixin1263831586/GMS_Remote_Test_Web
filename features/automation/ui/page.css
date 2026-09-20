@@ -59,7 +59,6 @@ body {
     溢出 tab 仍可由方向键聚焦滚入。 */
     overflow: hidden;
 }
-.workflow-tabs::-webkit-scrollbar { display: none; }
 .ats-actions { display: flex; flex: 0 0 auto; gap: 8px; margin-left: auto; align-items: center; }
 .ats-more-menu { position: relative; }
 .ats-more-btn {

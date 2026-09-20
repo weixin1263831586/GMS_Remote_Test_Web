@@ -96,6 +96,85 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             self.assertEqual(stats["customer_no_reply_3_days"], 1)
             self.assertEqual([item["issue_id"] for item in stats["lists"]["customer_no_reply_3_days"]], [629401])
 
+    def test_assistant_procedural_reply_is_not_waiting_owner_reply(self):
+        """助理催办模板/纯状态流转不算 owner 待回复（如陈海燕的
+        Confirmed→Feedback 状态变更）。
+
+        - 助理纯状态变更（无备注）→ 跳过，回溯上一条实质回复；
+        - 助理模板备注（"请更新目前最新状况…请将状态改为Closed"）+ 状态
+          detail → 同样跳过；
+        - 全是程序性日志 → 不进任何待回复桶；
+        - 助理模板之后客户有实质回复 → 正常归因客户。
+        """
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            template = ("客户，您好！请更新目前最新状况，若问题已解决或无需继续跟进，"
+                        "请将状态改为Closed，谢谢！")
+            # ① 助理纯状态变更（641827 场景）：上一条实质是客户提单。
+            db.upsert_issue(_issue(
+                641827, "黄 超群",
+                journals=[
+                    {"user": "客户A", "created_on": "2026-05-01T00:00:00", "notes": "开机异常，请分析"},
+                    {"user": "陈海燕", "created_on": "2026-05-20T03:00:00", "notes": "",
+                     "details": [{"name": "status", "old_value": "Confirmed", "new_value": "Feedback"}]},
+                ],
+            ))
+            # ② 助理模板备注 + 状态 detail。
+            db.upsert_issue(_issue(
+                641828, "黄 超群",
+                journals=[
+                    {"user": "客户B", "created_on": "2026-05-01T00:00:00", "notes": "相机黑屏"},
+                    {"user": "陈海燕", "created_on": "2026-05-21T03:00:00", "notes": template,
+                     "details": [{"name": "status", "old_value": "Confirmed", "new_value": "Feedback"}]},
+                ],
+            ))
+            # ③ 全是程序性日志。
+            db.upsert_issue(_issue(
+                641829, "黄 超群",
+                journals=[
+                    {"user": "陈海燕", "created_on": "2026-05-22T03:00:00", "notes": "",
+                     "details": [{"name": "status", "old_value": "New", "new_value": "Confirmed"}]},
+                ],
+            ))
+            # ④ 助理模板后客户又实质回复 → 归因客户，属于 owner 待回复。
+            db.upsert_issue(_issue(
+                641830, "黄 超群",
+                journals=[
+                    {"user": "客户C", "created_on": "2026-05-01T00:00:00", "notes": "WIFI 断连"},
+                    {"user": "陈海燕", "created_on": "2026-05-21T03:00:00", "notes": template,
+                     "details": [{"name": "status", "old_value": "Confirmed", "new_value": "Feedback"}]},
+                    {"user": "客户C", "created_on": "2026-05-23T08:00:00", "notes": "还是必现，请继续跟进"},
+                ],
+            ))
+            # 对照：owner 自己的纯状态变更是实质动作（等待客户）。
+            db.upsert_issue(_issue(
+                641831, "黄 超群",
+                journals=[
+                    {"user": "客户D", "created_on": "2026-05-01T00:00:00", "notes": "蓝牙搜索不到"},
+                    {"user": "黄 超群", "created_on": "2026-05-25T07:03:40", "notes": "",
+                     "details": [{"name": "status", "old_value": "New", "new_value": "Confirmed"}]},
+                ],
+            ))
+
+            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+                mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
+                mocked_datetime.min = datetime.min
+                mocked_datetime.fromisoformat = datetime.fromisoformat
+                stats = db.get_workload_statistics(owner_names=["黄 超群"], stale_days=3, list_limit=20)
+
+            waiting_ids = {item["issue_id"] for item in stats["lists"]["waiting_my_reply"]}
+            self.assertNotIn(641827, waiting_ids, "助理纯状态变更不应算 owner 待回复")
+            self.assertNotIn(641828, waiting_ids, "助理模板+状态流转不应算 owner 待回复")
+            self.assertNotIn(641829, waiting_ids, "全程序性日志不应算 owner 待回复")
+            self.assertIn(641830, waiting_ids, "客户实质回复后应归因 owner 待回复")
+            customer_ids = {
+                item["issue_id"] for item in stats["lists"]["waiting_customer_reply"]}
+            self.assertIn(641831, customer_ids, "owner 字段动作=等待客户")
+            # 641830 的归因人是客户 C。
+            item = next(i for i in stats["lists"]["waiting_my_reply"] if i["issue_id"] == 641830)
+            self.assertEqual(item["last_external_reply_by"], "客户C")
+
     def test_unmapped_rockchip_email_suffix_is_rk_colleague(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -119,10 +198,55 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 mocked_datetime.fromisoformat = datetime.fromisoformat
                 stats = db.get_workload_statistics(owner_names=["黄 超群"], stale_days=3, list_limit=10)
 
-            self.assertEqual(stats["no_reply_3_days"], 1)
+            self.assertEqual(stats["waiting_my_reply"], 0)
+            self.assertEqual(stats["no_reply_3_days"], 0)
+            # RK 同事最新回复（仅凭 @rock-chips.com 邮箱即可识别）：
+            # 球在客户侧，不算 owner 待回复。
+            self.assertEqual(stats["waiting_customer_reply"], 1)
+            self.assertEqual(stats["customer_no_reply_3_days"], 1)
             self.assertEqual(stats["rk_colleague_no_reply_3_days"], 1)
-            self.assertEqual(stats["customer_no_reply_3_days"], 0)
-            self.assertEqual(stats["lists"]["rk_colleague_no_reply_3_days"][0]["last_external_reply_by"], "未配置RK同事")
+            item = stats["lists"]["customer_no_reply_3_days"][0]
+            self.assertEqual(item["last_reply_side"], "rk_colleague")
+            self.assertEqual(item["last_external_reply_by"], "未配置RK同事")
+
+    def test_registered_colleague_latest_reply_is_not_waiting_owner_reply(self):
+        """注册公司员工（org chart 成员）最新回复不算 owner 待回复。
+
+        生产路径（statistics_api / daily-brief）都会传
+        ``organization_user_map=effective_user_map(owner)``；本用例锚定
+        部门助理带实质备注回复的场景（无日志邮箱，仅凭注册名匹配）：
+        同样只算「等待客户」，并落入 rk_colleague 超期桶。
+        """
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db.upsert_issue(_issue(
+                641832, "黄 超群",
+                journals=[
+                    {"user": "客户D", "created_on": "2026-05-01T00:00:00", "notes": "GPS 定位漂移"},
+                    {"user": "陈海燕", "created_on": "2026-05-21T03:00:00",
+                     "notes": "请提供复现步骤与完整日志"},
+                ],
+            ))
+            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+                mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
+                mocked_datetime.min = datetime.min
+                mocked_datetime.fromisoformat = datetime.fromisoformat
+                stats = db.get_workload_statistics(
+                    owner_names=["黄 超群"], stale_days=3, list_limit=10,
+                    organization_user_map=[
+                        {"id": 902, "name": "陈海燕", "email": "chenhy@rock-chips.com"},
+                    ],
+                )
+
+            self.assertEqual(stats["waiting_my_reply"], 0)
+            self.assertEqual(stats["no_reply_3_days"], 0)
+            self.assertEqual(stats["waiting_customer_reply"], 1)
+            self.assertEqual(stats["customer_no_reply_3_days"], 1)
+            self.assertEqual(stats["rk_colleague_no_reply_3_days"], 1)
+            item = stats["lists"]["customer_no_reply_3_days"][0]
+            self.assertEqual(item["last_reply_side"], "rk_colleague")
+            self.assertEqual(item["last_external_reply_by"], "陈海燕")
 
     def test_redmine_user_map_name_with_site_suffix_marks_last_replier_as_rk_colleague(self):
         from features.redmine.repository import _looks_like_rk_actor

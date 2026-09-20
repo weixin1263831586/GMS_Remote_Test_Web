@@ -14,6 +14,7 @@ Prompt Policy 升级成 Runtime Policy：
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .trace import KkAgentTrace
@@ -76,7 +77,22 @@ def bind_claims(
         bound: list[str] = []
         for entry in ledger:
             tokens = [str(ref).lower() for ref in entry.get("refs") or [] if str(ref)]
-            if any(token and token in haystack for token in tokens):
+            matched = False
+            for token in tokens:
+                if not token:
+                    continue
+                if token.isdigit() or token.lstrip("#").isdigit():
+                    # 数字引用按数字边界匹配：#1000 不得被子串匹配误绑到
+                    # #100 的证据（伪造/笔误引用不应算「已证实」）；不带
+                    # # 的裸数字引用也按同样边界匹配，防止反向漏绑。
+                    digits = token.lstrip("#")
+                    if re.search(rf"(?<!\d){digits}(?!\d)", haystack):
+                        matched = True
+                        break
+                elif token in haystack:
+                    matched = True
+                    break
+            if matched:
                 bound.append(str(entry["evidence_id"]))
         bindings.append({
             "reference": str(item.get("reference") or "")[:120],
