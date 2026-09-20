@@ -125,7 +125,7 @@ def classify_gate_failure(
         "未连接或插件缺失）。恢复步骤：① 运行 gms-agent doctor --client "
         "kkagent --json 检查插件与认证；② 核对 ~/.kkagent/config.toml 的 "
         "[mcp_servers.gms] 与已安装插件 payload（在仓库内运行 python "
-        "tools/sync_agent_package.py . 后重装插件）；③ 修复后重跑本分析。"
+        "tools/scripts/agent/sync_package.py . 后重装插件）；③ 修复后重跑本分析。"
         f"原始 findings: {findings}"
     )
     return ("mcp_evidence_unavailable", "mcp_evidence_unavailable", recovery)

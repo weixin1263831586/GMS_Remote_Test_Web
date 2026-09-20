@@ -1,6 +1,6 @@
 """Registry/builder ZIP contract tests (one ZIP implementation).
 
-The Controller registry and tools/build_agent_package.py must produce the
+The Controller registry and tools/scripts/agent/build_package.py must produce the
 SAME single-root layout — the exact bytes gms-agent's extractor expects.
 """
 

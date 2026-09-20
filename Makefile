@@ -19,18 +19,18 @@ agent-check:
 	$(PY) -m pytest agent/gms-remote-test/tests -q
 	$(PY) -m pytest plugins/gms-remote-test/tests -q
 	$(PY) scripts/check_source_secrets.py .
-	$(PY) tools/release_agent.py --check
+	$(PY) tools/scripts/agent/release.py --check
 
-# tools/release_agent.py --version 内部会调用 tools/sync_agent_package.py
+# tools/scripts/agent/release.py --version 内部会调用 tools/scripts/agent/sync_package.py
 # 同步 plugins/ 生成树，这里只负责在其后复跑完整自检确认新版本契约成立。
 agent-release:
 	@test -n "$(V)" || { echo "用法: make agent-release V=X.Y.Z"; exit 2; }
-	$(PY) tools/release_agent.py --version $(V)
+	$(PY) tools/scripts/agent/release.py --version $(V)
 	$(MAKE) agent-check
 
 # sync 必须幂等：源树未变时重复执行不得改动 plugins/。
 # git diff --exit-code 对比工作区与暂存区；请在 plugins/ 相关改动入暂存区/
 # 提交后运行，否则在途差异会被误报为 sync 漂移。
 agent-sync-check:
-	$(PY) tools/sync_agent_package.py
+	$(PY) tools/scripts/agent/sync_package.py
 	@git diff --exit-code -- plugins/ && echo "plugins/ 无漂移：sync 幂等"

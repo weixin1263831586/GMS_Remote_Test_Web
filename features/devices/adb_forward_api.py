@@ -67,10 +67,15 @@ async def start_adb_forward(
         if result.get("success"):
             return JSONResponse(content=result)
         return error_response(
-            result.get("error", "ADB转发启动失败"), status_code=500
+            result.get("error", "ADB转发启动失败"), status_code=502
         )
     except HTTPException:
         raise
+    except RuntimeError as exc:
+        # adb-proxy/adb-hub 流程失败（如 5037 端口 ADB 协议初始化失败）
+        # 属设备/远端环境失败，映射 502；500 保留给编程错误。
+        logger.error("ADB proxy operation failed: %s", exc)
+        return error_response(f"{exc!s}. 请检查配置和参数是否正确。", status_code=502)
     except Exception as exc:
         logger.error("Error starting ADB forward: %s", exc)
         return error_response(f"{exc!s}. 请检查配置和参数是否正确。", status_code=500)
@@ -92,10 +97,14 @@ async def stop_adb_forward(
         if result.get("success"):
             return JSONResponse(content=result)
         return error_response(
-            result.get("error", "ADB转发停止失败"), status_code=500
+            result.get("error", "ADB转发停止失败"), status_code=502
         )
     except HTTPException:
         raise
+    except RuntimeError as exc:
+        # 与 start 一致：adb-proxy 流程失败映射 502。
+        logger.error("ADB proxy stop failed: %s", exc)
+        return error_response(f"{exc!s}. 请检查配置和参数是否正确。", status_code=502)
     except Exception as exc:
         logger.error("Error stopping ADB forward: %s", exc)
         return error_response(f"{exc!s}. 请检查配置和参数是否正确。", status_code=500)

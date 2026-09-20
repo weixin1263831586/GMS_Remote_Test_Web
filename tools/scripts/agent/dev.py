@@ -12,8 +12,11 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _common import find_repo_root  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
+
+ROOT = find_repo_root()
 AGENT = ROOT / "agent" / "gms-remote-test" / "runtime" / "gms-agent"
 PACKAGE = ROOT / "agent" / "gms-remote-test"
 

@@ -20,7 +20,7 @@ AGENT_DIR = REPO_ROOT / "agent" / "gms-remote-test"
 PLUGIN_DIR = REPO_ROOT / "plugins" / "gms-remote-test"
 SKILL_DIR = AGENT_DIR / "skill"
 PACKAGE_YAML = AGENT_DIR / "package.yaml"
-SYNC_SCRIPT = REPO_ROOT / "tools" / "sync_agent_package.py"
+SYNC_SCRIPT = REPO_ROOT / "tools" / "scripts" / "agent" / "sync_package.py"
 
 
 def package_version() -> str:
@@ -134,7 +134,7 @@ def test_no_legacy_authorized_true_in_payload_docs():
 
 def test_build_agent_package_manifest_shape():
     result = subprocess.run(
-        ["python3", str(REPO_ROOT / "tools" / "build_agent_package.py"), "--print-manifest"],
+        ["python3", str(REPO_ROOT / "tools" / "scripts" / "agent" / "build_package.py"), "--print-manifest"],
         capture_output=True,
         text=True,
         cwd=REPO_ROOT,

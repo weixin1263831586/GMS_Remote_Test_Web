@@ -16,6 +16,6 @@
 
 ## 文档维护规则
 
-- `docs/cli/command-reference.md` 由 `python3 tools/generate_cli_docs.py` 生成，禁止手工编辑；新增 `gms-rt` 命令后必须重新生成（`tests/contract/test_cli_docs_drift.py` 会在漂移时失败）。
+- `docs/cli/command-reference.md` 由 `python3 tools/scripts/docs/generate_cli_docs.py` 生成，禁止手工编辑；新增 `gms-rt` 命令后必须重新生成（`tests/contract/test_cli_docs_drift.py` 会在漂移时失败）。
 - 架构决策记录在 `docs/architecture/adr/`；源码注释引用架构决策时直接链接对应 ADR，不得引用不存在的评审文档编号。
 - Agent 安装后使用视角的文档位于 `agent/gms-remote-test/docs/`；本目录 `docs/agent/` 只维护平台管理员 / 部署者视角，不复制命令表。

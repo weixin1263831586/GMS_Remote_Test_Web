@@ -89,10 +89,10 @@ jobs:
         run: ruff check .
       - name: Vulture dead-code scan
         # 审核第 22 项僵尸代码检测: min-confidence 90 只报 100% 置信度的
-        # 未用局部变量; FastAPI/mock 误报在 tools/vulture_allowlist.py。
+        # 未用局部变量; FastAPI/mock 误报在 tools/scripts/maintenance/vulture_allowlist.py。
         run: |
           python -m vulture features foundation worker_agent tools \
-            tools/vulture_allowlist.py --min-confidence 90
+            tools/scripts/maintenance/vulture_allowlist.py --min-confidence 90
 
   # Semgrep 静态安全扫描（SAST 门禁）：
   # - ERROR 级发现直接阻断（shell 注入、taint 传播等高危模式）；审计过的
@@ -373,7 +373,7 @@ jobs:
         # launcher 可执行位与自包含性只有在这套测试里才被覆盖。两个测试树
         # 的文件同名，必须分开两次 pytest 调用收集。
         run: |
-          python tools/sync_agent_package.py .
+          python tools/scripts/agent/sync_package.py .
           git diff --exit-code -- plugins/gms-remote-test/
           python -m pytest agent/gms-remote-test/tests -q
           python -m pytest plugins/gms-remote-test/tests -q
@@ -384,7 +384,7 @@ jobs:
           python -m pytest features/system/tests/test_agent_package_lifecycle.py \
                  features/system/tests/test_agent_package_builder.py -q
       - name: Release archive builds for every client variant
-        run: python tools/build_agent_package.py --out dist
+        run: python tools/scripts/agent/build_package.py --out dist
 
   browser-e2e:
     name: browser-e2e

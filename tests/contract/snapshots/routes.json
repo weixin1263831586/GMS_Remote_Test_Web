@@ -2708,7 +2708,7 @@
     "methods": [
       "GET"
     ],
-    "path": "/api/tools/download/{file_path:path}"
+    "path": "/api/tools/download/{tool_id:path}"
   },
   {
     "methods": [

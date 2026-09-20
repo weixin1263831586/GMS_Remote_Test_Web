@@ -325,7 +325,13 @@ async def burn_gsi(
                         runtime.store_notification(client_id, "GSI burn failed", failure_summary[:300], "error", "firmware", {"devices": online_devices, "results": results})
                     except Exception as notify_error:
                         logger.warning("[GSI Burn] Failed to store failure notification: %s", notify_error)
-                    return error_response(f"部分设备烧写失败: {failure_summary}", results=results)
+                    # 烧写经 SSH 在远端主机执行，fastboot 失败属远端操作失败
+                    # （错误模型 502），500 保留给未预期的编程错误。
+                    return error_response(
+                        f"部分设备烧写失败: {failure_summary}",
+                        results=results,
+                        status_code=502,
+                    )
 
             except Exception as e:
                 try:

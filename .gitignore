@@ -22,3 +22,27 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# 第三方知识库本地 clone：按需用 tools/scripts/setup/update_android_internals_wiki.sh
+# 拉取/更新，不纳入主仓库版本控制（40.txt 重构方案）。
+/tools/android-internals-wiki/
+
+# usbip：目录只保留 usbipd 二进制，溯源记录在 tools/provenance.json；
+# 源码不入主仓库（fork: weixin1263831586/usbip，upstream: jiegec/usbip）。
+/tools/usbip/*
+!/tools/usbip/usbipd
+
+# usbip/adbproxy-rs/jadx：目录只保留可执行工件与目录级 *.provenance.json，
+# 源码/上游发行文档不入主仓库（各目录溯源见各自 provenance 文件）。
+/tools/usbip/*
+!/tools/usbip/usbipd
+!/tools/usbip/usbipd.provenance.json
+
+/tools/adbproxy-rs/*
+!/tools/adbproxy-rs/adbproxy-rs.provenance.json
+!/tools/adbproxy-rs/dist/
+
+/tools/jadx/*
+!/tools/jadx/bin/
+!/tools/jadx/lib/
+!/tools/jadx/jadx.provenance.json

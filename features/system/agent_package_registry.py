@@ -18,7 +18,7 @@ Serving model: the registry reads the repository's agent package declaration
 (agent/gms-remote-test/package.yaml) and the generated plugin payload
 (plugins/gms-remote-test/). Archive construction goes through the ONE
 canonical builder (features/system/agent_package_builder.py — the same
-module tools/build_agent_package.py uses), so the served zip and the
+module tools/scripts/agent/build_package.py uses), so the served zip and the
 released artifact share a single layout contract: a single
 ``gms-remote-test/`` root, never double-wrapped.
 """

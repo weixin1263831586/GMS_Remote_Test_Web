@@ -7,8 +7,8 @@ module re-opens the debt it just closed. This tool syncs every listed budget
 down to the file's CURRENT line count — never up — so a refactor that made
 files smaller immediately tightens the gate:
 
-    python tools/update_size_baseline.py --shrink-only          # apply
-    python tools/update_size_baseline.py --shrink-only --dry-run
+    python tools/scripts/maintenance/update_size_baseline.py --shrink-only          # apply
+    python tools/scripts/maintenance/update_size_baseline.py --shrink-only --dry-run
 
 Files that GREW beyond their budget are reported but left untouched: growth
 means either a regression the gate must keep failing on, or a deliberate
@@ -24,8 +24,11 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _common import find_repo_root  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
+
+ROOT = find_repo_root()
 RULES_FILE = ROOT / "tests" / "architecture" / "test_file_size_rules.py"
 
 # Matches entries like  'features/x.py': 123,  # optional comment

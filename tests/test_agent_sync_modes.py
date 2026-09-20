@@ -8,7 +8,7 @@ import pytest
 
 @pytest.mark.parametrize("content_matches", [True, False])
 def test_sync_removes_executable_bit_from_plain_module(tmp_path, content_matches):
-    path = Path(__file__).resolve().parents[1] / "tools/sync_agent_package.py"
+    path = Path(__file__).resolve().parents[1] / "tools/scripts/agent/sync_package.py"
     spec = importlib.util.spec_from_file_location("agent_sync_modes", path)
     sync = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(sync)
@@ -53,7 +53,7 @@ def _init_agent_repo(tmp_path: Path) -> tuple:
 def _load_sync():
     import importlib.util
 
-    path = Path(__file__).resolve().parents[1] / "tools/sync_agent_package.py"
+    path = Path(__file__).resolve().parents[1] / "tools/scripts/agent/sync_package.py"
     spec = importlib.util.spec_from_file_location("agent_sync_guard", path)
     sync = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(sync)

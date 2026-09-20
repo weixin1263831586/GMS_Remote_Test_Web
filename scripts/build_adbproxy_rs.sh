@@ -3,40 +3,44 @@ set -euo pipefail
 
 # Build the pinned adbproxy-rs source once on the Controller. Workers receive
 # only the resulting static Linux package and never need GitHub or Rust.
+#
+# usbip 模式（见 tools/adbproxy-rs/adbproxy-rs.provenance.json）：源码不入
+# 主仓库，构建时从 GMS fork clone provenance 清单锁定的 commit。
 ADBPROXY_VERSION="0.4.5"
 ADBPROXY_SOURCE_COMMIT="f2beb4ff1bece8ab8f5d63c04dbfd6bf90aae8ee"
-ADBPROXY_SOURCE_SHA256="347a1885fcd36cc721287d1f124370dacef8e2e1e2649d4f6c73516a87bf4d06"
 ADBPROXY_TARGET="x86_64-unknown-linux-musl"
 ADBPROXY_BUILDER_IMAGE="${GMS_ADB_PROXY_BUILDER_IMAGE:-rust:1.88-bookworm}"
+ADBPROXY_SOURCE_REPO="${GMS_ADBPROXY_SOURCE_REPO:-https://github.com/weixin1263831586/adbproxy-rs}"
 
 ADBPROXY_SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADBPROXY_PROJECT_ROOT="$(cd "${ADBPROXY_SCRIPT_ROOT}/.." && pwd)"
-ADBPROXY_SOURCE_ARCHIVE="${ADBPROXY_PROJECT_ROOT}/tools/adbproxy-rs/adbproxy-rs-v${ADBPROXY_VERSION}-source.tar.gz"
 ADBPROXY_DIST_ROOT="${ADBPROXY_PROJECT_ROOT}/tools/adbproxy-rs/dist"
 ADBPROXY_PACKAGE_NAME="adbproxy-rs-linux-x86_64-musl.tar.gz"
 ADBPROXY_PACKAGE="${ADBPROXY_DIST_ROOT}/${ADBPROXY_PACKAGE_NAME}"
 ADBPROXY_CHECKSUM="${ADBPROXY_PACKAGE}.sha256"
 
-for command_name in sha256sum tar; do
+for command_name in git sha256sum tar; do
     command -v "${command_name}" >/dev/null 2>&1 || {
         echo "Missing required command: ${command_name}" >&2
         exit 1
     }
 done
 
-[[ -f "${ADBPROXY_SOURCE_ARCHIVE}" ]] || {
-    echo "Pinned adbproxy-rs source archive is missing: ${ADBPROXY_SOURCE_ARCHIVE}" >&2
-    exit 1
-}
-printf '%s  %s\n' "${ADBPROXY_SOURCE_SHA256}" "${ADBPROXY_SOURCE_ARCHIVE}" |
-    sha256sum --check -
-
 ADBPROXY_BUILD_ROOT="$(mktemp -d)"
 trap 'rm -rf -- "${ADBPROXY_BUILD_ROOT}"' EXIT
-tar -xzf "${ADBPROXY_SOURCE_ARCHIVE}" -C "${ADBPROXY_BUILD_ROOT}"
-ADBPROXY_SOURCE_ROOT="${ADBPROXY_BUILD_ROOT}/adbproxy-rs-v${ADBPROXY_VERSION}"
+
+# Clone the GMS fork and detach at the commit pinned in the provenance
+# manifest; the checked-out HEAD must match exactly (no drifting builds).
+git clone "${ADBPROXY_SOURCE_REPO}" "${ADBPROXY_BUILD_ROOT}/src"
+git -C "${ADBPROXY_BUILD_ROOT}/src" checkout --detach "${ADBPROXY_SOURCE_COMMIT}"
+ADBPROXY_CHECKED_COMMIT="$(git -C "${ADBPROXY_BUILD_ROOT}/src" rev-parse HEAD)"
+[[ "${ADBPROXY_CHECKED_COMMIT}" == "${ADBPROXY_SOURCE_COMMIT}" ]] || {
+    echo "Checked out ${ADBPROXY_CHECKED_COMMIT} != pinned ${ADBPROXY_SOURCE_COMMIT}" >&2
+    exit 1
+}
+ADBPROXY_SOURCE_ROOT="${ADBPROXY_BUILD_ROOT}/src"
 [[ -f "${ADBPROXY_SOURCE_ROOT}/Cargo.lock" ]] || {
-    echo "Source archive is missing Cargo.lock" >&2
+    echo "Source tree is missing Cargo.lock" >&2
     exit 1
 }
 
@@ -56,7 +60,7 @@ build_with_docker() {
     }
     docker run --rm \
         -v "${ADBPROXY_BUILD_ROOT}:/work" \
-        -w "/work/adbproxy-rs-v${ADBPROXY_VERSION}" \
+        -w "/work/src" \
         "${ADBPROXY_BUILDER_IMAGE}" \
         bash -ceu '
             trap '"'"'chown -R '"$(id -u):$(id -g)"' /work'"'"' EXIT
@@ -95,10 +99,9 @@ for binary_name in adb-proxy adb-hub adb-hubd; do
 done
 
 {
-    printf 'project=https://github.com/Ken-u/adbproxy-rs\n'
+    printf 'source_repo=%s\n' "${ADBPROXY_SOURCE_REPO}"
     printf 'version=%s\n' "${ADBPROXY_VERSION}"
     printf 'source_commit=%s\n' "${ADBPROXY_SOURCE_COMMIT}"
-    printf 'source_sha256=%s\n' "${ADBPROXY_SOURCE_SHA256}"
     printf 'target=%s\n' "${ADBPROXY_TARGET}"
 } > "${ADBPROXY_STAGE}/BUILDINFO"
 

@@ -41,7 +41,7 @@ import mcp_launcher  # noqa: E402
 from gms_agent import client as gms_client  # noqa: E402
 
 
-SYNC_SCRIPT = REPO_ROOT / "tools" / "sync_agent_package.py"
+SYNC_SCRIPT = REPO_ROOT / "tools" / "scripts" / "agent" / "sync_package.py"
 
 
 class EnvSandbox(unittest.TestCase):

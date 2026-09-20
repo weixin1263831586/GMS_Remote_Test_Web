@@ -18,7 +18,7 @@ command family, and tab completion lists their action suffixes. Use
 `gms-rt-devices-list` for inventory. The stable MCP inventory tool remains
 `gms_rt_devices`; its description names the CLI equivalent.
 
-Run `python tools/audit_gms_agent_contract.py` from the repository root to
+Run `python tools/scripts/agent/audit_contract.py` from the repository root to
 detect drift among implementations, the CLI catalog, these docs, and MCP
 schemas/handlers.
 

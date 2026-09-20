@@ -5,7 +5,7 @@ the served bytes and the released artifact can never drift apart
 ("ZIP 构建只能有一个实现"):
 
   * features/system/agent_package_registry.py (Controller registry)
-  * tools/build_agent_package.py (release builder)
+  * tools/scripts/agent/build_package.py (release builder)
 
 Layout contract — a SINGLE package root, identical for every client
 variant (only the bundled manifests differ):

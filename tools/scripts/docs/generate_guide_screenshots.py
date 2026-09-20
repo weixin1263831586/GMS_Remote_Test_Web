@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -15,8 +16,11 @@ from urllib.request import urlopen
 
 from playwright.sync_api import sync_playwright
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _common import find_repo_root  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
+
+ROOT = find_repo_root()
 OUTPUT = ROOT / "web/static/images/guide"
 VIEWPORT = {"width": 1600, "height": 920}
 

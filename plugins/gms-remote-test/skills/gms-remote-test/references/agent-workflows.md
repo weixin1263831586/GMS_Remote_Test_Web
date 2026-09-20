@@ -232,9 +232,9 @@ elevation active.
 ## 9. Install / upgrade
 
 ```bash
-python tools/gms_agent_dev.py install --client codex \
+python tools/scripts/agent/dev.py install --client codex \
   --server https://CONTROLLER:5001 --ca-cert /etc/gms/controller-ca.pem
-python tools/gms_agent_dev.py doctor --client codex --json
+python tools/scripts/agent/dev.py doctor --client codex --json
 gms-agent profile list --client codex
 ```
 

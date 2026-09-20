@@ -779,7 +779,7 @@ function ut_loadToolsList() {
                 icon: '📦',
                 title: 'Gerrit Patch导出与导入',
                 description: '从Gerrit导出patch并应用到本地Android源码，支持批量导出Change的patch文件到指定目录，也支持将patch应用到本地代码',
-                file_path: 'gerrit_patch_export_and_apply_tool.sh'
+                tool_id: 'gerrit-patch'
             }
         ],
         '测试工具': []
@@ -998,8 +998,8 @@ function ut_createToolCard(tool, category, index, cardColor) {
         card.addEventListener('click', () => shareFirmware());
     } else if (tool.url) {
         card.addEventListener('click', () => openToolLink(tool.url));
-    } else if (tool.file_path && tool.action !== 'mainline-sync') {
-        card.addEventListener('click', () => ut_downloadTool(tool.file_path, tool.title));
+    } else if (tool.tool_id && tool.action !== 'mainline-sync') {
+        card.addEventListener('click', () => ut_downloadTool(tool.tool_id, tool.title));
     }
     card.addEventListener('mouseenter', () => {
         card.style.transform = 'translateY(-2px)';
@@ -1052,9 +1052,9 @@ function ut_createToolCard(tool, category, index, cardColor) {
         });
         actions.appendChild(downloadBtn);
     }
-    // 有 file_path 且无 url 的下载型工具不显示下载按钮（点击卡片即下载）
+    // 有 tool_id 且无 url 的下载型工具不显示下载按钮（点击卡片即下载）
     // 只有有 url 的非内置工具才显示下载按钮
-    const isDownloadOnlyTool = !isSyncTool && tool.file_path && !tool.url;
+    const isDownloadOnlyTool = !isSyncTool && tool.tool_id && !tool.url;
     if (!tool.builtin_id && !isSyncTool && !isShareFirmwareTool && !isDownloadOnlyTool) {
         const downloadBtn = document.createElement('button');
         downloadBtn.textContent = '下载';
@@ -1064,7 +1064,7 @@ function ut_createToolCard(tool, category, index, cardColor) {
         downloadBtn.addEventListener('mouseleave', () => { downloadBtn.style.opacity = '1'; });
         downloadBtn.addEventListener('click', (event) => {
             event.stopPropagation();
-            ut_downloadTool(tool.file_path, tool.title);
+            ut_downloadTool(tool.tool_id, tool.title);
         });
         actions.appendChild(downloadBtn);
     }
@@ -1473,12 +1473,12 @@ async function pollTestSuiteDownload(taskId, button) {
     }
 }
 
-function ut_downloadTool(filePath, title) {
-    if (!filePath) {
+function ut_downloadTool(toolId, title) {
+    if (!toolId) {
         showToast('该工具未配置下载文件', 'warning');
         return;
     }
-    const encodedPath = String(filePath).split('/').map(encodeURIComponent).join('/');
+    const encodedPath = String(toolId).split('/').map(encodeURIComponent).join('/');
     const a = document.createElement('a');
     a.href = `/api/tools/download/${encodedPath}`;
     a.download = '';
@@ -1510,7 +1510,7 @@ function ut_editTool(category, index) {
     document.getElementById('ut-tool-title').value = tool.title || '';
     document.getElementById('ut-tool-icon').value = tool.icon || '';
     document.getElementById('ut-tool-desc').value = tool.description || '';
-    document.getElementById('ut-tool-filepath').value = tool.file_path || '';
+    document.getElementById('ut-tool-filepath').value = tool.tool_id || tool.file_path || '';
     ModalManager.open('ut-tool-modal');
 }
 
@@ -1528,7 +1528,7 @@ function ut_saveTool() {
         ut_categorizedTools[category] = [];
     }
 
-    const toolData = { icon, title, description, file_path: filePath };
+    const toolData = { icon, title, description, tool_id: filePath };
 
     if (ut_editingTool) {
         // 编辑模式
@@ -1633,7 +1633,7 @@ async function ut_browseFiles() {
     state.fileBrowser.targetInputId = 'ut-tool-filepath';
     state.fileBrowser.selectedFile = null;
     state.fileBrowser.currentPath = '';
-    document.getElementById('file-browser-title').textContent = '选择工具文件 (tools/)';
+    document.getElementById('file-browser-title').textContent = '选择可下载工具';
     ModalManager.open('file-browser-modal');
     await ut_loadToolDir('');
 }
@@ -1650,7 +1650,7 @@ async function ut_loadToolDir(subpath) {
         state.fileBrowser.currentPath = data.path || '';
         // 复用 app.js 中的 renderFileList 来渲染文件列表
         const pathDisplay = document.getElementById('file-browser-current-path');
-        pathDisplay.textContent = 'tools/' + (data.path || '');
+        pathDisplay.textContent = '可下载工具清单';
         const listContainer = document.getElementById('file-browser-list');
         if (data.files.length === 0) {
             listContainer.innerHTML = '<div class="file-browser-item" style="cursor: default; color: var(--text-muted);">空目录</div>';
@@ -1661,7 +1661,7 @@ async function ut_loadToolDir(subpath) {
             const item = document.createElement('div');
             item.className = 'file-browser-item';
             item.addEventListener('click', (event) => selectFileForSelection(file.name, file.type, event));
-            item.addEventListener('dblclick', () => ut_openToolFileOrDir(file.name, file.type));
+            item.addEventListener('dblclick', () => ut_openToolFileOrDir(file.name, file.type, file.tool_id));
 
             const icon = document.createElement('span');
             icon.className = 'file-browser-icon';
@@ -1686,12 +1686,13 @@ async function ut_loadToolDir(subpath) {
     }
 }
 
-function ut_openToolFileOrDir(name, type) {
+function ut_openToolFileOrDir(name, type, toolId) {
     if (type === 'directory') {
         const current = state.fileBrowser.currentPath;
         const newPath = current ? current + '/' + name : name;
         ut_loadToolDir(newPath);
     } else {
         selectFileForSelection(name, type);
+        if (toolId) state.fileBrowser.selectedFile.tool_id = toolId;
     }
 }

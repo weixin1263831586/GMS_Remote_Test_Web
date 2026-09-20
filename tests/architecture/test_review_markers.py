@@ -79,7 +79,10 @@ FORBIDDEN_PATTERNS = [
     (re.compile(r"评审意见|评审第|工单\s*P"), "review-round wording"),
 ]
 
-_EXCLUDED_DIR_NAMES = {"__pycache__", ".venv", "node_modules", "dist"}
+# 第三方本地 clone（gitignore，如 tools/android-internals-wiki）不属于
+# 本仓库生产源码，不参与评审标记扫描。
+_EXCLUDED_DIR_NAMES = {"__pycache__", ".venv", "node_modules", "dist",
+                       "android-internals-wiki"}
 
 
 def _candidate_files() -> list[Path]:

@@ -48,7 +48,7 @@ GMS_RT_PROFILE — those become implementation details:
         agent client. Multi-Controller hosts never use first-match routing.
 
 Package layout contract (single root, produced by
-features/system/agent_package_builder.py and tools/build_agent_package.py):
+features/system/agent_package_builder.py and tools/scripts/agent/build_package.py):
 
     gms-remote-test/
       scripts/          gms-remote-test.sh, mcp_server.py, gms-agent, ...

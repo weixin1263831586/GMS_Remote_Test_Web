@@ -6,7 +6,7 @@
 per-owner 文件保留原样（其中的 departments 键被新读侧忽略，个人别名
 如需保留可后续手工并入）。
 
-用法：python tools/migrate_redmine_org_chart.py [--dry-run]
+用法：python tools/scripts/migrations/migrate_redmine_org_chart.py [--dry-run]
 幂等：canonical 已存在时不覆盖（除非 --force）。
 """
 
@@ -17,8 +17,11 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from _common import find_repo_root  # noqa: E402
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+PROJECT_ROOT = find_repo_root()
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from features.redmine.org_chart import (  # noqa: E402

@@ -2,7 +2,7 @@
 
 > Template source: this file lives at
 > `agent/gms-remote-test/templates/PLUGIN_AGENTS.md` and is synced to
-> `plugins/gms-remote-test/AGENTS.md` by `tools/sync_agent_package.py`.
+> `plugins/gms-remote-test/AGENTS.md` by `tools/scripts/agent/sync_package.py`.
 > It is NOT the instruction file for the canonical `agent/` tree —
 > the root `AGENTS.md` governs that tree. The "generated payload"
 > statements below describe the destination plugin tree, not this file.
@@ -31,14 +31,14 @@ especially before editing a generated file by hand.
 
 1. Edit the CLI / MCP adapter / SKILL / manifests under
    `agent/gms-remote-test/` — never in this generated copy.
-2. `python tools/release_agent.py --version X.Y.Z` to bump the single
+2. `python tools/scripts/agent/release.py --version X.Y.Z` to bump the single
    declared version (or skip when the same version is still valid), which
-   regenerates this payload via `python tools/sync_agent_package.py`.
+   regenerates this payload via `python tools/scripts/agent/sync_package.py`.
 3. Adapter changes: keep every existing tool name and argument contract
    (API compatibility); add tests under `agent/gms-remote-test/tests/`.
 4. Run `python3 -m pytest agent/gms-remote-test/tests -q` and
    `python3 -m pytest plugins/gms-remote-test/tests -q` as separate
-   processes, then `python tools/audit_gms_agent_contract.py` (the sync
+   processes, then `python tools/scripts/agent/audit_contract.py` (the sync
    enforces the six-way version contract).
 
 ## Security boundary (do not weaken)
@@ -99,6 +99,6 @@ especially before editing a generated file by hand.
 python3 -m pytest agent/gms-remote-test/tests -q   # source-tree tests
 python3 -m pytest plugins/gms-remote-test/tests -q # generated-payload tests
 bash -n agent/gms-remote-test/runtime/gms-remote-test.sh  # CLI syntax
-python tools/sync_agent_package.py .               # regenerate + version contract
+python tools/scripts/agent/sync_package.py .               # regenerate + version contract
 git diff --exit-code -- plugins/gms-remote-test/   # payload must be in sync
 ```

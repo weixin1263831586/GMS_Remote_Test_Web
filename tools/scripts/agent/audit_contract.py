@@ -7,11 +7,15 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _common import find_repo_root  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
+
+ROOT = find_repo_root()
 AGENT_ROOT = ROOT / "agent" / "gms-remote-test"
 CLI = AGENT_ROOT / "runtime" / "gms-remote-test.sh"
 MCP = AGENT_ROOT / "runtime" / "mcp_server.py"
