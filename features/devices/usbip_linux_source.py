@@ -1,6 +1,6 @@
 """Ubuntu/Linux USB/IP 来源主机支持。
 
-来源侧使用 ``tools/usbipd``（用户态 USB/IP 服务端，fork 自
+来源侧使用 ``tools/usbip/usbipd``（用户态 USB/IP 服务端，fork 自
 jiegec/usbip）导出 Android 设备；接入侧（Controller/Worker）继续使用
 内核 ``vhci_hcd`` + ``usbip attach``，与 Windows 来源完全一致。
 
@@ -11,7 +11,7 @@ jiegec/usbip）导出 Android 设备；接入侧（Controller/Worker）继续使
 - BUSID 由服务端按 ``busnum-address-port`` 派生，可用 udev 属性预测。
 
 来源缺少可用 usbipd（未安装或版本过低）时，``ensure_ubuntu_usbip_server``
-会先自动部署随平台分发的 ``tools/usbipd``：优先 sudo 安装到
+会先自动部署随平台分发的 ``tools/usbip/usbipd``：优先 sudo 安装到
 ``/usr/local/bin``，无免密 sudo 的主机回退安装到 ``~/.local/bin``。
 
 生命周期与安全约定：
@@ -48,8 +48,8 @@ LINUX_USBIPD_PID_FILE = "$HOME/.local/state/gms-usbipd.pid"
 
 LINUX_USBIPD_INSTALL_GUIDE = (
     "Ubuntu来源主机需要用户态usbipd服务端(v0.9.5+)。可由平台自动上传"
-    "（仓库 tools/usbipd），或手动执行：\n"
-    "scp tools/usbipd USER@HOST:/tmp/usbipd\n"
+    "（仓库 tools/usbip/usbipd），或手动执行：\n"
+    "scp tools/usbip/usbipd USER@HOST:/tmp/usbipd\n"
     "ssh USER@HOST \"sudo install -m 0755 /tmp/usbipd /usr/local/bin/usbipd\"\n"
     "验证安装：usbipd --version"
 )
@@ -739,13 +739,13 @@ def install_ubuntu_usbipd(
     ssh,
     local_binary: str | None = None,
 ) -> dict[str, Any]:
-    """Upload tools/usbipd to the Ubuntu source and install it.
+    """Upload tools/usbip/usbipd to the Ubuntu source and install it.
 
     优先 ``sudo -n install`` 到 ``/usr/local/bin``；主机无免密 sudo 时回退
     安装到用户目录 ``~/.local/bin``（解析时取候选中版本最高者，二者等价）。
     """
     binary = local_binary or str(
-        Path(__file__).resolve().parents[2] / "tools" / "usbipd"
+        Path(__file__).resolve().parents[2] / "tools" / "usbip" / "usbipd"
     )
     if not Path(binary).is_file():
         return {

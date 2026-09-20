@@ -17,7 +17,7 @@ agent/gms-remote-test/  手工维护的 CLI / MCP / Skill / 清单 / 包生命�
 plugins/gms-remote-test/ 由 sync 生成的插件载荷（禁止手改）
 web/             浏览器 shell 与静态前端（shell / static / templates）
 tests/           architecture / contract / unit / integration / e2e / reliability / soak
-tools/           包发布、同步、校验工具（如 release_agent.py、sync_agent_package.py）
+tools/           外部工具 + 项目维护脚本 tools/scripts/<category>/（见 tools/README.md）
 scripts/         部署、运维与脱敏脚本
 ```
 
@@ -57,7 +57,7 @@ bootstrap/           →  foundation/ / features/
   `features/`、`workflows/` 下**未被登记**的新 Python 模块上限 **600 行**；
   历史超限模块登记在 `MIGRATION_LINE_LIMITS` 中，不得超过各自登记值（债务可
   缩小、不可增长）。真正拆小文件后应同步收紧预算值，可用
-  `python tools/update_size_baseline.py --shrink-only` 一键把预算降到当前
+  `python tools/scripts/maintenance/update_size_baseline.py --shrink-only` 一键把预算降到当前
   实际行数（只降不升；增长中的文件保持原预算让门禁继续报警）。
 - **前端体积预算**（`test_frontend_size_rules.py`）：扫描 `web/shell/`、
   `web/static/css/`、`web/static/js/`。未登记文件默认上限 HTML **100 KB**、
@@ -101,7 +101,7 @@ bootstrap/           →  foundation/ / features/
   启动装配、前端交互与稳定性/耐久测试。
 - **Agent 包与生成树分开跑**：`agent/gms-remote-test/tests`（源码）与
   `plugins/gms-remote-test/tests`（生成载荷）必须在**独立 pytest 进程**中分别
-  运行，随后跑秘密扫描与 `tools/release_agent.py --check`。参考
+  运行，随后跑秘密扫描与 `tools/scripts/agent/release.py --check`。参考
   `agent/gms-remote-test/skill/references/project-map.md` 的测试路由表。
 
 `conftest.py` 在应用导入前设置测试环境（`GMS_SKIP_RUNTIME_ENV=1`、
@@ -127,14 +127,14 @@ python -m pytest tests/test_frontend_integrity.py -q
 # Agent 包一键自检与发布（Makefile）
 make agent-check              # 双向 pytest + secrets 扫描 + release --check
 make agent-release V=X.Y.Z    # 改版本号（内部自动 sync）→ 复跑完整自检
-make agent-sync-check         # 校验 sync_agent_package 幂等（plugins/ 无漂移）
+make agent-sync-check         # 校验 sync_package 幂等（plugins/ 无漂移）
 
 # 源树改动后同步生成树
-python tools/sync_agent_package.py .
+python tools/scripts/agent/sync_package.py .
 ```
 
 `make agent-check` 的四步顺序（两个独立 pytest 进程 → 秘密扫描 →
-`tools/release_agent.py --check`）是硬性要求，勿合并为单进程。
+`tools/scripts/agent/release.py --check`）是硬性要求，勿合并为单进程。
 
 ## 文档政策
 
@@ -148,7 +148,7 @@ python tools/sync_agent_package.py .
   模块与架构测试。
 - **生成的树 `plugins/` 禁止手改**：任何 Agent 包源改动都要在
   `agent/gms-remote-test/` 下完成，随后用
-  `python tools/sync_agent_package.py .` 同步生成 `plugins/`，并跑
+  `python tools/scripts/agent/sync_package.py .` 同步生成 `plugins/`，并跑
   `make agent-sync-check` 确认无漂移。
 
 ## 提交前检查清单
@@ -159,7 +159,7 @@ python tools/sync_agent_package.py .
    通过（行数预算只减不增、SSH/shell 边界、路由授权均满足）。
 3. Shell：`bash -n` 通过，CLI 契约测试通过。
 4. Agent 包：源码与 `plugins/` 生成树分别跑 pytest，秘密扫描通过，
-   `tools/release_agent.py --check` 通过（`make agent-check`）。
+   `tools/scripts/agent/release.py --check` 通过（`make agent-check`）。
 5. 前端：`node --check` 与前端完整性/重复导航检查通过。
 6. 对外契约变更同步更新 `tests/contract/snapshots/` 并在评审中说明差异。
 7. 架构决策或安边界变化已补入 `docs/architecture/adr/`。

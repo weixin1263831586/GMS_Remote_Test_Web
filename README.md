@@ -123,10 +123,10 @@ foundation/    共享基座：配置、进程、SSH 执行、响应、持久化
 features/      业务域（FastAPI 路由 + service + repository + tests）
 worker_agent/  Worker 侧执行与 Controller 通信
 agent/         gms-remote-test Agent Package（唯一手改源）
-plugins/       Agent 插件生成树（勿手改，用 tools/sync_agent_package.py 同步）
+plugins/       Agent 插件生成树（勿手改，用 tools/scripts/agent/sync_package.py 同步）
 web/           浏览器 Shell 与静态前端
 tests/         单元 / 契约 / 架构门禁 / E2E
-tools/         同步、发布与文档生成脚本
+tools/         外部工具与项目维护脚本（维护脚本在 tools/scripts/，见 tools/README.md）
 docs/          架构 / 部署 / USB-IP / Agent / CLI 文档
 ```
 
@@ -138,7 +138,7 @@ docs/          架构 / 部署 / USB-IP / Agent / CLI 文档
 - [部署](docs/deployment/quick-install.md)（安装 / 生产 / 配置 / Worker / 排障）
 - [USB/IP 与固件烧写](docs/usbip/overview.md)
 - [Agent Runtime](docs/agent/overview.md)
-- [gms-rt 命令参考](docs/cli/command-reference.md)（由 `tools/generate_cli_docs.py` 生成）
+- [gms-rt 命令参考](docs/cli/command-reference.md)（由 `tools/scripts/docs/generate_cli_docs.py` 生成）
 - [安全模型](docs/security.md)
 - [开发指南](docs/development.md)
 
@@ -149,8 +149,8 @@ pip install -r requirements-dev.txt
 PYTHONPATH=. python3 -m pytest features/<feature>/tests -q   # 目标 feature 测试
 PYTHONPATH=. python3 -m pytest tests/architecture -q          # 架构门禁
 python3 -m ruff check .
-python tools/sync_agent_package.py                            # 修改 agent 源后同步生成树
-python3 tools/generate_cli_docs.py                            # 新增 CLI 命令后刷新文档
+python tools/scripts/agent/sync_package.py                            # 修改 agent 源后同步生成树
+python3 tools/scripts/docs/generate_cli_docs.py                            # 新增 CLI 命令后刷新文档
 ```
 
 约束与门禁详见 [docs/development.md](docs/development.md)：源码注释不得引用不存在的评审文档编号（架构决策写入 `docs/architecture/adr/`）；`plugins/` 生成树不手改；SSH / shell 执行边界与文件行数预算由 `tests/architecture/` 强制。

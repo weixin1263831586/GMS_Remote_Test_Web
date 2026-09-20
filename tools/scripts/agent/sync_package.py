@@ -33,7 +33,7 @@ The tool also enforces:
     See docs/architecture/adr/0003-agent-profile-store.md.
 
 Usage:
-    python tools/sync_agent_package.py [repo_root]
+    python tools/scripts/agent/sync_package.py [repo_root]
 """
 
 from __future__ import annotations
@@ -44,13 +44,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _common import find_repo_root  # noqa: E402
+
 
 PLUGIN_ID = "gms-remote-test"
 PRESERVED_IN_PLUGIN = {"scripts/install_local.sh", "__pycache__"}
 
 
 def repo_root_arg() -> Path:
-    root = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path(__file__).resolve().parents[1]
+    root = (
+        Path(sys.argv[1]).resolve()
+        if len(sys.argv) > 1
+        else find_repo_root()
+    )
     return root
 
 
@@ -153,7 +160,7 @@ def r16_guard(root: Path, source: Path, version: str, pattern: str, label: str) 
     ).hexdigest():
         fail(
             f"{label} content changed at the same version ({version}). "
-            "Bump the version with tools/release_agent.py, then re-run sync."
+            "Bump the version with tools/scripts/agent/release.py, then re-run sync."
         )
 
 
@@ -227,7 +234,7 @@ def r16_tree_guard(
         return
     fail(
         f"{label} tree content changed at the same version ({version}). "
-        "Bump the version with tools/release_agent.py, then re-run sync."
+        "Bump the version with tools/scripts/agent/release.py, then re-run sync."
     )
 
 
@@ -236,8 +243,8 @@ GENERATED_MD = """# GENERATED — DO NOT EDIT THIS DIRECTORY DIRECTLY
 Everything under `plugins/gms-remote-test/` is a generated release payload.
 
 - Generated from: `agent/gms-remote-test/`
-- Regenerate with: `python tools/sync_agent_package.py`
-- Release flow: `python tools/release_agent.py --version X.Y.Z`
+- Regenerate with: `python tools/scripts/agent/sync_package.py`
+- Release flow: `python tools/scripts/agent/release.py --version X.Y.Z`
 
 The only hand-maintained exception is `scripts/install_local.sh`, a dev
 utility that registers THIS generated tree into a local kkagent.
@@ -287,7 +294,7 @@ def main() -> int:
         for name, value in declarations.items():
             marker = "" if value == package_version else "  != package.yaml"
             print(f"  {name}: {value}{marker}", file=sys.stderr)
-        fail(f"version drift against package.yaml {package_version}; fix with tools/release_agent.py")
+        fail(f"version drift against package.yaml {package_version}; fix with tools/scripts/agent/release.py")
 
     # --- same-version content guard --------------------------------------
     # A version must never silently change payload content.

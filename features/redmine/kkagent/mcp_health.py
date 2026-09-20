@@ -50,7 +50,7 @@ def _repair_hint(profile: str) -> str:
         f" --profile {profile}" if profile else ""
     )
     return (
-        f"修复：先在仓库内运行 python tools/sync_agent_package.py . 同步插件"
+        f"修复：先在仓库内运行 python tools/scripts/agent/sync_package.py . 同步插件"
         f" payload，再执行 {install}；详情见 gms-agent doctor --client"
         " kkagent --json。"
     )

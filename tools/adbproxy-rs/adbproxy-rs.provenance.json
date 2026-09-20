@@ -1,0 +1,18 @@
+{
+  "artifacts": [
+    "tools/adbproxy-rs/dist/adbproxy-rs-linux-x86_64-musl.tar.gz",
+    "tools/adbproxy-rs/dist/adbproxy-rs-linux-x86_64-musl.tar.gz.sha256"
+  ],
+  "description": "ADB over TCP 代理（fork 自 Ken-u/adbproxy-rs，含 GMS 补丁）。Controller 上 scripts/build_adbproxy_rs.sh 构建，经 features/cluster/deployment_api.py 离线分发给 Ubuntu 来源 Worker；Worker 安装不访问 GitHub、不需要 Rust。",
+  "source_repo": "weixin1263831586/adbproxy-rs",
+  "source": "https://github.com/weixin1263831586/adbproxy-rs",
+  "upstream": "https://github.com/Ken-u/adbproxy-rs",
+  "pinned_version": "0.4.5",
+  "pinned_commit": "f2beb4ff1bece8ab8f5d63c04dbfd6bf90aae8ee",
+  "target": "x86_64-unknown-linux-musl（静态链接）",
+  "builder_image": "rust:1.88-bookworm（可经 GMS_ADB_PROXY_BUILDER_IMAGE 覆盖）",
+  "license": "MIT（声明于上游 Cargo.toml）",
+  "gms_patches": "device policy 默认拒绝：source 连接需显式目标 peer IP 白名单；shared hub 保留 TCP/5037 且本地 ADB side server 后启动；Linux peer UID 查找支持 FIN_WAIT1/FIN_WAIT2 半关闭 Tradefed 连接并在 accept() 后立即执行；multipart NLM_F_DUMP 响应读到 NLMSG_DONE，高连接数不会把客户端藏到首个 netlink 缓冲区之外；--single-user 模式（本平台使用）使用经典进程内聚合器并在 host:kill 后保活 managed hub，启动时抢占 TCP/5037 防止并发 inventory 探测拉起系统 ADB 抢占端口。",
+  "build": "scripts/build_adbproxy_rs.sh：从本清单 source 仓库 clone pinned_commit，cargo test --locked + cargo build --locked --release --bins --target musl，校验静态链接后打包 dist/ 并写 BUILDINFO 与 .sha256",
+  "update_procedure": "在 fork 上基于上游新版本 rebase GMS 补丁后打 tag；更新本清单 pinned_version/pinned_commit 与 gms_patches，在 Controller 重跑 scripts/build_adbproxy_rs.sh 生成新 dist/（.sha256 自动刷新）。源码不入主仓库；dist/ 是唯一的分发工件。"
+}

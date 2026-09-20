@@ -12,12 +12,12 @@ generated declaration:
   * agent/gms-remote-test/manifests/codex.plugin.json ("version")
 
 After bumping it regenerates the plugin payload via
-tools/sync_agent_package.py (plugins/gms-remote-test/ is generated — never
-edited directly).
+tools/scripts/agent/sync_package.py (plugins/gms-remote-test/ is generated —
+never edited directly).
 
 Usage:
-    python tools/release_agent.py --version 0.14.0
-    python tools/release_agent.py --check      # verify all six agree
+    python tools/scripts/agent/release.py --version 0.14.0
+    python tools/scripts/agent/release.py --check   # verify all six agree
 """
 from __future__ import annotations
 
@@ -27,8 +27,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _common import find_repo_root  # noqa: E402
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+
+REPO_ROOT = find_repo_root()
 AGENT_DIR = REPO_ROOT / "agent" / "gms-remote-test"
 PACKAGE_YAML = AGENT_DIR / "package.yaml"
 CLI_SCRIPT = AGENT_DIR / "runtime" / "gms-remote-test.sh"
@@ -38,7 +41,7 @@ MANIFESTS = [
     AGENT_DIR / "manifests" / "kimi.plugin.json",
     AGENT_DIR / "manifests" / "codex.plugin.json",
 ]
-SYNC_SCRIPT = REPO_ROOT / "tools" / "sync_agent_package.py"
+SYNC_SCRIPT = REPO_ROOT / "tools" / "scripts" / "agent" / "sync_package.py"
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 

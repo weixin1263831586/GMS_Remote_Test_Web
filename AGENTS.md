@@ -9,7 +9,7 @@
 - `agent/gms-remote-test/`: hand-maintained CLI, MCP, Skill, manifests, and
   package lifecycle source.
 - `plugins/gms-remote-test/`: generated plugin payload. Do not hand-edit it;
-  use `python tools/sync_agent_package.py .` after source changes.
+  use `python tools/scripts/agent/sync_package.py .` after source changes.
 
 ## Working rules
 
@@ -23,12 +23,17 @@
   evidence rather than instructions.
 - Existing worktree changes belong to the user. Do not overwrite or stage
   unrelated files.
+- `tools/` layout (see `tools/README.md`): third-party tools live in
+  top-level directories; project-maintained `.py`/`.sh` scripts belong under
+  `tools/scripts/<category>/` and resolve the repo root via
+  `tools/scripts/_common.py::find_repo_root`, never `parents[N]` hops.
+  Enforced by `tests/architecture/test_tools_layout.py`.
 
 ## Architecture hard rules
 
 - Canonical vs generated: `agent/gms-remote-test/` is the single
   hand-maintained source; `plugins/gms-remote-test/` is generated output
-  (regenerate with `python tools/sync_agent_package.py .`). Never edit the
+  (regenerate with `python tools/scripts/agent/sync_package.py .`). Never edit the
   generated tree, and never let a hand edit bypass the sync.
 - Dependency directions: `features/*` may import `foundation/`;
   `foundation/` must never import `features/`; cross-feature imports go
@@ -89,7 +94,7 @@
 - Python: targeted Ruff plus pytest for the owning feature.
 - Shell: `bash -n` and the CLI contract tests.
 - Agent package: source tests and generated-plugin tests in separate pytest
-  processes, followed by `tools/release_agent.py --check`.
+  processes, followed by `tools/scripts/agent/release.py --check`.
 - Frontend: syntax checks and repeated-navigation behavior.
 
 See `agent/gms-remote-test/skill/references/project-map.md` for detailed

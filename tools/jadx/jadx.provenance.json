@@ -1,0 +1,14 @@
+{
+  "artifacts": [
+    "tools/jadx/bin/",
+    "tools/jadx/lib/"
+  ],
+  "description": "dex/java 反编译器（skylot/jadx 的 GMS fork 发行包），平台 APK 分析链路使用其 CLI；fork 保留用于推送自有优化。",
+  "source_repo": "weixin1263831586/jadx",
+  "source": "https://github.com/weixin1263831586/jadx",
+  "upstream": "https://github.com/skylot/jadx",
+  "pinned_version": "1.4.0",
+  "license": "GPL-3.0（原 LICENSE/NOTICE/README 随发行包分发；目录精简后以本清单记录，完整文本见上游仓库）",
+  "artifacts_note": "bin/ 为启动脚本（jadx/jadx-gui/jadx-jdk11 等），lib/ 为全部依赖 jar（jadx-core-1.4.0.jar 可核对实际版本）；上游原始 LICENSE/NOTICE 不再落库。",
+  "update_procedure": "目录只保留 bin/ 与 lib/，源码不入主仓库。更新：从 fork（或上游 release 页）下载新版 jadx-*.zip，用其中的 bin/ lib/ 覆盖（保留本清单），刷新 pinned_version 并核对 lib/ 下 jadx-core-<版本>.jar 与发行 tag 一致。"
+}

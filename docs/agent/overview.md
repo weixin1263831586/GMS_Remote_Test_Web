@@ -32,24 +32,24 @@ Agent 与 Worker Agent 的边界：Agent 通过 Controller 的 HTTP API 驱动�
 
 ```text
 agent/gms-remote-test/            手工维护的源码根（CLI、MCP adapter、SDK、Skill、manifest）
-        │  python tools/sync_agent_package.py
+        │  python tools/scripts/agent/sync_package.py
         ▼
 plugins/gms-remote-test/          生成结果，禁止手改
-        │  python tools/build_agent_package.py
+        │  python tools/scripts/agent/build_package.py
         ▼
 dist 分发包（由 features/system/agent_package_builder.py 与该工具产出，
-            发布走 python tools/release_agent.py --version X.Y.Z）
+            发布走 python tools/scripts/agent/release.py --version X.Y.Z）
 ```
 
 规则：
 
 - **只改源码根** `agent/gms-remote-test/`，然后运行
-  `python tools/sync_agent_package.py` 重新生成 `plugins/gms-remote-test/`。
+  `python tools/scripts/agent/sync_package.py` 重新生成 `plugins/gms-remote-test/`。
   直接手改 `plugins/` 会导致与源码树漂移，CI 的 Agent Package Gate 会校验
-  生成树、版本契约和打包结果与源码同步，`tools/release_agent.py --check`
+  生成树、版本契约和打包结果与源码同步，`tools/scripts/agent/release.py --check`
   可在本地做同样的检查。
-- 版本提升走 `python tools/release_agent.py --version X.Y.Z`（会改写所有
-  版本声明并重新 sync）；`tools/audit_gms_agent_contract.py` 强制六方版本契约。
+- 版本提升走 `python tools/scripts/agent/release.py --version X.Y.Z`（会改写所有
+  版本声明并重新 sync）；`tools/scripts/agent/audit_contract.py` 强制六方版本契约。
 - 分发包布局（canonical DISTRIBUTION layout）：`runtime/ → scripts/`、
   `skill/ → skills/gms-remote-test/`、`manifests/* → 插件根 manifest`。
 

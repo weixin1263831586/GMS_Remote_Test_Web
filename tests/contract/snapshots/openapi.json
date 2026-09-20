@@ -20834,7 +20834,7 @@
     },
     "/api/tools/browse": {
       "post": {
-        "description": "浏览可下载工具清单，返回与 /api/files/list 相同格式以便复用文件浏览器弹框",
+        "description": "浏览可下载工具清单，返回与 /api/files/list 相同格式以便复用文件浏览器弹框\n\n稳定 tool_id 设计：浏览器只看到 tool_id 与 download_name，永远拿不到\ntools/ 下的真实路径，因此这里返回扁平清单、不展开目录层级。",
         "requestBody": {
           "content": {
             "application/json": {
@@ -20870,16 +20870,16 @@
         "summary": "Browse Utility Tools"
       }
     },
-    "/api/tools/download/{file_path}": {
+    "/api/tools/download/{tool_id}": {
       "get": {
-        "description": "下载 tools/ 目录下的指定文件",
+        "description": "按稳定 tool_id 下载 tools/ 清单中的文件（兼容历史文件名）",
         "parameters": [
           {
             "in": "path",
-            "name": "file_path",
+            "name": "tool_id",
             "required": true,
             "schema": {
-              "title": "File Path",
+              "title": "Tool Id",
               "type": "string"
             }
           }

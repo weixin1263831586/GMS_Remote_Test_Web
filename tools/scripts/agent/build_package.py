@@ -3,7 +3,7 @@
 
 The repository keeps one source of truth (agent/gms-remote-test/, synced
 into the generated plugins/gms-remote-test/ by
-tools/sync_agent_package.py) and one declared version
+tools/scripts/agent/sync_package.py) and one declared version
 (agent/gms-remote-test/package.yaml).
 This tool turns the payload into per-client distribution archives:
 
@@ -24,8 +24,8 @@ that the Controller Agent Package Registry embeds in its manifest
 endpoint.
 
 Usage:
-    python tools/build_agent_package.py [--out dist]
-    python tools/build_agent_package.py --print-manifest
+    python tools/scripts/agent/build_package.py [--out dist]
+    python tools/scripts/agent/build_package.py --print-manifest
 """
 from __future__ import annotations
 
@@ -35,8 +35,11 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _common import find_repo_root  # noqa: E402
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+
+REPO_ROOT = find_repo_root()
 PLUGIN_DIR = REPO_ROOT / "plugins" / "gms-remote-test"
 PACKAGE_YAML = REPO_ROOT / "agent" / "gms-remote-test" / "package.yaml"
 
@@ -45,8 +48,8 @@ from features.system.agent_package_builder import CLIENT_MANIFESTS, build_packag
 
 
 # The canonical generated plugin payload (synced from
-# agent/gms-remote-test by tools/sync_agent_package.py) is the packaging
-# input — builder and registry share the exact same tree.
+# agent/gms-remote-test by tools/scripts/agent/sync_package.py) is the
+# packaging input — builder and registry share the exact same tree.
 
 
 def read_version() -> str:

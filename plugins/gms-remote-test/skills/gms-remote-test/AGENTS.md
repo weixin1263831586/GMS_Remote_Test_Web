@@ -22,14 +22,14 @@ be edited directly.
 1. Edit the owning source under `agent/gms-remote-test/`.
 2. Add or update a source test under `agent/gms-remote-test/tests/`.
 3. For behavior visible to installed clients, bump the package once with
-   `python tools/release_agent.py --version X.Y.Z`; it updates every version
+   `python tools/scripts/agent/release.py --version X.Y.Z`; it updates every version
    declaration and synchronizes the generated plugin.
 4. Run source tests and generated-plugin tests in separate Python processes.
-5. Run `python tools/audit_gms_agent_contract.py` and
-   `python tools/release_agent.py --check`.
+5. Run `python tools/scripts/agent/audit_contract.py` and
+   `python tools/scripts/agent/release.py --check`.
 
 Never hand-copy runtime or Skill files into the generated plugin. During
-development, `python tools/sync_agent_package.py .` may refresh it without a
+development, `python tools/scripts/agent/sync_package.py .` may refresh it without a
 version bump; releases use `release_agent.py`.
 
 ## Naming and contract invariants

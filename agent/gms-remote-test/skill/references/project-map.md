@@ -8,11 +8,11 @@ fields may evolve.
 
 | Area | Source of truth | Primary verification |
 |---|---|---|
-| Agent package/version/manifests | `agent/gms-remote-test/` | `tools/release_agent.py --check` |
+| Agent package/version/manifests | `agent/gms-remote-test/` | `tools/scripts/agent/release.py --check` |
 | CLI command contract | `agent/gms-remote-test/runtime/gms-remote-test.sh` | `features/system/tests/test_skill_cli.py` |
 | MCP adapter and tool schemas | `agent/gms-remote-test/runtime/mcp_server.py` | `agent/gms-remote-test/tests/test_mcp_server.py` |
 | Installer/profile lifecycle | `agent/gms-remote-test/runtime/gms-agent`, `runtime/gms_agent/package_manager.py`, `runtime/mcp_launcher.py` | `agent/gms-remote-test/tests/test_installer_lifecycle.py` |
-| Generated plugin payload | `plugins/gms-remote-test/` | generate with `tools/sync_agent_package.py`; never hand-edit |
+| Generated plugin payload | `plugins/gms-remote-test/` | generate with `tools/scripts/agent/sync_package.py`; never hand-edit |
 | Authentication/authorization | `features/auth/` | matching `features/auth/tests` and caller-domain tests |
 | Devices/console | `features/devices/` | `features/devices/tests` |
 | Cluster workers/jobs | `features/cluster/` | matching cluster tests |
@@ -44,9 +44,9 @@ put reusable behavior in the feature service.
 ```bash
 bash -n agent/gms-remote-test/runtime/gms-remote-test.sh
 python3 -m pytest agent/gms-remote-test/tests -q
-python tools/sync_agent_package.py .
+python tools/scripts/agent/sync_package.py .
 python3 -m pytest plugins/gms-remote-test/tests -q
-python tools/release_agent.py --check
+python tools/scripts/agent/release.py --check
 ```
 
 Run source and generated-plugin tests in separate pytest processes because

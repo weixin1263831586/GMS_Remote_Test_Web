@@ -2,7 +2,7 @@
 # Install the Redmine Daily Brief systemd units for this checkout.
 #
 # Run from any directory:
-#   ./tools/install_daily_brief_systemd.sh
+#   ./tools/scripts/deployment/install_daily_brief_systemd.sh
 #
 # The script intentionally invokes sudo interactively and never accepts a
 # password through an argument, environment variable, or standard input.

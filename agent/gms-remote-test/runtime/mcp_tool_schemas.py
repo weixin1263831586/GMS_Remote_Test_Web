@@ -6,7 +6,7 @@ applies service-token/toolset filtering plus catalog-derived annotations;
 the declarations themselves are pure data.
 
 This module is part of the plugin payload — edit under
-agent/gms-remote-test/runtime/ and re-run tools/sync_agent_package.py.
+agent/gms-remote-test/runtime/ and re-run tools/scripts/agent/sync_package.py.
 """
 
 from __future__ import annotations

@@ -20,6 +20,9 @@ from urllib.request import urlopen
 from PIL import Image, ImageChops
 from playwright.sync_api import sync_playwright
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _common import find_repo_root  # noqa: E402
+
 
 PAGES = [
     "test",
@@ -43,8 +46,11 @@ PAGES = [
     "gms-assistant",
 ]
 
-DEFAULT_MAIN_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_WORKTREE_ROOT = Path(__file__).resolve().parents[1]
+# 语义化定位：主 checkout = repo root；对比的 worktree 默认挂在本 checkout
+# 下（.worktrees/<name>），从脚本所在位置向上找 repo root 即可，勿再硬编码
+# parents[N]——tools/scripts/<category>/ 的层级今后还可能调整。
+DEFAULT_MAIN_ROOT = find_repo_root()
+DEFAULT_WORKTREE_ROOT = DEFAULT_MAIN_ROOT
 
 
 def free_port() -> int:

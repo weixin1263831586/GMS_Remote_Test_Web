@@ -15,10 +15,10 @@ needed on the consumer machine.
 The package lifecycle installer is the portable path for all three clients:
 
 ```bash
-python tools/gms_agent_dev.py install \
+python tools/scripts/agent/dev.py install \
   --client codex --server https://CONTROLLER:5001 \
   --ca-cert /etc/gms/controller-ca.pem
-python tools/gms_agent_dev.py doctor --client codex --json
+python tools/scripts/agent/dev.py doctor --client codex --json
 ```
 
 It installs the runtime, Skill, exact Controller profile, command links, and
@@ -33,7 +33,7 @@ To refresh only the checkout's runtime and `gms-rt-*` command links without
 creating or changing any Controller profile:
 
 ```bash
-python tools/gms_agent_dev.py install --client none
+python tools/scripts/agent/dev.py install --client none
 ```
 
 For kkagent-only local plugin development, the generated payload retains its
@@ -204,7 +204,7 @@ release copy of `agent/gms-remote-test/` (never edit this directory
 directly), kept in sync by:
 
 ```bash
-python tools/sync_agent_package.py
+python tools/scripts/agent/sync_package.py
 ```
 
 It syncs the CLI, the MCP adapter, the launcher (`mcp_launcher.py`), the
@@ -212,9 +212,9 @@ MCP reconcile helper (`agent_mcp_config.py`), the
 `gms-agent` installer CLI, the `gms_agent/` Python SDK, `SKILL.md`,
 `references/`, `agents/`, and validates the six-way version contract against
 `agent/gms-remote-test/package.yaml` (the single version source).
-Version bumps go through `python tools/release_agent.py --version X.Y.Z`,
+Version bumps go through `python tools/scripts/agent/release.py --version X.Y.Z`,
 which rewrites every declaration and re-runs the sync; distribution
-archives are built with `python tools/build_agent_package.py`.
+archives are built with `python tools/scripts/agent/build_package.py`.
 
 ## Tests
 

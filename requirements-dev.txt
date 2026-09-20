@@ -12,5 +12,5 @@ httpx==0.28.1
 # 由独立 E2E job 安装并在 unit job 中 --ignore=tests/e2e 隔离。
 playwright==1.58.0
 # vulture 死代码扫描（审核 §22 僵尸代码检测）。FastAPI router/dependency
-# 回调产生大量误报，白名单见 tools/vulture_allowlist.py；仅 dev 使用。
+# 回调产生大量误报，白名单见 tools/scripts/maintenance/vulture_allowlist.py；仅 dev 使用。
 vulture==2.16

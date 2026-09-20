@@ -67,7 +67,7 @@ installs runtime + Skill + MCP registration as one version, and stores
 per-client TOML profiles under `~/.config/gms-agent/profiles/`.
 
 Repository developers may refresh only the local CLI links without changing
-any Controller profile: `python tools/gms_agent_dev.py install --client none`.
+any Controller profile: `python tools/scripts/agent/dev.py install --client none`.
 
 When more than one profile exists for a client, select one explicitly:
 
@@ -154,7 +154,7 @@ When changing the agent package:
 1. Edit only `agent/gms-remote-test` sources.
 2. Add source tests under `agent/gms-remote-test/tests`.
 3. Bump the single package version with
-   `python tools/release_agent.py --version X.Y.Z`.
+   `python tools/scripts/agent/release.py --version X.Y.Z`.
 4. Validate the source and generated plugin in separate pytest processes.
 5. Run the Skill and Codex plugin validators.
 

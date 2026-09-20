@@ -40,9 +40,9 @@ tool boundary.
 | `gms_rt_apk_search(task_id, query, mode?, limit?, path?, line?)` | `gms-rt-apk-search [--mode name\|content\|symbol]` |
 | `gms_rt_apk_source(task_id, path?, view?)` | `gms-rt-apk-source` (view=true → `gms-rt-apk-source-read`) |
 
-For a repository checkout, use `python tools/gms_agent_dev.py install
+For a repository checkout, use `python tools/scripts/agent/dev.py install
 --client codex --server https://CONTROLLER:5001`; then run `python
-tools/gms_agent_dev.py doctor --client codex --json`. The shipped
+tools/scripts/agent/dev.py doctor --client codex --json`. The shipped
 `gms-agent install --client auto` path supports all three clients. Restart
 the client or open a new session after changing its MCP registration.
 

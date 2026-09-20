@@ -24,8 +24,11 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _common import find_repo_root  # noqa: E402
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+PROJECT_ROOT = find_repo_root()
 CLI_SCRIPT = PROJECT_ROOT / "agent/gms-remote-test/runtime/gms-remote-test.sh"
 OUTPUT_PATH = PROJECT_ROOT / "docs/cli/command-reference.md"
 
@@ -41,7 +44,7 @@ _FUNCTION_DEF = re.compile(r"^(?P<name>gms-rt-[a-z0-9-]+)\(\)\s*\{", re.MULTILIN
 
 HEADER = """# gms-rt 命令参考
 
-> 此文件由 `tools/generate_cli_docs.py` 生成，请勿手工编辑。
+> 此文件由 `tools/scripts/docs/generate_cli_docs.py` 生成，请勿手工编辑。
 > 真源：`agent/gms-remote-test/runtime/gms-remote-test.sh`
 > （`_gms_rt_command_usage` / `_gms_rt_command_summary` 命令目录，与
 > `gms-rt-system-commands` 的机器可读清单同源）。
@@ -169,7 +172,7 @@ def main() -> int:
         if len(diff) >= 10:
             break
     print("DRIFT: docs/cli/command-reference.md is stale; rerun "
-          "python3 tools/generate_cli_docs.py to update it.\n" + "\n".join(diff),
+          "python3 tools/scripts/docs/generate_cli_docs.py to update it.\n" + "\n".join(diff),
           file=sys.stderr)
     return 1
 

@@ -21,15 +21,32 @@ __all__ = [
 ]
 
 
+# Android 17 对应的 SDK 版本。设备侧 uboot 随 Android 版本发布：
+# Android 17 起的 uboot 才识别 `oem board:<action>`，更早版本只认
+# `oem at-<action>-vboot`（RK3572 例外，全平台统一识别 board:）。
+ANDROID_17_SDK = 37
+
+
 @dataclass(frozen=True)
 class PreparedFastbootDevice:
     serial: str
     identity: str
+    # ro.build.version.sdk，在 ADB 阶段读取；设备已在 fastboot（无 ADB
+    # 阶段）时为 0（未知），oem 命令按旧版处理并由 unlock 兜底重试。
+    android_sdk: int = 0
 
     def oem_argument(self, action: str) -> str:
         if action not in {"lock", "unlock"}:
             raise ValueError("action must be lock or unlock")
-        if "rk3572" in self.identity.lower():
+        # 解锁/上锁命令与设备当前 uboot 版本绑定：
+        #   * RK3572：全平台统一识别 `oem board:<action>`；
+        #   * 其他平台：Android 17（SDK >= 37）的 uboot 用 `oem board:<action>`，
+        #     Android 17 之前的版本用 `oem at-<action>-vboot`。
+        # identity 由 serial + ro.board.platform + `getvar product` 组成。
+        identity = self.identity.lower()
+        if "rk3572" in identity:
+            return f"board:{action}"
+        if self.android_sdk >= ANDROID_17_SDK:
             return f"board:{action}"
         return f"at-{action}-vboot"
 
@@ -105,6 +122,13 @@ class FastbootPreparer:
                     return "fastboot"
         return ""
 
+    @staticmethod
+    def _parse_android_sdk(output: str) -> int:
+        try:
+            return max(0, int((output or "").strip().splitlines()[0].strip()))
+        except (IndexError, ValueError):
+            return 0
+
     def fastboot_mode(self, serial: str) -> str:
         listed = self._execute(
             ["fastboot", "devices"],
@@ -150,6 +174,7 @@ class FastbootPreparer:
     def prepare_bootloader(self, serial: str) -> PreparedFastbootDevice:
         mode = self.fastboot_mode(serial)
         board = ""
+        android_sdk = 0
         if not mode:
             board_result = self._execute(
                 ["adb", "-s", serial, "shell", "getprop", "ro.board.platform"],
@@ -157,6 +182,14 @@ class FastbootPreparer:
                 required=False,
             )
             board = board_result.output
+            # uboot 随 Android 版本发布，oem 命令选择依赖设备当前版本；
+            # 此刻设备还在 ADB 模式，是读取版本的唯一窗口。
+            sdk_result = self._execute(
+                ["adb", "-s", serial, "shell", "getprop", "ro.build.version.sdk"],
+                timeout=8,
+                required=False,
+            )
+            android_sdk = self._parse_android_sdk(sdk_result.output)
             self._execute(["adb", "-s", serial, "reboot", "bootloader"])
             self._notify_transport_reset(serial)
             self._wait_for_bootloader(serial)
@@ -176,19 +209,45 @@ class FastbootPreparer:
         return PreparedFastbootDevice(
             serial=serial,
             identity=f"{serial} {board} {product}",
+            android_sdk=android_sdk,
         )
 
     def unlock_bootloader(
         self, prepared: PreparedFastbootDevice,
     ) -> None:
         """Unlock writes while the device is in bootloader Fastboot."""
+        command = prepared.oem_argument("unlock")
+        result = self._execute(
+            [
+                "fastboot",
+                "-s",
+                prepared.serial,
+                "oem",
+                command,
+            ],
+            timeout=30,
+            required=False,
+        )
+        if result.code == 0:
+            return
+        if "unrecognized" not in result.output.lower():
+            # 传输类失败（设备可能已接受命令）按原样抛出，不盲目重试。
+            detail = result.output or f"exit code {result.code}"
+            raise FastbootPreparationError(
+                f"fastboot -s {prepared.serial} failed: {detail}"
+            )
+        # 版本未知（设备此前已在 fastboot、无 ADB 阶段）时默认命令可能与
+        # 设备 uboot 不匹配：仅在明确 unrecognized 时用备选命令重试一次。
+        alternative = (
+            "at-unlock-vboot" if command == "board:unlock" else "board:unlock"
+        )
         self._execute(
             [
                 "fastboot",
                 "-s",
                 prepared.serial,
                 "oem",
-                prepared.oem_argument("unlock"),
+                alternative,
             ],
             timeout=30,
         )

@@ -671,9 +671,9 @@ function confirmFileSelection() {
             showToast('请选择一个文件，而非文件夹', 'warning');
             return;
         }
-        fullPath = state.fileBrowser.currentPath
-            ? state.fileBrowser.currentPath + '/' + selectedItem.name
-            : selectedItem.name;
+        // 稳定 tool_id 优先：浏览器不保存 tools/ 真实路径；旧数据只有
+        // 文件名时由服务端 legacy 名称映射兜底。
+        fullPath = selectedItem.tool_id || selectedItem.name;
         if (targetInput) {
             targetInput.value = fullPath;
         }
@@ -695,7 +695,7 @@ function navigateToParent() {
 
     if (state.fileBrowser.mode === 'utility-tool') {
         if (!currentPath || !currentPath.includes('/')) {
-            showToast('已到达 tools/ 根目录', 'info');
+            showToast('已到达清单顶层', 'info');
             return;
         }
         const parentPath = currentPath.substring(0, currentPath.lastIndexOf('/'));

@@ -1,6 +1,6 @@
 # gms-rt 命令参考
 
-> 此文件由 `tools/generate_cli_docs.py` 生成，请勿手工编辑。
+> 此文件由 `tools/scripts/docs/generate_cli_docs.py` 生成，请勿手工编辑。
 > 真源：`agent/gms-remote-test/runtime/gms-remote-test.sh`
 > （`_gms_rt_command_usage` / `_gms_rt_command_summary` 命令目录，与
 > `gms-rt-system-commands` 的机器可读清单同源）。
