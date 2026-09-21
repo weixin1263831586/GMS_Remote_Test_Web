@@ -20,6 +20,7 @@ fields may evolve.
 | Reports | `features/reports/` | matching report tests |
 | Firmware | `features/firmware/` | matching firmware tests; verify approval/elevation paths |
 | Redmine/APK/SDK evidence | `features/redmine/`, APK/system routes and source providers | domain tests plus MCP evidence tests |
+| External knowledge (background only, ADR 0014) | `features/knowledge/external/`, `features/knowledge/external_api.py`, `gms-rt-knowledge-search` | `features/knowledge/tests/test_external_*.py` plus agent package tests |
 | Shared configuration/security | `foundation/`, `bootstrap/` | targeted unit/contract tests |
 | Web shell/navigation | `web/` | JS syntax plus repeated-navigation checks |
 

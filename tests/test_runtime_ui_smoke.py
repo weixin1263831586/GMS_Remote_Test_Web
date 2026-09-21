@@ -1557,10 +1557,11 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
-    def test_devices_console_hides_write_actions_for_plain_user_role(self):
+    def test_devices_console_prompts_permission_for_plain_user_role(self):
         page = self.new_page()
-        # 普通 user 角色没有 devices.inventory：绑定/采集/清空日志是必 403
-        # 的写操作，页面应隐藏；打开控制台与终端只读输出保持可用。
+        # 普通 user 角色没有 devices.inventory：绑定/采集按钮保持可见，点击
+        # 时给出明确的权限提示而非裸 403；打开控制台与终端只读输出保持可用，
+        # 清空日志仍禁用（带原因 title）。服务端 403 始终是安全边界。
         page.route(
             "**/api/auth/status",
             lambda route: route.fulfill(
@@ -1607,8 +1608,14 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             page.goto(f"{self.base_url}/devices-console", wait_until="domcontentloaded")
             card = page.locator(".port-card").first
             expect(card.get_by_role("button", name="打开控制台")).to_have_count(1)
-            expect(card.get_by_role("button", name="启动采集")).to_have_count(0)
-            expect(card.get_by_role("button", name="编辑绑定")).to_have_count(0)
+            expect(card.get_by_role("button", name="启动采集")).to_have_count(1)
+            expect(card.get_by_role("button", name="编辑绑定")).to_have_count(1)
+            # 无权限点击写操作：弹明确提示，不打开绑定弹框。
+            card.get_by_role("button", name="编辑绑定").click()
+            page_notice = page.locator("#page-notice")
+            expect(page_notice).to_be_visible()
+            expect(page_notice).to_contain_text("权限")
+            expect(page.locator("#binding-modal")).to_be_hidden()
             card.get_by_role("button", name="打开控制台").click()
             expect(page.locator(".console-tab")).to_have_count(1)
             clear_logs = page.locator(".clear-logs")

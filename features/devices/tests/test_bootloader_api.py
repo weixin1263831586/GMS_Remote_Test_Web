@@ -5,9 +5,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from foundation.command_result import CommandResult
-
 from features.devices import bootloader_api
+from foundation.command_result import CommandResult
 
 
 class _RecordingSSHManager:

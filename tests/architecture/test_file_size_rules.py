@@ -8,7 +8,7 @@ MIGRATION_LINE_LIMITS = {
     'foundation/config.py': 771,  # +7: RuntimeConfigStore 集成（examples 模板回退/owner 隔离）
     'features/assistant/api.py': 1462,
     'features/assistant/executor.py': 1397,
-    'features/assistant/tools.py': 967,
+    'features/assistant/tools.py': 917,  # knowledge 工具拆至 knowledge_tools.py; -50 后收缩登记
     'features/assistant/universal_ai.py': 970,
     'features/automation/executors.py': 1095,  # +44: ADR 0012 回环请求携带能力 Bearer 头
     'features/automation/service.py': 771,  # +35: ADR 0012 能力快照编译入 run
@@ -27,7 +27,8 @@ MIGRATION_LINE_LIMITS = {
     'features/auth/service.py': 656,
     'features/auth/agent_tokens.py': 365,
     'features/auth/constants.py': 98,  # +14: build.* scopes 与人类角色权限(ADR 0006)
-    'features/auth/tests/test_auth_api.py': 602,
+    'features/auth/api.py': 606,  # 23edaef 后按实际行数登记（+6 超 600 默认限额）
+    'features/auth/tests/test_auth_api.py': 636,  # 23edaef 后按实际行数登记（602→636）
     'features/auth/tests/test_security_boundary.py': 472,
     # +105: tmux 嵌套引号注入回归（7 组恶意 workspace，真实 shell 执行桩）。
     'features/build/tests/test_build_service.py': 705,
@@ -56,8 +57,9 @@ MIGRATION_LINE_LIMITS = {
     'features/redmine/tests/test_daily_brief_repository.py': 728,  # +23: f64c054 取消路径回归; +7: deep-analysis 接入; +98: 2026-09 证据预采集回归
     'features/redmine/tests/test_daily_brief_service.py': 793,  # +21: f64c054; +143: 2026-09 证据预采集/脱敏回归
     # +72: sanitizeHref scheme 白名单回归(node 执行测试)。
-    'features/redmine/tests/test_dashboard_stats.py': 1165,
-    'features/reports/analysis_api.py': 752,  # +40: reports.read 门禁 helper
+    'features/redmine/repository_queries.py': 614,  # 23edaef 后按实际行数登记（+14 超 600 默认限额）
+    'features/redmine/tests/test_dashboard_stats.py': 1286,  # 23edaef 后按实际行数登记（1165→1286）
+    'features/reports/analysis_api.py': 654,  # -98: mainline/KB 召回拆至 diagnosis_recalls.py; ADR 0014 系统背景召回接入
     'features/reports/api_helpers.py': 614,
     'features/reports/weekly_report_api.py': 1112,
     'features/system/update_monitor/api.py': 602,  # +page JS 静态端点(CSP 前置迁移)

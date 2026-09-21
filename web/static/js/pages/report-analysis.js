@@ -1364,30 +1364,11 @@ function renderReportDiagnosis(data) {
         `;
     }
 
-    const sourceCards = sourceResults.length > 0
-        ? sourceResults.map(item => {
-            const itemUrl = safeReportExternalUrl(item.url);
-            return `
-            <div class="dx-list-item${itemUrl ? ' dx-clickable' : ''}" ${itemUrl ? `data-click="_actOpenUrlBlank" data-a0="${escapeJsAttr(itemUrl)}"` : ''}>
-                <div class="dx-list-head">
-                    <div class="dx-list-title">${escapeHtml(item.type || 'source')}</div>
-                    ${itemUrl ? `<a class="dx-link" href="${escapeHtml(itemUrl)}" target="_blank" rel="noopener" data-click="_actStopPropagation">打开源码</a>` : ''}
-                </div>
-                <div class="dx-list-path dx-list-path-inline">${escapeHtml(item.path || item.display_path || '')}${item.line ? `<span>:${escapeHtml(String(item.line))}</span>` : ''}</div>
-            </div>
-        `;
-        }).join('')
-        : renderDxEmpty('未检索到源码结果');
+    const sourceCards = renderReportSourceCards(sourceResults);
 
-    const kbCards = kbResults.length > 0
-        ? kbResults.map(item => `
-            <div class="dx-list-item">
-                <div class="dx-list-title">#${escapeHtml(String(item.id || ''))} ${escapeHtml(item.subject || '')}</div>
-                <div class="dx-list-meta">${escapeHtml(item.status_name || '')} | ${escapeHtml(item.updated_on || '')}</div>
-                <div class="dx-list-text">${escapeHtml((item.solution_summary || item.description || '').slice(0, 260))}</div>
-            </div>
-        `).join('')
-        : renderDxEmpty('未命中知识库');
+    const kbCards = renderReportKbCards(kbResults);
+
+    const backgroundSection = renderReportSystemBackgroundPanel(data.system_background_results);
 
     const candidateCards = !hasExactArtifact && artifactCandidates.length > 0
         ? `<details class="dx-details"><summary>候选构件 (${artifactCandidates.length})</summary><div class="dx-list">${
@@ -1534,6 +1515,7 @@ function renderReportDiagnosis(data) {
                         <div class="dx-list">${kbCards}</div>
                     </div>
                 </div>
+                ${backgroundSection}
                 </section>
             </div>
         </div>

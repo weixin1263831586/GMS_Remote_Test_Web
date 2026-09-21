@@ -1845,6 +1845,24 @@ class RedmineEvidenceToolTests(unittest.TestCase):
             captured["args"][-4:], ["--offset", "10", "--limit", "100"],
         )
 
+    def test_knowledge_search_args(self):
+        # ADR 0014: background-only knowledge search maps to the CLI verb.
+        text, is_error = mcp_server.knowledge_search_tool({})
+        self.assertTrue(is_error)
+        self.assertIn("query", text)
+        captured = self._capture_run()
+        mcp_server.knowledge_search_tool({"query": "LMKD PRESSURE_AFTER_KILL"})
+        self.assertEqual(
+            captured["args"], ["--query", "LMKD PRESSURE_AFTER_KILL"],
+        )
+        self.assertEqual(captured["command"], "gms-rt-knowledge-search")
+        mcp_server.knowledge_search_tool({"query": "Binder timeout", "limit": 3})
+        self.assertEqual(
+            captured["args"], ["--query", "Binder timeout", "--limit", "3"],
+        )
+        mcp_server.knowledge_search_tool({"query": "ANR", "limit": 99})
+        self.assertEqual(captured["args"][-1], "10")  # clamped to the cap
+
     def test_apk_attachment_and_source_tools(self):
         captured = self._capture_run()
         mcp_server.apk_analyze_attachment_tool({
@@ -1878,6 +1896,7 @@ class RedmineEvidenceToolTests(unittest.TestCase):
             "gms_rt_redmine_image", "gms_rt_apk_analyze_attachment",
             "gms_rt_apk_source_search", "gms_rt_apk_source_read",
             "gms_rt_sdk_sources", "gms_rt_sdk_search", "gms_rt_sdk_read",
+            "gms_rt_knowledge_search",
         ):
             self.assertIn(name, names)
             self.assertIn(name, mcp_server._TOOL_HANDLERS)

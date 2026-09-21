@@ -23,6 +23,14 @@ router = APIRouter(prefix="/api/knowledge")
 page_router = APIRouter()
 _service = KnowledgeService()
 
+# 外部知识源联邦路由（ADR 0014）：随本 feature 的主 router 一起挂载，
+# 路径前缀各自独立（/api/knowledge/external/*、/api/knowledge/android-internals/*）。
+from . import external_api as _external_api  # noqa: E402
+
+
+router.include_router(_external_api.router)
+router.include_router(_external_api.agent_router)
+
 MAX_UPLOAD_SIZE = 100 * 1024 * 1024
 LIST_PREVIEW_CHARS = 500
 

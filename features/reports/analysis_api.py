@@ -1,7 +1,5 @@
-import sqlite3
 
 from features.auth import (
-    authentication_required,
     principal_actor_id,
     require_authenticated_user,
     require_authenticated_user_when_auth_required,
@@ -26,7 +24,6 @@ from .api_helpers import (
     _ensure_uploaded_report_extension,
     _extract_class_names_from_text,
     _extract_failure_keywords,
-    _get_knowledge_base,
     analyze_with_ai,
     asyncio,
     config_manager,
@@ -44,8 +41,12 @@ from .api_helpers import (
     test_report_manager,
 )
 from .diagnosis_quality import public_provider_error
+from .diagnosis_recalls import (
+    search_knowledge_base,
+    search_mainline_exemptions,
+    search_system_background,
+)
 from .display import report_display_name
-from .knowledge_ranking import android_version_from_request, rank_kb_hits
 from .uploads import ReportUploadTooLargeError, stage_report_uploads
 
 
@@ -64,38 +65,6 @@ def _principal_has_reports_read(principal: object) -> bool:
 
 
 router = APIRouter()
-
-_MAINLINE_DB_PATH = settings.data_root / 'mainline_known_issues.sqlite3'
-
-
-def _query_mainline_exemptions(request: "ReportDiagnosisRequest") -> list[dict]:
-    """Look up Mainline known-issue exemptions for the failing test.
-
-    Read-only; degrades to an empty list when the DB is absent or the query
-    fails (mirrors the graceful degradation of the other recall channels).
-    """
-    if not _MAINLINE_DB_PATH.exists():
-        return []
-    from features.system import (
-        init_mainline_issues_db,
-        query_mainline_exemption_match,
-    )
-
-    conn = sqlite3.connect(str(_MAINLINE_DB_PATH))
-    conn.row_factory = sqlite3.Row
-    try:
-        init_mainline_issues_db(conn)
-        # 匹配器负责校验 test_type。
-        # (VTS/unknown → ''), so no separate mapping layer is needed here.
-        return query_mainline_exemption_match(
-            conn,
-            test_module=request.module,
-            test_case=request.test_name,
-            issue_type=request.test_type,
-            limit=10,
-        )
-    finally:
-        conn.close()
 
 
 def _is_safe_report_delete_dir(result_dir: str) -> bool:
@@ -411,7 +380,13 @@ async def analyze_suite_log_dir(
     suite_path: str = Form(...),
     path: str = Form(default=""),
 ):
-    """递归分析套件浏览器选中的本地测试日志目录。"""
+    """递归分析套件浏览器选中的本地测试日志目录。
+
+    这是文件级分析入口：路径边界由 _resolve_suite_log_dir 限定在配置的
+    suites_path 内，与套件浏览器文件接口面向同一批已认证用户。手工在测
+    试机上跑的 tradefed run 不会注册报告记录，因此这里不做报告库可见性
+    校验（报告账号分区仍然约束报告列表/详情/下载/删除，见 ADR 0010）。
+    """
     require_authenticated_user_when_auth_required(request)
     config = config_manager.load_config()
     abs_path, err = _resolve_suite_log_dir(suite_path, path, config)
@@ -431,21 +406,6 @@ async def analyze_suite_log_dir(
     try:
         analyzer = ReportAnalyzer()
         result_dir = _suite_result_dir_for_log_dir(suite_path, abs_path)
-        report_timestamp = (
-            os.path.basename(result_dir.rstrip(os.sep))
-            if result_dir
-            else os.path.basename(abs_path.rstrip(os.sep))
-        )
-        if authentication_required():
-            report = (
-                get_accessible_report_by_timestamp(
-                    test_report_db, request, report_timestamp
-                )
-                if report_timestamp
-                else None
-            )
-            if not can_access_report(request, report):
-                return error_response("Report log directory not found", 404)
         if result_dir:
             result = await asyncio.to_thread(
                 analyzer.analyze_file,
@@ -537,90 +497,18 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
                     "ai_error": public_provider_error(exc),
                 }
 
-        async def _search_knowledge_base():
-            try:
-                kb = _get_knowledge_base(http_request)
-                kb_query = " ".join(keywords[:5]) or request.test_name or request.error_message[:80]
-                if not kb or not kb_query.strip():
-                    return []
-                # Relevance dimensions extracted from the failure under diagnosis,
-                # used to filter out broad "same-module, wrong-platform/wrong-case"
-                # FTS noise (e.g. an RK3399 Android15 ticket surfacing for an
-                # RK3576 Android16 SearchView failure).
-                probe = {
-                    "test_name": request.test_name or "",
-                    "module": request.module or "",
-                    "android_version": android_version_from_request(request),
-                }
+        # 第五路召回：Android 系统机制背景知识（ADR 0014, background-only）。
+        background_query = " ".join(keywords[:6]) or request.test_name or (request.error_message or "")[:120]
 
-                def _gather() -> list[dict]:
-                    # Two recall channels — the synced issue store (largest, most
-                    # current) and the curated case_facts — each adapt to the same
-                    # canonical hit shape via _adapt_hit, so dedup + scoring stay
-                    # in one place.
-                    merged: list[dict] = []
-                    seen: set[int] = set()
-
-                    def _adapt(row: dict, source: str, *, issue_store: bool = False) -> None:
-                        iid = int(row.get("issue_id") or 0)
-                        if not iid or iid in seen:
-                            return
-                        seen.add(iid)
-                        if issue_store:
-                            module = row.get("category") or row.get("module") or ""
-                            root_cause = row.get("error_analysis") or ""
-                            error_signature = ""
-                            solution = (row.get("solution") or "")[:600]
-                        else:
-                            module = row.get("module") or ""
-                            root_cause = row.get("root_cause") or ""
-                            error_signature = row.get("error_signature") or ""
-                            solution = row.get("solution") or row.get("reply_template") or ""
-                        merged.append({
-                            "id": iid,
-                            "subject": row.get("subject") or "",
-                            "status_name": row.get("status_name") or "",
-                            "module": module,
-                            "chip_platform": row.get("chip_platform") or row.get("soc_platform") or "",
-                            "android_version": row.get("android_version") or "",
-                            "error_signature": error_signature,
-                            "root_cause": root_cause,
-                            "solution_summary": solution,
-                            "source": source,
-                        })
-
-                    try:
-                        repo = getattr(kb, "issue_repository", None)
-                        if repo is not None:
-                            for issue in repo.search_similar(kb_query, 0, 20):
-                                _adapt(issue, "issue_store", issue_store=True)
-                    except Exception as exc:
-                        logger.debug("Issue-store KB recall skipped: %s", redact_sensitive_text(exc))
-                    try:
-                        for s in kb.search_similar(kb_query, limit=20):
-                            _adapt(s, "case_facts")
-                    except Exception as exc:
-                        logger.debug("Case-facts KB recall skipped: %s", redact_sensitive_text(exc))
-                    return rank_kb_hits(merged, probe)
-
-                return await asyncio.to_thread(_gather)
-            except Exception as kb_error:
-                logger.warning("Knowledge base search failed: %s", redact_sensitive_text(kb_error))
-            return []
-
-        async def _search_mainline_exemptions():
-            """Recall Google Mainline known-issue exemptions for this failure."""
-            try:
-                return await asyncio.to_thread(_query_mainline_exemptions, request)
-            except Exception as exc:
-                logger.debug("Mainline exemption lookup skipped: %s", redact_sensitive_text(exc))
-                return []
-
-        suite_target, ai_result, kb_results, mainline_exemptions = await asyncio.gather(
+        # 召回通道编排：suite target / AI / 内部案例 KB / Mainline 豁免 /
+        # 系统机制背景五路并行；KB 与 Mainline 的失败降级实现在
+        # diagnosis_recalls.py（各自独立降级，互不影响）。
+        suite_target, ai_result, kb_results, mainline_exemptions, system_background_results = await asyncio.gather(
             _resolve_suite_target(),
             _run_ai_analysis(),
-            _search_knowledge_base(),
-            _search_mainline_exemptions(),
+            search_knowledge_base(http_request, request, keywords),
+            search_mainline_exemptions(request),
+            search_system_background(background_query),
         )
 
         source_search_results = []
@@ -662,6 +550,10 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
             "ai_result": ai_result,
             "source_search_results": source_search_results[:10],
             "knowledge_base_results": kb_results[:8],
+            # ADR 0014: 外部 Android 系统机制背景知识。命名刻意区别于
+            # knowledge_base_results —— 这里是「Android 为什么这样工作」，
+            # 不是「我们以前遇到过什么」，且永远是 background，不参与根因判定。
+            "system_background_results": system_background_results[:6],
             "suite_target": suite_target,
             "mainline_exemptions": mainline_exemptions,
             "mainline_exempt": bool(mainline_exemptions),

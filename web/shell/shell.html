@@ -59,7 +59,8 @@
     <script src="/static/js/pages/file-browser.js?v=20260904-gsi-worker-browse" defer></script>
     <script src="/static/js/pages/test-control.js?v=20260827-usbip-vid-pids" defer></script>
     <script src="/static/js/pages/test-reports.js?v=20260812-stable-surfaces" defer></script>
-    <script src="/static/js/pages/report-analysis.js?v=20260813-upload-generation" defer></script>
+    <script src="/static/js/pages/report-analysis.js?v=20260920-adr0014" defer></script>
+    <script src="/static/js/pages/report-analysis-diagnosis.js?v=20260920-adr0014" defer></script>
     <script src="/static/js/pages/conversational-agent.js?v=20260813-ai-status" defer></script>
     <script src="/static/js/pages/agent-access.js?v=20260912-agent-access-title" defer></script>
     <script src="/static/js/pages/api-docs.js?v=20260812-stable-surfaces" defer></script>
@@ -953,8 +954,11 @@
                         <span id="vpn-status-label" class="vpn-status-label">状态: 未知</span>
 
                     </div>
-                    <!-- 文件上传区 -->
-                    <div class="upload-frame" data-admin-only data-operation-log-tab="system">
+                    <!-- 文件上传区：对所有用户可见；上传动作在 file-browser.js
+                         handleUploadFile 中先弹管理员提权确认，拒绝即取消。
+                         不再用 data-admin-only 整块隐藏，避免普通用户
+                         "两眼一抹黑"看不到入口。 -->
+                    <div class="upload-frame" data-operation-log-tab="system">
                         <div class="form-row">
                             <label>📁 本地文件:</label>
                             <div id="drop-zone" class="drop-zone">

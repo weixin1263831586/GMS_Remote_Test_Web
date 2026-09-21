@@ -159,7 +159,9 @@ class KnowledgeStoreTests(unittest.TestCase):
                 return {"success": True, "content": "GTS 测试需要使用 gts-tradefed，并准备账号、网络和设备。", "provider": "fake"}
 
         analyzer = Analyzer()
-        with patch("features.knowledge.service.get_universal_analyzer", return_value=analyzer):
+        # 依赖 seam（bootstrap 注入分析器工厂）：patch 模块级工厂全局即可，
+        # 无需真实接线 composition root。
+        with patch("features.knowledge.service._ask_analyzer_factory", return_value=analyzer):
             result = self.service.ask("u1", "GTS测试", space_id="gms")
 
         self.assertEqual(result["mode"], "ai")
