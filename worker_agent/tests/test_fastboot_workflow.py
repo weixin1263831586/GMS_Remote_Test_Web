@@ -17,12 +17,12 @@ class FakeRunner:
         serial: str = "RK3572GMS1",
         mode: str = "",
         board: str = "rk3572",
-        sdk: str = "",
+        vendor: str = "",
     ):
         self.serial = serial
         self.mode = mode
         self.board = board
-        self.sdk = sdk
+        self.vendor = vendor
         self.commands: list[list[str]] = []
 
     def __call__(self, argv: list[str], _timeout: int) -> CommandResult:
@@ -34,8 +34,8 @@ class FakeRunner:
         if argv[:3] == ["adb", "-s", self.serial]:
             if argv[3:] == ["shell", "getprop", "ro.board.platform"]:
                 return CommandResult(stdout=f"{self.board}\n")
-            if argv[3:] == ["shell", "getprop", "ro.build.version.sdk"]:
-                return CommandResult(stdout=f"{self.sdk}\n")
+            if argv[3:] == ["shell", "getprop", "ro.vendor.api_level"]:
+                return CommandResult(stdout=f"{self.vendor}\n")
             if argv[3:] == ["reboot", "bootloader"]:
                 self.mode = "bootloader"
                 return CommandResult()
@@ -57,30 +57,32 @@ class FakeRunner:
 
 
 @pytest.mark.parametrize(
-    ("serial", "board", "sdk", "expected"),
+    ("serial", "board", "vendor", "expected"),
     [
-        # RK3572：全平台统一识别 board:<action>（与 Android 版本无关）。
+        # RK3572：全平台统一识别 board:<action>（与 vendor/uboot 版本无关）。
         ("RK3572GMS1", "", "", "board:unlock"),
         ("GENERIC-1", "rk3572", "", "board:unlock"),
         ("GENERIC-1", "rk3572", "34", "board:unlock"),
-        # RK3588GMS7 回归用例（GSI 烧写 unrecognized command 失败）：
-        # Android 17（SDK 37）的 uboot 用 board:；更早版本用 at-unlock-vboot。
-        ("RK3588GMS7", "rk3588", "37", "board:unlock"),
-        ("RK3588GMS7", "rk3588", "36", "at-unlock-vboot"),
-        ("RK3588GMS7", "", "35", "at-unlock-vboot"),
+        # RK3588GMS7 纯 A17：vendor API level 为日期码 202604 → board:。
+        ("RK3588GMS7", "rk3588", "202604", "board:unlock"),
+        # A16 时代 vendor（202504）与更早 vendor 一律 at-*。
+        ("RK3588GMS7", "rk3588", "202504", "at-unlock-vboot"),
+        # GRF+SSI 回归（RK3562GMS1 事故）：system 底座报 ro.build.version.sdk=37，
+        # 但 vendor 停在 A14（vendor.api_level=34）→ 按 vendor 判定为 at-*。
+        ("RK3562GMS1", "rk3562", "34", "at-unlock-vboot"),
         # 版本未知（设备已在 fastboot，无 ADB 阶段）：非 RK3572 默认旧命令，
-        # unlock_bootloader 在明确 unrecognized 时以备选命令兜底重试。
-        ("RK3588GMS7", "", "", "at-unlock-vboot"),
+        # apply_oem_action 在明确 unrecognized 时以备选命令兜底重试。
+        ("RK3588GMS7", "rk3588", "", "at-unlock-vboot"),
         ("GENERIC-1", "", "", "at-unlock-vboot"),
     ],
 )
 def test_python_preparation_selects_oem_argument(
     serial: str,
     board: str,
-    sdk: str,
+    vendor: str,
     expected: str,
 ) -> None:
-    runner = FakeRunner(serial=serial, board=board, sdk=sdk)
+    runner = FakeRunner(serial=serial, board=board, vendor=vendor)
     prepared = FastbootPreparer(
         runner,
         sleep=lambda _seconds: None,
@@ -90,9 +92,39 @@ def test_python_preparation_selects_oem_argument(
     assert ["adb", "-s", serial, "reboot", "bootloader"] in runner.commands
 
 
+def test_apply_oem_action_falls_back_when_lock_command_unrecognized() -> None:
+    """版本未知时 lock 默认旧命令；uboot（纯 A17）不识别 at-lock-vboot 时
+    以 board:lock 兜底，而不是让锁定脚本 `set -e` 中途退出、设备滞留
+    fastboot 无法开机（RK3562GMS1 事故的镜像场景）。"""
+    runner = FakeRunner(serial="RK3562GMS1", board="rk3562", vendor="")
+    prepared = FastbootPreparer(
+        runner, sleep=lambda _seconds: None,
+    ).prepare_bootloader(runner.serial)
+    assert prepared.oem_argument("lock") == "at-lock-vboot"
+
+    class UnrecognizedOnceRunner(FakeRunner):
+        def __call__(self, argv: list[str], _timeout: int) -> CommandResult:
+            self.commands.append(argv)
+            if argv[:4] == ["fastboot", "-s", self.serial, "oem"]:
+                if "at-lock-vboot" in argv:
+                    return CommandResult(
+                        stderr="FAILED (remote: 'unrecognized command')\n",
+                        code=1,
+                    )
+                return CommandResult()
+            return super().__call__(argv, _timeout)
+
+    failing = UnrecognizedOnceRunner(serial=runner.serial)
+    FastbootPreparer(failing, sleep=lambda _seconds: None).apply_oem_action(
+        prepared, "lock",
+    )
+    board_attempt = [argv for argv in failing.commands if "board:lock" in argv]
+    assert board_attempt, "unrecognized 后未以 board:lock 兜底"
+
+
 def test_unlock_bootloader_falls_back_when_oem_command_unrecognized() -> None:
     """版本未知时默认旧命令；明确 unrecognized 后以 board:unlock 重试。"""
-    runner = FakeRunner(serial="RK3588GMS7", board="rk3588", sdk="")
+    runner = FakeRunner(serial="RK3588GMS7", board="rk3588", vendor="")
     runner_device = FastbootPreparer(runner, sleep=lambda _s: None)
     prepared = runner_device.prepare_bootloader(runner.serial)
     assert prepared.oem_argument("unlock") == "at-unlock-vboot"

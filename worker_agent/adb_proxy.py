@@ -468,6 +468,42 @@ def _target_connect(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
     }
 
 
+def _wait_for_devices_gone(
+    devices: list[str],
+    backend_name: str,
+    timeout: float = 8.0,
+) -> None:
+    """Best-effort mirror of the _target_connect device-appearance wait.
+
+    target_disconnect restarts (or stops) the shared adb-hub and, on the
+    last disconnect, also restarts the side ADB server.  The inventory
+    queried immediately after the teardown can still list the removed
+    serials, and the Worker publishes that inventory in the pre-ACK
+    heartbeat (worker_agent/app.py).  A stale entry then made the UI's
+    post-disconnect auto-refresh keep showing the device until a later
+    manual refresh.  Poll until the serials leave ``adb devices``; the
+    teardown itself already succeeded, so on timeout this returns without
+    error instead of failing an otherwise-completed disconnect.
+    """
+    wanted = [serial for serial in devices if serial]
+    if not wanted:
+        return
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            visible = {item.get("serial") for item in _adb_devices_safe()}
+        except (OSError, subprocess.TimeoutExpired, RuntimeError):
+            visible = set()
+        if not any(
+            serial in visible or f"{backend_name}:{serial}" in visible
+            for serial in wanted
+        ):
+            return
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(0.25)
+
+
 def _target_disconnect(payload: dict[str, Any]) -> dict[str, Any]:
     source_worker_id = _validated_name(
         payload.get("source_worker_id"), "source_worker_id"
@@ -486,6 +522,11 @@ def _target_disconnect(payload: dict[str, Any]) -> dict[str, Any]:
         and int(current_import.get("generation") or 0) > requested_generation
     ):
         raise RuntimeError("stale ADB Proxy target generation")
+    gone_devices = [
+        str(item or "").strip()
+        for item in (current_import or {}).get("devices") or []
+        if str(item or "").strip()
+    ]
     imports = [
         item for item in state.get("imports") or []
         if item.get("source_worker_id") != source_worker_id
@@ -512,6 +553,10 @@ def _target_disconnect(payload: dict[str, Any]) -> dict[str, Any]:
             timeout=15,
             check=False,
         )
+    # Wait until the removed serials have actually left the (re)started
+    # server's inventory before returning; the controller publishes this
+    # Worker's inventory to the UI right after the command ACK.
+    _wait_for_devices_gone(gone_devices, backend_name)
     return {
         "connected": bool(imports),
         "source_worker_id": source_worker_id,
@@ -587,6 +632,7 @@ def _restart_hub(config_path: Path) -> None:
         _stop_managed(root / "hub.pid", "adb-hub")
         _force_kill_adb_port(5037)
         _force_kill_adb_port(5039)
+        log_offset = _hub_log_offset()
         process = subprocess.Popen(
             [
                 _binary("adb-hub"),
@@ -600,22 +646,40 @@ def _restart_hub(config_path: Path) -> None:
             start_new_session=True,
         )
         _write_pid(root / "hub.pid", process.pid)
-        # A port conflict makes adb-hub exit with rc=1 within ~1s. Detect
-        # that immediately instead of probing whoever is squatting :5037 —
-        # an arbitrary listener accepts TCP but resets the ADB handshake,
-        # which otherwise only surfaces as "protocol fault: Connection
-        # reset by peer".
-        exited, early_detail = _hub_startup_exited(process)
-        if not exited:
-            break
-        _stop_managed(root / "hub.pid", "adb-hub")
-        if attempt == 0 and _is_port_race(early_detail):
-            # A concurrent `adb` client (e.g. CTS tooling) re-spawned a
-            # server on :5037 between the kill and the hub bind; clear it
-            # and retry once before giving up.
-            time.sleep(1.0)
-            continue
-        raise RuntimeError(f"adb-hub 启动失败: {early_detail}")
+        # A port conflict makes adb-hub exit with rc=1 within ~1s — or,
+        # because of --daemon, only show up as a bind error in the hub log
+        # while the tracked process keeps running (the daemon child's
+        # failure is invisible in the exit code). Detect both immediately
+        # instead of probing whoever is squatting :5037 — an arbitrary
+        # listener accepts TCP but resets the ADB handshake, which
+        # otherwise only surfaces as "protocol fault: Connection reset by
+        # peer".
+        exited, early_detail = _hub_startup_exited(process, log_offset)
+        if exited:
+            _stop_managed(root / "hub.pid", "adb-hub")
+            if attempt == 0 and _is_port_race(early_detail):
+                # A concurrent `adb` client (e.g. CTS tooling) re-spawned a
+                # server on :5037 between the kill and the hub bind; clear
+                # it and retry once before giving up.
+                time.sleep(1.0)
+                continue
+            raise RuntimeError(f"adb-hub 启动失败: {early_detail}")
+        # adb-hub reserves :5037 before its ADB service is ready, and a
+        # stalled boot (observed after a source proxy was torn down while
+        # the hub probed its backends: 30s+ with no "listening" line)
+        # accepts TCP but resets every handshake, so the probe loop below
+        # would only surface a misleading protocol fault. Require the
+        # fresh readiness marker within a bounded window; otherwise retry
+        # once with clean ports before reporting failure.
+        if not _wait_hub_listening(log_offset):
+            _stop_managed(root / "hub.pid", "adb-hub")
+            if attempt == 0:
+                time.sleep(1.0)
+                continue
+            raise RuntimeError(
+                "adb-hub 启动超时：5037 未进入监听就绪状态，请查看 Worker 日志"
+            )
+        break
     tcp_ready = _wait_tcp("127.0.0.1", 5037)
     adb_ready, adb_error = (
         _wait_adb_server(
@@ -623,27 +687,51 @@ def _restart_hub(config_path: Path) -> None:
             timeout=_hub_start_wait_seconds(
                 len(config.get("backend") or [])
             ),
+            log_offset=log_offset,
         )
         if tcp_ready
         else (False, "")
     )
     if not adb_ready or process.poll() is not None:
         _stop_managed(root / "hub.pid", "adb-hub")
-        detail = adb_error or _hub_log_error()
+        # Prefer a fresh bind error: it tells the operator that :5037 is
+        # still held by another ADB process, while the client-side
+        # protocol fault only shows the symptom.
+        detail = (
+            adb_error
+            or _hub_log_bind_error(log_offset)
+            or _hub_log_error()
+        )
         detail = f": {detail}" if detail else ""
         raise RuntimeError(f"adb-hub 未能在5037端口完成ADB协议初始化{detail}")
 
 
-def _hub_startup_exited(process: Any, timeout: float = 3.0) -> tuple[bool, str]:
-    """Catch an adb-hub that dies during startup (e.g. bind conflict)."""
+def _hub_startup_exited(
+    process: Any,
+    log_offset: int = -1,
+    timeout: float = 3.0,
+) -> tuple[bool, str]:
+    """Catch an adb-hub that fails during startup (e.g. bind conflict)."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         code = process.poll()
         if code is not None:
             if code == 0:
                 # Detached cleanly; the daemon child keeps serving :5037.
+                # Under --daemon the child's own failure cannot surface
+                # through the exit code, so give its log a short grace
+                # window before declaring the detach clean.
+                grace = time.monotonic() + 1.5
+                while time.monotonic() < grace:
+                    detail = _hub_log_bind_error(log_offset)
+                    if detail:
+                        return True, detail
+                    time.sleep(0.1)
                 return False, ""
             return True, _hub_log_error() or f"adb-hub 进程已退出 (rc={code})"
+        detail = _hub_log_bind_error(log_offset)
+        if detail:
+            return True, detail
         time.sleep(0.1)
     return False, ""
 
@@ -653,6 +741,72 @@ def _hub_log_error() -> str:
         if "error" in line.lower():
             return line[-500:]
     return ""
+
+
+def _hub_log_offset() -> int:
+    """Current hub log size, used as the start marker for fresh errors."""
+    try:
+        return _log_path("hub").stat().st_size
+    except OSError:
+        return 0
+
+
+def _hub_log_bind_error(since_offset: int) -> str:
+    """First bind-conflict error the hub logged after ``since_offset``.
+
+    ``--daemon`` hides the daemon child's nonzero exit behind the parent's
+    rc=0, so an EADDRINUSE failure is only observable in the log. Only
+    entries past ``since_offset`` count — the log persists across restarts,
+    so a stale conflict from a previous attempt must never trigger a retry.
+    """
+    if since_offset < 0:
+        return ""
+    path = _log_path("hub")
+    try:
+        size = path.stat().st_size
+        with path.open("r", encoding="utf-8", errors="replace") as stream:
+            stream.seek(min(since_offset, size))
+            fresh = stream.read()
+    except OSError:
+        return ""
+    for line in fresh.splitlines():
+        lowered = line.lower()
+        if "error" in lowered and (
+            "bind" in lowered or "address in use" in lowered
+        ):
+            return _sanitize_log_line(line)[-500:]
+    return ""
+
+
+def _hub_log_listening(since_offset: int) -> bool:
+    """True once the fresh hub log shows the ADB service is ready.
+
+    adb-hub prints its "listening" line only after the side ADB server and
+    backend watchers are wired up. Before that point the :5037 socket may
+    already accept TCP but reset every ADB handshake, which a probe loop
+    would only report as a client-side protocol fault.
+    """
+    if since_offset < 0:
+        return False
+    path = _log_path("hub")
+    try:
+        size = path.stat().st_size
+        with path.open("r", encoding="utf-8", errors="replace") as stream:
+            stream.seek(min(since_offset, size))
+            fresh = stream.read()
+    except OSError:
+        return False
+    return "listening" in fresh.lower()
+
+
+def _wait_hub_listening(log_offset: int, timeout: float = 10.0) -> bool:
+    """Bounded wait for the hub's readiness marker (normal boot ~3.3s)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _hub_log_listening(log_offset):
+            return True
+        time.sleep(0.25)
+    return False
 
 
 def _is_port_race(detail: str) -> bool:
@@ -758,44 +912,45 @@ def _hub_device_wait_seconds(backend_count: int) -> float:
     return float(max(15, 10 + max(0, backend_count) * 10))
 
 
-def _force_kill_adb_port(port: int) -> None:
-    """Kill only processes LISTENING on the given loopback port.
+def _force_kill_adb_port(port: int, timeout: float = 6.0) -> None:
+    """Kill every process LISTENING on the given loopback port.
 
     ``adb kill-server`` can fail when the server is in a half-broken state
-    (the exact scenario that triggers the protocol fault). Use ``fuser`` to
-    forcefully clear the port so adb-hub can bind cleanly.
-
-    The previous ``fuser -k PORT/tcp`` killed EVERY process with a
-    socket on the port — including outbound client connections from
-    unrelated tooling. Restrict the kill to processes that OWN a listening
-    socket bound to the loopback address the managed hub uses, so foreign
+    (the exact scenario that triggers the protocol fault), so the listener
+    is also cleared by signaling it directly. The kill stays restricted to
+    processes that OWN a listening socket bound to the loopback address
+    the managed hub uses (see ``_listeners_on_loopback_port``), so foreign
     listeners and stray clients are not shot.
+
+    TERM first and wait for the port to actually drain, then escalate to
+    KILL for a wedged server. A single TERM round with a fixed 0.5s sleep
+    lost the race against servers that take seconds to unwind, and the
+    subsequent adb-hub bind failed with EADDRINUSE. If ``timeout`` expires
+    with a listener still present, the startup guard surfaces the hub's
+    bind error instead of silently continuing.
     """
-    for socket_addr in ("127.0.0.1:5037", "127.0.0.1:5039"):
-        if _socket_port(socket_addr) == port:
-            _kill_adb_server(socket_addr)
-    # fuser fallback: only the process holding the LISTEN socket on the
-    # loopback port. fuser has no "listening only" flag, so narrow by
-    # namespace (tcp), port and the fact that adb servers are the only
-    # intended listeners; -k still targets processes, not connections,
-    # when given a single port spec.
-    listening = _listeners_on_loopback_port(port)
-    for pid in listening:
-        subprocess.run(
-            ["kill", "-TERM", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    time.sleep(0.5)
-
-
-def _socket_port(socket_addr: str) -> int:
-    try:
-        return int(str(socket_addr).rsplit(":", 1)[1])
-    except (IndexError, ValueError):
-        return -1
+    deadline = time.monotonic() + max(1.0, timeout)
+    _kill_adb_server(f"127.0.0.1:{port}")
+    escalated = False
+    while time.monotonic() < deadline:
+        listeners = _listeners_on_loopback_port(port)
+        if not listeners:
+            # Absorb a server an adb client respawned in this window
+            # before declaring the port clear.
+            time.sleep(0.3)
+            if not _listeners_on_loopback_port(port):
+                return
+            continue
+        for pid in listeners:
+            subprocess.run(
+                ["kill", "-KILL" if escalated else "-TERM", str(pid)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        escalated = True
+        time.sleep(0.25)
 
 
 def _listeners_on_loopback_port(port: int) -> list[int]:
@@ -1032,19 +1187,32 @@ def _wait_tcp(host: str, port: int, timeout: float = 8.0) -> bool:
     return False
 
 
-def _wait_adb_server(process: Any, timeout: float = 20.0) -> tuple[bool, str]:
+def _wait_adb_server(
+    process: Any,
+    timeout: float = 20.0,
+    log_offset: int = -1,
+) -> tuple[bool, str]:
     """Wait until the managed Hub answers an ADB inventory request.
 
     A bound TCP socket is not sufficient: adb-hub reserves :5037 before its
     side ADB server and remote backends finish initialization. An immediate
     ``adb devices`` can therefore hit a short connection-refused/startup
     window. Retry that protocol request while the managed process is alive.
+
+    A fresh bind-conflict entry in the hub log (logged after
+    ``log_offset``) means adb-hub never owned :5037 — a leftover or
+    concurrently respawned adb server holds it. Probing that squatter for
+    the whole window only produces a misleading protocol fault, so fail
+    fast with the actionable bind error instead.
     """
     deadline = time.monotonic() + timeout
     last_error = ""
     while time.monotonic() < deadline:
         if process.poll() is not None:
             return False, last_error or "adb-hub进程已退出"
+        bind_error = _hub_log_bind_error(log_offset)
+        if bind_error:
+            return False, bind_error
         try:
             _adb_devices_safe()
             return True, ""

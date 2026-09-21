@@ -9,6 +9,7 @@
 | 架构 | [architecture/overview.md](architecture/overview.md) | 系统架构、模块边界、ADR 决策记录（Controller/Worker 边界、Feature/Foundation 分层、Agent Profile Store、SSH 执行边界、USB/IP 固件所有权） |
 | 部署 | [deployment/quick-install.md](deployment/quick-install.md) | 快速安装、生产部署、配置体系、Worker 部署、升级排障 |
 | USB/IP | [usbip/overview.md](usbip/overview.md) | 设备接入选型、固件烧写流程、ADB Proxy 对比、故障排除 |
+| 设备 | [devices/bootloader-oem-commands.md](devices/bootloader-oem-commands.md) | Bootloader 锁定/解锁与 GSI 烧写的 oem 命令选型矩阵、vendor 版本判据、失败兜底与恢复 |
 | Agent | [agent/overview.md](agent/overview.md) | Agent Runtime 定位、安装 enrollment、安全模型、Profile 管理 |
 | CLI | [cli/gms-rt.md](cli/gms-rt.md) | gms-rt 命令设计原则、[命令参考](cli/command-reference.md)（生成文档）、工作流示例 |
 | 安全 | [security.md](security.md) | 认证双轨、scope/elevation、审批 Token、执行边界、秘密管理 |

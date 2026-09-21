@@ -2667,19 +2667,15 @@ async function refreshDevices() {
                 'POST',
                 null,
                 {silentToast: true})
-                .then(response => {
+                .then(() => {
                     if (workspaceWorkerId() !== refreshedWorker) return;
-                    if (Array.isArray(response?.devices)) {
-                        // refresh 端点回写快照后 offline 设备保留在库里作历史；
-                        // 旧版 Controller 的响应未过滤，这里兜底剔除，
-                        // 避免手动刷新闪现一批不存在的历史设备。
-                        state.devices = response.devices.filter(device =>
-                            !['offline', 'unknown'].includes(String(device?.state || device?.status || ''))
-                        );
-                        if (typeof renderDevices === 'function') {
-                            renderDevices();
-                        }
-                    }
+                    // refresh 回包是集群快照形状（id/state/properties），
+                    // 与 /api/devices/list 的 device_id/status 形状不同；
+                    // 直接赋值渲染会和随后的 loadDevices 各重建一次 DOM，
+                    // 造成手动刷新闪屏。这里只触发一次静默重拉（refresh
+                    // 刚回写了 Worker 端扫描结果，重拉必然拿到新数据），
+                    // 由统一的渲染签名守卫去重。
+                    loadDevices(true, {silent: true}).catch(() => {});
                 })
                 .catch(workerError => {
                     debugLog(`[refreshDevices] worker refresh fallback: ${workerError.message}`);

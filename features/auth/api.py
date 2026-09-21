@@ -57,6 +57,22 @@ def _client_ssh_unavailable(error: str | None) -> bool:
     return any(marker in text for marker in _SSH_UNAVAILABLE_MARKERS)
 
 
+# 客户端 SSH 主机密钥与信任记录不一致（客户端重装过系统/更换 SSH 服务端）。
+# 这不是密码错误，也不同于「服务不可达」——不能用 SSHD 安装指南解决，需要
+# 管理员核对指纹后更新 Controller 的 known_hosts。单独归类，避免被通用
+# 「用户名或密码错误」掩盖。
+_SSH_HOST_KEY_MARKERS = (
+    '主机密钥',
+    'known_hosts',
+    'host key',
+)
+
+
+def _client_ssh_host_key_changed(error: str | None) -> bool:
+    text = str(error or '').lower()
+    return any(marker in text for marker in _SSH_HOST_KEY_MARKERS)
+
+
 def configure_client_ssh_authenticator(
     authenticator: Callable[[str, str, str], tuple[bool, str, str | None]],
 ) -> None:
@@ -407,6 +423,14 @@ async def auth_login(request: Request, req: dict):
         )
         if retry_after:
             return _rate_limit_response(retry_after)
+        if client_ssh_error and _client_ssh_host_key_changed(client_ssh_error):
+            # 主机密钥不匹配必须原样透出：它不是密码错误，重试密码没有意义，
+            # 通用文案会让用户和管理员都误判方向。
+            return error_response(
+                client_ssh_error,
+                status_code=401,
+                error_code="client_host_key_changed",
+            )
         if client_ssh_error and _client_ssh_unavailable(client_ssh_error):
             # 客户端 SSH 服务不可达（多为未安装 SSHD）：给出原因和安装指南，
             # 否则用户会被全屏登录层困住且只看到误导性的“用户名或密码错误”。

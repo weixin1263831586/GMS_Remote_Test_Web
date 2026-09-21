@@ -75,6 +75,14 @@ def _bootloader_operation_response(results: list[dict], action_text: str):
             "failed": len(results) - success_count,
         },
     }
+    if not results:
+        # 没有任何逐设备记录意味着操作根本没执行成功（历史 bug：脚本失败
+        # 时结果被静默丢弃，这里被当成全部成功）。必须按失败处理。
+        return error_response(
+            f"Device {action_text} produced no per-device results",
+            status_code=200,
+            data=payload,
+        )
     if success_count != len(results):
         details = "; ".join(
             f"{item.get('device')}: {item.get('error') or item.get('output') or 'unknown error'}"
@@ -169,16 +177,14 @@ def _run_bootloader_lock_block(
                         timeout=timeout,
                     )
 
-                prepared = FastbootPreparer(remote_runner).prepare_bootloader(
-                    device_id,
-                )
+                preparer = FastbootPreparer(remote_runner)
+                prepared = preparer.prepare_bootloader(device_id)
+                # oem 命令（含 unrecognized 兜底重试）统一在 Python 侧执行：
+                # 失败会带着明确原因进入失败记录，而不是把设备留在 fastboot
+                # 后因脚本 `set -e` 退出且缺少失败记录被误报成功。
+                preparer.apply_oem_action(prepared, action)
 
-                cmd = shlex.join([
-                    "bash",
-                    remote_script,
-                    device_id,
-                    prepared.oem_argument(action),
-                ])
+                cmd = shlex.join(["bash", remote_script, device_id, "-"])
                 result = runtime.ssh_manager.execute_command(ssh, cmd)
                 code = result.code
                 output, error = result.stdout, result.stderr
@@ -198,16 +204,22 @@ def _run_bootloader_lock_block(
                         error = (
                             f"{error}\n" if error else ""
                         ) + "设备操作后未在 60 秒内返回 ADB device 状态"
-                    time.sleep(2)
-                    result_output = "\n".join(
-                        part.strip() for part in (output, error) if part and part.strip()
+                else:
+                    # 脚本失败后设备可能停在 fastboot/fastbootd，尽力把它
+                    # 重启回系统，避免界面显示"无法开机"。
+                    runtime.ssh_manager.execute_command(
+                        ssh, f"fastboot -s {device_id} reboot",
                     )
-                    results.append({
-                        "device": device_id,
-                        "success": code == 0,
-                        "output": result_output[-500:],
-                        **({"error": result_output[-500:]} if code != 0 else {}),
-                    })
+                time.sleep(2)
+                result_output = "\n".join(
+                    part.strip() for part in (output, error) if part and part.strip()
+                )
+                results.append({
+                    "device": device_id,
+                    "success": code == 0,
+                    "output": result_output[-500:],
+                    **({"error": result_output[-500:]} if code != 0 else {}),
+                })
             except Exception as exc:
                 results.append({
                     "device": device_id, "success": False, "error": str(exc),

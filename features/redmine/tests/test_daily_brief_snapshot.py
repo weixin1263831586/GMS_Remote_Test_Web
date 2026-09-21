@@ -136,6 +136,39 @@ class SnapshotScopingTests(unittest.TestCase):
         self.assertIn("Zhang San", captured["owner_names"])
         self.assertEqual(snapshot["owner"]["user_id"], 7)
 
+    def test_snapshot_defaults_to_owner_user_map(self):
+        """未显式传 organization_user_map 时必须加载 owner 组织成员映射。
+
+        晨报的「待回复」归因（repository_queries._reply_wait_info）靠这份
+        映射识别 RK 同事（部门助理等）；缺失时「同事已回复」会被误判为
+        「等待 owner 回复」，晨报计数偏多、与统计看板口径不一致。
+        """
+        captured: dict = {}
+        member = {"id": 1441, "name": "陈海燕", "email": "chenhy@rock-chips.com"}
+
+        class _Repo:
+            def get_workload_statistics(self, **kwargs):
+                captured.update(kwargs)
+                return {"lists": {"waiting_my_reply": [], "no_reply_3_days": []}}
+
+        user = SimpleNamespace(id=7, firstname="San", lastname="Zhang",
+                               login="zhangsan", mail="z@x.com")
+        service = SimpleNamespace(
+            agent=_FakeAgent(user, {}),
+            repository=_Repo(),
+        )
+        with patch.object(snapshot_mod, "get_redmine_service_for_owner",
+                          lambda owner: service), \
+                patch.object(snapshot_mod, "load_redmine_user_map_for_owner",
+                             lambda owner: [member]), \
+                patch.object(snapshot_mod, "_sync_owner_issue_snapshots",
+                             _async(False)):
+            asyncio.run(
+                build_daily_triage_snapshot("owner-a", refresh=True)
+            )
+
+        self.assertEqual(captured["organization_user_map"], [member])
+
     def test_source_sync_status_reflects_pre_sync_outcome(self):
         """pre-sync 失败不静默：快照必须带 source_sync_status。"""
 

@@ -88,6 +88,19 @@ class ClientManager:
                 return True, detected_username, None
             except Exception as e:
                 error_msg = str(e)
+                # 主机密钥不匹配（客户端重装系统/更换 SSH 服务端）不是密码
+                # 错误，单独归类，避免登录层把它吞成「用户名或密码错误」。
+                lowered = error_msg.lower()
+                if (
+                    isinstance(e, paramiko.BadHostKeyException)
+                    or 'known_hosts' in lowered
+                    or 'host key' in lowered
+                ):
+                    return False, '', (
+                        '客户端 SSH 主机密钥校验失败：客户端可能重装过系统或更换了'
+                        ' SSH 服务端，请管理员核对客户端主机密钥指纹并更新'
+                        ' known_hosts 信任记录'
+                    )
                 # 提供更友好的错误提示
                 if 'banner' in error_msg.lower() or 'timeout' in error_msg.lower():
                     return False, '', f'SSH 连接超时：请检查 {client_ip} 是否开启 SSH 服务，或网络是否通畅'

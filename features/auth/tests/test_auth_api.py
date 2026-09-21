@@ -532,6 +532,40 @@ class AuthApiTests(unittest.TestCase):
         self.assertIn("未开启 SSH 服务", body["error"])
         self.assertIn("Add-WindowsCapability", body["install_guide"])
 
+    def test_client_ssh_host_key_mismatch_surfaces_trust_error(self):
+        """主机密钥不匹配（客户端重装系统）不是密码错误，须透出信任类错误。"""
+        with patch.object(
+            config_manager,
+            "find_device_host_password",
+            return_value=None,
+        ), patch(
+            "features.auth.api._request_source_ip",
+            return_value="172.16.14.94",
+        ), patch(
+            "features.auth.api._client_ssh_authenticator",
+            return_value=(
+                False,
+                "",
+                "客户端 SSH 主机密钥校验失败：客户端可能重装过系统或更换了"
+                " SSH 服务端，请管理员核对客户端主机密钥指纹并更新"
+                " known_hosts 信任记录",
+            ),
+        ):
+            login = self.client.post(
+                "/api/auth/login",
+                json={
+                    "username": "qiujian@172.16.14.94",
+                    "password": "whatever",
+                },
+            )
+
+        self.assertEqual(login.status_code, 401)
+        body = login.json()
+        self.assertEqual(body["error_code"], "client_host_key_changed")
+        self.assertIn("主机密钥", body["error"])
+        self.assertNotIn("install_guide", body)
+        self.assertNotEqual(body["error"], "用户名或密码错误")
+
     def test_client_ssh_wrong_password_keeps_generic_login_error(self):
         with patch.object(
             config_manager,
