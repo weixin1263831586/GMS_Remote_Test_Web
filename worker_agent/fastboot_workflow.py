@@ -21,32 +21,40 @@ __all__ = [
 ]
 
 
-# Android 17 对应的 SDK 版本。设备侧 uboot 随 Android 版本发布：
-# Android 17 起的 uboot 才识别 `oem board:<action>`，更早版本只认
-# `oem at-<action>-vboot`（RK3572 例外，全平台统一识别 board:）。
-ANDROID_17_SDK = 37
+# Android 17 的 vendor API level（日期码格式）。oem lock/unlock 命令由
+# uboot 决定，而 uboot 跟随 vendor 固件发布，不跟随 SSI 系统底座：
+#   * 纯 Android 17 的 vendor（ro.vendor.api_level = 202604）识别
+#     `oem board:<action>`；
+#   * GRF+SSI 等旧 vendor 构建（如 A17 SSI 底座 + A14 vendor 的
+#     RK3562GMS1，vendor.api_level = 34）只认 `oem at-<action>-vboot`。
+# 注意不能用 ro.build.version.sdk 判定：GRF+SSI 构建的 system 侧 SDK
+# 跟随 SSI 底座，同样会报 37。
+ANDROID_17_VENDOR_API_LEVEL = 202604
 
 
 @dataclass(frozen=True)
 class PreparedFastbootDevice:
     serial: str
     identity: str
-    # ro.build.version.sdk，在 ADB 阶段读取；设备已在 fastboot（无 ADB
-    # 阶段）时为 0（未知），oem 命令按旧版处理并由 unlock 兜底重试。
-    android_sdk: int = 0
+    # ro.vendor.api_level，在 ADB 阶段读取；设备已在 fastboot（无 ADB
+    # 阶段）时为 0（未知），oem 命令按旧 vendor 处理，并由 unrecognized
+    # 兜底重试纠正误判。
+    vendor_api_level: int = 0
 
     def oem_argument(self, action: str) -> str:
         if action not in {"lock", "unlock"}:
             raise ValueError("action must be lock or unlock")
-        # 解锁/上锁命令与设备当前 uboot 版本绑定：
+        # 解锁/上锁命令与设备当前 uboot 版本绑定，而 uboot 随 vendor 固件
+        # 发布：
         #   * RK3572：全平台统一识别 `oem board:<action>`；
-        #   * 其他平台：Android 17（SDK >= 37）的 uboot 用 `oem board:<action>`，
-        #     Android 17 之前的版本用 `oem at-<action>-vboot`。
+        #   * 其他平台：vendor API level 达到 Android 17（>= 202604）的
+        #     uboot 用 `oem board:<action>`，更早的 vendor（含 GRF+SSI）
+        #     用 `oem at-<action>-vboot`。
         # identity 由 serial + ro.board.platform + `getvar product` 组成。
         identity = self.identity.lower()
         if "rk3572" in identity:
             return f"board:{action}"
-        if self.android_sdk >= ANDROID_17_SDK:
+        if self.vendor_api_level >= ANDROID_17_VENDOR_API_LEVEL:
             return f"board:{action}"
         return f"at-{action}-vboot"
 
@@ -123,7 +131,7 @@ class FastbootPreparer:
         return ""
 
     @staticmethod
-    def _parse_android_sdk(output: str) -> int:
+    def _parse_api_level(output: str) -> int:
         try:
             return max(0, int((output or "").strip().splitlines()[0].strip()))
         except (IndexError, ValueError):
@@ -174,7 +182,7 @@ class FastbootPreparer:
     def prepare_bootloader(self, serial: str) -> PreparedFastbootDevice:
         mode = self.fastboot_mode(serial)
         board = ""
-        android_sdk = 0
+        vendor_api_level = 0
         if not mode:
             board_result = self._execute(
                 ["adb", "-s", serial, "shell", "getprop", "ro.board.platform"],
@@ -182,14 +190,15 @@ class FastbootPreparer:
                 required=False,
             )
             board = board_result.output
-            # uboot 随 Android 版本发布，oem 命令选择依赖设备当前版本；
-            # 此刻设备还在 ADB 模式，是读取版本的唯一窗口。
-            sdk_result = self._execute(
-                ["adb", "-s", serial, "shell", "getprop", "ro.build.version.sdk"],
+            # uboot 随 vendor 固件发布，oem 命令选择依赖 vendor 侧版本；
+            # 此刻设备还在 ADB 模式，是读取版本的唯一窗口。不能用
+            # ro.build.version.sdk：GRF+SSI 构建跟随 SSI 系统底座同样报 37。
+            vendor_result = self._execute(
+                ["adb", "-s", serial, "shell", "getprop", "ro.vendor.api_level"],
                 timeout=8,
                 required=False,
             )
-            android_sdk = self._parse_android_sdk(sdk_result.output)
+            vendor_api_level = self._parse_api_level(vendor_result.output)
             self._execute(["adb", "-s", serial, "reboot", "bootloader"])
             self._notify_transport_reset(serial)
             self._wait_for_bootloader(serial)
@@ -209,14 +218,21 @@ class FastbootPreparer:
         return PreparedFastbootDevice(
             serial=serial,
             identity=f"{serial} {board} {product}",
-            android_sdk=android_sdk,
+            vendor_api_level=vendor_api_level,
         )
 
-    def unlock_bootloader(
-        self, prepared: PreparedFastbootDevice,
+    def apply_oem_action(
+        self, prepared: PreparedFastbootDevice, action: str,
     ) -> None:
-        """Unlock writes while the device is in bootloader Fastboot."""
-        command = prepared.oem_argument("unlock")
+        """Run the platform oem lock/unlock command in bootloader Fastboot.
+
+        版本未知（设备此前已在 fastboot、无 ADB 阶段）时默认命令可能与
+        设备 uboot 不匹配：仅在明确 unrecognized 时用备选命令重试一次。
+        lock 与 unlock 一样保留兜底，否则 uboot 不识别 `oem board:lock`
+        时脚本以 `set -e` 中途退出，设备会被留在 fastboot 无法开机
+        （RK3562 Android 17 GSI 回归）。
+        """
+        command = prepared.oem_argument(action)
         result = self._execute(
             [
                 "fastboot",
@@ -236,10 +252,10 @@ class FastbootPreparer:
             raise FastbootPreparationError(
                 f"fastboot -s {prepared.serial} failed: {detail}"
             )
-        # 版本未知（设备此前已在 fastboot、无 ADB 阶段）时默认命令可能与
-        # 设备 uboot 不匹配：仅在明确 unrecognized 时用备选命令重试一次。
         alternative = (
-            "at-unlock-vboot" if command == "board:unlock" else "board:unlock"
+            f"at-{action}-vboot"
+            if command == f"board:{action}"
+            else f"board:{action}"
         )
         self._execute(
             [
@@ -251,6 +267,12 @@ class FastbootPreparer:
             ],
             timeout=30,
         )
+
+    def unlock_bootloader(
+        self, prepared: PreparedFastbootDevice,
+    ) -> None:
+        """Unlock writes while the device is in bootloader Fastboot."""
+        self.apply_oem_action(prepared, "unlock")
 
     def enter_fastbootd(
         self, prepared: PreparedFastbootDevice,

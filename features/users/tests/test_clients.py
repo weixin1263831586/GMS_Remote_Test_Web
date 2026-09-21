@@ -66,5 +66,58 @@ class ClientIpResolutionTests(unittest.TestCase):
         self.assertEqual(resolved, '192.0.2.30')
 
 
+class DetectUsernameHostKeyTests(unittest.TestCase):
+    """主机密钥校验失败必须映射为明确的信任类错误。
+
+    客户端重装系统后 SSH 主机密钥变化，paramiko 以 BadHostKeyException /
+    「not found in known_hosts」失败；此前这类错误不含任何既有映射关键词，
+    一路落到通用文案，登录页误报「密码错误」。
+    """
+
+    def _detect(self, side_effect):
+        from features.users.sessions import ClientManager
+
+        manager = ClientManager()
+        manager.config_manager = SimpleNamespace(load_config=lambda: {})
+        with patch.object(
+            manager, '_ssh_whoami', side_effect=side_effect
+        ):
+            return manager.detect_username(
+                '172.16.14.94', 'qiujian', 'secret'
+            )
+
+    def test_bad_host_key_exception_maps_to_trust_error(self):
+        import paramiko
+
+        ok, _, error = self._detect(
+            paramiko.SSHException("Server '172.16.14.94' not found in known_hosts")
+        )
+
+        self.assertFalse(ok)
+        self.assertIn('主机密钥', error)
+        self.assertIn('known_hosts', error)
+
+    def test_host_key_mismatch_text_maps_to_trust_error(self):
+        # BadHostKeyException 的构造需要真实 PKey；其文本形态即 "does not
+        # match"，这里用等价文本锚定字符串兜底路径。
+        ok, _, error = self._detect(
+            RuntimeError("Host key for server '172.16.14.94' does not match")
+        )
+
+        self.assertFalse(ok)
+        self.assertIn('主机密钥', error)
+        self.assertIn('known_hosts', error)
+
+    def test_authentication_failure_keeps_password_hint(self):
+        import paramiko
+
+        ok, _, error = self._detect(
+            paramiko.AuthenticationException('authentication failed')
+        )
+
+        self.assertFalse(ok)
+        self.assertIn('用户名和密码', error)
+
+
 if __name__ == '__main__':
     unittest.main()

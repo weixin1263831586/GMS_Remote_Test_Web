@@ -50,6 +50,43 @@ fi
     ]
 
 
+def test_lock_script_skips_oem_command_for_sentinel_dash(tmp_path: Path) -> None:
+    """传入 "-" 表示 oem 命令已在 Python 侧执行，脚本只做重启衔接。"""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    command_log = tmp_path / "fastboot.log"
+    _write_executable(
+        bin_dir / "fastboot",
+        """#!/bin/bash
+printf '%s\\n' "$*" >> "$FASTBOOT_LOG"
+if [[ "$3" == "getvar" && "$4" == "is-userspace" ]]; then
+    printf 'is-userspace: yes\\n' >&2
+fi
+exit 0
+""",
+    )
+
+    result = subprocess.run(
+        ["bash", str(LOCK_SCRIPT), "RK3562GMS1", "-"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "FASTBOOT_LOG": str(command_log),
+        },
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert command_log.read_text().splitlines() == [
+        "-s RK3562GMS1 reboot fastboot",
+        "-s RK3562GMS1 getvar is-userspace",
+        "-s RK3562GMS1 reboot",
+    ]
+
+
 def test_lock_script_waits_for_fastbootd_before_final_reboot(
     tmp_path: Path,
 ) -> None:

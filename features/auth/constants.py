@@ -1,7 +1,7 @@
 """Auth feature constants shared by service.py and agent_tokens.py.
 
-Kept in a leaf module so agent_tokens.py can import them without a circular
-import with service.py (which mixes the AgentTokenServiceMixin in).
+Leaf module so agent_tokens.py can import them without a circular import with
+service.py (which mixes the AgentTokenServiceMixin in).
 """
 
 from __future__ import annotations
@@ -11,9 +11,8 @@ from __future__ import annotations
 # not a role ladder step; their power comes entirely from AGENT_SCOPES.
 AGENT_ROLE = "agent_service"
 
-# Agent Service Token scopes (ADR 0006). Scopes reuse the
-# platform permission vocabulary so ``has_permission`` composes naturally;
-# role-based admin gates (require_role) never match an agent principal.
+# Agent Service Token scopes (ADR 0006); permission-vocabulary reuse,
+# ``has_permission`` composes, require_role never matches an agent principal.
 AGENT_SCOPES: dict[str, str] = {
     "devices.read": "read device inventory",
     "devices.lease": "lease/claim devices",
@@ -29,6 +28,8 @@ AGENT_SCOPES: dict[str, str] = {
     "artifacts.read_own": "read own evidence artifacts and derived text",
     "apk.analyze_own": "run JADX analysis on own artifacts and read results",
     "sdk.read": "search/read admin-configured SDK source providers",
+    # ADR 0014: background-only external knowledge (never root-cause evidence).
+    "knowledge.read": "search read-only external Android knowledge sources",
     # Build orchestration scopes (ADR 0006 least-privilege): creating or
     # driving a build job eventually executes shell commands on build
     # servers, so agents must be granted these explicitly — a valid token
@@ -54,10 +55,9 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "artifacts.read_own",
         "apk.analyze_own",
         "sdk.read",
-        # 敏感副作用操作细分权限:登录 ≠ 允许发邮件。
+        "knowledge.read",  # ADR 0014 背景知识只读检索
         "email.send",
-        # Build 面向人类操作员开放;agent token 需显式 build.* scope。
-        "build.read",
+        "build.read",  # Build 面向人类操作员开放;agent token 需显式 build.* scope。
         "build.execute",
         "build.cancel",
     }),
@@ -73,6 +73,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "artifacts.read_own",
         "apk.analyze_own",
         "sdk.read",
+        "knowledge.read",
         "email.send",
         "build.read",
         "build.execute",
@@ -95,4 +96,3 @@ APPROVAL_TOKEN_TTL_SECONDS = 300
 # ``CurrentUser`` moved to ``principal.py``; re-exported here for the
 # historical ``from .constants import CurrentUser`` import paths.
 from .principal import CurrentUser  # noqa: E402,F401
-

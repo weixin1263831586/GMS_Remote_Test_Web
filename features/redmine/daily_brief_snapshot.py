@@ -242,6 +242,9 @@ async def build_daily_triage_snapshot(
 
     ``organization_user_map`` 仅作显式覆盖用于测试，正常调用不传；
     owner 身份始终经 resolve_daily_brief_owner_identity 解析为单个用户。
+    未显式传入时默认加载该 owner 的组织成员映射（与统计看板
+    ``_user_map_for_request`` 同源），保证 RK 同事识别口径一致；
+    否则同事已回复的工单会被晨报误判为「等待 owner 回复」。
     """
     service = get_redmine_service_for_owner(owner_id)
 
@@ -252,6 +255,8 @@ async def build_daily_triage_snapshot(
             f"resolved identity for owner {owner_id!r} carries no usable names"
         )
     user_map = organization_user_map
+    if user_map is None:
+        user_map = load_redmine_user_map_for_owner(owner_id)
 
     # 默认先同步 Redmine（本地 SQLite 只是镜像；不同步会分析过期数据）。
     # pre-sync 失败不阻断晨报（本地镜像兜底），但必须在快照里显式标记
