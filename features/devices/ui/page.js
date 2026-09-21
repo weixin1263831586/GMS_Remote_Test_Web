@@ -85,14 +85,21 @@
     }
 
     function computeManagePermission(status) {
-        // 服务端才是安全边界（无权限请求仍会被 403）；这里只决定 UI 显示
-        // 哪些写操作按钮，避免普通 user 角色点击后必然 403。
+        // 服务端才是安全边界（无权限请求仍会被 403）；这里只决定点击写操作
+        // 按钮时是否放行。按钮始终渲染：普通 user 点击时给出明确的权限
+        // 提示（requireManagePermission），既不隐藏按钮也不裸抛 403。
         if (!status?.auth_required) return true;
         const user = status.user;
         if (!user) return false;
         if (status.elevated) return true;
         const permissions = Array.isArray(user.permissions) ? user.permissions : [];
         return permissions.includes('*') || permissions.includes('devices.inventory');
+    }
+
+    function requireManagePermission() {
+        if (state.canManageDevices) return true;
+        notice('当前账号无设备管理权限：串口绑定与采集需要 device_operator 或管理员角色（devices.inventory），请联系管理员调整角色', 'error');
+        return false;
     }
 
     async function loadAuthStatus() {
@@ -132,27 +139,24 @@
             if (port.error) card.append(element('div', 'port-error', friendlySerialError(port.error)));
 
             const actions = element('div', 'port-actions');
-            if (state.canManageDevices) {
-                actions.append(button(port.binding ? '编辑绑定' : '绑定', () => openBinding(port)));
-            }
+            actions.append(button(port.binding ? '编辑绑定' : '绑定', () => {
+                if (!requireManagePermission()) return;
+                openBinding(port);
+            }));
+            const captureButton = () => button(
+                port.capture_enabled ? '停止采集' : '启动采集',
+                () => {
+                    if (!requireManagePermission()) return;
+                    toggleCapture(port);
+                },
+                port.capture_enabled ? 'capture-on' : ''
+            );
             if (session) {
                 actions.append(button('切换控制台', () => switchView('console', session.portKey), 'primary'));
-                if (state.canManageDevices) {
-                    actions.append(button(
-                        port.capture_enabled ? '停止采集' : '启动采集',
-                        () => toggleCapture(port),
-                        port.capture_enabled ? 'capture-on' : ''
-                    ));
-                }
+                actions.append(captureButton());
             } else if (port.binding) {
                 actions.append(button('打开控制台', () => openConsole(port), 'primary'));
-                if (state.canManageDevices) {
-                    actions.append(button(
-                        port.capture_enabled ? '停止采集' : '启动采集',
-                        () => toggleCapture(port),
-                        port.capture_enabled ? 'capture-on' : ''
-                    ));
-                }
+                actions.append(captureButton());
             }
             card.append(actions);
             list.append(card);

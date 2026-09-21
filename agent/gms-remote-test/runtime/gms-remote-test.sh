@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.20"
+GMS_RT_VERSION="0.22.24"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -3534,6 +3534,46 @@ gms-rt-sdk-read() {
     api_call "$url" "GET" | jq -r '.data | "source: \(.source_id) commit: \(.commit) blob_sha256: \(.blob_sha256)\nlines \(.offset)+\(.returned_lines)/\(.total_lines)\(if .truncated then " (truncated)" else "" end)", (.lines[] | "\(.line)\t\(.text)")'
 }
 
+gms-rt-knowledge-search() {
+    # ADR 0014: 外部 Android 知识源只读检索（android-internals-wiki）。
+    # 命中一律是 background 背景知识：解释系统机制，不得当作 verified
+    # root cause 证据，也不能替代 gms-rt-sdk-* 的源码取证。
+    local query="" limit=5
+    if [ $# -ge 1 ]; then
+        case "$1" in
+            -*) : ;;
+            *) query="$1"; shift ;;
+        esac
+    fi
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -h|--help)
+                echo "Usage: gms-rt-knowledge-search QUERY [--limit N]"
+                echo "  Query: mechanism keywords, e.g. 'LMKD PRESSURE_AFTER_KILL', 'Binder timeout'"
+                return 0
+                ;;
+            --query) shift; [ $# -gt 0 ] || { error "--query requires a value"; return "$GMS_RT_EXIT_USAGE"; }; query="$1" ;;
+            --limit) shift; [ $# -gt 0 ] || { error "--limit requires a value"; return "$GMS_RT_EXIT_USAGE"; }; limit="$1" ;;
+            *) error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE" ;;
+        esac
+        shift
+    done
+    [ -z "$query" ] && { error "Usage: gms-rt-knowledge-search QUERY [--limit N]"; return "$GMS_RT_EXIT_USAGE"; }
+    check_jq
+    local url="/knowledge/android-internals/search?q=$(_urlencode "$query")&limit=$limit"
+    if [ "$GMS_RT_OUTPUT" = "json" ]; then
+        api_call "$url" "GET" | jq '.'
+        return $?
+    fi
+    api_call "$url" "GET" | jq -r '.data |
+        (.sources_status | map(select(.status != "ready"))) as $bad |
+        "background hits: \(.results | length)" +
+        (if ($bad | length) > 0
+         then " (sources: " + ([$bad[] | "\(.source)=\(.status)"] | join(", ")) + ")"
+         else "" end),
+        (.results[] | "[\(.chapter // "-")] \(.title)\n  \(.snippet)\n  versions: \(.applicable_versions // "-") · confidence: \(.confidence // "-") · verified: \(.last_verified // "-")\n  src: \(.source_path) @ \(.source_revision[0:8] // "-") · \(.license)\n")'
+}
+
 # ==============================================================================
 # Report Commands
 # ==============================================================================
@@ -5688,6 +5728,7 @@ _gms_rt_command_usage() {
         gms-rt-artifact-search) printf '%s' 'gms-rt-artifact-search <snapshot_id> <query> [--limit N]' ;;
         gms-rt-apk-analyze-attachment) printf '%s' 'gms-rt-apk-analyze-attachment <snapshot_id> <artifact_id>' ;;
         gms-rt-apk-source-read) printf '%s' 'gms-rt-apk-source-read <task_id> <path> [--offset N] [--limit N]' ;;
+        gms-rt-knowledge-search) printf '%s' 'gms-rt-knowledge-search QUERY [--limit N]' ;;
         gms-rt-sdk-sources) printf '%s' 'gms-rt-sdk-sources' ;;
         gms-rt-sdk-search) printf '%s' 'gms-rt-sdk-search --source ID --revision REV --query TEXT [--path FILTER] [--limit N]' ;;
         gms-rt-sdk-read) printf '%s' 'gms-rt-sdk-read SDK_RESULT_ID [--offset N] [--limit N]' ;;
@@ -5785,6 +5826,7 @@ _gms_rt_command_summary() {
         gms-rt-artifact-search) printf '%s' 'Search description, journals, and artifact text for a fixed query with evidence refs' ;;
         gms-rt-apk-analyze-attachment) printf '%s' 'Import a Redmine .apk artifact into the JADX analysis pipeline (owner-scoped)' ;;
         gms-rt-apk-source-read) printf '%s' 'Read a window of one decompiled source file by task-relative path' ;;
+        gms-rt-knowledge-search) printf '%s' 'Search background Android system-mechanism knowledge from the external wiki (read-only, ADR 0014)' ;;
         gms-rt-sdk-sources) printf '%s' 'List admin-configured SDK source providers and default revisions' ;;
         gms-rt-sdk-search) printf '%s' 'Search an SDK source at a pinned revision; matches carry commit-bound result ids' ;;
         gms-rt-sdk-read) printf '%s' 'Read a commit-pinned SDK source window by signed result id (returns commit and blob sha256)' ;;
@@ -5859,6 +5901,8 @@ gms-rt-system-commands() {
             then {external_side_effects: false, resource_intensive: false, required_scope: "artifacts.read_own"}
             elif test("redmine-|artifact-")
             then {external_side_effects: false, resource_intensive: false, required_scope: "redmine.read"}
+            elif test("knowledge-search")
+            then {external_side_effects: false, resource_intensive: false, required_scope: "knowledge.read"}
             elif test("sdk-")
             then {external_side_effects: false, resource_intensive: false, required_scope: "sdk.read"}
             elif test("^(gms-rt-cluster-devices|gms-rt-devices-(list|console))$")
@@ -6219,6 +6263,7 @@ ${YELLOW}Redmine Evidence (read-only analysis chain):${NC}
   gms-rt-artifact-search         - Search description/journals/artifact text
   gms-rt-apk-analyze-attachment  - Import a Redmine .apk artifact into JADX
   gms-rt-apk-source-read         - Read a window of one decompiled file
+  gms-rt-knowledge-search        - Search background Android system-mechanism knowledge (ADR 0014)
   gms-rt-sdk-sources             - List configured SDK source providers
   gms-rt-sdk-search              - Search SDK source pinned to a revision
   gms-rt-sdk-read                - Read commit-pinned SDK source by result id

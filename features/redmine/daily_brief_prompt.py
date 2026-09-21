@@ -216,6 +216,16 @@ WEB SEARCH (when used): keep queries to 2-4 simple space-separated keywords;
 no boolean operators (OR/AND/NOT), no quoted phrase nesting — complex queries
 fail. If one query returns nothing useful, reword with different domain terms
 rather than adding operators.
+ANDROID BACKGROUND KNOWLEDGE (optional, ADR 0014): gms_rt_knowledge_search
+(CLI: gms-rt-knowledge-search "keywords" --json --non-interactive) returns
+background-only Android system-mechanism knowledge from the external
+android-internals wiki (LMKD, Binder, Choreographer, ANR internals, ...). Use
+it to explain mechanisms or to plan verification steps. Every hit carries
+evidence_level="background": never cite a hit as verified root cause, never
+count it as evidence-gate material, and it cannot replace gms_rt_sdk_* /
+gms_rt_apk_* source or test-binary forensics. When a hit is used, cite
+chapter, applicable_versions and last_verified inline, e.g. 背景
+（android-internals-wiki 4.3，适用 Android 15-17，verified 2026-09-20）.
 Reading long artifacts: prefer gms_rt_redmine_artifact_read with offset/limit
 paging (continue from the previous offset) instead of re-reading from the
 start; never re-read the same window twice.

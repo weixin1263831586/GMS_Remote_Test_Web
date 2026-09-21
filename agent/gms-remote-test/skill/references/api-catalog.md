@@ -61,6 +61,7 @@ human user in their own shell.
 | System | `gms-rt-system-capabilities`, `gms-rt-system-command-describe`, `gms-rt-system-commands`, `gms-rt-system-docs`, `gms-rt-system-doctor`, `gms-rt-system-health`, `gms-rt-system-help`, `gms-rt-system-selfcheck`, `gms-rt-system-skills`, `gms-rt-system-update`, `gms-rt-system-version` |
 | Redmine evidence | `gms-rt-redmine-credentials-status`, `gms-rt-redmine-triage`, `gms-rt-redmine-issue-fetch`, `gms-rt-redmine-issue-show`, `gms-rt-redmine-journals`, `gms-rt-redmine-attachments`, `gms-rt-redmine-attachment-download`, `gms-rt-redmine-artifact-image`, `gms-rt-redmine-history-search`, `gms-rt-artifact-read`, `gms-rt-artifact-search` |
 | SDK sources | `gms-rt-sdk-sources`, `gms-rt-sdk-search`, `gms-rt-sdk-read` |
+| External knowledge (background only, ADR 0014) | `gms-rt-knowledge-search` |
 
 Related commands intentionally have different contracts:
 
@@ -143,6 +144,12 @@ gms-rt-sdk-read --result-id RID --source SRC --path P --commit SHA --json --non-
 #    same/similar problems and reusable fixes before writing a new analysis
 gms-rt-redmine-history-search 'camera bind failure' --limit 20 --json --non-interactive
 gms-rt-redmine-history-search 'mediaserver crash' --exclude-issue-id 648526 --resolved-only --json --non-interactive
+
+# 10. Optional: background Android system-mechanism knowledge from the
+#     external android-internals wiki (ADR 0014). Background only: explains
+#     how a mechanism (LMKD, Binder, Choreographer, ...) works; NEVER root-
+#     cause evidence and never a substitute for sdk/apk forensics.
+gms-rt-knowledge-search 'LMKD PRESSURE_AFTER_KILL' --limit 5 --json --non-interactive
 ```
 
 Citation format for analysis output:
@@ -152,10 +159,12 @@ Citation format for analysis output:
 [redmine:648526/attachment:776655#sha256=<prefix>]
 [apk:TASK/sources/com/example/Test.java:L120]
 [sdk:SRC@<commit>/path/to/File.java:L88]
+[wiki:android-internals/<chapter> <source_path>@<source_revision prefix> verified:<last_verified>]
 ```
 
 Agent scopes: `redmine.read`, `artifacts.read_own`, `apk.analyze_own`,
-`sdk.read`. Missing credentials, private issues, partial downloads, or
+`sdk.read`, `knowledge.read` (background wiki search only). Missing
+credentials, private issues, partial downloads, or
 unknown SDK revisions surface as explicit errors — never as
 `complete=true`.
 

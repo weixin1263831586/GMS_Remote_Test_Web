@@ -4,10 +4,28 @@ import re
 from pathlib import Path
 from typing import Any
 
-from features.assistant import get_universal_analyzer
-
 from .parsers import parse_file
 from .storage import KnowledgeStore
+
+
+# 解耦 seam（test_feature_dependency_cycles）：ask() 需要 AI 生成答案，但
+# knowledge 不得静态 import features.assistant（会与 reports 侧构成
+# knowledge→assistant→reports→knowledge 依赖环）。组合根
+# （bootstrap/routes.py）通过 set_ask_analyzer_factory 注入分析器；
+# 未注入时 ask() 走既有的检索降级路径，不抛出。
+
+
+def _unwired_analyzer() -> Any:
+    raise RuntimeError("AI analyzer 未接入（composition root 未注册）")
+
+
+_ask_analyzer_factory: Any = _unwired_analyzer
+
+
+def set_ask_analyzer_factory(factory: Any) -> None:
+    """Composition-root seam: register the AI analyzer used by ask()."""
+    global _ask_analyzer_factory
+    _ask_analyzer_factory = factory
 
 
 def _title_from_text(text: str, fallback: str = "无标题") -> str:
@@ -122,7 +140,7 @@ class KnowledgeService:
             "如果片段不足，明确说明缺口。回答要给出可执行步骤、关键词和引用来源编号。"
         )
         try:
-            result = get_universal_analyzer().generate(
+            result = _ask_analyzer_factory().generate(
                 prompt,
                 system_prompt=system,
                 max_tokens=1800,

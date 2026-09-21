@@ -42,6 +42,7 @@ from features.gerrit.config import (
 )
 from features.gerrit.service import query_gerrit_dual_mode
 from features.gerrit.settings import config_manager as gerrit_config_manager
+from features.knowledge.service import set_ask_analyzer_factory
 from features.redmine import api as redmine
 from features.redmine import apk_import_api as redmine_apk_import
 from features.redmine import credentials_api as redmine_credentials
@@ -111,6 +112,11 @@ from workflows.firmware_device import (
     release_firmware_devices,
 )
 
+
+# 解耦 seam（test_feature_dependency_cycles）：knowledge.ask() 需要 assistant
+# 的 AI 分析器，但 knowledge 不得静态 import features.assistant。组合根
+# （本模块）注入工厂；接线前 ask() 自动走检索降级路径。
+set_ask_analyzer_factory(get_universal_analyzer)
 
 ALL_ROUTERS = [
     assistant.router,

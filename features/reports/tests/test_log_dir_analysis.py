@@ -156,6 +156,30 @@ class AnalyzeLogDirEndpointTests(unittest.TestCase):
         self.assertEqual(body["data"]["report_type"], "log")
         self.assertEqual(body["data"]["report_name"], "2026.06.25_10.57.05")
 
+    def test_authenticated_user_can_analyze_unregistered_manual_run(self):
+        """手工 tradefed run 未注册报告时，套件日志目录分析不应 404。"""
+
+        class EmptyReportStore:
+            @staticmethod
+            def get_report_by_timestamp(*_args, **_kwargs):
+                return None
+
+        with patch(
+            "features.reports.analysis_api.test_report_db", EmptyReportStore()
+        ):
+            resp = self.client.post(
+                "/api/reports/analyze-log-dir",
+                data={
+                    "suite_path": f"{self.suite_root}/tools",
+                    "path": "logs/2026.06.25_10.57.05",
+                },
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertTrue(body["success"])
+        self.assertEqual(body["mode"], "suite_log_dir")
+        self.assertEqual(body["data"]["report_type"], "log")
+
     def test_returns_clear_error_when_dir_not_local(self):
         resp = self.client.post(
             "/api/reports/analyze-log-dir",

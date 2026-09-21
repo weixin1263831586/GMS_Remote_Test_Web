@@ -102,7 +102,7 @@ mcp_tool_schemas = _load_tool_schemas()
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.20"
+SERVER_VERSION = "0.22.24"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -2113,6 +2113,7 @@ _TOOLSETS = {
             "gms_rt_sdk_sources",
             "gms_rt_sdk_search",
             "gms_rt_sdk_read",
+            "gms_rt_knowledge_search",
         )
     },
     # 只读设备实证工具集：晨报分析器绑定 device_serial 时与 evidence 一并
@@ -2642,6 +2643,18 @@ def sdk_read_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     return run_cli("gms-rt-sdk-read", args)
 
 
+def knowledge_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    # ADR 0014: background-only Android mechanism knowledge; results carry
+    # provenance and are never root-cause evidence.
+    query = str(arguments.get("query") or "").strip()
+    if not query:
+        return "missing required field: query", True
+    args = ["--query", query]
+    if arguments.get("limit"):
+        args.extend(["--limit", str(_int_arg(arguments, "limit", 5, 1, 10))])
+    return run_cli("gms-rt-knowledge-search", args)
+
+
 _TOOL_HANDLERS = {
     "gms_rt_context": context_tool,
     "gms_rt_run": run_tool,
@@ -2693,6 +2706,7 @@ _TOOL_HANDLERS = {
     "gms_rt_sdk_sources": sdk_sources_tool,
     "gms_rt_sdk_search": sdk_search_tool,
     "gms_rt_sdk_read": sdk_read_tool,
+    "gms_rt_knowledge_search": knowledge_search_tool,
     "gms_rt_shell": shell_tool,
     "gms_rt_logcat": logcat_tool,
     "gms_rt_shell_exec": shell_exec_tool,

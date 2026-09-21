@@ -748,6 +748,23 @@ function ut_getCategoryInfo(category) {
     return ut_categoryMeta[category] || UT_DEFAULT_CATEGORIES[category] || { icon: '📁', color: '#8e8e93' };
 }
 
+// Stable-ID 一次性迁移：早期版本把下载路径存在 file_path 字段；后端
+// _resolve_tool_id 兼容历史文件名/真实路径，这里补写 tool_id 让旧卡片
+// 恢复"点击即下载"（例如 Gerrit Patch 工具卡），避免
+// "该工具未配置下载文件" 的误报。仅写 localStorage，无网络请求。
+function ut_migrateLegacyFilePaths(categories) {
+    let changed = false;
+    Object.values(categories || {}).forEach((tools) => {
+        (tools || []).forEach((tool) => {
+            if (tool && !tool.tool_id && tool.file_path) {
+                tool.tool_id = tool.file_path;
+                changed = true;
+            }
+        });
+    });
+    return changed;
+}
+
 function ut_loadToolsList() {
     try {
         ut_categoryMeta = JSON.parse(localStorage.getItem(UT_CATEGORY_META_KEY) || '{}') || {};
@@ -760,6 +777,7 @@ function ut_loadToolsList() {
     if (stored) {
         try {
             ut_categorizedTools = JSON.parse(stored);
+            if (ut_migrateLegacyFilePaths(ut_categorizedTools)) ut_saveCategories();
             ut_ensureBuiltInTools();
             ut_renderToolsGrid();
             return;
