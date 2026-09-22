@@ -10,6 +10,7 @@ import os
 import stat
 
 import pytest
+from cryptography.fernet import Fernet
 
 from features.system.skill_archive_signing import (
     SIGNING_KEY_ENV,
@@ -33,6 +34,31 @@ def test_master_key_autogenerates_when_file_missing(tmp_path, monkeypatch):
     assert stat.S_IMODE(key_path.stat().st_mode) == 0o600
     # 第二次调用走"文件已存在"分支，保持幂等
     validate_secret_configuration()
+
+
+def test_master_key_waits_for_concurrent_creator_to_finish(tmp_path, monkeypatch):
+    """The O_EXCL loser must not validate the winner's still-empty file."""
+    import foundation.secrets as secrets
+
+    key_path = tmp_path / "secrets" / "master.key"
+    key_path.parent.mkdir(parents=True)
+    expected = Fernet.generate_key()
+    monkeypatch.setenv("GMS_SECRET_KEY_FILE", str(key_path))
+    monkeypatch.delenv("GMS_SECRET_KEY", raising=False)
+
+    def lose_create_race(_path, _flags, _mode):
+        with open(key_path, "wb"):
+            pass
+        os.chmod(key_path, 0o600)
+        raise FileExistsError
+
+    def finish_winner_write(_delay):
+        key_path.write_bytes(expected + b"\n")
+
+    monkeypatch.setattr(secrets.os, "open", lose_create_race)
+    monkeypatch.setattr(secrets.time, "sleep", finish_winner_write)
+
+    assert secrets._load_key() == expected
 
 
 def test_master_key_corrupt_file_still_raises(tmp_path, monkeypatch):

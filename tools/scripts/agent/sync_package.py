@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""sync_agent_package.py — generate plugins/gms-remote-test from agent/.
+"""sync_package.py — generate plugins/gms-remote-test from agent/.
 
 The single generation rule of the agent package system:
 
     agent/gms-remote-test/   Source      — the ONLY hand-edited tree
     plugins/gms-remote-test/ Generated   — produced by this tool, never edited
-    dist/gms-remote-test/    Build output — produced by build_agent_package.py
+    dist/gms-remote-test/    Build output — produced by build_package.py
 
 Mapping (source → generated):
 
@@ -140,7 +140,7 @@ def prune_stale(plugin_dir: Path, expected: set[str]) -> list[str]:
     return removed
 
 
-def r16_guard(root: Path, source: Path, version: str, pattern: str, label: str) -> None:
+def same_version_guard(root: Path, source: Path, version: str, pattern: str, label: str) -> None:
     """A version must never silently change content."""
     try:
         result = subprocess.run(
@@ -178,12 +178,12 @@ def _head_package_version(root: Path, package_yaml: Path) -> str:
     return match.group(1) if match else ""
 
 
-def r16_tree_guard(
+def same_version_tree_guard(
     root: Path, source_dir: Path, version: str, label: str, package_yaml: Path
 ) -> None:
     """Whole-tree same-version content guard.
 
-    ``r16_guard`` above only compares two anchor files; a same-version
+    ``same_version_guard`` above only compares two anchor files; a same-version
     change to ANY other payload file (package_manager.py, mcp_launcher.py,
     SKILL.md, manifests, docs …) slipped through, so two machines could run
     different content while both reported the same version and installed
@@ -304,27 +304,25 @@ def main() -> int:
         capture_output=True, text=True,
     ).returncode == 0
     if in_git:
-        r16_guard(root, runtime / "gms-remote-test.sh", cli_version,
+        same_version_guard(root, runtime / "gms-remote-test.sh", cli_version,
                   r'^GMS_RT_VERSION="([^"]+)"$', "gms-remote-test.sh")
-        r16_guard(root, runtime / "mcp_server.py", mcp_version,
+        same_version_guard(root, runtime / "mcp_server.py", mcp_version,
                   r'^SERVER_VERSION = "([^"]+)"$', "mcp_server.py")
         # The anchor checks above only cover two files; the tree guards
         # below close the same-version drift hole for the WHOLE
-        # distributable payload (审核意见：release identity 不能只覆盖
-        # runtime/ — SKILL/manifests/templates 同版本变更同样会造成
-        # "version 未变但内容变了" 的安装漂移)。runtime、skill、
+        # distributable payload 。runtime、skill、
         # manifests 与 templates（README/PLUGIN_AGENTS，随包发布）都在
         # 守护范围内；docs/tests 不参与发布身份，仅 runtime 侧已覆盖。
         # 升版本放行统一按 HEAD 的 package.yaml canonical 版本判定。
-        r16_tree_guard(root, runtime, cli_version, "runtime/", package_yaml)
-        r16_tree_guard(root, skill, cli_version, "skill/", package_yaml)
-        r16_tree_guard(root, manifests, cli_version, "manifests/", package_yaml)
-        r16_tree_guard(root, agent_dir / "templates", cli_version, "templates/", package_yaml)
+        same_version_tree_guard(root, runtime, cli_version, "runtime/", package_yaml)
+        same_version_tree_guard(root, skill, cli_version, "skill/", package_yaml)
+        same_version_tree_guard(root, manifests, cli_version, "manifests/", package_yaml)
+        same_version_tree_guard(root, agent_dir / "templates", cli_version, "templates/", package_yaml)
         # AGENT_PLAYBOOK.md 是发布载荷（同步进 plugin docs/），同版本内容
-        # 漂移同样造成 "version 未变但内容变了" 的安装漂移（审核意见）。
+        # 漂移同样造成 "version 未变但内容变了" 的安装漂移。
         playbook = docs / "AGENT_PLAYBOOK.md"
         if in_git and playbook.is_file():
-            r16_tree_guard(root, docs, cli_version, "docs/", package_yaml)
+            same_version_tree_guard(root, docs, cli_version, "docs/", package_yaml)
 
     # --- generate --------------------------------------------------------
     expected: set[str] = set()

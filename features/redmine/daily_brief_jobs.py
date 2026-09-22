@@ -4,7 +4,7 @@
 (job_id, worker_id, lease_token) 做 CAS——租约被其他 Worker 接管后旧
 Worker 的迟到写入会被拒绝。
 
-审核意见 P1 修复落点：
+修复落点：
 - ``has_active_job``：already_running 分支必须校验真的有活动 job；
 - ``create_run_and_enqueue_job``（repository 内，跨 runs+jobs 同一
   BEGIN IMMEDIATE 事务）：消灭「run 已建 / job 未入队」的孤儿窗口；
@@ -77,7 +77,7 @@ class DailyBriefJobStore:
     def cancel_queued_issue_jobs(self, run_id: str) -> int:
         """作废 run 的全部排队 issue-job（force 重跑前调用）。
 
-        审核意见 P1：force 重跑会删除 issue 行（refreeze），排队的
+        force 重跑会删除 issue 行（refreeze），排队的
         issue-job 若不清除，会在 run-job 之后被领取并因 issue 行不存在
         而失败。claim 门控是兜底，这里在重置时源头清除。
         """
@@ -241,7 +241,7 @@ class DailyBriefJobStore:
                 ).fetchone()
                 if row is None:
                     return None
-                # 跨 kind 互斥（审核意见 P1）：同一 run 的活跃 run-job 是
+                # 跨 kind 互斥：同一 run 的活跃 run-job 是
                 # 全量执行域（force 重跑会删掉 issue 行），排队的
                 # issue-job 此时不允许被领取——否则 reanalyze_issue 读到
                 # 被删除的 issue 行 → RuntimeError → 失败收敛把刚重置的
@@ -354,8 +354,8 @@ class DailyBriefJobStore:
 
 
 # claim_next_job 的过期恢复需要终态集合；从 repository 常量会形成循环
-# import（repository 又要 import JobStore），这里以同一字面量保持一致，
-# 由架构测试约束两处不得漂移。
+# import（repository 又要 import JobStore），这里以同一字面量保持一致；
+# 改动时必须与 repository.TERMINAL_RUN_STATUSES 同步更新。
 TERMINAL_RUN_STATUSES_SQL = frozenset({"completed", "partial", "failed", "cancelled"})
 
 

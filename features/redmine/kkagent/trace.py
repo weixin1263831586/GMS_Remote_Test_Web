@@ -23,8 +23,7 @@ from typing import Any, Literal
 TOOL_OUTPUT_PREVIEW_CHARS = 200
 TOOL_INPUT_JSON_CHARS = 500
 
-# 截断 tool input 时必须保留的身份字段（审核意见 P2：Evidence Gate 需要
-# 按 issue/snapshot/artifact 归属核对证据，这些 key 不允许被截断吞掉）。
+# 截断 tool input 时必须保留的身份字段。
 _IDENTITY_INPUT_KEYS = (
     "issue_id", "issue", "snapshot_id", "artifact_id",
     "source", "revision", "path", "query", "q", "mode",
@@ -244,8 +243,7 @@ class KkAgentTrace:
 
         OpenGrok/code-search 等动态索引返回 ``reproducible: false``（只
         保证"当前索引里有"，不保证指定 commit）；local git 才返回 true。
-        Evidence Gate 据此约束 root_cause_type=confirmed（审核意见 P2：
-        不可复现的源码证据不能单独确认根因）。
+        Evidence Gate 据此约束 root_cause_type=confirmed。
         """
         return sum(
             1
@@ -256,7 +254,7 @@ class KkAgentTrace:
         )
 
     def evidence_ledger(self) -> list[dict[str, Any]]:
-        """Claim ↔ Evidence Ledger（审核意见 P2）：给每次成功调用分配稳定证据 ID。
+        """Claim ↔ Evidence Ledger：给每次成功调用分配稳定证据 ID。
 
         全局布尔计数（``*_checked`` / ``*_count``）只能证明"某次调用发生过"，
         不能证明"结论引用的证据就是这次调用"。Ledger 为每条证据分配
@@ -332,7 +330,7 @@ def _bounded_tool_input(value: Any) -> dict[str, Any]:
     if len(encoded) <= TOOL_INPUT_JSON_CHARS:
         return value
     # 身份字段永远保留（供 Evidence Gate 按目标 issue 归属核对），其余
-    # 内容截断为原始 JSON 前缀。身份键的**值**也要截断（审核意见 P2）：
+    # 内容截断为原始 JSON 前缀。身份键的**值**也要截断：
     # path/query 等值可被超大参数击穿总量上限，审计表随之膨胀；归属核对
     # 只需要可辨识前缀。
     kept = {

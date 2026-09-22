@@ -29,7 +29,7 @@ from .bootloader_api import (
     unlock_bootloader as unlock_bootloader,
 )
 from .locks import device_lock_manager
-from .management_api import _known_usbip_sources, _prune_inactive_usbip_sources
+from .management_api import _prune_inactive_usbip_sources, known_usbip_sources
 from .manager import device_manager
 from .operations_api import (
     connect_wifi as connect_wifi,
@@ -78,19 +78,6 @@ def _device_results(results, operation_name):
         },
         f"{operation_name}完成: 成功 {success_count} 台, 失败 {failed_count} 台",
     )
-
-
-def _known_usbip_device_ids() -> set:
-    """Return USB/IP device ids from in-memory and persisted runtime state."""
-    device_ids = set()
-    with runtime.global_state.usbip_devices_source_lock:
-        device_ids.update(runtime.global_state.usbip_devices_source.keys())
-    runtime_sources = (runtime.config_manager.get_runtime_config() or {}).get("usbip_devices_source") or {}
-    if isinstance(runtime_sources, dict):
-        device_ids.update(str(device_id) for device_id in runtime_sources if device_id)
-    return device_ids
-
-
 
 
 @router.get("/api/devices/list")
@@ -253,7 +240,7 @@ async def get_connected_devices(
 
     usbip_sources = _prune_inactive_usbip_sources(
         devices,
-        _known_usbip_sources(),
+        known_usbip_sources(),
         runtime.config_manager.load_config()
         if hasattr(runtime.config_manager, "load_config")
         else {},

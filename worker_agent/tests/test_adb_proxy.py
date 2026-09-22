@@ -267,7 +267,9 @@ def test_restart_hub_retries_once_on_bind_port_race(tmp_path):
     ), patch(
         "worker_agent.adb_proxy._binary", return_value="/bin/adb-hub"
     ), patch(
-        "worker_agent.adb_proxy._process_log", return_value=None
+        # Popen dup's the write handle parent-side; production closes it in a
+        # finally, so the fake log handle must be a closeable mock.
+        "worker_agent.adb_proxy._process_log", return_value=MagicMock()
     ), patch(
         "worker_agent.adb_proxy.subprocess.Popen",
         side_effect=lambda *a, **k: next(processes),
@@ -305,7 +307,9 @@ def test_restart_hub_reports_bind_failure_without_long_wait(tmp_path):
     ), patch(
         "worker_agent.adb_proxy._binary", return_value="/bin/adb-hub"
     ), patch(
-        "worker_agent.adb_proxy._process_log", return_value=None
+        # Popen dup's the write handle parent-side; production closes it in a
+        # finally, so the fake log handle must be a closeable mock.
+        "worker_agent.adb_proxy._process_log", return_value=MagicMock()
     ), patch(
         "worker_agent.adb_proxy.subprocess.Popen", return_value=crashed
     ), patch(
@@ -369,7 +373,9 @@ def test_restart_hub_retries_when_daemon_masks_bind_failure(tmp_path):
     ), patch(
         "worker_agent.adb_proxy._binary", return_value="/bin/adb-hub"
     ), patch(
-        "worker_agent.adb_proxy._process_log", return_value=None
+        # Popen dup's the write handle parent-side; production closes it in a
+        # finally, so the fake log handle must be a closeable mock.
+        "worker_agent.adb_proxy._process_log", return_value=MagicMock()
     ), patch(
         "worker_agent.adb_proxy.subprocess.Popen",
         side_effect=_spawn_daemon_hub(tmp_path, {1}, {2}),
@@ -400,7 +406,9 @@ def test_restart_hub_retries_once_when_hub_stalls_before_listening(tmp_path):
     ), patch(
         "worker_agent.adb_proxy._binary", return_value="/bin/adb-hub"
     ), patch(
-        "worker_agent.adb_proxy._process_log", return_value=None
+        # Popen dup's the write handle parent-side; production closes it in a
+        # finally, so the fake log handle must be a closeable mock.
+        "worker_agent.adb_proxy._process_log", return_value=MagicMock()
     ), patch(
         "worker_agent.adb_proxy.subprocess.Popen",
         side_effect=_spawn_daemon_hub(tmp_path, set(), {2}),
@@ -434,7 +442,9 @@ def test_restart_hub_fails_fast_when_hub_never_reaches_listening(tmp_path):
     ), patch(
         "worker_agent.adb_proxy._binary", return_value="/bin/adb-hub"
     ), patch(
-        "worker_agent.adb_proxy._process_log", return_value=None
+        # Popen dup's the write handle parent-side; production closes it in a
+        # finally, so the fake log handle must be a closeable mock.
+        "worker_agent.adb_proxy._process_log", return_value=MagicMock()
     ), patch(
         "worker_agent.adb_proxy.subprocess.Popen",
         side_effect=_spawn_daemon_hub(tmp_path, set()),

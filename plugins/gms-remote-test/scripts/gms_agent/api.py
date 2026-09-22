@@ -7,8 +7,14 @@ the raw API payload (the ``data`` field of the CLI envelope) and raise
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from .client import GmsClient
+
+
+def _path_segment(value: str) -> str:
+    """Encode one server-ID path segment (job/task/snapshot/operation ids)."""
+    return quote(value, safe="")
 
 
 class DevicesApi:
@@ -20,7 +26,7 @@ class DevicesApi:
         return self._client.request("GET", f"/devices/list{query}")["data"]
 
     def info(self, device: str) -> Any:
-        return self._client.request("GET", f"/devices/info?device={device}")["data"]
+        return self._client.request("GET", "/devices/info", params={"device": device})["data"]
 
     def user_locked(self) -> Any:
         return self._client.request("GET", "/devices/user-locked")["data"]
@@ -36,13 +42,13 @@ class JobsApi:
         return self._client.request("GET", f"/cluster/jobs?limit={limit}")["data"]
 
     def status(self, job_id: str) -> Any:
-        return self._client.request("GET", f"/cluster/jobs/{job_id}")["data"]
+        return self._client.request("GET", f"/cluster/jobs/{_path_segment(job_id)}")["data"]
 
     def events(self, job_id: str, after: int = -1, limit: int = 500) -> Any:
         if not 1 <= limit <= 2000:
             raise ValueError("limit must be 1-2000")
         return self._client.request(
-            "GET", f"/cluster/jobs/{job_id}/events?after={after}&limit={limit}"
+            "GET", f"/cluster/jobs/{_path_segment(job_id)}/events?after={after}&limit={limit}"
         )["data"]
 
 
@@ -81,7 +87,7 @@ class TestsApi:
         return self._client.request("GET", "/test/suites")["data"]
 
     def status(self, job_id: str) -> Any:
-        return self._client.request("GET", f"/test/status?job_id={job_id}")["data"]
+        return self._client.request("GET", "/test/status", params={"job_id": job_id})["data"]
 
 
 class ReportsApi:
@@ -100,10 +106,10 @@ class ApkApi:
         return self._client.request("GET", "/apk/tasks")["data"]
 
     def status(self, task_id: str) -> Any:
-        return self._client.request("GET", f"/apk/status/{task_id}")["data"]
+        return self._client.request("GET", f"/apk/status/{_path_segment(task_id)}")["data"]
 
     def manifest(self, task_id: str) -> Any:
-        return self._client.request("GET", f"/apk/manifest/{task_id}")["data"]
+        return self._client.request("GET", f"/apk/manifest/{_path_segment(task_id)}")["data"]
 
 
 class RedmineApi:
@@ -116,11 +122,13 @@ class RedmineApi:
         )["data"]
 
     def issue(self, snapshot_id: str) -> Any:
-        return self._client.request("GET", f"/redmine-agent/issues/{snapshot_id}")["data"]
+        return self._client.request("GET", f"/redmine-agent/issues/{_path_segment(snapshot_id)}")["data"]
 
     def journals(self, snapshot_id: str, **params: Any) -> Any:
         return self._client.request(
-            "GET", f"/redmine-agent/evidence/{snapshot_id}/journals", params=params or None
+            "GET",
+            f"/redmine-agent/evidence/{_path_segment(snapshot_id)}/journals",
+            params=params or None,
         )["data"]
 
 
@@ -129,7 +137,9 @@ class FirmwareApi:
         self._client = client
 
     def burn_status(self, operation_id: str) -> Any:
-        return self._client.request("GET", f"/burn/firmware/{operation_id}/status")["data"]
+        return self._client.request(
+            "GET", f"/burn/firmware/{_path_segment(operation_id)}/status"
+        )["data"]
 
 
 class AuthApi:

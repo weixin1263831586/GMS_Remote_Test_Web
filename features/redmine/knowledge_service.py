@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .case_evaluator import CaseEvaluator
@@ -510,7 +510,7 @@ class RedmineKnowledgeService:
         scanned = _parse_iso(issue.get("last_scanned_at"))
         if not scanned:
             return True
-        if (datetime.utcnow() - scanned) > timedelta(hours=self._agent_reply_fresh_hours):
+        if (datetime.now(timezone.utc).replace(tzinfo=None) - scanned) > timedelta(hours=self._agent_reply_fresh_hours):
             return True
         updated = _parse_iso(issue.get("updated_on"))
         # Redmine side has new activity since our last scan → must re-fetch.

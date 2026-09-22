@@ -44,7 +44,7 @@ def _coerce_optional_int(value: Any) -> int | None:
 
 @router.post("/issues/batch-import")
 async def batch_import_issues(request: Request):
-    body = await request.json()
+    body = await _maybe_body(request)
     raw_ids = body.get("issue_ids")
     issue_ids = _coerce_issue_ids(raw_ids)
     reanalyze = bool(body.get("reanalyze", True))
@@ -59,7 +59,7 @@ async def batch_import_issues(request: Request):
 
 @router.post("/issues/import-recent")
 async def import_recent_issues(request: Request, limit: int = Query(20, ge=1, le=500)):
-    body = await request.json() if await _maybe_body(request) else {}
+    body = await _maybe_body(request)
     assigned_like = str((body or {}).get("assigned_like") or "")
     reanalyze = bool((body or {}).get("reanalyze", True))
     return await _knowledge(request).import_recent_assigned(limit=limit, assigned_like=assigned_like, reanalyze=reanalyze)
@@ -93,7 +93,7 @@ async def get_case_fact(issue_id: int, request: Request):
 
 @router.post("/search/similar")
 async def search_similar(request: Request, limit: int = Query(10, ge=1, le=50)):
-    body = await request.json()
+    body = await _maybe_body(request)
     query = body.get("query") or body.get("text") or ""
     if isinstance(query, dict):
         probe = query
@@ -128,7 +128,7 @@ async def issue_workbench(issue_id: int, request: Request, similar_limit: int = 
 
 @router.post("/mature-cases/build")
 async def build_mature_case(request: Request):
-    body = await request.json()
+    body = await _maybe_body(request)
     issue_ids = _coerce_issue_ids(body.get("issue_ids"))
     title = str(body.get("title") or "")
     if not issue_ids:
@@ -194,7 +194,7 @@ async def agent_reply(issue_id: int, request: Request):
 
 @router.post("/issues/{issue_id}/reference-output")
 async def import_reference_output(issue_id: int, request: Request):
-    body = await request.json()
+    body = await _maybe_body(request)
     return {"success": True, "data": _knowledge(request).import_reference_output(issue_id, body)}
 
 
@@ -205,7 +205,7 @@ async def list_reference_outputs(issue_id: int, request: Request):
 
 @router.post("/issues/{issue_id}/evaluate-case")
 async def evaluate_case(issue_id: int, request: Request):
-    body = await request.json() if await _maybe_body(request) else {}
+    body = await _maybe_body(request)
     reference = body.get("reference") if body else None
     return {"success": True, "data": _knowledge(request).evaluate_case(issue_id, reference=reference)}
 
@@ -222,7 +222,7 @@ async def latest_evaluation(issue_id: int, request: Request):
 async def save_daily_brief_case(brief_date: str, issue_id: int, request: Request, run_id: str = Query("")):
     """把一次晨报**诊断**分析结果沉淀为本地 case_fact（FTS 可检索）。
 
-    审核意见（P1）：批量 triage 的结果只是待办摘要（无根因），且其执行
+    批量 triage 的结果只是待办摘要（无根因），且其执行
     状态（completed）不是 Redmine 工单状态——一律拒绝保存，避免把错误
     status 和 AI 推导写进知识库。只有 evidence_gate 判定为 diagnostic 的
     深度分析可以保存。
@@ -278,7 +278,7 @@ async def save_daily_brief_case(brief_date: str, issue_id: int, request: Request
 
 @router.post("/issues/{issue_id}/create-internal")
 async def create_internal_from_issue(issue_id: int, request: Request):
-    body = await request.json()
+    body = await _maybe_body(request)
     confirmed = bool(body.get("confirmed", False))
     payload = {k: v for k, v in body.items() if k != "confirmed"}
     payload.setdefault("created_by", _approver(request))
@@ -287,7 +287,7 @@ async def create_internal_from_issue(issue_id: int, request: Request):
 
 @router.post("/mature-cases/{case_id}/create-internal")
 async def create_internal_from_case(case_id: int, request: Request):
-    body = await request.json()
+    body = await _maybe_body(request)
     confirmed = bool(body.get("confirmed", False))
     payload = {k: v for k, v in body.items() if k != "confirmed"}
     payload.setdefault("created_by", _approver(request))

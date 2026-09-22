@@ -71,7 +71,7 @@ def _pgrep_protocol_state(candidates: list[tuple[str, str]]):
     """Shared state for the new pgrep -f + /proc/<pid>/cmdline protocol.
 
     ``candidates`` 是当前 (pid, cmdline) 列表；pgrep -f 只返回 PID，
-    /proc/<pid>/cmdline 查询返回对应 argv。测试通过修改 ``candidates``[:]`
+    /proc/<pid>/cmdline 查询返回对应 argv。测试通过修改 ``candidates``[:]
     模拟进程出现/消失。
     """
     return {"candidates": list(candidates)}
@@ -699,10 +699,10 @@ class ServerLifecycleTests(unittest.TestCase):
             for cmd in ssh_manager.calls
         ))
 
-    def test_start_without_ssh_connection_binds_all_interfaces_with_warning_path(self):
-        # SSH_CONNECTION 不可读时退化为 0.0.0.0:3240（仍显式 --listen，
-        # 不依赖 usbipd 默认值）；白名单改用 Worker 上 ip route get 解析
-        # 来源地址失败 → fail-closed，而不是 allow-all。
+    def test_start_without_ssh_connection_fails_closed_when_worker_egress_unresolved(self):
+        # SSH_CONNECTION 不可读时 --listen 退化为 0.0.0.0:3240（仍显式传参，
+        # 不依赖 usbipd 默认值）；但白名单需在 Worker 上用 ip route get 解析
+        # 来源地址，解析失败 → fail-closed，绝不无白名单启动 allow-all。
         responses = {
             "for b in": ("/usr/local/bin/usbipd\n", "", 0),
             "/usr/local/bin/usbipd --version": ("usbipd 0.9.5", "", 0),

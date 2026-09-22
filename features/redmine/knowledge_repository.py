@@ -35,7 +35,7 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
         if not issue_id:
             raise ValueError("case_fact requires issue_id")
         now = _now()
-        # 单事务 read-merge-write（审核意见 P2）：旧实现先独立连接读、再
+        # 单事务 read-merge-write：旧实现先独立连接读、再
         # 开另一连接写，多进程（Web/Worker/CLI）并发保存同一 issue 时
         # 后写者整行覆盖前者的合并结果。BEGIN IMMEDIATE 持写锁完成整个
         # RMW，配合 schema 层 WAL + busy_timeout 消除丢失更新。
@@ -109,7 +109,7 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
             if not str(merged.get(key) or "").strip():
                 merged[key] = existing.get(key) or ""
         # error_signature 是领域事实，provenance 占位符（历史版本写入的
-        # "daily-brief:<date>"）不得覆盖已有真实签名（审核意见 P1）。
+        # "daily-brief:<date>"）不得覆盖已有真实签名。
         incoming_signature = str(merged.get("error_signature") or "").strip()
         existing_signature = str(existing.get("error_signature") or "").strip()
         if (
@@ -118,7 +118,7 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
             and not existing_signature.startswith("daily-brief:")
         ):
             merged["error_signature"] = existing_signature
-        # 集合字段 union/dedupe（审核意见 P1）：新 evidence/keywords 非空
+        # 集合字段 union/dedupe：新 evidence/keywords 非空
         # 时不再整体覆盖已有集合——dict 做 key 级合并（list 值保序去重
         # 合并），list 做保序去重；只有 payload 为空才整体保留已有值。
         for payload_key, existing_key in (
@@ -149,7 +149,7 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
             merged["confidence"] = new_conf
         else:
             merged["confidence"] = max(old_conf, new_conf)
-        # 质量标签仲裁（审核意见 P2）：save-case 恒带 "daily_brief_ai"，
+        # 质量标签仲裁：save-case 恒带 "daily_brief_ai"，
         # 不能覆盖批量导入得到的更高分级（"high" 等）——否则一次晨报保存
         # 就把已有质量分级降级。仅当新来源质量更高时才更新。
         merged["source_quality"] = cls._better_source_quality(
@@ -207,7 +207,7 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
 
     @classmethod
     def _union_collections(cls, incoming: Any, existing_value: Any) -> Any:
-        """集合字段合并（审核意见 P1）：union/dedupe 而非整体覆盖。
+        """集合字段合并：union/dedupe 而非整体覆盖。
 
         - dict：key 级合并；同 key 且双方都是 list 时保序去重合并
           （多轮晨报的 ``daily_brief_evidence`` 逐轮累积，旧证据不丢），
@@ -249,7 +249,7 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
             )
         except sqlite3.OperationalError as exc:
             # FTS 半更新（DELETE 成功、INSERT 失败）会让该案例静默退出
-            # 检索；至少留下可排查的日志（审核意见 P3）。
+            # 检索；至少留下可排查的日志。
             logger.warning("FTS index update failed for issue %s: %s", fields["issue_id"], exc)
 
     @staticmethod

@@ -72,7 +72,7 @@ class RuntimeSettings:
             if project_root
             else Path(__file__).resolve().parents[1]
         )
-        environment = env.get("GMS_ENV", "development").strip().lower()
+        environment = runtime_environment(environ)
         return cls(
             project_root=root,
             data_root=Path(

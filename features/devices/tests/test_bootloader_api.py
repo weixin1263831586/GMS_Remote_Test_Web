@@ -78,7 +78,7 @@ def test_failed_lock_script_records_failure_and_recovers_device(
     payload = json.loads(response.body)
 
     assert payload["success"] is False
-    results = payload["data"]["results"]
+    results = payload["details"]["results"]
     assert [item["success"] for item in results] == [False]
     assert "RK3562GMS1" in results[0]["error"]
     # oem 命令在 Python 侧执行（版本未知走旧命令）。
@@ -93,8 +93,11 @@ def test_operation_without_per_device_results_is_not_success() -> None:
     response = bootloader_api._bootloader_operation_response([], "lock")
     payload = json.loads(response.body)
 
-    assert response.status_code == 200
+    assert response.status_code == 502
     assert payload["success"] is False
+    assert payload["code"] == "UPSTREAM_FAILURE"
+    assert payload["details"]["summary"]["total"] == 0
+    assert payload["next_actions"]
 
 
 def test_adb_ready_requires_exact_successful_device_state() -> None:
@@ -116,7 +119,8 @@ def test_failed_bootloader_result_is_not_reported_as_success() -> None:
     )
     payload = json.loads(response.body)
 
-    assert response.status_code == 200
+    assert response.status_code == 502
     assert payload["success"] is False
-    assert payload["data"]["summary"]["failed"] == 1
+    assert payload["code"] == "UPSTREAM_FAILURE"
+    assert payload["details"]["summary"]["failed"] == 1
     assert "Bootloader remains locked" in payload["error"]

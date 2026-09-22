@@ -5,10 +5,12 @@ credential_mode / needs_authentication，让 gms_rt_auth_status 一次看清
 「是 agent token 还是人工会话」「还要不要出示凭据」。
 """
 
-from features.auth.tests.test_auth_api import AuthApiTests
+import unittest
+
+from features.auth.tests._auth_fixture import AuthApiMixin
 
 
-class AuthStatusFieldTests(AuthApiTests):
+class AuthStatusFieldTests(AuthApiMixin, unittest.TestCase):
     def test_auth_status_reports_principal_type_and_credential_mode(self):
         """status 需要直接暴露 principal_type/credential_mode。"""
         self.client.post(

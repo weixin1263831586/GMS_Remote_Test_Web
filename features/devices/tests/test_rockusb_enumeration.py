@@ -271,7 +271,7 @@ class DeviceListLoaderMergeTests(unittest.IsolatedAsyncioTestCase):
                 "filter_suppressed_usbip_devices",
                 side_effect=lambda devices: list(devices),
             ),
-            patch.object(devices_api, "_known_usbip_sources", return_value={}),
+            patch.object(devices_api, "known_usbip_sources", return_value={}),
             patch.object(devices_api, "_prune_inactive_usbip_sources", return_value={}),
         ):
             response = await devices_api.get_connected_devices(

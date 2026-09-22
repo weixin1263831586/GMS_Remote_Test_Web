@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shlex
 import time
 import uuid
 from pathlib import Path
@@ -294,7 +295,7 @@ class BuildService:
         root = base_dir.strip() or str(server.get("workspace_root") or "")
         backend = self._backend(server)
         command = (
-            f"find {root!r} -maxdepth 1 -mindepth 1 -type d "
+            f"find {shlex.quote(root)} -maxdepth 1 -mindepth 1 -type d "
             r"\( -name '*Android*' -o -name '*android*' \) -printf '%f\n' "
             "| sort"
         )
@@ -332,7 +333,7 @@ class BuildService:
         # COMMON_LUNCH_CHOICES, which also includes dozens of generic AOSP
         # products that are not useful firmware targets for this SDK.
         rockchip_products_command = (
-            f"cd {workspace!r} && "
+            f"cd {shlex.quote(workspace)} && "
             "timeout 12s bash --noprofile --norc -c '"
             "printf \"__GMS_LUNCH_BEGIN__\\n\"; "
             "{ find device/rockchip -type f -name AndroidProducts.mk -exec "
@@ -357,7 +358,7 @@ class BuildService:
         # 全部展示成可用于当前 SDK 的选项。命令运行在独立 shell 中，即使
         # stdin EOF 触发了默认项，也不会污染后续构建环境。
         rkbuild_command = (
-            f"cd {workspace!r} && "
+            f"cd {shlex.quote(workspace)} && "
             "timeout 35s bash --noprofile --norc -c '"
             "if [ -f build/envsetup.sh ]; then source build/envsetup.sh >/dev/null 2>&1; "
             "elif [ -f build/make/envsetup.sh ]; then source build/make/envsetup.sh >/dev/null 2>&1; "
@@ -381,7 +382,7 @@ class BuildService:
         # 标准 Android 源码没有 rkbuild_lunch，回退到 envsetup 为当前源码树
         # 计算出的 COMMON_LUNCH_CHOICES，并用哨兵隔离 shell/profile 噪声。
         discover_command = (
-            f"cd {workspace!r} && "
+            f"cd {shlex.quote(workspace)} && "
             "timeout 60s bash --noprofile --norc -c '"
             "unset TARGET_PRODUCT TARGET_RELEASE TARGET_BUILD_VARIANT TARGET_BUILD_APPS; "
             "if [ -f build/envsetup.sh ]; then source build/envsetup.sh >/dev/null 2>&1; "
@@ -402,7 +403,7 @@ class BuildService:
             return remember(options)
 
         fallback_command = (
-            f"cd {workspace!r} && "
+            f"cd {shlex.quote(workspace)} && "
             "bash --noprofile --norc -c '"
             "if [ -f build/envsetup.sh ]; then source build/envsetup.sh >/dev/null 2>&1; "
             "elif [ -f build/make/envsetup.sh ]; then source build/make/envsetup.sh >/dev/null 2>&1; fi; "

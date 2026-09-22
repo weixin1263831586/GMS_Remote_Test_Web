@@ -188,8 +188,7 @@ def decode_signed_id(result_id: str, secret: bytes) -> dict[str, Any]:
     if not sep or not encoded or not signature:
         raise SourceProviderError("result_id 格式非法", status_code=422)
     # 非 ASCII 载荷在这里是非法输入（签名内容只可能是 base64url/hex），
-    # 必须映射 422 而不是让 UnicodeEncodeError 穿透成 500（审核意见：
-    # 任何持 sdk.read scope 的客户端可用非 ASCII result_id 打出全栈）。
+    # 必须映射 422 而不是让 UnicodeEncodeError 穿透成 500。
     if not encoded.isascii():
         raise SourceProviderError("result_id 格式非法", status_code=422)
     expected = hmac.new(secret, encoded.encode("ascii"), hashlib.sha256).hexdigest()[:16]

@@ -18,7 +18,7 @@ MIGRATION_LINE_LIMITS = {
     'features/cluster/api.py': 760,  # +37: page JS 静态端点(CSP 前置迁移); +3: ADR 0010 owner 读侧注释
     'features/cluster/tests/test_api_hardening.py': 744,
     'features/cluster/tests/test_cluster.py': 667,
-    # +43: 启动期 reconcile_claims()（跨库 split-brain 修复，审核意见 P2）；
+    # +43: 启动期 reconcile_claims()（跨库 split-brain 修复）；
     # 后续把 reconcile 拆到 repository_reconciliation.py 时应回落 600。
     'features/cluster/repository.py': 651,
     # +25: upsert_seen_device（终端握手库存滞后的实时探测回填）。

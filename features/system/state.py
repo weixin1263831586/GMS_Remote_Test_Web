@@ -7,10 +7,8 @@
 
 import logging
 import queue
-import re
 import threading
 import time
-from collections import OrderedDict
 from datetime import datetime, timedelta
 
 import paramiko
@@ -262,12 +260,3 @@ class GlobalState:
 
 
 global_state = GlobalState()
-
-# Redmine 问题ID缓存
-REDMINE_ISSUE_ID_CACHE = OrderedDict()
-
-# 预编译正则（供 core.network 等模块使用）
-_IP_PATTERN = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
-_PING_RTT_PATTERN = re.compile(r'rtt min/avg/max/mdev = [\d.]+/([\d.]+)/[\d.]+/[\d.]+ ms')
-_PING_AVG_PATTERN = re.compile(r'avg[=\s]+([\d.]+)', re.IGNORECASE)
-_PING_LOSS_PATTERN = re.compile(r'(\d+)% packet loss')

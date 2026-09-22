@@ -608,7 +608,7 @@ def _merge_traces(first: KkAgentTrace, second: KkAgentTrace) -> KkAgentTrace:
         # 修复轮 replay 同 id 的调用（resume 会重放工具调用）：优先保留
         # 「有结果」的一侧——初跑只有 pending tool_call、修复轮带回成功
         # result 时，旧去重无条件保留 first 会把已成功的取证永远留在
-        # pending，gate 误判取证缺失并烧光修复轮次（审核意见 P2）。
+        # pending，gate 误判取证缺失并烧光修复轮次。
         if not call.tool_call_id:
             continue
         for later in second.tool_calls:

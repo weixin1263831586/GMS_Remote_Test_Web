@@ -14,7 +14,8 @@ def device_action_claim_payload(
     Only reservation claims may be borrowed (the holder's flash→test
     workflow umbrella). cluster-job claims are NOT borrowable: mutating a
     device under the owner's own running job must 409 instead of silently
-    borrowing the job's claim (workflow-level reentrancy, review P1).
+    borrowing the job's claim (workflow-level reentrancy; see ADR 0011 on
+    claim-consistency semantics).
     """
     source_id = f"operation:{operation_id}"
     owned = {

@@ -720,7 +720,7 @@ function closeModal(modalId) {
     const modal = document.getElementById(id);
     if (modal) {
         // 对于动态创建的模态框（直接移除）
-        if (id.startsWith('source-analysis-modal-') || id.startsWith('ai-analysis-modal-')) {
+        if (id.startsWith('ai-analysis-modal-')) {
             // ModalManager.close 同时负责隐藏（display/show/aria）与清理
             // Esc 监听器；这里只补一个延迟 DOM 移除以等动画完成。
             ModalManager.close(id);

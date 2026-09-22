@@ -46,10 +46,25 @@ class FederatedKnowledgeService:
             return self._providers.get(source_id)
 
     def status(self) -> list[dict[str, Any]]:
-        """全部 source 的状态（含 disabled 原因）；单 source 异常不冒泡。"""
+        """全部 source 的状态（含 disabled 原因）；单 source 异常不冒泡。
+
+        已登记（KNOWN_SOURCES）但未注册 provider 的源也必须
+        出现一行 ``not_configured``，而不是从 /sources 里"消失"——
+        fail-closed 的含义是显式禁用，不是静默缺位。
+        """
         out: list[dict[str, Any]] = []
         with self._lock:
             providers = list(self._providers.values())
+            registered = set(self._providers)
+        for source_id in KNOWN_SOURCES:
+            if source_id not in registered:
+                out.append(ProviderStatus(
+                    source=source_id,
+                    enabled=False,
+                    status="not_configured",
+                    detail="未配置（fail-closed 禁用），请在 configs 中设置 "
+                           "external_knowledge.providers 后重启",
+                ).to_dict())
         for provider in providers:
             try:
                 out.append(provider.status().to_dict())
@@ -66,6 +81,7 @@ class FederatedKnowledgeService:
         *,
         sources: list[str] | None = None,
         limit: int = 5,
+        android_api_level: int | None = None,
     ) -> dict[str, Any]:
         """联邦检索：返回 ``{"results", "sources_status"}``，永不抛异常。
 
@@ -92,9 +108,26 @@ class FederatedKnowledgeService:
         status_rows: list[dict[str, Any]] = []
         if not query:
             return {"results": [], "sources_status": self.status()}
+        with self._lock:
+            registered = set(self._providers)
+        # 检索结果同样要给未注册的已知名源一行 not_configured（fail-closed
+        # 显式化）；请求了未知 source 时由 API 层 422，这里只处理已知源。
+        for source_id in KNOWN_SOURCES:
+            if wanted is not None and source_id not in wanted:
+                continue
+            if source_id not in registered:
+                status_rows.append(ProviderStatus(
+                    source=source_id,
+                    enabled=False,
+                    status="not_configured",
+                    detail="未配置（fail-closed 禁用）",
+                ).to_dict())
         for provider in providers:
             try:
-                hits = provider.search(query, limit=limit)
+                search_options: dict[str, Any] = {"limit": limit}
+                if android_api_level is not None:
+                    search_options["android_api_level"] = android_api_level
+                hits = provider.search(query, **search_options)
             except Exception as exc:
                 logger.warning("external knowledge search failed for %s: %s", provider.source_id, exc)
                 status_rows.append(ProviderStatus(
@@ -114,7 +147,7 @@ class FederatedKnowledgeService:
                     hit.evidence_level = "background"
                 results.append(hit)
         # 按 source 分桶轮转合并（各自分数降序）：单 provider 已截到 limit，
-        # 未来多 source 时避免高分源整体挤掉低分源（评审项 M3）。
+        # 未来多 source 时避免高分源整体挤掉低分源。
         by_source: dict[str, list[KnowledgeHit]] = {}
         for hit in results:
             by_source.setdefault(hit.source, []).append(hit)
@@ -139,13 +172,24 @@ def federated_search(
     *,
     sources: list[str] | None = None,
     limit: int = 5,
+    android_api_level: int | None = None,
 ) -> dict[str, Any]:
     """进程级便捷入口：懒加载单例（配置驱动），供 reports/assistant 复用。"""
-    return _singleton().search(query, sources=sources, limit=limit)
+    return _singleton().search(
+        query,
+        sources=sources,
+        limit=limit,
+        android_api_level=android_api_level,
+    )
 
 
 def federated_status() -> list[dict[str, Any]]:
     return _singleton().status()
+
+
+def federated_service() -> FederatedKnowledgeService:
+    """进程级单例本体（approve/reindex 等对象级操作需要 provider 实例）。"""
+    return _singleton()
 
 
 def federated_reindex(source: str) -> dict[str, Any]:

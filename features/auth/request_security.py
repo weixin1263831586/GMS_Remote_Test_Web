@@ -53,12 +53,14 @@ def bootstrap_token_matches(connection: HTTPConnection) -> bool:
 def _normalized_origin(value: str) -> str:
     try:
         parsed = urlsplit(str(value or "").strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return ""
+        # .port raises ValueError for malformed/out-of-range ports; treat the
+        # whole header as unparseable instead of failing the request.
+        default_port = 443 if parsed.scheme == "https" else 80
+        port = parsed.port or default_port
     except ValueError:
         return ""
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        return ""
-    default_port = 443 if parsed.scheme == "https" else 80
-    port = parsed.port or default_port
     suffix = "" if port == default_port else f":{port}"
     return f"{parsed.scheme}://{parsed.hostname.lower()}{suffix}"
 

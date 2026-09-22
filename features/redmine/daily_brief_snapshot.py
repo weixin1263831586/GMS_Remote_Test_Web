@@ -214,7 +214,7 @@ def _unreplied_days(entry: dict[str, Any], snapshot_at: datetime) -> float:
     if not last:
         return 0.0
     try:
-        last_dt = datetime.fromisoformat(last.replace("Z", "+00:00")).replace(tzinfo=None)
+        last_dt = datetime.fromisoformat(last.replace("Z", "+00:00")).astimezone().replace(tzinfo=None)
     except ValueError:
         return 0.0
     return round(max(0.0, (snapshot_at - last_dt).total_seconds() / 86400.0), 1)

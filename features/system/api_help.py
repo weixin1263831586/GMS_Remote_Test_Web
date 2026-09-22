@@ -188,10 +188,10 @@ def generate_per_api_help_text(method: str, path: str) -> str | None:
     prefix_length = len(desc_prefix)
     desc_length = len(description)
 
-    # 按中文字符宽度修正填充，保持表格基本对齐。
+    # 按中文字符宽度修正填充：宽字符显示宽度比字符数多 1，
+    # 需从填充长度中扣除，才能让 Desc 行与边框对齐。
     chinese_chars = len([c for c in description + desc_prefix if ord(c) > 127])
-    visual_adjustment = chinese_chars // 2
-    needed_padding = content_length - prefix_length - desc_length + visual_adjustment
+    needed_padding = content_length - prefix_length - desc_length - chinese_chars
 
     desc_part = description + ' ' * needed_padding
 

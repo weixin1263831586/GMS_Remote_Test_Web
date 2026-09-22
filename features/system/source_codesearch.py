@@ -33,7 +33,7 @@ class CodesearchProvider:
 
     - 索引是动态的：``revision`` 仅作为请求标签记录在 result_id 里，
       ``commit`` 恒为空串；不保证跨索引更新的引用可复现性；
-    - 审核意见（P2）：所有返回显式携带 ``reproducible: false`` 与
+    - 所有返回显式携带 ``reproducible: false`` 与
       ``requested_revision``——这类证据不允许单独把 root_cause 推到
       confirmed（由 daily brief prompt/evidence 消费方执行）；
     - result_id 载荷为 ``source_id/revision/path``（无 commit）；
@@ -173,6 +173,8 @@ class CodesearchProvider:
         data = self._request_json("/api/v1/search", params)
         results = data.get("results")
         matches: list[dict[str, Any]] = []
+        # 达到 limit 截断时必须如实上报（与 local_git provider 契约一致）。
+        limited = False
         if isinstance(results, dict):
             for raw_path, raw_hits in results.items():
                 repo_path = _strip_opengrok_path(str(raw_path), self.config.project)
@@ -199,8 +201,10 @@ class CodesearchProvider:
                         "result_id": self._make_result_id(repo_path, resolved),
                     })
                     if len(matches) >= limit:
+                        limited = True
                         break
                 if len(matches) >= limit:
+                    limited = True
                     break
         return {
             "source_id": self.config.source_id,
@@ -209,7 +213,7 @@ class CodesearchProvider:
             "reproducible": False,
             "total": _opengrok_line_number(data.get("resultCount")) or len(matches),
             "scanned_files": len(results) if isinstance(results, dict) else 0,
-            "limited": False,
+            "limited": limited,
             "matches": matches,
         }
 

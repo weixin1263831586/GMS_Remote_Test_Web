@@ -292,12 +292,12 @@ async def run_daily_brief(
     payload: dict | None = None,
     mode: str = Query("manual"),
 ):
+    _require_human(request)
     if mode not in BRIEF_MODES:
         return JSONResponse(
             content={"success": False, "error": f"mode must be one of {BRIEF_MODES}"},
             status_code=400,
         )
-    _require_human(request)
     if not _has_redmine_credentials(request):
         return _missing_credentials_payload(request)
     service = _service_for_request(request)

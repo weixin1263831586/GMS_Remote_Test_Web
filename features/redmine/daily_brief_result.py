@@ -64,7 +64,7 @@ RESULT_SCHEMA_VERSION = 2
 def validate_issue_result(result: dict[str, Any]) -> list[str]:
     """Validate new output and canonicalize it in place.
 
-    审核意见（P2）：``extra="ignore"`` 会让未知字段被 Pydantic 丢弃，但原始
+    ``extra="ignore"`` 会让未知字段被 Pydantic 丢弃，但原始
     dict 仍可能继续带着 legacy/hallucinated 字段进入持久层。这里在验证成功后
     用 ``model_dump()`` 覆盖原 dict，只保留 schema 内字段（并写入
     ``result_schema_version``），保证持久化表示 canonical。运行时附加字段

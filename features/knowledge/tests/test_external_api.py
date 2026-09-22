@@ -71,11 +71,14 @@ class ExternalApiTests(unittest.TestCase):
             external_api, "federated_search", return_value=data
         ) as fed:
             resp = self.client.post(
-                "/external/search", json={"query": "lmkd", "limit": 3}
+                "/external/search",
+                json={"query": "lmkd", "limit": 3, "android_api_level": 34},
             )
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["data"]["results"][0]["evidence_level"], "background")
-        fed.assert_called_once_with("lmkd", sources=[], limit=3)
+        fed.assert_called_once_with(
+            "lmkd", sources=[], limit=3, android_api_level=34
+        )
 
     def test_search_degrades_on_service_error(self):
         with patch.object(external_api, "require_permission", return_value=_allow), patch.object(
@@ -132,16 +135,24 @@ class ExternalApiTests(unittest.TestCase):
         with patch.object(external_api, "require_agent_scope", return_value=_allow), patch.object(
             external_api, "federated_search", return_value=data
         ) as fed:
-            resp = self.client.get("/android-internals/search", params={"q": "choreographer", "limit": 2})
+            resp = self.client.get(
+                "/android-internals/search",
+                params={"q": "choreographer", "limit": 2, "android_api_level": 34},
+            )
         self.assertEqual(resp.status_code, 200)
-        # M5：统一 envelope（success_response 默认带 message 字段）。
+        # 统一 envelope（success_response 默认带 message 字段）。
         body = resp.json()
         self.assertTrue(body["success"])
         self.assertEqual(body["data"], data)
-        fed.assert_called_once_with("choreographer", sources=["android_internals"], limit=2)
+        fed.assert_called_once_with(
+            "choreographer",
+            sources=["android_internals"],
+            limit=2,
+            android_api_level=34,
+        )
 
     def test_search_rejects_blank_source_items(self):
-        # L1：空串条目不是"未知源 422"就是被过滤，绝不能静默放大为全源检索。
+        # 空串条目不是"未知源 422"就是被过滤，绝不能静默放大为全源检索。
         with patch.object(external_api, "require_permission", return_value=_allow), patch.object(
             external_api, "federated_search", return_value={"results": [], "sources_status": []}
         ) as fed:

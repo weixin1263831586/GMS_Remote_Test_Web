@@ -107,7 +107,9 @@ def copy_fileobj_to_path(
     chunk_size: int = 1024 * 1024,
 ) -> int:
     bytes_written = 0
-    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    parent_dir = os.path.dirname(destination)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
     try:
         with open(destination, 'wb') as target:
             while chunk := source.read(chunk_size):

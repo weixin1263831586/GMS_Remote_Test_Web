@@ -102,7 +102,7 @@ mcp_tool_schemas = _load_tool_schemas()
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.24"
+SERVER_VERSION = "0.22.26"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -1055,11 +1055,13 @@ def burn_firmware_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
                 return "wait_online_max must be an integer (seconds)", True
     args = [firmware_path, device, wipe_str, "--approval-token", approval_token, *extra]
     if arguments.get("wait") is True:
-        return run_cli(
-            "gms-rt-burn-firmware",
-            args,
-            timeout=arguments.get("timeout") if arguments.get("timeout") is not None else 1800,
-        )
+        timeout = 1800
+        if arguments.get("timeout") is not None:
+            try:
+                timeout = max(1, int(arguments["timeout"]))
+            except (TypeError, ValueError):
+                return "timeout must be an integer (seconds)", True
+        return run_cli("gms-rt-burn-firmware", args, timeout=timeout)
     # 异步：后台启动 CLI，立即返回 operation_id；结果落盘供 burn_status 读取。
     return start_burn_operation("gms-rt-burn-firmware", args)
 
@@ -1553,22 +1555,6 @@ def _split_short_option(token: str) -> list[str]:
     return [f"-{ch}" for ch in body]
 
 
-def _expand_option_tokens(tokens: list[str]) -> list[str]:
-    """Expand clustered short options into individual flags.
-
-    Only clusters of KNOWN short-flag letters expand: '-dc' for logcat is
-    -d + -c. Unknown-letter clusters stay intact so value tokens (file
-    names like '-some-file') are not misread as flags.
-    """
-    expanded: list[str] = []
-    for token in tokens:
-        if token.startswith("-") and not token.startswith("--") and len(token) > 2:
-            expanded.extend(_split_short_option(token))
-        else:
-            expanded.append(token)
-    return expanded
-
-
 def _is_long_option_prefix(token: str, long_name: str) -> bool:
     """True when token is --name or --name=value or an unambiguous
     abbreviation that getopt_long would still accept as --name."""
@@ -1666,13 +1652,6 @@ def _validate_single_shell_command(command: str) -> tuple[bool, str]:
             return False, (
                 "streaming logcat is not allowed; add -d/-t/-T (dump mode)"
             )
-        has_dump_mode = has_dump_mode or any(
-            t in rest for t in ("-d", "-t", "-T")
-        )
-        if not has_dump_mode:
-            return False, (
-                "streaming logcat is not allowed; add -d/-t/-T (dump mode)"
-            )
     elif binary == "dmesg":
         # dmesg -c (and -C, including inside clusters like -tc) clear
         # the kernel ring buffer; positively allow only read-only flags.
@@ -1746,8 +1725,6 @@ def _validate_shell_command(command: str) -> tuple[bool, str]:
 
 
 def shell_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
-    import re
-
     global _DEVICE_ID_PATTERN
     device = str(arguments.get("device") or "").strip()
     command = str(arguments.get("command") or "").strip()
@@ -1802,8 +1779,6 @@ def _is_clear_request(arguments: dict[str, Any]) -> bool:
 
 
 def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
-    import re
-
     global _DEVICE_ID_PATTERN
     device = str(arguments.get("device") or "").strip()
     if not device:
@@ -1928,12 +1903,6 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         items.extend(["-t", since_text])
         if len(items) > _LOGCAT_MAX_ARGS + 2:
             return f"too many logcat arguments (max {_LOGCAT_MAX_ARGS})", True
-    if until_text is not None and since_text is None and not any(
-        flag in items for flag in ("-d", "-t", "-T", "-g", "-L", "-p", "-print")
-    ):
-        # -d is added below anyway; keep the check consistent with the
-        # existing dump-mode logic.
-        pass
     # Dump mode keeps the call bounded for unattended agents; the CLI adds
     # -d itself in --non-interactive mode when no dump flag is present.
     if not any(
@@ -1994,8 +1963,6 @@ _SHELL_EXEC_MAX_COMMAND_CHARS = 2000
 
 
 def shell_exec_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
-    import re
-
     global _DEVICE_ID_PATTERN
     device = str(arguments.get("device") or "").strip()
     command = str(arguments.get("command") or "").strip()
@@ -2652,6 +2619,11 @@ def knowledge_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     args = ["--query", query]
     if arguments.get("limit"):
         args.extend(["--limit", str(_int_arg(arguments, "limit", 5, 1, 10))])
+    if arguments.get("android_api_level") is not None:
+        args.extend([
+            "--android-api-level",
+            str(_int_arg(arguments, "android_api_level", 1, 1, 1000)),
+        ])
     return run_cli("gms-rt-knowledge-search", args)
 
 

@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.24"
+GMS_RT_VERSION="0.22.26"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -893,8 +893,13 @@ gms-rt-agent-enroll() {
     local dir
     dir=$(dirname "$out_file")
     mkdir -p "$dir" && chmod 700 "$dir" 2>/dev/null || true
+    # 保存/恢复 umask：本脚本可被 source（函数模式），泄漏 077 会改变调用者
+    # shell 之后创建的所有文件权限。
+    local _old_umask
+    _old_umask=$(umask)
     umask 077
     printf '%s\n' "$token" > "$out_file"
+    umask "$_old_umask"
     unset token data code response body
     local used_profile="${profile_flag:-${GMS_RT_PROFILE}}"
     success "Agent token enrolled (0600): $out_file"
@@ -1020,7 +1025,10 @@ gms-rt-approval-create() {
         --arg mode "$burn_mode" \
         '{tool: $tool, device: $device, command: $command,
           firmware_sha256: $sha, wipe_data: $wipe, burn_mode: $mode}')
-    response=$(curl "${CURL_TLS_ARGS[@]}" -sS -X POST "${API_BASE}/auth/approval-tokens" \
+    # 审批令牌由人工会话铸造（服务端拒匿名与 agent token），
+    # 这里必须携带当前凭据（cookie 或 Bearer），否则永远 401。
+    response=$(curl "${CURL_TLS_ARGS[@]}" ${CURL_BEARER_ARGS:+"${CURL_BEARER_ARGS[@]}"} \
+        "${CURL_AUTH_ARGS[@]}" -sS -X POST "${API_BASE}/auth/approval-tokens" \
         -H "Content-Type: application/json" -d "$data" \
         -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT")
     local http_status body
@@ -2545,7 +2553,7 @@ gms-rt-devices-shell() {
             --arg device "$device_id" \
             --arg command "${shell_args[*]}" \
             '{token: $token, tool: "gms_rt_shell_exec", device: $device, command: $command}')
-        consume_response=$(curl "${CURL_TLS_ARGS[@]}" -sS -X POST \
+        consume_response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS -X POST \
             "${API_BASE}/auth/approval-tokens/consume" \
             -H "Content-Type: application/json" \
             --data-binary "@-" -w $'\nHTTP_STATUS:%{http_code}' \
@@ -2837,15 +2845,22 @@ gms-rt-devices-push() {
     [ -z "$host" ] && { error "无法确定测试主机地址"; return 1; }
     ! command -v scp &> /dev/null && { error "scp 命令未找到. 请安装 OpenSSH 客户端"; return 1; }
 
-    local tmp_remote="/tmp/gms-rt-push-$$-$filename"
+    # 临时文件名不含用户输入：远端 sh 会解释拼接后的命令，旧实现把本地文件名
+    # 拼进 scp/ssh 远端命令，含引号的文件名可注入测试主机命令。
+    # $$ 在 source（函数模式）下对所有调用相同，追加 $RANDOM 供并发去重。
+    local tmp_remote="/tmp/gms-rt-push-$$-$RANDOM"
 
     echo "📤 Step 1/2: Transferring $filename to test host..."
     scp -P "$port" "$local_path" "$user@$host:$tmp_remote" || { error "文件传输失败"; return 1; }
 
     echo "📤 Step 2/2: Pushing to device $device_id:$remote_path (via $user@$host)..."
     local push_result=0
-    ssh -p "$port" "$user@$host" "adb -s $device_id push '$tmp_remote' '$remote_path'" || push_result=$?
-    ssh -p "$port" "$user@$host" "rm -f '$tmp_remote'" 2>/dev/null
+    local quoted_device quoted_tmp quoted_remote_path
+    quoted_device=$(_shell_quote "$device_id")
+    quoted_tmp=$(_shell_quote "$tmp_remote")
+    quoted_remote_path=$(_shell_quote "$remote_path")
+    ssh -p "$port" "$user@$host" "adb -s ${quoted_device} push ${quoted_tmp} ${quoted_remote_path}" || push_result=$?
+    ssh -p "$port" "$user@$host" "rm -f ${quoted_tmp}" 2>/dev/null
     return $push_result
 }
 
@@ -3538,7 +3553,7 @@ gms-rt-knowledge-search() {
     # ADR 0014: 外部 Android 知识源只读检索（android-internals-wiki）。
     # 命中一律是 background 背景知识：解释系统机制，不得当作 verified
     # root cause 证据，也不能替代 gms-rt-sdk-* 的源码取证。
-    local query="" limit=5
+    local query="" limit=5 android_api_level=""
     if [ $# -ge 1 ]; then
         case "$1" in
             -*) : ;;
@@ -3548,19 +3563,23 @@ gms-rt-knowledge-search() {
     while [ "$#" -gt 0 ]; do
         case "$1" in
             -h|--help)
-                echo "Usage: gms-rt-knowledge-search QUERY [--limit N]"
+                echo "Usage: gms-rt-knowledge-search QUERY [--limit N] [--android-api-level N]"
                 echo "  Query: mechanism keywords, e.g. 'LMKD PRESSURE_AFTER_KILL', 'Binder timeout'"
                 return 0
                 ;;
             --query) shift; [ $# -gt 0 ] || { error "--query requires a value"; return "$GMS_RT_EXIT_USAGE"; }; query="$1" ;;
             --limit) shift; [ $# -gt 0 ] || { error "--limit requires a value"; return "$GMS_RT_EXIT_USAGE"; }; limit="$1" ;;
+            --android-api-level) shift; [ $# -gt 0 ] || { error "--android-api-level requires a value"; return "$GMS_RT_EXIT_USAGE"; }; android_api_level="$1" ;;
             *) error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE" ;;
         esac
         shift
     done
-    [ -z "$query" ] && { error "Usage: gms-rt-knowledge-search QUERY [--limit N]"; return "$GMS_RT_EXIT_USAGE"; }
+    [ -z "$query" ] && { error "Usage: gms-rt-knowledge-search QUERY [--limit N] [--android-api-level N]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
     local url="/knowledge/android-internals/search?q=$(_urlencode "$query")&limit=$limit"
+    if [ -n "$android_api_level" ]; then
+        url="$url&android_api_level=$(_urlencode "$android_api_level")"
+    fi
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
         api_call "$url" "GET" | jq '.'
         return $?
@@ -4570,7 +4589,7 @@ gms-rt-test-logs-stream() {
     echo "📡 Streaming test logs (Ctrl+C to stop)..."
     _refresh_tls_args
     _ensure_auth_cookie_jar || return 1
-    curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -N "${API_BASE}/test/logs/stream"
+    curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -N "${API_BASE}/test/logs/stream"
 }
 
 # Start a test - delegates to /api/test/parse-args for intelligent parameter parsing
@@ -5728,7 +5747,7 @@ _gms_rt_command_usage() {
         gms-rt-artifact-search) printf '%s' 'gms-rt-artifact-search <snapshot_id> <query> [--limit N]' ;;
         gms-rt-apk-analyze-attachment) printf '%s' 'gms-rt-apk-analyze-attachment <snapshot_id> <artifact_id>' ;;
         gms-rt-apk-source-read) printf '%s' 'gms-rt-apk-source-read <task_id> <path> [--offset N] [--limit N]' ;;
-        gms-rt-knowledge-search) printf '%s' 'gms-rt-knowledge-search QUERY [--limit N]' ;;
+        gms-rt-knowledge-search) printf '%s' 'gms-rt-knowledge-search QUERY [--limit N] [--android-api-level N]' ;;
         gms-rt-sdk-sources) printf '%s' 'gms-rt-sdk-sources' ;;
         gms-rt-sdk-search) printf '%s' 'gms-rt-sdk-search --source ID --revision REV --query TEXT [--path FILTER] [--limit N]' ;;
         gms-rt-sdk-read) printf '%s' 'gms-rt-sdk-read SDK_RESULT_ID [--offset N] [--limit N]' ;;

@@ -230,7 +230,9 @@ async def run_claimed_job(
                 # 区分真实队列任务和已经失败的任务。
                 # 批量 run 中的 issue-job 仍不写 run，避免和 force 重跑
                 # 的 run-job 竞争终态。
-                owns_run_terminal_state = job["kind"] == "run" or run.mode.startswith("issue:")
+                owns_run_terminal_state = job["kind"] == "run" or (
+                    run is not None and run.mode.startswith("issue:")
+                )
                 if run is not None and owns_run_terminal_state and run.status not in TERMINAL_RUN_STATUSES:
                     run.status = "failed"
                     run.error = mask_secrets(str(exc), 1000)
@@ -306,7 +308,7 @@ async def worker_loop(
                 logger.exception(
                     "daily brief worker continuing after unexpected job error"
                 )
-                # backoff（审核意见 P3）：DB 持续异常时避免紧密循环重扫
+                # backoff：DB 持续异常时避免紧密循环重扫
                 # 全部 owner 库。
                 try:
                     await asyncio.wait_for(
@@ -332,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    # SDK source registry：与 Web 进程同源初始化（审核意见 P1）。否则本
+    # SDK source registry：与 Web 进程同源初始化。否则本
     # 进程的 sdk_sources_available() 与 Web 手动分析不一致，evidence gate
     # 会错误地对测试类失败降级放行。
     try:
@@ -344,7 +346,7 @@ def main(argv: list[str] | None = None) -> int:
         logger.exception("sdk source registry init failed; source gate stays strict")
 
     async def retry_source_init(stop_event: asyncio.Event) -> None:
-        """初始化失败低频重试（审核意见 P2）：启动期密钥文件竞态/临时
+        """初始化失败低频重试：启动期密钥文件竞态/临时
         权限问题不应让本进程整个生命周期都保持 UNINITIALIZED（与 Web
         行为永久不一致，且强制取证会系统性烧光分析轮次）。"""
         from features.system import registry_state

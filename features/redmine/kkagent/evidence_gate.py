@@ -1,6 +1,6 @@
 """Runtime Evidence Gate：用真实 tool trace 校验晨报取证要求。
 
-审核意见（P1）：history_checked 等字段目前主要靠模型自报
+history_checked 等字段目前主要靠模型自报
 （bool("false") == True 的静默转换更是直接放水）。本模块从 kkagent
 stream-json 轨迹里统计**真实发生**的 MCP 调用，把 evidence 判定从
 Prompt Policy 升级成 Runtime Policy：
@@ -60,7 +60,7 @@ def is_test_failure_subject(entry: dict[str, Any]) -> bool:
 def bind_claims(
     result: dict[str, Any], ledger: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """把模型声称的 evidence 条目绑定回真实证据 ID（审核意见 P2）。
+    """把模型声称的 evidence 条目绑定回真实证据 ID。
 
     每条声称的 evidence 用 source/reference/fact 拼接成可匹配文本，与 ledger
     每条证据的引用 token（issue/artifact/snapshot id、路径、查询词）做包含
@@ -106,7 +106,7 @@ def evaluate_evidence_gate(
 ) -> dict[str, Any]:
     """从轨迹推导取证事实；绝不读取模型自报的 history_checked。
 
-    审核意见（P1）：所有取证判定都按 ``target_issue_id`` 归属——分析
+    所有取证判定都按 ``target_issue_id`` 归属——分析
     #100 时，对相似工单 #200 的 journals/attachments 调用不能当作 #100
     自己已取证。归属依据为调用输入的 issue_id/snapshot_id 与返回结构里
     的 snapshot_id/artifact_id 关联（见 ``_targets_current``）。
@@ -336,7 +336,7 @@ def gate_errors(
                 "downgrade to 'likely' or obtain pinned-commit evidence"
             )
         elif result.get("root_cause_type") == "confirmed":
-            # Claim 级绑定（审核意见 P2）：轨迹里存在可复现源码证据还不够，
+            # Claim 级绑定：轨迹里存在可复现源码证据还不够，
             # 模型声称的 evidence 必须真的引用了其中一条——否则"源码证据 A
             # + 无关根因 B"仍会被全局计数误判为已证实。
             reproducible_ids = {
@@ -393,7 +393,7 @@ def gate_and_errors(
 ) -> tuple[dict[str, Any], list[str]]:
     """一次性：评估 gate → 绑定 claim → 写回 result → 返回 (gate, errors)。"""
     gate = evaluate_evidence_gate(trace, entry)
-    # Claim ↔ Evidence Ledger 绑定（审核意见 P2）：把模型声称的 evidence
+    # Claim ↔ Evidence Ledger 绑定：把模型声称的 evidence
     # 绑定回稳定证据 ID，随 gate 一起存档；confirmed 级结论的引用必须
     # 命中可复现源码证据，而不是仅"轨迹里存在过一次"（gate_errors）。
     gate["claim_bindings"] = bind_claims(result, trace.evidence_ledger())

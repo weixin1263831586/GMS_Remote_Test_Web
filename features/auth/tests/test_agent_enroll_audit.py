@@ -214,8 +214,10 @@ class EnrollmentAuditRedactionTests(AgentEnrollmentPublicAccessTests):
         raw_token = resp.json()["token"]["token"]
 
         audit_text = self._read_audit_text()
-        self.assertIn("/api/auth/agent-enroll", audit_text), (
-            "audit must keep the redemption event itself"
+        self.assertIn(
+            "/api/auth/agent-enroll",
+            audit_text,
+            "audit must keep the redemption event itself",
         )
         self.assertNotIn(code, audit_text, "配对码泄漏进审计日志")
         self.assertNotIn(raw_token, audit_text, "Agent token 泄漏进审计日志")

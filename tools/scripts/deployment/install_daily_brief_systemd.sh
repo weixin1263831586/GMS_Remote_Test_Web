@@ -9,7 +9,7 @@
 set -Eeuo pipefail
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-readonly REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+readonly REPO_DIR="$(cd -- "${SCRIPT_DIR}/../../.." && pwd -P)"
 readonly UNIT_SOURCE_DIR="${REPO_DIR}/deploy/systemd"
 readonly WEB_UNIT="gms-web-app.service"
 readonly WORKER_UNIT="gms-redmine-daily-brief-worker.service"

@@ -46,9 +46,6 @@ def _parse_csv_env(env_name: str, default: str) -> list[str]:
 
 TRUSTED_HOSTS = _parse_csv_env('TRUSTED_HOSTS', '*')
 
-UPLOAD_PROGRESS_QUERY_TIMEOUT = 5
-UPLOAD_PROGRESS_EXPIRATION = 10
-UPLOAD_PROGRESS_CLEANUP_INTERVAL = 60
 GSI_PROGRESS_POLL_INTERVAL = 0.5
 DEFAULT_FAVICON_TIMEOUT = 10
 MAX_BATCH_SIZE = 20
@@ -60,8 +57,6 @@ USER_STATE_MAX_AGE_HOURS = 24
 USER_STATE_STALE_RUNNING_HOURS = 8
 UPLOAD_PROGRESS_MAX_AGE_SECONDS = 600
 USBIP_STATE_MAX_AGE_SECONDS = 86400
-APK_TASK_MAX_AGE_SECONDS = 86400
-TERMINAL_SESSION_MAX_AGE_SECONDS = 3600
 FIRMWARE_UPLOAD_PROGRESS_MAX_ITEMS_PER_CLIENT = 1
 DEVICE_CACHE_TTL = 3
 DEVICE_SSH_POOLS_MAX = 10
@@ -219,7 +214,7 @@ class ConfigManager(ConfigPersistenceMixin):
 
         if not redmine_config or 'base_url' not in redmine_config:
             raise ValueError(
-                'Redmine 未配置或配置不完整，请在 configs/config.json 中配置 redmine 段，'
+                'Redmine 未配置或配置不完整，请在 configs/local/config.json 中配置 redmine 段，'
                 '包含 domain 和 base_url 字段'
             )
 
@@ -697,16 +692,17 @@ class ConfigManager(ConfigPersistenceMixin):
 
             encrypted_password = encrypt_secret(password)
 
-            runtime = self._load_runtime_config() or {}
-            runtime['redmine_auth'] = {
-                'username': username,
-                'encrypted_password': encrypted_password,
-                'updated_at': time.strftime('%Y-%m-%dT%H:%M:%S')
-            }
-            if self._write_runtime_config_file(runtime, preserve_redmine_auth=False):
-                logger.info(f"[Redmine Auth] Saved credentials for {username}")
-                return True
-            return False
+            with self._runtime_write_lock:
+                runtime = self._load_runtime_config() or {}
+                runtime['redmine_auth'] = {
+                    'username': username,
+                    'encrypted_password': encrypted_password,
+                    'updated_at': time.strftime('%Y-%m-%dT%H:%M:%S')
+                }
+                if self._write_runtime_config_file(runtime, preserve_redmine_auth=False):
+                    logger.info(f"[Redmine Auth] Saved credentials for {username}")
+                    return True
+                return False
         except Exception as e:
             logger.error(f"[Redmine Auth] Failed to save credentials: {e}")
             return False

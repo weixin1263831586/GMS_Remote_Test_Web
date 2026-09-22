@@ -181,7 +181,11 @@ def write_profile_toml(
         "",
     ]
     path = profile_path(profile)
-    path.write_text("\n".join(lines), encoding="utf-8")
+    # 0600 at creation: write_text() would briefly expose the profile at the
+    # process umask before the chmod lands.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines))
     path.chmod(0o600)
     return path
 

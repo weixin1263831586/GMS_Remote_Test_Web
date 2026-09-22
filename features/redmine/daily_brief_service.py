@@ -90,7 +90,7 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         try:
             runtime = manager.get_runtime_config() if manager else {}
         except Exception:
-            pass
+            logger.info("daily brief runtime config unavailable", exc_info=True)
         return normalize_daily_brief_config((runtime or {}).get(RUNTIME_CONFIG_KEY) or {})
 
     def save_config(self, config_manager: Any | None, config: dict[str, Any]) -> bool:
@@ -236,8 +236,6 @@ class DailyBriefService(DailyBriefRunStarterMixin):
             "issues": [display_issue(issue) for issue in issues],
         }
 
-    _issue_payload = staticmethod(issue_payload)
-
     # ------------------------------------------------------------------ triage
 
     async def build_triage(
@@ -271,8 +269,7 @@ class DailyBriefService(DailyBriefRunStarterMixin):
             self.repository.delete_snapshot(run.run_id)
             self.repository.delete_issues(run.run_id)
             # 重冻结会删掉全部 issue 行；仍在排队的 issue-job 必须一并
-            # 作废，否则它们随后被领取时读不到 issue 行（审核意见 P1：
-            # 跨 kind 竞态把刚重置的 run 打成 failed）。
+            # 作废，否则它们随后被领取时读不到 issue 行。
             self.repository.jobs.cancel_queued_issue_jobs(run.run_id)
         # 复用 run 重新执行前清除上一轮的取消标志。
         self.repository.clear_cancel(run.run_id)
@@ -704,6 +701,9 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         # 数量、Markdown 与 run.status 会互相矛盾。
         self._summarize_phase(run)
         refreshed = self.repository.get_issue(run.run_id, issue_id)
+        if refreshed is None:
+            # 并发重跑可能已清空该 run 的 issue 行;不伪造状态,同入参校验语义。
+            return {"error": f"issue {issue_id} no longer in run {run.run_id}"}
         return {"run_id": run.run_id, "issue_id": issue_id, "status": refreshed.status}
 
 __all__ = ["DEFAULT_BRIEF_CONFIG", "DailyBriefService", "normalize_daily_brief_config"]

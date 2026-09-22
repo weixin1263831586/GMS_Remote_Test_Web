@@ -49,6 +49,19 @@ class ApprovalTokenServiceMixin:
     # 消费两端使用同一函数，调用方无法用为 A 固件签发的令牌烧 B 固件。
     BURN_TOOL = "gms_rt_burn_firmware"
 
+    @staticmethod
+    def normalize_burn_devices(value: str) -> str:
+        """Canonicalize a burn device spec into a sorted, deduped CSV.
+
+        Splitting on "," only (never on ":") keeps TCP serials such as
+        ``192.168.1.5:5555`` intact while allowing "A,B" multi-device
+        burns; the result matches the canonical device string the burn
+        endpoint derives from its sanitized device list.
+        """
+        parts = {part.strip() for part in str(value or "").split(",")}
+        parts.discard("")
+        return ",".join(sorted(parts))
+
     @classmethod
     def derive_burn_command(
         cls,
@@ -58,13 +71,7 @@ class ApprovalTokenServiceMixin:
         wipe_data: bool,
         burn_mode: str,
     ) -> str:
-        devices = ",".join(
-            sorted({
-                part.strip()
-                for part in str(device or "").split(",")
-                if part.strip()
-            })
-        )
+        devices = cls.normalize_burn_devices(device)
         digest = str(firmware_sha256 or "").strip().lower()
         if not digest:
             raise ValueError("firmware_sha256 必填")
@@ -104,7 +111,13 @@ class ApprovalTokenServiceMixin:
                 wipe_data=wipe_data,
                 burn_mode=burn_mode,
             )
-            device_name = command.split(":")[1]
+            # Bind the token to the canonical device list, not the command
+            # prefix: a TCP serial "ip:port" contains a colon that the
+            # prefix split would truncate, so the consumer's device match
+            # would fail even though derive_burn_command kept it intact.
+            device_name = self.normalize_burn_devices(device_name)
+            if not device_name:
+                raise ValueError("device 必须包含至少一个有效设备序列号")
         ttl = max(30, min(600, int(ttl_seconds or APPROVAL_TOKEN_TTL_SECONDS)))
         token = secrets.token_urlsafe(32)
         now = _utcnow()

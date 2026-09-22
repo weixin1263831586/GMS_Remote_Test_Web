@@ -19,14 +19,16 @@ ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_BYTE_LIMITS = {
     # CSP 前置迁移后 shell 内联脚本外置(shell-main.js 等),html 大幅收缩。
     'web/shell/shell.html': 262103,          # 728210→262073→262103: +30 残留 onkeypress 迁移为 data-keypress 委托; target: < 100 KB after partials split
-    'web/static/css/common.css': 147941,      # +1092: inline hover 样式迁移为声明式 CSS; +2841: 9月 UI 对齐; target: < 50 KB after split
+    'web/static/css/common.css': 148115,      # +1092: inline hover 样式迁移为声明式 CSS; +2841: 9月 UI 对齐; +174: CSS 变量缺省回退(--bg-color 等)双主题兜底; target: < 50 KB after split
     'web/static/js/navigation.js': 50 * 1024,
     'web/static/js/api-constants.js': 36286,
     'web/static/js/pages/test-suite-browser.js': 125721,   # target: < 50 KB (browser context isolation + direct local fetch & request generation)
     'web/static/js/pages/report-analysis.js': 115880,      # -1265: KB/源码卡片渲染拆至 report-analysis-diagnosis.js（ADR 0014 背景分栏同文件新增）; target: < 50 KB
-    'web/static/js/pages/firmware-burn.js': 129459,        # target: < 50 KB
-    'web/static/js/pages/api-docs.js': 50304,              # +165: act-bridge 委托 helper
-    'web/static/js/shell/weekly-report.js': 83553,         # +244: XSS 转义一致性; target: < 50 KB
+    'web/static/js/pages/firmware-burn.js': 129988,        # +529: beforeunload 拦截移入 try 外并在失败路径移除（防上传中断警告常驻）; target: < 50 KB
+    'web/static/js/pages/api-docs.js': 50374,              # +165: act-bridge 委托 helper; +70: clipboard 仅安全上下文可用，失败回退 copyText
+    # 拆分兑现（评审意见：不放宽 weekly-report 预算，优先拆分）：周报分析
+    # 面板迁至 utility-tools.js（46.7 KB，默认限额内）；预算收缩到实际值。
+    'web/static/js/shell/weekly-report.js': 41351,         # 83553→41351: 分析面板拆出; target: < 50 KB
     # 原 shell.html 内联主脚本外置(仅搬运,CSP 前置迁移);随 partials 拆分继续收缩。
     'web/static/js/shell/shell-main.js': 288220,           # +lazy activation 早退(set-username); +2084: workflow tabs 页头统一迁移; +4573: 9月 shell/终端对齐; target: < 100 KB after decomposition
 }

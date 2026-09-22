@@ -130,8 +130,6 @@ def _pull_apk(device_id: str | None, on_device_path: str, package: str) -> str:
     device, build fingerprint and remote APK metadata; package-only caching can
     return another device's framework resources in mixed-build labs.
     """
-    import os
-
     os.makedirs(_APK_CACHE_DIR, exist_ok=True)
     adb = _adb_path()
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
@@ -510,8 +508,6 @@ def pull_device_file(
     Used to fetch an APK for host-side decompilation. Raises RuntimeError on
     failure.
     """
-    import os
-
     os.makedirs(os.path.dirname(os.path.abspath(local_path)), exist_ok=True)
     adb = _adb_path()
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""

@@ -74,7 +74,7 @@ class AgentTokenServiceTests(unittest.TestCase):
         self.assertEqual(self.admin.resource_owner_id, self.admin.id)
 
     def test_resource_owner_survives_token_rotation(self):
-        """token 轮换后资源归属仍是登记账号（审核意见：防资源孤儿）。"""
+        """token 轮换后资源归属仍是登记账号。"""
         first = self.service.create_agent_token(
             name="rotate-a", owner=self.admin, scopes=["build.execute"]
         )
@@ -268,9 +268,10 @@ class EnrollmentServiceTests(unittest.TestCase):
         )
         code = enrollment["code"]
         # 直接把过期时间改到过去，模拟 TTL 流逝。
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
-        past = (datetime.utcnow() - timedelta(minutes=1)).strftime(
+        # naive-UTC:与 _from_iso 的库内时间约定一致(避免弃用的 utcnow())。
+        past = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=1)).strftime(
             "%Y-%m-%dT%H:%M:%S.%f"
         )
         with self.service._lock, self.service._connect() as conn:

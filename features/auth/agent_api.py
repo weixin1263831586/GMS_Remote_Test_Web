@@ -126,8 +126,8 @@ async def auth_agent_enroll(request: Request, req: dict):
     Intentionally does not require a session: the build server only holds the
     one-shot code. Scopes/ACLs/expiry come from the enrollment record.
     Anonymous brute-force of the pairing code is throttled per source IP by
-    the same persistent limiter the login endpoint uses (code review
-    2026-08: the endpoint must not rely on TTL/one-shot alone).
+    the same persistent limiter the login endpoint uses — TTL and one-shot
+    consumption alone are not a brute-force defence.
     """
     # Use the trusted-proxy-aware resolver — behind nginx/Traefik
     # every enrollment would otherwise share the proxy's IP and one build
@@ -267,6 +267,11 @@ async def auth_consume_approval_token(request: Request, req: dict):
             )
         except ValueError as exc:
             return error_response(str(exc), status_code=400)
+        # Match the consumer against the canonical device list, exactly as
+        # create_approval_token stored it (sorted, deduped CSV).
+        device = auth_service.normalize_burn_devices(device)
+        if not device:
+            return error_response("device 必须包含至少一个有效设备序列号", status_code=400)
     # Agent token device ACL applies at approval time so a token scoped to
     # specific devices cannot be driven against anything else. Multi-device
     # burns carry a CSV canonical device list ("A,B"); verify every member

@@ -250,7 +250,7 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/security-audit/logs": "features.system.audit:list_security_audit_logs",
     "/api/security-audit/export": "features.system.audit:export_security_audit_logs",
     # --- 补充：网址/工具 ---
-    "/api/websites/load": "features.system.assets:load_user_tools",
+    "/api/websites/load": "features.system.tools_data_api:load_user_tools",
     "/api/tools/list": "features.system.assets:list_utility_tools",
     # --- 补充：配置 ---
     "/api/config/ai": "features.assistant.config_api:get_ai_config",

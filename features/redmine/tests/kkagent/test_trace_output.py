@@ -91,7 +91,7 @@ class TraceConsumeTests(unittest.TestCase):
         self.assertEqual(trace.evidenced_issue_ids(), {646504, 646505})
 
     def test_truncated_tool_input_keeps_identity_keys(self):
-        # 审核意见 P2：截断不允许吞掉 issue_id/artifact_id 等身份字段。
+        # 截断不允许吞掉 issue_id/artifact_id 等身份字段。
         big_payload = {"description": "x" * 4000, "issue_id": 123,
                        "artifact_id": "att-9", "path": "frameworks/base"}
         trace = _trace_with_events([

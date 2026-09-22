@@ -405,7 +405,7 @@ def test_firmware_claim_survives_worker_adb_fastboot_transition(tmp_path):
 
 
 def test_startup_reconciliation_repairs_cross_db_drift(tmp_path):
-    """崩溃 split-brain 修复（审核意见 P2）：
+    """崩溃 split-brain 修复：
 
     - active reservation 丢了物理 claim（claim 过期/半提交）→ 重启后重取；
     - 已结束 reservation 的幽灵 claim → 重启后释放；

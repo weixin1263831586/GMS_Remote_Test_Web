@@ -74,7 +74,7 @@ def test_tree_guard_allows_content_change_after_version_bump(tmp_path):
         ("skill/", agent / "skill"),
         ("manifests/", agent / "manifests"),
     ):
-        sync.r16_tree_guard(root, tree, "0.2.0", label, package_yaml)
+        sync.same_version_tree_guard(root, tree, "0.2.0", label, package_yaml)
 
 
 def test_tree_guard_blocks_skill_change_at_same_version(tmp_path):
@@ -82,7 +82,7 @@ def test_tree_guard_blocks_skill_change_at_same_version(tmp_path):
     root, agent, package_yaml = _init_agent_repo(tmp_path)
     (agent / "skill" / "SKILL.md").write_text("drifted\n")
     with pytest.raises(SystemExit):
-        sync.r16_tree_guard(root, agent / "skill", "0.1.0", "skill/", package_yaml)
+        sync.same_version_tree_guard(root, agent / "skill", "0.1.0", "skill/", package_yaml)
 
 
 def test_tree_guard_blocks_manifest_change_at_same_version(tmp_path):
@@ -92,7 +92,7 @@ def test_tree_guard_blocks_manifest_change_at_same_version(tmp_path):
         '{\n  "version": "0.1.0",\n  "name": "changed"\n}\n'
     )
     with pytest.raises(SystemExit):
-        sync.r16_tree_guard(root, agent / "manifests", "0.1.0", "manifests/", package_yaml)
+        sync.same_version_tree_guard(root, agent / "manifests", "0.1.0", "manifests/", package_yaml)
 
 
 def test_tree_guard_blocks_runtime_change_at_same_version(tmp_path):
@@ -102,4 +102,4 @@ def test_tree_guard_blocks_runtime_change_at_same_version(tmp_path):
         '#!/bin/bash\nGMS_RT_VERSION="0.1.0"\n# drifted\n'
     )
     with pytest.raises(SystemExit):
-        sync.r16_tree_guard(root, agent / "runtime", "0.1.0", "runtime/", package_yaml)
+        sync.same_version_tree_guard(root, agent / "runtime", "0.1.0", "runtime/", package_yaml)

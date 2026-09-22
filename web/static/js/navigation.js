@@ -65,25 +65,11 @@ const API_DOCS_CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存（生产环境�
 const FIRMWARE_UPLOAD_TIMEOUT = 24 * 60 * 60 * 1000; // 服务端分片保留24小时
 const apiDetailsCache = new Map();
 
-// API表格列宽配置 (与HTML模板保持一致: 25%, 18%, 17%, 40%)
-const API_TABLE_COLUMNS = {
-    INTERFACE: 25,
-    DESCRIPTION: 20,
-    SKILL: 20,
-    USAGE: 35
-};
-
-const HTTP_METHODS = {
-    GET: 'GET',
-    POST: 'POST',
-    WEBSOCKET: 'WebSocket'
-};
-
-const CURL_SPECIAL_PARAMS = ['force_refresh', 'log_type', 'report_timestamp'];
-const VIEWPORT_HEIGHT_OFFSET = 150;
-let pendingUsbipDeviceHost = '';
 let activeUsbipSelection = null;
 let usbipSourceLoadPromise = null;
+// 最近一次设备主机密码弹框关联的主机（auth-elevation.js / firmware-burn.js /
+// vpn-control.js 共享的状态，未配置时为空字符串）。
+let pendingUsbipDeviceHost = '';
 const usbipSourceDeviceCache = new Map();
 const usbipSourceOsByHost = new Map();
 const usbipAssignedBusidsBySource = new Map();
@@ -144,14 +130,10 @@ const BADGE_SIZES = { xs: '9px', sm: '10px', md: '11px', lg: '12px' };
 const BADGE_PADDINGS = { xs: '1px 4px', sm: '2px 6px', md: '3px 8px', lg: '4px 10px' };
 
 // ==================== 轮询间隔配置 ====================
-// GSI 固件烧写进度轮询间隔（毫秒）
-const GSI_PROGRESS_POLL_INTERVAL = 2000; // 2 秒
 // APK 分析任务状态轮询间隔（毫秒）
 const STATUS_POLL_INTERVAL = 5000;
 // 报告列表刷新间隔（毫秒）
 const REPORTS_REFRESH_INTERVAL = 15000; // 15 秒
-// 最大进度轮询错误次数
-const MAX_PROGRESS_ERRORS = 3;
 let wakeTestStatusPolling = () => {};
 let stopTestStatusPolling = () => {};
 

@@ -43,24 +43,24 @@ body {
     border-bottom: 0;
     border-radius: 0;
 }
-.ats-toolbar-main {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
 .workflow-tabs {
     display: flex;
     align-items: center;
     gap: 0;
     min-height: 44px;
-    /* overflow-x:auto 会让 Chromium 把纵向滚轮转成 tab 栏横向滚动，
-    劫持页面滚动（设备串口页同款问题已修）。hidden 不劫持；
-    溢出 tab 仍可由方向键聚焦滚入。 */
-    overflow: hidden;
+    /* 窄视口下 tab 行比视口宽：内容包在自身横向滚动容器里（content-based
+       overflow），既不劫持纵向滚轮，也让 mobile overflow 门禁认可溢出
+       已被容器约束（overflow:hidden + 无滚动容器会被判为 leak）。 */
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
 }
+.workflow-tabs::-webkit-scrollbar { display: none; }
 .ats-actions { display: flex; flex: 0 0 auto; gap: 8px; margin-left: auto; align-items: center; }
 .ats-more-menu { position: relative; }
+/* UA 对关闭 <details> 内容的 display:none 会被下面的 display:flex 覆盖，
+   导致收起的菜单按钮常驻渲染并溢出窄视口（mobile overflow 门禁抓到）。 */
+.ats-more-menu:not([open]) .ats-more-dropdown { display: none; }
 .ats-more-btn {
     border: 1px solid var(--line);
     background: var(--panel-3);
@@ -451,7 +451,6 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
 .preflight-result.ready strong { color: var(--ok); }
 .preflight-result.error { border-left-color: var(--danger); }
 .preflight-result.error strong { color: var(--danger); }
-.build-monitor { min-height: 0; }
 .stage-panel { min-height: 0; flex: 1 1 auto; }
 .stage-pane {
     flex: 1 1 auto;

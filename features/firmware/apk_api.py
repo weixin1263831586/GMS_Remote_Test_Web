@@ -360,8 +360,9 @@ async def get_apk_source(
             with open(file_path, encoding="utf-8", errors="replace") as f:
                 content = f.read()
             return ApiResponse.success({"path": path, "content": content, "size": file_size})
-        except Exception as e:
-            return ApiResponse.error(f"Failed to read file: {e}", status_code=500)
+        except Exception:
+            logger.warning("Failed to read decompiled source file %s", file_path, exc_info=True)
+            return ApiResponse.error("Failed to read file", status_code=500)
     else:
         try:
             target_dir = safe_join(sources_dir, path) if path else sources_dir
@@ -469,11 +470,9 @@ async def download_apk_source(task_id: str, request: Request):
         return ApiResponse.error("Output directory not found", status_code=404)
 
     filename = normalize_apk_filename(task.get("filename", "app.apk")).replace(".apk", "_decompiled").replace(".jar", "_decompiled")
-    zip_path = shutil.make_archive(
-        safe_join(runtime.apk_upload_dir, task_id, filename),
-        "zip",
-        output_dir,
-    )
+    # 压缩可能很大,放线程池避免阻塞事件循环。
+    zip_path = await asyncio.to_thread(
+        shutil.make_archive, safe_join(runtime.apk_upload_dir, task_id, filename), "zip", output_dir)
 
     def iterfile():
         with open(zip_path, "rb") as f:

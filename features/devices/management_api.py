@@ -25,11 +25,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _known_usbip_device_ids() -> set:
-    return set(_known_usbip_sources().keys())
+def known_usbip_device_ids() -> set:
+    return set(known_usbip_sources().keys())
 
 
-def _known_usbip_sources() -> dict[str, dict[str, Any]]:
+def known_usbip_sources() -> dict[str, dict[str, Any]]:
     """Return persisted, in-memory, and currently attached USB/IP sources."""
     from .usbip import usbip_manager
 
@@ -269,7 +269,7 @@ def _build_devices_management_payload(
     from features.users import auto_assign_new_devices, build_device_group_map
 
     all_sources = _prune_inactive_usbip_sources(
-        device_ids, _known_usbip_sources(), config
+        device_ids, known_usbip_sources(), config
     )
     adb_proxy_sources = _local_adb_proxy_sources(device_ids)
     for device_id in device_ids:

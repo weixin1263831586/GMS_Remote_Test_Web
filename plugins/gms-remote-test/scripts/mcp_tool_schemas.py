@@ -1463,6 +1463,12 @@ ALL_TOOLS: list[dict[str, Any]] = [
                         "description": "Mechanism keywords, e.g. 'LMKD PRESSURE_AFTER_KILL'.",
                     },
                     "limit": {"type": "integer", "minimum": 1, "maximum": 10},
+                    "android_api_level": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000,
+                        "description": "Optional target Android API level for compatibility-aware ranking.",
+                    },
                 },
                 "required": ["query"],
                 "additionalProperties": False,

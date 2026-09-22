@@ -149,7 +149,8 @@ gms-rt-redmine-history-search 'mediaserver crash' --exclude-issue-id 648526 --re
 #     external android-internals wiki (ADR 0014). Background only: explains
 #     how a mechanism (LMKD, Binder, Choreographer, ...) works; NEVER root-
 #     cause evidence and never a substitute for sdk/apk forensics.
-gms-rt-knowledge-search 'LMKD PRESSURE_AFTER_KILL' --limit 5 --json --non-interactive
+gms-rt-knowledge-search 'LMKD PRESSURE_AFTER_KILL' --limit 5 \
+  --android-api-level 34 --json --non-interactive
 ```
 
 Citation format for analysis output:

@@ -194,26 +194,6 @@ def _flatten_departments(payload: Any) -> list[dict[str, Any]]:
     return result
 
 
-def _load_user_map_payload_from(path) -> dict[str, Any]:
-    """Load the raw user-map JSON payload (for mutation + save round-trips)."""
-    if not path.exists():
-        return {"departments": []}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(payload, dict):
-            payload.setdefault("departments", [])
-            return payload
-    except Exception:
-        pass
-    return {"departments": []}
-
-
-def _save_user_map_payload_to(path, payload: dict[str, Any]) -> None:
-    """Write the raw user-map JSON payload to disk."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
 def load_redmine_user_map_for_owner(owner_id: str) -> list[dict[str, Any]]:
     # 方案 2：全局组织架构（共享）+ 个人 overlay 别名合并；此函数是
     # 全部读消费方（statistics/dashboard/api/daily-brief）的统一入口。

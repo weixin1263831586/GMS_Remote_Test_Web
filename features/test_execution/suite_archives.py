@@ -63,7 +63,7 @@ def extract_archive_local_with_progress(
 
     # Dispatch by CONTENT, never by filename: a tarball renamed payload.rar
     # used to reach the raw `tar -xf` branch below and bypass the
-    # member-count / byte-budget / symlink policy entirely (review P1).
+    # member-count / byte-budget / symlink policy entirely .
     fmt = sniff_archive_format(archive_path)
     if fmt == "zip":
         with zipfile.ZipFile(archive_path, "r") as archive:

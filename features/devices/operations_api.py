@@ -22,7 +22,7 @@ from foundation.security_audit import security_audit_logger
 from . import reconnect, runtime
 from .locks import device_lock_manager
 from .management_api import (
-    _known_usbip_device_ids,
+    known_usbip_device_ids,
 )
 from .management_api import (
     router as management_router,
@@ -152,7 +152,7 @@ async def reboot_devices(req: DeviceActionRequest, request: Request):
     )
     if conflict:
         return conflict
-    usbip_device_ids = _known_usbip_device_ids()
+    usbip_device_ids = known_usbip_device_ids()
     usbip_reconnect_hosts: dict[str, list[str]] = {}
     runtime_sources = (runtime.config_manager.get_runtime_config() or {}).get(
         "usbip_devices_source"

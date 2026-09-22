@@ -375,7 +375,11 @@ class RepositoryStorageMixin:
                     payload.get("subject") or "",
                     payload.get("description") or "",
                     payload.get("summary") or "",
-                    payload.get("failures_json") or "",
+                    # failures_json 走 _decode_row 后是 list/dict，而 FTS 列是 TEXT：
+                    # 直接绑定会以 "Error binding parameter" 抛 InterfaceError，
+                    # 而 except 只捕 sqlite3.OperationalError，于是索引未更新、
+                    # 整个写事务（含调用方的 UPDATE）回滚。
+                    self._json_value(payload.get("failures_json") or ""),
                     payload.get("doc_content") or "",
                 ),
             )

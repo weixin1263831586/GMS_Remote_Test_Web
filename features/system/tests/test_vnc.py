@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from features.system.vnc import (
     NOVNC_WEB_PORT,
@@ -120,6 +120,10 @@ class VNCManagerTests(unittest.TestCase):
             "_is_local_port_listening",
             return_value=True,
         ), patch.object(
+            manager,
+            "_is_local_rfb_healthy",
+            return_value=True,
+        ), patch.object(
             manager.ssh_manager,
             "get_connection",
         ) as get_connection:
@@ -148,12 +152,69 @@ class VNCManagerTests(unittest.TestCase):
             manager,
             "_is_local_port_listening",
             side_effect=lambda port: port == NOVNC_WEB_PORT,
+        ), patch.object(
+            manager,
+            "_is_local_rfb_healthy",
+            return_value=False,
         ):
             result = manager.get_vnc_status()
 
         self.assertFalse(result["running"])
         self.assertEqual(result["vnc_count"], 0)
         self.assertTrue(result["port_listening"])
+
+    def test_local_rfb_health_requires_rfb_greeting(self):
+        connection = MagicMock()
+        connection.recv.return_value = b"RFB 003.008\n"
+        connection.__enter__.return_value = connection
+        with patch("features.system.vnc.socket.create_connection", return_value=connection):
+            self.assertTrue(VNCManager._is_local_rfb_healthy())
+
+        connection.recv.return_value = b""
+        with patch("features.system.vnc.socket.create_connection", return_value=connection):
+            self.assertFalse(VNCManager._is_local_rfb_healthy())
+
+    def test_local_rfb_health_accepts_fragmented_greeting(self):
+        connection = MagicMock()
+        connection.recv.side_effect = [b"RF", b"B 003.", b"008\n"]
+        connection.__enter__.return_value = connection
+
+        with patch("features.system.vnc.socket.create_connection", return_value=connection):
+            self.assertTrue(VNCManager._is_local_rfb_healthy())
+
+    def test_local_start_restarts_stuck_x11vnc_before_relaunching(self):
+        manager = VNCManager()
+        with patch.object(manager, "_find_local_novnc_web_dir", return_value="/opt/noVNC"), \
+             patch("features.system.vnc.shutil.which", return_value="/usr/bin/x11vnc"), \
+             patch.object(manager, "_has_local_websockify", return_value=True), \
+             patch.object(manager, "_is_local_process_running", return_value=True), \
+             patch.object(manager, "_is_local_port_listening", return_value=True), \
+             patch.object(manager, "_is_local_rfb_healthy", side_effect=[False, True]), \
+             patch.object(manager, "_kill_local_processes") as kill_processes, \
+             patch("features.system.vnc.subprocess.run"), \
+             patch("features.system.vnc.start_detached_process"), \
+             patch("features.system.vnc.time.sleep"):
+            result = manager._start_local_vnc()
+
+        self.assertTrue(result["success"])
+        kill_processes.assert_called_once_with("x11vnc.*:0", force=True)
+
+    def test_local_start_restarts_stuck_x11vnc_when_its_socket_backlog_is_full(self):
+        manager = VNCManager()
+        with patch.object(manager, "_find_local_novnc_web_dir", return_value="/opt/noVNC"), \
+             patch("features.system.vnc.shutil.which", return_value="/usr/bin/x11vnc"), \
+             patch.object(manager, "_has_local_websockify", return_value=True), \
+             patch.object(manager, "_is_local_process_running", return_value=True), \
+             patch.object(manager, "_is_local_port_listening", side_effect=[False, True, True, True]), \
+             patch.object(manager, "_is_local_rfb_healthy", side_effect=[True]), \
+             patch.object(manager, "_kill_local_processes") as kill_processes, \
+             patch("features.system.vnc.subprocess.run"), \
+             patch("features.system.vnc.start_detached_process"), \
+             patch("features.system.vnc.time.sleep"):
+            result = manager._start_local_vnc()
+
+        self.assertTrue(result["success"])
+        kill_processes.assert_called_once_with("x11vnc.*:0", force=True)
 
 
 if __name__ == "__main__":

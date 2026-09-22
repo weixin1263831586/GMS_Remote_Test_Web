@@ -104,7 +104,14 @@ async def import_legacy_org_chart(
 ):
     """把旧扁平 configs/redmine_user_map.json 导入 canonical 组织架构文件。"""
     require_human_principal(request)
-    legacy = Path(org_chart_path()).parent.parent / "redmine_user_map.json"
+    current = Path(org_chart_path())
+    # canonical 缺失时 org_chart_path() 本身就解析到旧扁平文件，
+    # 此时直接以其为导入源（parent.parent 推导只在 canonical 生效时成立）。
+    legacy = (
+        current
+        if org_chart_is_legacy_path()
+        else current.parent.parent / "redmine_user_map.json"
+    )
     if not legacy.exists():
         return {"success": False, "error": "未找到旧版 configs/redmine_user_map.json"}
     try:
@@ -127,6 +134,7 @@ async def import_legacy_org_chart(
 async def get_my_binding(request: Request):
     # 读写都仅人工会话（ADR 0012）：个人身份绑定是账号级偏好，
     # Agent token / 机器能力 principal 不得读取或代写。
+    require_human_principal(request)
     member = get_self_binding(owner_id_from_request(request))
     return {"success": True, "data": {"member": member}}
 

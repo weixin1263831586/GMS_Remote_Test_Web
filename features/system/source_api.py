@@ -7,7 +7,7 @@
 
 所有端点要求 ``sdk.read`` scope；provider 配置只来自服务端 config。
 
-Handler 全部为普通 ``def``（审核意见 P1）：provider 内部是同步阻塞 I/O
+Handler 全部为普通 ``def``：provider 内部是同步阻塞 I/O
 （urllib 30s 超时、local_git 逐文件 ``git show`` 子进程），声明为
 ``async def`` 会把阻塞放到事件循环上，一次慢查询就卡停整个 Web 进程；
 普通 ``def`` 由 FastAPI 丢线程池执行。

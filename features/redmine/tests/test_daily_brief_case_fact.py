@@ -53,7 +53,7 @@ class BuildCaseFactTests(unittest.TestCase):
         self.assertEqual(fact["confidence"], 85.0)
         self.assertEqual(fact["source_quality"], "daily_brief_ai")
         self.assertEqual(len(fact["keywords"]), 2)
-        # evidence 列统一包 dict（审核意见 P1：消费方按 dict 解引用）；
+        # evidence 列统一包 dict；
         # per-run provenance 落在 evidence 内，不冒充 error_signature。
         self.assertEqual(
             fact["evidence"],
@@ -66,7 +66,7 @@ class BuildCaseFactTests(unittest.TestCase):
             },
         )
         # 无真实签名时留空（merge 保留已有签名）；provenance 占位符
-        # 会覆盖已有真实 error_signature 并破坏签名聚合（审核意见 P1）。
+        # 会覆盖已有真实 error_signature 并破坏签名聚合。
         self.assertEqual(fact["error_signature"], "")
 
     def test_minimal_result_does_not_crash(self):

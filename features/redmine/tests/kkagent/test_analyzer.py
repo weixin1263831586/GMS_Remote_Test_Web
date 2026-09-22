@@ -368,7 +368,7 @@ class AnalyzerE2ETests(unittest.TestCase):
 
 
 class MergeTracesReplayTests(unittest.TestCase):
-    """审核意见 P2：修复轮 replay 同 id 调用时，保留有结果的一侧。"""
+    """修复轮 replay 同 id 调用时，保留有结果的一侧。"""
 
     def test_replayed_call_with_result_replaces_pending(self):
         from features.redmine.kkagent.analyzer import _merge_traces
@@ -465,7 +465,7 @@ class GateFailureClassificationTests(unittest.TestCase):
         self.assertEqual(error_type, "mcp_evidence_unavailable")
         self.assertEqual(status, "mcp_evidence_unavailable")
         self.assertIn("gms-agent doctor", error)
-        self.assertIn("sync_agent_package", error)
+        self.assertIn("sync_package.py", error)
         self.assertIn("原始 findings", error)
 
     def test_cli_only_session_is_also_mcp_unavailable(self):

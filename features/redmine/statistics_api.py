@@ -9,6 +9,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from features.users import owner_id_from_request
+from foundation.error_model import ApiError
 
 from .api import (
     _DEPARTMENT_OVERDUE_CACHE,
@@ -158,7 +159,12 @@ def _redmine_user_names(user: Any) -> list[str]:
 
 
 async def _current_redmine_user(service) -> Any | None:
-    client = service.agent._make_client()
+    try:
+        client = service.agent._make_client()
+    except Exception as exc:
+        # 与 _live_stats_for_user 同策略:客户端不可读时降级本地快照,不裸 500。
+        logger.warning("Redmine client unavailable for current user lookup: %s", exc)
+        return None
     try:
         return await client.get_current_user()
     except Exception as exc:
@@ -391,41 +397,54 @@ async def get_resolved_issues_by_date(
             for user in profile_users:
                 owner_names.extend(display_names_from_mapping(user))
     owner_names = list(dict.fromkeys(name for name in owner_names if name))
-    try:
-        if profile_users:
-            # 按指派人实时拉取，使部门明细不依赖本地 DB 同步范围
+    issues: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    if profile_users:
+        # 按指派人实时拉取，使部门明细不依赖本地 DB 同步范围
+        try:
             client = service.agent._make_client()
-            semaphore = asyncio.Semaphore(4)
+        except Exception as exc:
+            return ApiError.dependency_unavailable(
+                f"Redmine 客户端不可用: {exc}", next_actions=({"action": "检查 Redmine 凭据配置后重试"},),
+            ).to_response()
+        semaphore = asyncio.Semaphore(4)
 
-            async def _user_issues(user: dict[str, Any]) -> list[dict[str, Any]]:
-                async with semaphore:
-                    return await client.fetch_resolved_issues_by_assignee(
-                        assignee_id=int(user["id"]),
-                        start=start.strip(),
-                        end=end.strip(),
-                        limit=limit,
-                    )
+        async def _user_issues(user: dict[str, Any]) -> list[dict[str, Any]]:
+            async with semaphore:
+                return await client.fetch_resolved_issues_by_assignee(
+                    assignee_id=int(user["id"]),
+                    start=start.strip(),
+                    end=end.strip(),
+                    limit=limit,
+                )
 
-            try:
-                batches = await asyncio.gather(*[_user_issues(u) for u in profile_users])
-            finally:
-                await client.close()
-            seen: set[int] = set()
-            issues: list[dict[str, Any]] = []
-            for batch in batches:
-                for item in batch:
-                    iid = int(item.get("issue_id") or 0)
-                    if iid and iid not in seen:
-                        seen.add(iid)
-                        issues.append(item)
-            issues.sort(key=lambda i: (i.get("resolved_on") or "", i.get("issue_id") or 0), reverse=True)
-            issues = issues[:limit]
-        else:
+        try:
+            batches = await asyncio.gather(*[_user_issues(u) for u in profile_users])
+        except Exception as exc:
+            return ApiError.upstream_failure(
+                f"Redmine 已解决明细查询失败: {exc}", service="redmine",
+                next_actions=({"action": "稍后重试;若持续失败请检查 Redmine 可用性"},),
+            ).to_response()
+        finally:
+            await client.close()
+        for batch in batches:
+            for item in batch:
+                iid = int(item.get("issue_id") or 0)
+                if iid and iid not in seen:
+                    seen.add(iid)
+                    issues.append(item)
+        issues.sort(key=lambda i: (i.get("resolved_on") or "", i.get("issue_id") or 0), reverse=True)
+        issues = issues[:limit]
+    else:
+        try:
             issues = service.repository.get_resolved_issues_by_date(
                 owner_names=owner_names or None, start=start.strip(), end=end.strip(), limit=limit,
             )
-    except Exception as exc:
-        return {"success": False, "error": str(exc)}
+        except Exception as exc:
+            return ApiError.dependency_unavailable(
+                f"本地明细查询失败: {exc}", next_actions=({"action": "稍后重试;请检查本地数据库状态"},),
+            ).to_response()
+
     items = [
         {
             "issue_id": i.get("issue_id"),
@@ -481,7 +500,9 @@ async def get_department_overdue_statistics(
     try:
         client = service.agent._make_client()
     except Exception as exc:
-        return {"success": False, "error": f"Redmine client unavailable: {exc}"}
+        return ApiError.dependency_unavailable(
+            f"Redmine 客户端不可用: {exc}", next_actions=({"action": "检查 Redmine 凭据配置后重试"},),
+        ).to_response()
     window_days = int(profile.get("window_days") or stats_cfg["window_days"])
     semaphore = asyncio.Semaphore(4)
 
@@ -529,8 +550,6 @@ async def get_department_overdue_statistics(
         }
         _update_ttl_cache(_DEPARTMENT_OVERDUE_CACHE, cache_key, now_ts, data)
         return {"success": True, "data": data}
-    except Exception as exc:
-        return {"success": False, "error": f"department overdue statistics failed: {exc}"}
     finally:
         await client.close()
 

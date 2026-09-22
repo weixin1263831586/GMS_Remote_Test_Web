@@ -143,7 +143,7 @@ class SecurityBoundaryTests(SecurityBoundaryFixtureTests):
         # leftover template placeholders.
         self.assertIn("https://testserver/api/agent/install", installer.text)
         self.assertIn("SERVER='https://testserver'", installer.text)
-        self.assertNotIn("__GMS_REMOTE_TEST_SERVER__", installer.text)
+        self.assertNotIn("__SERVER_URL__", installer.text)
         self.assertEqual(skill_archive.status_code, 200)
         self.assertEqual(skill_archive.headers["content-type"], "application/zip")
 

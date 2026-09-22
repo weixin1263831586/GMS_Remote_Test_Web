@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import stat
+import time
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -14,6 +15,9 @@ from foundation.runtime_settings import is_production_environment
 
 
 logger = logging.getLogger(__name__)
+
+_CONCURRENT_KEY_READ_ATTEMPTS = 50
+_CONCURRENT_KEY_READ_DELAY_SECONDS = 0.01
 
 
 def _production() -> bool:
@@ -44,6 +48,31 @@ def _key_path() -> Path:
     return legacy
 
 
+def _read_key_after_concurrent_create(path: Path) -> bytes:
+    """Wait briefly for the process that won O_EXCL to finish its write."""
+    last_error: Exception | None = None
+    for attempt in range(_CONCURRENT_KEY_READ_ATTEMPTS):
+        try:
+            mode = stat.S_IMODE(path.stat().st_mode)
+            if mode & 0o077:
+                raise RuntimeError(f"secret key file permissions must be 0600: {path}")
+            return _validate_key(path.read_bytes())
+        except (OSError, RuntimeError) as exc:
+            last_error = exc
+            if attempt + 1 < _CONCURRENT_KEY_READ_ATTEMPTS:
+                time.sleep(_CONCURRENT_KEY_READ_DELAY_SECONDS)
+    raise RuntimeError(f"concurrently created secret key was not readable: {path}") from last_error
+
+
+def _write_all(descriptor: int, payload: bytes) -> None:
+    pending = memoryview(payload)
+    while pending:
+        written = os.write(descriptor, pending)
+        if written <= 0:
+            raise OSError("failed to write secret key")
+        pending = pending[written:]
+
+
 def _load_key() -> bytes:
     injected = os.getenv("GMS_SECRET_KEY", "").strip()
     if injected:
@@ -64,12 +93,12 @@ def _load_key() -> bytes:
                 0o600,
             )
             try:
-                os.write(descriptor, legacy_path.read_bytes())
+                _write_all(descriptor, legacy_path.read_bytes())
             finally:
                 os.close(descriptor)
             path = canonical_path
         except FileExistsError:
-            path = canonical_path
+            return _read_key_after_concurrent_create(canonical_path)
         except OSError:
             # A read-only deployment can continue with the legacy key; the
             # next writable startup can complete the migration.
@@ -92,11 +121,16 @@ def _load_key() -> bytes:
             path,
         )
 
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     key = Fernet.generate_key()
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        os.write(descriptor, key + b"\n")
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        # 并发启动的 Web/Worker 进程已抢先创建密钥：读取复用对方写入的
+        # 密钥，而不是让其中一个进程启动即崩溃（与上方迁移分支一致）。
+        return _read_key_after_concurrent_create(path)
+    try:
+        _write_all(descriptor, key + b"\n")
     finally:
         os.close(descriptor)
     return key

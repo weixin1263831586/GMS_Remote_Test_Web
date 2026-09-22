@@ -502,6 +502,12 @@ async function submitFirmwareBurn() {
         showToast('请重新选择要烧写的设备', 'warning');
         return;
     }
+    // 声明在 try 外：catch 中也要能移除刷新拦截。
+    const warnBeforeRefresh = (e) => {
+        e.preventDefault();
+        e.returnValue = '固件上传中，刷新会暂停浏览器上传；重新选择同一文件后可从已上传分片续传。确定要离开吗？';
+        return e.returnValue;
+    };
     try {
         const granted = await requestElevatedAccess('烧写设备固件');
         if (!granted) return;
@@ -509,11 +515,6 @@ async function submitFirmwareBurn() {
         showToast('正在烧写固件...', 'info');
         addLogEntry(`开始烧写固件: ${firmwarePath}`, 'info');
 
-        const warnBeforeRefresh = (e) => {
-            e.preventDefault();
-            e.returnValue = '固件上传中，刷新会暂停浏览器上传；重新选择同一文件后可从已上传分片续传。确定要离开吗？';
-            return e.returnValue;
-        };
         const cleanupUploadState = () => {
             if (selectedFirmwareFile) {
                 window.removeEventListener('beforeunload', warnBeforeRefresh);
@@ -699,6 +700,11 @@ async function submitFirmwareBurn() {
             notifyOperationResult('固件烧写失败', error.message, 'error', 'firmware-burn');
         }
         addLogEntry(`固件烧写异常: ${error.message}`, 'error');
+        // 上传失败后移除刷新拦截，避免 beforeunload 警告常驻并随重试叠加；
+        // 续传状态（sessionStorage）保留，刷新后仍可校验指纹续传。
+        if (selectedFirmwareFile) {
+            window.removeEventListener('beforeunload', warnBeforeRefresh);
+        }
         // 回滚前端乐观锁定；后端锁由其 finally 释放并经下方刷新同步。
         unlockDevicesInUI(devices);
         loadDevices(true).catch(refreshError => {
@@ -1788,6 +1794,8 @@ async function showAdbProxyDiagnostics(assignment) {
         'ADB Proxy 诊断',
         '正在读取双端状态和最近日志...'
     );
+    // 须在首个 await 前注册：加载期间关闭时 close() 才能移除弹窗节点。
+    ModalManager.onClose(modalId, () => modal.remove());
     try {
         const workers = Array.from(new Set([
             assignment.source_worker_id,
@@ -1822,7 +1830,6 @@ async function showAdbProxyDiagnostics(assignment) {
     } catch (error) {
         showModalError(modal, error.message);
     }
-    ModalManager.onClose(modalId, () => modal.remove());
 }
 
 async function submitAdbProxyConnect() {
@@ -2153,6 +2160,8 @@ async function showUsbipDiagnostics(selection) {
         'USB/IP 诊断',
         '正在读取传输、协议和网络质量状态...'
     );
+    // 须在首个 await 前注册：加载期间关闭时 close() 才能移除弹窗节点。
+    ModalManager.onClose(modalId, () => modal.remove());
     try {
         const status = await apiCall(
             '/api/usbip/status?device_host=' + encodeURIComponent(selection.device_host),
@@ -2182,7 +2191,6 @@ async function showUsbipDiagnostics(selection) {
     } catch (error) {
         showModalError(modal, error.message);
     }
-    ModalManager.onClose(modalId, () => modal.remove());
 }
 
 async function performUsbipDisconnect(selections) {

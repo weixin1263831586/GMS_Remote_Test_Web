@@ -1,6 +1,6 @@
 """晨报 AI 分析结果 → 本地 case_fact（纯映射，无 I/O）。
 
-审核意见（P1）：本模块早期单独发明了一套 Issue → Case 映射，导致
+本模块早期单独发明了一套 Issue → Case 映射，导致
 ① 把晨报**执行状态**（completed）写进知识库的 status_name（那不是
 Redmine 工单状态）；② project/chip/android/module 等富字段丢失；
 ③ 覆盖已有高质量知识库记录。修复后：
@@ -93,11 +93,11 @@ def build_case_fact_from_brief(
     fact["reply_template"] = _first_line(result.get("suggested_reply_zh"), 500)
     fact["keywords"] = keywords[:8] or list(base.get("keywords") or [])[:8]
     evidence = result.get("evidence")
-    # evidence 列形状统一为 dict（审核意见 P1）：schema 默认 '{}'、
+    # evidence 列形状统一为 dict：schema 默认 '{}'、
     # RedmineCaseExtractor 写 dict、消费方（knowledge_service /
     # mature_cases）按 dict 解引用；AI 的 Evidence list 原样落库会让
     # workbench 502、成熟案例聚合静默丢证据。包一层保留原文。
-    # per-run provenance 落在 evidence 内（审核意见 P1）：错误签名是
+    # per-run provenance 落在 evidence 内：错误签名是
     # 真实领域事实，绝不能拿 "daily-brief:<date>" 这类 provenance
     # 字符串冒充——它会覆盖已有真实签名并破坏签名聚合/检索。
     run_provenance = {
@@ -114,13 +114,13 @@ def build_case_fact_from_brief(
         merged_evidence.setdefault("daily_brief_run", run_provenance)
         fact["evidence"] = merged_evidence
     fact["confidence"] = result.get("confidence") or 0
-    # 尺度统一（审核意见 P2）：AI 自评是 0–1（schema ge=0 le=1），提取器
+    # 尺度统一：AI 自评是 0–1（schema ge=0 le=1），提取器
     # 是 0–100，同列混存会让 merge 的 max() 与成熟案例排序跨量纲比较。
     # 入库统一 0–100。
     if isinstance(fact["confidence"], (int, float)) and 0 < float(fact["confidence"]) <= 1:
         fact["confidence"] = round(float(fact["confidence"]) * 100, 1)
     # 真实错误签名优先；无真实签名时留空（merge 保留已有签名），
-    # per-run 合成标记会破坏签名聚合与检索加分（审核意见 P2）。
+    # per-run 合成标记会破坏签名聚合与检索加分。
     fact["error_signature"] = str(base.get("error_signature") or "")
     fact["source_quality"] = "daily_brief_ai"
     # 保留提取器的症状/文档摘录，供 merge 与质量判断使用。
