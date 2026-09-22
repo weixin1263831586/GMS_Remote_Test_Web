@@ -184,9 +184,9 @@ class GmsClient:
             endpoint = "/" + endpoint
         query = ""
         if params:
-            from urllib.parse import urlencode
-
-            query = "?" + urlencode({k: v for k, v in params.items() if v is not None})
+            query = "?" + urllib.parse.urlencode(
+                {k: v for k, v in params.items() if v is not None}
+            )
         url = f"{self.server_url}/api{endpoint}{query}"
         # Pick up token rotations/enroll-paths between calls.
         self.refresh_token()

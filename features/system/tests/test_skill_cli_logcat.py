@@ -51,6 +51,11 @@ class DevicesLogcatTests(unittest.TestCase):
             )
             (stub_dir / "adb").chmod(0o755)
             env = os.environ.copy()
+            # 沙箱密闭性：剔除宿主机 profile/凭据环境变量并钉住 XDG 路径，
+            # CLI 才不会读到宿主机的 gms-agent profile（同
+            # test_skill_cli_profile_routing 的隔离模式），结果不随宿主漂移。
+            for key in ("GMS_RT_PROFILE", "GMS_CURL_CA_CERT", "GMS_AUTH_TOKEN_FILE"):
+                env.pop(key, None)
             env.update(
                 {
                     "HOME": temporary,
@@ -59,6 +64,9 @@ class DevicesLogcatTests(unittest.TestCase):
                         f"http://127.0.0.1:{self.server.server_port}"
                     ),
                     "GMS_AUTH_COOKIE_JAR": str(Path(temporary) / "session.cookies"),
+                    "XDG_CONFIG_HOME": str(Path(temporary) / ".config"),
+                    "XDG_DATA_HOME": str(Path(temporary) / ".local" / "share"),
+                    "XDG_STATE_HOME": str(Path(temporary) / ".local" / "state"),
                     "NO_COLOR": "1",
                 }
             )

@@ -185,7 +185,7 @@ class DeviceOperationsTests(unittest.TestCase):
                 return_value=["FB001"],
             ),
             patch.object(management_api.device_lock_manager, "get_all_locks", return_value={}),
-            patch.object(management_api, "_known_usbip_sources", return_value={}),
+            patch.object(management_api, "known_usbip_sources", return_value={}),
             patch("features.users.auto_assign_new_devices", return_value=[]),
             patch("features.users.build_device_group_map", return_value={}),
         ):
@@ -265,7 +265,7 @@ class DeviceOperationsTests(unittest.TestCase):
                 return_value={},
             ),
             patch.object(management_api.runtime, "config_manager", _ConfigManager()),
-            patch.object(management_api, "_known_usbip_sources", return_value={}),
+            patch.object(management_api, "known_usbip_sources", return_value={}),
             patch.object(
                 management_api,
                 "_local_adb_proxy_sources",
@@ -376,7 +376,7 @@ class DeviceOperationsTests(unittest.TestCase):
                 "reboot_device",
                 side_effect=reboot,
             ),
-            patch.object(operations_api, "_known_usbip_device_ids", return_value=set()),
+            patch.object(operations_api, "known_usbip_device_ids", return_value=set()),
             patch.object(operations_api.runtime, "config_manager", _ConfigManager()),
             patch.object(
                 operations_api.runtime,

@@ -40,6 +40,10 @@ class AgentAdminCliTests(unittest.TestCase):
     def _run(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as temporary:
             env = os.environ.copy()
+            # 沙箱密闭性：剔除宿主机 profile/凭据环境变量并钉住 XDG 路径
+            # （同 test_skill_cli_profile_routing 的隔离模式）。
+            for key in ("GMS_RT_PROFILE", "GMS_CURL_CA_CERT", "GMS_AUTH_TOKEN_FILE"):
+                env.pop(key, None)
             env.update(
                 {
                     "HOME": temporary,
@@ -47,6 +51,9 @@ class AgentAdminCliTests(unittest.TestCase):
                         f"http://127.0.0.1:{self.server.server_port}"
                     ),
                     "GMS_AUTH_COOKIE_JAR": str(Path(temporary) / "session.cookies"),
+                    "XDG_CONFIG_HOME": str(Path(temporary) / ".config"),
+                    "XDG_DATA_HOME": str(Path(temporary) / ".local" / "share"),
+                    "XDG_STATE_HOME": str(Path(temporary) / ".local" / "state"),
                     "NO_COLOR": "1",
                 }
             )

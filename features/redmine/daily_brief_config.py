@@ -196,7 +196,7 @@ def normalize_daily_brief_config(payload: dict[str, Any] | None) -> dict[str, An
     config["model"] = str(payload.get("model") or "").strip()
     # profile 名只允许安全字符，避免注入 env / 路径。
     profile = str(payload.get("agent_profile") or "").strip()
-    config["agent_profile"] = profile if re.fullmatch(r"[A-Za-z0-9._-]{1,64}", profile) else ""
+    config["agent_profile"] = profile if _PROFILE_NAME_RE.fullmatch(profile) else ""
     # 设备 serial 出现在 prompt 与 MCP 调用参数里，只允许安全字符。
     serial = str(payload.get("device_serial") or "").strip()
     config["device_serial"] = serial if _DEVICE_SERIAL_RE.fullmatch(serial) else ""

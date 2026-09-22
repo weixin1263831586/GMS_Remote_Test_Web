@@ -20,7 +20,6 @@ from typing import Any
 
 from foundation.config_paths import sanitize_owner_id
 
-from .daily_brief_jobs import JOB_KINDS as JOB_KINDS
 from .daily_brief_jobs import DailyBriefJobStore
 from .daily_brief_models import (
     DailyBriefIssue,
@@ -698,6 +697,7 @@ class DailyBriefRepository:
 
     def create_run_and_enqueue_job(self, run: DailyBriefRun, *, issue: DailyBriefIssue | None = None) -> tuple[bool, dict[str, Any], bool]:
         """Create/reuse a run, optional single issue and job in one write transaction."""
+        run.owner_id = canonical_owner_id(run.owner_id)
         now = _now()
         with self._lock, self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")

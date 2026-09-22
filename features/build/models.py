@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -16,7 +16,7 @@ TERMINAL_JOB_STATUSES = {JOB_COMPLETED, JOB_FAILED, JOB_CANCELLED}
 
 
 def utc_now_iso() -> str:
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return datetime.now(timezone.utc).replace(tzinfo=None).replace(microsecond=0).isoformat() + "Z"
 
 
 class BuildJobCreateRequest(BaseModel):

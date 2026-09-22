@@ -47,6 +47,10 @@ class SkillUpdateEnvTests(unittest.TestCase):
             (scripts_dir / "gms-agent").chmod(0o755)
 
             env = os.environ.copy()
+            # 沙箱密闭性：剔除宿主机 profile/凭据环境变量并钉住 XDG 路径
+            # （同 test_skill_cli_profile_routing 的隔离模式）。
+            for key in ("GMS_RT_PROFILE", "GMS_CURL_CA_CERT", "GMS_AUTH_TOKEN_FILE"):
+                env.pop(key, None)
             env.update(
                 {
                     "HOME": temporary,

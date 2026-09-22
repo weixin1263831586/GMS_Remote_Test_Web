@@ -53,9 +53,8 @@ class AgentTokenEnrollmentMixin:
         rate limiting keeps online guessing impractical; the code is stored
         hashed so a leaked DB row is not directly usable. The endpoint is
         anonymous and rate-limited per IP, but the code itself must still
-        resist offline guessing (code review 2026-08: 24-bit groups — a
-        single 24-bit group — were rejected as too small; the three-group
-        form is what makes this acceptable).
+        resist offline guessing: a single 24-bit group is too small, while
+        the three-group form reaches 72 bits of entropy.
 
         ``ttl_minutes`` (1–30, default ``ENROLLMENT_TTL_MINUTES``) lets an
         admin widen the exchange window for slow hand-off while keeping

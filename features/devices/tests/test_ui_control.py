@@ -16,11 +16,6 @@ from features.devices.ui_control_api import (
 )
 
 
-class _FakeConfigManager:
-    """runtime 在 app 启动前为 None，_android_cli_path 内部用 runtime.config_manager，
-    测试里直接 monkeypatch 本模块的 runtime 引用。"""
-
-
 def test_error_detection_flags_cli_failures():
     """Android CLI 恒返回 exit 0，错误检测只能靠输出文本。"""
     assert _looks_like_error("Error: Multiple devices are currently online") is not None

@@ -361,6 +361,8 @@ class SensitiveRouteAuthorizationTests(unittest.TestCase):
     def test_state_changing_api_routes_declare_authorization(self):
         offenders = []
         parse_cache: dict[str, tuple] = {}
+        # 全量 features/ 树只索引一次（函数契约如此）；放循环内是 O(files²)。
+        feature_index = _feature_module_index(parse_cache)
         for path in sorted((ROOT / "features").rglob("*.py")):
             relative = str(path.relative_to(ROOT))
             if "/tests/" in relative or "__pycache__" in relative:
@@ -373,7 +375,6 @@ class SensitiveRouteAuthorizationTests(unittest.TestCase):
             helpers = _module_helper_bodies(tree)
             dep_variables = _module_dep_variables(tree)
             imported_sources = _imported_helper_sources(tree, relative)
-            feature_index = _feature_module_index(parse_cache)
             for node in ast.walk(tree):
                 if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
                     continue
@@ -646,7 +647,7 @@ class ResourceOwnerIdentityHygieneTests(unittest.TestCase):
 class OwnerIdentityTaintCheckTests(unittest.TestCase):
     """Business modules must never read the raw principal ``.id`` attribute.
 
-    升级 ResourceOwnerIdentityHygieneTests 的语法扫描（审计意见十五）：
+    升级 ResourceOwnerIdentityHygieneTests 的语法扫描：
     只要业务代码出现 ``user.id`` 这类原始读，AST 就已丢失"这个值之后会
     流向 owner 字段还是 audit 归因"的语义，别名/转发/位置参数都能逃过
     sink 匹配。因此直接把"未分类的主体身份读"整体设为违规——调用方必须

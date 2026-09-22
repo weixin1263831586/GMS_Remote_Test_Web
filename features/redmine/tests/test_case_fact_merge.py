@@ -1,4 +1,4 @@
-"""upsert_case_fact merge 语义：已有高质量事实不被 AI 空值清空（审核意见 P1）。"""
+"""upsert_case_fact merge 语义：已有高质量事实不被 AI 空值清空。"""
 
 from __future__ import annotations
 
@@ -65,7 +65,6 @@ class UpsertCaseFactMergeTests(unittest.TestCase):
         }, merge_missing=True)
         fact = self.db.get_case_fact(123)
         self.assertEqual(fact["subject"], "RK3576 Android16 GTS CtsCarrierApiTestCases fail")
-        self.assertEqual(fact["module"], "VBMeta" if fact["module"] == "VBMeta" else fact["module"])
         self.assertTrue(fact["problem_summary"] or fact["root_cause"])
 
     def test_default_upsert_keeps_replace_semantics(self):
@@ -129,7 +128,7 @@ class UpsertCaseFactMergeTests(unittest.TestCase):
         self.assertEqual(fact["root_cause"], "new ai cause")
 
     def test_real_error_signature_not_replaced_by_provenance_placeholder(self):
-        """真实 error_signature 不被 provenance 占位符覆盖（审核意见 P1）。
+        """真实 error_signature 不被 provenance 占位符覆盖。
 
         历史 mapper 在提取器拿不到签名时写 "daily-brief:<date>"；这是
         非空 provenance 字符串，旧 merge 的"空才保留"挡不住它，真实签名
@@ -153,7 +152,7 @@ class UpsertCaseFactMergeTests(unittest.TestCase):
         )
 
     def test_evidence_and_keywords_union_on_merge(self):
-        """新 evidence/keywords 非空时 union/dedupe，不整体覆盖（审核意见 P1）。"""
+        """新 evidence/keywords 非空时 union/dedupe，不整体覆盖。"""
         self.db.upsert_case_fact({
             "issue_id": 13,
             "subject": "s",

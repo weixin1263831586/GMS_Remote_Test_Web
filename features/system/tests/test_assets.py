@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from features.system import assets
+from features.system import assets, tools_data_api
 from features.system.favicon_security import FaviconResolver
 from features.system.icon_fetcher import IconFetcher
 from foundation.command_result import CommandResult
@@ -133,19 +133,19 @@ class WebsiteToolsValidationTests(unittest.TestCase):
             ]
         }
 
-        assets._validate_tools_data(tools)
+        tools_data_api._validate_tools_data(tools)
 
     def test_rejects_script_protocol(self):
         tools = {"Bad": [{"title": "Unsafe", "url": "javascript:alert(1)", "icon": ""}]}
 
         with self.assertRaisesRegex(ValueError, "Unsupported"):
-            assets._validate_tools_data(tools)
+            tools_data_api._validate_tools_data(tools)
 
     def test_rejects_protocol_relative_url(self):
         tools = {"Bad": [{"title": "Unsafe", "url": "//example.com", "icon": ""}]}
 
         with self.assertRaisesRegex(ValueError, "Invalid"):
-            assets._validate_tools_data(tools)
+            tools_data_api._validate_tools_data(tools)
 
 
 if __name__ == "__main__":

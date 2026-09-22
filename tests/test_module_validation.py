@@ -112,8 +112,6 @@ class FailureEvidenceTests(unittest.TestCase):
                 command = " ".join(args)
                 if command.startswith("logcat"):
                     return "04-04 10:00:00 log line\n"
-                if command == "getprop " or command == "getprop ":
-                    return ""
                 return "snapshot-output\n"
 
             with mock.patch(

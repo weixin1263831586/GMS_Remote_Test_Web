@@ -1182,7 +1182,15 @@ window._actClickById = function (elementId) {
 };
 
 window.copyPreWithFlash = function (pre) {
-    navigator.clipboard.writeText(pre.textContent);
+    const text = pre.textContent;
+    // navigator.clipboard 仅在安全上下文存在；HTTP 部署下为 undefined，
+    // 直接调用会抛 TypeError。失败/缺失时回退到带 execCommand 降级的
+    // copyText（与 copyDeployCommand 同一约定）。
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => copyText(text));
+    } else {
+        copyText(text);
+    }
     pre.style.background = 'var(--success-color)';
     pre.style.color = 'white';
     setTimeout(() => {

@@ -10,16 +10,16 @@
     * { box-sizing:border-box; }
     body { margin:0; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
     html { scrollbar-gutter:stable; overflow-y:scroll; scroll-padding-top:86px; }
-    header { position:sticky; top:0; z-index:1000; min-height:44px; display:flex; align-items:center; gap:16px; padding:0 16px; border-bottom:0; background:var(--panel); box-shadow:0 8px 18px rgba(0,0,0,.22); }
+    header { position:sticky; top:0; z-index:1000; min-height:44px; display:flex; align-items:center; gap:16px; padding:0 16px; border-bottom:0; background:var(--panel); box-shadow:0 8px 18px rgba(0,0,0,.22); flex-wrap:wrap; row-gap:6px; }
     .header-title { font-size:18px; font-weight:700; white-space:nowrap; margin:0; }
     select,input { height:30px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:0 8px; font-size:13px; }
     input { min-width:260px; }
     button { height:30px; border:0; border-radius:6px; padding:0 10px; color:white; background:var(--primary); font-weight:650; cursor:pointer; font-size:13px; }
     button.secondary { background:#30394a; }
     main { padding:0; }
-    .tabs { display:flex; align-self:stretch; gap:0; }
+    .tabs { display:flex; align-self:stretch; gap:0; max-width:100%; overflow-x:auto; scrollbar-width:none; }
     /* 页签是原生 <button role="tab">（a11y 契约）：重置按钮外观，保留底部指示条。 */
-    .tab { position:relative; flex:0 0 112px; width:112px; height:44px; padding:0 14px; cursor:pointer; font:inherit; font-size:13px; font-weight:600; color:var(--muted); background:none; border:none; border-radius:0; transition:all .15s; white-space:nowrap; }
+    .tab { position:relative; flex:1 1 112px; min-width:96px; max-width:112px; width:auto; height:44px; padding:0 8px; cursor:pointer; font:inherit; font-size:13px; font-weight:600; color:var(--muted); background:none; border:none; border-radius:0; transition:all .15s; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .tab:hover { color:var(--text); }
     .tab:focus-visible { outline:0; background:rgb(59 130 246 / 12%); }
     .tab.active { color:var(--primary); }

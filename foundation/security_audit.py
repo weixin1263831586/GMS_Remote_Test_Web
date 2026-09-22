@@ -67,7 +67,9 @@ class SecurityAuditLogger:
         self.lock_path = f'{log_path}.lock'
         self.max_read_lines = max_read_lines
         self._lock = threading.Lock()
-        os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
+        parent = os.path.dirname(self.log_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         if os.path.exists(self.log_path):
             os.chmod(self.log_path, 0o600)
         # Parsed-record cache keyed on the log file's mtime. The audit log is
@@ -121,7 +123,7 @@ class SecurityAuditLogger:
                         'be verified against it',
                         path,
                     )
-                path.parent.mkdir(parents=True, exist_ok=True)
+                path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                 key = os.urandom(32).hex().encode('ascii')
                 descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                 try:
@@ -402,7 +404,12 @@ class SecurityAuditLogger:
         # Preserve the original file first (don't unlink the only copy).
         # Overwrite any prior rotated backup so we don't accumulate them —
         # rotation can fire repeatedly across a long-running process.
-        with open(rotated_path, 'wb') as handle:
+        # os.open + 0o600 avoids a umask window where the backup (which
+        # carries usernames/IPs) is briefly world-readable.
+        descriptor = os.open(
+            rotated_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600,
+        )
+        with os.fdopen(descriptor, 'wb') as handle:
             handle.write(raw)
         os.chmod(rotated_path, 0o600)
 

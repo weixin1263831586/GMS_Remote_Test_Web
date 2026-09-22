@@ -2,8 +2,7 @@
 
 Reservation/job state (cluster DB) and physical device claims (claims DB)
 span two databases and can never share one transaction; a crash between the
-two commits leaves ghost claims or unfenced reservations/jobs (review P2,
-ADR 0011). ``reconcile_claims`` repairs that drift idempotently at startup —
+two commits leaves ghost claims or unfenced reservations/jobs (ADR 0011). ``reconcile_claims`` repairs that drift idempotently at startup —
 per-source repair instead of whole-DB rebuild. Kept as a separate mixin so
 ``repository.py`` stays under its migration line limit.
 """
@@ -87,7 +86,7 @@ class ClusterReconciliationRepositoryMixin:
                 if self.claims.list_by_source(source_id):
                     self.claims.release(source_id, status="reconciled")
                     stats["job_claims_released"] += 1
-            # 非终态 job 丢 claim（审核意见 P2 中间形态）：崩溃发生在
+            # 非终态 job 丢 claim：崩溃发生在
             # "job 状态已提交、claim 尚未写"或 claim 被误释放时，运行中的
             # 任务失去物理 fencing。按 device_leases 的设备清单重取 claim，
             # 恢复 fencing；拿不到（他方占用）时把 job 标记为 failed，

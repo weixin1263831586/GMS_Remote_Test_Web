@@ -97,11 +97,12 @@ class ApkImportApiTests(unittest.TestCase):
         _tiny_apk(target)
         import hashlib
 
+        self.artifact_sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
         store.update_artifact(
             artifact["artifact_id"],
             status="ready",
             size_bytes=target.stat().st_size,
-            sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
+            sha256=self.artifact_sha256,
             stored_path=rel,
         )
         self.artifact_id = artifact["artifact_id"]
@@ -167,7 +168,7 @@ class ApkImportApiTests(unittest.TestCase):
         self.assertEqual(data["source_ref"]["issue_id"], 648526)
         self.assertEqual(data["source_ref"]["snapshot_id"], self.snapshot_id)
         task = self.firmware_runtime.global_state.apk_analysis_tasks[data["task_id"]]
-        self.assertEqual(task["source_ref"]["sha256"], task["source_ref"]["sha256"])
+        self.assertEqual(task["source_ref"]["sha256"], self.artifact_sha256)
         # 伪造完成，清理后台任务
         self._complete_task(data["task_id"])
 

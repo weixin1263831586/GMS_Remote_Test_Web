@@ -16,6 +16,11 @@ def initialize_auth_schema(db_path: Path) -> None:
         except sqlite3.OperationalError as exc:
             if "locked" not in str(exc).lower():
                 raise
+        # Schema 读取与迁移全程持 BEGIN IMMEDIATE 写锁（与
+        # features/redmine/daily_brief_repository.py 同一约定）：
+        # Web/Worker/CLI 多进程并发初始化时，先拿写锁再读 schema、
+        # 再 ALTER，迁移天然串行且幂等，避免双重 ADD COLUMN 竞态。
+        conn.execute("BEGIN IMMEDIATE")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS platform_users (

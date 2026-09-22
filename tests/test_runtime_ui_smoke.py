@@ -722,6 +722,8 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 ".map((input) => input.value)"
             )
             # AGENT_SCOPES 服务端契约：对象键集合（修复前是 0 个复选框）。
+            # 与 features/auth/constants.py AGENT_SCOPES 保持同步
+            # （ADR 0014：knowledge.read 背景知识只读检索）。
             self.assertEqual(
                 sorted(scopes),
                 sorted([
@@ -737,6 +739,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     "artifacts.read_own",
                     "apk.analyze_own",
                     "sdk.read",
+                    "knowledge.read",
                     "build.read",
                     "build.execute",
                     "build.cancel",
@@ -1689,11 +1692,14 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 }"""
             )
             page.locator('#dailyBriefCard [data-click="showDailyBriefIssue"]').click()
-            expect(page.locator('[id^="dailyBriefIssueModal-"]')).to_have_class(
+            # 「查看分析」已与单号分析统一为 singleIssueAnalysisModal 布局
+            # （openSingleIssueReportModal）；dailyBriefIssueModal- 前缀仅
+            # 剩旧格式 fallback 路径会创建。
+            expect(page.locator('[id^="singleIssueAnalysisModal-"]')).to_have_class(
                 re.compile(r"show")
             )
             page.keyboard.press("Escape")
-            expect(page.locator('[id^="dailyBriefIssueModal-"]')).not_to_have_class(
+            expect(page.locator('[id^="singleIssueAnalysisModal-"]')).not_to_have_class(
                 re.compile(r"show")
             )
             self.assert_no_page_errors(page_errors)
@@ -1914,6 +1920,10 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             expect(page.locator("#reports-table-body")).not_to_contain_text(
                 "正在加载报告"
             )
+            # mock 的 resolve 句柄在 loadTestReports 真正发出请求时才赋值
+            # （内部先 await GmsWorkspace.ready）；先等 mock 被调用，
+            # 否则与页面异步初始化竞争（评审后补的稳定性等待）。
+            page.wait_for_function("typeof window.__resolveStableReports === 'function'")
             page.evaluate(
                 """() => window.__resolveStableReports({
                   reports: [{
@@ -1945,6 +1955,10 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
 
             page.evaluate(
                 """() => {
+                  // loadSecurityAudit 对未提权会话短路为权限提示行；本段
+                  // 验证刷新原子性，先补提权态（同 stale pagination 用例）。
+                  state.elevated = true;
+                  state.elevatedUntil = Date.now() + 60000;
                   const tbody = document.querySelector('#security-audit-table-body');
                   tbody.innerHTML = '<tr><td colspan="6">old-audit-surface</td></tr>';
                   securityAuditState.loaded = true;
@@ -1963,6 +1977,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             expect(page.locator("#security-audit-table-body")).to_have_attribute(
                 "aria-busy", "true"
             )
+            page.wait_for_function("typeof window.__resolveStableAudit === 'function'")
             page.evaluate(
                 """() => window.__resolveStableAudit({data: {
                   records: [{
@@ -2011,6 +2026,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             expect(page.locator("#suite-file-list")).to_have_attribute(
                 "aria-busy", "true"
             )
+            page.wait_for_function("typeof window.__resolveStableSuite === 'function'")
             page.evaluate(
                 """() => window.__resolveStableSuite({data: {
                   path: 'next', suite_root: '/tmp/android-cts-16_r1',
@@ -2117,6 +2133,10 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
 
             audit_state = page.evaluate(
                 """async () => {
+                  // loadSecurityAudit 在未提权会话下短路为权限提示行；
+                  // 本用例验证的是分页状态回滚语义，先补提权态。
+                  state.elevated = true;
+                  state.elevatedUntil = Date.now() + 60000;
                   const tbody = document.querySelector('#security-audit-table-body');
                   tbody.innerHTML = '<tr><td colspan="6">old-audit</td></tr>';
                   securityAuditState.loaded = true;

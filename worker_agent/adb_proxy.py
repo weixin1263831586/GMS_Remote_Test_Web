@@ -330,14 +330,20 @@ def _source_start(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
     ]
     for allowed_peer in allowed_peers:
         proxy_args.extend(["--allow-peer", allowed_peer])
-    process = subprocess.Popen(
-        proxy_args,
-        stdin=subprocess.DEVNULL,
-        stdout=_process_log("proxy"),
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-        env=env,
-    )
+    # Popen 已为子进程 dup 该句柄，父进程侧必须在 spawn 后关闭，
+    # 否则每次 source_start 泄漏一个文件描述符。
+    proxy_log = _process_log("proxy")
+    try:
+        process = subprocess.Popen(
+            proxy_args,
+            stdin=subprocess.DEVNULL,
+            stdout=proxy_log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            env=env,
+        )
+    finally:
+        proxy_log.close()
     _write_pid(root / "proxy.pid", process.pid)
     ready = _wait_tcp(
         "127.0.0.1" if listen_host == "0.0.0.0" else listen_host,
@@ -633,18 +639,23 @@ def _restart_hub(config_path: Path) -> None:
         _force_kill_adb_port(5037)
         _force_kill_adb_port(5039)
         log_offset = _hub_log_offset()
-        process = subprocess.Popen(
-            [
-                _binary("adb-hub"),
-                "--config", str(config_path),
-                "--daemon",
-                "--single-user",
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=_process_log("hub"),
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
+        # Popen 已为子进程 dup 该句柄，父进程侧必须在 spawn 后关闭。
+        hub_log = _process_log("hub")
+        try:
+            process = subprocess.Popen(
+                [
+                    _binary("adb-hub"),
+                    "--config", str(config_path),
+                    "--daemon",
+                    "--single-user",
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=hub_log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        finally:
+            hub_log.close()
         _write_pid(root / "hub.pid", process.pid)
         # A port conflict makes adb-hub exit with rc=1 within ~1s — or,
         # because of --daemon, only show up as a bind error in the hub log
@@ -843,7 +854,9 @@ def _ensure_log_monitor(path: Path) -> None:
         while True:
             try:
                 _rotate_log_if_needed(path)
-            except OSError:
+            except (OSError, ValueError):
+                # 非法 log 轮转环境变量（非数字）或文件系统错误不能让
+                # 监控线程静默退出，否则日志永久停止轮转。
                 pass
             time.sleep(5)
 
@@ -954,7 +967,7 @@ def _force_kill_adb_port(port: int, timeout: float = 6.0) -> None:
 
 
 def _listeners_on_loopback_port(port: int) -> list[int]:
-    """PIDs with a LISTEN socket on 127.0.0.1:<port> (or [::1]:<port>).
+    """PIDs with a LISTEN socket on 127.0.0.0/8:<port> (or [::1]:<port>).
 
     Parses /proc/net/tcp{,6} instead of a blanket ``fuser -k``: the pid is
     resolved through /proc/<pid>/fd -> socket inode, which only matches the
@@ -983,8 +996,12 @@ def _listeners_on_loopback_port(port: int) -> list[int]:
                     continue
             except ValueError:
                 continue
-            # Loopback only: v4 127.0.0.0/8 prefix 01..., v6 ::1.
-            if not (address_hex.upper().startswith("0100") or address_hex == "00000000000000000000000000000001"):
+            # Loopback only: /proc/net/tcp writes the address as one
+            # little-endian 32-bit word, so 127.0.0.0/8 (first octet 0x7F)
+            # ends with "7F"; /proc/net/tcp6 writes four LE words and ::1 is
+            # 00000000000000000000000001000000.
+            upper_address = address_hex.upper()
+            if not (upper_address.endswith("7F") or upper_address == "00000000000000000000000001000000"):
                 continue
             try:
                 inodes.add(int(fields[9]))
@@ -1282,10 +1299,17 @@ def _stop_managed(path: Path, expected: str) -> bool:
     if not _managed_running(path, expected):
         path.unlink(missing_ok=True)
         return False
-    pid = int(path.read_text(encoding="utf-8").strip())
     try:
+        # 与 _managed_running 读取同一份 pid：二次读取存在 TOCTOU，
+        # 且损坏的 pid 文件不能让停止流程抛出未捕获的 ValueError。
+        pid = int(path.read_text(encoding="utf-8").strip())
         os.killpg(pid, signal.SIGTERM)
     except ProcessLookupError:
+        path.unlink(missing_ok=True)
+        return False
+    except (OSError, ValueError):
+        # 进程组属于其他 uid（无法 kill）或 pid 文件损坏：进程不可停，
+        # 只能清掉 pid 文件并按"未停止"返回，避免阻塞来源切换。
         path.unlink(missing_ok=True)
         return False
     for _ in range(30):

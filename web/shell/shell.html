@@ -43,8 +43,8 @@
     <script src="/static/js/shell/websites.js?v=20260905-extract" defer></script>
     <script src="/static/js/shell/server-sync.js?v=20260905-extract" defer></script>
     <script src="/static/js/shell/dnd-sort.js?v=20260905-extract" defer></script>
-    <script src="/static/js/shell/utility-tools.js?v=20260905-extract" defer></script>
-    <script src="/static/js/shell/weekly-report.js?v=20260905-extract" defer></script>
+    <script src="/static/js/shell/utility-tools.js?v=20260921-ut-split" defer></script>
+    <script src="/static/js/shell/weekly-report.js?v=20260921-ut-split" defer></script>
     <script src="/static/js/shell/arrow-nav.js?v=20260917-navigation-focus-anchor" defer></script>
     <script src="/static/js/shell/shell-terminal.js?v=20260905-extract" defer></script>
     <script src="/static/js/shell/sidebar-dnd.js?v=20260910-device-console-order" defer></script>
@@ -114,9 +114,12 @@
         body.workspace-scope-single .host-workspace-single-bar { display: flex; align-items: center; gap: 6px; }
         .host-workspace-mode-pending { display: none; }
         /* 与其他页面标题保持相同的 6px 内容间距。标题行保留 24px 供右侧
-           按钮（page-title-actions）使用；左侧标题回归公共几何
-           （line-height 1.6，自然高度约 19px）并与行顶对齐，不再为迁就
-           右侧按钮把文字垂直居中到 24px 行盒里（那会整体下沉约 2px）。 */
+           按钮（page-title-actions）使用；左侧标题文字保持顶部对齐
+           （line-height 1.6，字形不进 24px 行盒垂直居中——那会整体下沉
+           约 2px），但盒子本身 align-self: stretch 撑满行高，使
+           "标题盒底 → 内容顶"的间距仍是 margin-bottom 的 6px
+           （runtime UI smoke 的 titleToContent 契约）。stretch 只改变
+           盒高，字形仍渲染在盒顶，与 69f91b0 的防下沉意图一致。 */
         .host-workspace-title-row { position: relative; min-height: 24px; margin-bottom: 6px; display: flex; align-items: flex-start; }
         .main-container > #page-desktop.page-content,
         .main-container > #page-terminal.page-content { --page-body-frame-top: 45px; }
@@ -124,7 +127,7 @@
             .main-container > #page-desktop.page-content,
             .main-container > #page-terminal.page-content { --page-body-frame-top: 38px; }
         }
-        .host-workspace-title-row > .section-title { height: auto; min-height: 19px; line-height: 1.6; }
+        .host-workspace-title-row > .section-title { height: auto; min-height: 19px; line-height: 1.6; align-self: stretch; }
         .host-workspace-title-state { height: 24px; align-items: center; }
         .host-workspace-title-state > .host-workspace-pane-status {
             flex: 0 0 150px;
@@ -1866,7 +1869,7 @@
             </div>
             <div class="embedded-frame-shell" data-frame-state="loading">
                 <div class="embedded-frame-loading" role="status" aria-label="页面仍在准备中" data-loading-text="页面仍在准备中…"></div>
-                <iframe id="gms-assistant-frame" data-src="/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
+                <iframe id="gms-assistant-frame" data-src="/gms-assistant/public/agents/7f43a8ef-400b-4578-ab64-60607673e3e8/chat"
                         style="border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg);">
                 </iframe>
             </div>
@@ -3423,72 +3426,6 @@
         </div>
     </div>
 
-    <!-- 报错分析弹框 -->
-    <div id="source-analysis-modal" class="modal">
-        <div class="modal-content" style="max-width: 800px;">
-            <div class="modal-header">
-                <span class="modal-title">🤖 报错分析 (OpenGrok)</span>
-                <button type="button" class="modal-close" aria-label="关闭" data-click="closeSourceAnalysisModal">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="modal-form-row">
-                    <label>搜索关键词:</label>
-                    <input type="text" id="opengrok-query" placeholder="输入类名、方法名或变量名" style="flex: 1;" />
-                </div>
-
-                <div class="modal-form-row" style="display: flex; gap: 10px;">
-                    <div style="flex: 1;">
-                        <label>搜索字段:</label>
-                        <select id="opengrok-search-field" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px;">
-                            <option value="smart">智能搜索 (推荐)</option>
-                            <option value="full">全文搜索</option>
-                            <option value="def">定义搜索</option>
-                            <option value="symbol">符号搜索</option>
-                            <option value="path">路径搜索</option>
-                        </select>
-                    </div>
-                    <div style="flex: 1;">
-                        <label>项目:</label>
-                        <select id="opengrok-project" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px;">
-                            <option value="">所有项目</option>
-                            <option value="Android14" selected>Android14</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="modal-form-row">
-                    <label>文件类型:</label>
-                    <select id="opengrok-type" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 3px;">
-                        <option value="">所有类型</option>
-                        <option value="java">Java</option>
-                        <option value="kotlin">Kotlin</option>
-                        <option value="c">C</option>
-                        <option value="cxx">C++</option>
-                        <option value="python">Python</option>
-                        <option value="sh">Shell</option>
-                        <option value="golang">Go</option>
-                        <option value="rust">Rust</option>
-                    </select>
-                </div>
-
-                <div class="modal-buttons">
-                    <button class="btn-xxs" data-click="closeSourceAnalysisModal">取消</button>
-                    <button class="btn-xxs btn-primary" data-click="searchSourceCode">🔍 搜索</button>
-                </div>
-
-                <!-- 搜索结果区域 -->
-                <div id="opengrok-results" style="margin-top: 20px; display: none;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                        <div style="font-size: 12px; font-weight: 600;">搜索结果</div>
-                        <button class="btn-xxs" data-click="openOpenGrokLink" style="font-size: 11px;">🌐 在OpenGrok中打开</button>
-                    </div>
-                    <div id="opengrok-results-list" style="max-height: 400px; overflow-y: auto; background: var(--light-bg); border-radius: 3px; padding: 10px; font-size: 12px;">
-                        <div style="text-align: center; color: var(--text-secondary); padding: 20px;">请输入关键词进行搜索</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
     <!-- 报错诊断工作台弹框 -->
     <div id="report-diagnosis-modal" class="modal">
         <div class="modal-content report-diagnosis-shell">

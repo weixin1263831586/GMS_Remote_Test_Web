@@ -75,7 +75,10 @@ class AutomationStore:
         return conn
 
     def _init_schema(self) -> None:
+        # 进程安全（硬规则 7）：跨进程串行化建表/ALTER TABLE 迁移，
+        # 与 claim_* 的写锁方案保持一致；语句本身幂等。
         with self._schema_lock, self._open_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS automation_runs (
                     id TEXT PRIMARY KEY,

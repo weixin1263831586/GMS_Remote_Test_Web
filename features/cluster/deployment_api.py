@@ -457,11 +457,7 @@ async def deploy_adb_proxy_source(
                 raise
             finally:
                 sftp.close()
-            controller_ca_arg = (
-                "controller-ca.crt"
-                if controller_certificate.is_file()
-                else "-"
-            )
+            controller_ca_arg = "controller-ca.crt" if controller_certificate.is_file() else "-"
             install = _adb_proxy_source_install_command(
                 worker_id=worker_id,
                 controller_url=controller_url,
@@ -698,13 +694,12 @@ async def deploy_worker(
                 write_remote_token_file(sftp, remote_token, token)
                 sftp.put(str(gts_credential), remote_credential)
                 sftp.chmod(remote_credential, 0o600)
+            except Exception:
+                remove_remote_files_quietly(sftp, remote_archive, remote_token, remote_credential)
+                raise
             finally:
                 sftp.close()
-            controller_ca_arg = (
-                "controller-ca.crt"
-                if controller_certificate.is_file()
-                else "-"
-            )
+            controller_ca_arg = "controller-ca.crt" if controller_certificate.is_file() else "-"
             install = (
                 "set -e; "
                 f"cleanup() {{ rm -f {shlex.quote(remote_archive)} "

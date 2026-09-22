@@ -136,6 +136,7 @@ class VNCManager:
                 x11vnc_running = (
                     self._is_local_process_running(X11VNC_DISPLAY_PATTERN)
                     and self._is_local_port_listening(VNC_PORT)
+                    and self._is_local_rfb_healthy()
                 )
 
                 # 检查websockify是否运行
@@ -153,6 +154,24 @@ class VNCManager:
                         self._kill_local_processes(X11VNC_DISPLAY_PATTERN)
                         time.sleep(1)
                         x11vnc_running = False
+
+                # A listening TCP socket is not enough: a stuck x11vnc can
+                # retain port 5900 without completing the RFB greeting.  In
+                # that state a normal "start" used to try a second x11vnc,
+                # which failed on the occupied port and left noVNC unusable.
+                # Only kill a process matching our x11vnc pattern; never
+                # interfere with an unrelated process that happens to own
+                # the port.
+                if (
+                    not x11vnc_running
+                    and self._is_local_process_running(X11VNC_DISPLAY_PATTERN)
+                ):
+                    logger.warning(
+                        "[VNC] x11vnc is listening on %s but its RFB handshake failed; restarting it",
+                        VNC_PORT,
+                    )
+                    self._kill_local_processes(X11VNC_DISPLAY_PATTERN, force=True)
+                    time.sleep(0.5)
 
                 # 如果已经运行且是免密码模式，返回成功
                 if x11vnc_running and websockify_running:
@@ -207,6 +226,7 @@ class VNCManager:
             x11vnc_running = (
                 self._is_local_process_running(X11VNC_DISPLAY_PATTERN)
                 and self._is_local_port_listening(VNC_PORT)
+                and self._is_local_rfb_healthy()
             )
 
             websockify_running = (
@@ -253,6 +273,27 @@ class VNCManager:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
             connection.settimeout(0.2)
             return connection.connect_ex(('127.0.0.1', port)) == 0
+
+    @staticmethod
+    def _is_local_rfb_healthy(timeout: float = 0.5) -> bool:
+        """Return whether the local VNC server completes its RFB greeting.
+
+        ``ss`` can report a stuck x11vnc as listening even though noVNC can
+        never establish a session.  Probe the protocol rather than treating
+        an open port as readiness.
+        """
+        try:
+            with socket.create_connection(('127.0.0.1', VNC_PORT), timeout=timeout) as connection:
+                connection.settimeout(timeout)
+                greeting = bytearray()
+                while len(greeting) < 12:
+                    chunk = connection.recv(12 - len(greeting))
+                    if not chunk:
+                        break
+                    greeting.extend(chunk)
+                return len(greeting) == 12 and greeting.startswith(b'RFB ')
+        except OSError:
+            return False
 
     @staticmethod
     def _kill_local_processes(pattern: str, *, force: bool = False) -> None:
@@ -364,6 +405,7 @@ class VNCManager:
                 x11vnc_running = (
                     self._is_local_process_running(X11VNC_DISPLAY_PATTERN)
                     and self._is_local_port_listening(VNC_PORT)
+                    and self._is_local_rfb_healthy()
                 )
                 websockify_running = (
                     self._is_local_process_running(WEBSOCKIFY_PATTERN)

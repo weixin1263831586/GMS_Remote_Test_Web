@@ -26,7 +26,7 @@ def native_summary_result(
     return {
         "result_format": "kkagent_markdown",
         # 独立键：native 摘要不是 IssueResult schema 的 v3（字段集完全
-        # 不同），不复用同名版本字段误导消费方（审核意见 P3）。
+        # 不同），不复用同名版本字段误导消费方。
         "native_summary_version": 1,
         "problem_summary": str(entry.get("subject") or ""),
         "detailed_report": report,

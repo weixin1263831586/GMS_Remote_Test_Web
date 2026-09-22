@@ -1471,6 +1471,49 @@
         "title": "ExecutionSpec",
         "type": "object"
       },
+      "ExternalSearchRequest": {
+        "properties": {
+          "android_api_level": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Android Api Level"
+          },
+          "limit": {
+            "default": 5,
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "ExternalSearchRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -4024,7 +4067,7 @@
     },
     "/api/auth/agent-enroll": {
       "post": {
-        "description": "Exchange an enrollment code for an Agent Service Token.\n\nIntentionally does not require a session: the build server only holds the\none-shot code. Scopes/ACLs/expiry come from the enrollment record.\nAnonymous brute-force of the pairing code is throttled per source IP by\nthe same persistent limiter the login endpoint uses (code review\n2026-08: the endpoint must not rely on TTL/one-shot alone).",
+        "description": "Exchange an enrollment code for an Agent Service Token.\n\nIntentionally does not require a session: the build server only holds the\none-shot code. Scopes/ACLs/expiry come from the enrollment record.\nAnonymous brute-force of the pairing code is throttled per source IP by\nthe same persistent limiter the login endpoint uses — TTL and one-shot\nconsumption alone are not a brute-force defence.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -7179,6 +7222,7 @@
             "schema": {
               "default": 500,
               "maximum": 2000,
+              "minimum": 0,
               "title": "Limit",
               "type": "integer"
             }
@@ -13797,6 +13841,89 @@
         "summary": "Gms Update Monitor Sync Status"
       }
     },
+    "/api/knowledge/android-internals/search": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "maximum": 10,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "android_api_level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Android Api Level"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Agent Search Android Internals"
+      }
+    },
+    "/api/knowledge/android-internals/status": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Agent Android Internals Status"
+      }
+    },
     "/api/knowledge/ask": {
       "post": {
         "responses": {
@@ -14155,6 +14282,87 @@
           }
         },
         "summary": "Restore Doc Version"
+      }
+    },
+    "/api/knowledge/external/approve-revision": {
+      "post": {
+        "description": "管理员批准当前 clone HEAD 为索引目标（ADR 0014 revision 三态）。\n\n不自动跟随上游 master：批准是显式动作，随后 reindex 才把批准的\nrevision 真正索引。clone 缺新提交时批准后 status 会显示\n\"已批准待索引\" 状态。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Approve External Revision"
+      }
+    },
+    "/api/knowledge/external/reindex": {
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reindex External"
+      }
+    },
+    "/api/knowledge/external/search": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search External"
+      }
+    },
+    "/api/knowledge/external/sources": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List External Sources"
       }
     },
     "/api/knowledge/folders": {
@@ -15897,7 +16105,7 @@
     },
     "/api/redmine-agent/daily-brief/{brief_date}/issues/{issue_id}/save-case": {
       "post": {
-        "description": "把一次晨报**诊断**分析结果沉淀为本地 case_fact（FTS 可检索）。\n\n审核意见（P1）：批量 triage 的结果只是待办摘要（无根因），且其执行\n状态（completed）不是 Redmine 工单状态——一律拒绝保存，避免把错误\nstatus 和 AI 推导写进知识库。只有 evidence_gate 判定为 diagnostic 的\n深度分析可以保存。\n\n只写本地知识库，不做任何 Redmine 写操作。字段以\nRedmineCaseExtractor 从本地扫描库提取的 Redmine 事实为基底，AI 结论\n仅覆盖结论性字段；落库为 non-destructive merge（已有非空事实字段不\n被空值清空）。重复保存按 issue_id upsert，保留 created_at。\nrun_id 指定用户当前查看的晨报。",
+        "description": "把一次晨报**诊断**分析结果沉淀为本地 case_fact（FTS 可检索）。\n\n批量 triage 的结果只是待办摘要（无根因），且其执行\n状态（completed）不是 Redmine 工单状态——一律拒绝保存，避免把错误\nstatus 和 AI 推导写进知识库。只有 evidence_gate 判定为 diagnostic 的\n深度分析可以保存。\n\n只写本地知识库，不做任何 Redmine 写操作。字段以\nRedmineCaseExtractor 从本地扫描库提取的 Redmine 事实为基底，AI 结论\n仅覆盖结论性字段；落库为 non-destructive merge（已有非空事实字段不\n被空值清空）。重复保存按 issue_id upsert，保留 created_at。\nrun_id 指定用户当前查看的晨报。",
         "parameters": [
           {
             "in": "path",
@@ -18251,7 +18459,7 @@
     },
     "/api/reports/analyze-log-dir": {
       "post": {
-        "description": "递归分析套件浏览器选中的本地测试日志目录。",
+        "description": "递归分析套件浏览器选中的本地测试日志目录。\n\n这是文件级分析入口：路径边界由 _resolve_suite_log_dir 限定在配置的\nsuites_path 内，与套件浏览器文件接口面向同一批已认证用户。手工在测\n试机上跑的 tradefed run 不会注册报告记录，因此这里不做报告库可见性\n校验（报告账号分区仍然约束报告列表/详情/下载/删除，见 ADR 0010）。",
         "requestBody": {
           "content": {
             "application/x-www-form-urlencoded": {

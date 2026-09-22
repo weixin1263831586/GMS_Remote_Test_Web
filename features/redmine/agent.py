@@ -254,13 +254,11 @@ class RedmineAgent(
                     except Exception as exc:
                         failed += 1
                         logger.error("[RedmineAgent] sync analyze issue %s failed: %s", issue_id, exc, exc_info=True)
-                        self.db.upsert_issue({
-                            "issue_id": issue_id,
-                            "run_id": run_id,
-                            "subject": str(getattr(issue_stub, "subject", "")),
-                            "analysis_status": "failed",
-                            "error": str(exc),
-                        })
+                        # upsert_issue 是整行覆盖:在库中既有行上叠加失败状态。
+                        failed_payload = dict(self.db.get_issue(issue_id) or {}, issue_id=issue_id, run_id=run_id,
+                                              subject=str(getattr(issue_stub, "subject", "")),
+                                              analysis_status="failed", error=str(exc))
+                        self.db.upsert_issue(failed_payload)
 
             summary = {
                 "assigned_to": assigned_to,
@@ -335,6 +333,7 @@ class RedmineAgent(
         created_to = window_end_dt.strftime("%Y-%m-%d")
         self.db.create_run(run_id, mode, window_start_dt.isoformat(timespec="seconds"), window_end_dt.isoformat(timespec="seconds"), max_issues)
 
+        client: RedmineClient | None = None
         try:
             client = self._make_client()
             current_user = await client.get_current_user()
@@ -360,13 +359,11 @@ class RedmineAgent(
                 except Exception as exc:
                     failed += 1
                     logger.error("[RedmineAgent] issue %s failed: %s", issue_id, exc, exc_info=True)
-                    self.db.upsert_issue({
-                        "issue_id": issue_id,
-                        "run_id": run_id,
-                        "subject": str(getattr(issue_stub, "subject", "")),
-                        "analysis_status": "failed",
-                        "error": str(exc),
-                    })
+                    # 同上:整行 upsert 需保留既有分析结果。
+                    failed_payload = dict(self.db.get_issue(issue_id) or {}, issue_id=issue_id, run_id=run_id,
+                                          subject=str(getattr(issue_stub, "subject", "")),
+                                          analysis_status="failed", error=str(exc))
+                    self.db.upsert_issue(failed_payload)
 
             report = self._build_run_report(run_id, issue_results)
             report_path = self.db.write_run_report(run_id, report)
@@ -392,7 +389,8 @@ class RedmineAgent(
             self.db.update_run(run_id, status="failed", finished_at=_now_iso(), error=str(exc))
             return {"run_id": run_id, "status": "failed", "error": str(exc)}
         finally:
-            await client.close()
+            if client is not None:
+                await client.close()
 
     # Single issue analysis
 
@@ -586,6 +584,7 @@ class RedmineAgent(
         created = getattr(issue, "created_on", None)
         if isinstance(created, datetime):
             if created.tzinfo is not None:
-                created = created.replace(tzinfo=None)
+                # Redmine 的 created_on 带时区偏移,换算到本地时区再去掉 tzinfo。
+                created = created.astimezone().replace(tzinfo=None)
             return start <= created <= end
         return True

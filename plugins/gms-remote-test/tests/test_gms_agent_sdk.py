@@ -201,9 +201,10 @@ def test_mcp_fast_path_falls_back_without_server(monkeypatch):
 
 
 def test_mcp_fast_path_passthrough_flags_do_not_swallow_args(monkeypatch):
-    """Regression (code review 2026-08): ``--json``/``--non-interactive``
-    used to fall into the generic ``--`` branch and consume the NEXT
-    positional as their value (e.g. a job id), corrupting the request."""
+    """``--json``/``--non-interactive`` must be recognized as passthrough
+    flags instead of falling into the generic ``--`` branch and consuming
+    the NEXT positional as their value (e.g. a job id), which would
+    corrupt the request."""
     spec = importlib.util.spec_from_file_location("mcp_server_under_test_flags", SCRIPTS / "mcp_server.py")
     mcp = importlib.util.module_from_spec(spec)
     sys.modules.setdefault("mcp_server_under_test_flags", mcp)

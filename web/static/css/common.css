@@ -246,7 +246,7 @@ body {
 }
 
 .notification-toggle:hover {
-    background: var(--bg-color);
+    background: var(--bg-color, var(--lighter-bg));
     border-color: var(--primary-color);
 }
 
@@ -322,7 +322,7 @@ body {
 .client-account-switch-option:hover,
 .client-account-switch-option:focus-visible {
     border-color: var(--primary-color);
-    background: var(--hover-bg);
+    background: var(--hover-bg, var(--lighter-bg));
 }
 
 .client-account-switch-option:disabled {
@@ -2096,7 +2096,7 @@ select option {
     border-radius: 3px;
     font-size: 11px;
     white-space: nowrap;
-    background: var(--bg-color);
+    background: var(--bg-color, var(--darker-bg));
     border: 1px solid var(--border-color);
     color: var(--text-secondary);
 }
@@ -2115,7 +2115,7 @@ select option {
     padding: 10px;
     border: 1px solid var(--border-color);
     border-radius: 4px;
-    background: var(--bg-color);
+    background: var(--bg-color, var(--darker-bg));
     color: var(--text-primary);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -3548,7 +3548,7 @@ body.modal-open {
 }
 
 .route-check-close:hover {
-    background: var(--danger-bg);
+    background: var(--danger-bg, rgba(239, 68, 68, 0.15));
     color: var(--danger-color);
 }
 
@@ -3763,7 +3763,7 @@ body.modal-open {
 }
 
 .btn-terminal:hover:not(:disabled) {
-    background: var(--primary-hover);
+    background: var(--primary-hover, var(--primary-light));
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 }
@@ -5838,13 +5838,11 @@ body.apk-resizing {
     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
 
-/* APK Tab 动作栏 - 搜索框和按钮在同一行 */
+/* APK Tab 动作栏 - 搜索框和按钮在同一行（补充 5417 行基准块的
+   align-items: center；重复的 display/gap/margin-bottom 已并入该块） */
 .apk-tab-actions {
-    display: flex;
     align-items: center;
-    gap: 8px;
     justify-content: space-between;
-    margin-bottom: 8px;
 }
 
 .apk-tab-actions .apk-search-container {

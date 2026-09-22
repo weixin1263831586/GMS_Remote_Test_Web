@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import builtins
 import re
 import sqlite3
 import subprocess
@@ -16,14 +17,19 @@ from unittest.mock import patch
 
 from features.knowledge.external.android_internals import (
     AndroidInternalsProvider,
-    _bm25_score,
     parse_frontmatter,
 )
 from features.knowledge.external.base import (
     EVIDENCE_LEVEL_BACKGROUND,
     EXTERNAL_KNOWLEDGE_LICENSE,
+    ExternalKnowledgeError,
     fts_safe_query,
     search_terms,
+)
+from features.knowledge.external.content_policy import load_policy
+from features.knowledge.external.ranking import (
+    _bm25_score,
+    parse_aosp_url,
 )
 
 
@@ -54,6 +60,31 @@ status: draft
 doFrame 由 VSync 驱动，FrameTimeline 记录帧 deadline。
 """
 
+#: 与上游 knowledge-pack/policy.yaml 同构的最小 policy fixture。
+POLICY_YAML = """\
+schema_version: 1
+distribution:
+  android_internals:
+    default: include-body-markdown
+    included_paths:
+      - src/part2/**
+    excluded_paths:
+      - src/graphify-out/**
+    excluded_tags:
+      - internal-only
+exported_metadata:
+  - title
+  - chapter
+  - applicable_versions
+  - last_verified
+  - last_verified_against
+  - confidence
+  - tags
+  - sources
+license:
+  expression: CC-BY-NC-SA-4.0 OR LicenseRef-AIW-Commercial
+"""
+
 
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(
@@ -77,24 +108,41 @@ class _WikiRepo:
         (self.repo / "src/part2").mkdir(parents=True, exist_ok=True)
         (self.repo / "src/part2/lmkd.md").write_text(PAGE_A, encoding="utf-8")
         (self.repo / "src/part2/choreographer.md").write_text(PAGE_B, encoding="utf-8")
+        # 非正文路径：policy included_paths 之外，ingestion 必须排除。
+        (self.repo / "src/notes").mkdir(parents=True, exist_ok=True)
+        (self.repo / "src/notes/scratch.md").write_text("draft note", encoding="utf-8")
+        pack = self.repo / "knowledge-pack"
+        pack.mkdir(parents=True, exist_ok=True)
+        (pack / "policy.yaml").write_text(POLICY_YAML, encoding="utf-8")
         _git(self.repo, "init", "-q")
         _git(self.repo, "add", "-A")
         _git(self.repo, "commit", "-qm", "init")
 
 
 class FrontmatterTests(unittest.TestCase):
-    def test_scalar_projection_and_list_skip(self):
-        scalars, body = parse_frontmatter(PAGE_A)
-        self.assertEqual(scalars["title"], "LMKD 低内存守护")
-        self.assertEqual(scalars["chapter"], "10.2")
-        self.assertEqual(scalars["confidence"], "high")
-        self.assertNotIn("sources", scalars)
+    def test_full_parse_keeps_lists_and_structures(self):
+        # ADR 0014：sources/tags 等数组与嵌套结构必须保留——sources 是
+        # Wiki→codesearch 锚点的来源，旧实现只投影顶层标量直接丢弃。
+        metadata, body = parse_frontmatter(PAGE_A)
+        self.assertEqual(metadata["title"], "LMKD 低内存守护")
+        self.assertEqual(metadata["chapter"], "10.2")
+        self.assertEqual(metadata["confidence"], "high")
+        self.assertEqual(
+            metadata["sources"],
+            [{"type": "official", "path": "https://example.com/a"}],
+        )
         self.assertIn("PRESSURE_AFTER_KILL", body)
 
     def test_no_frontmatter(self):
-        scalars, body = parse_frontmatter("# Just a doc\nbody")
-        self.assertEqual(scalars, {})
+        metadata, body = parse_frontmatter("# Just a doc\nbody")
+        self.assertEqual(metadata, {})
         self.assertTrue(body.startswith("# Just a doc"))
+
+    def test_broken_yaml_keeps_body_and_scalar_fallback(self):
+        # 坏 frontmatter 不丢正文：回退标量投影仍可索引。
+        broken = "---\ntitle: [unclosed\n---\n\nbody text\n"
+        _metadata, body = parse_frontmatter(broken)
+        self.assertIn("body text", body)
 
 
 class FtsQueryTests(unittest.TestCase):
@@ -137,7 +185,7 @@ class FtsQueryTests(unittest.TestCase):
         self.assertIn("pressure", query)
 
     def test_search_terms_strict_limit(self):
-        # M4：配额必须被严格遵守（历史实现单长类名的 camel 子词可越界）。
+        # 配额必须被严格遵守（历史实现单长类名的 camel 子词可越界）。
         terms = search_terms(
             "CtsStatsdAtomHostTestCases GraphicsAtomTests colorModeEvents binder",
             limit=4,
@@ -226,7 +274,7 @@ class ProviderTests(unittest.TestCase):
                     self.assertEqual(hit.evidence_level, EVIDENCE_LEVEL_BACKGROUND)
 
     def test_bm25_score_degenerate_non_negative_best(self):
-        # M3：best >= 0（无区分信号）时全部给 1.0，最佳命中不得被算成 0 分。
+        # best >= 0（无区分信号）时全部给 1.0，最佳命中不得被算成 0 分。
         self.assertEqual(_bm25_score(0.0, 0.0), 1.0)
         self.assertEqual(_bm25_score(-3.2, -3.2), 1.0)
         self.assertAlmostEqual(_bm25_score(-1.6, -3.2), 0.5)
@@ -252,7 +300,7 @@ class ProviderTests(unittest.TestCase):
             self.assertTrue(provider.search("LMKD"))
 
     def test_hit_revision_comes_from_index_not_live_head(self):
-        # M2 语义：命中声称的 revision 与索引内容对应；git pull 未 reindex
+        # 命中声称的 revision 与索引内容对应；git pull 未 reindex
         # 时不得把新 HEAD 冒充给旧内容。
         provider = self._provider()
         with self._indexed(provider):
@@ -264,6 +312,137 @@ class ProviderTests(unittest.TestCase):
             self.assertTrue(hits)
             self.assertEqual(hits[0].source_revision, stored)
             self.assertNotEqual(hits[0].source_revision, "a" * 40)
+
+    def test_policy_missing_fail_closed(self):
+        # ADR 0014：policy 缺失时 reindex 必须显式失败，而不是放宽成
+        # "src 下全部 Markdown 都是知识"。
+        (self.root / "wiki/knowledge-pack/policy.yaml").unlink()
+        provider = self._provider()
+        with self._indexed(provider), self.assertRaises(ExternalKnowledgeError):
+            provider.reindex()
+
+    def test_policy_parser_dependency_missing_fails_closed(self):
+        real_import = builtins.__import__
+
+        def reject_yaml(name, *args, **kwargs):
+            if name == "yaml":
+                raise ImportError("simulated missing PyYAML")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=reject_yaml):
+            policy = load_policy(self.root / "wiki")
+
+        self.assertTrue(policy.degraded)
+        self.assertEqual(policy.included_paths, ())
+
+    def test_policy_excludes_non_canonical_paths(self):
+        # scratch.md 位于 included_paths 之外；doc_count 不含它。
+        provider = self._provider()
+        with self._indexed(provider):
+            result = provider.reindex()
+            self.assertEqual(result["doc_count"], 2)
+            self.assertIn("policy_revision", result)
+            self.assertEqual(result["license_expression"], "CC-BY-NC-SA-4.0 OR LicenseRef-AIW-Commercial")
+
+    def test_policy_excluded_tags_drop_page(self):
+        page = PAGE_B.replace("status: draft", "status: draft\ntags:\n  - internal-only")
+        (self.root / "wiki/src/part2/choreographer.md").write_text(page, encoding="utf-8")
+        provider = self._provider()
+        with self._indexed(provider):
+            result = provider.reindex()
+            self.assertEqual(result["doc_count"], 1)
+            self.assertEqual(provider.search("doFrame"), [])
+
+    def test_hit_carries_source_anchor_and_policy_license(self):
+        provider = self._provider()
+        with self._indexed(provider):
+            provider.reindex()
+            hits = provider.search("LMKD PRESSURE_AFTER_KILL")
+            self.assertTrue(hits)
+            hit = hits[0]
+            # PAGE_A 的 sources 是不可识别为 googlesource 的 URL：仍保留为
+            # url-only anchor，供 Agent 直接 fetch。
+            self.assertEqual(len(hit.source_anchors), 1)
+            self.assertEqual(hit.source_anchors[0].url, "https://example.com/a")
+            self.assertEqual(
+                hit.license, "CC-BY-NC-SA-4.0 OR LicenseRef-AIW-Commercial"
+            )
+            self.assertEqual(hit.extra.get("status"), "finalized")
+
+    def test_revision_tri_state_in_status(self):
+        # 初次 reindex 建立批准基线；clone HEAD 前进后 available 领先。
+        provider = self._provider()
+        with self._indexed(provider):
+            provider.reindex()
+            status = provider.status()
+            self.assertTrue(status.approved_revision)
+            self.assertEqual(status.source_revision, status.approved_revision)
+            fake_new = "b" * 40
+            provider._head_revision = lambda: fake_new
+            status = provider.status()
+            self.assertEqual(status.available_revision, fake_new)
+            self.assertNotEqual(status.approved_revision, fake_new)
+            self.assertIn("available", status.detail)
+
+    def test_new_revision_requires_approval_before_reindex(self):
+        provider = self._provider()
+        with self._indexed(provider):
+            provider.reindex()
+            page = self.root / "wiki/src/part2/lmkd.md"
+            page.write_text(PAGE_A + "\n新增验证内容。\n", encoding="utf-8")
+            _git(self.root / "wiki", "add", "-A")
+            _git(self.root / "wiki", "commit", "-qm", "update wiki")
+
+            with self.assertRaisesRegex(ExternalKnowledgeError, "尚未批准"):
+                provider.reindex()
+
+            approved = provider.approve_revision()["approved_revision"]
+            pending = provider.status()
+            self.assertEqual(pending.approved_revision, approved)
+            self.assertNotEqual(pending.source_revision, approved)
+            self.assertIn("等待 reindex", pending.detail)
+
+            result = provider.reindex()
+            self.assertEqual(result["source_revision"], approved)
+            self.assertEqual(result["approved_revision"], approved)
+            ready = provider.status()
+            self.assertEqual(ready.source_revision, ready.approved_revision)
+            self.assertEqual(ready.detail, "")
+
+    def test_aosp_url_anchor_parsing(self):
+        anchor = parse_aosp_url(
+            "https://android.googlesource.com/platform/frameworks/base/+"
+            "/refs/tags/android-17.0.0_r1/services/core/java/com/android/"
+            "server/am/OomAdjuster.java"
+        )
+        self.assertEqual(anchor.repo, "platform/frameworks/base")
+        self.assertEqual(anchor.revision, "android-17.0.0_r1")
+        self.assertEqual(anchor.evidence_type, "aosp")
+        self.assertTrue(anchor.path.endswith("OomAdjuster.java"))
+
+    def test_rerank_prefers_version_matching_hit(self):
+        # Android 10–17 覆盖页 vs Android 4 专属页：同 BM25 分下前者应
+        # 因版本兼容加分排到前面（version-aware rerank）。
+        old_page = """---
+title: 旧版 lowmemorykiller 机制
+chapter: '1.1'
+status: finalized
+applicable_versions: Android 4 (API 14) - Android 9 (API 28)
+last_verified: '2026-08-15'
+confidence: high
+---
+
+lmkd 之前的用户态 lowmemorykiller 驱动与 PRESSURE_AFTER_KILL 无关。
+"""
+        (self.root / "wiki/src/part2/legacy-lmk.md").write_text(old_page, encoding="utf-8")
+        _git(self.root / "wiki", "add", "-A")
+        provider = self._provider()
+        with self._indexed(provider):
+            provider.reindex()
+            hits = provider.search("PRESSURE_AFTER_KILL", android_api_level=34)
+            self.assertGreaterEqual(len(hits), 2)
+            self.assertEqual(hits[0].source_path, "src/part2/lmkd.md")
+            self.assertGreater(hits[0].score, hits[1].score)
 
 
 _WIKI_CLONE = Path(__file__).resolve().parents[3] / "tools" / "android-internals-wiki"

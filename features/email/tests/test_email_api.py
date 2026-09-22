@@ -169,18 +169,8 @@ class EmailApiTests(unittest.TestCase):
 
         self._login()
 
-        def deny(request):
-            return CurrentUser(
-                id="u-viewer",
-                username="viewer",
-                display_name="Viewer",
-                role="user",
-                # user 角色默认有 email.send;extra_permissions 为空且
-                # 用一个没有任何权限的角色模拟细分权限被回收的账号。
-            )
-
-        # 临时构造 role 权限不含 email.send 的 principal:用 worker_service
-        # 角色(只有 worker.*,没有 email.send)。
+        # user 角色默认有 email.send,故用 worker_service 角色
+        # (只有 worker.*,没有 email.send)模拟细分权限被回收的账号。
         def deny_worker(request):
             return CurrentUser(
                 id="u-svc",

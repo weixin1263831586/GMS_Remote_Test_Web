@@ -198,6 +198,9 @@ class SkillCliConvenienceTests(unittest.TestCase):
     ) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as temporary:
             env = os.environ.copy()
+            # 沙箱密闭性：剔除宿主机 profile/凭据环境变量（同 test_skill_cli）。
+            for key in ("GMS_RT_PROFILE", "GMS_CURL_CA_CERT", "GMS_AUTH_TOKEN_FILE"):
+                env.pop(key, None)
             env.update(
                 {
                     "HOME": temporary,

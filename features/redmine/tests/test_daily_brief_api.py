@@ -324,8 +324,6 @@ class DailyBriefApiTests(unittest.TestCase):
 
     def test_single_issue_owner_ineligibility_uses_api_error_envelope(self):
         """资格错误必须走统一错误信封（HTTP 403），不得包进 success 响应。"""
-        from unittest.mock import patch
-
         with patch(
             "features.redmine.daily_brief_run_starter.is_daily_brief_owner_eligible",
             return_value=False,

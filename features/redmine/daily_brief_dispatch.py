@@ -30,7 +30,7 @@ def enqueue_reanalysis(
 ) -> dict[str, Any]:
     """单 issue 重新分析入队。
 
-    审核意见 P2：优先绑定显式 run_id 精确操作；未提供时才回落
+    优先绑定显式 run_id 精确操作；未提供时才回落
     该日期最新 run（旧 API 兼容）。
     """
     if run_id:

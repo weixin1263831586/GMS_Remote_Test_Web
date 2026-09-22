@@ -295,4 +295,4 @@ DAILY TRIAGE ONLY:
 """
 
 
-__all__ = ["PROMPT_TEMPLATE", "prompt_template_for"]
+__all__ = ["PROMPT_TEMPLATE", "issue_result_schema_json", "prompt_template_for"]

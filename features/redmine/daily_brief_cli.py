@@ -76,7 +76,7 @@ def _enabled_owner_ids(
 def _run_mode(mode: str, owner_ids: list[str]) -> int:
     """enqueue-only：nightly/delta 定时触发只入队，不再直接执行 AI。
 
-    审核意见 P1（统一执行域）：旧 CLI 在 systemd 进程里直接
+    统一执行域：旧 CLI 在 systemd 进程里直接
     execute_run()，与 Durable Worker 形成两个并发执行域——nightly 与
     manual 可能同时各起一个 kkagent session，破坏
     max_parallel_issues=1 的全局语义，也无法统一取消/lease/重试。

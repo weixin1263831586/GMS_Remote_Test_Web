@@ -196,7 +196,7 @@ def reconcile_codex(
 def main() -> int:
     # Thin CLI wrapper: agent_mcp_config.py codex|kimi <config> <mcp_server>
     #                    <server_url> <profile> <token_file> [ca_cert]
-    if len(sys.argv) < 8:
+    if len(sys.argv) < 7:
         print(
             "usage: agent_mcp_config.py codex|kimi CONFIG MCP_SERVER SERVER_URL "
             "PROFILE TOKEN_FILE [CA_CERT]",

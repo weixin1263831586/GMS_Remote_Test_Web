@@ -6,7 +6,7 @@
 - Controller 上已配置该设备主机的 USB/IP 来源
 - 一个可用的短模块套件（默认 CTS ``CtsSecurityTestCases``）
 
-全链路覆盖 2026-08 代码审核第五节建议的 nightly 检查：
+全链路覆盖以下 nightly 检查：
 
     attach → ADB 可见 → 创建 job → 租约原子分配 → Tradefed 短模块 →
     job 终态 → 断开 USB/IP → 租约/worker/设备状态全部恢复

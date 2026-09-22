@@ -74,7 +74,7 @@ def test_save_case_uses_explicit_daily_brief_run(case_client):
 
 
 def test_save_case_rejects_triage_result(case_client):
-    """审核意见 P1：triage 待办摘要禁止沉淀为知识库案例。"""
+    """triage 待办摘要禁止沉淀为知识库案例。"""
     client, sink = case_client
     response = client.post("/daily-brief/2026-09-15/issues/101/save-case?run_id=new")
     assert response.status_code == 409

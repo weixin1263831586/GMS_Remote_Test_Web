@@ -246,8 +246,8 @@ class AgentTokenServiceMixin:
 
         单值 membership（``agent_acl_allows``）不能拿 CSV 聚合字符串冒充
         一个设备身份——多设备烧写的 canonical device 是 "A,B"，旧写法
-        ``"A,B" in {"A","B"}`` 恒 False，合法的多设备审批被误拒绝
-        （审核意见 P2）。
+        ``"A,B" in {"A","B"}`` 恒 False，合法的多设备审批会被误拒绝，
+        因此这里逐成员校验。
         """
         return bool(values) and all(
             cls.agent_acl_allows(record, kind, value) for value in values

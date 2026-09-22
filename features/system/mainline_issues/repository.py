@@ -3,22 +3,14 @@
 
 from __future__ import annotations
 
-# ruff: noqa: F403, F405, E402
 import re
 import sqlite3
-from pathlib import Path
+
+from .parser import FetchedPage, KnownIssue, ReleasePage
 
 
-DEFAULT_INDEX_URL = 'https://docs.partner.android.com/mainline/release/release-notes?authuser=2'
-DEFAULT_DB_PATH = Path('data/mainline_known_issues.sqlite3')
-KNOWN_ISSUE_HEADING_RE = re.compile(r'^(MTS|CTS|GTS)\s+known issues\b.*:$', flags=re.IGNORECASE)
-PRODUCT_SECTIONS = ('Android', 'Android Go')
 # Mainline 问题类型白名单，供解析、查询和豁免匹配共用。
 MAINLINE_ISSUE_TYPES = ('MTS', 'CTS', 'GTS')
-
-
-
-from .parser import *
 
 
 def _migrate_sync_runs_table(conn: sqlite3.Connection) -> None:
@@ -59,6 +51,10 @@ def _migrate_sync_runs_table(conn: sqlite3.Connection) -> None:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
+    # Web 路由、CLI 同步和报告诊断三条路径都会连库后调用本函数；schema
+    # 读取与迁移全程持 BEGIN IMMEDIATE 写锁（与 features/auth/schema.py
+    # 同一约定），多进程并发初始化时串行且幂等，不会双重 RENAME/ADD COLUMN。
+    conn.execute("BEGIN IMMEDIATE")
     existing_columns = {
         row[1] for row in conn.execute("PRAGMA table_info('mainline_known_issues')").fetchall()
     }
@@ -181,6 +177,7 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.commit()
 
 
 def get_page_state(conn: sqlite3.Connection, source_url: str) -> sqlite3.Row | None:

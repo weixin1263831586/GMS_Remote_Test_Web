@@ -235,7 +235,7 @@ class TestFailureSourceEvidenceGateTests(unittest.TestCase):
 
 
 class TargetIssueScopeTests(unittest.TestCase):
-    """审核意见 P1：当前 issue 与相似 issue 的证据必须严格分开。"""
+    """当前 issue 与相似 issue 的证据必须严格分开。"""
 
     def test_current_issue_evidence_passes(self):
         trace = _full_trace(issue_id=123, history_searches=0)
@@ -287,10 +287,8 @@ class TargetIssueScopeTests(unittest.TestCase):
         self.assertTrue(any("attachments" in e for e in gate_errors(gate)))
 
 
-
-
 class ReproducibleSourceEvidenceTests(unittest.TestCase):
-    """审核意见 P2：动态索引（reproducible=false）证据不能单独 confirm 根因。"""
+    """动态索引（reproducible=false）证据不能单独 confirm 根因。"""
 
     @staticmethod
     def _entry() -> dict:
@@ -380,7 +378,7 @@ class ReproducibleSourceEvidenceTests(unittest.TestCase):
 
 
 class ClaimEvidenceLedgerTests(unittest.TestCase):
-    """审核意见 P2：源码证据 A 不足以证实无关根因 B（claim 级绑定）。"""
+    """源码证据 A 不足以证实无关根因 B（claim 级绑定）。"""
 
     @staticmethod
     def _entry() -> dict:

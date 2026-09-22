@@ -207,7 +207,7 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         run_a = make_run(owner="alice")
         repo_a.create_run(run_a)
         self.assertIsNone(repo_b.get_run(run_a.run_id))
-        self.assertEqual(repo_a.db_path, repo_a.db_path)
+        self.assertNotEqual(repo_a.db_path, repo_b.db_path)
 
     def test_frozen_snapshot_persists_across_repository_instances(self):
         """冻结快照必须落盘：新 repository 实例（= 新进程）仍能读回。"""
@@ -355,7 +355,7 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertEqual(self.repo.get_job(first["job_id"])["status"], "completed")
 
     def test_queued_issue_job_is_cancelled_when_run_job_active(self):
-        """审核意见 P1：活跃 run-job 存在时，排队 issue-job 被作废而不是领取。"""
+        """活跃 run-job 存在时，排队 issue-job 被作废而不是领取。"""
         run = make_run(status="pending")
         self.repo.create_run(run)
         self.repo.upsert_issue(DailyBriefIssue(
@@ -373,7 +373,7 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertIn("superseded", issue_job["error"])
 
     def test_force_rerun_cancels_queued_issue_jobs(self):
-        """审核意见 P1：refreeze 重置作废排队 issue-job（源头清除）。"""
+        """refreeze 重置作废排队 issue-job（源头清除）。"""
         run = make_run(status="failed")
         self.repo.create_run(run)
         self.repo.upsert_issue(DailyBriefIssue(

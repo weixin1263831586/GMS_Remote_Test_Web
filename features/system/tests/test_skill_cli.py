@@ -37,6 +37,11 @@ class SkillCliTests(unittest.TestCase):
     ) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as temporary:
             env = os.environ.copy()
+            # 沙箱密闭性：剔除宿主机的 profile/凭据环境变量，否则 CLI 按
+            # 显式 profile fail-closed（与 test_skill_cli_profile_routing
+            # 的隔离模式一致），测试结果随宿主环境漂移。
+            for key in ("GMS_RT_PROFILE", "GMS_CURL_CA_CERT", "GMS_AUTH_TOKEN_FILE"):
+                env.pop(key, None)
             env.update(
                 {
                     "HOME": temporary,

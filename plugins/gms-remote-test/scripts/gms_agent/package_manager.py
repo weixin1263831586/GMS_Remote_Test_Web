@@ -359,12 +359,11 @@ def artifact_url_ok(url: object, server: str) -> bool:
     """
     if not isinstance(url, str):
         return False
-    from urllib.parse import urlsplit
 
-    parsed = urlsplit(url)
+    parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return False
-    origin = urlsplit(server)
+    origin = urllib.parse.urlsplit(server)
     return (parsed.scheme, parsed.netloc) == (origin.scheme, origin.netloc)
 
 
@@ -819,7 +818,7 @@ def _mcp_registration_status(client: str) -> dict[str, object]:
 def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
     """Build a secret-free local installation/profile consistency report."""
 
-    if profile and re.fullmatch(r"[A-Za-z0-9_.-]+", profile):
+    if profile and profile_store.validate_profile_name(profile):
         declared = load_profile(profile).get("client", "")
     else:
         declared = ""
@@ -1740,8 +1739,12 @@ def write_enrollment_token(
             return []
         token_file = Path(token_value).expanduser()
         token_file.parent.mkdir(parents=True, exist_ok=True)
-        token_file.write_text(token + "\n", encoding="utf-8")
-        token_file.chmod(0o600)
+        # 0600 at creation: write_text() would leave the token readable at
+        # the process umask until the chmod below lands.
+        fd = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(token + "\n")
+        os.chmod(token_file, 0o600)
         return [str(token_file)]
     unique_server, _ca = profile_server_and_ci_or_none()
     if not unique_server:
@@ -1755,8 +1758,12 @@ def write_enrollment_token(
             continue
         token_file = Path(token_value).expanduser()
         token_file.parent.mkdir(parents=True, exist_ok=True)
-        token_file.write_text(token + "\n", encoding="utf-8")
-        token_file.chmod(0o600)
+        # 0600 at creation: write_text() would leave the token readable at
+        # the process umask until the chmod below lands.
+        fd = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(token + "\n")
+        os.chmod(token_file, 0o600)
         written.append(str(token_file))
     return written
 
@@ -1804,8 +1811,15 @@ def cmd_enroll(args: argparse.Namespace) -> int:
     except (urllib.error.URLError, OSError, ValueError) as error:
         print(f"Error: enrollment 失败: {error}", file=sys.stderr)
         return 6
-    token = (body.get("token") or {}).get("token", "")
-    scopes = (body.get("token") or {}).get("scopes", [])
+    # Malformed-but-valid JSON (a non-dict body, or a non-dict "token"
+    # member) must fail with a clean error, not an AttributeError traceback.
+    token_payload = body.get("token") if isinstance(body, dict) else None
+    if not isinstance(token_payload, dict):
+        token_payload = {}
+    token = str(token_payload.get("token") or "")
+    scopes = token_payload.get("scopes")
+    if not isinstance(scopes, list):
+        scopes = []
     if not token:
         print("Error: 响应缺少 token", file=sys.stderr)
         return 7
@@ -1906,7 +1920,7 @@ def cmd_profile(args: argparse.Namespace) -> int:
                 )
         return 0
 
-    if not requested_name or not re.fullmatch(r"[A-Za-z0-9_.-]+", requested_name):
+    if not requested_name or not profile_store.validate_profile_name(requested_name):
         print("Error: a valid profile name is required", file=sys.stderr)
         return 2
     path = profile_store.profile_path(requested_name)

@@ -17,7 +17,7 @@ never edited directly).
 
 Usage:
     python tools/scripts/agent/release.py --version 0.14.0
-    python tools/scripts/agent/release.py --check   # verify all six agree
+    python tools/scripts/agent/release.py --check   # verify all declarations agree
 """
 from __future__ import annotations
 

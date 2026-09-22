@@ -21,10 +21,39 @@ from typing import Any, Protocol, runtime_checkable
 
 EVIDENCE_LEVEL_BACKGROUND = "background"
 
-EXTERNAL_KNOWLEDGE_LICENSE = "CC BY-NC-SA 4.0"
+#: 上游 knowledge-pack/policy.yaml 的 license.expression（ADR 0014）：
+#: 不要硬编码简化后的 "CC BY-NC-SA 4.0"——上游声明的是双许可表达式，且
+#: Knowledge Pack 重新分发授权（SmartPerfetto 专属）不适用于 GMS。运行期以
+#: reindex 时从 policy 读到的值为准，此常量仅是 policy 缺失时的回退展示值。
+EXTERNAL_KNOWLEDGE_LICENSE = "CC-BY-NC-SA-4.0 OR LicenseRef-AIW-Commercial"
 
 #: 联邦结果允许的 source 标识（新增 provider 时在此登记）。
 KNOWN_SOURCES: tuple[str, ...] = ("android_internals",)
+
+
+@dataclass(frozen=True)
+class SourceAnchor:
+    """Wiki 命中指向的上游源码/文档锚点（ADR 0014：Wiki→codesearch 闭环）。
+
+    Agent 拿到 anchor 后可直接调用 codesearch/SDK 检索验证，而不是把
+    Wiki 正文当结论。``evidence_type`` 沿用上游 sources[].type（aosp /
+    kernel / official / vendor ...），语义即证据等级链路里的层级。
+    """
+
+    repo: str = ""
+    revision: str = ""
+    path: str = ""
+    url: str = ""
+    evidence_type: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "repo": self.repo,
+            "revision": self.revision,
+            "path": self.path,
+            "url": self.url,
+            "evidence_type": self.evidence_type,
+        }
 
 
 @dataclass(frozen=True)
@@ -33,12 +62,18 @@ class ProviderStatus:
 
     source: str
     enabled: bool
-    status: str  # "ready" | "disabled" | "error" | "empty"
+    status: str  # "ready" | "disabled" | "error" | "empty" | "not_configured"
     detail: str = ""
     source_revision: str = ""
     doc_count: int = 0
     last_sync_at: str = ""
     license: str = EXTERNAL_KNOWLEDGE_LICENSE
+    #: revision 三态（ADR 0014：外部知识更新链路可复现）：
+    #: available = 本地 clone HEAD（pull 后领先于索引）；
+    #: approved  = 管理员批准并已索引的 revision；
+    #: source_revision = 本次索引内容对应的 revision（= approved 时链路闭环）。
+    available_revision: str = ""
+    approved_revision: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -50,6 +85,8 @@ class ProviderStatus:
             "doc_count": self.doc_count,
             "last_sync_at": self.last_sync_at,
             "license": self.license,
+            "available_revision": self.available_revision,
+            "approved_revision": self.approved_revision,
         }
 
 
@@ -70,6 +107,8 @@ class KnowledgeHit:
     license: str = EXTERNAL_KNOWLEDGE_LICENSE
     evidence_level: str = EVIDENCE_LEVEL_BACKGROUND
     score: float = 0.0
+    #: 上游 sources[] 投影出的源码锚点：codesearch 验证入口（可为空）。
+    source_anchors: list[SourceAnchor] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -87,6 +126,7 @@ class KnowledgeHit:
             "license": self.license,
             "evidence_level": self.evidence_level,
             "score": round(self.score, 4),
+            "source_anchors": [anchor.to_dict() for anchor in self.source_anchors],
         }
 
 
@@ -98,7 +138,13 @@ class ExternalKnowledgeProvider(Protocol):
 
     def status(self) -> ProviderStatus: ...
 
-    def search(self, query: str, *, limit: int = 5) -> list[KnowledgeHit]: ...
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        android_api_level: int | None = None,
+    ) -> list[KnowledgeHit]: ...
 
 
 class ExternalKnowledgeError(Exception):

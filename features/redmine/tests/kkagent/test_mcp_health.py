@@ -52,7 +52,7 @@ class ParseDoctorPayloadTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("部署异常", reason)
         self.assertIn("run gms-agent install", reason)
-        self.assertIn("sync_agent_package", reason)
+        self.assertIn("sync_package", reason)
 
     def test_missing_kkagent_client_names_the_gap(self):
         payload = {"ok": True, "clients": [{"client": "codex", "skill_present": True}]}
@@ -77,7 +77,7 @@ class ParseDoctorPayloadTests(unittest.TestCase):
         self.assertIn("profile 无效", reason)
         self.assertIn("agent token 缺失", reason)
         self.assertIn("MCP server 未注册", reason)
-        self.assertIn("sync_agent_package", reason)
+        self.assertIn("sync_package", reason)
 
     def test_bad_token_permissions_are_reported(self):
         payload = {
@@ -159,7 +159,7 @@ class ProbeKkAgentMcpHealthTests(unittest.TestCase):
         probe = asyncio.run(scenario())
         self.assertFalse(probe.ok)
         self.assertIn("MCP server 未注册", probe.reason)
-        self.assertIn("sync_agent_package", probe.reason)
+        self.assertIn("sync_package", probe.reason)
         trace = probe.tool_trace()
         self.assertEqual(trace.status, "failed")
         self.assertEqual(trace.failure_kind, "mcp_unavailable")

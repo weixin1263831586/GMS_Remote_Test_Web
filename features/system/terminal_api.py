@@ -149,7 +149,9 @@ async def upload_file(
             async with ssh_manager.async_optional_connection(config) as ssh:
                 if not ssh:
                     os.remove(temp_path)
-                    return error_response("SSH connection failed", 500)
+                    # SSH 是基础设施故障：按统一错误模型映射 502，500 仅留给
+                    # 意外编程错误（foundation.error_model）。
+                    return error_response("SSH connection failed", 502)
 
                 # Determine target path and upload via SFTP. sftp.put is a
                 # blocking transfer (files can be GB-sized) — run the whole
@@ -290,7 +292,7 @@ async def _upload_file_chunk(
                     return JSONResponse(content={
                         "success": False, "error": "SSH connection failed",
                         "chunks_uploaded": len(uploaded_chunks), "total_chunks": total_chunks,
-                    }, status_code=500)
+                    }, status_code=502)
 
                 try:
                     remote_filename = os.path.basename(merged_file)
@@ -339,4 +341,4 @@ async def _upload_file_chunk(
             except OSError:
                 pass
         logger.error(f"Error uploading chunk {chunk_index}: {e}")
-        return error_response(str(e), status_code=500, chunk_index=chunk_index)
+        return error_response(str(e), 500, chunk_index=chunk_index)

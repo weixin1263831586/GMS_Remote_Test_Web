@@ -3,7 +3,14 @@ import unittest
 from pathlib import Path
 
 
-CALL_ATTR_RE = re.compile(r'on(?:click|change|input|submit|keydown|mouseover|mouseout)=["\']([^"\']+)["\']')
+# 事件名与 tests/test_inline_handler_ratchet.py 的 INLINE_HANDLER_RE 保持
+# 一致（act-bridge 支持的全集，含 = 两侧空白），防止新事件名（如
+# keypress/toggle）绕过解析校验却仍受 CSP 限制。
+CALL_ATTR_RE = re.compile(
+    r'\bon(?:click|change|input|submit|keydown|keyup|keypress|load|error|'
+    r'mouseover|mouseout|focus|blur|dblclick|dragstart|dragend|dragover|'
+    r'dragenter|drop|toggle|contextmenu|scroll)\s*=\s*["\']([^"\']+)["\']'
+)
 # act-bridge 委托目标：data-click="fnName" 等（值为函数名，非表达式）。
 DELEGATED_TARGET_RE = re.compile(
     r'data-(?:click|change|input|submit|keydown|keyup|keypress|dblclick|'

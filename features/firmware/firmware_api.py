@@ -472,7 +472,7 @@ async def burn_firmware(
                     _canonical_devices = ",".join(sorted(devices))
                     # Agent token device ACL: a token scoped to specific
                     # devices must not be driven against anything else.
-                    # 逐设备校验（审核意见 P2）：CSV 聚合串不是设备身份。
+                    # 逐设备校验：CSV 聚合串不是设备身份。
                     _agent_record = getattr(
                         request.state, "agent_token_record", None
                     )
@@ -486,7 +486,7 @@ async def burn_firmware(
                             status_code=403,
                         )
                     _wipe = wipe_data is not False
-                    # 审批消费时机（审核意见 P2）：一次性 token 在全部
+                    # 审批消费时机：一次性 token 在全部
                     # deterministic preflight 通过、即将执行第一个破坏性
                     # 动作时才消费——否则"设备不在 fastboot/路由不匹配/
                     # 校验失败"等无损失败会把用户刚批准的 5 分钟 token 白白

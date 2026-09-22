@@ -222,7 +222,7 @@ def test_runtime_password_is_removed_when_start_fails(tmp_path: Path):
 
 
 def test_runtime_password_persists_encrypted_with_ttl(tmp_path: Path):
-    """审核意见 P2：runtime password 加密落盘 + TTL，跨进程/重启可 poll。
+    """runtime password 加密落盘 + TTL，跨进程/重启可 poll。
 
     进程内 dict 会因多 Uvicorn worker 或 Controller 重启而丢失，使密码
     认证的远端 tmux 构建无法再 poll/cancel。改为加密落盘（明文不落库）

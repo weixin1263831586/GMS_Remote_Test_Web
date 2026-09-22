@@ -135,7 +135,8 @@ async function _apiCallOnce(url, method, data, opts) {
                     ? window.requestElevatedAccess('需要管理员权限执行此操作')
                     : Promise.resolve(false));
                 if (granted) {
-                    return _apiCallOnce(url, method, data, { _elevationRetried: true });
+                    // 保留调用方 opts（如 silentToast），仅标记已重试一次。
+                    return _apiCallOnce(url, method, data, { ...opts, _elevationRetried: true });
                 }
             }
             const rawMessage = (

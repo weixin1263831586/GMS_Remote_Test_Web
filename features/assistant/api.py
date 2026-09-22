@@ -261,8 +261,9 @@ def _extract_device_count(text: str) -> int:
     match = re.search(r"(?<![A-Za-z0-9])(\d+)\s*(?:台|个)?\s*(?:设备|device)", text, re.IGNORECASE)
     if match:
         return max(1, min(8, int(match.group(1))))
-    if re.search(r"(一|两|二|三|四|五)\s*台", text):
-        return _parse_chinese_number(text)
+    match = re.search(r"(一|两|二|三|四|五)\s*台", text)
+    if match:
+        return _parse_chinese_number(match.group(1))
     return 1
 
 
@@ -591,7 +592,6 @@ async def _analyze_saved_report(session: dict[str, Any], report_timestamp: str) 
             return None
 
         summary = analysis.get("summary") or {}
-        analysis.get("failures") or []
         detail = f"总计 {summary.get('total', 0)}，通过 {summary.get('pass', 0)}，失败 {summary.get('fail', summary.get('failed', 0))}"
         _append_step(session, "报告分析", "done", detail, {"report_analysis": analysis})
         return analysis
@@ -1458,5 +1458,5 @@ async def get_agent_capabilities():
         "tool_catalog": tools_by_category,
         "total_tools": len(registry),
         "limits": {"max_retries": MAX_AGENT_RETRIES},
-            "suite_source": "local" if config_manager.is_config_host_local(config) else "ssh",
+        "suite_source": "local" if config_manager.is_config_host_local(config) else "ssh",
     })

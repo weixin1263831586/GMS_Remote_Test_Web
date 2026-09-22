@@ -130,7 +130,9 @@ class LocalGitProvider:
                         "snippet": line[:400],
                     })
                     if len(matches) >= limit:
-                        return self._search_payload(commit, matches, scanned, limited or True)
+                        # 到达 limit 即结果集被截断：与扫描预算耗尽一样按
+                        # limited 上报（原 `limited or True` 是恒真死表达式）。
+                        return self._search_payload(commit, matches, scanned, True)
         return self._search_payload(commit, matches, scanned, limited)
 
     def _search_payload(
@@ -277,7 +279,7 @@ _REGISTRY: SourceRegistry | None = None
 def registry_state() -> str:
     """注册表状态：UNINITIALIZED / AVAILABLE / UNAVAILABLE。
 
-    审核意见（P1）：进程内未初始化 ≠ 部署确认无 source。独立 Worker /
+    进程内未初始化 ≠ 部署确认无 source。独立 Worker /
     CLI 必须先调用 :func:`initialize_source_runtime`；否则
     ``sdk_sources_available()`` 不能当作"部署没有 SDK 源"的证据。
     """
@@ -320,7 +322,7 @@ def configure_source_registry(configs: list[ProviderConfig], secret: bytes) -> N
 def source_registry() -> SourceRegistry:
     """当前进程的 SDK source registry。
 
-    审核意见（P1）：旧的惰性兜底（``configure_source_registry([], b"")``）
+    旧的惰性兜底（``configure_source_registry([], b"")``）
     会在未初始化进程里用**空密钥**建空 registry 并写回全局——第一条
     ``/api/sdk/*`` 读请求就把状态从 UNINITIALIZED 静默转成 UNAVAILABLE，
     ``sdk_sources_available()`` 由 None（fail-safe 强制取证）变 False，

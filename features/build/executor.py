@@ -243,7 +243,7 @@ class SshTmuxBuildBackend:
         # a double-quoted tmux command is NOT safe: the single quotes become
         # literal characters inside "..." and $(...) / `...` / $VAR still
         # expand in the outer shell, letting a hostile workspace name break
-        # out of the template boundary (review P1 nested-quote injection).
+        # out of the template boundary (nested-quote injection).
         # NOTE: $? below is intentionally NOT backslash-escaped: the whole
         # inner string is single-quoted by shlex.quote for every outer shell
         # layer, so it reaches the final `bash -lc` verbatim and expands at

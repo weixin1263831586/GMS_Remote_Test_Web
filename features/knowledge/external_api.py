@@ -37,6 +37,13 @@ from .external import (
 )
 
 
+def _federated_provider(source_id: str):
+    """取联邦单例中的 provider（未配置返回 None）；复用进程级懒加载。"""
+    from .external import federated_service
+
+    return federated_service().provider(source_id)
+
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/external")
@@ -51,6 +58,7 @@ class ExternalSearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=MAX_QUERY_LENGTH)
     sources: list[str] = Field(default_factory=list, max_length=8)
     limit: int = Field(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT)
+    android_api_level: int | None = Field(None, ge=1, le=1000)
 
 
 def _validate_sources(sources: list[str]) -> str | None:
@@ -77,7 +85,12 @@ def search_external(request: Request, payload: ExternalSearchRequest):
         if unknown:
             return error_response(unknown, 422)
     try:
-        data = federated_search(query, sources=payload.sources, limit=payload.limit)
+        data = federated_search(
+            query,
+            sources=payload.sources,
+            limit=payload.limit,
+            android_api_level=payload.android_api_level,
+        )
     except Exception as exc:
         logger.warning("external knowledge search degraded: %s", exc)
         data = {"results": [], "sources_status": federated_status()}
@@ -91,12 +104,38 @@ def reindex_external(request: Request):
     try:
         data = federated_reindex(KNOWN_SOURCES[0])
     except ExternalKnowledgeError as exc:
-        # 并发重建 / 未配置 / clone 无效：语义化 4xx，而非 500。
+        # 并发重建 / 未配置 / clone 无效 / policy 不可用：语义化 4xx，而非 500。
         return error_response(str(exc), 409)
     except Exception as exc:
         logger.warning("external knowledge reindex failed: %s", exc)
         return error_response("外部知识索引重建失败", 502)
     return success_response(data=data, message="External knowledge reindex complete")
+
+
+@router.post("/approve-revision")
+@handle_api_errors
+def approve_external_revision(request: Request):
+    """管理员批准当前 clone HEAD 为索引目标（ADR 0014 revision 三态）。
+
+    不自动跟随上游 master：批准是显式动作，随后 reindex 才把批准的
+    revision 真正索引。clone 缺新提交时批准后 status 会显示
+    "已批准待索引" 状态。
+    """
+    require_elevated_admin(request)
+    provider = _federated_provider(KNOWN_SOURCES[0])
+    if provider is None:
+        return error_response(f"外部知识源未配置: {KNOWN_SOURCES[0]}", 409)
+    approve = getattr(provider, "approve_revision", None)
+    if approve is None:
+        return error_response(f"外部知识源不支持批准 revision: {KNOWN_SOURCES[0]}", 409)
+    try:
+        data = approve()
+    except ExternalKnowledgeError as exc:
+        return error_response(str(exc), 409)
+    except Exception as exc:
+        logger.warning("external knowledge revision approval failed: %s", exc)
+        return error_response("批准 revision 失败", 502)
+    return success_response(data=data, message="Revision approved; run reindex to apply")
 
 
 @agent_router.get("/search")
@@ -105,10 +144,16 @@ def agent_search_android_internals(
     request: Request,
     q: str = Query(..., min_length=1, max_length=MAX_QUERY_LENGTH),
     limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    android_api_level: int | None = Query(None, ge=1, le=1000),
 ):
     require_agent_scope("knowledge.read")(request)
     try:
-        data = federated_search(q, sources=[KNOWN_SOURCES[0]], limit=limit)
+        data = federated_search(
+            q,
+            sources=[KNOWN_SOURCES[0]],
+            limit=limit,
+            android_api_level=android_api_level,
+        )
     except Exception as exc:
         logger.warning("agent external search degraded: %s", exc)
         data = {"results": [], "sources_status": federated_status()}

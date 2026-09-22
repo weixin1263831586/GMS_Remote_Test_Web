@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -1075,11 +1076,9 @@ class HttpAutomationExecutor:
             notification_status = (
                 "completed" if run.get("status") == "reporting" else run.get("status", "")
             )
-            notifications = notify_run_completion(
-                {**run, "status": notification_status}
-            )
+            notifications = notify_run_completion({**run, "status": notification_status})
         except Exception:
-            pass
+            logging.getLogger(__name__).exception("completion notification dispatch failed")
         if notifications.get("ok") is False:
             return {
                 "success": False,

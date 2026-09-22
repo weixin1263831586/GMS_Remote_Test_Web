@@ -1,36 +1,16 @@
 import shutil
 import sqlite3
-import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
-
-from bootstrap.application import create_app
 from features.auth import AuthService, auth_service
-from features.auth.api import _client_ssh_probe_cache
+from features.auth.tests._auth_fixture import AuthApiMixin
 from foundation.config import config_manager
 
 
-class AuthApiTests(unittest.TestCase):
-    def setUp(self):
-        _client_ssh_probe_cache.clear()
-        self.tmp = tempfile.TemporaryDirectory()
-        self.original_db_path = auth_service.db_path
-        self.original_initialized = auth_service._initialized
-        auth_service.db_path = Path(self.tmp.name) / "platform_auth.sqlite3"
-        auth_service._initialized = False
-        self.client = TestClient(create_app())
-
-    def tearDown(self):
-        self.client.close()
-        _client_ssh_probe_cache.clear()
-        auth_service.db_path = self.original_db_path
-        auth_service._initialized = self.original_initialized
-        self.tmp.cleanup()
-
+class AuthApiTests(AuthApiMixin, unittest.TestCase):
     def test_current_user_supports_anonymous_client_identity_in_development(self):
         response = self.client.get("/api/users/current")
 

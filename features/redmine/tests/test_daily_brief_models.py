@@ -44,7 +44,7 @@ class ValidIssueResultTests(unittest.TestCase):
         self.assertEqual(validate_issue_result(self._valid()), [])
 
     def test_unknown_fields_are_canonicalized_away(self):
-        """审核意见 P2：extra=ignore 后未知字段不得进入持久层。"""
+        """extra=ignore 后未知字段不得进入持久层。"""
         result = self._valid()
         result["legacy_old_field"] = "x"
         result["hallucinated_field"] = {"deep": True}

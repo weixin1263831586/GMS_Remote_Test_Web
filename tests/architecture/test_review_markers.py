@@ -13,7 +13,8 @@ docs/development.md「文档政策」的工程化约束：源码注释不得引�
 - `<日期> audit` / `audit follow-up|fix|round` —— 带日期的审计引用
   （不扫描裸 `audit` 一词：安全审计日志功能 security_audit 本身是合法
   领域词汇）；
-- `review round` / `评审意见` / `评审第` 之类评审轮次措辞。
+- `review round` / `评审意见` / `评审项` / `审核意见` 之类评审轮次措辞；
+- 注释开头的裸优先级编号（如 `# P1:`、`# M3：`）。
 
 已清洗为真实出处的引用不受影响：架构决策引用 `ADR NNNN`（见
 docs/architecture/adr/），历史行为说明直接描述行为本身。
@@ -76,7 +77,12 @@ FORBIDDEN_PATTERNS = [
     (re.compile(r"\b\d{4}-\d{2}-\d{2}\s+audit\b", re.IGNORECASE), "dated audit citation"),
     (re.compile(r"\baudit\s+(?:follow-up|fix|round)\b", re.IGNORECASE), "audit citation"),
     (re.compile(r"review round", re.IGNORECASE), "review-round wording"),
-    (re.compile(r"评审意见|评审第|工单\s*P"), "review-round wording"),
+    (
+        re.compile(r"评审意见|评审第|评审项|评审批注|审核意见|[一二三四五六七八九十\d]+轮评审|工单\s*P"),
+        "review-round wording",
+    ),
+    (re.compile(r"^\s*(?:#|//|/\*|\*)\s*[MLPR]\d+[a-z]?[：:]", re.IGNORECASE),
+     "bare review priority"),
 ]
 
 # 第三方本地 clone（gitignore，如 tools/android-internals-wiki）不属于

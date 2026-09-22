@@ -11,6 +11,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from features.auth import require_elevated_admin_when_auth_required
 from foundation.config_paths import default_suites_path
+from foundation.error_model import ApiError
 from foundation.responses import error_response, success_response
 from foundation.security import sanitize_device_ids
 from worker_agent.fastboot_workflow import (
@@ -78,22 +79,22 @@ def _bootloader_operation_response(results: list[dict], action_text: str):
     if not results:
         # 没有任何逐设备记录意味着操作根本没执行成功（历史 bug：脚本失败
         # 时结果被静默丢弃，这里被当成全部成功）。必须按失败处理。
-        return error_response(
+        return ApiError.upstream_failure(
             f"Device {action_text} produced no per-device results",
-            status_code=200,
-            data=payload,
-        )
+            details={"service": "fastboot", **payload},
+            next_actions=({"action": "检查 Worker/SSH 与 fastboot 输出后重试"},),
+        ).to_response()
     if success_count != len(results):
         details = "; ".join(
             f"{item.get('device')}: {item.get('error') or item.get('output') or 'unknown error'}"
             for item in results
             if not item.get("success")
         )
-        return error_response(
+        return ApiError.upstream_failure(
             f"Device {action_text} failed: {details}",
-            status_code=200,
-            data=payload,
-        )
+            details={"service": "fastboot", **payload},
+            next_actions=({"action": "确认设备连接与 bootloader 状态后重试"},),
+        ).to_response()
     return _api_success(payload, f"Device {action_text} operation completed")
 
 

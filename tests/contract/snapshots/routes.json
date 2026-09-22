@@ -1573,6 +1573,18 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/android-internals/search"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/android-internals/status"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/knowledge/ask"
@@ -1624,6 +1636,30 @@
       "POST"
     ],
     "path": "/api/knowledge/docs/{doc_id}/versions/{version_id}/restore"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/external/approve-revision"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/external/reindex"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/external/search"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/external/sources"
   },
   {
     "methods": [

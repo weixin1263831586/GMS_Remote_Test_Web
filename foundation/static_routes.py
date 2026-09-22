@@ -33,7 +33,7 @@ from foundation.config import config_manager
 logger = logging.getLogger(__name__)
 
 
-def _parse_route(entry: dict) -> tuple[ipaddress._BaseNetwork, ipaddress._BaseAddress] | None:
+def _parse_route(entry: dict) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ipaddress.IPv4Address | ipaddress.IPv6Address] | None:
     """解析并校验一条路由配置；非法条目返回 None 并告警。"""
     destination = str(entry.get('destination') or '').strip()
     gateway = str(entry.get('gateway') or '').strip()

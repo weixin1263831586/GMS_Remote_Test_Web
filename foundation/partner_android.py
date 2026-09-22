@@ -42,9 +42,8 @@ def _candidate_firefox_cookie_dbs() -> list[Path]:
     for root in roots:
         if not root.exists():
             continue
+        # '*.default*' 已覆盖 default-release/default 等全部变体。
         paths.extend(root.glob('*.default*/cookies.sqlite'))
-        paths.extend(root.glob('*.default-release/cookies.sqlite'))
-        paths.extend(root.glob('*.default/cookies.sqlite'))
     return _existing_unique(paths)
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -74,7 +74,8 @@ def validate_run_transition(from_status: str, to_status: str) -> None:
 
 def utc_now_iso() -> str:
     # 亚秒精度用于公平排序同一轮次内推进的任务。
-    return datetime.utcnow().isoformat(timespec="microseconds") + "Z"
+    # naive-UTC 字符串 + "Z" 后缀(避免弃用的 utcnow())。
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="microseconds") + "Z"
 
 
 def normalize_devices(devices: list[Any]) -> list[dict[str, Any]]:

@@ -88,7 +88,7 @@ class DeviceListIsolationTests(unittest.IsolatedAsyncioTestCase):
                 patch("features.users.current_username_for_request", side_effect=lambda request: request.state.current_user.username),
                 patch.object(devices_api.reconnect, "reconcile_observed_usbip_devices"),
                 patch.object(devices_api.reconnect, "filter_suppressed_usbip_devices", side_effect=lambda devices: devices),
-                patch.object(devices_api, "_known_usbip_sources", return_value={}),
+                patch.object(devices_api, "known_usbip_sources", return_value={}),
                 patch.object(devices_api, "_prune_inactive_usbip_sources", return_value={}),
             ):
                 with global_state.device_cache_lock:
@@ -169,7 +169,7 @@ class DeviceListIsolationTests(unittest.IsolatedAsyncioTestCase):
                 "filter_suppressed_usbip_devices",
                 side_effect=lambda devices: list(devices),
             ),
-            patch.object(devices_api, "_known_usbip_sources", return_value={}),
+            patch.object(devices_api, "known_usbip_sources", return_value={}),
             patch.object(devices_api, "_prune_inactive_usbip_sources", return_value={}),
         ):
             first = await devices_api.get_connected_devices(
@@ -240,7 +240,7 @@ class DeviceListIsolationTests(unittest.IsolatedAsyncioTestCase):
                     "filter_suppressed_usbip_devices",
                     side_effect=lambda devices: list(devices),
                 ),
-                patch.object(devices_api, "_known_usbip_sources", return_value={}),
+                patch.object(devices_api, "known_usbip_sources", return_value={}),
                 patch.object(devices_api, "_prune_inactive_usbip_sources", return_value={}),
             ):
                 adb_response = await devices_api.get_connected_devices(

@@ -383,7 +383,7 @@ def list_job_events(
     job_id: str,
     request: Request,
     after: int = Query(default=-1),
-    limit: int = Query(default=500, le=2000),
+    limit: int = Query(default=500, ge=0, le=2000),
 ):
     job = service().repository.get_job(job_id)
     if not job:

@@ -1,4 +1,4 @@
-"""认证预检测试：Daily Brief 语义必须 fail-closed（审核意见 P1/P2）。"""
+"""认证预检测试：Daily Brief 语义必须 fail-closed。"""
 
 from __future__ import annotations
 

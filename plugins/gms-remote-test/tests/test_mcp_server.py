@@ -296,14 +296,12 @@ class RunCliTests(unittest.TestCase):
         """An envelope larger than MAX_OUTPUT_BYTES must still parse as
         JSON after adapter trimming — the old head/tail text cut produced
         invalid JSON with is_error=False (silently corrupted data)."""
-        import subprocess as _subprocess
-
         def fake_run(argv, **kwargs):
             payload = json.dumps({
                 "ok": True, "exit_code": 0,
                 "data": {"logs": "x" * (mcp_server.MAX_OUTPUT_BYTES + 100)},
             })
-            return _subprocess.CompletedProcess(
+            return subprocess.CompletedProcess(
                 argv, 0, stdout=payload, stderr="",
             )
 
@@ -903,8 +901,6 @@ class DocsCompactionTests(unittest.TestCase):
         self.assertIn("GET /p | d | gms-rt-p", payload["data"])
 
     def test_run_cli_renders_docs_for_system_docs_command(self):
-        import tempfile
-        from pathlib import Path
         with tempfile.TemporaryDirectory() as tmp:
             cli = Path(tmp) / "gms-remote-test.sh"
             cli.write_text('#!/bin/bash\necho \'{"ok":true,"exit_code":0,"data":{"apis":'
@@ -949,7 +945,6 @@ class JobsCompactionTests(unittest.TestCase):
         data = {"jobs": [self._sample_job(), self._sample_job("job-2", "failed")]}
         out = mcp_server._compact_jobs_list(data)
         lines = out.splitlines()
-        self.assertEqual(lines[0], mcp_server._compact_jobs_list.__doc__ and lines[0])
         self.assertIn("# 2 jobs | columns: job_id | status | attempt | devices", lines[0])
         self.assertIn("job-1 | completed | completed | RK3562GMS7 | CtsDeqpTestCases", lines[1])
         self.assertIn("job-2 | failed", lines[2])
@@ -1785,7 +1780,6 @@ class RedmineEvidenceToolTests(unittest.TestCase):
         self.addCleanup(os.unlink, payload["path"])
         self.assertFalse(result.is_error)
         self.assertEqual([item["type"] for item in result.items], ["text"])
-        payload = json.loads(result.items[0]["text"].splitlines()[0])
         self.assertEqual(payload["device_id"], "RK3562GMS7")
         self.assertTrue(Path(payload["path"]).is_file())
 
@@ -1856,12 +1850,19 @@ class RedmineEvidenceToolTests(unittest.TestCase):
             captured["args"], ["--query", "LMKD PRESSURE_AFTER_KILL"],
         )
         self.assertEqual(captured["command"], "gms-rt-knowledge-search")
-        mcp_server.knowledge_search_tool({"query": "Binder timeout", "limit": 3})
+        mcp_server.knowledge_search_tool({
+            "query": "Binder timeout", "limit": 3, "android_api_level": 34,
+        })
         self.assertEqual(
-            captured["args"], ["--query", "Binder timeout", "--limit", "3"],
+            captured["args"], [
+                "--query", "Binder timeout", "--limit", "3",
+                "--android-api-level", "34",
+            ],
         )
         mcp_server.knowledge_search_tool({"query": "ANR", "limit": 99})
         self.assertEqual(captured["args"][-1], "10")  # clamped to the cap
+        mcp_server.knowledge_search_tool({"query": "ANR", "android_api_level": 5000})
+        self.assertEqual(captured["args"][-1], "1000")
 
     def test_apk_attachment_and_source_tools(self):
         captured = self._capture_run()

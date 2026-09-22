@@ -69,11 +69,14 @@ def derive_data_quality(
     if not str(snapshot_at or "").strip():
         return "unknown"
     try:
+        # fromisoformat may yield an aware datetime; mixing it with the naive
+        # local ``now`` raises TypeError, so fall back to "unknown" like an
+        # unparseable stamp instead of crashing the caller.
         generated = datetime.fromisoformat(str(snapshot_at))
-    except ValueError:
+        now = now or datetime.now()
+        age = (now - generated).total_seconds()
+    except (TypeError, ValueError):
         return "unknown"
-    now = now or datetime.now()
-    age = (now - generated).total_seconds()
     return "fresh" if 0 <= age <= DATA_FRESH_LIMIT_SECONDS else "stale"
 
 # 优先级由规则生成 base score，AI 只做有限调整；排序必须 deterministic。

@@ -1,12 +1,13 @@
 """Regression coverage for the two-account browser switcher."""
 
+import unittest
 from unittest.mock import patch
 
-from features.auth.tests.test_auth_api import AuthApiTests
+from features.auth.tests._auth_fixture import AuthApiMixin
 from foundation.config import config_manager
 
 
-class AuthSwitchTargetTests(AuthApiTests):
+class AuthSwitchTargetTests(AuthApiMixin, unittest.TestCase):
     def test_auth_status_exposes_the_sole_enabled_admin_for_account_switching(self):
         self.client.post(
             "/api/auth/setup",

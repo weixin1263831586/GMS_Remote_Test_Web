@@ -592,16 +592,16 @@ async def _retire_assignments_for_physically_local_devices(
             retired_serials |= serials
 
     if stale_busids:
-        assignments_map = _usbip_assignments()
-        for busid in stale_busids:
-            assignments_map.pop(f"{device_host}|{busid}", None)
-        if not _save_usbip_assignments(assignments_map):
-            logger.error(
-                "[USB/IP Status] failed to persist removal of stale "
-                "assignments for %s: %s",
-                device_host,
-                stale_busids,
-            )
+        # 读改写点须持锁（与其他 assignment 写点一致）；save 契约是
+        # "失败抛 RuntimeError"，这里降级为记录后继续（fail-open）。
+        with _usbip_assignment_lock:
+            assignments_map = _usbip_assignments()
+            for busid in stale_busids:
+                assignments_map.pop(f"{device_host}|{busid}", None)
+            try:
+                _save_usbip_assignments(assignments_map)
+            except RuntimeError:
+                logger.error("[USB/IP Status] failed to persist removal of stale assignments for %s: %s", device_host, stale_busids)
 
     with runtime.global_state.usbip_devices_source_lock:
         for serial in retired_serials:

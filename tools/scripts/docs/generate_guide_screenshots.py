@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import socket
 import subprocess
 import sys
@@ -463,9 +464,12 @@ def main() -> None:
             page = browser.new_page(viewport=VIEWPORT, bypass_csp=True)
             status = page.request.get(f"{base_url}/api/auth/status").json()
             endpoint = "setup" if status.get("setup_required") else "login"
+            # 一次性口令：仅用于本脚本刚拉起的 127.0.0.1 临时实例，
+            # 运行结束即销毁；避免在源码中出现字面量密码。
+            guide_password = f"GuideAdmin-{secrets.randbits(32)}!"
             login = page.request.post(
                 f"{base_url}/api/auth/{endpoint}",
-                data={"username": "guide-admin", "password": "GuideAdmin-2026!", "display_name": "Guide Admin"},
+                data={"username": "guide-admin", "password": guide_password, "display_name": "Guide Admin"},
             )
             if not login.ok:
                 raise RuntimeError(f"guide login failed: {login.text()}")

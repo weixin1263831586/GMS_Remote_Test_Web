@@ -1,20 +1,28 @@
 """AndroidInternalsProvider：android-internals-wiki 只读背景知识源。
 
 ADR 0014：仅消费管理员配置的本地 git clone（``external_knowledge.providers.
-android_internals.repo_root``），客户端不能提供路径；正文 license 为
-CC BY-NC-SA 4.0，平台侧只保留引用与 provenance，不做再分发。
+android_internals.repo_root``），客户端不能提供路径；license 表达式来自
+上游 policy（CC-BY-NC-SA-4.0 OR LicenseRef-AIW-Commercial），平台侧只保
+留引用与 provenance，不做再分发。
 
 实现要点：
 
+- 内容资格由 ``content_policy.AIWContentPolicy`` 决定：跟随上游
+  ``knowledge-pack/policy.yaml`` 的正文发布边界（included/excluded/excluded_
+  tags），policy 缺失或损坏时 fail-closed 不索引（ADR 0014）；
+- frontmatter 用安全 YAML（``yaml.safe_load``）完整解析：tags/sources/
+  数组与嵌套结构保留，audit 工作流字段按 policy 白名单投影；sources[]
+  投影为 ``SourceAnchor``（Wiki→codesearch 验证闭环）；
 - 伴生 FTS5 索引独立于个人知识库（``data_root/knowledge/external/``），
   schema 迁移走 ``user_version`` + ``BEGIN IMMEDIATE``（进程安全、幂等）；
 - 增量重建按内容 hash 跳过未变页；重建在单事务内完成，读方在提交前
   继续看到旧索引；
-- 检索词元经 ``fts_safe_query`` 清洗，杜绝 FTS 语法注入；
-- source_revision 在 reindex 时由 ``git rev-parse HEAD``（argv 形式，经
-  foundation.processes 边界）取得并写入 ``wiki_meta``；检索与状态从索引
-  读取该值——命中声称的 revision 始终与索引内容对应（git pull 未
-  reindex 时不会把新 HEAD 冒充给旧内容），检索热路径也不再起 git 子进程。
+- revision 三态（ADR 0014）：available = clone HEAD（pull 后未 reindex
+  时领先），approved = 管理员批准并索引的 revision（``approve_revision``），
+  命中的 source_revision 恒等于索引内容实际 revision；
+- 检索词元经 ``fts_safe_query`` 清洗，杜绝 FTS 语法注入；命中按 BM25 +
+  Android 版本兼容 + confidence + last_verified 新鲜度 + anchor 加权重排
+  （``rerank_hits``）。
 """
 
 from __future__ import annotations
@@ -43,6 +51,14 @@ from .base import (
     ProviderStatus,
     fts_safe_query,
 )
+from .content_policy import (
+    POLICY_RELATIVE_PATH,
+    AIWContentPolicy,
+    load_policy,
+    policy_state_summary,
+)
+from .frontmatter import _scalarize, parse_frontmatter
+from .ranking import _bm25_score, extract_source_anchors, rerank_hits
 
 
 logger = logging.getLogger(__name__)
@@ -56,7 +72,7 @@ REINDEX_BUSY_TIMEOUT_MS = 2_000
 _SNIPPET_TOKENS = 24
 
 #: schema 版本；表结构变化时递增并在 _SCHEMA_MIGRATIONS 中登记。
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _SCHEMA_MIGRATIONS: dict[int, str] = {
     1: """
     CREATE TABLE IF NOT EXISTS wiki_pages (
@@ -94,20 +110,13 @@ _SCHEMA_MIGRATIONS: dict[int, str] = {
         tokenize = 'unicode61'
     );
     """,
+    # v3: frontmatter 完整投影（sources→anchors、tags 等 JSON 字段）。
+    # 老库的 frontmatter 列是残缺标量投影，只能通过清空 pages 触发全量
+    # 重建；FTS 列结构未变，虚表无需重建。
+    3: """
+    DELETE FROM wiki_pages;
+    """,
 }
-
-_FM_KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$")
-_FM_SCALAR_FIELDS = (
-    "title",
-    "chapter",
-    "section",
-    "status",
-    "applicable_versions",
-    "last_verified",
-    "last_verified_against",
-    "confidence",
-)
-
 
 def index_db_path() -> Path:
     return Path(settings.data_root) / "knowledge/external/android_internals.sqlite3"
@@ -126,50 +135,6 @@ def _cjk_bigramize(text: str) -> str:
 
     return _CJK_RUN_RE.sub(_bigrams, text)
 
-
-def _bm25_score(rank: float, best: float) -> float:
-    """bm25 越负越相关；以最佳命中归一到 (0, 1]。
-
-    ``best >= 0``（没有任何负分，退化场景）时统一给 1.0：无区分信号时
-    不能把最佳命中误算成 0 分（历史 ``or 1.0`` 写法的边界缺陷）。
-    注意这是单 source 内的相对分，跨 source 不可直接比较。
-    """
-    if best >= 0:
-        return 1.0
-    return min(1.0, abs(rank) / abs(best))
-
-
-def _strip_quotes(value: str) -> str:
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-        return value[1:-1]
-    return value
-
-
-def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
-    """轻量 frontmatter 解析：只取顶层标量字段；列表/嵌套结构忽略。
-
-    frontmatter 内容是 untrusted evidence（ADR 0014），这里仅做字段投影，
-    永不把它当指令执行。
-    """
-    if not text.startswith("---"):
-        return {}, text
-    end = text.find("\n---", 3)
-    if end < 0:
-        return {}, text
-    block = text[3:end]
-    body = text[end + 4 :].lstrip("\n")
-    scalars: dict[str, str] = {}
-    for line in block.splitlines():
-        match = _FM_KEY_RE.match(line)
-        if not match:
-            continue
-        key, value = match.group(1), match.group(2)
-        if not value.strip() or value.lstrip().startswith(("-", "[")):
-            continue  # 列表/嵌套值：不解析，保持跳过
-        if key in _FM_SCALAR_FIELDS:
-            scalars[key] = _strip_quotes(value)
-    return scalars, body
 
 
 class AndroidInternalsProvider:
@@ -211,6 +176,10 @@ class AndroidInternalsProvider:
             return f"repo_root 缺少 src/ 目录: {self.repo_root}"
         return ""
 
+    def load_policy(self) -> AIWContentPolicy:
+        """读取上游发布策略（每次调用重新读取，管理员改 policy 即生效）。"""
+        return load_policy(self.repo_root)
+
     # ------------------------------------------------------------------
     # 状态
     # ------------------------------------------------------------------
@@ -222,41 +191,75 @@ class AndroidInternalsProvider:
         doc_count = 0
         last_sync_at = ""
         revision = ""
+        approved = ""
         try:
             with self._connect() as conn:
                 row = conn.execute("SELECT COUNT(*) FROM wiki_pages").fetchone()
                 doc_count = int(row[0] or 0)
                 meta = conn.execute(
-                    "SELECT key, value FROM wiki_meta WHERE key IN ('last_sync_at', 'source_revision')"
+                    "SELECT key, value FROM wiki_meta WHERE key IN "
+                    "('last_sync_at', 'source_revision', 'approved_revision')"
                 ).fetchall()
                 meta_map = {str(r["key"]): str(r["value"] or "") for r in meta}
                 last_sync_at = meta_map.get("last_sync_at", "")
                 revision = meta_map.get("source_revision", "")
+                approved = meta_map.get("approved_revision", "")
         except (sqlite3.Error, OSError) as exc:
             return ProviderStatus(
                 source=SOURCE_ID, enabled=True, status="error", detail=f"索引不可用: {exc}"
+            )
+        # revision 三态：available = clone HEAD（pull 后未 reindex 时领先于
+        # 索引）；approved = 管理员批准的 revision；source = 已索引 revision。
+        available = self._head_revision()
+        if not approved:
+            approved = revision
+        detail = ""
+        if not doc_count:
+            detail = "索引为空，请管理员执行 reindex"
+        elif approved and revision != approved:
+            detail = (
+                f"revision {approved[:12]} 已批准，等待 reindex"
+                f"（indexed {revision[:12] or 'none'}）"
+            )
+            if available and available != approved:
+                detail += f"；clone HEAD 已变更为 {available[:12]}，需重新批准"
+        elif available and approved and available != approved:
+            detail = (
+                f"上游有新 revision（available {available[:12]} ≠ approved "
+                f"{approved[:12]}），请管理员确认后 reindex"
             )
         return ProviderStatus(
             source=SOURCE_ID,
             enabled=True,
             status="ready" if doc_count else "empty",
-            detail="" if doc_count else "索引为空，请管理员执行 reindex",
+            detail=detail,
             source_revision=revision,
             doc_count=doc_count,
             last_sync_at=last_sync_at,
+            available_revision=available,
+            approved_revision=approved,
         )
 
     # ------------------------------------------------------------------
     # 检索
     # ------------------------------------------------------------------
 
-    def search(self, query: str, *, limit: int = DEFAULT_MAX_HITS) -> list[KnowledgeHit]:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = DEFAULT_MAX_HITS,
+        android_api_level: int | None = None,
+    ) -> list[KnowledgeHit]:
         if self.validate():
             return []
         match_query = fts_safe_query(query)
         if not match_query:
             return []
         limit = max(1, min(int(limit or self.max_hits), MAX_HITS_CAP))
+        # BM25 ORDER BY 取前 3x 候选，加权重排后再截到 limit：避免加权
+        # 信号（版本/新鲜度）作用在已被 BM25 截断的窗口外。
+        candidate_cap = min(MAX_HITS_CAP, max(limit * 3, limit + 5))
         try:
             with self._connect() as conn:
                 rows = conn.execute(
@@ -270,7 +273,7 @@ class AndroidInternalsProvider:
                     ORDER BY rank
                     LIMIT :limit
                     """,
-                    {"match": match_query, "snip_tokens": _SNIPPET_TOKENS, "limit": limit},
+                    {"match": match_query, "snip_tokens": _SNIPPET_TOKENS, "limit": candidate_cap},
                 ).fetchall()
                 # revision 读索引内置值（reindex 时写入）：与索引内容严格对应，
                 # 且检索热路径不起 git 子进程。
@@ -286,32 +289,46 @@ class AndroidInternalsProvider:
             frontmatter = self._load_frontmatter(row["frontmatter"])
             rank = float(row["rank"] or 0.0)
             score = _bm25_score(rank, best)
+            anchors = extract_source_anchors(frontmatter.get("sources"), revision)
+            tags = [str(tag) for tag in (frontmatter.get("tags") or []) if str(tag).strip()]
             hits.append(
                 KnowledgeHit(
                     source=SOURCE_ID,
-                    title=str(row["title"] or Path(str(row["path"])).stem),
+                    title=str(frontmatter.get("title") or row["title"] or Path(str(row["path"])).stem),
                     snippet=str(row["snip"] or "").strip(),
                     source_path=str(row["path"]),
                     chapter=str(frontmatter.get("chapter") or row["chapter"] or ""),
                     source_revision=revision,
-                    applicable_versions=str(frontmatter.get("applicable_versions") or ""),
-                    confidence=str(frontmatter.get("confidence") or ""),
-                    last_verified=str(frontmatter.get("last_verified") or ""),
-                    last_verified_against=str(frontmatter.get("last_verified_against") or ""),
-                    license=EXTERNAL_KNOWLEDGE_LICENSE,
+                    applicable_versions=_scalarize(frontmatter.get("applicable_versions")),
+                    confidence=_scalarize(frontmatter.get("confidence")),
+                    last_verified=_scalarize(frontmatter.get("last_verified")),
+                    last_verified_against=_scalarize(frontmatter.get("last_verified_against")),
+                    license=self._license_hint(),
                     score=score,
-                    extra={"status": str(frontmatter.get("status") or row["status"] or "")},
+                    source_anchors=anchors,
+                    extra={
+                        "status": str(frontmatter.get("status") or row["status"] or ""),
+                        "tags": tags,
+                    },
                 )
             )
-        return hits
+        return rerank_hits(hits, query, android_api_level=android_api_level)[:limit]
 
     @staticmethod
-    def _load_frontmatter(raw: Any) -> dict[str, str]:
+    def _load_frontmatter(raw: Any) -> dict[str, Any]:
         try:
             data = json.loads(raw or "{}")
         except (TypeError, ValueError):
             return {}
         return data if isinstance(data, dict) else {}
+
+    def _license_hint(self) -> str:
+        """license 展示值：policy.expression 优先，缺失时回退 ADR 0014 常量。"""
+        try:
+            expression = self.load_policy().license_expression
+        except Exception:  # 政策读取失败不阻塞检索
+            expression = ""
+        return expression or EXTERNAL_KNOWLEDGE_LICENSE
 
     # ------------------------------------------------------------------
     # 索引重建
@@ -326,7 +343,15 @@ class AndroidInternalsProvider:
             return self._reindex_locked()
 
     def _reindex_locked(self) -> dict[str, Any]:
-        pages = self._collect_pages()
+        policy = self.load_policy()
+        if policy.degraded:
+            # fail-closed：发布策略缺失/损坏时不重建，显式暴露而不是放宽
+            # 成"src 下全部都是知识"（ADR 0014）。
+            raise ExternalKnowledgeError(
+                f"上游发布策略不可用（{POLICY_RELATIVE_PATH}: {policy.parse_warning}）；"
+                "已拒绝重建索引，请检查 tools/android-internals-wiki 的 knowledge-pack/policy.yaml"
+            )
+        pages = self._collect_pages(policy)
         revision = self._head_revision()
         db_path = index_db_path()
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -339,17 +364,38 @@ class AndroidInternalsProvider:
                 conn.execute("PRAGMA journal_mode = WAL")
                 conn.execute("BEGIN IMMEDIATE")
                 self._ensure_schema(conn)
+                stored = conn.execute(
+                    "SELECT key, value FROM wiki_meta WHERE key IN "
+                    "('source_revision', 'approved_revision')"
+                ).fetchall()
+                stored_meta = {str(row["key"]): str(row["value"] or "") for row in stored}
+                indexed_revision = stored_meta.get("source_revision", "")
+                approved_revision = (
+                    stored_meta.get("approved_revision", "") or indexed_revision
+                )
+                if indexed_revision and revision != approved_revision:
+                    raise ExternalKnowledgeError(
+                        f"revision {revision[:12]} 尚未批准；当前批准版本为 "
+                        f"{approved_revision[:12] or 'none'}，请先执行 approve-revision"
+                    )
+                if not approved_revision:
+                    # 首次建库没有旧索引可保护，由本次管理员 reindex 完成初始批准。
+                    approved_revision = revision
                 updated, removed = self._apply_pages(conn, pages)
-                conn.execute(
-                    "INSERT INTO wiki_meta(key, value) VALUES('last_sync_at', ?) "
-                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                    (datetime.now().isoformat(timespec="seconds"),),
-                )
-                conn.execute(
-                    "INSERT INTO wiki_meta(key, value) VALUES('source_revision', ?) "
-                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                    (revision,),
-                )
+                meta: dict[str, str] = {
+                    "last_sync_at": datetime.now().isoformat(timespec="seconds"),
+                    "source_revision": revision,
+                    "approved_revision": approved_revision,
+                    "policy_state": json.dumps(
+                        policy_state_summary(policy), ensure_ascii=False, sort_keys=True
+                    ),
+                }
+                for key, value in meta.items():
+                    conn.execute(
+                        "INSERT INTO wiki_meta(key, value) VALUES(?, ?) "
+                        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                        (key, value),
+                    )
                 conn.commit()
             except sqlite3.OperationalError as exc:
                 conn.rollback()
@@ -367,19 +413,67 @@ class AndroidInternalsProvider:
             "android_internals reindex done: %s pages (+%s/-%s) in %.1fs",
             len(pages), updated, removed, time.time() - started,
         )
-        return {
+        result: dict[str, Any] = {
             "source": SOURCE_ID,
             "doc_count": len(pages),
             "updated": updated,
             "removed": removed,
             "source_revision": revision,
+            "approved_revision": approved_revision,
             "elapsed_seconds": round(time.time() - started, 2),
         }
+        result.update(policy_state_summary(policy))
+        return result
 
-    def _collect_pages(self) -> dict[str, dict[str, Any]]:
+    def approve_revision(self) -> dict[str, Any]:
+        """管理员批准当前 clone HEAD 为索引目标（三态收口动作）。
+
+        实际索引内容仍由 reindex 决定；这里只把 approved_revision 指向
+        available HEAD 并落审计痕迹，供 status/UI 显示"已批准待索引"。
+        """
+        reason = self.validate()
+        if reason:
+            raise ExternalKnowledgeError(reason)
+        revision = self._head_revision()
+        if not revision:
+            raise ExternalKnowledgeError("无法读取 clone HEAD revision")
+        db_path = index_db_path()
+        if not db_path.exists():
+            raise ExternalKnowledgeError("索引不存在，请先执行一次 reindex")
+        try:
+            conn = sqlite3.connect(db_path, timeout=REINDEX_BUSY_TIMEOUT_MS / 1000)
+            conn.row_factory = sqlite3.Row
+            try:
+                conn.execute(f"PRAGMA busy_timeout = {REINDEX_BUSY_TIMEOUT_MS}")
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    "INSERT INTO wiki_meta(key, value) VALUES('approved_revision', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (revision,),
+                )
+                conn.execute(
+                    "INSERT INTO wiki_meta(key, value) VALUES('approved_at', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (datetime.now().isoformat(timespec="seconds"),),
+                )
+                conn.commit()
+            except sqlite3.Error as exc:
+                conn.rollback()
+                raise ExternalKnowledgeError(f"批准 revision 失败: {exc}") from exc
+            finally:
+                conn.close()
+        except OSError as exc:
+            raise ExternalKnowledgeError(f"索引文件不可写: {exc}") from exc
+        logger.info("android_internals revision approved: %s", revision)
+        return {"source": SOURCE_ID, "approved_revision": revision}
+
+    def _collect_pages(self, policy: AIWContentPolicy | None = None) -> dict[str, dict[str, Any]]:
+        active_policy = policy or self.load_policy()
         src_root = self.repo_root / "src"
         pages: dict[str, dict[str, Any]] = {}
+        skipped = 0
         for md_path in sorted(src_root.rglob("*.md")):
+            rel_path = md_path.relative_to(self.repo_root).as_posix()
             try:
                 stat = md_path.stat()
                 text = md_path.read_text(encoding="utf-8", errors="replace")
@@ -389,17 +483,26 @@ class AndroidInternalsProvider:
             if not text.strip():
                 continue
             frontmatter, body = parse_frontmatter(text)
-            rel_path = md_path.relative_to(self.repo_root).as_posix()
+            tags = [str(tag) for tag in (frontmatter.get("tags") or []) if str(tag).strip()]
+            # 内容资格判定走 policy（路径 + excluded_tags 双重边界）。
+            if not active_policy.is_eligible(rel_path, tags):
+                skipped += 1
+                continue
+            projected = active_policy.project_frontmatter(frontmatter)
             pages[rel_path] = {
                 "path": rel_path,
-                "title": frontmatter.get("title") or md_path.stem,
-                "chapter": frontmatter.get("chapter") or frontmatter.get("section") or "",
-                "status": frontmatter.get("status") or "",
-                "frontmatter": frontmatter,
+                "title": _scalarize(projected.get("title")) or md_path.stem,
+                "chapter": _scalarize(projected.get("chapter") or projected.get("section") or ""),
+                "status": _scalarize(projected.get("status") or frontmatter.get("status") or ""),
+                "frontmatter": projected,
                 "content": body,
                 "content_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
                 "mtime": stat.st_mtime,
             }
+        if skipped:
+            logger.info(
+                "android_internals: policy excluded %s non-canonical paths", skipped
+            )
         return pages
 
     def _apply_pages(self, conn: sqlite3.Connection, pages: dict[str, dict[str, Any]]) -> tuple[int, int]:

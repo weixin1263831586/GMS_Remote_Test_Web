@@ -26,7 +26,7 @@ function routeFirmwareDownloadProgress(log) {
 function scheduleConnectedDeviceCatchup(expectedSerials, delays) {
     const schedule = Array.isArray(delays) && delays.length
         ? delays
-        : [2000, 5000, 10000];
+        : (delays === undefined ? [2000, 5000, 10000] : []);
     if (!expectedSerials || !expectedSerials.length || !schedule.length) return;
     setTimeout(async () => {
         try {

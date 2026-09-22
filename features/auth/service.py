@@ -412,7 +412,7 @@ class AuthService(
             # UPDATE across processes. self._lock only covers THIS process;
             # with multiple Uvicorn workers (or CLI + web) two concurrent
             # demotions could both observe admin count=2 and land the
-            # system with zero active admins (review P1). The database
+            # system with zero active admins . The database
             # invariant must be enforced by the database transaction.
             conn.execute('BEGIN IMMEDIATE')
             row = conn.execute(

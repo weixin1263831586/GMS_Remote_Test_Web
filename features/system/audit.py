@@ -33,22 +33,26 @@ async def record_security_page_view(req: SecurityPageViewRequest, request: Reque
 
     client_id = get_client_id_from_request(request)
     username, client_ip = parse_client_id(client_id)
-    record = security_audit_logger.log_event({
-        'action_type': 'page_view',
-        'source': 'web',
-        'operation': f"访问页面 {req.page}",
-        'page': req.page,
-        'title': req.title or '',
-        'hash': req.hash or '',
-        'method': request.method,
-        'path': '/#' + req.page,
-        'status_code': 200,
-        'duration_ms': 0,
-        'client_ip': client_ip,
-        'client_id': client_id,
-        'username': username,
-        'user_agent': request.headers.get('user-agent', '')[:300],
-    })
+    # log_event 持有跨进程文件锁并执行 fsync，属阻塞调用，须放到线程执行。
+    record = await asyncio.to_thread(
+        security_audit_logger.log_event,
+        {
+            'action_type': 'page_view',
+            'source': 'web',
+            'operation': f"访问页面 {req.page}",
+            'page': req.page,
+            'title': req.title or '',
+            'hash': req.hash or '',
+            'method': request.method,
+            'path': '/#' + req.page,
+            'status_code': 200,
+            'duration_ms': 0,
+            'client_ip': client_ip,
+            'client_id': client_id,
+            'username': username,
+            'user_agent': request.headers.get('user-agent', '')[:300],
+        },
+    )
     return ApiResponse.success({'id': record['id']})
 
 

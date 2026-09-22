@@ -166,7 +166,11 @@ def _add_apk_symbol(symbols: dict[str, list[dict[str, Any]]], name: str, kind: s
 
 
 def _index_java_source_file(sources_dir: str, file_path: str, symbols: dict[str, list[dict[str, Any]]]):
-    if os.path.getsize(file_path) > APK_SYMBOL_INDEX_MAX_FILE_SIZE:
+    try:
+        source_size = os.path.getsize(file_path)
+    except OSError:
+        return
+    if source_size > APK_SYMBOL_INDEX_MAX_FILE_SIZE:
         return
 
     rel_path = os.path.relpath(file_path, sources_dir)
@@ -358,7 +362,7 @@ async def run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
         with runtime.global_state.apk_analysis_tasks_lock:
             if task_id in runtime.global_state.apk_analysis_tasks:
                 runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'error'
-                runtime.global_state.apk_analysis_tasks[task_id]['error'] = 'jadx 反编译超时（超过600秒）'
+                runtime.global_state.apk_analysis_tasks[task_id]['error'] = f'jadx 反编译超时（超过{runtime.jadx_timeout}秒）'
                 persist_apk_task_locked(task_id)
     except Exception as e:
         with runtime.global_state.apk_analysis_tasks_lock:
@@ -402,12 +406,13 @@ def recover_apk_analysis_tasks() -> list[asyncio.Task]:
             or os.path.realpath(output_dir) != os.path.realpath(safe_output)
         ):
             with runtime.global_state.apk_analysis_tasks_lock:
-                current = runtime.global_state.apk_analysis_tasks[task_id]
-                current.update({
-                    'status': 'error',
-                    'error': 'Interrupted analysis files failed integrity validation',
-                })
-                persist_apk_task_locked(task_id)
+                current = runtime.global_state.apk_analysis_tasks.get(task_id)
+                if current is not None:
+                    current.update({
+                        'status': 'error',
+                        'error': 'Interrupted analysis files failed integrity validation',
+                    })
+                    persist_apk_task_locked(task_id)
             continue
         shutil.rmtree(safe_output, ignore_errors=True)
         task_handle = asyncio.create_task(

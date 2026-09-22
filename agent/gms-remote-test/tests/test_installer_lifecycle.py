@@ -14,8 +14,8 @@ failure injection:
         that changed between the version decision and the download.
 * `register_kkagent_plugin` fails closed on a corrupt registry and
         never overwrites other plugins' registrations; writes are atomic.
-* 其他  sync_one fixes a lost executable bit even when content matches.
-* 其他  gms_agent.client._load_token rejects a token file owned by
+* `sync_one` fixes a lost executable bit even when content matches.
+* `gms_agent.client._load_token` rejects a token file owned by
         another user (owner check, CLI parity).
 """
 
@@ -729,7 +729,7 @@ class TestKkagentRegistryFailClosed(EnvSandbox):
 
 
 class TestSyncOneExecBit(unittest.TestCase):
-    """其他: identical content must still fix a lost executable bit."""
+    """Identical content must still fix a lost executable bit."""
 
     def test_identical_content_fixes_exec_bit(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -757,7 +757,7 @@ def _load_sync_module():
 
 
 class TestTokenOwnerCheck(unittest.TestCase):
-    """其他: SDK parity — token file owned by another user is rejected."""
+    """SDK parity — token file owned by another user is rejected."""
 
     def test_token_file_owner_check(self):
         with tempfile.TemporaryDirectory() as tmp:

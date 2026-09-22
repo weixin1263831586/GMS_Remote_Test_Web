@@ -21,7 +21,7 @@ ARCHIVE_EXTENSIONS = (
 # through the system-extractor path with preflight + post-scan, NOT through
 # `tar -xf`). Extraction dispatch is by CONTENT sniffing, never by filename
 # alone — a tar renamed to .rar used to fall into the raw `tar -xf` path and
-# bypass the member/budget/symlink policy entirely (review P1).
+# bypass the member/budget/symlink policy entirely .
 UPLOAD_ARCHIVE_EXTENSIONS = (*ARCHIVE_EXTENSIONS, '.rar', '.7z')
 _SANITIZE_FILENAME_RE = re.compile(r'[^\w\-_.\[\]]')
 _SANITIZE_DIRNAME_RE = re.compile(r'[^A-Za-z0-9._-]+')
@@ -65,7 +65,7 @@ def sniff_archive_format(path: str) -> str:
 
     Extension-based dispatch let a tarball renamed ``payload.rar`` reach a
     raw ``tar -xf`` fallback and bypass every member/budget/symlink check
-    (review P1). Dispatch order: zip → tar (any compression, via content
+    . Dispatch order: zip → tar (any compression, via content
     probe) → 7z/rar (magic bytes). Returns '' when the content matches no
     known archive format.
     """
@@ -81,7 +81,8 @@ def sniff_archive_format(path: str) -> str:
     if magic[:2] == b'\x1f\x8b' or magic[:3] == b'BZh':
         # gzip/bzip2 stream: accept as tar only when tarfile can open it.
         try:
-            return 'tar' if tarfile.open(path, 'r:*') else ''
+            with tarfile.open(path, 'r:*'):
+                return 'tar'
         except (tarfile.TarError, OSError):
             return ''
     try:
@@ -132,10 +133,11 @@ def strip_common_archive_root(
     top_levels = {name.split('/', 1)[0] for name in files if '/' in name}
     if len(top_levels) == 1:
         root = top_levels.pop()
+        prefix = root + '/'
         return root, [
-            (name, name[len(root) + 1 :])
+            (name, name[len(prefix):] if name.startswith(prefix) else name)
             for name in names
-            if name not in {root, root + '/'}
+            if name not in {root, prefix}
         ]
     return '', [(name, name) for name in names]
 

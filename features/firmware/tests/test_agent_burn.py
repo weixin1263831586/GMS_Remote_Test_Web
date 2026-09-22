@@ -256,7 +256,7 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
 
         固件文件存在（临时文件），服务端必须对它的实际字节计算 SHA256 并
         用服务端派生的 operation 串消费审批，而不是客户端传入的任何串。
-        审批消费点在全部 deterministic preflight 之后（审核意见 P2），
+        审批消费点在全部 deterministic preflight 之后，
         这里把链路推进到本地烧写批处理，断言消费恰好一次且绑定串正确。
         """
         with tempfile.NamedTemporaryFile(
@@ -364,7 +364,7 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
         consume.assert_called_once()
 
     def test_agent_burn_preflight_failure_does_not_consume_approval(self):
-        """无损失败不得提前烧掉一次性审批 token（审核意见 P2）。
+        """无损失败不得提前烧掉一次性审批 token。
 
         preflight（设备不在可烧写状态）失败时，审批必须原封不动，
         用户修正设备状态后可用同一 token 重试。
