@@ -8,6 +8,81 @@ from tests.test_runtime_ui_smoke import RuntimeUiHarness, expect
 
 
 class DailyBriefReviewUiTests(RuntimeUiHarness):
+    def test_admin_account_is_unavailable_instead_of_empty_brief(self):
+        page = self.new_page()
+
+        def respond(route):
+            if route.request.url.endswith('/daily-brief/latest'):
+                data = {
+                    'account_available': False,
+                    'message': '管理员账号不能运行每日晨报；请使用普通网页用户账号。',
+                    'run': None,
+                    'issues': [],
+                }
+            else:
+                data = {}
+            route.fulfill(
+                status=200,
+                content_type='application/json',
+                body=json.dumps({'success': True, 'data': data}),
+            )
+
+        page.route('**/api/redmine-agent/**', respond)
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("switchTab('daily-brief')")
+            controls = page.locator('#dailyBriefRunControls')
+            expect(controls).to_contain_text('当前账号不可用')
+            expect(page.locator('#dailyBriefCard')).to_contain_text('管理员账号不能运行每日晨报')
+            expect(controls.get_by_text('生成每日晨报')).to_have_count(0)
+            self.assertNotIn('暂无每日晨报', controls.inner_text())
+        finally:
+            page.close()
+
+    def test_incomplete_evidence_is_explicit_in_row_and_analysis_modal(self):
+        page = self.new_page()
+        page.route('**/api/redmine-agent/**', lambda route: route.fulfill(
+            status=200, content_type='application/json',
+            body='{"success":true,"data":{}}',
+        ))
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.wait_for_function("typeof renderDailyBriefInner === 'function'")
+            page.evaluate("switchTab('daily-brief')")
+            page.evaluate("""() => {
+                dailyBriefCache = {
+                    run: {run_id: 'brief-gate', brief_date: '2026-09-22',
+                        status: 'completed', report_json: {}},
+                    issues: [{issue_id: 644070, subject: 'CtsSecurityTestCases报错',
+                        status: 'completed', result: {
+                            result_format: 'kkagent_markdown',
+                            detailed_report: '## 结论\\n\\n当前判断仍需复核。',
+                            needs_human_review: true,
+                            evidence_gate: {
+                                analysis_mode: 'diagnostic',
+                                attachments_checked: false,
+                                history_search_required: true,
+                                history_checked: false,
+                                source_evidence_required: true,
+                                source_evidence_checked: false,
+                            },
+                        }}],
+                };
+                document.getElementById('dailyBriefCard').innerHTML =
+                    renderDailyBriefInner(dailyBriefCache);
+            }""")
+            row = page.locator('#dailyBriefCard .daily-brief-row')
+            expect(row).to_contain_text('取证未闭环 · 需人工确认')
+            row.get_by_text('查看分析', exact=True).click()
+            modal = page.locator('[id^="singleIssueAnalysisModal-"].show')
+            expect(modal.locator('.daily-brief-modal-title')).to_contain_text('取证未闭环')
+            expect(modal).to_contain_text('取证未闭环，仅供人工复核')
+            expect(modal).to_contain_text('附件尚未全部读取或校验')
+            expect(modal).to_contain_text('相似历史工单检索未达到要求')
+            expect(modal).to_contain_text('测试失败缺少可追溯的源码级证据')
+        finally:
+            page.close()
+
     def test_single_issue_input_locates_without_filtering_history(self):
         """「Redmine 单号」输入框只定位不过滤：命中翻页高亮，未命中不隐藏列表。"""
         page = self.new_page()
@@ -325,6 +400,37 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
             modal = page.locator('.daily-brief-modal').last
             expect(modal).to_contain_text('最新一次分析已停止')
             expect(modal).to_contain_text('Retained evidence')
+        finally:
+            page.close()
+
+    def test_compact_gfm_table_renders_as_table_in_analysis_modal(self):
+        # 「一、问题概况」表格分隔行有 |---|---|（紧凑）与 | --- | --- |（带
+        # 空格）两种真实写法：紧凑式曾因分隔行检测正则的字符区间缺陷整表
+        # 退化为竖线纯文本，只有带空格写法能出表格。两种写法都必须渲染表格。
+        page = self.new_page()
+        page.route('**/api/redmine-agent/**', lambda route: route.fulfill(
+            status=200, content_type='application/json', body='{"success":true,"data":{}}',
+        ))
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("switchTab('daily-brief')")
+            page.evaluate("""() => {
+                singleIssueAnalysisHistory = [{
+                    run: {run_id: 'compact-table-run', status: 'completed'},
+                    issues: [{issue_id: 652777, status: 'completed', result: {
+                        detailed_report: '## 一、问题概况\\n\\n'
+                            + '| 项目 | 内容 |\\n|---|---|\\n'
+                            + '| 单号 | #652777 |\\n| 设备 | RK3576 |',
+                    }}],
+                }];
+                renderSingleIssueAnalysisHistory();
+            }""")
+            page.locator('#singleIssueAnalysisHistory').get_by_text('查看分析', exact=True).click()
+            modal = page.locator('.daily-brief-modal').last
+            table = modal.locator('table.md-table')
+            expect(table).to_have_count(1)
+            expect(table.locator('th')).to_have_text(['项目', '内容'])
+            expect(table.locator('td')).to_have_text(['单号', '#652777', '设备', 'RK3576'])
         finally:
             page.close()
 

@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from .state_machine import InvalidJobTransitionError
+
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> str:
@@ -41,6 +45,10 @@ class ClusterCommandRepositoryMixin:
                 """SELECT c.id FROM cluster_commands c
                    WHERE c.status IN ('completed','failed','cancelled')
                      AND c.updated_at < ?
+                     AND EXISTS (
+                        SELECT 1 FROM cluster_command_events e
+                        WHERE e.command_id=c.id
+                     )
                    ORDER BY c.updated_at LIMIT ?""",
                 (cutoff_str, limit),
             ).fetchall()
@@ -140,11 +148,15 @@ class ClusterCommandRepositoryMixin:
                 message="任务派发命令写入失败，任务已置为失败",
             )
         except Exception:
-            pass
+            # 收敛失败本身要留痕:任务可能停留在派发中状态且 claim 未释放。
+            logger.warning(
+                "failed to transition job %s to failed after dispatch error", job_id,
+                exc_info=True,
+            )
         try:
             self.claims.release(f"job:{job_id}", status="failed")
         except Exception:
-            pass
+            logger.warning("failed to release claim for job %s", job_id, exc_info=True)
 
     def create_command(self, data: dict[str, Any]) -> dict[str, Any]:
         now = _utc_now()

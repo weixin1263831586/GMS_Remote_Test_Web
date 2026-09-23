@@ -35,7 +35,25 @@ class SearchSystemBackgroundTests(unittest.TestCase):
             out = asyncio.run(diagnosis_recalls.search_system_background("lmkd"))
         self.assertEqual(len(out), diagnosis_recalls.BACKGROUND_LIMIT)
         fed.assert_called_once_with(
-            "lmkd", sources=["android_internals"], limit=diagnosis_recalls.BACKGROUND_LIMIT
+            "lmkd",
+            sources=["android_internals"],
+            limit=diagnosis_recalls.BACKGROUND_LIMIT,
+            android_api_level=None,
+        )
+
+    def test_android_api_level_is_forwarded(self):
+        """版本上下文透传：报告侧统一转换的 API level 必须进入联邦检索。"""
+        payload = {"results": [_hit(0)], "sources_status": []}
+        with patch("features.knowledge.federated_search", return_value=payload) as fed:
+            out = asyncio.run(
+                diagnosis_recalls.search_system_background("lmkd", android_api_level=36)
+            )
+        self.assertEqual(len(out), 1)
+        fed.assert_called_once_with(
+            "lmkd",
+            sources=["android_internals"],
+            limit=diagnosis_recalls.BACKGROUND_LIMIT,
+            android_api_level=36,
         )
 
     def test_provider_error_degrades_to_empty(self):
@@ -60,6 +78,50 @@ class DiagnosisPayloadTests(unittest.TestCase):
         source = inspect.getsource(api.diagnose_report_failure)
         self.assertIn('"system_background_results"', source)
         self.assertIn("search_system_background", source)
+
+    def test_diagnosis_forwards_api_level_from_request(self):
+        """编排必须把报告上下文的 API level 传给第五路召回（版本贯通回归）。"""
+        import inspect
+
+        import features.reports.analysis_api as api
+
+        source = inspect.getsource(api.diagnose_report_failure)
+        self.assertIn("android_api_level_from_request", source)
+
+
+class AndroidApiLevelFromRequestTests(unittest.TestCase):
+    """suite_version / android_version → API level 统一转换。"""
+
+    def _request(self, **fields):
+        from features.reports.api_models import ReportDiagnosisRequest
+
+        return ReportDiagnosisRequest(test_name="t", **fields)
+
+    def test_suite_version_major_maps_to_api_level(self):
+        from features.reports.knowledge_ranking import android_api_level_from_request
+
+        for suite, expected in (
+            ("16.0_r1", 36), ("android-15", 35), ("14", 34), ("13.0_r7", 33),
+        ):
+            with self.subTest(suite=suite):
+                self.assertEqual(
+                    android_api_level_from_request(self._request(suite_version=suite)),
+                    expected,
+                )
+
+    def test_android_version_field_used_when_suite_missing(self):
+        from features.reports.knowledge_ranking import android_api_level_from_request
+
+        request = self._request(android_version="16")
+        self.assertEqual(android_api_level_from_request(request), 36)
+
+    def test_unknown_version_returns_none(self):
+        from features.reports.knowledge_ranking import android_api_level_from_request
+
+        self.assertIsNone(
+            android_api_level_from_request(self._request(suite_version="12", android_version=""))
+        )
+        self.assertIsNone(android_api_level_from_request(self._request()))
 
 
 if __name__ == "__main__":

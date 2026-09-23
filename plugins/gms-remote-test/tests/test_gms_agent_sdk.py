@@ -12,6 +12,7 @@ import json
 import sys
 import urllib.error
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -25,6 +26,7 @@ SCRIPTS = _BASE / (
 sys.path.insert(0, str(SCRIPTS))
 
 from gms_agent import GmsApiError, GmsClient  # noqa: E402
+from gms_agent.api import TestsApi  # noqa: E402
 from gms_agent.client import (  # noqa: E402
     EXIT_AUTH,
     EXIT_CONFLICT,
@@ -61,6 +63,25 @@ def test_missing_server_url_raises_usage_error(monkeypatch):
     with pytest.raises(GmsApiError) as excinfo:
         GmsClient()
     assert excinfo.value.exit_code == 2
+
+
+def test_test_start_uses_controller_request_model_fields():
+    client = MagicMock()
+    client.request.return_value = {"data": {"job_id": "job-1"}}
+    result = TestsApi(client).start(
+        "serial-1", module="CtsModule", case="CtsCase", suite="cts",
+        test_type="CTS", retry="retry-dir", worker_id="worker-1",
+    )
+    assert result == {"job_id": "job-1"}
+    client.request.assert_called_once_with(
+        "POST", "/test/start",
+        {
+            "devices": ["serial-1"], "test_module": "CtsModule",
+            "test_case": "CtsCase", "test_suite": "cts",
+            "test_type": "CTS", "retry_dir": "retry-dir",
+            "worker_id": "worker-1",
+        },
+    )
 
 
 @pytest.mark.parametrize(

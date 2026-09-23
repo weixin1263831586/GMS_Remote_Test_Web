@@ -143,6 +143,8 @@ def test_third_party_tool_dirs_track_artifacts_only():
         ),
         "tools/jadx/": (
             "jadx.provenance.json",
+            "LICENSE",
+            "NOTICE",
             "bin/*",
             "lib/*",
         ),

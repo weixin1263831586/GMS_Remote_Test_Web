@@ -271,14 +271,25 @@ class WorkerAgent:
 
     def _ack_command(
         self, command_id: str, status: str, result: dict | None = None, error: str = ""
-    ):
-        response = (
-            self.client.ack(command_id, status, error=error)
-            if result is None
-            else self.client.ack(command_id, status, result, error)
-        )
-        self.runtime.mark_command_synced(command_id)
-        return response
+    ) -> bool:
+        """Best-effort Controller delivery for an already durable terminal state.
+
+        A Controller ACK is a transport concern, not part of device command
+        execution.  On failure the unsynced row is retried by heartbeat
+        reconciliation; most importantly, it must not rewrite a completed
+        command as failed.
+        """
+        try:
+            (
+                self.client.ack(command_id, status, error=error)
+                if result is None
+                else self.client.ack(command_id, status, result, error)
+            )
+            self.runtime.mark_command_synced(command_id)
+            return True
+        except Exception:
+            logger.warning("command %s ACK delivery failed; will retry", command_id, exc_info=True)
+            return False
 
     def handle(self, command):
         previous = self.runtime.previous_command(command["id"])

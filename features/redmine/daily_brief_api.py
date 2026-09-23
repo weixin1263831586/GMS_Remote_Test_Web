@@ -22,7 +22,11 @@ from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from features.auth import require_agent_scope, require_human_principal_when_auth_required
+from features.auth import (
+    get_authenticated_user,
+    require_agent_scope,
+    require_human_principal_when_auth_required,
+)
 from features.users import owner_id_from_request
 from foundation.error_model import ApiError
 
@@ -34,6 +38,7 @@ from .daily_brief_config import (
 )
 from .daily_brief_dispatch import enqueue_reanalysis, enqueue_refresh, enqueue_run
 from .daily_brief_models import BRIEF_MODES
+from .daily_brief_owner_policy import ADMIN_OWNER_MESSAGE
 from .daily_brief_repository import TERMINAL_RUN_STATUSES
 from .daily_brief_service import (
     DEFAULT_BRIEF_CONFIG,
@@ -57,6 +62,11 @@ def _require_human(request: Request) -> None:
     """写端点（配置/触发/重分析）只允许人工会话：Agent token 不得改配置，
     也不得通过 API 批量启动 AI 子进程；取证走只读 MCP 工具。"""
     require_human_principal_when_auth_required(request)
+
+
+def _is_administrator_account(request: Request) -> bool:
+    user = get_authenticated_user(request)
+    return user is not None and user.role == "admin"
 
 
 def _service_for_request(request: Request | None) -> DailyBriefService:
@@ -225,10 +235,29 @@ async def get_daily_triage(
 @router.get("/daily-brief/latest")
 async def get_latest_brief(request: Request):
     _require_read(request)
+    if _is_administrator_account(request):
+        return {
+            "success": True,
+            "data": {
+                "account_available": False,
+                "message": ADMIN_OWNER_MESSAGE,
+                "run": None,
+                "issues": [],
+            },
+        }
     service = _service_for_request(request)
     run = service.latest_run()
     if run is None:
-        return {"success": True, "data": {"configured": False, "message": "暂无晨报。"}}
+        return {
+            "success": True,
+            "data": {
+                "account_available": True,
+                "configured": False,
+                "message": "暂无晨报。",
+                "run": None,
+                "issues": [],
+            },
+        }
     return {"success": True, "data": service.run_payload(run)}
 
 
@@ -293,6 +322,11 @@ async def run_daily_brief(
     mode: str = Query("manual"),
 ):
     _require_human(request)
+    if _is_administrator_account(request):
+        return ApiError.forbidden(
+            ADMIN_OWNER_MESSAGE,
+            next_actions=({"action": "请切换到普通网页用户账号后重试"},),
+        ).to_response()
     if mode not in BRIEF_MODES:
         return JSONResponse(
             content={"success": False, "error": f"mode must be one of {BRIEF_MODES}"},

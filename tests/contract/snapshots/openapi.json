@@ -14713,6 +14713,7 @@
             "schema": {
               "default": "",
               "description": "Keyword search across module, testcase, exemption, issue text, and source URL",
+              "maxLength": 256,
               "title": "Q",
               "type": "string"
             }

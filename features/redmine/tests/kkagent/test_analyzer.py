@@ -438,6 +438,25 @@ class McpHealthPreflightTests(unittest.TestCase):
             "type": "result", "subtype": "success", "exit_code": 0,
             "session_id": "s", "message": "## 结论",
         })
+        trace.tool_calls = [
+            ToolTrace(
+                tool_call_id="issue", tool_name="gms_rt_redmine_issue_fetch",
+                tool_input={"issue_id": 1}, status="succeeded",
+                evidence_issue_ids=[1], snapshot_ids=["snap-1"],
+            ),
+            ToolTrace(
+                tool_call_id="journals", tool_name="gms_rt_redmine_journals",
+                tool_input={"snapshot_id": "snap-1"}, status="succeeded",
+            ),
+            ToolTrace(
+                tool_call_id="history-1", tool_name="gms_rt_redmine_history_search",
+                tool_input={"query": "first"}, status="succeeded",
+            ),
+            ToolTrace(
+                tool_call_id="history-2", tool_name="gms_rt_redmine_history_search",
+                tool_input={"query": "second"}, status="succeeded",
+            ),
+        ]
         with patch.object(
             analyzer, "_run_stream",
             AsyncMock(return_value=(trace, _StreamFallback(), False)),

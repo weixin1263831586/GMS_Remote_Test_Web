@@ -382,6 +382,28 @@ class DailyBriefApiTests(unittest.TestCase):
 
     # ------------------------------------------------------------------ run
 
+    def test_admin_latest_reports_account_unavailable(self):
+        resp = self.client.get(
+            "/api/redmine-agent/daily-brief/latest",
+            headers={"x-test-role": "admin"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()["data"]
+        self.assertFalse(data["account_available"])
+        self.assertIsNone(data["run"])
+        self.assertIn("管理员账号", data["message"])
+
+    def test_admin_cannot_start_daily_brief(self):
+        resp = self.client.post(
+            "/api/redmine-agent/daily-brief/run",
+            headers={"x-test-role": "admin"},
+        )
+        self.assertEqual(resp.status_code, 403)
+        body = resp.json()
+        self.assertFalse(body["success"])
+        self.assertEqual(body["code"], "FORBIDDEN")
+        self.assertIn("管理员账号", body["error"])
+
     def test_manual_run_is_durably_queued_without_web_background_task(self):
         resp = self.client.post("/api/redmine-agent/daily-brief/run")
         self.assertEqual(resp.status_code, 200)

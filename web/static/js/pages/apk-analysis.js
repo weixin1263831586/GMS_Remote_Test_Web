@@ -3,6 +3,7 @@
 window.apkCurrentTaskId = null;
 window.apkPollInterval = null;
 window.apkStatusPollInFlight = false;
+window.apkPollGeneration = 0;
 window.apkNotifiedTaskId = null;
 window.apkPendingOpenTarget = null;
 window.apkOpenFiles = new Map();
@@ -25,6 +26,9 @@ function stopApkPolling() {
     clearInterval(window.apkPollInterval);
     window.apkPollInterval = null;
     window.apkStatusPollInFlight = false;
+    // Responses started for the old task are no longer allowed to change the
+    // current task's UI, timers, notifications, or selected source files.
+    window.apkPollGeneration += 1;
 }
 
 function setApkUploadEmpty(empty) {
@@ -154,6 +158,7 @@ async function restoreApkTask(taskId, options = {}) {
     const task = window.apkTaskHistory.find(item => item.task_id === taskId) || {};
     stopApkPolling();
     window.apkCurrentTaskId = taskId;
+    const generation = window.apkPollGeneration;
     window.apkNotifiedTaskId = task.status === 'completed' ? taskId : null;
     setApkUploadEmpty(false);
     resetApkTaskPanels(options.fromHistoryLoad ? storedApkAnalysisTab() : 'manifest');
@@ -168,6 +173,7 @@ async function restoreApkTask(taskId, options = {}) {
     if (select) select.value = taskId;
 
     const status = await pollApkStatus();
+    if (window.apkCurrentTaskId !== taskId || window.apkPollGeneration !== generation) return;
     if (status?.status === 'analyzing' && !window.apkPollInterval) {
         window.apkPollInterval = setInterval(pollApkStatus, STATUS_POLL_INTERVAL);
     }
@@ -300,6 +306,9 @@ async function startApkAnalysis() {
         const data = await apiCall(`/api/apk/analyze/${window.apkCurrentTaskId}`, 'POST');
 
         if (data.success) {
+            // 先清理旧轮询器再启动:重复点击"开始分析"时直接覆盖
+            // window.apkPollInterval 会泄漏旧 interval(每个都在 poll)。
+            stopApkPolling();
             window.apkPollInterval = setInterval(pollApkStatus, STATUS_POLL_INTERVAL);
             void loadApkTaskHistory(true);
             await pollApkStatus();
@@ -322,10 +331,16 @@ async function startApkAnalysis() {
 async function pollApkStatus() {
     if (!window.apkCurrentTaskId) return;
     if (window.apkStatusPollInFlight) return;
+    const taskId = window.apkCurrentTaskId;
+    const generation = window.apkPollGeneration;
     window.apkStatusPollInFlight = true;
 
     try {
-        const data = await apiCall(`/api/apk/status/${window.apkCurrentTaskId}`);
+        const data = await apiCall(`/api/apk/status/${taskId}`);
+
+        if (window.apkCurrentTaskId !== taskId || window.apkPollGeneration !== generation) {
+            return;
+        }
 
         if (!data.success) {
             stopApkPolling();
@@ -381,14 +396,14 @@ async function pollApkStatus() {
                         .catch(() => {});
                 }, 200);
             }
-            if (window.apkNotifiedTaskId !== window.apkCurrentTaskId) {
-                window.apkNotifiedTaskId = window.apkCurrentTaskId;
+            if (window.apkNotifiedTaskId !== taskId) {
+                window.apkNotifiedTaskId = taskId;
                 notifyOperationResult(
                     'APK反编译已完成',
                     status.filename || '反编译完成，可查看结果',
                     'success',
                     'apk',
-                    { task_id: window.apkCurrentTaskId }
+                    { task_id: taskId }
                 );
             }
         } else if (status.status === 'error') {
@@ -397,15 +412,15 @@ async function pollApkStatus() {
 
             showToast(`分析失败: ${status.error}`, 'error');
             void loadApkTaskHistory(true);
-            if (window.apkNotifiedTaskId !== window.apkCurrentTaskId) {
-                window.apkNotifiedTaskId = window.apkCurrentTaskId;
+            if (window.apkNotifiedTaskId !== taskId) {
+                window.apkNotifiedTaskId = taskId;
                 notifyOperationResult(
                     'APK分析失败',
                     status.error || '反编译失败',
                     'error',
                     'apk',
                     {
-                        task_id: window.apkCurrentTaskId
+                        task_id: taskId
                     }
                 );
             }
@@ -420,7 +435,9 @@ async function pollApkStatus() {
             btn.textContent = '🔬 重新分析';
         }
     } finally {
-        window.apkStatusPollInFlight = false;
+        if (window.apkCurrentTaskId === taskId && window.apkPollGeneration === generation) {
+            window.apkStatusPollInFlight = false;
+        }
     }
 }
 

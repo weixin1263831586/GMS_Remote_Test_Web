@@ -10,6 +10,9 @@
   "target": "x86_64-unknown-linux-gnu",
   "build_env": "GitHub Actions ubuntu-22.04（glibc 2.35，兼容 Ubuntu 22.04 来源主机）",
   "sha256": "d238204e21a884769960ad1871db3b9c961263ee5daea4fe6d3b84f15edb0ca2",
+  "artifact_sha256": {
+    "tools/usbip/usbipd": "d238204e21a884769960ad1871db3b9c961263ee5daea4fe6d3b84f15edb0ca2"
+  },
   "release_url": "https://github.com/weixin1263831586/usbip/releases/tag/v0.9.6",
   "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
   "build": "GitHub Actions release.yml（cargo build --release --bin usbipd）",

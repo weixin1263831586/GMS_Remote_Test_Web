@@ -178,8 +178,9 @@ async def get_status(
 
         return JSONResponse(content=response)
     except Exception as e:
-        logger.error(f"Error getting status: {e}")
-        return error_response(str(e), status_code=500)
+        # 意外异常按错误模型返回通用消息:str(e) 可能含路径/命令/凭据。
+        logger.exception("Error getting status: %s", e)
+        return error_response("Internal server error", status_code=500)
 
 
 # ==================== Log Stream ====================

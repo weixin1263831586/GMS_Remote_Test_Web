@@ -1,5 +1,12 @@
 # 每日晨报审核修复综合评估（2026-09-15）
 
+> **Status: Historical review snapshot（历史评审记录，非现行规范）**
+> 基线为 `b53f1a8` 时点状态。文中出现的 `redmine_daily_triage_v11`、
+> `package 0.22.17` 等版本号均为当时快照，**不是当前配置**；现行架构
+> 见 `docs/architecture/adr/0013`（批量晨报与单号分析同一工作流）与
+> ADR 0014（外部知识源），Agent 分析规范以
+> `agent/gms-remote-test/skill/references/redmine-daily-triage.md` 为准。
+
 基线：`b53f1a8`，包含开始检查时已经暂存的 57 个文件改动。
 本记录区分实际修复、保留的本地改动和仍未覆盖的验证范围；不把历史
 GitHub CI 结果视为当前工作区的测试结果。

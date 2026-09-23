@@ -50,8 +50,8 @@ async def clean_test_logs(request: Request):
         logger.info(f"[Clean Logs] User {client_id} cleared test logs")
         return success_response(message="Logs cleared")
     except Exception as e:
-        logger.error(f"Error cleaning logs: {e}")
-        return error_response(f"{e!s}", status_code=500)
+        logger.exception("Error cleaning logs: %s", e)
+        return error_response("Internal server error", status_code=500)
 
 
 # ==================== Get Logs ====================
@@ -83,8 +83,8 @@ async def get_test_logs(request: Request):
         return FileResponse(resolved, media_type="text/plain", filename=resolved.name)
 
     except Exception as e:
-        logger.error(f"Error getting test logs: {e}")
-        return error_response(str(e), status_code=500)
+        logger.exception("Error getting test logs: %s", e)
+        return error_response("Internal server error", status_code=500)
 
 
 # ==================== Batch Download Logs ====================
@@ -113,8 +113,8 @@ async def download_test_logs(req: dict, request: Request):
             status_code = 404 if "不属于当前用户" in result.get("error", "") else 400
             return error_response("Log file not found", status_code=status_code)
     except Exception as e:
-        logger.error(f"Error downloading logs: {e}")
-        return error_response(str(e), status_code=500)
+        logger.exception("Error downloading logs: %s", e)
+        return error_response("Internal server error", status_code=500)
 
 
 # ==================== Save Log ====================
@@ -159,8 +159,8 @@ async def save_current_log(req: dict, request: Request):
             }
         )
     except Exception as e:
-        logger.error(f"Error saving log: {e}")
-        return error_response(str(e), status_code=500)
+        logger.exception("Error saving log: %s", e)
+        return error_response("Internal server error", status_code=500)
 
 
 # ==================== List Logs ====================

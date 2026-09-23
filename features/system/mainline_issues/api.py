@@ -121,7 +121,7 @@ async def mainline_known_issues_sync_status(
 
 @router.get('/api/mainline-known-issues')
 async def list_mainline_known_issues(
-    q: str = Query('', description='Keyword search across module, testcase, exemption, issue text, and source URL'),
+    q: str = Query('', max_length=256, description='Keyword search across module, testcase, exemption, issue text, and source URL'),
     issue_type: str = Query('', description='MTS, CTS, or GTS'),
     product_section: str = Query('', description='Android or Android Go'),
     test_module: str = Query('', description='Exact test module'),
@@ -139,11 +139,16 @@ async def list_mainline_known_issues(
     params: list[str | int] = []
     if q:
         like = f'%{escape_like(q)}%'
+        # escape_like 转义了 %/_/\,LIKE 必须带 ESCAPE 子句转义才生效;
+        # 缺失时含 %/_ 的查询会把转义符按字面匹配,既漏数据又可被通配符滥用。
         where.append(
             '('
-            'test_module LIKE ? OR test_case LIKE ? OR exemption_id LIKE ? OR '
-            'issue_text LIKE ? OR source_url LIKE ? OR release_label LIKE ? OR '
-            'android_versions LIKE ? OR category LIKE ? OR product_section LIKE ? OR issue_type LIKE ?'
+            'test_module LIKE ? ESCAPE "\\" OR test_case LIKE ? ESCAPE "\\" OR '
+            'exemption_id LIKE ? ESCAPE "\\" OR '
+            'issue_text LIKE ? ESCAPE "\\" OR source_url LIKE ? ESCAPE "\\" OR '
+            'release_label LIKE ? ESCAPE "\\" OR '
+            'android_versions LIKE ? ESCAPE "\\" OR category LIKE ? ESCAPE "\\" OR '
+            'product_section LIKE ? ESCAPE "\\" OR issue_type LIKE ? ESCAPE "\\"'
             ')'
         )
         params.extend([like] * 10)

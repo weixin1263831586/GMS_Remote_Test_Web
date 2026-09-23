@@ -135,20 +135,29 @@ EVIDENCE QUALITY GATE (complete this silently before returning JSON):
   certification/merge blocking status — never null, never another enum word.
 
 DETAILED REPORT ("detailed_report", mandatory, Chinese Markdown):
-- This is the in-depth per-issue report shown in the UI. Structure it with
-  EXACTLY these level-2 sections, in order (use "## " headings):
+- This is the in-depth per-issue report shown in the UI. The FIRST paragraph
+  is a standalone conclusion line: `**结论：**` + 2-3 sentences (real
+  device/platform failure vs test-side/noise artifact, the exact failing
+  point, owner direction). Then structure it with EXACTLY these level-2
+  sections, in order (use "## " headings):
   1. "## 一、问题概况" — a Markdown table (one row per key: Issue link,
-     报告设备, 测试套件/复现环境, 失败用例, 失败原因, 当前状态) using facts
-     from the issue and journals only. Cell text stays short; long values
+     报告设备, 系统/构建版本, 测试套件/复现环境, 执行命令, 失败用例, 失败原因,
+     当前状态) using facts from the issue and journals only; paths, commands
+     and test names in `code` spans. Cell text stays short; long values
      may wrap inside a cell.
   2. "## 二、测试原理（源码级）" — when the issue is about a test/feature
      failure: cite the actual host/device/AOSP source paths and key logic
      (use the GMS MCP SDK search or the test module knowledge), in a short
      list. If source-level detail is genuinely unavailable, explain the
      general mechanism instead of inventing paths.
-  3. "## 三、根因分析（按可能性排序）" — numbered hypotheses, most likely
-     first, each with how to verify it (config/file/log to check). Mark
-     each hypothesis 待验证 unless backed by direct evidence.
+  3. "## 三、失败链路还原与根因分析（按可能性排序）" — for test/log failures:
+     first a numbered timeline of the decisive device/host log events with
+     second-level timestamps, quoting decisive lines verbatim in backticks and
+     labeling unrelated records (cache/UID warnings, system-checker messages)
+     as 噪音; if evidence spans multiple log dirs/runs, add a small table
+     marking each segment 真实失败/未执行/噪音. Then the ranked hypotheses,
+     most likely first, each with how to verify it (config/file/log to
+     check). Mark each hypothesis 待验证 unless backed by direct evidence.
   4. "## 四、本地设备现状" — when device tools returned live data: build
      fingerprint, relevant flags/compat changes, log traces, with ✅/⚠️.
      If no device was inspected, write "未检查本地设备。" and skip.
@@ -192,23 +201,35 @@ def prompt_template_for(entry: dict) -> str:
         return """Analyze Redmine issue #{issue_id}: {subject}
 Status: {status}. Attachments: {attachment_count}.
 Return your final analysis directly in Simplified Chinese Markdown (no JSON,
-enum labels or duplicate summaries). Lead with the conclusion, then structure
-the report with EXACTLY these level-2 sections, in order:
+enum labels or duplicate summaries). The FIRST paragraph is a standalone
+conclusion line: `**结论：**` + 2-3 sentences stating whether this is a real
+device/platform failure or a test-side/noise artifact, the exact failing point
+and the owner direction. Then structure the report with EXACTLY these level-2
+sections, in order:
 1. "## 一、问题概况" — a compact Markdown table (one row per key): 单号/链接,
-   报告人, 报告设备, 测试套件/复现环境, 失败用例, 当前状态; facts from the
-   issue and journals only, cell text short.
+   报告人, 报告设备, 系统/构建版本, 测试套件/复现环境, 执行命令, 失败用例,
+   当前状态; facts from the issue and journals only, cell text short; paths,
+   commands and test names go in `code` spans.
 2. "## 二、处理时间线" — dated bullets of the journals (who changed what,
    which attachments were added), oldest first; cite ids like [journal:ID].
-3. "## 三、机制分析（源码级）" — how the tested feature/mechanism actually
+3. "## 三、失败链路还原（日志时间线）" — for test/log failures: when evidence
+   spans multiple log directories, runs or attachments, FIRST give a small
+   table marking each segment 真实失败/未执行/噪音, THEN a numbered timeline of
+   the decisive device/host log events with second-level timestamps, quoting
+   each decisive line verbatim in backticks (log lines stay original, your
+   narration is 中文). Explicitly label unrelated records (cache/UID warnings,
+   system-checker messages) as 噪音 so readers do not chase them. If no logs
+   exist, write 无可用日志，改为引用工单描述中的关键句。
+4. "## 四、机制分析（源码级）" — how the tested feature/mechanism actually
    works, citing real host/device/AOSP source paths and key logic; when source
    evidence is unavailable, describe the mechanism and say so instead of
    inventing paths.
-4. "## 四、根因分析（按可能性排序）" — numbered hypotheses, most likely
+5. "## 五、根因分析（按可能性排序）" — numbered hypotheses, most likely
    first, each with how to verify it (config/file/log to check); mark each
    hypothesis 待验证 unless backed by direct causal evidence.
-5. "## 五、本地设备现状" — only live device/tool output, with ✅/⚠️ markers;
+6. "## 六、本地设备现状" — only live device/tool output, with ✅/⚠️ markers;
    if no device was inspected write "未检查本地设备。" and skip the rest.
-6. "## 六、建议下一步" — numbered concrete actions; adb/shell commands in a
+7. "## 七、建议下一步" — numbered concrete actions; adb/shell commands in a
    fenced code block; state preconditions explicitly (SSI/GRF, dpi, version).
 Cite actual issue/journal/attachment/source references where relevant. Prefer
 tables and lists over prose; keep the report readable, not exhaustive.
@@ -231,12 +252,12 @@ paging (continue from the previous offset) instead of re-reading from the
 start; never re-read the same window twice.
 
 Read the current issue and its latest journals first, then relevant attachments.
-Use registered read-only GMS MCP tools when available. If only the GMS CLI is
-available, use these signatures (snapshot_id is returned by issue-fetch):
-- gms-rt-redmine-issue-fetch {issue_id} --wait --json --non-interactive
-- gms-rt-redmine-journals <snapshot_id> --json --non-interactive
-- gms-rt-redmine-attachments <snapshot_id> --json --non-interactive
-- gms-rt-redmine-history-search "keywords" --exclude-issue-id {issue_id} --json --non-interactive
+Use registered read-only GMS MCP tools directly. The runtime Evidence Gate can
+attest only direct gms_rt_* tool calls: never run gms-rt CLI through Bash for
+required evidence. Generic Bash, web search, mcp__codesearch and background
+knowledge do not satisfy Redmine history, attachment-read or source-evidence
+requirements. If a required native tool is unavailable, state that evidence is
+unavailable; do not manufacture a completed check or a verified conclusion.
 History search matches terms with OR + bm25: a hit that matched ONLY a
 background word (SoC model like RK3588, "Android16", "GMS") is NOT evidence of
 a similar problem. Each result carries matched_terms / distinctive_matches
@@ -248,9 +269,9 @@ READ-ONLY ANALYSIS BOUNDARY: this is a read-only diagnosis. Never repair or
 mutate the environment: no gms-agent install/upgrade, no plugin reinstall,
 no edits under the repository, configs/ or ~/.config, no service restarts,
 no files outside the system temp dir. A missing or broken gms MCP toolset is
-a finding, not something to fix in-session: gather evidence with the
-documented CLI signatures above instead, and if those also fail, state
-"GMS MCP/CLI 取证不可用" and return the final output immediately.
+a finding, not something to fix in-session. State "GMS MCP 取证不可用" and
+return the final output immediately; the Controller will keep the result out of
+the completed state until its Evidence Gate can attest the required calls.
 Investigate relevant history, attachments, source and test evidence as deeply as
 needed to reach an accurate, actionable conclusion. There is no step, elapsed-time
 or token budget. Cross-check competing explanations and verify proposed fixes

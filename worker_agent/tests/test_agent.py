@@ -231,6 +231,24 @@ def test_background_slow_command_reports_failure(tmp_path):
     assert agent.client.ack.call_args.args[1] == "failed"
 
 
+def test_ack_delivery_failure_preserves_completed_command(tmp_path):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+    agent.client.ack.side_effect = ConnectionError("controller unavailable")
+    command = {
+        "id": "cmd-completed-but-unsynced",
+        "command_type": "device_action",
+        "payload": {"action": "reboot", "devices": []},
+    }
+
+    with patch("worker_agent.app.execute_device_action", return_value={"ok": True}):
+        agent.run_slow_command(command)
+
+    saved = agent.runtime.previous_command(command["id"])
+    assert saved["status"] == "completed"
+    assert saved["controller_synced"] == 0
+
+
 def test_background_usbip_command_reports_completion(tmp_path):
     agent = WorkerAgent(worker_config(tmp_path))
     agent.client = MagicMock()

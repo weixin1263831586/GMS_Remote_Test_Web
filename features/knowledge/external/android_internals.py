@@ -66,7 +66,13 @@ logger = logging.getLogger(__name__)
 SOURCE_ID = "android_internals"
 
 DEFAULT_MAX_HITS = 5
-MAX_HITS_CAP = 10
+#: 输出命中上限（API limit 的硬顶）。
+MAX_OUTPUT_HITS = 10
+#: BM25 候选池上限（与输出上限分离）：先取
+#: min(MAX_RERANK_CANDIDATES, max(limit*3, limit+5)) 个候选，加权重排后
+#: 截到 limit。旧实现候选窗被 MAX_HITS_CAP=10 截死，limit=10 时第
+#: 11~30 名里版本更匹配/更新鲜的页面 reranker 根本看不到。
+MAX_RERANK_CANDIDATES = 50
 GIT_TIMEOUT_SECONDS = 15
 REINDEX_BUSY_TIMEOUT_MS = 2_000
 _SNIPPET_TOKENS = 24
@@ -144,7 +150,7 @@ class AndroidInternalsProvider:
 
     def __init__(self, repo_root: str, *, max_hits: int = DEFAULT_MAX_HITS) -> None:
         self.repo_root = Path(os.path.expanduser(str(repo_root or ""))).resolve()
-        self.max_hits = max(1, min(int(max_hits or DEFAULT_MAX_HITS), MAX_HITS_CAP))
+        self.max_hits = max(1, min(int(max_hits or DEFAULT_MAX_HITS), MAX_OUTPUT_HITS))
         self._reindex_lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -256,10 +262,8 @@ class AndroidInternalsProvider:
         match_query = fts_safe_query(query)
         if not match_query:
             return []
-        limit = max(1, min(int(limit or self.max_hits), MAX_HITS_CAP))
-        # BM25 ORDER BY 取前 3x 候选，加权重排后再截到 limit：避免加权
-        # 信号（版本/新鲜度）作用在已被 BM25 截断的窗口外。
-        candidate_cap = min(MAX_HITS_CAP, max(limit * 3, limit + 5))
+        limit = max(1, min(int(limit or self.max_hits), MAX_OUTPUT_HITS))
+        candidate_cap = min(MAX_RERANK_CANDIDATES, max(limit * 3, limit + 5))
         try:
             with self._connect() as conn:
                 rows = conn.execute(

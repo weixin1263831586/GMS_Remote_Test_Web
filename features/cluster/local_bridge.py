@@ -78,7 +78,9 @@ def _host_metrics() -> dict[str, float]:
         memory_total_gb = values["MemTotal"] / 1024 ** 2
         memory_available_gb = values["MemAvailable"] / 1024 ** 2
     except Exception:
-        pass
+        # best-effort 采集:/proc/meminfo 异常时回退 0 值,但要留痕迹,
+        # 否则资源面板长期显示 0 无法归因。
+        logger.debug("host memory metrics unavailable", exc_info=True)
     try:
         load = os.getloadavg()[0]
         cpu_percent = min(100.0, load * 100 / max(1, os.cpu_count() or 1))
