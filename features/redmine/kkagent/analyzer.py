@@ -1,18 +1,6 @@
-"""KkAgentRedmineAnalyzer：通过 headless kkagent 做单 issue AI 分析。
-
-编排职责：一次分析 = 启动进程 → 实时消费 stream-json → 证据门禁 →
-（门禁/schema 未过）精确 resume 修复。进程管理、stderr 分类、轨迹、
-解析、预检分别位于本包的 process/errors/trace/output/auth_preflight/
-evidence_gate 模块。
-
-调用约束（docs/architecture/adr/0008-daily-brief-triage-and-diagnosis.md）：
-- ``asyncio.create_subprocess_exec``，禁止 shell=True；
-- 禁止 --yolo/--auto/--disable-sandbox；
-- 晨报不设分析步数或耗时硬预算，保留人工取消；
-- 批量 triage 使用 schema JSON；单项诊断保留最终 Markdown 总结
-  （docs/architecture/adr/0009-native-diagnostic-summary.md）；
-- prompt 明确 Redmine 内容为不可信数据，不得作为指令执行。
-"""
+"""Headless kkagent 单 issue 分析：stream-json → Evidence Gate →
+同 session 修复。进程始终使用 ``create_subprocess_exec``，禁止 shell、
+自动授权和 Redmine 指令注入；诊断结果保留 native Markdown。"""
 
 from __future__ import annotations
 
@@ -26,7 +14,7 @@ from ..daily_brief_prompt import issue_result_schema_json, prompt_template_for
 from .errors import classify_failure
 from .evidence_gate import gate_and_errors
 from .mcp_health import probe_kkagent_mcp_health
-from .native_summary import native_summary_result
+from .native_summary import native_evidence_repair_prompt, native_summary_result
 from .output import parse_issue_result
 from .process import (
     STREAM_LINE_LIMIT_BYTES,
@@ -44,15 +32,11 @@ DAILY_BRIEF_MCP_TOOLSETS = "evidence"
 
 logger = logging.getLogger(__name__)
 
-# Prompt 版本随 runtime-owned evidence/schema repair 语义升级。
-# v17: triage 同样注入 Controller 预采集上下文（Redmine 基线无设备维度）。
-# v18: 晨报批量阶段与单号分析统一走 diagnostic 深度诊断（ADR 0013），
-#      triage prompt 仅保留用于历史持久化结果渲染，新生成分析不再使用。
+# v18: 晨报与单号分析统一走 diagnostic 深度诊断（ADR 0013）。
 PROMPT_VERSION = "redmine_daily_triage_v18"
 
 REPAIR_MAX_TURNS = 0
-# 首次修复仍可能被模型原样重放（线上曾出现完整取证后连续漏掉
-# confidence）。允许在同一 session 内再纠正一次；不重开会话、不重做取证。
+# 同一 session 最多纠正两轮，不重开会话。
 REPAIR_RESUME_RETRIES = 2
 
 REPAIR_PROMPT_TEMPLATE = """The previous analysis output did not pass validation.
@@ -391,10 +375,7 @@ class KkAgentRedmineAnalyzer:
     async def _analyze_once(self, entry: dict[str, Any]) -> KkAgentAnalysisResult:
         """执行一次 headless 分析：MCP 健康/证据预检 → stream → gate → 修复。"""
         progress = entry.get("_progress_recorder") if isinstance(entry, dict) else None
-        # MCP 健康前置检查（#653167 nightly 复盘）：gms MCP server 未连接
-        # 时 LLM 会话注定以 evidence_gate_failed 收场（CLI 兜底取证不被
-        # gate 记分），9 分钟 + 40 万 tokens 纯浪费。doctor 探活失败直接
-        # 快速失败并给出恢复步骤。
+        # MCP 预检失败时直接返回，避免启动注定无法过门禁的 LLM 会话。
         health = await probe_kkagent_mcp_health(self.env_extra)
         if progress is not None:
             progress.tool_started(
@@ -434,11 +415,22 @@ class KkAgentRedmineAnalyzer:
 
         if entry.get("analysis_mode") == "diagnostic":
             result = native_summary_result(trace, entry)
-            if result is not None:
+            if result is None:
+                trace.status = trace.error_type = "invalid_ai_output"
+                trace.error = "kkagent 未返回最终分析总结。"
+                return self._failure(trace, raw)
+            _gate, findings = gate_and_errors(trace, entry, result)
+            if not findings:
                 trace.status = "completed"
                 return self._success(result, trace, raw)
-            trace.status = trace.error_type = "invalid_ai_output"
-            trace.error = "kkagent 未返回最终分析总结。"
+            repaired, trace = await self._repair(entry, trace, findings)
+            if repaired is not None:
+                return repaired
+            result = native_summary_result(trace, entry) or result
+            _gate, findings = gate_and_errors(trace, entry, result)
+            trace.status, trace.error_type, trace.error = classify_gate_failure(
+                trace, findings
+            )
             return self._failure(trace, raw)
 
         result, errors = parse_issue_result(trace=trace, raw=raw.text())
@@ -479,12 +471,7 @@ class KkAgentRedmineAnalyzer:
         trace: KkAgentTrace,
         gate_errors_list: list[str],
     ) -> tuple[KkAgentAnalysisResult | None, KkAgentTrace]:
-        """--resume <session_id> 补证据/修 schema，并保留全部修复轨迹。
-
-        ``gate_errors_list`` 同时承载两类 findings：evidence gate 错误与
-        schema 校验错误（"schema validation failed: ..."）。修复轮重新
-        parse + 重新 gate，任何一类仍有残余即视为修复失败。
-        """
+        """同 session 补证据/修输出，合并轨迹后重新执行 Evidence Gate。"""
         session_id = trace.session_id
         if not session_id:
             # 启动失败/认证失败/session 未创建：没有可 resume 的对象。
@@ -493,10 +480,16 @@ class KkAgentRedmineAnalyzer:
         findings = list(gate_errors_list)
         merged = trace
         progress = entry.get("_progress_recorder") if isinstance(entry, dict) else None
+        native_summary = entry.get("analysis_mode") == "diagnostic"
         for _attempt in range(REPAIR_RESUME_RETRIES):
-            repair_prompt = self.build_repair_prompt(findings)
+            repair_prompt = (
+                native_evidence_repair_prompt(findings)
+                if native_summary else self.build_repair_prompt(findings)
+            )
             if progress is not None:
-                progress.stage_changed("正在自动修复输出格式")
+                progress.stage_changed(
+                    "正在自动补齐取证" if native_summary else "正在自动修复输出格式"
+                )
             repair_trace, raw, timed_out = await self._run_stream(
                 self.build_repair_command(repair_prompt, session_id), progress
             )
@@ -517,7 +510,13 @@ class KkAgentRedmineAnalyzer:
                 findings = [repair_trace.error or repair_trace.error_type]
                 continue
 
-            result, errors = parse_issue_result(trace=repair_trace, raw=raw.text())
+            if native_summary:
+                result = native_summary_result(merged, entry)
+                errors = [] if result is not None else [
+                    "repair did not return a complete diagnostic Markdown report"
+                ]
+            else:
+                result, errors = parse_issue_result(trace=repair_trace, raw=raw.text())
             if result is None:
                 findings = errors or ["repair output is invalid"]
                 merged.errors.extend(findings[:10])

@@ -233,7 +233,7 @@ async def list_gms_update_monitor_changes(
         where.append('change_type = ?')
         params.append(change_type)
     if q:
-        where.append('(entity_key LIKE ? OR before_json LIKE ? OR after_json LIKE ?)')
+        where.append('(entity_key LIKE ? ESCAPE "\" OR before_json LIKE ? ESCAPE "\" OR after_json LIKE ? ESCAPE "\")')
         like = _like_param(q)
         params.extend([like, like, like])
     where_sql = f"WHERE {' AND '.join(where)}" if where else ''
@@ -289,8 +289,8 @@ async def list_gms_update_monitor_artifacts(
     if q:
         like = _like_param(q)
         where.append(
-            '(release_name LIKE ? OR file_name LIKE ? OR download_url LIKE ? OR '
-            'description LIKE ? OR target_platform LIKE ? OR section_path LIKE ?)'
+            '(release_name LIKE ? ESCAPE "\" OR file_name LIKE ? ESCAPE "\" OR download_url LIKE ? ESCAPE "\" OR '
+            'description LIKE ? ESCAPE "\" OR target_platform LIKE ? ESCAPE "\" OR section_path LIKE ? ESCAPE "\")'
         )
         params.extend([like, like, like, like, like, like])
     where_sql = f"WHERE {' AND '.join(where)}" if where else ''
@@ -393,7 +393,7 @@ async def list_gms_update_monitor_packages(
         params.append(section)
     if q:
         like = _like_param(q)
-        where.append('(file_name LIKE ? OR partner_gerrit_tag LIKE ? OR description LIKE ? OR download_url LIKE ?)')
+        where.append('(file_name LIKE ? ESCAPE "\" OR partner_gerrit_tag LIKE ? ESCAPE "\" OR description LIKE ? ESCAPE "\" OR download_url LIKE ? ESCAPE "\")')
         params.extend([like, like, like, like])
     where_sql = f"WHERE {' AND '.join(where)}" if where else ''
     with conn:
@@ -441,7 +441,7 @@ async def list_gms_update_monitor_mainline(
         params.append(month.lower())
     if q:
         like = _like_param(q)
-        where.append('(preload_version LIKE ? OR partner_zip_build_id LIKE ? OR notes_url LIKE ? OR ci_build_url LIKE ?)')
+        where.append('(preload_version LIKE ? ESCAPE "\" OR partner_zip_build_id LIKE ? ESCAPE "\" OR notes_url LIKE ? ESCAPE "\" OR ci_build_url LIKE ? ESCAPE "\")')
         params.extend([like, like, like, like])
     where_sql = f"WHERE {' AND '.join(where)}" if where else ''
     with conn:
@@ -479,7 +479,7 @@ async def list_gms_update_monitor_requirement_sections(
         where.append("number != '' AND number NOT LIKE '%.%'")
     if q:
         like = _like_param(q)
-        where.append('(number LIKE ? OR title LIKE ? OR path LIKE ? OR text_excerpt LIKE ?)')
+        where.append('(number LIKE ? ESCAPE "\" OR title LIKE ? ESCAPE "\" OR path LIKE ? ESCAPE "\" OR text_excerpt LIKE ? ESCAPE "\")')
         params.extend([like, like, like, like])
     where_sql = f"WHERE {' AND '.join(where)}" if where else ''
     with conn:
@@ -543,7 +543,7 @@ async def list_gms_update_monitor_requirement_version_tags(
         params.append(change_kind)
     if q:
         like = _like_param(q)
-        where.append('(section_title LIKE ? OR requirement_ids LIKE ? OR text_excerpt LIKE ?)')
+        where.append('(section_title LIKE ? ESCAPE "\" OR requirement_ids LIKE ? ESCAPE "\" OR text_excerpt LIKE ? ESCAPE "\")')
         params.extend([like, like, like])
     where_sql = f"WHERE {' AND '.join(where)}" if where else ''
     with conn:
@@ -578,7 +578,7 @@ async def list_gms_update_monitor_requirement_table_rows(
         params.append(section_key)
     if q:
         like = _like_param(q)
-        where.append('(section_title LIKE ? OR row_text LIKE ? OR headers_json LIKE ? OR values_json LIKE ?)')
+        where.append('(section_title LIKE ? ESCAPE "\" OR row_text LIKE ? ESCAPE "\" OR headers_json LIKE ? ESCAPE "\" OR values_json LIKE ? ESCAPE "\")')
         params.extend([like, like, like, like])
     where_sql = f"WHERE {' AND '.join(where)}" if where else ''
     with conn:

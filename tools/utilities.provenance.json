@@ -1,0 +1,41 @@
+{
+  "description": "tools/ 根目录散装分发工件（按 stable tool_id / 内部路径直接分发的二进制与镜像）统一溯源清单。这些文件不属于任何单个工具目录，历史上没有统一完整性门禁；本清单按统一 provenance schema（见 tests/architecture/test_tool_provenance.py）登记来源、版本与 sha256，替换任何文件必须同步刷新对应条目。",
+  "utilities": {
+    "tools/jq-linux-amd64": {
+      "description": "jq 命令行 JSON 处理器，供 Worker/部署脚本使用（scripts/prepare_pinned_jq.sh 安装并强校验同一 sha256）",
+      "source": "https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64",
+      "upstream": "https://github.com/jqlang/jq",
+      "pinned_version": "1.8.1",
+      "license": "MIT（上游 jq LICENSE）",
+      "sha256": "020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d",
+      "update_procedure": "scripts/prepare_pinned_jq.sh 内固定 JQ_VERSION/EXPECTED_SHA256 并下载校验；升级时同步修改该脚本与本条目。"
+    },
+    "tools/scrcpy-linux-x86_64-v3.3.4.tar.gz": {
+      "description": "scrcpy 发行包（server jar + 依赖），经 utility_tools_api 以 stable tool_id 'scrcpy' 分发",
+      "source": "https://github.com/Genymobile/scrcpy/releases/download/v3.3.4/scrcpy-linux-x86_64-v3.3.4.tar.gz",
+      "upstream": "https://github.com/Genymobile/scrcpy",
+      "pinned_version": "3.3.4",
+      "license": "Apache-2.0（上游 scrcpy LICENSE；server jar 同源）",
+      "sha256": "0305d98c06178c67e12427bbf340c436d0d58c9e2a39bf9ffbbf8f54d7ef95a5",
+      "update_procedure": "下载上游 release tar.gz 放入 tools/，同步更新 features/system/utility_tools_api.py 的 'scrcpy' 条目 path/download_name 与本条目 pinned_version/sha256。"
+    },
+    "tools/upgrade_tool": {
+      "description": "Rockchip 升级工具（burn 烧写链路使用的静态链接 ELF 闭源二进制，取自 Rockchip 官方 Linux 工具包），经 utility_tools_api 以 stable tool_id 'upgrade-tool' 分发",
+      "source": "https://opensource.rockchip.com/",
+      "upstream": "https://opensource.rockchip.com/",
+      "pinned_version": "unversioned（Rockchip 二进制未内嵌版本号，以 sha256 为准）",
+      "license": "Rockchip 专有（LicenseRef-Proprietary-Rockchip；仅内部分发，不对外再发布）",
+      "sha256": "aaa03f022957cc7decc427a11857181f2724c7c5a4a0b586008d472d8192d511",
+      "update_procedure": "从 Rockchip 官方工具包获取新 upgrade_tool，替换 tools/upgrade_tool 后重算并更新本条目 sha256；firmware burn 门禁依赖该文件与设备端固件配套，升级前先在实验台验证。"
+    },
+    "tools/misc.img": {
+      "description": "Rockchip loader/parameter 镜像（擦除 misc 分区等维护操作使用，取自 Rockchip 官方固件工具包），经 utility_tools_api 以 stable tool_id 'misc-img' 分发",
+      "source": "https://opensource.rockchip.com/",
+      "upstream": "https://opensource.rockchip.com/",
+      "pinned_version": "unversioned（Rockchip 未在镜像内嵌版本，以 sha256 为准）",
+      "license": "Rockchip 专有（LicenseRef-Proprietary-Rockchip；仅内部分发，不对外再发布）",
+      "sha256": "a38370aa07463a6c7837205fca9804023a6a6e9f7c2488331cafce88755fb705",
+      "update_procedure": "从 Rockchip 官方固件工具包获取新 misc.img，替换后重算并更新本条目 sha256。"
+    }
+  }
+}

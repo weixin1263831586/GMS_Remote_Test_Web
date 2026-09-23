@@ -47,6 +47,7 @@ from .diagnosis_recalls import (
     search_system_background,
 )
 from .display import report_display_name
+from .knowledge_ranking import android_api_level_from_request
 from .uploads import ReportUploadTooLargeError, stage_report_uploads
 
 
@@ -498,7 +499,10 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
                 }
 
         # 第五路召回：Android 系统机制背景知识（ADR 0014, background-only）。
+        # 报告上下文的 Android 版本统一转换为 API level 透传，version-aware
+        # rerank 在这条主入口同样生效（knowledge_ranking 统一 helper）。
         background_query = " ".join(keywords[:6]) or request.test_name or (request.error_message or "")[:120]
+        background_api_level = android_api_level_from_request(request)
 
         # 召回通道编排：suite target / AI / 内部案例 KB / Mainline 豁免 /
         # 系统机制背景五路并行；KB 与 Mainline 的失败降级实现在
@@ -508,7 +512,9 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
             _run_ai_analysis(),
             search_knowledge_base(http_request, request, keywords),
             search_mainline_exemptions(request),
-            search_system_background(background_query),
+            search_system_background(
+                background_query, android_api_level=background_api_level
+            ),
         )
 
         source_search_results = []

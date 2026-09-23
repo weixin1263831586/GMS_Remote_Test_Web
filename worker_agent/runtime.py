@@ -28,6 +28,10 @@ class WorkerRuntime:
         self._processes: dict[str, subprocess.Popen] = {}
         self._lock = threading.RLock()
         with self.connect() as conn:
+            # The schema snapshot and ALTERs must be one process-safe unit.
+            # A per-runtime Python lock is insufficient when the service,
+            # CLI and a restarted worker open the same database together.
+            conn.execute("BEGIN IMMEDIATE")
             conn.execute("""CREATE TABLE IF NOT EXISTS commands (
                 id TEXT PRIMARY KEY, status TEXT NOT NULL, result_json TEXT NOT NULL,
                 error TEXT NOT NULL, controller_synced INTEGER NOT NULL DEFAULT 0,

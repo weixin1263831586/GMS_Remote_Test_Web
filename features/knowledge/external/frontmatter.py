@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import datetime
 import logging
 import re
 from typing import Any
@@ -36,6 +37,23 @@ def _scalarize(value: Any) -> str:
     return str(value).strip()
 
 
+def _jsonable(value: Any) -> Any:
+    """递归把 YAML 特有标量转为 JSON 稳定表示。
+
+    PyYAML 会把未加引号的 ISO 日期解析成 ``datetime.date``（真实语料
+    存在 ``last_verified: 2026-08-15`` 写法），随后 ``_apply_pages`` 的
+    ``json.dumps`` 直接 TypeError——整库 reindex 失败。统一在解析边界
+    转为 ISO 字符串，语义不变、下游（快照投影/检索展示）无感。
+    """
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, (datetime.date, datetime.datetime)):
+        return value.date().isoformat() if isinstance(value, datetime.datetime) else value.isoformat()
+    return value
+
+
 def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     """安全 YAML frontmatter 解析：保留 tags/sources 等数组与嵌套结构。
 
@@ -55,7 +73,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 
         loaded = yaml.safe_load(block)
         if isinstance(loaded, dict):
-            return loaded, body
+            return _jsonable(loaded), body
         return {}, body
     except ImportError:
         pass

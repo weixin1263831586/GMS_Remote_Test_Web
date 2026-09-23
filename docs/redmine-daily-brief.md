@@ -106,7 +106,8 @@ display id 比对 `run.owner_id`。schema v5 迁移会把存量库里的 legacy
 在「每日晨报」顶部的「单号分析」输入 Redmine 单号，点击「开始分析」
 或按 Enter。该入口仅排队诊断输入的工单，不扫描待处理列表，也不要求
 工单先出现在晨报里。结果直接展示 kkagent 的原始 Markdown 总结，
-「停止此项」仅取消对应任务。单号任务与 nightly/delta 晨报分别保存。
+任务运行中可用「停止分析」取消对应任务（停止后仍会记录 cancelled
+终态事件）。单号任务与 nightly/delta 晨报分别保存。
 
 API：`POST /api/redmine-agent/daily-brief/analyze-issue`，JSON 为
 `{"issue_id":647338}`；返回 `run_id` / `job_id`。通过

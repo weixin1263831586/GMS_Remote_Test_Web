@@ -147,13 +147,21 @@ def _gather_kb_hits(kb: Any, kb_query: str, probe: dict[str, str]) -> list[dict]
     return rank_kb_hits(merged, probe)
 
 
-async def search_system_background(query: str) -> list[dict]:
+async def search_system_background(
+    query: str,
+    *,
+    android_api_level: int | None = None,
+) -> list[dict]:
     """Android 系统机制背景知识召回（ADR 0014，background-only）。
 
     federated_search 走函数内延迟导入：features.knowledge.api 初始化会经
     assistant→reports 链回到本模块，顶层导入会造成循环 import（与
     federation._build_from_config 的延迟手法一致）。联邦层自身已做失败
     隔离；这里再兜底一层，保证该通道任何异常都不影响其余召回与 200 响应。
+
+    ``android_api_level`` 由调用方从报告上下文统一转换
+    （knowledge_ranking.android_api_level_from_request）并透传，使
+    version-aware rerank 在报告自动诊断这条主入口同样生效。
     """
     query = (query or "").strip()
     if not query:
@@ -162,7 +170,11 @@ async def search_system_background(query: str) -> list[dict]:
         from features.knowledge import federated_search
 
         data = await asyncio.to_thread(
-            federated_search, query, sources=[BACKGROUND_SOURCE], limit=BACKGROUND_LIMIT
+            federated_search,
+            query,
+            sources=[BACKGROUND_SOURCE],
+            limit=BACKGROUND_LIMIT,
+            android_api_level=android_api_level,
         )
         return list(data.get("results") or [])[:BACKGROUND_LIMIT]
     except Exception as exc:

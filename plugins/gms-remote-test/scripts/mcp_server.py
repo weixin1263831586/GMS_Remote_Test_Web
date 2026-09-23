@@ -102,7 +102,7 @@ mcp_tool_schemas = _load_tool_schemas()
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.26"
+SERVER_VERSION = "0.22.27"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -252,6 +252,15 @@ def _sdk_fast_call(command: str, args: list[str]) -> tuple[str, bool] | None:
         else:
             positional.append(token)
         index += 1
+
+    # The shell command exposes --worker and performs --query filtering
+    # client-side.  The HTTP inventory route accepts worker_id only; retain
+    # the shell implementation whenever query semantics are requested.
+    if normalize_command(command) == "gms-rt-cluster-devices":
+        if "query" in params:
+            return None
+        if "worker" in params:
+            params["worker_id"] = params.pop("worker")
 
     try:
         if _sdk_client is None:
@@ -1444,6 +1453,21 @@ def run_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             True,
         )
     args = arguments.get("args")
+    # A profile owns both the Controller origin and its service token.  The
+    # generic read-only runner must never let prompt/tool input retarget that
+    # token (nor relax the profile's TLS policy).  Typed tools do not accept
+    # these transport switches in the first place.
+    if args is None:
+        args = []
+    if not isinstance(args, list) or not all(isinstance(item, str) for item in args):
+        return "args must be an array of strings", True
+    transport_switches = (
+        "--server", "--ca-cert", "--insecure", "--profile",
+        "--token", "--password-stdin",
+    )
+    for item in args:
+        if item in transport_switches or any(item.startswith(f"{name}=") for name in transport_switches):
+            return "denied: MCP cannot override profile, authentication, server, or TLS settings", True
     stdin_text = arguments.get("password_stdin")
     if stdin_text is not None and not isinstance(stdin_text, str):
         return "password_stdin must be a string", True

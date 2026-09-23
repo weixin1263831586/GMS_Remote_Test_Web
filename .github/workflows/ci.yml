@@ -299,6 +299,46 @@ jobs:
           path: artifacts/
           if-no-files-found: ignore
 
+  # 知识召回质量专用 job（评审 P1）：普通 unit job 不部署 gitignored 的
+  # tools/android-internals-wiki，Golden Query 语料级测试只会静默 skip——
+  # "看起来在跑 knowledge tests，实际召回质量零验证"。这里显式 clone
+  # pinned revision（pin 变更必须走评审提交，fail-closed）→ 全量重建
+  # 临时索引 → 重放 golden corpus（recall@5 + 负例零召回 + 防漂移）。
+  # 上游 revision 升级流程：改 GMS_WIKI_PINNED_REVISION → 本 job 红转绿
+  # 即召回质量对齐；若 recall 断言失败说明上游语料变化，需要评审判断。
+  knowledge-quality:
+    name: knowledge-quality-golden-corpus
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # 本地已验证的语料 revision（golden corpus 通过）；升级 pin 时先在
+      # 本地重放 golden query，确认 recall 断言仍成立再改这里。
+      GMS_WIKI_PINNED_REVISION: "64a3963aedee5a5961ef25963520b991f14b51a1"
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Prepare pinned wiki clone + fresh temp index
+        run: |
+          bash tools/scripts/testing/prepare_knowledge_quality_corpus.sh
+      - name: Golden query corpus recall gate
+        env:
+          # prepare 步骤已把 GMS_DATA_ROOT 指向临时根并完成 reindex；
+          # 测试直接消费同一路径的索引（只读）。
+          GMS_WIKI_INDEX_DB: ${{ github.workspace }}/../gms-knowledge-index/android_internals.sqlite3
+        run: |
+          # 上一步的 GMS_DATA_ROOT 指向 mktemp 目录；直接从导出文件定位。
+          idx="${GMS_DATA_ROOT:-}/knowledge/external/android_internals.sqlite3"
+          test -f "${idx}" || { echo "::error::temp index missing: ${idx}"; exit 1; }
+          GMS_WIKI_INDEX_DB="${idx}" pytest \
+            "features/knowledge/tests/test_external_provider.py::GoldenQueryCorpusTests" -v
+
   worker-agent:
     name: worker-agent
     runs-on: ubuntu-latest
@@ -423,6 +463,7 @@ jobs:
       secret-scan, lint, dependency-audit, static-sast,
       unit-foundation, unit-feature-auth-system, unit-feature-devices-firmware,
       unit-feature-test-execution, unit-feature-assistant-reports,
+      knowledge-quality,
       worker-agent,
       security, agent-package, browser-e2e,
     ]

@@ -97,6 +97,27 @@ class CommandEventsRepositoryTests(unittest.TestCase):
             self.assertEqual(repo.list_command_events("cmd-1"), [])
             self.assertEqual(len(repo.list_command_events("cmd-2")), 1)
 
+    def test_prune_skips_old_commands_that_no_longer_have_events(self):
+        """An empty oldest batch must not starve later event-bearing rows."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = _repository(tmp)
+            with repo.connect() as conn:
+                conn.execute(
+                    "UPDATE cluster_commands SET status='completed',"
+                    "updated_at='2020-01-01T00:00:00Z' WHERE id='cmd-1'"
+                )
+                conn.execute("""INSERT INTO cluster_commands
+                    (id,worker_id,command_type,job_id,attempt_id,dispatch_token,
+                     payload_json,status,result_json,error,created_at,updated_at,
+                     delivered_at,acknowledged_at)
+                    VALUES('cmd-2','worker-A','flash_gsi','','','tok','{}',
+                           'completed','{}','','2020-01-01','2020-01-02','','')""")
+            repo.append_command_events("worker-A", "cmd-2", [
+                {"sequence": 0, "message": "later event"},
+            ])
+            self.assertEqual(repo.prune_terminal_command_events(retention_hours=1, limit=1), 1)
+            self.assertEqual(repo.list_command_events("cmd-2"), [])
+
 
 class CommandEventsApiTests(unittest.TestCase):
     def _client(self, repo, patches):

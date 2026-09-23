@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
-from features.users import get_client_id_from_request
+from features.users import owner_id_from_request
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 from foundation.uploads import save_upload_to_path
@@ -51,7 +51,10 @@ async def _stage_upload(file: UploadFile, user_id: str):
 
 
 def _user(request: Request) -> str:
-    return get_client_id_from_request(request)
+    # Knowledge is account-owned data.  Agent token IDs are intentionally
+    # rotated, so using the actor/client ID here silently partitions one
+    # account's documents on every token rotation.
+    return owner_id_from_request(request)
 
 
 def _space_id(user_id: str, requested: str = "") -> str:
@@ -210,11 +213,32 @@ async def get_doc(request: Request, doc_id: str):
 @handle_api_errors
 async def update_doc(request: Request, doc_id: str):
     data = await request.json()
+    if not isinstance(data, dict):
+        return error_response("请求体必须是 JSON 对象", 422)
     allowed = {
         k: v
         for k, v in data.items()
         if k in {"title", "content_md", "raw_content", "summary", "tags", "links", "favorite", "source", "source_file"}
     }
+    # 值类型校验:存储层直接把这些值绑定进 sqlite,任意 JSON 类型(list/
+    # dict/对象)会触发 InterfaceError 走异常路径(应映射为 422 请求错误,
+    # 而不是 500 编程错误)。favorite 仅接受 0/1 布尔语义。
+    _TEXT_FIELDS = {"title", "content_md", "raw_content", "summary", "source", "source_file"}
+    for key, value in allowed.items():
+        if key in _TEXT_FIELDS:
+            if value is not None and not isinstance(value, str):
+                return error_response(f"字段 {key} 必须是字符串", 422)
+        elif key == "favorite":
+            if not isinstance(value, (bool, int)) or isinstance(value, float):
+                return error_response("字段 favorite 必须是 0/1", 422)
+        elif key == "tags":
+            if not isinstance(value, (list, str)):
+                return error_response("字段 tags 必须是字符串或字符串数组", 422)
+            if isinstance(value, list) and not all(isinstance(t, str) for t in value):
+                return error_response("字段 tags 数组元素必须是字符串", 422)
+        elif key == "links":
+            if not isinstance(value, list):
+                return error_response("字段 links 必须是数组", 422)
     doc = _service.store.update_doc(_user(request), doc_id, allowed)
     if not doc:
         return error_response("文档不存在", 404)

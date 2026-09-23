@@ -431,7 +431,9 @@ window.downloadTestSuite = async function downloadTestSuite() {
     const log = (msg) => {
         if (logDiv) {
             const time = new Date().toLocaleTimeString();
-            logDiv.innerHTML += `[${time}] ${msg}\n`;
+            // msg 可能携带服务端返回的 error/archive_path 等远端数据,
+            // 必须转义后插入(与页面其余 escapeHtml 用法一致)。
+            logDiv.innerHTML += `[${time}] ${escapeHtml(msg)}\n`;
             logDiv.scrollTop = logDiv.scrollHeight;
         }
         debugLog('[downloadTestSuite] ' + msg);
@@ -569,7 +571,7 @@ async function pollDownloadProgress(taskId) {
         const sizeMb = ((completedTask.downloaded_size || 0) / 1024 / 1024).toFixed(2);
         if (logDiv) {
             const time = new Date().toLocaleTimeString();
-            logDiv.innerHTML += `[${time}] ✅ 下载完成：${completedTask.archive_path}\n`;
+            logDiv.innerHTML += `[${time}] ✅ 下载完成：${escapeHtml(completedTask.archive_path)}\n`;
             logDiv.innerHTML += `[${time}] 📦 文件大小：${sizeMb} MB\n`;
         }
         notifyOperationResult(
@@ -809,7 +811,7 @@ window.submitExtractSuite = async function submitExtractSuite() {
         if (logDiv) {
             logDiv.style.display = 'block';
             const time = new Date().toLocaleTimeString();
-            logDiv.innerHTML += `[${time}] 开始解压：${archivePath}\n`;
+            logDiv.innerHTML += `[${time}] 开始解压：${escapeHtml(archivePath)}\n`;
         }
 
         const suiteWorkerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
@@ -851,7 +853,7 @@ window.submitExtractSuite = async function submitExtractSuite() {
             }
             if (logDiv) {
                 const time = new Date().toLocaleTimeString();
-                logDiv.innerHTML += `[${time}] ✅ 解压完成：${completedTask.extracted_path}\n`;
+                logDiv.innerHTML += `[${time}] ✅ 解压完成：${escapeHtml(completedTask.extracted_path)}\n`;
             }
             notifyOperationResult(
                 '测试套件解压完成',
@@ -866,7 +868,7 @@ window.submitExtractSuite = async function submitExtractSuite() {
         } else {
             if (logDiv) {
                 const time = new Date().toLocaleTimeString();
-                logDiv.innerHTML += `[${time}] ❌ 解压失败：${result2.error}\n`;
+                logDiv.innerHTML += `[${time}] ❌ 解压失败：${escapeHtml(result2.error)}\n`;
             }
             notifyOperationResult(
                 '测试套件解压失败',
@@ -879,7 +881,7 @@ window.submitExtractSuite = async function submitExtractSuite() {
     } catch (error) {
         if (logDiv) {
             const time = new Date().toLocaleTimeString();
-            logDiv.innerHTML += `[${time}] ❌ 错误：${error.message}\n`;
+            logDiv.innerHTML += `[${time}] ❌ 错误：${escapeHtml(error.message)}\n`;
         }
         notifyOperationResult(
             '测试套件解压失败',

@@ -13,6 +13,8 @@ import asyncio
 import unittest
 from unittest.mock import patch
 
+from starlette.requests import Request
+
 from features.devices import adb_forward_api
 from features.firmware import gsi_sn_burn
 
@@ -31,9 +33,10 @@ class _JSONBody:
 
 class AdbForwardStartStatusTests(unittest.TestCase):
     def _start(self, exc: Exception | None = None, manager_result: dict | None = None):
-        request = adb_forward_api.ADBForwardStartRequest(
+        body = adb_forward_api.ADBForwardStartRequest(
             device_host="127.0.0.1",
         )
+        request = Request({"type": "http", "method": "POST", "headers": []})
         with (
             patch.object(
                 adb_forward_api.adb_forward_manager,
@@ -48,7 +51,7 @@ class AdbForwardStartStatusTests(unittest.TestCase):
                 fake_start.side_effect = exc
             else:
                 fake_start.return_value = manager_result or {}
-            response = asyncio.run(adb_forward_api.start_adb_forward(request))
+            response = asyncio.run(adb_forward_api.start_adb_forward(request, body))
 
         if isinstance(response, _JSONBody):
             return response.status_code

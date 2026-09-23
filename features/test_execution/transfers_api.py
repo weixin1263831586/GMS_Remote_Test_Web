@@ -157,8 +157,8 @@ async def list_tradefed_results(
             )
         return JSONResponse(content=result)
     except Exception as e:
-        logger.error(f"Error listing tradefed results: {e}")
-        return error_response(str(e), 500)
+        logger.exception("Error listing tradefed results: %s", e)
+        return error_response("Internal server error", 500)
 
 
 @router.post("/api/test/suites/download-url", dependencies=_WRITE_AUTH)

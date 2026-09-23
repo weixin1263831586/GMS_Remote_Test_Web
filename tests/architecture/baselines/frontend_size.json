@@ -1,0 +1,26 @@
+{
+  "comment": "前端资源字节 ceiling baseline(独立持久化的 size ratchet)。规则同 file_size.json:只减不增;上调/新增登记必须带 waivers 理由与 expiry。",
+  "unit": "bytes",
+  "ceilings": {
+    "web/shell/shell.html": 257395,
+    "web/static/css/common.css": 148115,
+    "web/static/js/api-constants.js": 35745,
+    "web/static/js/navigation.js": 39268,
+    "web/static/js/pages/api-docs.js": 50374,
+    "web/static/js/pages/firmware-burn.js": 129988,
+    "web/static/js/pages/report-analysis.js": 93063,
+    "web/static/js/pages/test-suite-browser.js": 125689,
+    "web/static/js/shell/shell-main.js": 288095,
+    "web/static/js/shell/weekly-report.js": 41351
+  },
+  "waivers": {
+    "web/static/js/navigation.js": {
+      "reason": "登记时文件已超旧 ceiling(并发改动);后续拆分回落",
+      "expires": "2026-11-06"
+    },
+    "web/static/js/pages/test-suite-browser.js": {
+      "reason": "XSS 修复:下载/解压日志插值补 escapeHtml(6 处);后续公共日志组件拆分回落",
+      "expires": "2026-11-04"
+    }
+  }
+}

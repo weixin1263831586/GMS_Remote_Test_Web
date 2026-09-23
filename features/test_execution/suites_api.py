@@ -154,8 +154,9 @@ async def diagnose_suite_target(
         )
         return ApiResponse.success(target)
     except Exception as e:
-        logger.error(f"[TestSuites] Diagnosis target failed: {e}", exc_info=True)
-        return ApiResponse.error(f"Targeting failed: {e}", status_code=500)
+        logger.error("[TestSuites] Diagnosis target failed: %s", e, exc_info=True)
+        # 不回显 str(e):异常文本可能含路径/命令,详见 foundation/errors.py。
+        return ApiResponse.error("Internal server error", status_code=500)
 
 
 def _normalize_suite_relative_path(path: str | None) -> str:

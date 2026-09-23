@@ -125,6 +125,10 @@ def _get_model_by_tool() -> dict[str, type]:
             WifiConnectRequest,
         )
         from features.firmware import SNBurnRequest
+
+        # features.knowledge 的公共面不含请求模型;经延迟导入引用其 API
+        # 模块(跨 feature 深层内部 import 会被依赖门禁拦截)。
+        from features.knowledge import external_api as _knowledge_external_api
         from features.reports import ReportDiagnosisRequest
         from features.system import VNCStartRequest, VPNConnectRequest
         from features.test_execution import (
@@ -134,6 +138,7 @@ def _get_model_by_tool() -> dict[str, type]:
             TradefedListResultsRequest,
         )
         from features.users import ClientInfoRequest
+
         _MODEL_BY_TOOL = {
             "users_detect": ClientInfoRequest,
             "users_set_username": ClientInfoRequest,
@@ -159,6 +164,9 @@ def _get_model_by_tool() -> dict[str, type]:
             "usbip_connect": USBIPStartRequest,
             "usbip_disconnect": USBIPDisconnectRequest,
             "burn_serial": SNBurnRequest,
+            # knowledge external search: 请求体经 ExternalSearchRequest 建模,
+            # android_api_level 的范围校验(1-1000)在此生效。
+            "android_internals_search": _knowledge_external_api.ExternalSearchRequest,
         }
     return _MODEL_BY_TOOL
 
@@ -305,6 +313,7 @@ class ActionExecutor:
         try:
             module = importlib.import_module(module_path)
             func = getattr(module, func_name)
+            await ActionExecutor._enforce_route_dependencies(module, func, request)
             signature = _cached_signature(func)
             if "request" in signature.parameters:
                 if request is None:
@@ -1286,6 +1295,10 @@ class ActionExecutor:
             return ToolResult(success=False, tool_name=tool.name, error=f"Cannot resolve {ref}: {e}")
 
         try:
+            # Calling an endpoint object directly bypasses FastAPI's route
+            # dependency graph.  Resolve route-level guards (notably
+            # human-only policies) explicitly before binding any caller data.
+            await self._enforce_route_dependencies(module, func, request)
             call_kwargs = self._build_call_kwargs(func, tool, request, params)
             if asyncio.iscoroutinefunction(func):
                 response = await func(**call_kwargs)
@@ -1313,6 +1326,24 @@ class ActionExecutor:
                 page=_TOOL_PAGES.get(tool.category, ""),
             )
 
+    @staticmethod
+    async def _enforce_route_dependencies(module: Any, func: Any, request: Any) -> None:
+        routers = [value for value in vars(module).values() if value.__class__.__name__ == "APIRouter"]
+        for router in routers:
+            for route in router.routes:
+                if getattr(route, "endpoint", None) is not func:
+                    continue
+                for dependency_parameter in getattr(route, "dependencies", ()):
+                    if request is None:
+                        raise HTTPException(status_code=401, detail="Route authorization context is required")
+                    dependency = getattr(dependency_parameter, "dependency", None)
+                    if not callable(dependency):
+                        raise HTTPException(status_code=403, detail="Unsupported route authorization dependency")
+                    resolved = dependency(request)
+                    if inspect.isawaitable(resolved):
+                        await resolved
+                return
+
     def _build_call_kwargs(self, func: Any, tool: AgentTool, request: Any, params: dict[str, Any]) -> dict[str, Any]:
         from features.assistant.api import AgentRequestShim
 
@@ -1320,12 +1351,27 @@ class ActionExecutor:
 
         query_params = self._query_params_for_tool(tool, params)
         body_params = self._body_params_for_tool(tool, params)
+        sig = _cached_signature(func)
+        dependency_names = {
+            name for name, parameter in sig.parameters.items()
+            if (
+                parameter.default is not inspect.Parameter.empty
+                and parameter.default.__class__.__module__.startswith("fastapi.params")
+                and parameter.default.__class__.__name__ == "Depends"
+            )
+        }
+        supplied_dependencies = dependency_names.intersection(params or {})
+        if supplied_dependencies:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Reserved authorization parameters are not accepted: {sorted(supplied_dependencies)}",
+            )
+
         shim = AgentRequestShim(
             request,
             query_params=query_params,
             json_body=body_params,
         ) if request else None
-        sig = _cached_signature(func)
         kwargs: dict[str, Any] = {}
 
         for name, parameter in sig.parameters.items():
@@ -1335,16 +1381,15 @@ class ActionExecutor:
                 kwargs[name] = False
             elif name == "h":
                 kwargs[name] = None
-            elif name in ("req", "body"):
+            elif name in ("req", "body", "payload"):
+                # "payload" 是 knowledge external_api 等路由的请求体形参,
+                # 与 req/body 同语义(POST body),此前未绑定导致 assistant
+                # 经 executor_ref 直调 search_external 时必现缺参。
                 model = model_by_tool.get(tool.name)
                 if model:
                     kwargs[name] = model(**body_params)
                 else:
                     kwargs[name] = body_params
-            elif name in params:
-                kwargs[name] = params[name]
-            elif name in query_params:
-                kwargs[name] = query_params[name]
             elif (
                 parameter.default is not inspect.Parameter.empty
                 and parameter.default.__class__.__module__.startswith("fastapi.params")
@@ -1360,6 +1405,10 @@ class ActionExecutor:
                 if inspect.isawaitable(resolved):
                     raise RuntimeError("Async route dependencies are not supported")
                 kwargs[name] = resolved
+            elif name in params:
+                kwargs[name] = params[name]
+            elif name in query_params:
+                kwargs[name] = query_params[name]
             elif parameter.default is not inspect.Parameter.empty:
                 default = parameter.default
                 if default.__class__.__module__.startswith("fastapi.params"):

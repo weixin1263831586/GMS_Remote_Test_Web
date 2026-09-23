@@ -68,13 +68,17 @@ class TestsApi:
         max_wait: int | None = None,
         worker_id: str | None = None,
     ) -> Any:
-        body: dict[str, Any] = {"device": device, "module": module, "case": case}
+        body: dict[str, Any] = {
+            "devices": [device] if device else [],
+            "test_module": module or "",
+            "test_case": case or "",
+        }
         if suite:
-            body["suite"] = suite
+            body["test_suite"] = suite
         if test_type:
-            body["type"] = test_type
+            body["test_type"] = test_type
         if retry:
-            body["retry"] = retry
+            body["retry_dir"] = retry
         if wait:
             body["wait"] = wait
         if max_wait is not None:

@@ -7,11 +7,40 @@ import re
 from .api_models import ReportDiagnosisRequest
 
 
-def android_version_from_request(request: ReportDiagnosisRequest) -> str:
-    """Best-effort Android major version from a suite version."""
-    raw = (getattr(request, "suite_version", "") or "").strip()
-    match = re.match(r"(\d+)", raw)
+#: Android 大版本 → API level（A13/A14/A15/A16/A17 → 33/34/35/36/37）。
+#: 统一 helper：报告诊断、外部知识 version-aware rerank 共用，不要各入口自行猜。
+_ANDROID_API_BY_MAJOR = {
+    "13": 33,
+    "14": 34,
+    "15": 35,
+    "16": 36,
+    "17": 37,
+}
+
+# "android-15" / "Android 16" 形态优先，其次 "16.0_r1" 的前导数字。
+_ANDROID_PREFIX_RE = re.compile(r"android[-_.\s]?(\d{1,2})", re.IGNORECASE)
+_LEADING_MAJOR_RE = re.compile(r"^(\d{1,2})")
+
+
+def _android_major(raw: str) -> str:
+    text = (raw or "").strip()
+    match = _ANDROID_PREFIX_RE.search(text) or _LEADING_MAJOR_RE.match(text)
     return match.group(1) if match else ""
+
+
+def android_version_from_request(request: ReportDiagnosisRequest) -> str:
+    """Best-effort Android major version from a suite or report context."""
+    for field in ("suite_version", "android_version"):
+        major = _android_major(getattr(request, field, "") or "")
+        if major:
+            return major
+    return ""
+
+
+def android_api_level_from_request(request: ReportDiagnosisRequest) -> int | None:
+    """已知 Android 大版本时返回对应 API level，未知返回 None（跳过版本加权）。"""
+    major = android_version_from_request(request)
+    return _ANDROID_API_BY_MAJOR.get(major)
 
 
 def test_method_and_class(test_name: str) -> tuple[str, str]:

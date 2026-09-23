@@ -6,10 +6,10 @@ from fastapi import APIRouter, Depends, Request, UploadFile
 
 from features.auth import (
     CurrentUser,
-    require_authenticated_user_when_auth_required,
+    require_human_principal_when_auth_required,
 )
+from features.redmine.api import get_redmine_config_for_request
 from features.redmine.client import RedmineClient
-from foundation.config import config_manager
 from foundation.responses import error_response, success_response
 
 
@@ -22,7 +22,7 @@ router = APIRouter()
 async def redmine_reply(
     request: Request,
     _user: CurrentUser | None = Depends(
-        require_authenticated_user_when_auth_required
+        require_human_principal_when_auth_required
     ),
 ):
     """向 Redmine 工单发送文本回复和可选附件。"""
@@ -47,12 +47,18 @@ async def redmine_reply(
 
         logger.info(f"[Redmine Reply] 准备发送回复到 Issue #{issue_id}，附件数: {len(files)}")
 
-        stored_creds = config_manager.load_redmine_credentials()
-        if not stored_creds:
+        # Replies are externally visible writes.  They must use the current
+        # resource owner's credentials, never a legacy process-global account.
+        manager = get_redmine_config_for_request(request)
+        stored_creds = manager.load_redmine_credentials() or {}
+        api_key = manager.load_redmine_api_key()
+        if not api_key and not (
+            stored_creds.get("username") and stored_creds.get("password")
+        ):
             return error_response('未配置 Redmine 凭证', status_code=401)
 
         try:
-            redmine_config = config_manager.get_redmine_config()
+            redmine_config = manager.get_redmine_config()
             base_url = redmine_config['base_url']
         except ValueError as e:
             return error_response(str(e), status_code=404)
@@ -67,7 +73,12 @@ async def redmine_reply(
             logger.info(f"[Redmine Reply] 上传附件: {filename} ({len(content)} bytes)")
             attachment_files.append({'content': content, 'filename': filename, 'content_type': file_content_type})
 
-        client = RedmineClient(base_url, stored_creds.get('username'), stored_creds.get('password'))
+        client = RedmineClient(
+            base_url,
+            stored_creds.get('username', ''),
+            stored_creds.get('password', ''),
+            api_key=api_key,
+        )
         result = await client.reply_issue(issue_id, reply_text, attachment_files)
         attachment_info = f"，携带 {result.get('attachments', 0)} 个附件" if result.get('attachments') else ''
         logger.info(f"[Redmine Reply] 回复已成功发送到 Issue #{issue_id}{attachment_info}")

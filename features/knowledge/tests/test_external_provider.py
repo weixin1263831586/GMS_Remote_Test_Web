@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import builtins
+import os
 import re
 import sqlite3
 import subprocess
@@ -132,6 +133,31 @@ class FrontmatterTests(unittest.TestCase):
             [{"type": "official", "path": "https://example.com/a"}],
         )
         self.assertIn("PRESSURE_AFTER_KILL", body)
+
+    def test_unquoted_iso_date_becomes_string(self):
+        # 回归：PyYAML 把未加引号的 `last_verified: 2026-08-15` 解析为
+        # datetime.date，_apply_pages 的 json.dumps 直接 TypeError，整库
+        # reindex 失败（真实上游语料即存在此写法）。解析边界必须统一
+        # 转 ISO 字符串。
+        text = (
+            "---\n"
+            "title: 日期字段\n"
+            "last_verified: 2026-08-15\n"
+            "last_verified_against: AOSP android-17.0.0_r1 retrieved 2026-08-15\n"
+            "sources:\n"
+            "- type: official\n"
+            "  retrieved: 2026-08-15\n"
+            "---\n\n"
+            "正文。\n"
+        )
+        metadata, body = parse_frontmatter(text)
+        self.assertEqual(metadata["last_verified"], "2026-08-15")
+        self.assertIsInstance(metadata["last_verified_against"], str)
+        self.assertEqual(metadata["sources"][0]["retrieved"], "2026-08-15")
+        import json
+
+        json.dumps(metadata, ensure_ascii=False)  # 不得抛 TypeError
+        self.assertIn("正文", body)
 
     def test_no_frontmatter(self):
         metadata, body = parse_frontmatter("# Just a doc\nbody")
@@ -263,6 +289,54 @@ class ProviderTests(unittest.TestCase):
             result = provider.reindex()
             self.assertEqual(result["removed"], 1)
             self.assertEqual(provider.search("doFrame"), [])
+
+    def test_rerank_window_extends_beyond_output_limit(self):
+        """候选池与输出上限分离回归（评审 P2）。
+
+        limit=10 时旧实现理论候选 30 实际只有 MAX_HITS_CAP=10——第
+        11~30 名里版本更匹配的页面 reranker 根本看不到。本用例构造
+        12 页：10 个旧版页（BM25 略强）+ 2 个 Android 16 覆盖页，
+        limit=10 且 android_api_level=36 时高版本页必须进入输出前列
+        （证明候选窗口 > 输出上限）。
+        """
+        (self.root / "wiki/src/part2").mkdir(parents=True, exist_ok=True)
+        for i in range(10):
+            (self.root / f"wiki/src/part2/legacy-{i}.md").write_text(
+                "---\n"
+                f"title: 旧版机制 {i}\n"
+                "chapter: '1.1'\n"
+                "status: finalized\n"
+                "applicable_versions: Android 4 (API 14) - Android 9 (API 28)\n"
+                "confidence: high\n"
+                "---\n\n"
+                f"sharedmechanismkeyword 旧版第 {i} 页。\n",
+                encoding="utf-8",
+            )
+        for i in range(2):
+            (self.root / f"wiki/src/part2/modern-{i}.md").write_text(
+                "---\n"
+                f"title: 新版机制 {i}\n"
+                "chapter: '1.2'\n"
+                "status: finalized\n"
+                "applicable_versions: Android 10 (API 29) - Android 17 (API 37)\n"
+                "confidence: high\n"
+                "---\n\n"
+                f"sharedmechanismkeyword 新版第 {i} 页。\n",
+                encoding="utf-8",
+            )
+        _git(self.root / "wiki", "add", "-A")
+        provider = self._provider()
+        with self._indexed(provider):
+            provider.reindex()
+            hits = provider.search(
+                "sharedmechanismkeyword", limit=10, android_api_level=36
+            )
+            self.assertEqual(len(hits), 10)
+            top_paths = [hit.source_path for hit in hits[:2]]
+            self.assertTrue(
+                all(p.endswith(("modern-0.md", "modern-1.md")) for p in top_paths),
+                f"版本匹配页未进入 Top-2（候选池未扩窗）: {top_paths}",
+            )
 
     def test_fts_injection_is_harmless(self):
         provider = self._provider()
@@ -447,6 +521,11 @@ lmkd 之前的用户态 lowmemorykiller 驱动与 PRESSURE_AFTER_KILL 无关。
 
 _WIKI_CLONE = Path(__file__).resolve().parents[3] / "tools" / "android-internals-wiki"
 
+#: knowledge-quality CI / 本地 golden replay 通过该环境变量指向
+#: prepare_knowledge_quality_corpus.sh 全量重建的临时索引；未设置时
+#: （本地开发环境）沿用已部署的伴生库。
+_GOLDEN_INDEX_DB = os.environ.get("GMS_WIKI_INDEX_DB", "")
+
 
 @unittest.skipUnless(_WIKI_CLONE.is_dir(), "android-internals-wiki clone 未部署")
 class GoldenQueryCorpusTests(unittest.TestCase):
@@ -455,6 +534,10 @@ class GoldenQueryCorpusTests(unittest.TestCase):
     官方 ``knowledge-pack/golden-queries.yaml`` 的查询在真实 clone 上重放；
     索引用已部署的伴生库（未建索引的环境跳过），只读不重建，避免测试写
     共享状态。轻量解析 yaml（id/query/expected_path），不引入 yaml 依赖。
+
+    ``GMS_WIKI_INDEX_DB`` 存在时改用该索引（CI knowledge-quality job：
+    pinned revision clone + 全量重建的临时 DB），否则保持 skip 语义
+    （索引未建的环境跳过，而不是拿空索引误报召回失败）。
     """
 
     @classmethod
@@ -462,6 +545,15 @@ class GoldenQueryCorpusTests(unittest.TestCase):
         import features.knowledge.external.android_internals as mod
 
         cls._mod = mod
+        if _GOLDEN_INDEX_DB:
+            db = Path(_GOLDEN_INDEX_DB)
+            if not db.is_file():
+                raise unittest.SkipTest(
+                    f"GMS_WIKI_INDEX_DB 指向的索引不存在: {db}"
+                )
+            cls._db_patch = patch.object(mod, "index_db_path", return_value=db)
+            cls._db_patch.start()
+            cls.addClassCleanup(cls._db_patch.stop)
 
     def _rows(self) -> list[dict]:
         path = _WIKI_CLONE / "knowledge-pack" / "golden-queries.yaml"

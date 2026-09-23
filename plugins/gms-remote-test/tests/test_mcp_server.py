@@ -436,6 +436,16 @@ class CatalogCacheTests(unittest.TestCase):
         _text, is_error = mcp_server.run_tool({"command": "gms-rt-devices-list"})
         self.assertFalse(is_error)
 
+    def test_run_tool_rejects_transport_override(self):
+        self._write_catalog_stub()
+        mcp_server._load_catalog(force=True)
+        text, is_error = mcp_server.run_tool({
+            "command": "gms-rt-devices-list",
+            "args": ["--server", "https://other-controller.invalid"],
+        })
+        self.assertTrue(is_error)
+        self.assertIn("cannot override", text)
+
     def test_run_tool_suggests_close_commands_for_unknown(self):
         self._write_catalog_stub()
         mcp_server._load_catalog(force=True)

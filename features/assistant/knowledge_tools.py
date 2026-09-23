@@ -90,6 +90,8 @@ def knowledge_agent_tools() -> list[AgentTool]:
                 {"name": "query", "type": "string", "required": True, "desc": "机制/关键词，如 LMKD、Binder 超时"},
                 {"name": "sources", "type": "array", "required": False, "desc": "限定外部知识源（默认全部）"},
                 {"name": "limit", "type": "integer", "required": False, "desc": "返回数量（1-10）"},
+                {"name": "android_api_level", "type": "integer", "required": False,
+                 "desc": "目标 Android API level（A13/14/15/16/17 → 33/34/35/36/37），用于版本匹配重排"},
             ],
             keywords=_kw(
                 "knowledge", "系统机制", "原理", "Android机制", "LMKD", "Binder",
