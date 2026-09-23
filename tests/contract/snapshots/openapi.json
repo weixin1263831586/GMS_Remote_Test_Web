@@ -208,6 +208,12 @@
             "title": "Capture Enabled",
             "type": "boolean"
           },
+          "device_id": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Device Id",
+            "type": "string"
+          },
           "label": {
             "default": "",
             "maxLength": 120,
@@ -223,6 +229,12 @@
             "default": "",
             "maxLength": 500,
             "title": "Note",
+            "type": "string"
+          },
+          "worker_id": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Worker Id",
             "type": "string"
           }
         },
@@ -11297,6 +11309,55 @@
           }
         },
         "summary": "Unlock Bootloader"
+      }
+    },
+    "/api/devices/console/availability/{device_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Serial Availability",
+        "tags": [
+          "devices-console"
+        ]
       }
     },
     "/api/devices/console/bindings/{port_key}": {

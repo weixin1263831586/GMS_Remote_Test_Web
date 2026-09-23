@@ -263,6 +263,21 @@ class SkillCliTests(unittest.TestCase):
             "U-Boot ready\n",
         )
 
+    def test_devices_console_assesses_bound_device(self):
+        result = self._run(
+            "gms-rt-devices-console",
+            "--device",
+            "DEVICE-1",
+            "--worker",
+            "worker-a",
+            "--json",
+            "--non-interactive",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)["data"]["data"]
+        self.assertTrue(data["available"])
+        self.assertEqual(data["confidence"], "output_verified")
+
     def test_permission_error_has_stable_exit_code_and_json(self):
         result = self._run("gms-rt-devices-list", "--json", "--non-interactive")
 

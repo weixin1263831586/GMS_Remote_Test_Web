@@ -48,7 +48,7 @@ human user in their own shell.
 | Agent credentials and approval | `gms-rt-agent-tokens`, `gms-rt-agent-enroll-code`, `gms-rt-agent-token-revoke`, `gms-rt-auth-scopes-check`, `gms-rt-approval-create` |
 | Cluster inventory | `gms-rt-cluster-workers`, `gms-rt-cluster-devices`, `gms-rt-cluster-resolve` |
 | Test | `gms-rt-test-start`, `gms-rt-test-stop`, `gms-rt-test-status`, `gms-rt-test-clean`, `gms-rt-test-suites`, `gms-rt-test-modules`, `gms-rt-test-suites-result`, `gms-rt-test-logs-stream` |
-| Devices | `gms-rt-devices-list`, `gms-rt-devices-info`, `gms-rt-devices-console`, `gms-rt-devices-wait`, `gms-rt-devices-reboot`, `gms-rt-devices-remount`, `gms-rt-devices-shell`, `gms-rt-devices-logcat`, `gms-rt-devices-push`, `gms-rt-devices-wifi`, `gms-rt-devices-scrcpy`, `gms-rt-devices-screencap`, `gms-rt-devices-ui-dump`, `gms-rt-devices-snapshot`, `gms-rt-devices-user-locked` |
+| Devices | `gms-rt-devices-list`, `gms-rt-devices-info`, `gms-rt-devices-console`, `gms-rt-devices-wait`, `gms-rt-devices-reboot`, `gms-rt-devices-remount`, `gms-rt-devices-shell`, `gms-rt-devices-diag`, `gms-rt-devices-logcat`, `gms-rt-devices-push`, `gms-rt-devices-wifi`, `gms-rt-devices-scrcpy`, `gms-rt-devices-screencap`, `gms-rt-devices-ui-dump`, `gms-rt-devices-snapshot`, `gms-rt-devices-user-locked` |
 | Bootloader | `gms-rt-devices-bootloader-lock`, `gms-rt-devices-bootloader-unlock`, `gms-rt-devices-bootloader-status` |
 | Reports | `gms-rt-reports-list`, `gms-rt-reports-analyze`, `gms-rt-reports-download`, `gms-rt-reports-delete` |
 | APK analysis | `gms-rt-apk-resolve`, `gms-rt-apk-analyze`, `gms-rt-apk-status`, `gms-rt-apk-manifest`, `gms-rt-apk-source`, `gms-rt-apk-search`, `gms-rt-apk-download`, `gms-rt-apk-analyze-attachment`, `gms-rt-apk-source-read` |
@@ -175,6 +175,7 @@ unknown SDK revisions surface as explicit errors — never as
 gms-rt-system-doctor device --json --non-interactive
 gms-rt-devices-list --json
 gms-rt-devices-console --json
+gms-rt-devices-console --device DEVICE-1 --worker worker-a --json
 gms-rt-devices-console usb-FTDI_FT232R_USB_UART_A6022883-if00-port0 --tail 500
 gms-rt-devices-wait DEVICE-1 --state online --max-wait 300 --json --non-interactive
 gms-rt-devices-info 'DEVICE-1 DEVICE-2'

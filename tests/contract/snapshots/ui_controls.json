@@ -133,6 +133,7 @@
       "binding-newline",
       "binding-note",
       "binding-port",
+      "binding-title",
       "cancel-binding",
       "close-binding",
       "console-section",

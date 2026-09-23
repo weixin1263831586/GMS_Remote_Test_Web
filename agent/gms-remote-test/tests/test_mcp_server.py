@@ -647,6 +647,27 @@ class TypedToolTests(unittest.TestCase):
             ["usb-FTDI-port0", "--tail", "500", "--date", "20260911"],
         )
 
+    def test_device_console_tool_assesses_device_on_explicit_worker(self):
+        captured = self._capture_run()
+        text, is_error = mcp_server.device_console_tool(
+            {"device": "D1", "worker_id": "worker-a"}
+        )
+        self.assertFalse(is_error, text)
+        self.assertEqual(captured["command"], "gms-rt-devices-console")
+        self.assertEqual(captured["args"], ["--device", "D1", "--worker", "worker-a"])
+
+    def test_device_console_tool_rejects_ambiguous_selection(self):
+        text, is_error = mcp_server.device_console_tool(
+            {"port_key": "p1", "device": "D1"}
+        )
+        self.assertTrue(is_error)
+        self.assertIn("mutually exclusive", text)
+        text, is_error = mcp_server.device_console_tool(
+            {"device": "D1", "tail": 100}
+        )
+        self.assertTrue(is_error)
+        self.assertIn("assess device first", text)
+
     def test_device_console_tool_rejects_invalid_tail_and_date(self):
         text, is_error = mcp_server.device_console_tool({"tail": "many"})
         self.assertTrue(is_error)

@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.27"
+GMS_RT_VERSION="0.22.29"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -2071,12 +2071,26 @@ gms-rt-devices-console() {
     local tail_lines=500
     local log_date=""
     local log_options=0
+    local device_id=""
+    local worker_id=""
     while [ "$#" -gt 0 ]; do
         case "$1" in
             -h|--help)
-                printf 'Usage: gms-rt-devices-console [port_key] [--tail 1..10000] [--date YYYYMMDD]\n'
+                printf 'Usage: gms-rt-devices-console [port_key] [--tail 1..10000] [--date YYYYMMDD] [--device SERIAL [--worker WORKER_ID]]\n'
                 return 0
                 ;;
+            --device)
+                shift
+                [ "$#" -gt 0 ] || { error "--device requires a serial"; return "$GMS_RT_EXIT_USAGE"; }
+                device_id="$1"
+                ;;
+            --device=*) device_id="${1#*=}" ;;
+            --worker)
+                shift
+                [ "$#" -gt 0 ] || { error "--worker requires a Worker ID"; return "$GMS_RT_EXIT_USAGE"; }
+                worker_id="$1"
+                ;;
+            --worker=*) worker_id="${1#*=}" ;;
             --tail)
                 shift
                 [ "$#" -gt 0 ] || {
@@ -2130,8 +2144,27 @@ gms-rt-devices-console() {
         error "port_key is required when --tail or --date is used"
         return "$GMS_RT_EXIT_USAGE"
     fi
+    if [ -n "$port_key" ] && [ -n "$device_id" ]; then
+        error "port_key and --device are mutually exclusive"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
+    if [ -n "$worker_id" ] && [ -z "$device_id" ]; then
+        error "--worker requires --device"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
 
     local response
+    if [ -n "$device_id" ]; then
+        local availability="/devices/console/availability/$(_urlencode "$device_id")"
+        [ -z "$worker_id" ] || availability="$availability?worker_id=$(_urlencode "$worker_id")"
+        response=$(api_call "$availability") || return $?
+        if [ "$GMS_RT_OUTPUT" = "json" ]; then
+            echo "$response" | jq '.'
+        else
+            echo "$response" | jq -r '.data | "device=\(.device_id) worker=\(.worker_id) state=\(.state) available=\(.available) confidence=\(.confidence)\n\(.reason)"'
+        fi
+        return ${PIPESTATUS[1]}
+    fi
     if [ -z "$port_key" ]; then
         response=$(api_call "/devices/console/ports") || return $?
         if [ "$GMS_RT_OUTPUT" = "json" ]; then
@@ -2142,7 +2175,7 @@ gms-rt-devices-console() {
             echo "No Controller serial ports found."
             return 0
         fi
-        echo "$response" | jq -r '.data.ports[] | "\(.binding.label // .devname // .port_key)\t\(.online | if . then "online" else "offline" end)\t\(.devname // "-")\t\(.port_key)\t\(.binding.baudrate // "unbound") baud\t\(.error // "")"'
+        echo "$response" | jq -r '.data.ports[] | "\(.binding.label // .devname // .port_key)\t\(.online | if . then "online" else "offline" end)\t\(.devname // "-")\t\(.port_key)\tdevice=\(.binding.device_id // "unbound")\tcapture=\(.capture_active // false)\t\(.error // "")"'
         return ${PIPESTATUS[1]}
     fi
 
@@ -2449,10 +2482,12 @@ gms-rt-devices-ui-dump() {
 }
 
 gms-rt-devices-snapshot() {
-    # 一次调用聚合设备状态快照——fingerprint、前台 activity、
-    # 锁屏状态、device owner/admin 列表。之前要逐条 shell + dumpsys 拼装。
-    # 复用 gms-rt-devices-shell（本地 adb / SSH 直连，同 gms_rt_shell 白名单
-    # 语义之外的平台诊断路径），每条独立失败降级为 null，不拖垮整个快照。
+    # 一次调用聚合设备诊断包——此前只有 fingerprint/activity/keyguard/owners
+    # 四项且探针失败被 2>/dev/null 静默吞掉，null 无从区分 offline /
+    # unauthorized / 属性本就不存在。现在扩成真正的取证包（ro.build.*/
+    # ro.boot.* 属性、内核 cmdline、存储、电池），失败探针带原因进 errors[]，
+    # 信封含 collected/total。复用 gms-rt-devices-shell（本地 adb / SSH 直连，
+    # 同 gms_rt_shell 白名单语义之外的平台诊断路径）。
     # Snapshot probes are the documented read-only typed set;
     # export the typed-readonly marker so the shell gate allows only these
     # fixed probe commands in service-token mode.
@@ -2462,29 +2497,87 @@ gms-rt-devices-snapshot() {
     # 收紧后的 typed-readonly 白名单拒绝管道（元字符
     # 复核），因此 dumpsys+grep 探针改为在函数侧取全量输出、本地 grep。
     # 每条探针命令仍是固定字符串，探针命令面不因修复而扩大。
+    local probe_file probe_err
+    probe_file=$(mktemp "${TMPDIR:-/tmp}/gms-rt-snap.XXXXXX") || return "$GMS_RT_EXIT_OPERATION"
+    probe_err=$(mktemp "${TMPDIR:-/tmp}/gms-rt-snap.XXXXXX") || { rm -f "$probe_file"; return "$GMS_RT_EXIT_OPERATION"; }
     _snapshot_probe() {
-        local output filtered
-        output=$(_GMS_RT_TYPED_READONLY=1 gms-rt-devices-shell "$device_id" "$1" 2>/dev/null) || return 0
-        filtered=$(printf '%s\n' "$output" | ${2:-head -3})
-        printf '%s' "$filtered"
+        # subshell-safe: 计数与输出经 stdout 返回，失败记录直接追加到
+        # probe_file（子 shell 内的文件写入对外可见）。stderr 不再丢弃，
+        # 截断后作为失败原因 —— 这是 offline/unauthorized 的唯一线索。
+        local output rc probe_error
+        : >"$probe_err"
+        output=$(GMS_RT_TYPED_READONLY=1 gms-rt-devices-shell "$device_id" "$1" 2>"$probe_err")
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            probe_error=$(tr '\t\n\r' '   ' <"$probe_err" | head -c 200)
+            [ -n "$probe_error" ] || probe_error="command failed (exit $rc)"
+            printf '%s\t%s\t%s\n' "$1" "$rc" "$probe_error" >>"$probe_file"
+            printf '%s' ""
+            return 0
+        fi
+        # 过滤器只能是不含管道/引号的简单词列表（$2、$3 顺序应用），未给出
+        # 时沿用旧的 head -3 默认。未加引号展开不会重新解析 `|`，因此不
+        # 支持 "grep x | head" 形式 —— 用两个过滤器位代替。
+        if [ -n "${2:-}" ]; then output=$(printf '%s\n' "$output" | $2); fi
+        if [ -n "${3:-}" ]; then output=$(printf '%s\n' "$output" | $3); fi
+        if [ -z "${2:-}" ] && [ -z "${3:-}" ]; then
+            output=$(printf '%s\n' "$output" | head -3)
+        fi
+        printf '%s' "$output"
     }
-    local prop_fp activity keyguard owners
+    local prop_fp activity keyguard owners build_props boot_props cmdline storage battery
     prop_fp=$(_snapshot_probe "getprop ro.build.fingerprint")
     activity=$(_snapshot_probe "dumpsys activity activities" "grep -m1 topResumedActivity")
     keyguard=$(_snapshot_probe "dumpsys window" "grep -m1 mDreamingLockscreen")
     owners=$(_snapshot_probe "dpm list-owners")
+    build_props=$(_snapshot_probe "getprop" "grep -F [ro.build." "head -30")
+    boot_props=$(_snapshot_probe "getprop" "grep -F [ro.boot." "head -50")
+    cmdline=$(_snapshot_probe "cat /proc/cmdline")
+    storage=$(_snapshot_probe "df -h / /data" "head -5")
+    battery=$(_snapshot_probe "dumpsys battery" "head -20")
+    rm -f "$probe_err"
+    # Keep in sync with the probe list above (9 probes).
+    local total=9 collected=0 value
+    for value in "$prop_fp" "$activity" "$keyguard" "$owners" \
+        "$build_props" "$boot_props" "$cmdline" "$storage" "$battery"; do
+        [ -n "$value" ] && collected=$((collected + 1))
+    done
+    local errors_json
+    errors_json=$(jq -Rn '
+        [inputs
+        | select(length > 0)
+        | split("\t")
+        | {probe: .[0], exit_code: ((.[1] // "0") | tonumber), error: (.[2] // "command failed")}]' \
+        <"$probe_file")
+    rm -f "$probe_file"
     jq -n \
         --arg device "$device_id" \
+        --argjson collected "$collected" \
+        --argjson total "$total" \
+        --argjson errors "$errors_json" \
         --arg fingerprint "$prop_fp" \
         --arg activity "$activity" \
         --arg keyguard "$keyguard" \
         --arg owners "$owners" \
+        --arg build_props "$build_props" \
+        --arg boot_props "$boot_props" \
+        --arg cmdline "$cmdline" \
+        --arg storage "$storage" \
+        --arg battery "$battery" \
         '{
             device: $device,
+            collected: $collected,
+            total: $total,
+            errors: $errors,
             fingerprint: ($fingerprint | if length > 0 then . else null end),
             focused_activity: ($activity | if length > 0 then . else null end),
             lockscreen: ($keyguard | if length > 0 then . else null end),
-            device_owners: ($owners | if length > 0 then . else null end)
+            device_owners: ($owners | if length > 0 then . else null end),
+            build_props: ($build_props | if length > 0 then . else null end),
+            boot_props: ($boot_props | if length > 0 then . else null end),
+            kernel_cmdline: ($cmdline | if length > 0 then . else null end),
+            storage: ($storage | if length > 0 then . else null end),
+            battery: ($battery | if length > 0 then . else null end)
         }'
 }
 
@@ -2724,6 +2817,46 @@ gms-rt-devices-shell() {
         echo "🔌 使用 Ctrl+D 退出 shell"; echo ""
         ssh -t -p "$port" "$user@$host" "adb -s $device_id shell"
     fi
+}
+
+# Read-only device diagnosis front door for agents (ADR-free local gap:
+# MCP exposes gms_rt_shell, but the bare CLI previously had no equivalent
+# unattended path). Delegates to gms-rt-devices-shell with the typed-
+# readonly marker, so the SAME fixed allowlist gate applies — the marker
+# alone never widens the command surface. Each invocation appends a local
+# audit line (best-effort: audit failures never block diagnosis).
+_gms_rt_diag_audit() {
+    local audit_dir="${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test"
+    local audit_file="$audit_dir/diag-audit.log"
+    mkdir -p "$audit_dir" 2>/dev/null || return 0
+    local safe_command
+    safe_command=$(printf '%s' "$2" | tr '\t\n' '  ')
+    {
+        flock 9
+        printf '%s\t%s\t%s\t%s\t%s\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "${GMS_RT_PROFILE:-default}" "$1" "$safe_command" "$3" >&9
+    } 9>>"$audit_file" 2>/dev/null || return 0
+}
+
+gms-rt-devices-diag() {
+    local device_id="$1"
+    [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-diag DEVICE_ID COMMAND"; return "$GMS_RT_EXIT_USAGE"; }
+    shift
+    [ "$#" -gt 0 ] || { error "缺少诊断命令. 用法: gms-rt-devices-diag DEVICE_ID 'getprop ro.build.fingerprint'"; return "$GMS_RT_EXIT_USAGE"; }
+    local diag_command="$*"
+    _gms_rt_diag_audit "$device_id" "$diag_command" "start"
+    local status=0
+    # Marker name MUST match what the gate inside gms-rt-devices-shell
+    # actually reads (GMS_RT_TYPED_READONLY — same name the MCP adapter
+    # passes via env_extra). A leading-underscore "private" variant is a
+    # different variable and silently unlocks nothing; that mismatch used
+    # to leave the snapshot probes denied-and-nulled in service-token mode.
+    # The marker routes to the fixed read-only allowlist only — it never
+    # bypasses the approval path for mutating commands.
+    GMS_RT_TYPED_READONLY=1 gms-rt-devices-shell "$device_id" "$diag_command" || status=$?
+    _gms_rt_diag_audit "$device_id" "$diag_command" "exit=$status"
+    return "$status"
 }
 
 # Capture device logcat via `adb shell logcat -v time` (local adb or SSH fallback).
@@ -5690,8 +5823,9 @@ _gms_rt_command_usage() {
             printf '%s' "$1 <devices>"
             ;;
         gms-rt-devices-wait) printf '%s' 'gms-rt-devices-wait <devices> [--state online|fastboot|any] [--interval SECONDS] [--max-wait SECONDS]' ;;
-        gms-rt-devices-console) printf '%s' 'gms-rt-devices-console [port_key] [--tail N] [--date YYYYMMDD]' ;;
+        gms-rt-devices-console) printf '%s' 'gms-rt-devices-console [port_key] [--tail N] [--date YYYYMMDD] [--device SERIAL [--worker WORKER_ID]]' ;;
         gms-rt-devices-shell) printf '%s' 'gms-rt-devices-shell <device_id> [--approval-token TOKEN] [command]' ;;
+        gms-rt-devices-diag) printf '%s' 'gms-rt-devices-diag <device_id> <command>' ;;
         gms-rt-devices-scrcpy) printf '%s' 'gms-rt-devices-scrcpy DEVICE1 [DEVICE2 ...]' ;;
         gms-rt-devices-screencap) printf '%s' 'gms-rt-devices-screencap <device_id>' ;;
         gms-rt-devices-ui-dump) printf '%s' 'gms-rt-devices-ui-dump <device_id>' ;;
@@ -5755,6 +5889,28 @@ _gms_rt_command_usage() {
     esac
 }
 
+# Suggest the closest known commands for a mistyped name (git-style
+# "did you mean"). Reads the command catalog on stdin (name<TAB>usage<TAB>summary)
+# and prints a comma-separated suggestion list; empty output means no close
+# match. Pure local name-distance heuristic, no network access. The program
+# is passed via -c so the piped catalog keeps owning stdin (a heredoc would
+# replace it and yield zero names).
+_gms_rt_closest_commands() {
+    local requested="$1"
+    [ -n "$requested" ] || return 0
+    command -v python3 >/dev/null 2>&1 || return 0
+    python3 -c '
+import difflib
+import sys
+
+requested = sys.argv[1]
+names = [line.split("\t")[0] for line in sys.stdin.read().splitlines() if line]
+matches = difflib.get_close_matches(requested, names, n=3, cutoff=0.5)
+if matches:
+    print(", ".join(matches))
+' "$requested" 2>/dev/null || return 0
+}
+
 _gms_rt_command_summary() {
     case "$1" in
         gms-rt-adb-forward-status) printf '%s' 'List ADB proxy Workers and active source-to-target assignments' ;;
@@ -5799,13 +5955,14 @@ _gms_rt_command_summary() {
         gms-rt-devices-info) printf '%s' 'Read detailed properties for one or more devices' ;;
         gms-rt-devices-wait) printf '%s' 'Wait for selected devices to become visible in the requested state' ;;
         gms-rt-devices-logcat) printf '%s' 'Capture device logcat via adb shell logcat -v time (-c clears the buffer first; dump mode in non-interactive sessions)' ;;
-        gms-rt-devices-console) printf '%s' 'List Controller serial ports or read one port retained console log' ;;
+        gms-rt-devices-console) printf '%s' 'List Controller serial ports, assess a device binding, or read retained logs' ;;
         gms-rt-devices-bootloader-lock) printf '%s' 'Lock the bootloader on one or more devices' ;;
         gms-rt-devices-bootloader-unlock) printf '%s' 'Unlock the bootloader on one or more devices' ;;
         gms-rt-devices-bootloader-status) printf '%s' 'Read bootloader lock status for one or more devices' ;;
         gms-rt-devices-reboot) printf '%s' 'Reboot one or more devices and report partial failures' ;;
         gms-rt-devices-remount) printf '%s' 'Remount one or more devices read-write and optionally reboot when required' ;;
         gms-rt-devices-shell) printf '%s' 'Open a human ADB shell or run one approved device command' ;;
+        gms-rt-devices-diag) printf '%s' 'Run one read-only diagnostic device command (shared typed-readonly allowlist, locally audited)' ;;
         gms-rt-devices-push) printf '%s' 'Push one local file to a device through ADB' ;;
         gms-rt-devices-wifi) printf '%s' 'Connect one or more devices to a Wi-Fi network' ;;
         gms-rt-devices-scrcpy) printf '%s' 'Start human interactive screen mirroring for one or more devices' ;;
@@ -5896,6 +6053,16 @@ gms-rt-system-commands() {
     _gms_rt_command_catalog | jq -Rn --arg version "$GMS_RT_VERSION" '
         def category:
             split("-")[2] // "other";
+        # .data 的形态（data-array / data-object / data-mixed），让调用方
+        # 不必逐条试错。data-mixed 表示同一命令
+        # 不同参数下形态不同（如 devices-console 带不带 port_key）。
+        def output_shape:
+            if test("^(gms-rt-devices-list|gms-rt-devices-info|gms-rt-jobs-list|gms-rt-reports-list|gms-rt-cluster-(devices|workers)|gms-rt-users-list|gms-rt-redmine-attachments|gms-rt-redmine-journals|gms-rt-test-(suites|modules)|gms-rt-sdk-sources|gms-rt-sdk-search|gms-rt-knowledge-search|gms-rt-artifact-search|gms-rt-redmine-history-search|gms-rt-apk-(resolve|search|manifest|source|source-read)|gms-rt-system-commands)$")
+            then "data-array"
+            elif test("^(gms-rt-devices-console|gms-rt-devices-screencap)$")
+            then "data-mixed"
+            else "data-object"
+            end;
         def mode:
             if test("terminal-open|devices-shell|devices-scrcpy|devices-logcat|test-logs-stream|auth-(login|elevate)")
             then "interactive"
@@ -5961,6 +6128,7 @@ gms-rt-system-commands() {
             )),
             requires_explicit_authorization: (($name | mode) == "mutating"),
             supports_json: true,
+            output_shape: ($name | output_shape),
             agent_safe_unattended: (
                 ($name | mode) == "read_only"
                 and ($name | test("auth-(login|logout|elevate|elevation-reset)|approval-create|terminal-open|devices-(shell|scrcpy|logcat)|test-logs-stream") | not)
@@ -6056,8 +6224,8 @@ gms-rt-system-capabilities() {
 # can recover (e.g. re-enroll) without a human walkthrough.
 gms-rt-system-selfcheck() {
     check_jq || return 1
-    local auth_json health_json devices_json hints_json suites_json
-    local auth_ok=false health_ok=false devices_ok=false
+    local auth_json health_json devices_json console_json hints_json suites_json
+    local auth_ok=false health_ok=false devices_ok=false console_ok=false
     local hints=()
 
     if [ "$GMS_RT_OUTPUT" != "json" ]; then
@@ -6105,6 +6273,14 @@ gms-rt-system-selfcheck() {
         hints+=("device inventory unavailable: the current credential may lack the devices.read scope")
     fi
 
+    # --- Controller-local serial evidence ---------------------------------------
+    console_ok=true
+    console_json=$(api_call "/devices/console/ports" 2>/dev/null)
+    _gms_rt_selfcheck_is_json "$console_json" || { console_ok=false; console_json='{}'; }
+    if [ "$console_ok" != true ]; then
+        hints+=("serial console inventory unavailable: verify devices.read scope and Controller pyudev/dialout readiness")
+    fi
+
     # --- locally visible test suites --------------------------------------------
     local suite_dirs=() candidate
     for candidate in \
@@ -6141,11 +6317,13 @@ gms-rt-system-selfcheck() {
         --argjson auth "$auth_json" \
         --argjson health "$health_json" \
         --argjson devices "$devices_json" \
+        --argjson serial_console "$console_json" \
         --argjson suites "$suites_json" \
         --argjson hints "$hints_json" \
         --argjson auth_ok "$auth_ok" \
         --argjson health_ok "$health_ok" \
         --argjson devices_ok "$devices_ok" \
+        --argjson serial_console_ok "$console_ok" \
         '{
             schema_version: 1,
             cli_version: $version,
@@ -6160,6 +6338,9 @@ gms-rt-system-selfcheck() {
             server_health: {ok: $health_ok, status: (if $health_ok then $health else null end)},
             devices: (if $devices_ok
                 then {ok: true, items: (if ($devices | type) == "array" then $devices else ($devices.devices // []) end)}
+                else {ok: false} end),
+            serial_console: (if $serial_console_ok
+                then {ok: true, ports: ($serial_console.data.ports // [])}
                 else {ok: false} end),
             local_suites: $suites,
             hints: $hints
@@ -6214,7 +6395,7 @@ ${YELLOW}Desktop VNC:${NC}
 
 ${YELLOW}Device Management:${NC}
   gms-rt-devices-list               - List all connected devices
-  gms-rt-devices-console            - List Controller serial ports or read retained serial logs
+  gms-rt-devices-console            - List serial ports, assess device availability, or read retained logs
   gms-rt-devices-info               - Get detailed device information
   gms-rt-devices-wait               - Wait for devices to become ready
   gms-rt-devices-bootloader-lock    - Lock bootloader
@@ -6225,6 +6406,7 @@ ${YELLOW}Device Management:${NC}
   gms-rt-devices-remount            - Remount RW (with auto-reboot prompt)
   gms-rt-devices-wifi               - Connect to WiFi
   gms-rt-devices-shell              - Open interactive ADB shell
+  gms-rt-devices-diag               - Run an audited read-only diagnostic command
   gms-rt-devices-logcat             - Capture device logcat (adb shell logcat -v time; -c clears buffer first)
   gms-rt-devices-push               - Push file to device (adb push)
   gms-rt-devices-screencap          - Capture device screenshot as base64 PNG
@@ -6488,8 +6670,33 @@ _gms_rt_dispatch() {
     _refresh_transport_config
 
     if [[ "$command" != gms-rt-* ]] || ! declare -F "$command" >/dev/null; then
-        _gms_rt_dispatch_usage_error "$command" "Unknown command: $command"
+        # Mirror the MCP adapter's closest-match hint so agents and humans
+        # get an actionable correction instead of a bare "Unknown command".
+        local _suggestions
+        _suggestions=$(_gms_rt_command_catalog | _gms_rt_closest_commands "$command")
+        if [ -n "$_suggestions" ]; then
+            _gms_rt_dispatch_usage_error "$command" \
+                "Unknown command: $command. Closest matches: $_suggestions"
+        else
+            _gms_rt_dispatch_usage_error "$command" \
+                "Unknown command: $command (run 'gms-rt-system-help' to list commands)"
+        fi
         return $?
+    fi
+
+    # Global --help/-h: every command previously accepted these only if its
+    # own parser happened to handle them; otherwise the token was passed to
+    # the command as a positional argument (e.g. devices-info "--help" was
+    # treated as a device serial). Intercept exactly "--help"/"-h" as the
+    # sole remaining argument and print the catalog usage line.
+    if [ "${#args[@]}" -eq 1 ] && { [ "${args[0]}" = "--help" ] || [ "${args[0]}" = "-h" ]; }; then
+        if [ "$GMS_RT_OUTPUT" = "json" ] && command -v jq >/dev/null 2>&1; then
+            jq -cn --arg name "$command" --arg usage "$(_gms_rt_command_usage "$command")" \
+                '{ok: true, command: $name, usage: $usage}'
+        else
+            printf 'Usage: %s\n' "$(_gms_rt_command_usage "$command")"
+        fi
+        return 0
     fi
 
     if [ "$GMS_RT_OUTPUT" = "json" ]; then

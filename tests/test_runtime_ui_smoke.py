@@ -5793,6 +5793,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         )
         port = {
             "port_key": "usb-FTDI_TEST-if00-port0",
+            "identity_stable": True,
             "devname": "/dev/ttyUSB0",
             "by_id": "/dev/serial/by-id/usb-FTDI_TEST-if00-port0",
             "vendor_product": "0403:6001",
@@ -5804,6 +5805,10 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             "error": "",
             "binding": {
                 "label": "RK3562GMS3",
+                "device_id": "RK3562GMS3",
+                "worker_id": "ats-worker-controller",
+                "identity_verified": True,
+                "binding_version": 2,
                 "baudrate": 1500000,
                 "capture_enabled": False,
                 "newline": "cr",
@@ -5825,6 +5830,7 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 content_type="application/json",
                 body=json.dumps({
                     "success": True,
+                    "source": "local",
                     "devices": [{"device_id": "RK3562GMS3", "model": "rk3562"}],
                 }),
             ),
@@ -5840,6 +5846,26 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                 }),
             ),
         )
+        page.route(
+            "**/api/users/detect",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"username":"ui-smoke"}',
+            ),
+        )
+        deleted_bindings = []
+
+        def delete_serial_binding(route):
+            deleted_bindings.append(route.request.url)
+            port["binding"] = None
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"data":{"port_key":"usb-FTDI_TEST-if00-port0"}}',
+            )
+
+        page.route("**/api/devices/console/bindings/*", delete_serial_binding)
         try:
             self.goto_shell(page)
             page.evaluate("switchPage('devices-console', null)")
@@ -5870,9 +5896,35 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
                     return Math.abs(columnBox.bottom - dockBox.bottom) <= 2;
                 }"""
             ))
+            self.assertEqual(
+                frame.evaluate(
+                    "JSON.parse(sessionStorage.getItem('gms_serial_console_workspace_v1')).portKeys"
+                ),
+                [port["port_key"]],
+            )
+            page.reload(wait_until="domcontentloaded")
+            frame = self.frame_for(page, "#devices-console-frame")
+            expect(frame.locator(".console-tab")).to_have_count(1)
+            expect(frame.locator("#console-section")).to_be_visible()
             frame.locator("#ports-tab").click()
             expect(frame.locator("#ports-section")).to_be_visible()
             expect(frame.locator("#console-section")).to_be_hidden()
+
+            port["online"] = False
+            frame.locator("#refresh-ports").click()
+            expect(frame.locator(".port-state")).to_have_text("离线")
+            frame.get_by_role("button", name="编辑绑定").click()
+            page.once("dialog", lambda dialog: dialog.accept())
+            frame.locator("#delete-binding").click()
+            expect(frame.locator(".console-tab")).to_have_count(0)
+            expect(frame.get_by_role("button", name="绑定", exact=True)).to_be_visible()
+            self.assertEqual(len(deleted_bindings), 1)
+            self.assertEqual(
+                frame.evaluate(
+                    "JSON.parse(sessionStorage.getItem('gms_serial_console_workspace_v1')).portKeys"
+                ),
+                [],
+            )
 
             page.locator(".sidebar-brand").click()
             values = page.locator(

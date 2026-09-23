@@ -133,7 +133,9 @@ ALL_TOOLS: list[dict[str, Any]] = [
             "name": "gms_rt_device_console",
             "description": (
                 "List Controller serial-console ports, or read retained logs "
-                "for one stable port key. Interactive serial input remains "
+                "for one stable port key. Pass device to assess whether that "
+                "device has an explicitly bound, currently usable serial port. "
+                "Interactive serial input remains "
                 "human/Web-UI only. CLI equivalent: gms-rt-devices-console."
             ),
             "inputSchema": {
@@ -153,6 +155,14 @@ ALL_TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "pattern": "^[0-9]{8}$",
                         "description": "Optional retained-log date in YYYYMMDD.",
+                    },
+                    "device": {
+                        "type": "string",
+                        "description": "Device serial to assess; mutually exclusive with port_key.",
+                    },
+                    "worker_id": {
+                        "type": "string",
+                        "description": "Owning Worker for device assessment; requires device.",
                     },
                 },
                 "additionalProperties": False,
@@ -716,8 +726,12 @@ ALL_TOOLS: list[dict[str, Any]] = [
             "name": "gms_rt_devices_snapshot",
             "description": (
                 "One-shot device state snapshot: build "
-                "fingerprint, focused activity, keyguard/lock state, and "
-                "active device-admin/device-owner list in a single call."
+                "fingerprint, focused activity, keyguard/lock state, "
+                "active device-admin/device-owner list, plus ro.build.*/"
+                "ro.boot.* props, kernel cmdline, storage and battery "
+                "probes. Envelope carries collected/total and errors[] "
+                "with per-probe failure reasons (offline/unauthorized "
+                "are no longer indistinguishable from null)."
             ),
             "inputSchema": {
                 "type": "object",

@@ -1189,6 +1189,12 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/devices/console/availability/{device_id}"
+  },
+  {
+    "methods": [
       "DELETE"
     ],
     "path": "/api/devices/console/bindings/{port_key}"

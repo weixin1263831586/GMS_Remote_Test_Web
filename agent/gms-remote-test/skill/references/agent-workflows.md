@@ -93,6 +93,7 @@ The elevation window is visible via `gms_rt_auth_status`
 ```
 gms_rt_devices()                                  # inventory
 gms_rt_device_console()                           # list retained serial ports
+gms_rt_device_console(device="<serial>", worker_id="<worker>") # assess availability
 gms_rt_device_console(port_key="<port>", tail=500)
 gms_rt_device_info(devices=["<serial>"])          # per-device detail
 gms_rt_run(devices-bootloader-status, ["<serial>"])
@@ -101,6 +102,15 @@ gms_rt_device_wait(devices="<prefix>", state="online", max_wait=300)
 
 Device list entries use `status` + `protocol` (`adb`/`fastboot`);
 `devices-wait` matches on those fields.
+
+Serial availability is authoritative only after a human explicitly binds the
+USB-UART adapter to a device. Android ADB serials and external FTDI/CH340 USB
+serials do not share a reliable machine-readable identity. The assessment
+returns `confidence=explicit_binding`, `open_verified`, or `output_verified`
+(in increasing order); unbound online ports are candidates, never automatic
+matches. For a non-local `worker_id`,
+`unsupported_worker` means that Worker still needs its own serial capture
+deployment; do not substitute a Controller-local port.
 
 `devices-info` may transiently fail with exit_code 6 (curl cannot connect)
 right after a Controller restart — retry once after a few seconds before
@@ -131,6 +141,28 @@ gms_rt_shell(device="RK3562GMS7", command="settings get secure user_setup_comple
   -> `gms_rt_shell(cat /data/anr/<file>)`.
 - Everything else (reboot, push, Wi-Fi, remount, log clear) still requires a
   human-run `gms-rt-devices-*` CLI command — do not attempt to bypass.
+- CLI equivalent (`gms-rt-devices-diag`, plugin >= 0.22.28): agents driving
+  the bare CLI (no MCP client attached) get the same read-only allowlist via
+  `gms-rt-devices-diag <device> '<command>'`; every invocation appends a
+  local audit line to
+  `~/.local/state/gms-remote-test/<profile>.diag-audit.log`.
+
+### 5.1.1 Evidence availability matrix
+
+Where each class of diagnostic evidence can be obtained, per layer. Use the
+first available path; do not conclude "evidence unavailable" before checking
+both.
+
+| evidence | MCP (agent tools) | CLI (agent-safe) | notes |
+|---|---|---|---|
+| props (ro.build.*/ro.boot.*/system) | `gms_rt_shell(getprop ...)` | `gms-rt-devices-diag <dev> 'getprop ...'` | bundle: `gms_rt_devices_snapshot` |
+| kernel cmdline | `gms_rt_shell(cat /proc/cmdline)` | `gms-rt-devices-diag <dev> 'cat /proc/cmdline'` | also in snapshot `kernel_cmdline` |
+| storage / battery | `gms_rt_shell(df ...)` / `gms_rt_shell(dumpsys battery)` | `gms-rt-devices-diag` | also in snapshot `storage`/`battery` |
+| logcat (dump mode) | `gms_rt_logcat` or `gms_rt_shell(logcat -d ...)` | `gms-rt-devices-logcat <dev>` | clearing is human-only |
+| boot/u-boot serial prints | `gms_rt_device_console(device=..., worker_id=...)` then `gms_rt_device_console(port_key=..., tail=...)` | `gms-rt-devices-console --device <serial> [--worker <id>]`, then `gms-rt-devices-console <port_key>` | empty result -> read `data.capture_status.hint` (bound? online? capture on?) |
+| one-shot overview | `gms_rt_devices_snapshot` | `gms-rt-devices-snapshot <dev>` | envelope has `collected/total` + `errors[]` per probe |
+| screenshot | `gms_rt_devices_screencap` | human-only (returns base64 payload) | |
+| state-changing command | `gms_rt_shell_exec` + approval token | `gms-rt-devices-shell --approval-token ...` | human mints token via `gms-rt-approval-create` |
 
 ### 5.3 Approved one-shot shell (`gms_rt_shell_exec`, plugin >= 0.9.0)
 

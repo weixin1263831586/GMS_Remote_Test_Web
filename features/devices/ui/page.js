@@ -1,6 +1,8 @@
 (() => {
     'use strict';
 
+    const WORKSPACE_STORAGE_KEY = 'gms_serial_console_workspace_v1';
+
     // 每个控制台 tab 对应一个 session（终端、WebSocket、输入、历史日志各自独立），
     // 同一串口同一时刻只保留一个 session，重复“打开控制台”只会切换到已有 tab。
     const state = {
@@ -15,6 +17,7 @@
         noticeTimer: null,
         activeView: 'ports',
         canManageDevices: true,
+        modalReturnFocus: null,
     };
 
     const $ = id => document.getElementById(id);
@@ -84,6 +87,34 @@
         return state.sessions.find(session => session.portKey === portKey) || null;
     }
 
+    function readWorkspace() {
+        try {
+            const value = JSON.parse(sessionStorage.getItem(WORKSPACE_STORAGE_KEY) || '{}');
+            const keys = Array.isArray(value.portKeys)
+                ? value.portKeys.filter(key => typeof key === 'string' && key).slice(0, 12)
+                : [];
+            return {
+                portKeys: [...new Set(keys)],
+                activeView: value.activeView === 'console' ? 'console' : 'ports',
+                activeKey: typeof value.activeKey === 'string' ? value.activeKey : '',
+            };
+        } catch {
+            return {portKeys: [], activeView: 'ports', activeKey: ''};
+        }
+    }
+
+    function persistWorkspace() {
+        try {
+            sessionStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({
+                portKeys: state.sessions.map(session => session.portKey),
+                activeView: state.activeView,
+                activeKey: state.activeKey,
+            }));
+        } catch {
+            // sessionStorage may be unavailable in an opaque embedded context.
+        }
+    }
+
     function computeManagePermission(status) {
         // 服务端才是安全边界（无权限请求仍会被 403）；这里只决定点击写操作
         // 按钮时是否放行。按钮始终渲染：普通 user 点击时给出明确的权限
@@ -130,7 +161,9 @@
             const meta = element('div', 'port-meta');
             addMeta(meta, '设备节点', port.devname);
             addMeta(meta, '稳定标识', port.by_id || port.port_key);
+            addMeta(meta, '标识可靠性', port.identity_stable === false ? '临时节点，重插后需确认' : '稳定');
             addMeta(meta, 'USB 芯片', [port.vendor_product, port.driver].filter(Boolean).join(' · '));
+            addMeta(meta, '绑定设备', port.binding?.device_id || '未绑定');
             addMeta(meta, '波特率', port.binding ? String(port.binding.baudrate) : '未绑定');
             addMeta(meta, '常驻采集', port.capture_enabled ? (port.capture_active ? '采集中' : '等待端口') : '关闭');
             addMeta(meta, '最近输出', port.last_output_at ? new Date(port.last_output_at).toLocaleString() : '—');
@@ -188,6 +221,7 @@
                 target.terminal?.scrollToBottom();
             });
         }
+        persistWorkspace();
     }
 
     async function loadPorts(silent = false) {
@@ -220,32 +254,42 @@
         state.refreshTimer = setInterval(() => void loadPorts(true), 3000);
     }
 
-    async function loadBindingDeviceOptions(selectedLabel, editingKey) {
+    async function loadBindingDeviceOptions(selectedDevice, editingKey) {
         const select = $('binding-label');
         select.disabled = true;
         select.replaceChildren(new Option('正在加载设备…', ''));
         try {
             const data = await api('/api/devices/management');
             if (state.editingKey !== editingKey) return;
-            const devices = Array.isArray(data.devices) ? data.devices : [];
+            const devices = data.source === 'local' && Array.isArray(data.devices) ? data.devices : [];
             const options = new Map();
             devices.forEach(device => {
                 const value = String(device.device_id || device.serial_no || '').trim();
                 if (!value || options.has(value)) return;
                 const model = String(device.model || '').trim();
-                options.set(value, model && model !== value ? `${value} · ${model}` : value);
+                options.set(value, {
+                    text: model && model !== value ? `${value} · ${model}` : value,
+                    workerId: String(device.worker_id || '').trim(),
+                });
             });
-            select.replaceChildren(new Option(options.size ? '请选择设备' : '未发现设备', ''));
-            options.forEach((text, value) => select.add(new Option(text, value)));
-            if (selectedLabel && !options.has(selectedLabel)) {
-                select.add(new Option(`${selectedLabel} · 当前绑定`, selectedLabel));
+            select.replaceChildren(new Option(options.size ? '请选择设备' : '未发现 Controller 本机设备', ''));
+            options.forEach((item, value) => {
+                const option = new Option(item.text, value);
+                option.dataset.workerId = item.workerId;
+                select.add(option);
+            });
+            if (selectedDevice && !options.has(selectedDevice)) {
+                select.add(new Option(`${selectedDevice} · 当前绑定`, selectedDevice));
             }
-            select.value = selectedLabel || '';
+            select.value = selectedDevice || '';
+            if (data.source && data.source !== 'local') {
+                notice('当前设备清单来自远端主机，不能与 Controller 本机串口绑定', 'error');
+            }
         } catch (error) {
             if (state.editingKey !== editingKey) return;
             select.replaceChildren(new Option('设备列表加载失败', ''));
-            if (selectedLabel) select.add(new Option(`${selectedLabel} · 当前绑定`, selectedLabel));
-            select.value = selectedLabel || '';
+            if (selectedDevice) select.add(new Option(`${selectedDevice} · 当前绑定`, selectedDevice));
+            select.value = selectedDevice || '';
             notice(`设备列表加载失败：${error.message}`, 'error');
         } finally {
             if (state.editingKey === editingKey) select.disabled = false;
@@ -253,10 +297,11 @@
     }
 
     function openBinding(port) {
+        state.modalReturnFocus = document.activeElement;
         state.editingKey = port.port_key;
         const binding = port.binding || {};
         $('binding-port').textContent = `${port.devname || '离线端口'} · ${port.port_key}`;
-        loadBindingDeviceOptions(binding.label || '', port.port_key);
+        loadBindingDeviceOptions(binding.device_id || binding.label || '', port.port_key);
         $('binding-note').value = binding.note || '';
         $('binding-baudrate').value = binding.baudrate || 1500000;
         $('binding-newline').value = binding.newline || 'cr';
@@ -269,6 +314,8 @@
     function closeBinding() {
         $('binding-modal').hidden = true;
         state.editingKey = '';
+        state.modalReturnFocus?.focus?.();
+        state.modalReturnFocus = null;
     }
 
     async function saveBinding(event) {
@@ -280,6 +327,8 @@
                 method: 'PUT',
                 body: {
                     label: $('binding-label').value,
+                    device_id: $('binding-label').value,
+                    worker_id: $('binding-label').selectedOptions[0]?.dataset.workerId || '',
                     note: $('binding-note').value,
                     baudrate: Number($('binding-baudrate').value),
                     newline: $('binding-newline').value,
@@ -327,6 +376,9 @@
             `${port.devname || '当前离线'} · ${port.binding?.baudrate || ''} baud · ${port.port_key}`;
         const tabTitle = session.tab?.querySelector('.tab-title');
         if (tabTitle) tabTitle.textContent = `控制台${session.id}`;
+        if (!port.online) setSocketStatus(session, '串口离线', 'offline');
+        else if (port.capture_active) setSocketStatus(session, '串口已打开', 'online');
+        else if (session.socket?.readyState === WebSocket.OPEN) setSocketStatus(session, '等待串口', 'waiting');
     }
 
     function syncSessionHeadings() {
@@ -410,6 +462,7 @@
     }
 
     function connectSocket(session) {
+        clearTimeout(session.reconnectTimer);
         session.socketGeneration += 1;
         const generation = session.socketGeneration;
         if (session.socket) session.socket.close();
@@ -420,7 +473,7 @@
         session.socket = socket;
         socket.onopen = () => {
             if (generation !== session.socketGeneration || session.closed) return;
-            setSocketStatus(session, '已连接', 'online');
+            setSocketStatus(session, '通道已连接', 'waiting');
         };
         socket.onmessage = event => {
             if (generation !== session.socketGeneration || session.closed) return;
@@ -428,6 +481,11 @@
             try { message = JSON.parse(event.data); } catch { return; }
             if (message.type === 'data' || message.type === 'backlog') appendOutput(session, message.data || '');
             if (message.type === 'backlog') setWritable(session, Boolean(message.writable));
+            if (message.type === 'backlog') {
+                const status = message.port_status || {};
+                if (!status.device_online) setSocketStatus(session, '串口离线', 'offline');
+                else if (status.capture_active) setSocketStatus(session, '串口已打开', 'online');
+            }
             if (message.type === 'error') notice(friendlySerialError(message.error) || '串口操作失败', 'error');
         };
         socket.onerror = () => {
@@ -440,6 +498,9 @@
             session.socket = null;
             setWritable(session, false);
             setSocketStatus(session, event.code === 4404 ? '请先绑定' : '已断开', 'offline');
+            if (![4401, 4403, 4404].includes(event.code)) {
+                session.reconnectTimer = setTimeout(() => connectSocket(session), 2000);
+            }
         };
     }
 
@@ -476,7 +537,8 @@
         try {
             const data = await api(`/api/devices/console/ports/${encodeURIComponent(portKey)}/logs?${params}`);
             if (generation !== session.historyGeneration || session.closed) return;
-            session.pane.querySelector('.history-output').textContent = data.content || '暂无日志';
+            session.pane.querySelector('.history-output').textContent =
+                data.content || data.capture_status?.hint || '暂无日志';
             const effectiveDate = selectedDate || data.date || '';
             dateSelect.replaceChildren(new Option('最新', ''));
             (data.available_dates || []).forEach(date => dateSelect.add(new Option(date, date)));
@@ -554,6 +616,7 @@
                 </div>
                 <div class="console-actions">
                     <span class="socket-status status-pill offline">未连接</span>
+                    <button class="reconnect-socket" type="button">重连</button>
                     <button class="pause-output" type="button">暂停</button>
                     <button class="clear-screen" type="button">清屏</button>
                     <button class="copy-output" type="button">复制</button>
@@ -599,6 +662,7 @@
     function bindConsolePaneEvents(session) {
         const pane = session.pane;
         pane.querySelector('.close-console').addEventListener('click', () => closeConsole(session.portKey));
+        pane.querySelector('.reconnect-socket').addEventListener('click', () => connectSocket(session));
         pane.querySelector('.clear-screen').addEventListener('click', () => clearTerminal(session));
         pane.querySelector('.copy-output').addEventListener('click', async () => {
             try { await navigator.clipboard.writeText(terminalText(session)); notice('控制台内容已复制', 'success'); }
@@ -634,6 +698,7 @@
             closed: false,
             socket: null,
             socketGeneration: 0,
+            reconnectTimer: null,
             historyGeneration: 0,
             paused: false,
             pendingOutput: '',
@@ -674,6 +739,7 @@
         session.historyGeneration += 1;
         if (session.socket) session.socket.close();
         session.socket = null;
+        clearTimeout(session.reconnectTimer);
         session.resizeObserver?.disconnect();
         session.terminal?.dispose();
         session.pane.remove();
@@ -687,6 +753,21 @@
         } else {
             renderPorts();
         }
+        persistWorkspace();
+    }
+
+    function restoreWorkspace() {
+        const workspace = readWorkspace();
+        workspace.portKeys.forEach(portKey => {
+            const port = state.ports.find(item => item.port_key === portKey && item.binding);
+            if (port) openConsole(port);
+        });
+        if (workspace.activeView === 'console' && sessionByKey(workspace.activeKey)) {
+            switchView('console', workspace.activeKey);
+        } else {
+            switchView('ports');
+        }
+        persistWorkspace();
     }
 
     function bindEvents() {
@@ -714,6 +795,9 @@
         $('cancel-binding').addEventListener('click', closeBinding);
         $('delete-binding').addEventListener('click', deleteBinding);
         $('binding-modal').addEventListener('click', event => { if (event.target === $('binding-modal')) closeBinding(); });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && !$('binding-modal').hidden) closeBinding();
+        });
         window.addEventListener('gms:embedded-visibility', event => {
             syncPortAutoRefresh(event.detail?.visible !== false);
         });
@@ -726,6 +810,7 @@
             state.sessions.forEach(session => {
                 session.closed = true;
                 if (session.socket) session.socket.close();
+                clearTimeout(session.reconnectTimer);
                 session.resizeObserver?.disconnect();
                 session.terminal?.dispose();
             });
@@ -735,7 +820,10 @@
     async function initialize() {
         bindEvents();
         await loadAuthStatus();
-        try { await loadPorts(); }
+        try {
+            await loadPorts();
+            restoreWorkspace();
+        }
         finally { window.GmsEmbeddedWorkspace?.markReady(); }
         syncPortAutoRefresh(!document.hidden);
     }

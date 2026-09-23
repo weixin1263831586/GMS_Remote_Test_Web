@@ -100,6 +100,23 @@ class ApiHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if self.path == "/api/devices/console/availability/DEVICE-1?worker_id=worker-a":
+            self._write_json(
+                200,
+                {
+                    "success": True,
+                    "data": {
+                        "device_id": "DEVICE-1",
+                        "worker_id": "worker-a",
+                        "available": True,
+                        "state": "active",
+                        "confidence": "output_verified",
+                        "reason": "串口已绑定且当前可用。",
+                        "ports": [{"port_key": "usb-FTDI_TEST-if00-port0"}],
+                    },
+                },
+            )
+            return
         if self.path == "/api/devices/console/ports/usb-FTDI_TEST-if00-port0/logs?tail=200&date=20260910":
             self._write_json(
                 200,

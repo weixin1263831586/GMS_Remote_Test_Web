@@ -32,11 +32,11 @@
     <section id="console-section" class="view-panel console-panel" hidden></section>
 </main>
 
-<div id="binding-modal" class="modal-backdrop" hidden>
+<div id="binding-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="binding-title">
     <form id="binding-form" class="modal" autocomplete="off">
-        <div class="modal-head"><h2>串口绑定</h2><button id="close-binding" type="button" aria-label="关闭">×</button></div>
+        <div class="modal-head"><h2 id="binding-title">串口绑定</h2><button id="close-binding" type="button" aria-label="关闭">×</button></div>
         <p id="binding-port" class="mono"></p>
-        <label>设备名称<select id="binding-label"><option value="">正在加载设备…</option></select></label>
+        <label>绑定设备<select id="binding-label" required><option value="">正在加载本机设备…</option></select></label>
         <label>备注<textarea id="binding-note" maxlength="500" rows="3" placeholder="串口线连接位置、板卡或故障说明"></textarea></label>
         <label>波特率<input id="binding-baudrate" type="number" min="300" max="4000000" list="baudrate-options" required value="1500000"></label>
         <datalist id="baudrate-options"><option value="115200"></option><option value="921600"></option><option value="1500000"></option></datalist>

@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from foundation.cluster_port import get_local_worker_id
+
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,7 @@ class BindingStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self._lock = threading.RLock()
+        self._bindings = self._load_unlocked()
 
     def _load_unlocked(self) -> dict[str, dict[str, Any]]:
         if not self.path.exists():
@@ -86,7 +89,7 @@ class BindingStore:
         try:
             temporary.write_text(
                 json.dumps(
-                    {"schema_version": 1, "bindings": bindings},
+                    {"schema_version": 2, "bindings": bindings},
                     ensure_ascii=False,
                     indent=2,
                     sort_keys=True,
@@ -102,10 +105,28 @@ class BindingStore:
     def list(self) -> dict[str, dict[str, Any]]:
         with self._lock:
             return {
-                key: dict(value)
-                for key, value in self._load_unlocked().items()
+                key: self._normalized(value)
+                for key, value in self._bindings.items()
                 if isinstance(value, dict)
             }
+
+    @staticmethod
+    def _normalized(value: dict[str, Any]) -> dict[str, Any]:
+        """Expose legacy v1 labels as low-confidence device identities."""
+        result = dict(value)
+        explicit_device = str(result.get("device_id") or "").strip()
+        legacy_device = str(result.get("label") or "").strip()
+        result.setdefault("device_id", explicit_device or legacy_device)
+        result.setdefault(
+            "worker_id", get_local_worker_id() if result["device_id"] else ""
+        )
+        result.setdefault("binding_version", 1)
+        result["identity_verified"] = bool(
+            result.get("binding_version", 1) >= 2
+            and explicit_device
+            and str(result.get("worker_id") or "").strip()
+        )
+        return result
 
     def get(self, port_key: str) -> dict[str, Any] | None:
         binding = self.list().get(validate_port_key(port_key))
@@ -113,26 +134,32 @@ class BindingStore:
 
     def upsert(self, port_key: str, value: dict[str, Any]) -> dict[str, Any]:
         key = validate_port_key(port_key)
+        device_id = str(value.get("device_id") or "").strip()[:200]
+        worker_id = str(value.get("worker_id") or "").strip()[:120]
+        if device_id and not worker_id:
+            worker_id = get_local_worker_id()
         binding = {
             "label": str(value.get("label") or "").strip()[:120],
+            "device_id": device_id,
+            "worker_id": worker_id,
             "note": str(value.get("note") or "").strip()[:500],
             "baudrate": validate_baudrate(value.get("baudrate", DEFAULT_BAUDRATE)),
             "capture_enabled": bool(value.get("capture_enabled", False)),
             "newline": validate_newline(value.get("newline", "cr")),
             "updated_at": utc_now(),
+            "binding_version": 2,
         }
+        binding["identity_verified"] = bool(device_id and worker_id)
         with self._lock:
-            bindings = self._load_unlocked()
-            bindings[key] = binding
-            self._save_unlocked(bindings)
+            self._bindings[key] = binding
+            self._save_unlocked(self._bindings)
         return dict(binding)
 
     def delete(self, port_key: str) -> bool:
         key = validate_port_key(port_key)
         with self._lock:
-            bindings = self._load_unlocked()
-            existed = key in bindings
-            bindings.pop(key, None)
+            existed = key in self._bindings
+            self._bindings.pop(key, None)
             if existed:
-                self._save_unlocked(bindings)
+                self._save_unlocked(self._bindings)
             return existed
