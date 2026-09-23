@@ -17,6 +17,8 @@ from starlette.websockets import WebSocketDisconnect
 
 from features.devices import serial_console_api
 from features.devices.serial_console import SerialConsoleService
+from features.devices.serial_console_access import device_serial_availability, visible_ports
+from features.devices.serial_console_identity import serial_port_identity
 from features.devices.serial_console_storage import BindingStore
 
 
@@ -111,12 +113,25 @@ class SerialConsoleStoreTests(unittest.TestCase):
             )
             self.assertEqual(saved["baudrate"], 1_500_000)
             self.assertTrue(saved["capture_enabled"])
+            self.assertEqual(saved["binding_version"], 2)
+            self.assertFalse(saved["identity_verified"])
             self.assertEqual(
                 BindingStore(path).get("usb-FTDI_A-if00-port0")["label"],
                 "RK board",
             )
             self.assertTrue(store.delete("usb-FTDI_A-if00-port0"))
             self.assertIsNone(store.get("usb-FTDI_A-if00-port0"))
+
+    def test_structured_binding_caches_device_and_worker_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = BindingStore(Path(directory) / "bindings.json")
+            saved = store.upsert(
+                "usb-FTDI_A-if00-port0",
+                {"device_id": "DEVICE-1", "worker_id": "worker-a"},
+            )
+            self.assertEqual(saved["device_id"], "DEVICE-1")
+            self.assertEqual(saved["worker_id"], "worker-a")
+            self.assertTrue(saved["identity_verified"])
 
     def test_invalid_baudrate_and_port_key_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -157,6 +172,38 @@ class SerialConsoleServiceTests(unittest.TestCase):
         self.assertEqual(ports[0]["by_id"], str(self.by_id / self.stable_name))
         self.assertEqual(ports[0]["vendor_product"], "0403:6001")
         self.assertEqual(ports[0]["driver"], "ftdi_sio")
+
+    def test_enumeration_uses_usb_path_instead_of_unstable_tty_number(self):
+        (self.by_id / self.stable_name).unlink()
+        service = self.make_service()
+        port = service.list_ports()[0]
+        expected = serial_port_identity(
+            by_id="",
+            devname="/dev/ttyUSB0",
+            usb_path="pci-0000:00:14.0-usb-0:1:1.0",
+        )
+        self.assertEqual(port["port_key"], expected["port_key"])
+        self.assertEqual(port["identity_source"], "usb-path")
+        self.assertTrue(port["identity_stable"])
+
+    def test_device_availability_requires_explicit_binding(self):
+        local_worker = "ats-worker-controller"
+        unbound = [{"port_key": "p1", "online": True, "binding": None}]
+        result = device_serial_availability(
+            unbound, device_id="D1", worker_id=local_worker
+        )
+        self.assertFalse(result["available"])
+        self.assertEqual(result["state"], "unbound")
+        bound = [{
+            "port_key": "p1", "devname": "/dev/ttyUSB0", "online": True,
+            "capture_active": True, "last_output_at": "2026-09-23T00:00:00Z",
+            "binding": {"device_id": "D1", "worker_id": local_worker},
+        }]
+        result = device_serial_availability(
+            bound, device_id="D1", worker_id=local_worker
+        )
+        self.assertTrue(result["available"])
+        self.assertEqual(result["confidence"], "output_verified")
 
     def test_usb_io_error_has_actionable_message(self):
         error = OSError(5, "Input/output error")
@@ -211,6 +258,25 @@ class SerialConsoleServiceTests(unittest.TestCase):
         try:
             self.assertEqual(asyncio.run(exercise()), "loader> ")
             self.assertEqual(service.list_log_dates(self.stable_name), [])
+        finally:
+            service.stop()
+
+    def test_delete_binding_disconnects_an_open_console(self):
+        service = self.make_service(serial_factory=lambda **_kwargs: _FakeSerial([]))
+        service.update_binding(
+            self.stable_name,
+            {"baudrate": 115200, "capture_enabled": False},
+        )
+
+        async def exercise():
+            subscriber_id, queue, _backlog = await service.subscribe(self.stable_name)
+            self.assertTrue(service.delete_binding(self.stable_name))
+            self.assertIsNone(await asyncio.wait_for(queue.get(), timeout=1))
+            service.unsubscribe(self.stable_name, subscriber_id)
+
+        try:
+            asyncio.run(exercise())
+            self.assertIsNone(service.store.get(self.stable_name))
         finally:
             service.stop()
 
@@ -350,9 +416,17 @@ class SerialConsoleApiTests(unittest.TestCase):
         self.assertEqual(
             self.client.get("/api/devices/console/ports").json()["data"]["count"], 1
         )
+        availability = self.client.get(
+            "/api/devices/console/availability/DEVICE-1"
+        ).json()["data"]
+        self.assertEqual(availability["state"], "unbound")
+        self.assertFalse(availability["available"])
         response = self.client.put(
             "/api/devices/console/bindings/ttyUSB0",
-            json={"label": "rack", "baudrate": 115200, "capture_enabled": True},
+            json={
+                "label": "DEVICE-1", "device_id": "DEVICE-1",
+                "baudrate": 115200, "capture_enabled": True,
+            },
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["data"]["binding"]["baudrate"], 115200)
@@ -379,6 +453,67 @@ class SerialConsoleApiTests(unittest.TestCase):
             200,
         )
 
+    def test_empty_log_read_carries_capture_status_hint(self):
+        # 空结果必须能区分「没接线 / 没绑定 / 没开采集」。
+        self.service.read_log = lambda _key, **_kw: {
+            "date": "20260910",
+            "content": "",
+            "lines": 0,
+            "available_dates": [],
+        }
+        logs = self.client.get("/api/devices/console/ports/ttyUSB0/logs")
+        self.assertEqual(logs.status_code, 200, logs.text)
+        data = logs.json()["data"]
+        self.assertEqual(data["lines"], 0)
+        status = data["capture_status"]
+        self.assertFalse(status["bound"])
+        self.assertIn("绑定", status["hint"])
+
+        self.service.list_ports = lambda: [
+            {
+                "port_key": "ttyUSB0",
+                "devname": "/dev/ttyUSB0",
+                "online": True,
+                "binding": {"label": "board"},
+                "capture_enabled": True,
+                "capture_active": True,
+                "error": None,
+            }
+        ]
+        idle = self.client.get("/api/devices/console/ports/ttyUSB0/logs")
+        status = idle.json()["data"]["capture_status"]
+        self.assertTrue(status["bound"])
+        self.assertTrue(status["device_online"])
+        self.assertTrue(status["capture_enabled"])
+        self.assertIn("波特率", status["hint"])
+
+        self.service.list_ports = lambda: [
+            {
+                "port_key": "ttyUSB0", "devname": "/dev/ttyUSB0",
+                "online": True, "binding": {"label": "board"},
+                "capture_enabled": True, "capture_active": False,
+                "error": "串口被占用",
+            }
+        ]
+        busy = self.client.get("/api/devices/console/ports/ttyUSB0/logs")
+        self.assertIn("被占用", busy.json()["data"]["capture_status"]["hint"])
+
+        self.service.list_ports = lambda: [
+            {
+                "port_key": "ttyUSB0",
+                "devname": "/dev/ttyUSB0",
+                "online": False,
+                "binding": {"label": "board"},
+                "capture_enabled": True,
+                "capture_active": False,
+                "error": "拔出",
+            }
+        ]
+        offline = self.client.get("/api/devices/console/ports/ttyUSB0/logs")
+        status = offline.json()["data"]["capture_status"]
+        self.assertFalse(status["device_online"])
+        self.assertIn("不在线", status["hint"])
+
     def test_agent_console_read_requires_devices_read_scope(self):
         request = SimpleNamespace(state=SimpleNamespace(auth_method="agent_token"))
         user = object()
@@ -397,6 +532,23 @@ class SerialConsoleApiTests(unittest.TestCase):
         self.assertIs(result, user)
         require_scope.assert_called_once_with("devices.read")
         scope_dependency.assert_called_once_with(request)
+
+    def test_agent_port_visibility_applies_worker_and_device_acl(self):
+        request = SimpleNamespace(
+            state=SimpleNamespace(
+                auth_method="agent_token",
+                agent_token_record={
+                    "allowed_workers": "worker-a",
+                    "allowed_devices": "D1",
+                },
+            )
+        )
+        ports = [
+            {"port_key": "p1", "binding": {"worker_id": "worker-a", "device_id": "D1"}},
+            {"port_key": "p2", "binding": {"worker_id": "worker-a", "device_id": "D2"}},
+            {"port_key": "p3", "binding": None},
+        ]
+        self.assertEqual([item["port_key"] for item in visible_ports(request, ports)], ["p1"])
 
     def test_embedded_page_inlines_assets(self):
         response = self.client.get("/devices-console")

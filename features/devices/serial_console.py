@@ -23,6 +23,7 @@ import pyudev
 from foundation.config import settings
 
 from .serial_console_errors import friendly_serial_error
+from .serial_console_identity import serial_port_identity
 from .serial_console_storage import (
     SUPPORTED_NEWLINES,
     BindingStore,
@@ -31,6 +32,7 @@ from .serial_console_storage import (
     validate_newline,
     validate_port_key,
 )
+from .serial_console_subscribers import schedule_idle_stop, signal_subscriber_close
 
 
 logger = logging.getLogger(__name__)
@@ -43,7 +45,7 @@ DATE_RE = re.compile(r"^\d{8}$")
 @dataclass
 class _Subscriber:
     loop: asyncio.AbstractEventLoop
-    queue: asyncio.Queue[str]
+    queue: asyncio.Queue[Any]
 
 
 @dataclass
@@ -93,9 +95,8 @@ class SerialConsoleService:
         self._devname_to_key: dict[str, str] = {}
         self._observer = None
         self._started = False
-
+        self._enumeration_error = ""
     def configure_data_root(self, data_root: str | Path) -> None:
-        """Point the singleton at the lifespan-owned runtime directory."""
         with self._lock:
             if self._started:
                 raise RuntimeError("串口服务运行中，无法切换数据目录")
@@ -147,13 +148,17 @@ class SerialConsoleService:
             devices = self.udev_context_factory().list_devices(subsystem="tty")
         except Exception as exc:
             logger.warning("Unable to enumerate serial ports: %s", exc)
+            self._enumeration_error = f"枚举串口失败：{friendly_serial_error(exc)}"
             return ports
+        self._enumeration_error = ""
         for device in devices:
             devname = str(getattr(device, "device_node", "") or "")
             if not (devname.startswith("/dev/ttyUSB") or devname.startswith("/dev/ttyACM")):
                 continue
             by_id = by_target.get(os.path.realpath(devname), "")
-            port_key = validate_port_key(Path(by_id or devname).name)
+            usb_path = self._device_value(device, "ID_PATH", str(getattr(device, "sys_path", "") or ""))
+            identity = serial_port_identity(by_id=by_id, devname=devname, usb_path=usb_path)
+            port_key = validate_port_key(str(identity["port_key"]))
             vid = self._device_value(device, "ID_VENDOR_ID").lower()
             pid = self._device_value(device, "ID_MODEL_ID").lower()
             ports.append(
@@ -165,21 +170,17 @@ class SerialConsoleService:
                     "pid": pid,
                     "vendor_product": f"{vid}:{pid}" if vid and pid else "",
                     "driver": self._device_driver(device),
-                    "usb_path": self._device_value(
-                        device, "ID_PATH", str(getattr(device, "sys_path", "") or "")
-                    ),
+                    "usb_path": usb_path,
+                    "identity_source": identity["identity_source"],
+                    "identity_stable": identity["identity_stable"],
                     "online": True,
                 }
             )
         ports.sort(key=lambda item: (item["devname"], item["port_key"]))
         with self._lock:
             self._port_cache = {item["port_key"]: dict(item) for item in ports}
-            # 整体重建而非 update：设备拔出后其它设备可能复用同一
-            # /dev/ttyUSBn 节点名，陈旧映射会让 remove 事件误伤新占用者。
             self._devname_to_key.clear()
-            self._devname_to_key.update(
-                {item["devname"]: item["port_key"] for item in ports}
-            )
+            self._devname_to_key.update({item["devname"]: item["port_key"] for item in ports})
             present = set(self._port_cache)
             for key, runtime in self._runtimes.items():
                 runtime.online = key in present
@@ -187,6 +188,8 @@ class SerialConsoleService:
 
     def list_ports(self) -> list[dict[str, Any]]:
         physical = {item["port_key"]: item for item in self._physical_ports()}
+        if self._enumeration_error:
+            raise RuntimeError(self._enumeration_error)
         bindings = self.store.list()
         result = []
         for key in sorted(set(physical) | set(bindings)):
@@ -199,6 +202,8 @@ class SerialConsoleService:
                 "vendor_product": "",
                 "driver": "",
                 "usb_path": "",
+                "identity_source": "stored-binding",
+                "identity_stable": True,
                 "online": False,
             })
             binding = bindings.get(key)
@@ -233,12 +238,14 @@ class SerialConsoleService:
 
     def delete_binding(self, port_key: str) -> bool:
         key = validate_port_key(port_key)
-        runtime = self._runtime(key)
-        with self._lock:
-            if runtime.subscribers:
-                raise RuntimeError("控制台仍有连接，无法删除绑定")
+        deleted = self.store.delete(key)
+        if not deleted:
+            return False
         self._stop_worker(key)
-        return self.store.delete(key)
+        with self._lock:
+            subscribers = list(self._runtime(key).subscribers.values())
+        signal_subscriber_close(subscribers)
+        return True
 
     def set_capture(self, port_key: str, enabled: bool) -> dict[str, Any]:
         key = validate_port_key(port_key)
@@ -344,8 +351,6 @@ class SerialConsoleService:
                         runtime.error = ""
                     retry_delay = self.retry_interval
                     while not runtime.stop_event.is_set() and self._desired(port_key):
-                        # 句柄已被并发关闭（控制台断开/停止采集/热插拔）时
-                        # 直接退出本轮，不把关闭后的读错误当作串口故障。
                         if runtime.handle is not handle:
                             break
                         size = max(1, min(int(getattr(handle, "in_waiting", 0) or 1), 65536))
@@ -354,10 +359,6 @@ class SerialConsoleService:
                             continue
                         self._record_data(port_key, runtime, bytes(data))
                 except Exception as exc:
-                    # pyserial close() 先置 fd=None 再置 is_open=False，竞态窗口内
-                    # read()/in_waiting 会抛 "'NoneType' object cannot be
-                    # interpreted as an integer"。主动停止或句柄已被外部接管的
-                    # 关闭属预期行为，不写入 runtime.error。
                     intentional_close = (
                         runtime.stop_event.is_set()
                         or (handle is not None and runtime.handle is not handle)
@@ -401,8 +402,6 @@ class SerialConsoleService:
             try:
                 self._append_log(port_key, runtime, data)
             except OSError:
-                # 日志盘故障（磁盘满/目录被删）不应被捕获循环误判为串口
-                # 故障而拆掉连接；跳过本块落盘，串口采集继续。
                 logger.warning("serial log write failed for %s", port_key,
                                exc_info=True)
 
@@ -514,13 +513,13 @@ class SerialConsoleService:
             shutil.rmtree(directory)
             return count
 
-    async def subscribe(self, port_key: str) -> tuple[str, asyncio.Queue[str], str]:
+    async def subscribe(self, port_key: str) -> tuple[str, asyncio.Queue[Any], str]:
         key = validate_port_key(port_key)
         if not self.store.get(key):
             raise KeyError("请先绑定串口")
         runtime = self._runtime(key)
         subscriber_id = uuid.uuid4().hex
-        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=256)
+        queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=256)
         with self._lock:
             runtime.subscribers[subscriber_id] = _Subscriber(
                 loop=asyncio.get_running_loop(), queue=queue
@@ -534,8 +533,7 @@ class SerialConsoleService:
         runtime = self._runtime(key)
         with self._lock:
             runtime.subscribers.pop(subscriber_id, None)
-        if not self._desired(key):
-            self._stop_worker(key)
+        schedule_idle_stop(self, key)
 
     def write(self, port_key: str, data: str, *, append_newline: bool = False) -> int:
         key = validate_port_key(port_key)

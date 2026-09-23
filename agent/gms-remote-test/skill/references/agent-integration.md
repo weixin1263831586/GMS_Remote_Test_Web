@@ -21,7 +21,7 @@ tool boundary.
 | `gms_rt_commands(group?)` | `gms-rt-system-commands` (compact) |
 | `gms_rt_describe(command)` | `gms-rt-system-command-describe` |
 | `gms_rt_devices()` | `gms-rt-devices-list` |
-| `gms_rt_device_console(port_key?, tail?, date?)` | `gms-rt-devices-console` |
+| `gms_rt_device_console(port_key?, tail?, date?, device?, worker_id?)` | `gms-rt-devices-console` |
 | `gms_rt_device_info(devices)` | `gms-rt-devices-info` |
 | `gms_rt_device_wait(devices, state?, interval?, max_wait?)` | `gms-rt-devices-wait` |
 | `gms_rt_auth_status()` | `gms-rt-auth-status` |

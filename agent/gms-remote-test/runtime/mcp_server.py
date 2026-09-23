@@ -102,7 +102,7 @@ mcp_tool_schemas = _load_tool_schemas()
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.27"
+SERVER_VERSION = "0.22.29"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -800,8 +800,20 @@ def context_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 def device_console_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     args: list[str] = []
     port_key = str(arguments.get("port_key") or "").strip()
+    device = str(arguments.get("device") or "").strip()
+    worker_id = str(arguments.get("worker_id") or "").strip()
+    if port_key and device:
+        return "port_key and device are mutually exclusive", True
+    if worker_id and not device:
+        return "worker_id requires device", True
+    if device and (arguments.get("tail") is not None or arguments.get("date")):
+        return "tail/date require port_key; assess device first, then read the selected port", True
     if port_key:
         args.append(port_key)
+    if device:
+        args.extend(["--device", device])
+    if worker_id:
+        args.extend(["--worker", worker_id])
     if arguments.get("tail") is not None:
         try:
             tail = int(arguments["tail"])
@@ -2110,8 +2122,8 @@ _TOOLSETS = {
     # 只读设备实证工具集：晨报分析器绑定 device_serial 时与 evidence 一并
     # 放行（daily_brief_config.analyzer_env_extra）。全部是只读诊断：
     # 截图/UI 树/快照/logcat dump/只读 shell 白名单/设备信息与等待。
-    # gms_rt_shell_exec（需用户 approval token）与 gms_rt_device_console
-    # （交互串口）不放入本集合。
+    # gms_rt_shell_exec（需用户 approval token）不放入本集合；
+    # gms_rt_device_console 只读保留日志，属于设备证据。
     **{
         name: {"device_evidence"}
         for name in (
@@ -2122,6 +2134,7 @@ _TOOLSETS = {
             "gms_rt_device_info",
             "gms_rt_device_wait",
             "gms_rt_logcat",
+            "gms_rt_device_console",
         )
     },
 }

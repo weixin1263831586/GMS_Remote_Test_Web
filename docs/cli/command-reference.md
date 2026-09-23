@@ -48,7 +48,8 @@
 | `gms-rt-devices-bootloader-lock` | Lock the bootloader on one or more devices |  |
 | `gms-rt-devices-bootloader-status` | Read bootloader lock status for one or more devices |  |
 | `gms-rt-devices-bootloader-unlock` | Unlock the bootloader on one or more devices |  |
-| `gms-rt-devices-console` | List Controller serial ports or read one port retained console log | gms-rt-devices-console [port_key] [--tail N] [--date YYYYMMDD] |
+| `gms-rt-devices-console` | List Controller serial ports, assess a device binding, or read retained logs | gms-rt-devices-console [port_key] [--tail N] [--date YYYYMMDD] [--device SERIAL [--worker WORKER_ID]] |
+| `gms-rt-devices-diag` | Run one read-only diagnostic device command (shared typed-readonly allowlist, locally audited) | gms-rt-devices-diag <device_id> <command> |
 | `gms-rt-devices-info` | Read detailed properties for one or more devices |  |
 | `gms-rt-devices-list` | List devices visible through the Controller device inventory |  |
 | `gms-rt-devices-logcat` | Capture device logcat via adb shell logcat -v time (-c clears the buffer first; dump mode in non-interactive sessions) | gms-rt-devices-logcat <device_id> [-c] [logcat args] |

@@ -62,6 +62,14 @@ def test_console_tabs_support_multiple_concurrent_sessions():
     assert "session.closed = true;" in SCRIPT
 
 
+def test_console_workspace_survives_a_page_refresh_in_the_same_browser_tab():
+    assert "gms_serial_console_workspace_v1" in SCRIPT
+    assert "sessionStorage.setItem(WORKSPACE_STORAGE_KEY" in SCRIPT
+    assert "function restoreWorkspace()" in SCRIPT
+    assert "workspace.portKeys.forEach" in SCRIPT
+    assert "restoreWorkspace();" in SCRIPT
+
+
 def test_read_only_mode_hides_write_actions_without_inventory_permission():
     # 普通 user 角色没有 devices.inventory：capture/start 等写端点必然 403，
     # 页面必须先读 auth/status 判定权限再决定渲染哪些写操作按钮。
@@ -72,3 +80,16 @@ def test_read_only_mode_hides_write_actions_without_inventory_permission():
     # 403 "Permission denied" 需要映射为可操作的中文提示。
     assert "权限不足" in SCRIPT
     assert "/permission denied/i.test(message)" in SCRIPT
+
+
+def test_binding_persists_structured_identity_and_empty_logs_explain_state():
+    assert "device_id: $('binding-label').value" in SCRIPT
+    assert "worker_id: $('binding-label').selectedOptions[0]?.dataset.workerId" in SCRIPT
+    assert "data.capture_status?.hint" in SCRIPT
+
+
+def test_console_distinguishes_channel_from_port_and_reconnects():
+    assert "通道已连接" in SCRIPT
+    assert "串口已打开" in SCRIPT
+    assert "reconnect-socket" in SCRIPT
+    assert "session.reconnectTimer = setTimeout" in SCRIPT
