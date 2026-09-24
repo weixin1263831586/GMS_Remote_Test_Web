@@ -425,8 +425,18 @@ async def serial_console_websocket(websocket: WebSocket, port_key: str):
                     str(message.get("data") or ""),
                     append_newline=bool(message.get("append_newline", False)),
                 )
-            except Exception as exc:
+            except (ValueError, RuntimeError) as exc:
+                # 预期业务边界（占用/身份未验证/权限）；传输类错误已由
+                # 服务层经 friendly_serial_error 转成稳定文案，可直接回显。
                 await websocket.send_json({"type": "error", "error": str(exc)})
+            except Exception:
+                # 未知异常（pyserial/OS 路径/驱动/内部状态）不得把内部
+                # 细节原样发给客户端（评审 P2）。
+                logger.exception("serial write failed for %s", port_key)
+                await websocket.send_json({
+                    "type": "error",
+                    "error": "串口操作失败，请查看服务端日志",
+                })
             else:
                 audit_console_event(
                     user, "serial_write", port, status="ok", byte_count=written
@@ -442,6 +452,19 @@ async def serial_console_websocket(websocket: WebSocket, port_key: str):
             await websocket.send_json({"type": "error", "error": str(exc)})
     except (WebSocketDisconnect, asyncio.CancelledError):
         pass
+    except Exception:
+        # 未预期异常同样不得回显内部细节：留全栈日志，客户端只收通用
+        # 错误并关闭（1011 internal error）。
+        logger.exception("serial console websocket failed for %s", port_key)
+        if websocket.client_state.name == "CONNECTED":
+            try:
+                await websocket.send_json({
+                    "type": "error",
+                    "error": "串口服务异常，请稍后重试",
+                })
+                await websocket.close(code=1011, reason="internal error")
+            except Exception:
+                pass
     finally:
         release_writer_claim(writer_claim, user, port)
         if sender:

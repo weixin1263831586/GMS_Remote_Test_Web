@@ -4,7 +4,7 @@
   "default_limit": 600,
   "ceilings": {
     "features/assistant/api.py": 1462,
-    "features/assistant/executor.py": 1408,
+    "features/assistant/executor.py": 1145,
     "features/assistant/tools.py": 917,
     "features/assistant/universal_ai.py": 970,
     "features/auth/agent_tokens.py": 260,
@@ -70,10 +70,6 @@
     "foundation/config.py": 767
   },
   "waivers": {
-    "features/assistant/executor.py": {
-      "reason": "android_internals_search 链路补全:payload 请求体绑定 + ExternalSearchRequest 建模(ruff --fix 后 1408 行);后续拆分回落",
-      "expires": "2026-11-04"
-    },
     "features/knowledge/tests/test_external_provider.py": {
       "reason": "新增 rerank 扩窗回归 + YAML 日期 frontmatter 回归(评审修复);后续拆分 fixture 回落",
       "expires": "2026-11-04"

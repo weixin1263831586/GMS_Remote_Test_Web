@@ -46,17 +46,34 @@ def _limit_for(relative: str) -> int:
 
 
 class FrontendSizeRuleTests(unittest.TestCase):
+    @staticmethod
+    def _scanned_assets():
+        """全部第一方前端资产：web 三个根 + features/*/ui（评审 P2）。
+
+        此前只扫 web/shell 与 web/static，页面模块化到 features/*/ui
+        后（如 features/redmine/ui/page.js ≈ 244KB）完全脱离门禁——
+        结果等价于绕过 size ratchet。这里把 features/*/ui 下的
+        js/css/html 一并纳入同一 budget 体系。
+        """
+        for base in ('web/shell', 'web/static/css', 'web/static/js'):
+            yield from (
+                path for path in (ROOT / base).rglob('*')
+                if path.is_file() and path.suffix in {'.html', '.js', '.css'}
+            )
+        for ui_dir in sorted((ROOT / 'features').glob('*/ui')):
+            yield from (
+                path for path in ui_dir.rglob('*')
+                if path.is_file() and path.suffix in {'.html', '.js', '.css'}
+            )
+
     def test_web_assets_stay_within_budgets(self):
         offenders = []
-        for base in ('web/shell', 'web/static/css', 'web/static/js'):
-            for path in (ROOT / base).rglob('*'):
-                if not path.is_file() or path.suffix not in {'.html', '.js', '.css'}:
-                    continue
-                relative = str(path.relative_to(ROOT))
-                size = path.stat().st_size
-                limit = _limit_for(relative)
-                if size > limit:
-                    offenders.append((relative, size, limit))
+        for path in self._scanned_assets():
+            relative = str(path.relative_to(ROOT))
+            size = path.stat().st_size
+            limit = _limit_for(relative)
+            if size > limit:
+                offenders.append((relative, size, limit))
         self.assertEqual(
             offenders,
             [],

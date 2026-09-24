@@ -442,6 +442,14 @@
     .daily-brief-sub-title { font-size:12px; font-weight:650; color:#cbd5e1; margin-bottom:2px; }
     .daily-brief-sub-body { white-space:pre-wrap; line-height:1.7; overflow-wrap:anywhere; color:var(--text); }
     .daily-brief-modal-footer { flex:0 0 auto; width:100%; margin:0; padding:12px 20px; border-top:1px solid var(--border); background:var(--panel); box-shadow:0 -8px 20px rgba(0,0,0,.18); }
+    /* kkagent 完整会话回放（「完整会话」弹框） */
+    .issue-session-stream { display:flex; flex-direction:column; gap:8px; font-size:12.5px; }
+    .issue-session-event { border:1px solid var(--border); border-radius:8px; background:#101620; padding:8px 10px; overflow-wrap:anywhere; }
+    .issue-session-event.error { border-color:rgba(248,113,113,.45); background:rgba(50,20,20,.35); }
+    .issue-session-event.ok { border-color:rgba(52,211,153,.28); }
+    .issue-session-meta { display:flex; flex-wrap:wrap; gap:8px; align-items:baseline; color:#94a3b8; font-size:11px; margin-bottom:4px; }
+    .issue-session-error-tag { color:#f87171; font-weight:650; }
+    .issue-session-event pre { margin:2px 0 0; white-space:pre-wrap; word-break:break-word; font-size:12px; line-height:1.55; max-height:240px; overflow-y:auto; color:#dbe4f0; font-family:'Cascadia Code','Fira Code',monospace; }
     /* 实时分析进度时间线（「查看分析」弹框优化） */
     .analysis-timeline { display:flex; flex-direction:column; gap:2px; font-size:13px; line-height:1.6; }
     .analysis-timeline-item { display:flex; align-items:baseline; gap:8px; padding:4px 6px; border-radius:6px; overflow-wrap:anywhere; }

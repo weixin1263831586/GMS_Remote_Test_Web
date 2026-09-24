@@ -13,6 +13,7 @@ triage 数据严格来自 ``build_daily_triage_snapshot``（内部唯一调用
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -45,6 +46,7 @@ from .daily_brief_service import (
     DailyBriefService,
     normalize_daily_brief_config,
 )
+from .daily_brief_session import session_transcript
 from .daily_brief_snapshot import DEFAULT_LIST_LIMIT, DEFAULT_STALE_DAYS
 from .statistics_api import _has_redmine_credentials, _missing_credentials_payload
 
@@ -166,6 +168,46 @@ async def get_brief_run(request: Request, run_id: str):
     if run is None or run.owner_id != service.owner_id:
         return ApiError.not_found("分析任务不存在。").to_response()
     return {"success": True, "data": service.run_payload(run)}
+
+
+@router.get("/daily-brief/runs/{run_id}/issues/{issue_id}/session")
+async def get_issue_analysis_session(
+    request: Request,
+    run_id: str,
+    issue_id: int = Path(ge=1),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(80, ge=1, le=200),
+):
+    """单 issue 分析的 kkagent 完整会话回放（「完整会话」弹框数据源）。
+
+    - owner ACL 与 events 端点同构：run 不属于当前 owner 一律 404。
+    - session_id 只从该 issue 的 ai_execution 记录取（运行时落库），
+      不接受调用方传入的任意会话 id；kkagent 会话库查不到同样 404。
+    - 内容在 features/redmine/daily_brief_session.py 里裁剪：跳过模型
+      内部 thinking，工具输入/输出只保留有限预览。
+    """
+    _require_read(request)
+    service = _service_for_request(request)
+    run = service.repository.get_run(run_id)
+    if run is None or run.owner_id != service.owner_id:
+        return ApiError.not_found("分析任务不存在。").to_response()
+    executions = service.repository.list_ai_executions_for_run(run_id)
+    session_id = ""
+    for execution in executions:
+        if int(execution.get("issue_id") or 0) != int(issue_id):
+            continue
+        candidate = str(execution.get("session_id") or "").strip()
+        if candidate:
+            session_id = candidate
+            break
+    if not session_id:
+        return ApiError.not_found("该分析没有可回放的 kkagent 会话。").to_response()
+    transcript = await asyncio.to_thread(
+        session_transcript, session_id, offset=offset, limit=limit
+    )
+    if transcript is None:
+        return ApiError.not_found("kkagent 会话库不可用或会话已被清理。").to_response()
+    return {"success": True, "data": transcript}
 
 
 @router.get("/daily-brief/runs/{run_id}/issues/{issue_id}/events")

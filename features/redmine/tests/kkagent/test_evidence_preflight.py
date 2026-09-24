@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from contextlib import suppress
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
 
 from features.redmine.kkagent import evidence_preflight
@@ -188,3 +191,87 @@ class EvidencePreflightTests(unittest.TestCase):
         self.assertEqual(trace.status, "failed")
         self.assertIn("cancelled", trace.output_preview)
         run.assert_not_awaited()
+
+    def test_cancel_interrupts_running_preflight_command(self):
+        """评审 P2：communicate 期间请求停止须在轮询间隔级（≈0.25s）终止
+        preflight CLI，而不是等满 90s 超时。"""
+
+        async def scenario():
+            with TemporaryDirectory() as tmp:
+                script = Path(tmp) / "hang.sh"
+                script.write_text("#!/bin/sh\necho started\nsleep 30\n", encoding="utf-8")
+                flags = {"cancelled": False}
+
+                def should_cancel():
+                    return flags["cancelled"]
+
+                async def flip_later():
+                    await asyncio.sleep(0.6)
+                    flags["cancelled"] = True
+
+                flipper = asyncio.ensure_future(flip_later())
+                loop = asyncio.get_running_loop()
+                started = loop.time()
+                raised = False
+                try:
+                    await evidence_preflight._run_readonly_command(
+                        ["bash", str(script)], {},
+                        timeout_seconds=60, should_cancel=should_cancel,
+                    )
+                except evidence_preflight.PreflightCancelledError:
+                    raised = True
+                elapsed = loop.time() - started
+                flipper.cancel()
+                with suppress(asyncio.CancelledError):
+                    await flipper
+                return raised, elapsed
+
+        raised, elapsed = asyncio.run(scenario())
+        self.assertTrue(raised)
+        # 30s 的 sleep 子进程被整树终止；余量放宽给慢 CI。
+        self.assertLess(elapsed, 5.0)
+
+    def test_timeout_reaps_communicate_task(self):
+        async def scenario():
+            with TemporaryDirectory() as tmp:
+                script = Path(tmp) / "hang.sh"
+                script.write_text("#!/bin/sh\nsleep 30\n", encoding="utf-8")
+                current = asyncio.current_task()
+                before = set(asyncio.all_tasks())
+                result = await evidence_preflight._run_readonly_command(
+                    ["bash", str(script)], {}, timeout_seconds=0.1
+                )
+                await asyncio.sleep(0)
+                leaked = [
+                    task for task in asyncio.all_tasks()
+                    if task is not current and task not in before and not task.done()
+                ]
+                return result, leaked
+
+        (exit_code, _output, error), leaked = asyncio.run(scenario())
+        self.assertEqual(exit_code, evidence_preflight.NETWORK_EXIT_CODE)
+        self.assertIn("timed out", error)
+        self.assertEqual(leaked, [])
+
+    def test_collect_maps_midflight_cancel_to_failed_trace(self):
+        """运行中取消与"尝试前取消"同构：failed 轨迹 + 不再重试。"""
+
+        async def scenario():
+            with patch.object(
+                evidence_preflight, "_gms_command", return_value=["command"],
+            ), patch.object(
+                evidence_preflight, "_run_readonly_command",
+                AsyncMock(side_effect=evidence_preflight.PreflightCancelledError),
+            ) as run:
+                trace, _ = await evidence_preflight._collect(
+                    tool_name="gms_rt_devices_snapshot",
+                    arguments=["RK3576GMS1", "--json"],
+                    tool_input={"device": "RK3576GMS1"}, env_extra={},
+                    should_cancel=lambda: False,
+                )
+            return trace, run
+
+        trace, run = asyncio.run(scenario())
+        self.assertEqual(trace.status, "failed")
+        self.assertIn("cancelled during", trace.output_preview)
+        self.assertEqual(run.await_count, 1)

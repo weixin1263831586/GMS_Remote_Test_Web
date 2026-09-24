@@ -209,6 +209,27 @@ class EvidenceApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
+    def test_numeric_attachment_id_resolves_to_artifact(self):
+        # 模型偶尔把 Redmine 数字附件 ID 当 art_* 证据 ID 传入；服务端
+        # 解析别名（2026-09-24 晨报批次真实用例），跨 owner 仍不可见。
+        url = "/api/redmine-agent/artifacts/776656/text?offset=0&limit=10"
+        ok = self.client.get(url, headers={"x-test-owner": "owner-a"})
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.json()["data"]["returned_chars"], 10)
+        cross = self.client.get(url, headers={"x-test-owner": "owner-b"})
+        self.assertEqual(cross.status_code, 404)
+
+    def test_unknown_numeric_attachment_id_error_is_actionable(self):
+        url = "/api/redmine-agent/artifacts/999999/text"
+        response = self.client.get(url, headers={"x-test-owner": "owner-a"})
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("gms-rt-redmine-attachments", response.json()["error"])
+
+    def test_nonexistent_artifact_id_still_404(self):
+        url = "/api/redmine-agent/artifacts/art_does_not_exist/text"
+        response = self.client.get(url, headers={"x-test-owner": "owner-a"})
+        self.assertEqual(response.status_code, 404)
+
     def test_search_returns_evidence_refs(self):
         url = f"/api/redmine-agent/evidence/{self.snapshot['snapshot_id']}/search"
         response = self.client.get(

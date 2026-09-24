@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import ssl
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -53,6 +54,21 @@ async def post_gerrit_review(
     }
 
 
+def _rest_ssl(cfg: dict[str, Any]):
+    """REST outbound TLS 策略（评审 P1）。
+
+    默认校验证书（与 Basic Auth 配套，防 MITM 凭据泄露）；自签内网
+    Gerrit 经 ``rest_ca_cert`` 提供私有 CA。仅当已保存配置显式写
+    ``rest_verify_ssl=false`` 时才兼容关闭（新配置默认 True）。
+    """
+    if not bool(cfg.get("rest_verify_ssl", True)):
+        return False
+    ca_cert = str(cfg.get("rest_ca_cert") or "").strip()
+    if ca_cert:
+        return ssl.create_default_context(cafile=ca_cert)
+    return True
+
+
 async def _post_gerrit_review_rest(
     cfg: dict[str, Any],
     *,
@@ -70,7 +86,7 @@ async def _post_gerrit_review_rest(
     if verified is not None:
         payload["labels"] = {"Verified": int(verified)}
     timeout = aiohttp.ClientTimeout(total=30)
-    connector = aiohttp.TCPConnector(ssl=bool(cfg.get("rest_verify_ssl", False)))
+    connector = aiohttp.TCPConnector(ssl=_rest_ssl(cfg))
     auth = aiohttp.BasicAuth(
         str(cfg.get("rest_username") or ""),
         str(cfg.get("rest_password") or ""),
@@ -282,7 +298,7 @@ async def _query_gerrit_via_rest(
     if api_prefix:
         auth = aiohttp.BasicAuth(str(cfg["rest_username"]), str(cfg["rest_password"]))
     timeout = aiohttp.ClientTimeout(total=60)
-    connector = aiohttp.TCPConnector(ssl=bool(cfg.get("rest_verify_ssl", False)))
+    connector = aiohttp.TCPConnector(ssl=_rest_ssl(cfg))
     headers = {"Accept": "application/json"}
     items: list[dict[str, Any]] = []
     start = 0

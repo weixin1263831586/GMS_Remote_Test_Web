@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePath
 
 # Canonical CommandResult lives in foundation; re-exported here so the
@@ -13,11 +13,15 @@ from foundation.command_result import CommandResult
 
 
 __all__ = [
+    "ANDROID_17_VENDOR_API_LEVEL",
+    "BootloaderOemProfile",
     "CommandResult",
     "FastbootPreparationError",
     "FastbootPreparer",
     "PreparedFastbootDevice",
     "Runner",
+    "resolve_bootloader_oem_profile",
+    "vendor_partition",
 ]
 
 
@@ -33,6 +37,76 @@ ANDROID_17_VENDOR_API_LEVEL = 202604
 
 
 @dataclass(frozen=True)
+class BootloaderOemProfile:
+    """Bootloader OEM lock/unlock 能力档案（平台 hardcode → capability 化）。
+
+    不再在流程里散落 ``if "rk3572" ...`` 平台分支；每种 uboot 家族登记为
+    一个不可变 profile，``commands`` 是按优先级排列的 oem 命令模板
+    （``{action}`` 占位符替换为 lock/unlock）。首个命令是按已知信号选出
+    的首选；后续条目是 ``apply_oem_action`` 在 uboot 明确 unrecognized
+    时的兜底候选（传输类失败不做命令级重试）。
+    """
+
+    name: str
+    commands: tuple[str, ...]
+
+    def primary(self, action: str) -> str:
+        """首选 oem 命令参数（resolve 时依据 identity/vendor_api_level 选定）。"""
+        self._require_action(action)
+        return self.commands[0].format(action=action)
+
+    def fallback(self, action: str) -> str:
+        """unrecognized 兜底命令；profile 只登记一条命令时无兜底。"""
+        self._require_action(action)
+        if len(self.commands) < 2:
+            raise FastbootPreparationError(
+                f"bootloader profile {self.name} has no fallback oem command"
+            )
+        return self.commands[1].format(action=action)
+
+    @staticmethod
+    def _require_action(action: str) -> None:
+        if action not in {"lock", "unlock"}:
+            raise ValueError("action must be lock or unlock")
+
+
+#: Rockchip 新一代 uboot（RK3572 全平台 / vendor API level 达 A17）：
+#: 统一识别 `oem board:<action>`；旧命令留作兜底。
+_OEM_PROFILE_ROCKCHIP_BOARD = BootloaderOemProfile(
+    "rockchip_board_command",
+    ("board:{action}", "at-{action}-vboot"),
+)
+#: Rockchip 旧 vboot uboot（vendor < A17，含 GRF+SSI 组合）：
+#: 只认 `oem at-<action>-vboot`；新命令留作兜底。
+_OEM_PROFILE_ROCKCHIP_VBOOT_LEGACY = BootloaderOemProfile(
+    "rockchip_vboot_legacy",
+    ("at-{action}-vboot", "board:{action}"),
+)
+
+BOOTLOADER_OEM_PROFILES: dict[str, BootloaderOemProfile] = {
+    profile.name: profile
+    for profile in (_OEM_PROFILE_ROCKCHIP_BOARD, _OEM_PROFILE_ROCKCHIP_VBOOT_LEGACY)
+}
+
+
+def resolve_bootloader_oem_profile(
+    identity: str = "", vendor_api_level: int = 0
+) -> BootloaderOemProfile:
+    """由设备信号解析 OEM 能力档案（ADR：capability 取代平台 hardcode）。
+
+    判定信号依次为 ``identity``（serial + ro.board.platform + getvar
+    product）与 ``vendor_api_level``；两者都未知时按旧 vboot 命令起步，
+    由 ``apply_oem_action`` 的 unrecognized 兜底重试纠正误判。
+    """
+    if "rk3572" in (identity or "").lower():
+        return _OEM_PROFILE_ROCKCHIP_BOARD
+    level = int(vendor_api_level or 0)
+    if level >= ANDROID_17_VENDOR_API_LEVEL:
+        return _OEM_PROFILE_ROCKCHIP_BOARD
+    return _OEM_PROFILE_ROCKCHIP_VBOOT_LEGACY
+
+
+@dataclass(frozen=True)
 class PreparedFastbootDevice:
     serial: str
     identity: str
@@ -40,23 +114,17 @@ class PreparedFastbootDevice:
     # 阶段）时为 0（未知），oem 命令按旧 vendor 处理，并由 unrecognized
     # 兜底重试纠正误判。
     vendor_api_level: int = 0
+    # 由 identity + vendor_api_level 解析出的 OEM 能力档案；缺省按旧
+    # vboot 处理（与"版本未知"语义一致）。
+    profile: BootloaderOemProfile = field(
+        default_factory=lambda: _OEM_PROFILE_ROCKCHIP_VBOOT_LEGACY
+    )
 
     def oem_argument(self, action: str) -> str:
-        if action not in {"lock", "unlock"}:
-            raise ValueError("action must be lock or unlock")
         # 解锁/上锁命令与设备当前 uboot 版本绑定，而 uboot 随 vendor 固件
-        # 发布：
-        #   * RK3572：全平台统一识别 `oem board:<action>`；
-        #   * 其他平台：vendor API level 达到 Android 17（>= 202604）的
-        #     uboot 用 `oem board:<action>`，更早的 vendor（含 GRF+SSI）
-        #     用 `oem at-<action>-vboot`。
-        # identity 由 serial + ro.board.platform + `getvar product` 组成。
-        identity = self.identity.lower()
-        if "rk3572" in identity:
-            return f"board:{action}"
-        if self.vendor_api_level >= ANDROID_17_VENDOR_API_LEVEL:
-            return f"board:{action}"
-        return f"at-{action}-vboot"
+        # 发布；首选命令由 resolve_bootloader_oem_profile 按 identity +
+        # vendor_api_level 决定，兜底顺序见 BootloaderOemProfile。
+        return self.profile.primary(action)
 
 
 class FastbootPreparationError(RuntimeError):
@@ -219,6 +287,9 @@ class FastbootPreparer:
             serial=serial,
             identity=f"{serial} {board} {product}",
             vendor_api_level=vendor_api_level,
+            profile=resolve_bootloader_oem_profile(
+                f"{serial} {board} {product}", vendor_api_level
+            ),
         )
 
     def apply_oem_action(
@@ -227,10 +298,10 @@ class FastbootPreparer:
         """Run the platform oem lock/unlock command in bootloader Fastboot.
 
         版本未知（设备此前已在 fastboot、无 ADB 阶段）时默认命令可能与
-        设备 uboot 不匹配：仅在明确 unrecognized 时用备选命令重试一次。
-        lock 与 unlock 一样保留兜底，否则 uboot 不识别 `oem board:lock`
-        时脚本以 `set -e` 中途退出，设备会被留在 fastboot 无法开机
-        （RK3562 Android 17 GSI 回归）。
+        设备 uboot 不匹配：仅在明确 unrecognized 时按 profile 的候选
+        顺序用备选命令重试一次。lock 与 unlock 一样保留兜底，否则 uboot
+        不识别首选命令时脚本以 `set -e` 中途退出，设备会被留在 fastboot
+        无法开机（RK3562 Android 17 GSI 回归）。
         """
         command = prepared.oem_argument(action)
         result = self._execute(
@@ -252,11 +323,7 @@ class FastbootPreparer:
             raise FastbootPreparationError(
                 f"fastboot -s {prepared.serial} failed: {detail}"
             )
-        alternative = (
-            f"at-{action}-vboot"
-            if command == f"board:{action}"
-            else f"board:{action}"
-        )
+        alternative = prepared.profile.fallback(action)
         self._execute(
             [
                 "fastboot",

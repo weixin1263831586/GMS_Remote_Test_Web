@@ -61,7 +61,8 @@ class FederationTests(unittest.TestCase):
         reset_singleton_for_tests()
 
     def test_merge_orders_by_score_and_caps_limit(self):
-        # 单源内分数降序，多源轮转合并（不再跨源比分数）。
+        # RRF 融合：单 source 时退化为该源内部排序；多 source 各通道
+        # 名次可比（不跨源比较原始 BM25 分数），同分按 source 稳定排序。
         service = FederatedKnowledgeService([
             _FakeProvider("a", hits=[_hit("a", 0.5)]),
             _FakeProvider("b", hits=[_hit("b", 0.9)]),
@@ -112,14 +113,61 @@ class FederationTests(unittest.TestCase):
         out = service.search("q", sources=None)
         self.assertEqual(len(out["results"]), 1)
 
-    def test_multi_source_merge_round_robin_per_source(self):
-        # 单源内部按分数降序，多源轮转合并，防高分源整体挤掉低分源。
+    def test_multi_source_merge_rrf_per_source_rank(self):
+        # RRF 融合（round-robin 公平但不做 relevance calibration）：
+        # 各 source 内部仍按分数决定名次，跨 source 按名次融合；单命中的
+        # 低分源不会被高分源整体挤掉（b 首位命中保住 limit 内名额）。
         service = FederatedKnowledgeService([
             _FakeProvider("a", hits=[_hit("a", 0.9), _hit("a", 0.8), _hit("a", 0.7)]),
             _FakeProvider("b", hits=[_hit("b", 0.6)]),
         ])
         out = service.search("q", limit=2)
         self.assertEqual([r["source"] for r in out["results"]], ["a", "b"])
+
+    def test_rrf_boosts_hit_ranked_in_multiple_sources(self):
+        # RRF 核心语义：按各通道内名次融合（Σ1/(k+rank)）。同一命中对象
+        # 出现在多个通道时分数叠加——排在只命中单一通道的条目之前。
+        # （当前各 provider 返回不同对象，叠加主要面向未来共享条目的
+        # provider；单 source 时 RRF 退化为该源内部排序。）
+        both_a = KnowledgeHit(
+            source="a", title="LMKD", snippet="s", score=0.6,
+            source_path="part2/ch07/lmkd.md",
+        )
+        both_b = KnowledgeHit(
+            source="b", title="LMKD", snippet="s", score=0.6,
+            source_path="part2/ch07/lmkd.md",
+        )
+        service = FederatedKnowledgeService([
+            _FakeProvider("a", hits=[
+                _hit("a", 0.9), both_a, _hit("a", 0.5),
+            ]),
+            _FakeProvider("b", hits=[both_b, _hit("b", 0.4)]),
+        ])
+        out = service.search("q", limit=3)
+        titles = [r["title"] for r in out["results"]]
+        # "LMKD" 在 a 源 rank2 (1/62) + b 源 rank1 (1/61) ≈ 0.0324，
+        # 高于 a 源 rank1 (1/61 ≈ 0.0164)；0.9 分的 a 条目只能排第二。
+        self.assertEqual(titles[0], "LMKD")
+        self.assertEqual(titles.count("LMKD"), 1)
+
+    def test_rrf_fuses_equivalent_distinct_provider_objects(self):
+        left = KnowledgeHit(
+            source="a", title="LMKD", snippet="left", score=0.8,
+            source_path="part2/ch07/lmkd.md",
+        )
+        right = KnowledgeHit(
+            source="b", title="LMKD", snippet="right", score=0.7,
+            source_path="part2/ch07/lmkd.md",
+        )
+        service = FederatedKnowledgeService([
+            _FakeProvider("a", hits=[_hit("a", 0.9), left]),
+            _FakeProvider("b", hits=[right, _hit("b", 0.6)]),
+        ])
+        out = service.search("q", limit=4)
+        self.assertEqual(
+            [item["title"] for item in out["results"]].count("LMKD"), 1
+        )
+        self.assertEqual(out["results"][0]["title"], "LMKD")
 
     def test_source_filter(self):
         service = FederatedKnowledgeService([

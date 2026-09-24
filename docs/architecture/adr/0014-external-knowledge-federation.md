@@ -2,6 +2,10 @@
 
 Status: Accepted
 
+> **Note:** The Daily Brief triage restriction described below was superseded
+> by ADR 0013. New Daily Brief analyses use the unified diagnostic pipeline.
+> The background-only evidence policy remains unchanged.
+
 ## Context
 
 Single-issue diagnosis currently ranks evidence produced inside the platform:
@@ -75,7 +79,9 @@ separate from the personal knowledge base:
 - **triage never queries the wiki.** The morning-brief batch triage prompt
   and tool surface exclude `gms_rt_knowledge_search`; only the on-demand
   diagnostic deep analysis may use it. This keeps batch triage cheap and
-  prevents noise inflation from background hits.
+  prevents noise inflation from background hits. (See the note above: the
+  triage pipeline itself was removed by ADR 0013; the background-only
+  policy still governs every current analysis pipeline.)
 - **License boundary.** Wiki content stays in the admin-side clone and its
   companion index; it is displayed only inside the platform with license
   attribution and is never packaged into `plugins/gms-remote-test/`, the

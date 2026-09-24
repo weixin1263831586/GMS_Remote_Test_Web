@@ -22,7 +22,12 @@ DEFAULT_GERRIT_DASHBOARD = {
     "base_url": "",
     "rest_username": "",
     "rest_password": "",
-    "rest_verify_ssl": False,
+    # REST 走 Basic Auth，TLS 校验默认必须开启（评审 P1：verify=False +
+    # Basic Auth 组合存在 MITM 凭据泄露面）。自签内网 Gerrit 用
+    # rest_ca_cert 提供私有 CA；确需关闭校验只能对已保存配置显式写
+    # rest_verify_ssl=false（旧部署兼容），新配置一律默认校验。
+    "rest_verify_ssl": True,
+    "rest_ca_cert": "",
     "ssh_host": "",
     "ssh_user": "",
     "ssh_port": 29418,
@@ -121,6 +126,7 @@ def normalize_gerrit_dashboard_config(raw: dict[str, Any] | None) -> dict[str, A
         "rest_username": str(raw.get("rest_username") or DEFAULT_GERRIT_DASHBOARD["rest_username"]).strip(),
         "rest_password": str(raw.get("rest_password") or DEFAULT_GERRIT_DASHBOARD["rest_password"]).strip(),
         "rest_verify_ssl": bool(raw.get("rest_verify_ssl", DEFAULT_GERRIT_DASHBOARD["rest_verify_ssl"])),
+        "rest_ca_cert": str(raw.get("rest_ca_cert") or DEFAULT_GERRIT_DASHBOARD["rest_ca_cert"]).strip(),
         "ssh_host": str(raw.get("ssh_host") or DEFAULT_GERRIT_DASHBOARD["ssh_host"]).strip(),
         "ssh_user": str(raw.get("ssh_user") or DEFAULT_GERRIT_DASHBOARD["ssh_user"]).strip(),
         "ssh_port": _bounded_int(raw.get("ssh_port"), DEFAULT_GERRIT_DASHBOARD["ssh_port"], 1, 65535),
@@ -144,6 +150,7 @@ def denormalize_gerrit_dashboard_config(config: dict[str, Any]) -> dict[str, Any
         "rest_username": normalized["rest_username"],
         "rest_password": normalized["rest_password"],
         "rest_verify_ssl": normalized["rest_verify_ssl"],
+        "rest_ca_cert": normalized["rest_ca_cert"],
         "ssh_host": normalized["ssh_host"],
         "ssh_user": normalized["ssh_user"],
         "ssh_port": normalized["ssh_port"],

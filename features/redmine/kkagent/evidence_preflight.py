@@ -16,11 +16,12 @@ import json
 import os
 import shutil
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
 from .auth_preflight import GMS_SELFCHECK_SCRIPT
-from .process import child_env, terminate_process_tree
+from .process import child_env, settle_reader_future, terminate_process_tree
 
 # _attachment_manifest 只提取清单元数据（artifact id/kind/status），不含
 # 客户正文——与 trace._record_tool_result 对 live trace 的记账口径一致。
@@ -34,6 +35,13 @@ PREFLIGHT_TIMEOUT_SECONDS = 90.0
 # （含 usage error / 业务失败）不重试，立即收敛。
 NETWORK_RETRY_ATTEMPTS = 3
 NETWORK_RETRY_BACKOFF_SECONDS = (1.0, 3.0)
+# 运行中取消轮询间隔：与 kkagent 正式阶段的 CANCEL_POLL_SECONDS 一致，
+# 保证"点击停止 → 进程终止"延迟全阶段一致（评审 P2）。
+CANCEL_POLL_SECONDS = 0.25
+
+
+class PreflightCancelledError(Exception):
+    """用户在 preflight CLI 运行中请求停止（区别于超时/网络失败）。"""
 
 
 def _gms_command(command: str, arguments: list[str]) -> list[str] | None:
@@ -71,11 +79,27 @@ def _summary_trace(
     )
 
 
+async def _wait_cancel_flag(should_cancel: Callable[[], bool]) -> bool:
+    """轮询持久化取消标志；命中后以完成态唤醒 asyncio.wait。"""
+    while True:
+        await asyncio.sleep(CANCEL_POLL_SECONDS)
+        if should_cancel():
+            return True
+
+
 async def _run_readonly_command(
     command: list[str], env_extra: dict[str, str], *, timeout_seconds: float,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> tuple[int, bytes, str]:
-    """Run one bounded, read-only CLI call and return its exit/output summary."""
+    """Run one bounded, read-only CLI call and return its exit/output summary.
+
+    ``should_cancel`` 与超时一起参与同一个 wait（评审 P2：此前用户在
+    communicate 期间点击停止，最多要等满一次 90s 调用才能停止）。取消
+    先到 → 立即整树终止 CLI 并抛 ``PreflightCancelledError``。
+    """
     process: asyncio.subprocess.Process | None = None
+    communicate: asyncio.Future | None = None
+    cancel_watch: asyncio.Future | None = None
     try:
         process = await asyncio.create_subprocess_exec(
             *command,
@@ -84,25 +108,53 @@ async def _run_readonly_command(
             env=child_env(env_extra),
             start_new_session=os.name == "posix",
         )
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=timeout_seconds,
+        communicate = asyncio.ensure_future(process.communicate())
+        if should_cancel is not None:
+            cancel_watch = asyncio.ensure_future(_wait_cancel_flag(should_cancel))
+        done, _pending = await asyncio.wait(
+            {communicate, *([cancel_watch] if cancel_watch else [])},
+            timeout=timeout_seconds,
+            return_when=asyncio.FIRST_COMPLETED,
         )
-        return int(process.returncode or 0), stdout, stderr.decode(
-            "utf-8", errors="replace"
-        )[:500]
-    except asyncio.TimeoutError:
-        if process is not None:
+        if cancel_watch is not None and cancel_watch in done:
+            # 取消优先于同时完成的 communicate：停止语义必须生效。
+            communicate.cancel()
             await terminate_process_tree(process)
+            await settle_reader_future(communicate)
+            cancel_watch.cancel()
+            with suppress(asyncio.CancelledError):
+                await cancel_watch
+            raise PreflightCancelledError("cancelled during evidence preflight command")
+        if cancel_watch is not None:
+            cancel_watch.cancel()
+            with suppress(asyncio.CancelledError):
+                await cancel_watch
+        if communicate in done:
+            stdout, stderr = communicate.result()
+            return int(process.returncode or 0), stdout, stderr.decode(
+                "utf-8", errors="replace"
+            )[:500]
+        # 超时分支：communicate 仍在 pending。
+        await terminate_process_tree(process)
+        await settle_reader_future(communicate)
         return NETWORK_EXIT_CODE, b"", "Controller evidence request timed out"
     except OSError as exc:
         return NETWORK_EXIT_CODE, b"", f"Controller evidence request unavailable: {exc}"
     except asyncio.CancelledError:
+        if cancel_watch is not None:
+            cancel_watch.cancel()
+            with suppress(asyncio.CancelledError):
+                await cancel_watch
+        if communicate is not None:
+            communicate.cancel()
         if process is not None:
             cleanup = asyncio.create_task(terminate_process_tree(process))
             try:
                 await asyncio.shield(cleanup)
             except asyncio.CancelledError:
                 await cleanup
+        if communicate is not None:
+            await settle_reader_future(communicate)
         raise
 
 
@@ -150,9 +202,21 @@ async def _collect(
             return trace, payload
         if attempt:
             await asyncio.sleep(NETWORK_RETRY_BACKOFF_SECONDS[attempt - 1])
-        exit_code, output, error = await _run_readonly_command(
-            command, env_extra, timeout_seconds=PREFLIGHT_TIMEOUT_SECONDS,
-        )
+        try:
+            exit_code, output, error = await _run_readonly_command(
+                command, env_extra, timeout_seconds=PREFLIGHT_TIMEOUT_SECONDS,
+                should_cancel=should_cancel,
+            )
+        except PreflightCancelledError:
+            # 用户在 CLI 运行中请求停止：与"尝试前取消"同一收敛路径，
+            # 不再重试，也不启动后续 preflight 命令。
+            trace, payload = _summary_trace(
+                tool_name=tool_name, tool_input=tool_input, status="failed",
+                error="cancelled during evidence preflight command",
+                evidence_issue_ids=evidence_issue_ids,
+            ), {}
+            _notify("finished", False)
+            return trace, payload
         if exit_code != NETWORK_EXIT_CODE:
             break
     try:
@@ -285,5 +349,6 @@ __all__ = [
     "NETWORK_EXIT_CODE",
     "NETWORK_RETRY_ATTEMPTS",
     "EvidencePreflight",
+    "PreflightCancelledError",
     "collect_deep_analysis_evidence",
 ]

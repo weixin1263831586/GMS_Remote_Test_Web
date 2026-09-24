@@ -114,6 +114,57 @@ class EvidenceGateTests(unittest.TestCase):
         gate = evaluate_evidence_gate(trace, {"attachment_count": 2})
         self.assertTrue(gate["attachments_checked"])
 
+    def test_unrecoverable_read_failure_satisfies_attachment_gate(self):
+        # 「没有可用文本」是基础设施事实（PDF 无文字层等），重试永远失败；
+        # 门禁必须把这次失败读取视为已核验，否则模型被锁死在重试循环
+        # （2026-09-24 晨报批次真实发生）。
+        trace = _full_trace()
+        attachment_call = next(
+            call for call in trace.tool_calls if "redmine_attachments" in call.tool_name
+        )
+        attachment_call.text_artifact_ids = ["pdf-no-text"]
+        gate = evaluate_evidence_gate(trace, {"attachment_count": 2})
+        self.assertFalse(gate["attachments_checked"])
+
+        consume_line(trace, json.dumps({
+            "type": "tool_call", "tool_call_id": "read-p",
+            "tool_name": "gms_rt_redmine_artifact_read",
+            "input": {"artifact_id": "pdf-no-text"},
+        }))
+        consume_line(trace, json.dumps({
+            "type": "tool_result", "tool_call_id": "read-p",
+            "is_error": True,
+            "output": json.dumps(
+                {"ok": False, "error": "该 artifact 没有可用文本"},
+                ensure_ascii=False,
+            ),
+        }))
+        gate = evaluate_evidence_gate(trace, {"attachment_count": 2})
+        self.assertTrue(gate["attachments_checked"])
+        self.assertNotIn("pdf-no-text", gate["unread_text_artifact_ids"])
+
+    def test_wrong_id_read_failure_does_not_satisfy_gate(self):
+        # ID 写错之类的可恢复失败不算「已读」：模型仍需纠正后重读。
+        trace = _full_trace()
+        attachment_call = next(
+            call for call in trace.tool_calls if "redmine_attachments" in call.tool_name
+        )
+        attachment_call.text_artifact_ids = ["text-1"]
+        consume_line(trace, json.dumps({
+            "type": "tool_call", "tool_call_id": "read-w",
+            "tool_name": "gms_rt_redmine_artifact_read",
+            "input": {"artifact_id": "text-1"},
+        }))
+        consume_line(trace, json.dumps({
+            "type": "tool_result", "tool_call_id": "read-w",
+            "is_error": True,
+            "output": json.dumps({"ok": False, "error": "artifact 不存在"},
+                                 ensure_ascii=False),
+        }))
+        gate = evaluate_evidence_gate(trace, {"attachment_count": 2})
+        self.assertFalse(gate["attachments_checked"])
+        self.assertIn("text-1", gate["unread_text_artifact_ids"])
+
     def test_min_history_searches_is_two(self):
         self.assertEqual(MIN_HISTORY_SEARCHES, 2)
 

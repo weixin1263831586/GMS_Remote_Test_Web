@@ -289,6 +289,28 @@ class EvidenceStore:
             return None
         return self._artifact_from_row(row)
 
+    def get_artifact_by_attachment_id(self, attachment_id: str) -> dict[str, Any] | None:
+        """Map a numeric Redmine attachment id to its latest artifact row.
+
+        Models occasionally pass the Redmine numeric id where an ``art_*``
+        evidence id is expected; resolving the alias server-side saves a
+        wasted round trip (2026-09-24 brief run). Multiple snapshots of the
+        same issue can register the same attachment id: the newest row wins.
+        """
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM redmine_evidence_artifacts
+                WHERE attachment_id = ?
+                ORDER BY created_at DESC, artifact_id DESC
+                LIMIT 1
+                """,
+                (str(attachment_id or ""),),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._artifact_from_row(row)
+
     def list_artifacts(self, snapshot_id: str) -> list[dict[str, Any]]:
         with self._lock, self._connect() as conn:
             rows = conn.execute(

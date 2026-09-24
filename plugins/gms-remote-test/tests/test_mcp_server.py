@@ -1733,6 +1733,32 @@ class RedmineEvidenceToolTests(unittest.TestCase):
         result = mcp_server.redmine_image_tool({})
         self.assertTrue(result.is_error)
 
+    def test_image_tool_empty_payload_retries_then_returns_error(self):
+        original = mcp_server.run_cli
+        calls = []
+
+        def fake_run(command, args=None, **_kwargs):
+            calls.append((command, args))
+            return json.dumps({
+                "ok": True,
+                "data": {"artifact_id": "ART", "mime_type": "image/png", "base64": ""},
+            }), False
+
+        mcp_server.run_cli = fake_run
+        self.addCleanup(lambda: setattr(mcp_server, "run_cli", original))
+        result = mcp_server.redmine_image_tool({"artifact_id": "ART"})
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(result.is_error)
+        self.assertIn("已自动重试 1 次", result.items[0]["text"])
+
+    def test_image_tool_non_json_output_remains_diagnostic_text(self):
+        original = mcp_server.run_cli
+        mcp_server.run_cli = lambda *_a, **_k: ("plain diagnostic", False)
+        self.addCleanup(lambda: setattr(mcp_server, "run_cli", original))
+        result = mcp_server.redmine_image_tool({"artifact_id": "ART"})
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.items, [{"type": "text", "text": "plain diagnostic"}])
+
     @staticmethod
     def _fake_image_envelope():
         return json.dumps({

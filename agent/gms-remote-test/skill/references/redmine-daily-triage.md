@@ -56,6 +56,10 @@ issue → journals → attachment metadata → parsed summary
      → artifact search → artifact window read →（必要时才读更多）
 ```
 
+不可恢复的工具失败（附件无文本层 / artifact 文件缺失 / SDK source 未配置 /
+图片载荷不可用）按最终结论处理：记入 missing_information 并继续，禁止重试；
+只有网络/超时/空载荷类瞬时失败允许重试一次。
+
 ## AI 输出契约
 
 diagnostic（当前唯一新生成模式）的结果是最终中文 Markdown 报告：kkagent

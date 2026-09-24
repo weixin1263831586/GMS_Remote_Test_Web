@@ -16,6 +16,7 @@ _ANDROID_API_BY_MAJOR = {
     "16": 36,
     "17": 37,
 }
+_ANDROID_MAJOR_BY_API = {api: major for major, api in _ANDROID_API_BY_MAJOR.items()}
 
 # "android-15" / "Android 16" 形态优先，其次 "16.0_r1" 的前导数字。
 _ANDROID_PREFIX_RE = re.compile(r"android[-_.\s]?(\d{1,2})", re.IGNORECASE)
@@ -41,6 +42,14 @@ def android_api_level_from_request(request: ReportDiagnosisRequest) -> int | Non
     """已知 Android 大版本时返回对应 API level，未知返回 None（跳过版本加权）。"""
     major = android_version_from_request(request)
     return _ANDROID_API_BY_MAJOR.get(major)
+
+
+def android_version_from_api_level(api_level: int | None) -> str:
+    """已知 API level 转回 Android 大版本，未知值返回空串。"""
+    try:
+        return _ANDROID_MAJOR_BY_API.get(int(api_level), "")
+    except (TypeError, ValueError):
+        return ""
 
 
 def test_method_and_class(test_name: str) -> tuple[str, str]:

@@ -22,6 +22,20 @@ from .base import (
 
 logger = logging.getLogger(__name__)
 
+#: RRF 平滑常数（文献标准值）：rank 越靠前贡献 1/(k+rank) 越大，跨 source
+#: 的命中在各自通道内的名次可直接比较，无需校准原始分数。
+RRF_K = 60
+
+
+def _rrf_document_key(hit: KnowledgeHit) -> tuple[str, str, str]:
+    """Stable logical-document key used to fuse and deduplicate providers."""
+    path = str(hit.source_path or "").strip().replace("\\", "/").casefold()
+    title = " ".join(str(hit.title or "").split()).casefold()
+    if path:
+        return ("path", path, title)
+    snippet = " ".join(str(hit.snippet or "").split()).casefold()
+    return ("text", title, snippet[:240])
+
 
 class FederatedKnowledgeService:
     """聚合多个 ExternalKnowledgeProvider；生命周期与配置由调用方注入。"""
@@ -146,21 +160,54 @@ class FederatedKnowledgeService:
                 if hit.evidence_level != "background":
                     hit.evidence_level = "background"
                 results.append(hit)
-        # 按 source 分桶轮转合并（各自分数降序）：单 provider 已截到 limit，
-        # 未来多 source 时避免高分源整体挤掉低分源。
+        # RRF（Reciprocal Rank Fusion）合并（round-robin 公平但不做
+        # relevance calibration；ADR 0014 联邦排序收口）。score = Σ 1/(k + rank_i)：在多个
+        # source 都命中的条目获得叠加加分，单命中的条目按各 source 内部
+        # 排序保持相对次序（单 source 时退化为该 source 的原始排序，
+        # 与旧 round-robin 行为一致）。k=60 是文献标准值，抑制单一
+        # source 高 rank 的支配效应；同分按 (source, source_path) 稳定
+        # 排序，保证跨调用结果可复现。
         by_source: dict[str, list[KnowledgeHit]] = {}
         for hit in results:
             by_source.setdefault(hit.source, []).append(hit)
-        queues = [
-            sorted(bucket, key=lambda h: h.score, reverse=True)
-            for bucket in by_source.values()
+        ranked_per_source = [
+            by_source[source] for source in sorted(by_source)
         ]
-        merged: list[KnowledgeHit] = []
-        total_cap = max(1, limit)
-        while len(merged) < total_cap and any(queues):
-            for queue in queues:
-                if queue and len(merged) < total_cap:
-                    merged.append(queue.pop(0))
+        rrf_scores: dict[tuple[str, str, str], float] = {}
+        representatives: dict[tuple[str, str, str], KnowledgeHit] = {}
+        for hits in ranked_per_source:
+            seen_in_source: set[tuple[str, str, str]] = set()
+            unique_rank = 0
+            for hit in sorted(hits, key=lambda h: h.score, reverse=True):
+                key = _rrf_document_key(hit)
+                if key in seen_in_source:
+                    continue
+                seen_in_source.add(key)
+                unique_rank += 1
+                rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (
+                    RRF_K + unique_rank
+                )
+                current = representatives.get(key)
+                if current is None or (
+                    hit.score,
+                    hit.source,
+                    hit.source_path,
+                ) > (
+                    current.score,
+                    current.source,
+                    current.source_path,
+                ):
+                    representatives[key] = hit
+        merged_keys = sorted(
+            representatives,
+            key=lambda key: (
+                -rrf_scores[key],
+                representatives[key].source,
+                representatives[key].source_path,
+                representatives[key].title,
+            )
+        )
+        merged = [representatives[key] for key in merged_keys[: max(1, limit)]]
         return {
             "results": [hit.to_dict() for hit in merged],
             "sources_status": status_rows,

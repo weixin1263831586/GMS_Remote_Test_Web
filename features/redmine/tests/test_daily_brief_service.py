@@ -505,7 +505,7 @@ class RunLifecycleTests(unittest.TestCase):
         ))
         seen: list[dict] = []
 
-        async def fake_analyze(run_arg, issue_id, entry, analyzer, config):
+        async def fake_analyze(_run_arg, issue_id, entry, analyzer, config):
             seen.append(dict(entry))
 
         with patch.object(self.service, "_analyze_one", side_effect=fake_analyze):

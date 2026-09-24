@@ -423,12 +423,12 @@ function renderMarkdownDoc(text) {
 
 function _renderMarkdownTable(rows) {
   if (rows.length < 2) return esc(rows.join(_NL));
-  var header = rows[0].split('|').map(function(c){return c.trim();}).filter(function(_, idx, arr){ return !(idx === 0 && arr[0] === '') && !(idx === arr.length-1 && arr[arr.length-1] === ''); });
+  var header = _splitMarkdownTableRow(rows[0]);
   var body = rows.slice(2).map(function(r){
-    var cells = r.split('|').map(function(c){return c.trim();});
-    // drop leading/trailing empty from split on |
-    if (cells.length && cells[0] === '') cells.shift();
-    if (cells.length && cells[cells.length-1] === '') cells.pop();
+    var cells = _splitMarkdownTableRow(r);
+    // AI 输出可能行列不齐：补空/截断到表头列数，保证弹框内网格对齐。
+    while (cells.length < header.length) cells.push('');
+    if (cells.length > header.length) cells = cells.slice(0, header.length);
     return '<tr>' + cells.map(function(c){return '<td>' + _inlineMd(esc(c)) + '</td>';}).join('') + '</tr>';
   }).join('');
   return '<table class="md-table"><thead><tr>' + header.map(function(c){return '<th>' + esc(c) + '</th>';}).join('') + '</tr></thead><tbody>' + body + '</tbody></table>';
@@ -3243,6 +3243,9 @@ function openSingleIssueReportModal(item, statisticsOnly) {
   var modalId = 'singleIssueAnalysisModal-' + Date.now();
   // 30 天保留期内的终态 run 提供执行过程回看；超期按钮禁用并提示。
   var hasHistory = !statisticsOnly && singleIssueAnalysisHasHistory(item.run, issue);
+  var hasSession = !statisticsOnly
+    && Boolean(String((issue.ai_execution || {}).session_id || '').trim())
+    && Boolean(String(item.run.run_id || '').trim());
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = statisticsOnly ? 'modal' : 'modal daily-brief-analysis-overlay';
@@ -3256,6 +3259,10 @@ function openSingleIssueReportModal(item, statisticsOnly) {
     + '<div class="modal-buttons daily-brief-modal-footer">'
     + (statisticsOnly ? '' : '<button class="secondary" data-click="openSingleIssueAnalysisTimeline" data-a0="' + esc(issue.issue_id) + '"'
       + (hasHistory ? '' : ' disabled title="' + esc(singleIssueAnalysisHistoryDisabledHint(item.run, issue)) + '"') + '>执行过程</button>')
+    + (hasSession
+      ? '<button class="secondary" data-click="showIssueFullSession" data-a0="' + esc(item.run.run_id)
+        + '" data-a1="' + esc(issue.issue_id) + '" data-a2="' + esc(subject) + '" data-prevent>完整会话</button>'
+      : '')
     + '<button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">关闭</button></div></div>';
   if (statisticsOnly) {
     document.body.appendChild(modal);

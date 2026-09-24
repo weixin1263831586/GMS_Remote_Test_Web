@@ -162,6 +162,12 @@ async def search_system_background(
     ``android_api_level`` 由调用方从报告上下文统一转换
     （knowledge_ranking.android_api_level_from_request）并透传，使
     version-aware rerank 在报告自动诊断这条主入口同样生效。
+
+    Wiki→codesearch 串联验证（ADR 0014 阶段 ②→③→④）在召回后同步执行：
+    每条命中的 source_anchors 逐一去本地 codesearch 验证文件实体，结论
+    内嵌为该 hit 的 ``anchor_verifications``（verified=True/False/None，
+    验证器不可用时标为 unknown）。验证有预算上限且独立降级，失败不影响
+    背景召回本身，更不影响诊断主流程。
     """
     query = (query or "").strip()
     if not query:
@@ -176,7 +182,40 @@ async def search_system_background(
             limit=BACKGROUND_LIMIT,
             android_api_level=android_api_level,
         )
-        return list(data.get("results") or [])[:BACKGROUND_LIMIT]
+        results = list(data.get("results") or [])[:BACKGROUND_LIMIT]
+        if results:
+            results = await _attach_anchor_verifications(
+                results, android_api_level=android_api_level
+            )
+        return results
     except Exception as exc:
         logger.warning("System background search failed: %s", redact_sensitive_text(exc))
         return []
+
+
+async def _attach_anchor_verifications(
+    results: list[dict],
+    *,
+    android_api_level: int | None = None,
+) -> list[dict]:
+    """给每条 background 命中内嵌 codesearch 锚点验证结论（独立降级）。"""
+    try:
+        from .anchor_verification import verify_background_anchors
+        from .knowledge_ranking import android_version_from_api_level
+
+        verifications = await asyncio.to_thread(
+            verify_background_anchors,
+            results,
+            android_version=android_version_from_api_level(android_api_level),
+        )
+    except Exception as exc:
+        logger.debug("Anchor verification skipped: %s", redact_sensitive_text(exc))
+        return results
+    by_title: dict[str, list[dict]] = {}
+    for item in verifications:
+        by_title.setdefault(item.get("hit_title") or "", []).append(item)
+    for hit in results:
+        items = by_title.get(hit.get("title") or "")
+        if items:
+            hit["anchor_verifications"] = items
+    return results
