@@ -102,7 +102,7 @@ mcp_tool_schemas = _load_tool_schemas()
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.29"
+SERVER_VERSION = "0.22.30"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -2495,6 +2495,58 @@ def redmine_artifact_read_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     return run_cli("gms-rt-artifact-read", args)
 
 
+def _image_tool_payload(
+    cli_command: str, args: list[str]
+) -> tuple[dict[str, Any] | None, str, bool]:
+    """Run the image CLI and return ``(data, raw_text, is_error)``.
+
+    Empty base64 with an ok envelope is observed transiently under load
+    (2026-09-24 daily brief: 16 such failures in one batch run); one
+    immediate retry papers over that without teaching the model to blind-
+    retry. ``None`` means the CLI did not return a JSON envelope; an empty
+    dict means it returned valid JSON but still had no image payload after
+    the retry.  Callers must keep those states distinct.
+    """
+    for attempt in (1, 2):
+        text, is_error = run_cli(cli_command, args)
+        if is_error:
+            return {}, text, True
+        try:
+            data = json.loads(text).get("data") or {}
+        except (ValueError, AttributeError):
+            return None, text, False
+        if str(data.get("base64") or ""):
+            return data, text, False
+        if attempt == 1:
+            continue
+    return data, text, False
+
+
+def _image_unavailable_content(cli_command: str, args: list[str]) -> ToolContent:
+    """Actionable error for an image payload that never arrived.
+
+    Tells the model exactly which fallbacks exist instead of a bare
+    "no payload" it can only retry blindly.
+    """
+    fallback = (
+        "可改用 gms-rt-redmine-attachment-download 下载原件（不占会话上下文，"
+        "按路径/元数据引用即可）"
+        if cli_command == "gms-rt-redmine-artifact-image"
+        else "可改用 gms-rt-devices-ui-dump / gms-rt-devices-logcat 收集文本证据"
+    )
+    return ToolContent(
+        [{
+            "type": "text",
+            "text": (
+                "controller 未返回图片载荷（已自动重试 1 次）。不要盲目重试本调用，"
+                f"{fallback}；或在报告 missing_information 中记录"
+                "「图片不可读取」，证据门禁按基础设施不可用处理，不影响 root_cause_type。"
+            ),
+        }],
+        is_error=True,
+    )
+
+
 def devices_screencap_tool(arguments: dict[str, Any]) -> ToolContent:
     """Capture one device screenshot and return MCP image content.
 
@@ -2510,22 +2562,18 @@ def devices_screencap_tool(arguments: dict[str, Any]) -> ToolContent:
         return ToolContent(
             [{"type": "text", "text": "device (serial) is required"}], is_error=True
         )
-    text, is_error = run_cli("gms-rt-devices-screencap", [device])
+    # The CLI envelope carries data.base64/mime_type; convert to image
+    # content. _image_tool_payload retries once on an empty payload.
+    data, text, is_error = _image_tool_payload("gms-rt-devices-screencap", [device])
     if is_error:
         return ToolContent([{"type": "text", "text": text}], is_error=True)
-    # The CLI envelope carries data.base64/mime_type; convert to image content.
-    try:
-        envelope = json.loads(text)
-        data = envelope.get("data") or {}
-        image_b64 = str(data.get("base64") or "")
-        mime = str(data.get("mime_type") or "image/png")
-    except (ValueError, AttributeError):
+    if data is None:
+        # Not a JSON envelope — surface the raw CLI text for diagnosis.
         return ToolContent([{"type": "text", "text": text}], is_error=False)
+    image_b64 = str(data.get("base64") or "")
+    mime = str(data.get("mime_type") or "image/png")
     if not image_b64:
-        return ToolContent(
-            [{"type": "text", "text": "controller returned no image payload"}],
-            is_error=True,
-        )
+        return _image_unavailable_content("gms-rt-devices-screencap", [device])
     meta = {"device_id": str(data.get("device_id") or device)}
     if arguments.get("as_file"):
         return _image_file_result(image_b64, mime, "screencap", meta)
@@ -2550,22 +2598,20 @@ def redmine_image_tool(arguments: dict[str, Any]) -> ToolContent:
         return ToolContent(
             [{"type": "text", "text": "artifact_id is required"}], is_error=True
         )
-    text, is_error = run_cli("gms-rt-redmine-artifact-image", [artifact_id])
+    args = [artifact_id]
+    # The CLI envelope carries data.base64/mime_type; convert to image
+    # content. _image_tool_payload retries once on an empty payload.
+    data, text, is_error = _image_tool_payload(
+        "gms-rt-redmine-artifact-image", args
+    )
     if is_error:
         return ToolContent([{"type": "text", "text": text}], is_error=True)
-    # The CLI envelope carries data.base64/mime_type; convert to image content.
-    try:
-        envelope = json.loads(text)
-        data = envelope.get("data") or {}
-        image_b64 = str(data.get("base64") or "")
-        mime = str(data.get("mime_type") or "image/png")
-    except (ValueError, AttributeError):
+    if data is None:
         return ToolContent([{"type": "text", "text": text}], is_error=False)
+    image_b64 = str(data.get("base64") or "")
+    mime = str(data.get("mime_type") or "image/png")
     if not image_b64:
-        return ToolContent(
-            [{"type": "text", "text": "controller returned no image payload"}],
-            is_error=True,
-        )
+        return _image_unavailable_content("gms-rt-redmine-artifact-image", args)
     meta = {
         k: v for k, v in data.items()
         if k in ("artifact_id", "size_bytes", "sha256", "scaled", "derived_sha256")

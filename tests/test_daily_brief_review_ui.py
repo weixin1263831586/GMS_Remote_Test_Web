@@ -434,6 +434,121 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_escaped_pipe_cell_renders_as_single_column_in_table(self):
+        # GFM 表格单元格里的 \| 是转义管道符（如命令 `ps -A \| grep usb`），
+        # 不是列分隔。直接按 | 切分会把一个单元格撕成 5 列、与 2 列表头
+        # 错位（#641965 真实用例）。必须还原为单元格内的字面竖线。
+        page = self.new_page()
+        page.route('**/api/redmine-agent/**', lambda route: route.fulfill(
+            status=200, content_type='application/json', body='{"success":true,"data":{}}',
+        ))
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("switchTab('daily-brief')")
+            page.evaluate("""() => {
+                singleIssueAnalysisHistory = [{
+                    run: {run_id: 'escaped-pipe-run', status: 'completed'},
+                    issues: [{issue_id: 641965, status: 'completed', result: {
+                        detailed_report: '## 一、问题概况\\n\\n'
+                            + '| 项目 | 内容 |\\n|---|---|\\n'
+                            + '| 执行命令 | `ps -A \\\\| grep usb`、`logcat \\\\| grep usb` |',
+                    }}],
+                }];
+                renderSingleIssueAnalysisHistory();
+            }""")
+            page.locator('#singleIssueAnalysisHistory').get_by_text('查看分析', exact=True).click()
+            modal = page.locator('.daily-brief-modal').last
+            table = modal.locator('table.md-table')
+            expect(table).to_have_count(1)
+            expect(table.locator('th')).to_have_text(['项目', '内容'])
+            cells = table.locator('td')
+            expect(cells).to_have_count(2)
+            expect(cells.nth(1)).to_contain_text('ps -A | grep usb')
+        finally:
+            page.close()
+
+    def test_ragged_table_row_is_padded_to_header_width(self):
+        # AI 输出的表格行列数可能不齐（缺列）：按表头列数补空，保证
+        # 弹框内网格对齐，而不是让后续行整体左移串列。
+        page = self.new_page()
+        page.route('**/api/redmine-agent/**', lambda route: route.fulfill(
+            status=200, content_type='application/json', body='{"success":true,"data":{}}',
+        ))
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("switchTab('daily-brief')")
+            page.evaluate("""() => {
+                singleIssueAnalysisHistory = [{
+                    run: {run_id: 'ragged-table-run', status: 'completed'},
+                    issues: [{issue_id: 654663, status: 'completed', result: {
+                        detailed_report: '## 一、问题概况\\n\\n'
+                            + '| 证据段 | 内容 | 判定 |\\n|---|---|---|\\n'
+                            + '| 日志段 | 缺一列 |\\n| 完整行 | 三列 | 正常 |',
+                    }}],
+                }];
+                renderSingleIssueAnalysisHistory();
+            }""")
+            page.locator('#singleIssueAnalysisHistory').get_by_text('查看分析', exact=True).click()
+            modal = page.locator('.daily-brief-modal').last
+            rows = modal.locator('table.md-table tbody tr')
+            expect(rows).to_have_count(2)
+            expect(rows.nth(0).locator('td')).to_have_count(3)
+            expect(rows.nth(1).locator('td')).to_have_count(3)
+        finally:
+            page.close()
+
+    def test_full_session_button_opens_replay_modal(self):
+        # 「完整会话」按钮：ai_execution 带 session_id 时出现；点击后打开
+        # 回放弹框，渲染会话事件（thinking 不下发），支持加载更多。
+        page = self.new_page()
+
+        def respond(route):
+            url = route.request.url
+            if '/session?' in url:
+                data = {
+                    'session_id': 'sess-x', 'total_messages': 3,
+                    'total_events': 3, 'offset': 0, 'returned': 2,
+                    'truncated': True, 'next_offset': 2,
+                    'events': [
+                        {'sequence': 0, 'role': 'user', 'kind': 'text',
+                         'text': 'Analyze Redmine issue #641965'},
+                        {'sequence': 1, 'role': 'assistant', 'kind': 'tool_use',
+                         'tool_name': 'gms_rt_redmine_journals',
+                         'tool_input': '{"snapshot_id": "ev_1"}'},
+                    ],
+                }
+            else:
+                data = {}
+            route.fulfill(status=200, content_type='application/json',
+                          body=json.dumps({'success': True, 'data': data}))
+
+        page.route('**/api/redmine-agent/**', respond)
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            page.evaluate("switchTab('daily-brief')")
+            page.evaluate("""() => {
+                singleIssueAnalysisHistory = [{
+                    run: {run_id: 'sess-run-1', status: 'completed'},
+                    issues: [{issue_id: 641965, status: 'completed',
+                        ai_execution: {session_id: 'sess-x'},
+                        result: {detailed_report: '## 一、问题概况\\n\\n正文。'} }],
+                }];
+                renderSingleIssueAnalysisHistory();
+            }""")
+            page.locator('#singleIssueAnalysisHistory').get_by_text('查看分析', exact=True).click()
+            modal = page.locator('.daily-brief-modal').last
+            button = modal.get_by_text('完整会话', exact=True)
+            expect(button).to_be_visible()
+            button.click()
+            stream = page.locator('.issue-session-stream')
+            expect(stream).to_contain_text('Analyze Redmine issue #641965')
+            expect(stream).to_contain_text('gms_rt_redmine_journals')
+            expect(page.locator('.issue-session-stream pre')).to_have_count(2)
+            expect(page.locator('.issue-session-event')).to_have_count(2)
+            expect(stream.locator(':scope > .issue-session-event')).to_have_count(2)
+        finally:
+            page.close()
+
     def test_active_single_issue_is_restored_after_page_reload(self):
         page = self.new_page()
 

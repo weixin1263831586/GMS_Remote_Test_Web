@@ -325,16 +325,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
       - name: Prepare pinned wiki clone + fresh temp index
+        id: knowledge
         run: |
           bash tools/scripts/testing/prepare_knowledge_quality_corpus.sh
       - name: Golden query corpus recall gate
-        env:
-          # prepare 步骤已把 GMS_DATA_ROOT 指向临时根并完成 reindex；
-          # 测试直接消费同一路径的索引（只读）。
-          GMS_WIKI_INDEX_DB: ${{ github.workspace }}/../gms-knowledge-index/android_internals.sqlite3
         run: |
-          # 上一步的 GMS_DATA_ROOT 指向 mktemp 目录；直接从导出文件定位。
-          idx="${GMS_DATA_ROOT:-}/knowledge/external/android_internals.sqlite3"
+          # 索引路径由上一步经 GITHUB_OUTPUT 显式传递（step 间环境变量
+          # 不存活；评审 P0：脚本作用域退化导致 idx 缺根目录）。
+          idx="${{ steps.knowledge.outputs.index }}"
+          test -n "${idx}" || { echo "::error::prepare step did not emit index output"; exit 1; }
           test -f "${idx}" || { echo "::error::temp index missing: ${idx}"; exit 1; }
           GMS_WIKI_INDEX_DB="${idx}" pytest \
             "features/knowledge/tests/test_external_provider.py::GoldenQueryCorpusTests" -v

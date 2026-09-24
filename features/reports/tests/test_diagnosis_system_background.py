@@ -56,6 +56,25 @@ class SearchSystemBackgroundTests(unittest.TestCase):
             android_api_level=36,
         )
 
+    def test_android_version_reaches_anchor_verification(self):
+        payload = {
+            "results": [{
+                **_hit(0),
+                "source_anchors": [{"repo": "platform/frameworks/base", "path": "a/b/C.java"}],
+            }],
+            "sources_status": [],
+        }
+        with patch("features.knowledge.federated_search", return_value=payload), patch(
+            "features.reports.anchor_verification.verify_background_anchors",
+            return_value=[],
+        ) as verify:
+            asyncio.run(
+                diagnosis_recalls.search_system_background(
+                    "lmkd", android_api_level=37
+                )
+            )
+        verify.assert_called_once_with(payload["results"], android_version="17")
+
     def test_provider_error_degrades_to_empty(self):
         with patch("features.knowledge.federated_search", side_effect=RuntimeError("boom")):
             self.assertEqual(asyncio.run(diagnosis_recalls.search_system_background("anr")), [])
@@ -122,6 +141,13 @@ class AndroidApiLevelFromRequestTests(unittest.TestCase):
             android_api_level_from_request(self._request(suite_version="12", android_version=""))
         )
         self.assertIsNone(android_api_level_from_request(self._request()))
+
+    def test_api_level_maps_back_to_android_major(self):
+        from features.reports.knowledge_ranking import android_version_from_api_level
+
+        self.assertEqual(android_version_from_api_level(37), "17")
+        self.assertEqual(android_version_from_api_level(36), "16")
+        self.assertEqual(android_version_from_api_level(None), "")
 
 
 if __name__ == "__main__":

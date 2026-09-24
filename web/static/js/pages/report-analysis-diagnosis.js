@@ -54,6 +54,24 @@ function renderReportSystemBackgroundPanel(backgroundResults) {
             item.confidence ? `置信: ${item.confidence}` : '',
             item.last_verified ? `验证于: ${item.last_verified}` : '',
         ].filter(Boolean).join(' | ');
+        const anchors = Array.isArray(item.source_anchors) ? item.source_anchors : [];
+        // Wiki→codesearch 串联验证结论（内嵌在每条命中上）：
+        // verified: true=本地源码树已找到对应文件（绿）；
+        // false=codesearch 未命中（红）；null/无字段=验证器不可用（灰）。
+        const verifications = Array.isArray(item.anchor_verifications) ? item.anchor_verifications : [];
+        const verifyByPath = new Map();
+        verifications.forEach(v => { if (v && v.anchor) verifyByPath.set(v.anchor.path || '', v); });
+        const anchorHtml = anchors.length ? `
+                <div class="dx-list-meta">锚点: ${anchors.map(a => {
+                    const v = verifyByPath.get(a.path || '');
+                    const badge = v && v.verified === true
+                        ? '<span style="color:var(--success-color)">✔ 已在源码树验证</span>'
+                        : (v && v.verified === false
+                            ? '<span style="color:var(--danger-color)">✘ 源码树未命中</span>'
+                            : '<span style="color:var(--text-secondary)">◌ 未验证</span>');
+                    const label = [a.repo, a.path].filter(Boolean).join('/') || a.url || '';
+                    return `<div>${badge} ${escapeHtml(label.slice(0, 120))}${a.revision ? ` @ ${escapeHtml(String(a.revision).slice(0, 16))}` : ''}</div>`;
+                }).join('')}</div>` : '';
         return `
             <div class="dx-list-item">
                 <div class="dx-list-head">
@@ -61,7 +79,7 @@ function renderReportSystemBackgroundPanel(backgroundResults) {
                 </div>
                 <div class="dx-list-text">${escapeHtml((item.snippet || '').slice(0, 300))}</div>
                 <div class="dx-list-meta">${escapeHtml(meta || 'provenance 缺失')}</div>
-                <div class="dx-list-meta">来源: ${escapeHtml(item.source || 'android_internals')} @ ${escapeHtml((item.source_revision || '').slice(0, 8))} · ${escapeHtml(item.source_path || '')} · ${escapeHtml(item.license || '')}</div>
+                <div class="dx-list-meta">来源: ${escapeHtml(item.source || 'android_internals')} @ ${escapeHtml((item.source_revision || '').slice(0, 8))} · ${escapeHtml(item.source_path || '')} · ${escapeHtml(item.license || '')}</div>${anchorHtml}
             </div>
         `;
     }).join('');

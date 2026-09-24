@@ -1956,6 +1956,12 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/daily-brief/runs/{run_id}/issues/{issue_id}/session"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/redmine-agent/daily-brief/sync-subjects"
@@ -3091,6 +3097,18 @@
       "GET"
     ],
     "path": "/redmine-agent"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/redmine-agent/daily-brief-session.js"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/redmine-agent/markdown-table.js"
   },
   {
     "methods": [

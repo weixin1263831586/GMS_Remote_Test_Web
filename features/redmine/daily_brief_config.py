@@ -49,8 +49,6 @@ _PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 _KKAGENT_CLIENT_RE = re.compile(r'^\s*client\s*=\s*["\']kkagent["\']\s*$', re.MULTILINE)
 _DEVICE_SERIAL_RE = re.compile(r"^[A-Za-z0-9:._-]{2,64}$")
 _TRIGGER_TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
-# Compatibility export; unbudgeted analysis does not need additional rounds.
-TEST_FAILURE_EXTRA_TURNS = 0
 # 注意：kkagent 0.4.x 不提供按次覆盖 reasoning effort 的环境变量或 CLI
 # 参数（仅 config.toml 的 [thinking].effort 与 models.<name>.default_effort，
 # 且无 KKAGENT_THINKING_EFFORT）。per-model effort 必须由运维在该文件里
@@ -207,9 +205,7 @@ def normalize_daily_brief_config(payload: dict[str, Any] | None) -> dict[str, An
     return config
 
 
-def build_brief_analyzer(
-    config: dict[str, Any], *, extra_turns: int = 0
-) -> KkAgentRedmineAnalyzer:
+def build_brief_analyzer(config: dict[str, Any]) -> KkAgentRedmineAnalyzer:
     """Build unbudgeted analysis; legacy budgets cannot truncate evidence gathering."""
     return KkAgentRedmineAnalyzer(
         max_turns=0,
@@ -224,7 +220,6 @@ def build_brief_analyzer(
 __all__ = [
     "DEFAULT_BRIEF_CONFIG",
     "RUNTIME_CONFIG_KEY",
-    "TEST_FAILURE_EXTRA_TURNS",
     "analyzer_env_extra",
     "build_brief_analyzer",
     "list_daily_brief_agent_profiles",

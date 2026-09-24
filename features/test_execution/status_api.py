@@ -332,5 +332,8 @@ async def stream_test_logs(request: Request):
     return StreamingResponse(
         log_stream(),
         media_type="text/plain",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "Access-Control-Allow-Origin": "*", "X-Accel-Buffering": "no"},
+        # Origin 一律由中央 CORSMiddleware 统一裁决（GMS_ALLOWED_ORIGINS），
+        # 此处不再手写 Access-Control-Allow-Origin: *（评审 P2：端点级
+        # 手写头会绕过中央 CORS 策略）。仅保留流式传输必需的头。
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )

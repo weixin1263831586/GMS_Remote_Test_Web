@@ -79,9 +79,8 @@ def test_legacy_budgets_do_not_limit_analysis():
     assert config["max_turns"] == 0
     assert config["issue_timeout_seconds"] == 0
     assert build_brief_analyzer(config).max_turns == 0
-    assert build_brief_analyzer(config, extra_turns=6).max_turns == 0
     assert build_brief_analyzer(
-        normalize_daily_brief_config({"max_turns": 50}), extra_turns=6
+        normalize_daily_brief_config({"max_turns": 50})
     ).max_turns == 0
     assert build_brief_analyzer({"max_turns": 20, "issue_timeout_seconds": 60}).timeout_seconds == 0
 

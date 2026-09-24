@@ -29,3 +29,25 @@ def redmine_agent_page_js():
         media_type="application/javascript",
         headers={"Cache-Control": "no-store"},
     )
+
+
+@page_router.get("/redmine-agent/daily-brief-session.js")
+def redmine_agent_daily_brief_session_js():
+    """会话回放独立资源，避免 daily-brief 主脚本继续膨胀。"""
+    js = Path(__file__).with_name("ui") / "daily-brief-session.js"
+    return Response(
+        js.read_text(encoding="utf-8"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@page_router.get("/redmine-agent/markdown-table.js")
+def redmine_agent_markdown_table_js():
+    """Markdown 表格解析 helper 独立资源。"""
+    js = Path(__file__).with_name("ui") / "markdown-table.js"
+    return Response(
+        js.read_text(encoding="utf-8"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
+    )

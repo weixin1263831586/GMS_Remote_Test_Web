@@ -10,7 +10,6 @@ import asyncio
 import importlib
 import inspect
 import logging
-from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import HTTPException
@@ -26,38 +25,15 @@ from features.redmine import (
 )
 from foundation.config import config_manager
 
-from .executor_formatting import (
-    format_payload as _format_payload,
-)
+from .execution_result import ToolResult
 from .executor_formatting import (
     json_body as _json_body,
 )
+from .route_binding import build_call_kwargs, cached_signature
+from .route_invocation import call_router_function, enforce_route_dependencies
 
 
 logger = logging.getLogger(__name__)
-
-_TOOL_PAGES = {
-    "devices": "devices",
-    "test": "test",
-    "reports": "reports",
-    "report": "reports",
-    "desktop": "desktop",
-    "terminal": "terminal",
-    "vpn": "api-docs",
-    "usbip": "devices",
-    "ssh": "api-docs",
-    "burn": "devices",
-    "config": "api-docs",
-    "system": "api-docs",
-    "apk": "apk-analysis",
-    "assets": "websites",
-    "redmine": "redmine-agent",
-    "gerrit": "gerrit-dashboard",
-    "automation": "automation",
-    "cluster": "cluster",
-    "build": "automation",
-    "knowledge": "notes",
-}
 
 _CATEGORY_LABELS = {
     "device": "设备",
@@ -84,121 +60,6 @@ _CATEGORY_LABELS = {
     "build": "构建",
     "knowledge": "知识库",
 }
-
-_UNSUPPORTED_DIRECT_TOOLS = {
-    "apk_upload",
-    "terminal_push",
-    "test_logs_stream",
-    "system_websocket_{client_id}",
-    "burn_firmware",
-    "burn_gsi",
-}
-
-# 请求体模型映射，首次使用时初始化。
-_MODEL_BY_TOOL = None  # lazily initialized to avoid circular imports
-
-# 缓存函数签名，避免重复反射。
-_SIGNATURE_CACHE: dict[Any, inspect.Signature] = {}
-
-
-def _cached_signature(func: Any) -> inspect.Signature:
-    sig = _SIGNATURE_CACHE.get(func)
-    if sig is None:
-        sig = inspect.signature(func)
-        _SIGNATURE_CACHE[func] = sig
-    return sig
-
-
-def _get_model_by_tool() -> dict[str, type]:
-    """Lazy-initialised mapping of tool names to Pydantic request models."""
-    global _MODEL_BY_TOOL
-    if _MODEL_BY_TOOL is None:
-        from features.devices import (
-            ADBForwardStartRequest,
-            DeviceActionRequest,
-            DeviceLockRequest,
-            DeviceShellRequest,
-            UiControlRequest,
-            UiTapRequest,
-            USBIPDisconnectRequest,
-            USBIPStartRequest,
-            WifiConnectRequest,
-        )
-        from features.firmware import SNBurnRequest
-
-        # features.knowledge 的公共面不含请求模型;经延迟导入引用其 API
-        # 模块(跨 feature 深层内部 import 会被依赖门禁拦截)。
-        from features.knowledge import external_api as _knowledge_external_api
-        from features.reports import ReportDiagnosisRequest
-        from features.system import VNCStartRequest, VPNConnectRequest
-        from features.test_execution import (
-            SuiteApkAnalyzeRequest,
-            TestParseArgsRequest,
-            TestStartRequest,
-            TradefedListResultsRequest,
-        )
-        from features.users import ClientInfoRequest
-
-        _MODEL_BY_TOOL = {
-            "users_detect": ClientInfoRequest,
-            "users_set_username": ClientInfoRequest,
-            "devices_bootloader_lock": DeviceLockRequest,
-            "devices_bootloader_unlock": DeviceLockRequest,
-            "devices_bootloader_status": DeviceActionRequest,
-            "devices_info": DeviceActionRequest,
-            "devices_reboot": DeviceActionRequest,
-            "devices_remount": DeviceActionRequest,
-            "devices_wifi": WifiConnectRequest,
-            "devices_shell": DeviceShellRequest,
-            "devices_scrcpy": DeviceActionRequest,
-            "devices_ui_layout": UiControlRequest, "devices_ui_tap": UiTapRequest,
-            "test_start": TestStartRequest,
-            "test_parse_args": TestParseArgsRequest,
-            "test_suites_result": TradefedListResultsRequest,
-            "reports_diagnose": ReportDiagnosisRequest,
-            "suites_apk_analyze": SuiteApkAnalyzeRequest,
-            "desktop_vnc_start": VNCStartRequest,
-            "desktop_validate": VNCStartRequest,
-            "vpn_connect": VPNConnectRequest,
-            "adb_forward_start": ADBForwardStartRequest,
-            "usbip_connect": USBIPStartRequest,
-            "usbip_disconnect": USBIPDisconnectRequest,
-            "burn_serial": SNBurnRequest,
-            # knowledge external search: 请求体经 ExternalSearchRequest 建模,
-            # android_api_level 的范围校验(1-1000)在此生效。
-            "android_internals_search": _knowledge_external_api.ExternalSearchRequest,
-        }
-    return _MODEL_BY_TOOL
-
-
-# ==================== Result ====================
-
-@dataclass
-class ToolResult:
-    """工具执行结果。"""
-    success: bool
-    tool_name: str
-    data: Any = None
-    formatted_text: str = ""
-    quick_actions: list[dict[str, Any]] = field(default_factory=list)
-    page: str = ""
-    kind: str = "text"  # text / table / status / file / code
-    entities: dict[str, list[str]] = field(default_factory=dict)
-    error: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "success": self.success,
-            "tool_name": self.tool_name,
-            "data": self.data,
-            "formatted_text": self.formatted_text,
-            "quick_actions": self.quick_actions,
-            "page": self.page,
-            "kind": self.kind,
-            "entities": self.entities,
-            "error": self.error,
-        }
-
 
 # ==================== Executor ====================
 
@@ -313,8 +174,8 @@ class ActionExecutor:
         try:
             module = importlib.import_module(module_path)
             func = getattr(module, func_name)
-            await ActionExecutor._enforce_route_dependencies(module, func, request)
-            signature = _cached_signature(func)
+            await enforce_route_dependencies(module, func, request)
+            signature = cached_signature(func)
             if "request" in signature.parameters:
                 if request is None:
                     raise HTTPException(
@@ -1271,174 +1132,12 @@ class ActionExecutor:
     async def _call_router_function(
         self, tool: AgentTool, session: Any, request: Any, params: dict[str, Any]
     ) -> ToolResult:
-        """通过 executor_ref 调用 router 函数。"""
-        if tool.name in _UNSUPPORTED_DIRECT_TOOLS:
-            page = _TOOL_PAGES.get(tool.category, "api-docs")
-            return ToolResult(
-                success=False,
-                tool_name=tool.name,
-                formatted_text=f"「{tool.display_name}」需要在对应页面补充文件或交互参数，请打开页面操作。",
-                page=page,
-                quick_actions=[{"label": "打开页面", "page": page}],
-                error="该工具不支持 Agent 直接执行",
-            )
-
-        ref = tool.executor_ref
-        if ":" not in ref:
-            return ToolResult(success=False, tool_name=tool.name, error=f"Invalid executor_ref: {ref}")
-
-        module_path, func_name = ref.rsplit(":", 1)
-        try:
-            module = importlib.import_module(module_path)
-            func = getattr(module, func_name)
-        except (ImportError, AttributeError) as e:
-            return ToolResult(success=False, tool_name=tool.name, error=f"Cannot resolve {ref}: {e}")
-
-        try:
-            # Calling an endpoint object directly bypasses FastAPI's route
-            # dependency graph.  Resolve route-level guards (notably
-            # human-only policies) explicitly before binding any caller data.
-            await self._enforce_route_dependencies(module, func, request)
-            call_kwargs = self._build_call_kwargs(func, tool, request, params)
-            if asyncio.iscoroutinefunction(func):
-                response = await func(**call_kwargs)
-            else:
-                response = await asyncio.to_thread(func, **call_kwargs)
-
-            # 解析 JSONResponse
-            payload = _json_body(response) if hasattr(response, "body") else {"success": True, "data": response}
-            formatted = _format_payload(tool, payload)
-            return ToolResult(
-                success=payload.get("success", True),
-                tool_name=tool.name,
-                data=payload.get("data", payload),
-                formatted_text=formatted,
-                page=_TOOL_PAGES.get(tool.category, ""),
-                error=payload.get("error", ""),
-            )
-        except Exception as e:
-            logger.error("[Agent] router call %s failed: %s", ref, e, exc_info=True)
-            return ToolResult(
-                success=False,
-                tool_name=tool.name,
-                error=str(e),
-                formatted_text=f"调用「{tool.display_name}」失败：{e}",
-                page=_TOOL_PAGES.get(tool.category, ""),
-            )
-
-    @staticmethod
-    async def _enforce_route_dependencies(module: Any, func: Any, request: Any) -> None:
-        routers = [value for value in vars(module).values() if value.__class__.__name__ == "APIRouter"]
-        for router in routers:
-            for route in router.routes:
-                if getattr(route, "endpoint", None) is not func:
-                    continue
-                for dependency_parameter in getattr(route, "dependencies", ()):
-                    if request is None:
-                        raise HTTPException(status_code=401, detail="Route authorization context is required")
-                    dependency = getattr(dependency_parameter, "dependency", None)
-                    if not callable(dependency):
-                        raise HTTPException(status_code=403, detail="Unsupported route authorization dependency")
-                    resolved = dependency(request)
-                    if inspect.isawaitable(resolved):
-                        await resolved
-                return
+        """通过 executor_ref 调用 router 函数（实现见 route_invocation）。"""
+        return await call_router_function(tool, session, request, params)
 
     def _build_call_kwargs(self, func: Any, tool: AgentTool, request: Any, params: dict[str, Any]) -> dict[str, Any]:
-        from features.assistant.api import AgentRequestShim
-
-        model_by_tool = _get_model_by_tool()
-
-        query_params = self._query_params_for_tool(tool, params)
-        body_params = self._body_params_for_tool(tool, params)
-        sig = _cached_signature(func)
-        dependency_names = {
-            name for name, parameter in sig.parameters.items()
-            if (
-                parameter.default is not inspect.Parameter.empty
-                and parameter.default.__class__.__module__.startswith("fastapi.params")
-                and parameter.default.__class__.__name__ == "Depends"
-            )
-        }
-        supplied_dependencies = dependency_names.intersection(params or {})
-        if supplied_dependencies:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Reserved authorization parameters are not accepted: {sorted(supplied_dependencies)}",
-            )
-
-        shim = AgentRequestShim(
-            request,
-            query_params=query_params,
-            json_body=body_params,
-        ) if request else None
-        kwargs: dict[str, Any] = {}
-
-        for name, parameter in sig.parameters.items():
-            if name == "request":
-                kwargs[name] = shim
-            elif name == "help":
-                kwargs[name] = False
-            elif name == "h":
-                kwargs[name] = None
-            elif name in ("req", "body", "payload"):
-                # "payload" 是 knowledge external_api 等路由的请求体形参,
-                # 与 req/body 同语义(POST body),此前未绑定导致 assistant
-                # 经 executor_ref 直调 search_external 时必现缺参。
-                model = model_by_tool.get(tool.name)
-                if model:
-                    kwargs[name] = model(**body_params)
-                else:
-                    kwargs[name] = body_params
-            elif (
-                parameter.default is not inspect.Parameter.empty
-                and parameter.default.__class__.__module__.startswith("fastapi.params")
-                and parameter.default.__class__.__name__ == "Depends"
-            ):
-                dependency = parameter.default.dependency
-                if not callable(dependency) or request is None:
-                    raise HTTPException(
-                        status_code=401,
-                        detail="Route authorization context is required",
-                    )
-                resolved = dependency(request)
-                if inspect.isawaitable(resolved):
-                    raise RuntimeError("Async route dependencies are not supported")
-                kwargs[name] = resolved
-            elif name in params:
-                kwargs[name] = params[name]
-            elif name in query_params:
-                kwargs[name] = query_params[name]
-            elif parameter.default is not inspect.Parameter.empty:
-                default = parameter.default
-                if default.__class__.__module__.startswith("fastapi.params"):
-                    value = getattr(default, "default", inspect.Parameter.empty)
-                    if value is not inspect.Parameter.empty and value.__class__.__name__ != "PydanticUndefinedType":
-                        kwargs[name] = value
-
-        return kwargs
-
-    @staticmethod
-    def _body_params_for_tool(tool: AgentTool, params: dict[str, Any]) -> dict[str, Any]:
-        body = dict(params or {})
-        if tool.name == "devices_shell" and "serial_no" not in body:
-            devices = body.get("devices") or []
-            if devices:
-                body["serial_no"] = devices[0]
-        if tool.name == "burn_serial" and "sn_code" not in body:
-            body["sn_code"] = body.get("serial") or body.get("sn") or ""
-        if tool.name == "desktop_validate" and "host" not in body:
-            body["host"] = body.get("ubuntu_host") or body.get("device_host")
-        return body
-
-    @staticmethod
-    def _query_params_for_tool(tool: AgentTool, params: dict[str, Any]) -> dict[str, Any]:
-        query = dict(params or {})
-        if tool.name == "reports_delete" and "timestamp" not in query:
-            query["timestamp"] = query.get("report_timestamp", "")
-        if tool.name == "reports_download" and "report_timestamp" not in query:
-            query["report_timestamp"] = query.get("timestamp", "")
-        return {k: v for k, v in query.items() if v is not None}
+        """HTTP 模拟层参数绑定（实现见 route_binding）。"""
+        return build_call_kwargs(func, tool, request, params)
 
 
 # ==================== Global Instance ====================

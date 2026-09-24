@@ -14,7 +14,10 @@
 #   GMS_DATA_ROOT             索引落根（android_internals.sqlite3 写在
 #                             $GMS_DATA_ROOT/knowledge/external/ 下；默认
 #                             mktemp -d，与本地共享索引隔离）。
-# 输出：打印 GMS_DATA_ROOT 实际值，供后续步骤复用。
+# 输出：GitHub Actions 环境（GITHUB_OUTPUT 已设置）时写入 data_root /
+# index 两个 step output，供后续步骤显式消费；本地运行只打印（GitHub
+# Actions 每个 shell step 是新 shell，环境变量不跨 step 存活，必须走
+# step output 传递路径）。
 set -Eeuo pipefail
 
 REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
@@ -78,4 +81,12 @@ if not db.is_file() or result["doc_count"] <= 0:
     raise SystemExit(1)
 PY
 
-echo "GMS_DATA_ROOT=${GMS_DATA_ROOT}"
+index="${GMS_DATA_ROOT}/knowledge/external/android_internals.sqlite3"
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+    {
+        echo "data_root=${GMS_DATA_ROOT}"
+        echo "index=${index}"
+    } >> "${GITHUB_OUTPUT}"
+fi
+echo "[knowledge-quality] GMS_DATA_ROOT=${GMS_DATA_ROOT}"
+echo "[knowledge-quality] index=${index}"

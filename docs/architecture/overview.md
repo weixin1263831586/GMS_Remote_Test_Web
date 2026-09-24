@@ -71,8 +71,15 @@ Infrastructure
 
 ## 相关决策记录
 
+完整索引（ID / Title / Status / Supersedes / Superseded by）见
+[docs/architecture/adr/README.md](adr/README.md)。
+
+关键入口：
+
 - [ADR-0001 Controller / Worker 边界](adr/0001-controller-worker-boundary.md)
 - [ADR-0002 Feature / Foundation 边界](adr/0002-feature-foundation-boundary.md)
 - [ADR-0003 Agent Profile Store](adr/0003-agent-profile-store.md)
 - [ADR-0004 SSH 执行边界](adr/0004-ssh-execution-boundary.md)
 - [ADR-0005 USB/IP 固件烧写所有权](adr/0005-usbip-firmware-ownership.md)
+- [ADR-0013 Daily Brief 统一诊断流水线](adr/0013-daily-brief-batch-matches-single-issue-diagnosis.md)
+- [ADR-0014 外部知识联邦（background only）](adr/0014-external-knowledge-federation.md)

@@ -1,11 +1,14 @@
 import json
+import ssl
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import serialization
 
 
 class GerritConfigTests(unittest.TestCase):
@@ -18,6 +21,58 @@ class GerritConfigTests(unittest.TestCase):
 
     def tearDown(self):
         self.secret_env.stop()
+
+    def test_rest_tls_defaults_to_verified_with_ca_support(self):
+        """评审 P1：Basic Auth 出站必须默认校验 TLS；自签 CA 走 rest_ca_cert。"""
+        from features.gerrit.config import (
+            DEFAULT_GERRIT_DASHBOARD,
+            denormalize_gerrit_dashboard_config,
+            normalize_gerrit_dashboard_config,
+        )
+        from features.gerrit.service import _rest_ssl
+
+        # 默认开启校验（历史默认 False 是 MITM 面）
+        self.assertTrue(DEFAULT_GERRIT_DASHBOARD["rest_verify_ssl"])
+        self.assertEqual(DEFAULT_GERRIT_DASHBOARD["rest_ca_cert"], "")
+
+        # 未配置 → 校验开启，无 CA 时用系统信任库
+        cfg = normalize_gerrit_dashboard_config({})
+        self.assertTrue(cfg["rest_verify_ssl"])
+        self.assertEqual(cfg["rest_ca_cert"], "")
+        self.assertIs(_rest_ssl(cfg), True)
+
+        # 配置私有 CA → context 携带 cafile（用真实自签证书，OpenSSL 拒绝坏 PEM）
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.x509.oid import NameOID
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "gms-test-ca")])
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(name)
+            .issuer_name(name)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(datetime.now(timezone.utc))
+            .not_valid_after(datetime.now(timezone.utc) + timedelta(days=1))
+            .sign(key, hashes.SHA256())
+        )
+        with TemporaryDirectory() as tmp:
+            ca = Path(tmp) / "internal-ca.crt"
+            ca.write_text(cert.public_bytes(serialization.Encoding.PEM).decode())
+            cfg_ca = normalize_gerrit_dashboard_config({"rest_ca_cert": str(ca)})
+            context = _rest_ssl(cfg_ca)
+            self.assertIsInstance(context, ssl.SSLContext)
+            # denormalize 往返不丢 rest_ca_cert
+            raw = denormalize_gerrit_dashboard_config(cfg_ca)
+            self.assertEqual(raw["rest_ca_cert"], str(ca))
+
+        # 显式关闭（仅旧部署兼容路径）→ 仍然显式 False，而不是静默回退
+        legacy = normalize_gerrit_dashboard_config({"rest_verify_ssl": False})
+        self.assertFalse(legacy["rest_verify_ssl"])
+        self.assertIs(_rest_ssl(legacy), False)
 
     def test_profile_update_preserves_unrelated_profiles(self):
         from features.gerrit.config import (

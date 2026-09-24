@@ -79,8 +79,20 @@ def _get_snapshot(owner_id: str, snapshot_id: str) -> dict[str, Any]:
 
 def _get_artifact(owner_id: str, artifact_id: str) -> dict[str, Any]:
     store = owner_evidence_store(owner_id)
-    artifact = store.get_artifact(str(artifact_id or ""))
+    key = str(artifact_id or "").strip()
+    artifact = store.get_artifact(key)
+    if artifact is None and key.isdigit():
+        # 模型偶尔把 Redmine 数字附件 ID 当 art_* 证据 ID 传入；服务端
+        # 解析别名，省掉一次往返（2026-09-24 晨报批次真实用例）。
+        artifact = store.get_artifact_by_attachment_id(key)
     if artifact is None:
+        if key.isdigit():
+            raise EvidenceError(
+                f"artifact 不存在：'{key}' 是 Redmine 数字附件 ID 而非 art_* 证据 ID，"
+                "且当前证据库中没有该附件的映射记录；"
+                "请先用 gms-rt-redmine-attachments 获取本 issue 的 art_* 列表",
+                status_code=404,
+            )
         raise EvidenceError("artifact 不存在", status_code=404)
     snapshot = store.get_snapshot(str(artifact.get("snapshot_id") or ""))
     if snapshot is None:
@@ -413,19 +425,27 @@ def _artifact_file(owner_id: str, artifact_id: str, *, derived: bool = False) ->
     store = owner_evidence_store(owner_id)
     rel = str(artifact.get("derived_text_path") or "") if derived else str(artifact.get("stored_path") or "")
     # stored_path 已在 _artifact_from_row 中剥离，需要直接查询数据库。
+    # 数字附件 ID 别名解析后必须用解析出的 art_* id 查路径，原样字符串
+    # 查不到行（2026-09-24 别名回归测试抓到）。
+    resolved_id = str(artifact.get("artifact_id") or artifact_id)
     with store._connect() as conn:
         row = conn.execute(
             "SELECT stored_path, derived_text_path FROM redmine_evidence_artifacts WHERE artifact_id = ?",
-            (str(artifact_id),),
+            (resolved_id,),
         ).fetchone()
     if row is None:
         raise EvidenceError("artifact 不存在", status_code=404)
     rel = str(row["derived_text_path"] or "") if derived else str(row["stored_path"] or "")
     if not rel:
-        raise EvidenceError(
-            "该 artifact 没有可用文本" if derived else "该 artifact 未下载",
-            status_code=404,
-        )
+        if derived:
+            raise EvidenceError(
+                "该 artifact 没有可用文本（二进制/扫描件，如 PDF 无文字层）；"
+                "不要重复读取，改用 gms-rt-artifact-search 检索其可检索部分，"
+                "或在本报告 missing_information 中记录「附件无文本层」"
+                "（证据门禁按不可提取处理，不阻塞）",
+                status_code=404,
+            )
+        raise EvidenceError("该 artifact 未下载", status_code=404)
     path = store.resolve_internal(rel)
     if not path.is_file():
         raise EvidenceError("artifact 文件缺失", status_code=404)

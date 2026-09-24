@@ -35,6 +35,31 @@ def default_report_temp_dir() -> str:
     return os.environ.get('GMS_REPORT_TEMP_DIR') or str(Path(tempfile.gettempdir()) / 'gms_report')
 
 
+def codesearch_script_location() -> tuple[str, str]:
+    """定位 codesearch 脚本与其工作目录（search 子命令的 cwd）。"""
+    web_app_dir = Path(__file__).resolve().parents[2]
+    codesearch_dir = web_app_dir / 'plugins' / 'codesearch'
+    return str(codesearch_dir / 'scripts' / 'codesearch.py'), str(codesearch_dir)
+
+
+def run_codesearch_process(cmd: list[str], cwd: str) -> subprocess.CompletedProcess | None:
+    """Run a codesearch subprocess with standard error handling.
+
+    模块级 helper：报告源码检索（ReportAnalyzer._run_codesearch）与
+    Wiki 锚点验证（anchor_verification）共用同一条审计过的子进程路径，
+    命令参数固定为字面量列表，不拼接不可信输入。
+    """
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=cwd)
+        return result if result.returncode == 0 else None
+    except subprocess.TimeoutExpired:
+        logger.warning("代码搜索超时（30秒）")
+        return None
+    except Exception as e:
+        logger.error(f"代码搜索异常: {e}")
+        return None
+
+
 # Archive security helpers moved to foundation.archives (single shared
 # policy); private aliases keep intra-feature call sites stable.
 _enforce_post_extraction_safety = enforce_post_extraction_safety
@@ -194,15 +219,7 @@ class ReportAnalyzer:
 
     def _run_codesearch(self, cmd: list[str], cwd: str) -> subprocess.CompletedProcess | None:
         """Run a codesearch subprocess with standard error handling."""
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=cwd)
-            return result if result.returncode == 0 else None
-        except subprocess.TimeoutExpired:
-            logger.warning("代码搜索超时（30秒）")
-            return None
-        except Exception as e:
-            logger.error(f"代码搜索异常: {e}")
-            return None
+        return run_codesearch_process(cmd, cwd)
 
     def _attach_opengrok_url(self, item: dict[str, Any], base_url: str, project: str) -> None:
         """Build and attach an OpenGrok xref URL to a search result item, then clean temp keys."""
@@ -232,9 +249,7 @@ class ReportAnalyzer:
         Returns:
             List[Dict]: 搜索结果列表，每个包含 {project, path, line, type, file_type}
         """
-        web_app_dir = Path(__file__).resolve().parents[2]
-        codesearch_dir = web_app_dir / 'plugins' / 'codesearch'
-        codesearch_script = str(codesearch_dir / 'scripts' / 'codesearch.py')
+        codesearch_script, codesearch_dir = codesearch_script_location()
 
         # 优先用调用方传入的版本，其次用挂载报告的版本；按版本映射选择搜索项目
         opengrok_config = {}

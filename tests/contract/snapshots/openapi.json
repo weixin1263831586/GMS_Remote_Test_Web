@@ -15969,6 +15969,76 @@
         "summary": "Reanalyze Issue In Run"
       }
     },
+    "/api/redmine-agent/daily-brief/runs/{run_id}/issues/{issue_id}/session": {
+      "get": {
+        "description": "单 issue 分析的 kkagent 完整会话回放（「完整会话」弹框数据源）。\n\n- owner ACL 与 events 端点同构：run 不属于当前 owner 一律 404。\n- session_id 只从该 issue 的 ai_execution 记录取（运行时落库），\n  不接受调用方传入的任意会话 id；kkagent 会话库查不到同样 404。\n- 内容在 features/redmine/daily_brief_session.py 里裁剪：跳过模型\n  内部 thinking，工具输入/输出只保留有限预览。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 80,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Issue Analysis Session"
+      }
+    },
     "/api/redmine-agent/daily-brief/sync-subjects": {
       "post": {
         "description": "刷新前同步展示标题：把晨报/单号分析条目的 subject 与 Redmine 对齐。\n\nsubject 在分析入队时冻结，Redmine 上改标题后本地不会自动跟随；前端\n刷新按钮先调用本端点，再重新拉取展示数据。",
@@ -22249,6 +22319,38 @@
           }
         },
         "summary": "Redmine Agent Page"
+      }
+    },
+    "/redmine-agent/daily-brief-session.js": {
+      "get": {
+        "description": "会话回放独立资源，避免 daily-brief 主脚本继续膨胀。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Redmine Agent Daily Brief Session Js"
+      }
+    },
+    "/redmine-agent/markdown-table.js": {
+      "get": {
+        "description": "Markdown 表格解析 helper 独立资源。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Redmine Agent Markdown Table Js"
       }
     },
     "/redmine-agent/page.js": {

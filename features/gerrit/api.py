@@ -122,7 +122,7 @@ async def update_gerrit_dashboard_config(request: Request):
     manager = _config_for_request(request)
     current = manager.get_gerrit_dashboard_config()
     updates: dict[str, Any] = {}
-    for key in ("base_url", "rest_username", "ssh_host", "ssh_user", "default_owner"):
+    for key in ("base_url", "rest_username", "ssh_host", "ssh_user", "default_owner", "rest_ca_cert"):
         if key in body:
             updates[key] = str(body.get(key) or "").strip()
     if "rest_password" in body:

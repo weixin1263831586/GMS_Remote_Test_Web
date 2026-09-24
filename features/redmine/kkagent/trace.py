@@ -219,12 +219,26 @@ class KkAgentTrace:
         }
 
     def read_artifact_ids(self) -> set[str]:
-        return {
-            str(call.tool_input.get("artifact_id") or "").strip()
-            for call in self.tool_calls
-            if call.succeeded and "artifact_read" in call.tool_name
-            if str(call.tool_input.get("artifact_id") or "").strip()
-        }
+        """被读取（成功）或确认不可读（失败但原因不可恢复）的 artifact。
+
+        「该 artifact 没有可用文本 / artifact 文件缺失」是基础设施事实，
+        重试无济于事；把这类失败也视为已核验，避免证据门禁把模型锁死在
+        无法成功的重试循环里（2026-09-24 晨报批次真实发生）。其它失败
+        （如 ID 写错）不算读，模型纠正后重读仍然必要。
+        """
+        unreadable_markers = ("没有可用文本", "artifact 文件缺失")
+        checked: set[str] = set()
+        for call in self.tool_calls:
+            if "artifact_read" not in call.tool_name:
+                continue
+            artifact_id = str(call.tool_input.get("artifact_id") or "").strip()
+            if not artifact_id:
+                continue
+            if call.succeeded or any(
+                marker in call.output_preview for marker in unreadable_markers
+            ):
+                checked.add(artifact_id)
+        return checked
 
     # ---------------------------------------------------- 归属（target-scoped）
 
