@@ -6,11 +6,12 @@ agent token 能力边界 + human session 触发路径。
 
 from __future__ import annotations
 
+import sqlite3
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -178,6 +179,80 @@ class DailyBriefApiAuthzTests(unittest.TestCase):
                 headers={**headers, "x-test-owner": owner},
             )
             self.assertEqual(response.status_code, 404)
+
+    def test_raw_session_view_uses_owned_execution_session_only(self):
+        service = daily_brief_api.DailyBriefService("owner-a")
+        started = service.start_issue_analysis(652654, subject="#652654")
+        run_id = started["run_id"]
+        service.repository.record_ai_execution(
+            run_id,
+            652654,
+            {"session_id": "sess-owned", "status": "completed"},
+        )
+        raw_reader = Mock(return_value={
+            "format": "raw-messages-v1",
+            "session_id": "sess-owned",
+            "total_messages": 1,
+            "offset": 0,
+            "returned": 1,
+            "truncated": False,
+            "next_offset": 1,
+            "omitted_block_types": ["redacted_thinking", "thinking"],
+            "messages": [],
+        })
+        headers = {"x-test-scopes": "redmine.read"}
+        url = (
+            f"/api/redmine-agent/daily-brief/runs/{run_id}"
+            "/issues/652654/session?view=raw"
+        )
+        with patch.object(
+            daily_brief_api, "session_raw_messages", raw_reader
+        ):
+            response = self.client.get(url, headers=headers)
+            denied = self.client.get(
+                url, headers={**headers, "x-test-owner": "owner-b"}
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["format"], "raw-messages-v1")
+        raw_reader.assert_called_once_with(
+            "sess-owned", offset=0, limit=80
+        )
+        self.assertEqual(denied.status_code, 404)
+
+    def test_session_view_uses_latest_attempt_and_reports_index_outage(self):
+        service = daily_brief_api.DailyBriefService("owner-a")
+        started = service.start_issue_analysis(652655, subject="#652655")
+        run_id = started["run_id"]
+        service.repository.record_ai_execution(
+            run_id, 652655, {"session_id": "sess-old", "attempt_no": 1},
+        )
+        service.repository.record_ai_execution(
+            run_id, 652655, {"session_id": "sess-new", "attempt_no": 2},
+        )
+        reader = Mock(return_value={
+            "format": "turns-v1", "session_id": "sess-new", "turns": [],
+        })
+        headers = {"x-test-scopes": "redmine.read"}
+        url = (
+            f"/api/redmine-agent/daily-brief/runs/{run_id}"
+            "/issues/652655/session"
+        )
+        with patch.object(daily_brief_api, "session_transcript", reader):
+            response = self.client.get(url, headers=headers)
+        self.assertEqual(response.status_code, 200)
+        reader.assert_called_once_with("sess-new", offset=0, limit=80)
+
+        with patch.object(
+            brief_repo.DailyBriefRepository,
+            "list_ai_executions_for_run",
+            side_effect=sqlite3.OperationalError("database is locked"),
+        ):
+            unavailable = self.client.get(url, headers=headers)
+        self.assertEqual(unavailable.status_code, 503)
+        self.assertEqual(
+            unavailable.json()["code"], "DEPENDENCY_UNAVAILABLE",
+        )
 
 
 if __name__ == "__main__":

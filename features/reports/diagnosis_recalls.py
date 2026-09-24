@@ -163,11 +163,12 @@ async def search_system_background(
     （knowledge_ranking.android_api_level_from_request）并透传，使
     version-aware rerank 在报告自动诊断这条主入口同样生效。
 
-    Wiki→codesearch 串联验证（ADR 0014 阶段 ②→③→④）在召回后同步执行：
-    每条命中的 source_anchors 逐一去本地 codesearch 验证文件实体，结论
-    内嵌为该 hit 的 ``anchor_verifications``（verified=True/False/None，
-    验证器不可用时标为 unknown）。验证有预算上限且独立降级，失败不影响
-    背景召回本身，更不影响诊断主流程。
+    Wiki→codesearch 串联溯源（ADR 0014 阶段 ②→③→④）在召回后同步执行：
+    每条命中的 source_anchors 逐一去本地 codesearch 检查路径存在性，结论
+    内嵌为该 hit 的 ``anchor_verifications``（``evidence_level`` ∈
+    path_matched / path_missing / unknown，``path_present`` 为三态布尔）。
+    路径命中只证明源码树存在该文件，语义上刻意不叫 verified。
+    溯源有预算上限且独立降级，失败不影响背景召回本身，更不影响诊断主流程。
     """
     query = (query or "").strip()
     if not query:
@@ -198,11 +199,24 @@ async def _attach_anchor_verifications(
     *,
     android_api_level: int | None = None,
 ) -> list[dict]:
-    """给每条 background 命中内嵌 codesearch 锚点验证结论（独立降级）。"""
+    """给每条 background 命中内嵌 codesearch 锚点验证结论（独立降级）。
+
+    绑定契约：回挂用本函数生成的结构化 ``hit_id``（命中身份
+    投影），绝不按 ``hit_title`` ——两个知识条目同 title 时 title 回挂
+    会把验证结论交叉绑定到错误条目。
+    """
     try:
         from .anchor_verification import verify_background_anchors
         from .knowledge_ranking import android_version_from_api_level
 
+        # 结构化命中 id：就地写入原条目（浅拷贝会让验证结论写到副本而非
+        # 调用方条目）。召回结果就地编号即可保证一一对应（验证在同一线程
+        # 调用内完成，无并发）。
+        for index, hit in enumerate(results):
+            if isinstance(hit, dict):
+                # provider 结果是不可信证据：不能让其自带的重复
+                # hit_id 控制回挂归属。编排层每次都覆盖为局部唯一 id。
+                hit["hit_id"] = f"bg-{index}"
         verifications = await asyncio.to_thread(
             verify_background_anchors,
             results,
@@ -211,11 +225,13 @@ async def _attach_anchor_verifications(
     except Exception as exc:
         logger.debug("Anchor verification skipped: %s", redact_sensitive_text(exc))
         return results
-    by_title: dict[str, list[dict]] = {}
+    by_hit_id: dict[str, list[dict]] = {}
     for item in verifications:
-        by_title.setdefault(item.get("hit_title") or "", []).append(item)
+        hit_id = str(item.get("hit_id") or "")
+        if hit_id:
+            by_hit_id.setdefault(hit_id, []).append(item)
     for hit in results:
-        items = by_title.get(hit.get("title") or "")
+        items = by_hit_id.get(str(hit.get("hit_id") or ""))
         if items:
             hit["anchor_verifications"] = items
     return results

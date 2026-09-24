@@ -498,23 +498,54 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
             page.close()
 
     def test_full_session_button_opens_replay_modal(self):
-        # 「完整会话」按钮：ai_execution 带 session_id 时出现；点击后打开
-        # 回放弹框，渲染会话事件（thinking 不下发），支持加载更多。
+        # 「会话回放」按钮：ai_execution 带 session_id 时出现；点击后打开
+        # 回放弹框按 message/turn 聚合；上下文和成功工具结果默认折叠，
+        # thinking 不下发，并支持按回合加载更多。
         page = self.new_page()
 
         def respond(route):
             url = route.request.url
-            if '/session?' in url:
+            if '/session?' in url and 'view=raw' in url:
+                data = {
+                    'session_id': 'sess-x', 'format': 'raw-messages-v1',
+                    'total_messages': 1, 'offset': 0, 'returned': 1,
+                    'truncated': False, 'next_offset': 1,
+                    'omitted_block_types': ['redacted_thinking', 'thinking'],
+                    'messages': [{
+                        'sequence': 0, 'message_id': 1, 'role': 'user',
+                        'created_at': '2026-09-24T01:00:00', 'token_count': 9,
+                        'content': [{'type': 'tool_result',
+                                     'tool_use_id': 'c1',
+                                     'content': ('x' * 5000) + 'RAW_END'}],
+                    }],
+                }
+            elif '/session?' in url:
                 data = {
                     'session_id': 'sess-x', 'total_messages': 3,
-                    'total_events': 3, 'offset': 0, 'returned': 2,
+                    'format': 'turns-v1', 'total_turns': 3,
+                    'offset': 0, 'returned': 2,
                     'truncated': True, 'next_offset': 2,
-                    'events': [
-                        {'sequence': 0, 'role': 'user', 'kind': 'text',
-                         'text': 'Analyze Redmine issue #641965'},
-                        {'sequence': 1, 'role': 'assistant', 'kind': 'tool_use',
-                         'tool_name': 'gms_rt_redmine_journals',
-                         'tool_input': '{"snapshot_id": "ev_1"}'},
+                    'turns': [
+                        {'sequence': 0, 'role': 'user', 'kind': 'context',
+                         'created_at': '2026-09-24T01:00:00',
+                         'blocks': [{'kind': 'text',
+                                     'text': 'Analyze Redmine issue #641965'}]},
+                        {'sequence': 1, 'role': 'assistant', 'kind': 'assistant',
+                         'created_at': '2026-09-24T01:00:01',
+                         'blocks': [
+                             {'kind': 'text',
+                              'text': '## 开始\n\nI will read the snapshot.'},
+                             {'kind': 'tool_use', 'tool_call_id': 'c1',
+                              'tool_name': 'gms_rt_redmine_journals',
+                              'tool_input': '{"snapshot_id": "ev_1"}',
+                              'result': {'is_error': False,
+                                         'output': '{"ok": true}'}},
+                             {'kind': 'tool_use', 'tool_call_id': 'c2',
+                              'tool_name': 'gms_rt_redmine_artifact_read',
+                              'tool_input': '{"artifact_id": "a1"}',
+                              'result': {'is_error': True,
+                                         'output': '{"error": "not found"}'}},
+                         ]},
                     ],
                 }
             else:
@@ -536,16 +567,55 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
                 renderSingleIssueAnalysisHistory();
             }""")
             page.locator('#singleIssueAnalysisHistory').get_by_text('查看分析', exact=True).click()
-            modal = page.locator('.daily-brief-modal').last
-            button = modal.get_by_text('完整会话', exact=True)
+            analysis_modal = page.locator('.modal[id^="singleIssueAnalysisModal-"]')
+            button = analysis_modal.get_by_text('会话回放', exact=True)
             expect(button).to_be_visible()
             button.click()
-            stream = page.locator('.issue-session-stream')
+            session_modal = page.locator('.modal[id^="issueFullSessionModal-"]')
+            expect(session_modal).to_be_visible()
+            expect(analysis_modal).to_have_count(1)
+            self.assertTrue(analysis_modal.evaluate('(node) => node.inert'))
+            stream = session_modal.locator('.issue-session-stream')
             expect(stream).to_contain_text('Analyze Redmine issue #641965')
             expect(stream).to_contain_text('gms_rt_redmine_journals')
-            expect(page.locator('.issue-session-stream pre')).to_have_count(2)
-            expect(page.locator('.issue-session-event')).to_have_count(2)
-            expect(stream.locator(':scope > .issue-session-event')).to_have_count(2)
+            expect(stream).to_contain_text('I will read the snapshot.')
+            expect(stream.locator('.issue-session-message h2')).to_have_text('开始')
+            expect(stream.locator(':scope > .issue-session-context')).to_have_count(1)
+            expect(stream.locator(':scope > .issue-session-turn')).to_have_count(1)
+            expect(stream.locator('.issue-session-turn-header')).to_have_css(
+                'position', 'static'
+            )
+            expect(stream.locator('.issue-session-tool')).to_have_count(2)
+            self.assertFalse(stream.locator('.issue-session-context').evaluate(
+                '(node) => node.open'
+            ))
+            self.assertFalse(stream.locator('.issue-session-tool').nth(0).evaluate(
+                '(node) => node.open'
+            ))
+            self.assertTrue(stream.locator('.issue-session-tool').nth(1).evaluate(
+                '(node) => node.open'
+            ))
+            expect(session_modal.locator('.daily-brief-modal-footer')).to_contain_text(
+                '已显示 2 个回合'
+            )
+            session_modal.get_by_text('查看未裁剪原文', exact=True).click()
+            raw_stream = session_modal.locator('.issue-session-raw-stream')
+            expect(raw_stream).to_be_visible()
+            expect(raw_stream).to_contain_text('RAW_END')
+            expect(raw_stream.locator('.issue-session-raw-message')).to_have_count(1)
+            expect(raw_stream.locator('.issue-session-raw-header')).to_have_css(
+                'position', 'static'
+            )
+            expect(session_modal.get_by_text('返回会话视图', exact=True)).to_be_visible()
+            expect(session_modal.locator('.daily-brief-modal-footer')).to_contain_text(
+                '已全部加载（1 条原始消息）'
+            )
+            self.assertTrue(stream.evaluate('(node) => node.hidden'))
+            session_modal.get_by_text('返回 AI 分析', exact=True).click()
+            expect(session_modal).to_have_count(0)
+            expect(analysis_modal).to_be_visible()
+            self.assertFalse(analysis_modal.evaluate('(node) => node.inert'))
+            expect(analysis_modal).to_have_attribute('aria-hidden', 'false')
         finally:
             page.close()
 
@@ -1207,6 +1277,70 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
             expect(page.locator(".analysis-timeline-final")).to_contain_text("已修复")
             expect(toggle).to_have_text('查看过程')
             self.assertIn('分析总结', modal.locator('.modal-title').inner_text())
+        finally:
+            page.close()
+
+    def test_live_session_tail_refreshes_mutable_last_turn_without_new_events(self):
+        """实时会话追尾不能把 truncated=false 当终态；同一回合的
+        tool_result 回挂后，即使 Controller 没有新进度事件也要刷新。
+        """
+        page = self.new_page()
+        session_requests = []
+        event_requests = []
+
+        def respond(route):
+            url = route.request.url
+            if "/events" in url:
+                event_requests.append(url)
+                events = [] if len(event_requests) > 1 else [{
+                    "sequence": 1, "event_type": "session_started", "stage": "kkagent",
+                    "tool_name": "", "status": "", "summary": "session_id=sess-live",
+                    "duration_ms": 0, "created_at": "2026-09-24T10:00:00",
+                }]
+                payload = {
+                    "events": events, "next_sequence": 1,
+                    "run_status": "analyzing", "terminal": False,
+                }
+                route.fulfill(status=200, content_type="application/json",
+                              body=json.dumps({"success": True, "data": payload}))
+                return
+            if "/session?" in url:
+                session_requests.append(url)
+                completed = len(session_requests) > 1
+                tool = {"kind": "tool_use", "tool_call_id": "c1",
+                        "tool_name": "gms_rt_redmine_journals", "tool_input": "{}"}
+                if completed:
+                    tool["result"] = {"is_error": False, "output": "done"}
+                payload = {
+                    "format": "turns-v1", "turns": [{
+                        "sequence": 0, "kind": "assistant", "role": "assistant",
+                        "created_at": "2026-09-24T10:00:01", "blocks": [tool],
+                    }],
+                    "offset": 0, "returned": 1, "next_offset": 1,
+                    "total_turns": 1, "truncated": False,
+                }
+                route.fulfill(status=200, content_type="application/json",
+                              body=json.dumps({"success": True, "data": payload}))
+                return
+            route.fulfill(status=200, content_type="application/json",
+                          body='{"success":true,"data":{}}')
+
+        page.route("**/api/redmine-agent/**", respond)
+        try:
+            page.goto(f"{self.base_url}/redmine-agent", wait_until="domcontentloaded")
+            page.evaluate("switchTab('daily-brief')")
+            page.evaluate(
+                "showAnalysisTimelineModal('live-session-fixture', 652654, {})"
+            )
+            tool = page.locator(
+                '.modal[id^="analysisTimelineModal-"] .analysis-session-tool'
+            )
+            expect(tool).to_contain_text("✓", timeout=8_000)
+            self.assertGreaterEqual(len(session_requests), 2)
+            # 第二次从最后一个可变回合回退重读，所以 offset 仍为 0。
+            self.assertIn("offset=0", session_requests[1])
+            modal_id = page.evaluate("analysisTimelineState.modalId")
+            page.evaluate(f"removeDynamicModal({json.dumps(modal_id)})")
         finally:
             page.close()
 

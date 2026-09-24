@@ -110,25 +110,24 @@
         if (!page) return;
         const title = page.querySelector('.section-title');
         if (!title || title.closest('[data-ek-title-row]')) return;
-        // 参照 adb-title-row 等页面惯例：标题行 flex 化（space-between），
-        // 标题居左、动作按钮居右。flex 容器内 margin 不塌陷，.section-title
-        // 自带的 6px margin-bottom 仍留在行盒内部，"标题→内容"间距与
-        // 其他页面一致（runtime UI smoke 的 titleToContent/frame-top 契约）。
+        // 公共 .page-title-row/.page-title-action 规范（common.css，与
+        // adb-title-row 同一几何）：标题居左、动作按钮居右，24px 点击
+        // 目标由公共类保证，本文件不再做任何局部尺寸 hack。
+        // .section-title 自带的 6px margin-bottom 仍留在行盒内部，
+        // "标题→内容"间距与其他页面一致（runtime UI smoke 的
+        // titleToContent/frame-top 契约）。
         const row = document.createElement('div');
+        row.className = 'page-title-row';
         row.setAttribute('data-ek-title-row', '');
-        row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;';
         title.parentNode.insertBefore(row, title);
         row.appendChild(title);
         // 保持 data-click 为源码中的声明式字面量，使 act-bridge 的冻结
         // UI 契约扫描与运行时实际属性使用同一锚点。
         row.insertAdjacentHTML(
             'beforeend',
-            '<button type="button" class="btn-xs" data-click="ekOpen"></button>',
+            '<button type="button" class="btn-xs page-title-action" data-click="ekOpen"></button>',
         );
         const actionButton = row.lastElementChild;
-        // 高度压在标题行盒内（19px）：不撑高标题行，避免整体下移破坏
-        // frame-top 几何断言。
-        actionButton.style.cssText = 'height:19px;min-height:19px;line-height:17px;padding:0 8px;font-size:10px;flex:0 0 auto;';
         actionButton.title = '外部知识库（Android Internals Wiki）revision 状态与管理';
         actionButton.textContent = '🔗 外部知识库';
     }

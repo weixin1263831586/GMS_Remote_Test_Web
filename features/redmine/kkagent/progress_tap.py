@@ -4,6 +4,10 @@
 （tool_call/tool_result/llm_retry），不外显 reasoning/assistant 文本；
 tool input 原样转发给 sink——sink 侧（AnalysisProgressRecorder）负责
 按身份字段 allowlist 脱敏与截断。
+
+``session`` 事件单独分流：kkagent 流一输出 session_id 就转发给
+sink.session_available()（若 sink 支持），让「会话回放」在分析进行中
+即可 tail 同一 session，而不用等分析结束后 ai_execution 落库。
 """
 
 from __future__ import annotations
@@ -19,11 +23,21 @@ class ProgressTap:
         self.sink = sink
         self._started: dict[str, float] = {}
         self._inputs: dict[str, Any] = {}
+        self._session_reported = False
 
     def on_event(self, event: dict[str, Any]) -> None:
         if self.sink is None:
             return
         event_type = str(event.get("type") or "")
+        if event_type == "session":
+            if not self._session_reported:
+                session_id = str(event.get("session_id") or "")
+                if session_id:
+                    self._session_reported = True
+                    reporter = getattr(self.sink, "session_available", None)
+                    if callable(reporter):
+                        reporter(session_id)
+            return
         if event_type == "tool_call":
             call_id = str(event.get("tool_call_id") or "")
             self._started[call_id] = time.monotonic()

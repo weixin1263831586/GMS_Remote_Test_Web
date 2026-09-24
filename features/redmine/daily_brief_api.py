@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import sqlite3
 from datetime import datetime
 from typing import Literal
 
@@ -46,7 +47,7 @@ from .daily_brief_service import (
     DailyBriefService,
     normalize_daily_brief_config,
 )
-from .daily_brief_session import session_transcript
+from .daily_brief_session import session_raw_messages, session_transcript
 from .daily_brief_snapshot import DEFAULT_LIST_LIMIT, DEFAULT_STALE_DAYS
 from .statistics_api import _has_redmine_credentials, _missing_credentials_payload
 
@@ -177,23 +178,34 @@ async def get_issue_analysis_session(
     issue_id: int = Path(ge=1),
     offset: int = Query(0, ge=0),
     limit: int = Query(80, ge=1, le=200),
+    view: Literal["turns", "raw"] = Query("turns"),
 ):
-    """单 issue 分析的 kkagent 完整会话回放（「完整会话」弹框数据源）。
+    """单 issue 分析的 kkagent 会话回放（「会话回放」弹框数据源）。
 
     - owner ACL 与 events 端点同构：run 不属于当前 owner 一律 404。
-    - session_id 只从该 issue 的 ai_execution 记录取（运行时落库），
-      不接受调用方传入的任意会话 id；kkagent 会话库查不到同样 404。
-    - 内容在 features/redmine/daily_brief_session.py 里裁剪：跳过模型
-      内部 thinking，工具输入/输出只保留有限预览。
+    - session_id 只从该 issue 的归属记录取（不接受调用方传入的任意会话
+      id）：优先 ai_execution 落库记录；分析进行中时回退到进度时间线的
+      ``session_started`` 事件（kkagent 流开始即落库，用于实时
+      tail）。kkagent 会话库查不到同样 404。
+    - ``view=turns`` 按真实 message/turn 聚合并裁剪页面预览；
+      ``view=raw`` 按原始 message 分页返回未裁剪文本与工具载荷。
+    - 两种视图都移除内部 thinking/redacted_thinking。
     """
     _require_read(request)
     service = _service_for_request(request)
     run = service.repository.get_run(run_id)
     if run is None or run.owner_id != service.owner_id:
         return ApiError.not_found("分析任务不存在。").to_response()
-    executions = service.repository.list_ai_executions_for_run(run_id)
     session_id = ""
-    for execution in executions:
+    try:
+        executions = service.repository.list_ai_executions_for_run(run_id)
+    except sqlite3.Error:
+        return ApiError.dependency_unavailable(
+            "分析会话索引暂时不可用，请稍后重试。"
+        ).to_response()
+    # 同一 issue 可能有多次 attempt；回放必须跟随最新一次
+    # session，不能因为底层按 rowid 升序返回而选中旧 attempt。
+    for execution in reversed(executions):
         if int(execution.get("issue_id") or 0) != int(issue_id):
             continue
         candidate = str(execution.get("session_id") or "").strip()
@@ -201,9 +213,20 @@ async def get_issue_analysis_session(
             session_id = candidate
             break
     if not session_id:
+        # 分析进行中的实时 tail：session_started 事件在 kkagent 流开始时
+        # 落库（progress_tap 分流），早于 ai_execution 终态记录。
+        try:
+            store = event_store_for_repository(service.repository)
+            session_id = store.latest_session_id(run_id, issue_id)
+        except sqlite3.Error:
+            return ApiError.dependency_unavailable(
+                "分析会话时间线暂时不可用，请稍后重试。"
+            ).to_response()
+    if not session_id:
         return ApiError.not_found("该分析没有可回放的 kkagent 会话。").to_response()
+    reader = session_raw_messages if view == "raw" else session_transcript
     transcript = await asyncio.to_thread(
-        session_transcript, session_id, offset=offset, limit=limit
+        reader, session_id, offset=offset, limit=limit
     )
     if transcript is None:
         return ApiError.not_found("kkagent 会话库不可用或会话已被清理。").to_response()

@@ -9,6 +9,7 @@ from features.assistant import api as assistant_api
 from features.assistant.api import _missing_required_params
 from features.assistant.executor import ActionExecutor, _json_body
 from features.assistant.intent import resolve
+from features.assistant.route_invocation import guarded_tool_call
 from features.assistant.tools import registry
 from features.auth import CurrentUser
 from features.test_execution.api import get_status
@@ -43,6 +44,20 @@ class AgentRegressionTests(unittest.TestCase):
 
         self.assertFalse(payload["success"])
         self.assertEqual(payload["error"], "Internal Server Error")
+
+    def test_internal_error_request_id_is_logged_without_leaking_exception(self):
+        async def fail():
+            raise RuntimeError("secret=/tmp/private-token")
+
+        with self.assertLogs(
+            "features.assistant.route_invocation", level="ERROR"
+        ) as captured:
+            result = asyncio.run(guarded_tool_call("demo", "执行", fail()))
+
+        request_id = result.error.split("request_id=", 1)[1].rstrip("）")
+        self.assertIn(request_id, "\n".join(captured.output))
+        self.assertNotIn("private-token", result.error)
+        self.assertNotIn("private-token", result.formatted_text)
 
     def test_help_me_test_specific_module_resolves_to_test_start(self):
         intent = resolve(

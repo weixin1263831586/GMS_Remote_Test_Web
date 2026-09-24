@@ -216,11 +216,45 @@ def test_python_preparation_times_out_when_device_never_reenumerates() -> None:
             runner.mode = ""
         return result
 
+    # 假时钟：每次探测自推进 10s 模拟 fastboot_mode() 的真实阻塞，验证
+    # deadline 按单调时钟收敛（循环次数语义下 120 次探测 ≈ 二十分钟）。
+    now = [0.0]
+
+    def fake_monotonic() -> float:
+        return now[0]
+
+    def probe_costly_sleep(seconds: float) -> None:
+        now[0] += 10.0
+
     with pytest.raises(FastbootPreparationError, match="did not enter"):
         FastbootPreparer(
             never_reenumerates,
-            sleep=lambda _seconds: None,
+            sleep=probe_costly_sleep,
+            monotonic=fake_monotonic,
         ).prepare_bootloader(runner.serial)
+
+
+def test_mode_probe_shares_one_deadline_across_fastboot_commands() -> None:
+    """devices 吃完预算后不得再给 getvar 一份完整超时。"""
+    now = [0.0]
+    calls: list[tuple[list[str], int]] = []
+
+    def slow_runner(argv: list[str], timeout: int) -> CommandResult:
+        calls.append((argv, timeout))
+        now[0] += timeout
+        if argv == ["fastboot", "devices"]:
+            return CommandResult(stdout="SERIAL\tfastboot\n")
+        return CommandResult(stderr="is-userspace: no\n")
+
+    preparer = FastbootPreparer(
+        slow_runner,
+        bootloader_probe_timeout=8,
+        monotonic=lambda: now[0],
+    )
+
+    assert preparer.fastboot_mode("SERIAL", timeout=5) == ""
+    assert calls == [(["fastboot", "devices"], 5)]
+    assert now[0] == 5
 
 
 def test_vendor_partition_is_decided_in_python() -> None:

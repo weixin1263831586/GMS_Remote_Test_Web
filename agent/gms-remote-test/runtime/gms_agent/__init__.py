@@ -7,4 +7,4 @@ from .client import GmsAgentSdk, GmsApiError, GmsClient
 
 
 __all__ = ["GmsAgentSdk", "GmsApiError", "GmsClient"]
-__version__ = "0.22.30"
+__version__ = "0.22.31"

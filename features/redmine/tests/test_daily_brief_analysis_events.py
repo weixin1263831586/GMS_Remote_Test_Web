@@ -46,8 +46,9 @@ class AnalysisEventStoreTests(unittest.TestCase):
         self.store = DailyBriefAnalysisEventStore(self.db_path)
 
     def test_event_vocabulary_is_normalized(self):
-        """只允许 8 种标准化事件，拒绝 kkagent 原始协议直通。"""
-        self.assertEqual(len(EVENT_TYPES), 8)
+        """只允许 9 种标准化事件，拒绝 kkagent 原始协议直通。"""
+        self.assertEqual(len(EVENT_TYPES), 9)
+        self.assertIn("session_started", EVENT_TYPES)
         self.assertNotIn("reasoning", EVENT_TYPES)
         self.assertNotIn("assistant_message", EVENT_TYPES)
         with self.assertRaises(ValueError):
@@ -78,6 +79,19 @@ class AnalysisEventStoreTests(unittest.TestCase):
         self.assertEqual(len(self.store.list_after("run-1", 100)), 1)
         self.assertEqual(len(self.store.list_after("run-1", 101)), 1)
         self.assertEqual(self.store.list_after("run-1", 102), [])
+
+    def test_session_available_feeds_latest_session_id(self):
+        """session_started 事件落库后，latest_session_id 返回最新会话 id。"""
+        recorder = AnalysisProgressRecorder(self.store, "run-1", 100)
+        self.assertEqual(self.store.latest_session_id("run-1", 100), "")
+        recorder.session_available("aaaa1111bbbb")
+        self.assertEqual(self.store.latest_session_id("run-1", 100), "aaaa1111bbbb")
+        # 重试/resume 出现新 session 时取最新。
+        recorder.session_available("cccc2222dddd")
+        self.assertEqual(self.store.latest_session_id("run-1", 100), "cccc2222dddd")
+        # 其他 (run, issue) 隔离。
+        self.assertEqual(self.store.latest_session_id("run-1", 101), "")
+        self.assertEqual(self.store.latest_session_id("run-2", 100), "")
 
     def test_summary_never_stores_tool_output(self):
         """工具输出/凭据不进 summary；只有身份字段的白名单摘录。"""

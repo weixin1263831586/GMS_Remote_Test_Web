@@ -42,18 +42,26 @@ def codesearch_script_location() -> tuple[str, str]:
     return str(codesearch_dir / 'scripts' / 'codesearch.py'), str(codesearch_dir)
 
 
-def run_codesearch_process(cmd: list[str], cwd: str) -> subprocess.CompletedProcess | None:
+def run_codesearch_process(
+    cmd: list[str], cwd: str, *, timeout: float = 30.0,
+) -> subprocess.CompletedProcess | None:
     """Run a codesearch subprocess with standard error handling.
 
     模块级 helper：报告源码检索（ReportAnalyzer._run_codesearch）与
-    Wiki 锚点验证（anchor_verification）共用同一条审计过的子进程路径，
+    Wiki 锚点溯源（anchor_verification）共用同一条审计过的子进程路径，
     命令参数固定为字面量列表，不拼接不可信输入。
+
+    ``timeout`` 是本笔调用的剩余预算（秒）；调用方传入总预算扣减后的
+    remaining（总时间预算，而不是每项固定 30s——否则最坏
+    4 笔串行调用额外多出约 2 分钟）。
     """
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=cwd)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=max(0.1, timeout), cwd=cwd,
+        )
         return result if result.returncode == 0 else None
     except subprocess.TimeoutExpired:
-        logger.warning("代码搜索超时（30秒）")
+        logger.warning("代码搜索超时（%.1f秒预算）", timeout)
         return None
     except Exception as e:
         logger.error(f"代码搜索异常: {e}")

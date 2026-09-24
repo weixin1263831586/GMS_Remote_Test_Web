@@ -44,6 +44,7 @@ ANALYSIS_EVENT_RETENTION_DAYS = 30
 
 EVENT_TYPES = (
     "analysis_started",
+    "session_started",
     "stage_changed",
     "tool_started",
     "tool_completed",
@@ -52,6 +53,12 @@ EVENT_TYPES = (
     "analysis_completed",
     "analysis_failed",
 )
+
+#: session_started 事件 summary 的固定格式：``session_id=<id>``。kkagent 的
+#: session 在流开始时即可知，此事件让「会话回放」在分析进行中就能 tail，
+#: 而不必等 ai_execution 在分析结束后落库。
+SESSION_ID_PREFIX = "session_id="
+_SESSION_ID_PATTERN = re.compile(r"session_id=(\S+)")
 
 # summary 入库上限（描述性文本，不含任何工具输出正文）。
 _SUMMARY_MAX_CHARS = 160
@@ -231,6 +238,27 @@ class DailyBriefAnalysisEventStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def latest_session_id(self, run_id: str, issue_id: int) -> str:
+        """读取该 (run, issue) 最新已知的 kkagent session_id。
+
+        session_started 事件在分析进行中即落库，因此「会话回放」不必等
+        ai_execution 终态记录；终态权威来源仍是 ai_executions（端点优先
+        读它）。归属校验由调用方（run owner ACL）完成——本方法只按
+        run_id/issue_id 查询。
+        """
+        with self._lock, self._connect() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                "SELECT summary FROM redmine_daily_brief_analysis_events "
+                "WHERE run_id=? AND issue_id=? AND event_type='session_started' "
+                "ORDER BY sequence DESC LIMIT 1",
+                (run_id, int(issue_id)),
+            ).fetchone()
+        if row is None:
+            return ""
+        match = _SESSION_ID_PATTERN.search(str(row["summary"] or ""))
+        return match.group(1) if match else ""
+
     def purge_expired(self, *, days: int = ANALYSIS_EVENT_RETENTION_DAYS, now: str = "") -> int:
         """删除终态 run 的过期事件与孤儿事件；返回删除行数。
 
@@ -312,6 +340,14 @@ class AnalysisProgressRecorder:
 
     def stage_changed(self, summary: str, *, stage: str = "") -> None:
         self._emit("stage_changed", stage=stage, summary=summary)
+
+    def session_available(self, session_id: str) -> None:
+        """kkagent session 已创建（流开始时即可知）：落库供会话回放 tail。
+
+        summary 固定为 ``session_id=<id>``；id 经 scrub_secrets 清洗（纯
+        十六进制，不含凭据）。
+        """
+        self._emit("session_started", summary=f"{SESSION_ID_PREFIX}{session_id}")
 
     def tool_started(self, tool_name: str, tool_input: Any = None, *, stage: str = "kkagent") -> None:
         self.tool_started_count += 1
@@ -416,6 +452,7 @@ def progress_to_payload(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
 __all__ = [
     "ANALYSIS_EVENT_RETENTION_DAYS",
     "EVENT_TYPES",
+    "SESSION_ID_PREFIX",
     "AnalysisProgressRecorder",
     "DailyBriefAnalysisEventStore",
     "describe_tool_call",

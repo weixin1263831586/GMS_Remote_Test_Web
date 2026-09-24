@@ -3,7 +3,7 @@
   "unit": "bytes",
   "ceilings": {
     "web/shell/shell.html": 257395,
-    "web/static/css/common.css": 148115,
+    "web/static/css/common.css": 148154,
     "web/static/js/api-constants.js": 35745,
     "web/static/js/navigation.js": 39268,
     "web/static/js/pages/api-docs.js": 50374,
@@ -41,6 +41,10 @@
     "web/static/js/pages/test-suite-browser.js": {
       "reason": "XSS 修复:下载/解压日志插值补 escapeHtml(6 处);后续公共日志组件拆分回落",
       "expires": "2026-11-04"
+    },
+    "web/static/css/common.css": {
+      "reason": "UI release blocker:删除 19px 局部按钮 hack,新增 .page-title-row/.page-title-action 公共标题行规范(净增 39 字节);后续前端按域拆分回落",
+      "expires": "2027-01-31"
     }
   }
 }

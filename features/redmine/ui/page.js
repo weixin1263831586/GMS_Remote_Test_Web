@@ -3261,7 +3261,7 @@ function openSingleIssueReportModal(item, statisticsOnly) {
       + (hasHistory ? '' : ' disabled title="' + esc(singleIssueAnalysisHistoryDisabledHint(item.run, issue)) + '"') + '>执行过程</button>')
     + (hasSession
       ? '<button class="secondary" data-click="showIssueFullSession" data-a0="' + esc(item.run.run_id)
-        + '" data-a1="' + esc(issue.issue_id) + '" data-a2="' + esc(subject) + '" data-prevent>完整会话</button>'
+        + '" data-a1="' + esc(issue.issue_id) + '" data-a2="' + esc(subject) + '" data-prevent>会话回放</button>'
       : '')
     + '<button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">关闭</button></div></div>';
   if (statisticsOnly) {
@@ -3322,19 +3322,31 @@ var ANALYSIS_EVENT_RETENTION_DAYS = 30;
 
 var analysisTimelineState = {
   modalId: '', runId: '', issueId: 0, after: 0, events: [],
-  timer: null, controller: null, openedAt: 0,
+  timer: null, controller: null, requestToken: 0, openedAt: 0,
   // history：历史回看模式（终态 run 的完整时间线，不轮询、不自动切报告）；
   // terminal/runStatus：终态后保留在 state 上供报告 ↔ 执行过程切换复用。
   history: false, terminal: false, runStatus: '',
+  // 实时会话轨迹：progress 时间线里出现 session_started 事件后
+  // 自动 tail kkagent 会话（session 回放 API + offset 协议），把模型
+  // text/tool_use/tool_result 追加进同一时间线窗口；分析结束后停止
+  // tail，窗口保留为历史回放。sessionId 为空 = 尚未发现/不支持。
+  sessionId: '', sessionAfter: 0, sessionEnd: false, sessionLoading: false,
+  sessionTurns: [], sessionController: null, sessionRequestToken: 0,
 };
 
 function stopAnalysisTimelinePolling() {
   var state = analysisTimelineState;
   clearTimeout(state.timer);
   if (state.controller) { try { state.controller.abort(); } catch (_) {} }
+  state.requestToken += 1;
+  if (state.sessionController) { try { state.sessionController.abort(); } catch (_) {} }
+  state.sessionRequestToken += 1;
   state.modalId = ''; state.runId = ''; state.issueId = 0; state.after = 0;
   state.events = []; state.timer = null; state.controller = null;
   state.history = false; state.terminal = false; state.runStatus = '';
+  state.sessionId = ''; state.sessionAfter = 0;
+  state.sessionEnd = false; state.sessionLoading = false;
+  state.sessionTurns = []; state.sessionController = null;
 }
 
 function haltAnalysisTimelineLoop() {
@@ -3484,61 +3496,6 @@ function analysisTimelineEventRow(event) {
 // 之间插一行分组行，长过程一眼可分辨「平台在做准备」和「模型在取证」。
 var ANALYSIS_STAGE_LABELS = { preflight: 'Controller 证据预采集', kkagent: 'AI 取证分析' };
 
-function renderAnalysisTimelineBody() {
-  var state = analysisTimelineState;
-  if (!state.events.length) {
-    var empty = state.terminal
-      ? '没有保存的过程事件（终态过程事件仅保留 ' + ANALYSIS_EVENT_RETENTION_DAYS + ' 天，超期会被清理）。'
-      : (state.history ? '正在读取执行过程…' : '排队中，等待 Worker 领取任务…');
-    return '<div class="analysis-timeline-queued"><span class="analysis-timeline-item '
-      + (state.terminal ? 'stopped' : 'running') + '">'
-      + '<span class="analysis-timeline-icon">' + (state.terminal ? '✕' : '⏳') + '</span>'
-      + '<span class="analysis-timeline-text">' + esc(empty) + '</span></span></div>';
-  }
-  var html = '';
-  var currentStage = null;
-  state.events.forEach(function (event) {
-    var stage = String(event.stage || '') || null;
-    if (ANALYSIS_STAGE_LABELS[stage] && stage !== currentStage) {
-      html += '<div class="analysis-timeline-stage">'
-        + '<span>' + esc(ANALYSIS_STAGE_LABELS[stage]) + '</span></div>';
-    }
-    currentStage = stage;
-    html += analysisTimelineEventRow(event);
-  });
-  return html;
-}
-
-function analysisTimelineMetaHtml(runStatus) {
-  var state = analysisTimelineState;
-  var started = state.events.filter(function (event) { return event.event_type === 'tool_started'; }).length;
-  var done = state.events.filter(function (event) { return event.event_type === 'tool_completed'; }).length;
-  var failed = state.events.filter(function (event) { return event.event_type === 'tool_failed'; }).length;
-  var elapsed = Math.max(0, Math.floor((Date.now() - state.openedAt) / 1000));
-  var elapsedText = elapsed >= 60
-    ? Math.floor(elapsed / 60) + 'm ' + (elapsed % 60) + 's'
-    : elapsed + 's';
-  var live = ['pending', 'snapshotting', 'analyzing'].indexOf(runStatus) >= 0;
-  return '<span>状态 ' + esc(analysisTimelineRunStateLabel(runStatus)) + '</span>'
-    + '<span>工具调用 ' + started + '</span>'
-    + '<span>成功 ' + done + '</span>'
-    + '<span>失败 ' + failed + '</span>'
-    + (live ? '<span>本次观察 ' + elapsedText + '</span>' : '');
-}
-
-function analysisTimelineSetTitle(view, statusText) {
-  // 弹框标题跟随当前视图：运行态「🔵 正在分析」，过程视图「🕐 执行过程」
-  // + 终态徽标，报告视图「📋 分析总结」（状态在 meta 行展示，不重复徽标）。
-  var state = analysisTimelineState;
-  var title = document.getElementById(state.modalId + '-title');
-  if (!title) return;
-  var prefix = ({ live: '🔵 正在分析 · #', timeline: '🕐 执行过程 · #',
-    report: '📋 分析总结 · #' })[view] || '🕐 执行过程 · #';
-  title.innerHTML = '<span>' + prefix + esc(state.issueId) + '</span>'
-    + (view === 'timeline' ? '<span class="analysis-timeline-badge">已结束'
-      + (statusText ? ' · ' + esc(statusText) : '') + '</span>' : '');
-}
-
 async function fetchAllAnalysisTimelineEvents() {
   // 历史回看需要完整时间线，轮询只拿增量；终态 run 的事件不可变，按
   // limit=200 翻页直到取完（events API 单页上限 200）。返回 null 表示
@@ -3586,6 +3543,9 @@ async function loadAnalysisTimelineHistory() {
     state.terminal = true;
     // 读取失败仍进入终态视图：渲染已取到的部分；空时间线显示「未保存」文案。
   }
+  // 历史回放同样加载 kkagent 会话轨迹；在同一窗口中，分析结束即
+  // 自然成为完整历史会话）。一次性拉全，不再 tail。
+  await loadAnalysisTimelineSessionHistory();
   analysisTimelineSetTitle('timeline', analysisTimelineRunStateLabel(state.runStatus));
   renderAnalysisTimelineBox();
   var meta = document.getElementById(modalId + '-meta');
@@ -3695,14 +3655,8 @@ function showAnalysisTimelineModal(runId, issueId, options) {
   if (state.history) loadAnalysisTimelineHistory(); else pollAnalysisTimeline();
 }
 
-function renderAnalysisTimelineBox() {
-  var state = analysisTimelineState;
-  var box = document.getElementById(state.modalId + '-timeline');
-  if (!box) return;
-  var stick = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
-  box.innerHTML = renderAnalysisTimelineBody();
-  if (stick) box.scrollTop = box.scrollHeight;
-}
+// 实时会话轨迹：渲染与时间格式化在 daily-brief-timeline.js
+// （analysisTimelineSessionTurnRow / issueSessionTimelineTime）。
 
 async function pollAnalysisTimeline() {
   var state = analysisTimelineState;
@@ -3710,25 +3664,50 @@ async function pollAnalysisTimeline() {
     stopAnalysisTimelinePolling();
     return;
   }
+  var modalId = state.modalId;
+  var runId = state.runId;
+  var issueId = state.issueId;
+  var token = ++state.requestToken;
   try {
     state.controller = new AbortController();
-    var data = await api('/api/redmine-agent/daily-brief/runs/' + encodeURIComponent(state.runId)
-      + '/issues/' + encodeURIComponent(state.issueId)
+    var data = await api('/api/redmine-agent/daily-brief/runs/' + encodeURIComponent(runId)
+      + '/issues/' + encodeURIComponent(issueId)
       + '/events?after_sequence=' + state.after + '&limit=100', { signal: state.controller.signal }) || {};
-    if (!document.getElementById(state.modalId)) { stopAnalysisTimelinePolling(); return; }
+    if (token !== state.requestToken || state.modalId !== modalId
+        || state.runId !== runId || state.issueId !== issueId) return;
+    if (!document.getElementById(modalId)) { stopAnalysisTimelinePolling(); return; }
     if (Array.isArray(data.events) && data.events.length) {
       state.events = state.events.concat(data.events).slice(-400);
       state.after = Number(data.next_sequence) || state.after;
       renderAnalysisTimelineBox();
+      // 实时会话轨迹：发现 session_started 事件后启动 kkagent
+      // 会话 tail（一次），此后每轮轮询并行增量拉取。
+      if (!state.sessionId) {
+        for (var i = 0; i < data.events.length; i += 1) {
+          if (data.events[i].event_type === 'session_started') {
+            var summary = String(data.events[i].summary || '');
+            var match = summary.match(/session_id=(\S+)/);
+            if (match) {
+              state.sessionId = match[1];
+            }
+            break;
+          }
+        }
+      }
     }
+    // 会话增长不一定伴随新的 Controller 进度事件，所以
+    // tail 必须在每轮 events 轮询后独立运行。
+    if (state.sessionId && !state.sessionEnd) pollAnalysisTimelineSession();
     var meta = document.getElementById(state.modalId + '-meta');
     if (meta) meta.innerHTML = analysisTimelineMetaHtml(String(data.run_status || ''));
     if (data.terminal) {
-      await finishAnalysisTimeline();
+      await finishAnalysisTimeline(modalId, runId, issueId);
       return;
     }
   } catch (error) {
-    if (!document.getElementById(state.modalId)) { stopAnalysisTimelinePolling(); return; }
+    if (token !== state.requestToken || state.modalId !== modalId
+        || state.runId !== runId || state.issueId !== issueId) return;
+    if (!document.getElementById(modalId)) { stopAnalysisTimelinePolling(); return; }
     if (error && (error.name === 'AbortError' || error.status === 404)) {
       // 弹框已关（abort）或 run 永久不可达（不存在/无权限/已清理）：停止
       // 轮询，不做无意义重试；不可达时把弹框收敛为确定的结束提示，不再
@@ -3745,6 +3724,8 @@ async function pollAnalysisTimeline() {
     }
     // 网络瞬断：继续下一轮。
   }
+  if (token !== state.requestToken || state.modalId !== modalId
+      || state.runId !== runId || state.issueId !== issueId) return;
   var interval = document.hidden ? 12000 : 2500;
   analysisTimelineState.timer = setTimeout(pollAnalysisTimeline, interval);
 }
@@ -3766,12 +3747,16 @@ function analysisTimelineFinalBody(issue, run) {
   return (banner || '<div class="muted">本次分析未生成报告。</div>') + body;
 }
 
-async function finishAnalysisTimeline() {
+async function finishAnalysisTimeline(expectedModalId, expectedRunId, expectedIssueId) {
   var state = analysisTimelineState;
+  if (state.modalId !== expectedModalId || state.runId !== expectedRunId
+      || state.issueId !== expectedIssueId) return;
   if (!state.runId || !document.getElementById(state.modalId)) { stopAnalysisTimelinePolling(); return; }
   var modalId = state.modalId;
   try {
     var payload = await api('/api/redmine-agent/daily-brief/runs/' + encodeURIComponent(state.runId)) || {};
+    if (state.modalId !== expectedModalId || state.runId !== expectedRunId
+        || state.issueId !== expectedIssueId) return;
     if (!document.getElementById(modalId)) { stopAnalysisTimelinePolling(); return; }
     var run = payload.run || {};
     var issue = (payload.issues || [])[0] || {};
@@ -3782,6 +3767,12 @@ async function finishAnalysisTimeline() {
     } else {
       loadDailyBrief();
     }
+    // 终态前重读完整会话：这会作废任何在途的实时
+    // tail，避免最后几个 message 在 events 先到终态时丢失。
+    await loadAnalysisTimelineSessionHistory();
+    if (state.modalId !== expectedModalId || state.runId !== expectedRunId
+        || state.issueId !== expectedIssueId
+        || !document.getElementById(modalId)) return;
     state.runStatus = String(run.status || state.runStatus || '');
     analysisTimelineSetTitle('report', analysisTimelineRunStateLabel(state.runStatus));
     var box = document.getElementById(modalId + '-timeline');
@@ -3792,6 +3783,8 @@ async function finishAnalysisTimeline() {
     var stopButton = document.querySelector('[data-analysis-timeline-stop][data-a0="' + state.runId + '"]');
     if (stopButton) stopButton.remove();
   } catch (_) {
+    if (state.modalId !== expectedModalId || state.runId !== expectedRunId
+        || state.issueId !== expectedIssueId) return;
     // 终态详情拉取失败：不丢弃已渲染的时间线，就地收敛为确定的结束
     // 视图并保留「查看报告」重试入口，避免标题停留在「正在分析」、
     // 停止按钮残留（列表轮询仍会自然收敛行状态）。
@@ -3800,7 +3793,8 @@ async function finishAnalysisTimeline() {
       '<div class="daily-brief-warning">分析已结束，报告详情读取失败，可点击「查看报告」重试。</div>');
     analysisTimelineMarkEnded('报告读取失败');
   }
-  haltAnalysisTimelineLoop();
+  if (state.modalId === expectedModalId && state.runId === expectedRunId
+      && state.issueId === expectedIssueId) haltAnalysisTimelineLoop();
 }
 
 async function stopAnalysisTimelineRun(runId, button) {

@@ -60,6 +60,12 @@ issue → journals → attachment metadata → parsed summary
 图片载荷不可用）按最终结论处理：记入 missing_information 并继续，禁止重试；
 只有网络/超时/空载荷类瞬时失败允许重试一次。
 
+重试预算分层（与 Controller 实现一致，勿混淆）：上面的「重试一次」约束
+**模型层**工具调用；Controller 的 evidence preflight（分析启动前的确定性
+预采集）对网络类退出码固定 3 attempts（`features/redmine/kkagent/
+evidence_preflight.py::NETWORK_RETRY_ATTEMPTS`），发生在模型启动之前，
+不属于模型层预算。
+
 ## AI 输出契约
 
 diagnostic（当前唯一新生成模式）的结果是最终中文 Markdown 报告：kkagent

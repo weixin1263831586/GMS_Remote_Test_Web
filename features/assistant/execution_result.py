@@ -7,6 +7,7 @@ route_invocation 执行层与 response 渲染层消费，独立成模块
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,4 +39,23 @@ class ToolResult:
         }
 
 
-__all__ = ["ToolResult"]
+def internal_error_result(tool_name: str, action_label: str) -> ToolResult:
+    """未知异常的统一 Agent 出口。
+
+    ``str(e)`` 可能内嵌路径/凭据片段，不外显给 Agent——完整 traceback
+    只进服务端日志；Agent 拿到统一错误 + request id，用户可凭
+    request_id 回查日志定位。``action_label`` 是失败动作的动词短语
+    （执行/调用），用于 formatted_text。
+    """
+    request_id = uuid.uuid4().hex[:12]
+    return ToolResult(
+        success=False,
+        tool_name=tool_name,
+        error=f"服务内部错误（request_id={request_id}）",
+        formatted_text=(
+            f"{action_label}失败：服务内部错误（request_id={request_id}，已记录日志）"
+        ),
+    )
+
+
+__all__ = ["ToolResult", "internal_error_result"]

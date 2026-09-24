@@ -15971,7 +15971,7 @@
     },
     "/api/redmine-agent/daily-brief/runs/{run_id}/issues/{issue_id}/session": {
       "get": {
-        "description": "单 issue 分析的 kkagent 完整会话回放（「完整会话」弹框数据源）。\n\n- owner ACL 与 events 端点同构：run 不属于当前 owner 一律 404。\n- session_id 只从该 issue 的 ai_execution 记录取（运行时落库），\n  不接受调用方传入的任意会话 id；kkagent 会话库查不到同样 404。\n- 内容在 features/redmine/daily_brief_session.py 里裁剪：跳过模型\n  内部 thinking，工具输入/输出只保留有限预览。",
+        "description": "单 issue 分析的 kkagent 会话回放（「会话回放」弹框数据源）。\n\n- owner ACL 与 events 端点同构：run 不属于当前 owner 一律 404。\n- session_id 只从该 issue 的归属记录取（不接受调用方传入的任意会话\n  id）：优先 ai_execution 落库记录；分析进行中时回退到进度时间线的\n  ``session_started`` 事件（kkagent 流开始即落库，用于实时\n  tail）。kkagent 会话库查不到同样 404。\n- ``view=turns`` 按真实 message/turn 聚合并裁剪页面预览；\n  ``view=raw`` 按原始 message 分页返回未裁剪文本与工具载荷。\n- 两种视图都移除内部 thinking/redacted_thinking。",
         "parameters": [
           {
             "in": "path",
@@ -16013,6 +16013,20 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "default": "turns",
+              "enum": [
+                "turns",
+                "raw"
+              ],
+              "title": "View",
+              "type": "string"
             }
           }
         ],
@@ -22321,6 +22335,22 @@
         "summary": "Redmine Agent Page"
       }
     },
+    "/redmine-agent/daily-brief-session.css": {
+      "get": {
+        "description": "会话回放组件样式，避免主页面样式超过体积预算。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Redmine Agent Daily Brief Session Css"
+      }
+    },
     "/redmine-agent/daily-brief-session.js": {
       "get": {
         "description": "会话回放独立资源，避免 daily-brief 主脚本继续膨胀。",
@@ -22335,6 +22365,22 @@
           }
         },
         "summary": "Redmine Agent Daily Brief Session Js"
+      }
+    },
+    "/redmine-agent/daily-brief-timeline.js": {
+      "get": {
+        "description": "实时会话轨迹辅助独立资源，避免主页面脚本继续膨胀。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Redmine Agent Daily Brief Timeline Js"
       }
     },
     "/redmine-agent/markdown-table.js": {

@@ -49,6 +49,26 @@ function getSecurityAuditFilterKey() {
     return params.toString();
 }
 
+// 提权入口：此前的空状态提示让用户「点击右上角提权」，但 shell 顶部并
+// 没有该按钮，用户被卡死。改为在空状态内直接提供可点击的提权按钮
+// （act-bridge 事件委托，动态插入即可用），提权成功后原地重新加载数据。
+function securityAuditGateHtml() {
+    return `
+        <tr>
+            <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                <div style="margin-bottom: 12px;">🔒 此页面需要管理员权限，请先提权后查看。</div>
+                <button class="btn-xs btn-primary" type="button" data-click="elevateSecurityAuditView">🔓 立即提权</button>
+            </td>
+        </tr>
+    `;
+}
+
+async function elevateSecurityAuditView() {
+    const granted = await requestElevatedAccess('查看安全审计');
+    if (!granted) return;
+    await loadSecurityAudit(true);
+}
+
 async function loadSecurityAudit(reset = false) {
     const tbody = $('security-audit-table-body');
     if (!tbody) return;
@@ -59,13 +79,7 @@ async function loadSecurityAudit(reset = false) {
     // this makes the access requirement visible before any data request.
     if (state.authRequired && !state.elevated) {
         if (reset || !securityAuditState.loaded) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
-                        🔒 此页面需要管理员权限，请点击右上角提权后查看。
-                    </td>
-                </tr>
-            `;
+            tbody.innerHTML = securityAuditGateHtml();
         }
         return false;
     }
@@ -115,15 +129,15 @@ async function loadSecurityAudit(reset = false) {
         if (reset && hadRenderedRecords) securityAuditState.offset = previousOffset;
         const needElevation = error.status === 403 && !state.elevated;
         if (reset && (needElevation || !hadRenderedRecords)) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
-                        ${needElevation
-                            ? '🔒 此页面需要管理员权限，请点击右上角提权后查看。'
-                            : `加载失败: ${escapeHtml(error.message)}`}
-                    </td>
-                </tr>
-            `;
+            tbody.innerHTML = needElevation
+                ? securityAuditGateHtml()
+                : `
+                    <tr>
+                        <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                            加载失败: ${escapeHtml(error.message)}
+                        </td>
+                    </tr>
+                `;
         } else if (!needElevation) {
             showToast(
                 reset ? '审计记录刷新失败: ' + error.message
@@ -409,3 +423,4 @@ window.loadSecurityAudit = loadSecurityAudit;
 window.showSecurityAuditDetail = showSecurityAuditDetail;
 window.closeSecurityAuditDetailModal = closeSecurityAuditDetailModal;
 window.exportSecurityAudit = exportSecurityAudit;
+window.elevateSecurityAuditView = elevateSecurityAuditView;

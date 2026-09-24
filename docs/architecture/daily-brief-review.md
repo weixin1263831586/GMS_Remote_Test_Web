@@ -84,4 +84,5 @@ GitHub CI 结果视为当前工作区的测试结果。
 已有晨报及其冻结快照不会被改写。下一次生成或用户主动重新生成晨报时
 使用新契约；需要技术根因分析时，在工单详情点击“深度分析此项”。
 
-架构决定见 [ADR 0008](adr/0008-daily-brief-triage-and-diagnosis.md)。
+架构决定见 [ADR 0013](adr/0013-daily-brief-batch-matches-single-issue-diagnosis.md)
+（现行规范；上文引用的 ADR 0008 为历史方案，已被 0013 supersede）。
