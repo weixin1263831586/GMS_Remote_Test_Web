@@ -30,7 +30,11 @@ from .executor_formatting import (
     json_body as _json_body,
 )
 from .route_binding import build_call_kwargs, cached_signature
-from .route_invocation import call_router_function, enforce_route_dependencies
+from .route_invocation import (
+    call_router_function,
+    enforce_route_dependencies,
+    guarded_tool_call,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -130,24 +134,17 @@ class ActionExecutor:
 
         handler = self._handlers.get(tool_name)
         if handler:
-            try:
-                return await handler(session, request, params)
-            except Exception as e:
-                logger.error("[Agent] executor error for %s: %s", tool_name, e, exc_info=True)
-                return ToolResult(
-                    success=False, tool_name=tool_name,
-                    error=str(e), formatted_text=f"执行失败: {e}",
-                )
+            return await guarded_tool_call(
+                tool_name, "执行", handler(session, request, params)
+            )
 
         if tool.executor_ref:
-            try:
-                return await self._call_router_function(tool, session, request, params)
-            except Exception as e:
-                logger.error("[Agent] router call error for %s: %s", tool_name, e, exc_info=True)
-                return ToolResult(
-                    success=False, tool_name=tool_name,
-                    error=str(e), formatted_text=f"调用失败: {e}",
-                )
+            # call_router_function 内部已收敛路由执行异常；守护层只兜
+            # 编排（authorize/dispatch）抛出的异常。
+            return await guarded_tool_call(
+                tool_name, "调用",
+                self._call_router_function(tool, session, request, params),
+            )
 
         return ToolResult(
             success=False, tool_name=tool_name,

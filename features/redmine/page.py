@@ -42,6 +42,28 @@ def redmine_agent_daily_brief_session_js():
     )
 
 
+@page_router.get("/redmine-agent/daily-brief-session.css")
+def redmine_agent_daily_brief_session_css():
+    """会话回放组件样式，避免主页面样式超过体积预算。"""
+    css = Path(__file__).with_name("ui") / "daily-brief-session.css"
+    return Response(
+        css.read_text(encoding="utf-8"),
+        media_type="text/css",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@page_router.get("/redmine-agent/daily-brief-timeline.js")
+def redmine_agent_daily_brief_timeline_js():
+    """实时会话轨迹辅助独立资源，避免主页面脚本继续膨胀。"""
+    js = Path(__file__).with_name("ui") / "daily-brief-timeline.js"
+    return Response(
+        js.read_text(encoding="utf-8"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @page_router.get("/redmine-agent/markdown-table.js")
 def redmine_agent_markdown_table_js():
     """Markdown 表格解析 helper 独立资源。"""

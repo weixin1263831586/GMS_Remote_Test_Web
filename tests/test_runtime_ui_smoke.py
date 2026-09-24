@@ -2686,6 +2686,65 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_security_audit_unelevated_state_offers_a_working_elevation_button(self):
+        # 回归：安全审计空状态曾提示「点击右上角提权」，但 shell 顶部并无
+        # 该按钮，未提权用户被卡死在提示行、没有任何可点击入口。现在空状态
+        # 内嵌提权按钮，点击后走 requestElevatedAccess 并在成功后原地重载。
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof window.loadSecurityAudit === 'function'")
+            page.evaluate("window.switchPage('security-audit')")
+            expect(page.locator("#page-security-audit")).to_have_class(
+                re.compile(r"active")
+            )
+            page.evaluate(
+                """() => {
+                  state.authRequired = true;
+                  state.elevated = false;
+                  state.currentUser = {username: 'ui-smoke-admin'};
+                  window.__elevateCalls = [];
+                  window.__originalRequestElevatedAccess = window.requestElevatedAccess;
+                  window.requestElevatedAccess = async (label) => {
+                    window.__elevateCalls.push(label);
+                    return true;
+                  };
+                  securityAuditState.loaded = false;
+                  window.__auditReloads = 0;
+                  window.__originalLoadSecurityAudit = window.loadSecurityAudit;
+                  window.loadSecurityAudit = (reset) => {
+                    window.__auditReloads += 1;
+                    return window.__originalLoadSecurityAudit(reset);
+                  };
+                  return window.loadSecurityAudit(true);
+                }"""
+            )
+            gate = page.locator(
+                "#security-audit-table-body [data-click='elevateSecurityAuditView']"
+            )
+            expect(gate).to_be_visible()
+            # 旧文案不得再出现（它指向不存在的「右上角」按钮）。
+            expect(page.locator("#security-audit-table-body")).not_to_contain_text(
+                "右上角"
+            )
+            gate.click()
+            page.wait_for_function("window.__auditReloads >= 1")
+            self.assertEqual(
+                page.evaluate("window.__elevateCalls"),
+                ["查看安全审计"],
+            )
+            page.evaluate(
+                """() => {
+                  window.loadSecurityAudit = window.__originalLoadSecurityAudit;
+                  window.requestElevatedAccess = window.__originalRequestElevatedAccess;
+                }"""
+            )
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
     def test_saved_architecture_page_sets_title_before_load_and_lazy_loads_frame(self):
         page = self.new_page()
         page_errors = []

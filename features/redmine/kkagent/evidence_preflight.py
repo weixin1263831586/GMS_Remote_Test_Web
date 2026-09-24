@@ -33,6 +33,14 @@ PREFLIGHT_TIMEOUT_SECONDS = 90.0
 # 网络类失败最多尝试 3 次，尝试之间按 (1.0s, 3.0s) 退避；单个命令的
 # 最坏 wall time ≈ 3 × PREFLIGHT_TIMEOUT_SECONDS + 4s。非网络失败
 # （含 usage error / 业务失败）不重试，立即收敛。
+#
+# 与 Prompt 规范的重试分层：skill/references/
+# redmine-daily-triage.md 的「瞬时失败只允许重试一次」约束的是**模型层**
+# 工具调用；这里是 **Controller baseline 预采集**的确定性重试，
+# 发生在模型启动之前，两者不是同一层的预算，因此不冲突：
+#   * 模型层：同一工具瞬时失败由 LLM 自行决定，最多重试 1 次；
+#   * Controller baseline：preflight 对网络退出码固定 3 attempts。
+# 若未来统一为同一预算，必须同时改这里与 skill 文档，不能只改一侧。
 NETWORK_RETRY_ATTEMPTS = 3
 NETWORK_RETRY_BACKOFF_SECONDS = (1.0, 3.0)
 # 运行中取消轮询间隔：与 kkagent 正式阶段的 CANCEL_POLL_SECONDS 一致，

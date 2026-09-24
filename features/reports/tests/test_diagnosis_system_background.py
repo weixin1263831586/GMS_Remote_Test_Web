@@ -75,6 +75,32 @@ class SearchSystemBackgroundTests(unittest.TestCase):
             )
         verify.assert_called_once_with(payload["results"], android_version="17")
 
+    def test_anchor_results_bind_to_generated_ids_not_provider_ids(self):
+        hits = [
+            {**_hit(0), "title": "duplicate", "hit_id": "provider-duplicate"},
+            {**_hit(1), "title": "duplicate", "hit_id": "provider-duplicate"},
+        ]
+
+        def verify(results, *, android_version):
+            return [
+                {"hit_id": results[0]["hit_id"], "anchor": {"path": "a/A.java"}},
+                {"hit_id": results[1]["hit_id"], "anchor": {"path": "b/B.java"}},
+            ]
+
+        with patch(
+            "features.reports.anchor_verification.verify_background_anchors",
+            side_effect=verify,
+        ):
+            out = asyncio.run(diagnosis_recalls._attach_anchor_verifications(hits))
+
+        self.assertEqual([hit["hit_id"] for hit in out], ["bg-0", "bg-1"])
+        self.assertEqual(
+            out[0]["anchor_verifications"][0]["anchor"]["path"], "a/A.java",
+        )
+        self.assertEqual(
+            out[1]["anchor_verifications"][0]["anchor"]["path"], "b/B.java",
+        )
+
     def test_provider_error_degrades_to_empty(self):
         with patch("features.knowledge.federated_search", side_effect=RuntimeError("boom")):
             self.assertEqual(asyncio.run(diagnosis_recalls.search_system_background("anr")), [])

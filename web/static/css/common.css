@@ -1015,21 +1015,9 @@ body {
     display: inline-block;
 }
 
-/* 主页「⭐ 只看关注」24px 紧凑点击目标，垂直居中不回弹。 */
-.adb-title-row {
-    align-items: center !important;
-}
-.adb-title-row .section-title {
-    line-height: 18px;
-}
-.adb-title-row .btn-xxs {
-    min-width: 0;
-    min-height: 24px;
-    padding: 2px 8px;
-    font-size: 11px;
-    line-height: 16px;
-    margin: 0;
-}
+/* 页面标题行公共规范：24px 动作按钮点击目标（只看关注/外部知识库共用）。 */
+.page-title-row { display:flex; align-items:center !important; justify-content:space-between; }
+.page-title-row .btn-xxs, .page-title-row .btn-xs, .page-title-action { flex:0 0 auto; min-width:0; min-height:24px; padding:2px 8px; font-size:11px; line-height:16px; margin:0; }
 
 /* 参数设置区。 */
 .input-container {

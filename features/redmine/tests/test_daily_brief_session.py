@@ -1,4 +1,4 @@
-"""kkagent 完整会话回放（daily_brief_session）单元测试。"""
+"""kkagent 会话回放（daily_brief_session）单元测试。"""
 
 import json
 import sqlite3
@@ -24,6 +24,7 @@ class SessionTranscriptTests(unittest.TestCase):
                 ]), "2026-09-24T01:00:00"),
                 ("s1", "assistant", json.dumps([
                     {"type": "thinking", "thinking": "secret reasoning"},
+                    {"type": "redacted_thinking", "data": "private blob"},
                     {"type": "text", "text": "先读快照"},
                     {"type": "tool_use", "id": "c1", "name": "gms_rt_redmine_journals",
                      "input": {"snapshot_id": "ev_1"}},
@@ -36,6 +37,9 @@ class SessionTranscriptTests(unittest.TestCase):
                     {"type": "tool_result", "tool_use_id": "c2", "is_error": True,
                      "content": json.dumps({"ok": False, "error": "artifact 不存在"})},
                 ]), "2026-09-24T01:00:07"),
+                ("s1", "assistant", json.dumps([
+                    {"type": "text", "text": "## 结论\n\n证据不足。"},
+                ]), "2026-09-24T01:00:08"),
                 ("s2", "user", json.dumps([{"type": "text", "text": "其他会话"}]),
                  "2026-09-24T02:00:00"),
             ]
@@ -55,43 +59,73 @@ class SessionTranscriptTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_skips_thinking_and_clips_long_output(self):
+    def test_groups_messages_and_tool_results_into_turns(self):
         data = session_module.session_transcript("s1")
         self.assertIsNotNone(data)
-        self.assertEqual(data["total_messages"], 4)
-        kinds = [e["kind"] for e in data["events"]]
-        self.assertNotIn("thinking", kinds)
-        tool_results = [e for e in data["events"] if e["kind"] == "tool_result"]
-        self.assertEqual(len(tool_results), 2)
-        ok = tool_results[0]
-        self.assertFalse(ok["is_error"])
-        self.assertLessEqual(len(ok["output"]),
-                             session_module.TOOL_OUTPUT_PREVIEW_CHARS + 40)
-        err = tool_results[1]
-        self.assertTrue(err["is_error"])
+        self.assertEqual(data["format"], "turns-v1")
+        self.assertEqual(data["total_messages"], 5)
+        self.assertEqual(data["total_turns"], 3)
+        context, tool_turn, final_turn = data["turns"]
+        self.assertEqual(context["kind"], "context")
+        self.assertEqual(tool_turn["kind"], "assistant")
+        self.assertEqual(final_turn["kind"], "assistant")
+        self.assertTrue(final_turn["is_final"])
+        self.assertNotIn("thinking", str(data))
 
-    def test_pagination_is_stable_across_pages(self):
+        text, tool, orphan_result = tool_turn["blocks"]
+        self.assertEqual(text["kind"], "text")
+        self.assertEqual(tool["kind"], "tool_use")
+        self.assertEqual(tool["tool_call_id"], "c1")
+        self.assertFalse(tool["result"]["is_error"])
+        self.assertLessEqual(len(tool["result"]["output"]),
+                             session_module.TOOL_OUTPUT_PREVIEW_CHARS + 40)
+        self.assertEqual(orphan_result["kind"], "tool_result")
+        self.assertTrue(orphan_result["is_error"])
+
+    def test_pagination_is_stable_across_turns(self):
         with mock.patch.object(
             session_module,
-            "_render_blocks",
-            wraps=session_module._render_blocks,
-        ) as render:
+            "_parse_message_blocks",
+            wraps=session_module._parse_message_blocks,
+        ) as parse:
             first = session_module.session_transcript("s1", offset=0, limit=2)
         self.assertEqual(first["returned"], 2)
         self.assertTrue(first["truncated"])
-        self.assertIsNone(first["total_events"])
-        # 首页只读取到足以确认还有下一页的位置，不再解析整个会话。
-        self.assertEqual(render.call_count, 2)
+        self.assertIsNone(first["total_turns"])
+        # 回合生成器按需读取；不会为总数另行重复扫描会话。
+        self.assertEqual(parse.call_count, 5)
         second = session_module.session_transcript("s1", offset=first["next_offset"], limit=2)
-        seqs = [e["sequence"] for e in first["events"] + second["events"]]
+        seqs = [e["sequence"] for e in first["turns"] + second["turns"]]
         self.assertEqual(seqs, sorted(set(seqs)))
-        self.assertEqual(first["events"][0]["sequence"], 0)
+        self.assertEqual(first["turns"][0]["sequence"], 0)
+        self.assertEqual(second["total_turns"], 3)
 
-    def test_last_page_reports_exact_total_events(self):
-        data = session_module.session_transcript("s1", offset=4, limit=10)
+    def test_last_page_reports_exact_total_turns(self):
+        data = session_module.session_transcript("s1", offset=2, limit=10)
         self.assertFalse(data["truncated"])
-        self.assertEqual(data["total_events"], 5)
-        self.assertEqual(data["next_offset"], 5)
+        self.assertEqual(data["total_turns"], 3)
+        self.assertEqual(data["next_offset"], 3)
+
+    def test_raw_messages_are_untrimmed_but_private_thinking_is_omitted(self):
+        data = session_module.session_raw_messages("s1", offset=1, limit=2)
+
+        self.assertEqual(data["format"], "raw-messages-v1")
+        self.assertEqual(data["total_messages"], 5)
+        self.assertEqual(data["next_offset"], 3)
+        self.assertTrue(data["truncated"])
+        self.assertEqual(
+            data["omitted_block_types"],
+            ["redacted_thinking", "thinking"],
+        )
+        assistant, tool_result = data["messages"]
+        self.assertEqual(assistant["sequence"], 1)
+        self.assertEqual(
+            [block["type"] for block in assistant["content"]],
+            ["text", "tool_use"],
+        )
+        untrimmed = tool_result["content"][0]["content"]
+        self.assertGreater(len(untrimmed), session_module.TOOL_OUTPUT_PREVIEW_CHARS)
+        self.assertNotIn("截断", untrimmed)
 
     def test_missing_session_returns_none(self):
         self.assertIsNone(session_module.session_transcript("nope"))
@@ -107,8 +141,11 @@ class SessionTranscriptTests(unittest.TestCase):
                 " VALUES ('s3', 'user', 'not-json{{', '2026-09-24T03:00:00')"
             )
         data = session_module.session_transcript("s3")
-        self.assertEqual(len(data["events"]), 1)
-        self.assertEqual(data["events"][0]["kind"], "text")
+        self.assertEqual(len(data["turns"]), 1)
+        self.assertEqual(data["turns"][0]["kind"], "context")
+        self.assertEqual(data["turns"][0]["blocks"][0]["kind"], "text")
+        raw = session_module.session_raw_messages("s3")
+        self.assertEqual(raw["messages"][0]["content"], "not-json{{")
 
 
 if __name__ == "__main__":

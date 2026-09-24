@@ -3102,7 +3102,19 @@
     "methods": [
       "GET"
     ],
+    "path": "/redmine-agent/daily-brief-session.css"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/redmine-agent/daily-brief-session.js"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/redmine-agent/daily-brief-timeline.js"
   },
   {
     "methods": [

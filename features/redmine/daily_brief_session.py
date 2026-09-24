@@ -1,15 +1,17 @@
-"""Read back one analysis session's full kkagent transcript.
+"""Read back one analysis session's kkagent transcript views.
 
-「查看分析」弹框的「完整会话」数据源：把 Daily Brief 单条分析对应的
+「查看分析」弹框的「会话回放」数据源：把 Daily Brief 单条分析对应的
 kkagent 会话（``~/.kkagent/transcripts.db`` 的 messages 表）按序展开成
-事件流，供 UI 回放取证过程。
+回合流，供 UI 回放取证过程；用户显式切换后也可分页读取未裁剪原文。
 
 安全边界（硬性）：
 - session_id 一律来自该 owner 该 issue 的 ``redmine_daily_brief_ai_executions``
   记录（``ai_execution.session_id``），API 不接受调用方传入的任意 session id；
   不存在归属关系的会话一律 404，不泄露存在性。
-- 内容裁剪后再下发：跳过模型内部 thinking；工具输出/输入只保留有限预览，
-  防止单条日志把响应与浏览器内存撑爆。
+- 默认回合视图裁剪后再下发，防止单条日志把响应与浏览器内存撑爆；
+  ``raw`` 视图按消息分页且不裁剪文本/工具载荷。
+- 两种视图都跳过模型内部 thinking/redacted_thinking，不把隐私推理当作
+  可公开的会话证据。
 - 会话内容是分析证据，只读展示；本模块不做任何写操作。
 """
 
@@ -18,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -26,11 +29,11 @@ from typing import Any
 TOOL_OUTPUT_PREVIEW_CHARS = 2000
 TOOL_INPUT_PREVIEW_CHARS = 600
 TEXT_PREVIEW_CHARS = 4000
-# 单页事件数：浏览器渲染上限优先，分页按钮负责翻页。
+# 单页回合数：浏览器渲染上限优先，分页按钮负责翻页。
 DEFAULT_PAGE_SIZE = 80
 MAX_PAGE_SIZE = 200
 
-_SKIPPED_BLOCK_TYPES = {"thinking"}
+_SKIPPED_BLOCK_TYPES = {"thinking", "redacted_thinking"}
 # 会话回放关心的事件块：模型动作与结果。system/usage 等噪声不上屏。
 _RENDERABLE_BLOCK_TYPES = {"text", "tool_use", "tool_result"}
 
@@ -52,16 +55,16 @@ def _clip(value: Any, limit: int) -> str:
     return text[:limit] + f"…（截断，共 {len(text)} 字符）"
 
 
-def _render_blocks(blocks: Any, role: str, sequence: int) -> list[dict[str, Any]]:
-    """把一条 message 的 content blocks 展开为回放事件。"""
-    events: list[dict[str, Any]] = []
+def _parse_message_blocks(blocks: Any) -> list[dict[str, Any]]:
+    """解析一条 message，同时保留可见 block 的原始顺序。"""
+    parsed: list[dict[str, Any]] = []
     if isinstance(blocks, str):
         try:
             blocks = json.loads(blocks)
         except ValueError:
             blocks = [{"type": "text", "text": str(blocks)}]
     if not isinstance(blocks, list):
-        return events
+        return parsed
     for block in blocks:
         if not isinstance(block, dict):
             continue
@@ -70,23 +73,138 @@ def _render_blocks(blocks: Any, role: str, sequence: int) -> list[dict[str, Any]
             continue
         if block_type not in _RENDERABLE_BLOCK_TYPES:
             continue
-        event: dict[str, Any] = {
-            "sequence": sequence,
-            "role": role,
-            "kind": block_type,
-        }
+        item: dict[str, Any] = {"kind": block_type}
         if block_type == "text":
-            event["text"] = _clip(block.get("text"), TEXT_PREVIEW_CHARS)
+            item["text"] = _clip(block.get("text"), TEXT_PREVIEW_CHARS)
         elif block_type == "tool_use":
-            event["tool_name"] = str(block.get("name") or "")
-            event["tool_input"] = _clip(block.get("input"), TOOL_INPUT_PREVIEW_CHARS)
+            item["tool_call_id"] = str(block.get("id") or "")
+            item["tool_name"] = str(block.get("name") or "")
+            item["tool_input"] = _clip(
+                block.get("input"), TOOL_INPUT_PREVIEW_CHARS
+            )
         elif block_type == "tool_result":
-            event["tool_call_id"] = str(block.get("tool_use_id") or "")
-            event["is_error"] = bool(block.get("is_error"))
-            event["output"] = _clip(block.get("content"), TOOL_OUTPUT_PREVIEW_CHARS)
-        events.append(event)
+            item["tool_call_id"] = str(block.get("tool_use_id") or "")
+            item["is_error"] = bool(block.get("is_error"))
+            item["output"] = _clip(
+                block.get("content"), TOOL_OUTPUT_PREVIEW_CHARS
+            )
+        parsed.append(item)
+    return parsed
+
+
+def _untrimmed_message_content(value: Any) -> Any:
+    """保留消息原文，只移除不可公开的内部推理 block。"""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return value
+    if isinstance(value, list):
+        return [
+            item
+            for item in value
+            if not (
+                isinstance(item, dict)
+                and str(item.get("type") or "") in _SKIPPED_BLOCK_TYPES
+            )
+        ]
+    if (
+        isinstance(value, dict)
+        and str(value.get("type") or "") in _SKIPPED_BLOCK_TYPES
+    ):
+        return []
+    return value
+
+
+def _attach_tool_results(
+    turn: dict[str, Any] | None,
+    results: list[dict[str, Any]],
+    created_at: str,
+) -> list[dict[str, Any]]:
+    """把 user message 中的 tool_result 回挂到前一模型回合。"""
+    if turn is None:
+        return results
+    tools = {
+        str(block.get("tool_call_id") or ""): block
+        for block in turn["blocks"]
+        if block.get("kind") == "tool_use" and block.get("tool_call_id")
+    }
+    unmatched: list[dict[str, Any]] = []
+    for result in results:
+        tool = tools.get(str(result.get("tool_call_id") or ""))
+        if tool is None:
+            unmatched.append(result)
+            continue
+        tool["result"] = {
+            "is_error": bool(result.get("is_error")),
+            "output": str(result.get("output") or ""),
+            "created_at": created_at,
+        }
+    return unmatched
+
+
+def _iter_session_turns(
+    rows: Iterable[tuple[Any, Any, Any]],
+) -> Iterator[dict[str, Any]]:
+    """把消息流聚合成接近 kkagent 终端语义的回合流。"""
+    sequence = 0
+    pending_assistant: dict[str, Any] | None = None
+
+    for role_value, content_json, created_at_value in rows:
+        role = str(role_value or "")
+        created_at = str(created_at_value or "")
+        blocks = _parse_message_blocks(content_json)
+        results = [item for item in blocks if item["kind"] == "tool_result"]
+        visible = [item for item in blocks if item["kind"] != "tool_result"]
+        unmatched = _attach_tool_results(
+            pending_assistant, results, created_at
+        )
+        if pending_assistant is not None and unmatched:
+            # 极少数异常会话可能缺失对应 tool_use；仍保留真实结果，避免
+            # 审计记录静默丢失，并在前端标成“未匹配工具结果”。
+            pending_assistant["blocks"].extend(unmatched)
+        elif unmatched:
+            yield {
+                "sequence": sequence,
+                "kind": "tool_batch",
+                "role": role,
+                "created_at": created_at,
+                "blocks": unmatched,
+            }
+            sequence += 1
+            unmatched = []
+
+        if not visible:
+            continue
+
+        if pending_assistant is not None:
+            pending_assistant["sequence"] = sequence
+            yield pending_assistant
+            sequence += 1
+            pending_assistant = None
+
+        turn = {
+            "kind": "assistant" if role == "assistant" else (
+                "context" if sequence == 0 else "request"
+            ),
+            "role": role,
+            "created_at": created_at,
+            "blocks": visible,
+        }
+        if role == "assistant":
+            pending_assistant = turn
+            continue
+        turn["sequence"] = sequence
+        yield turn
         sequence += 1
-    return events
+
+    if pending_assistant is not None:
+        pending_assistant["sequence"] = sequence
+        pending_assistant["is_final"] = not any(
+            block.get("kind") == "tool_use"
+            for block in pending_assistant["blocks"]
+        )
+        yield pending_assistant
 
 
 def session_exists(session_id: str) -> bool:
@@ -111,9 +229,9 @@ def session_transcript(
     offset: int = 0,
     limit: int = DEFAULT_PAGE_SIZE,
 ) -> dict[str, Any] | None:
-    """展开一个会话的回放事件（分页）；会话不存在返回 None。
+    """展开一个会话的回合流（分页）；会话不存在返回 None。
 
-    返回的 events 按会话时间序展开，``sequence`` 是事件在整段会话中的
+    返回的 turns 按会话时间序展开，``sequence`` 是回合在整段会话中的
     序号（不是本页内偏移），供前端拼页与定位。
     """
     db_path = transcripts_db_path()
@@ -132,41 +250,96 @@ def session_transcript(
                 return None
             rows = conn.execute(
                 """
-                SELECT role, content_json FROM messages
+                SELECT role, content_json, created_at FROM messages
                 WHERE session_id = ?
                 ORDER BY created_at, id
                 """,
                 (str(session_id or ""),),
             )
             window: list[dict[str, Any]] = []
-            sequence = 0
+            observed_turns = 0
             truncated = False
-            for role, content_json in rows:
-                rendered = _render_blocks(content_json, str(role or ""), sequence)
-                sequence += len(rendered)
-                for event in rendered:
-                    if int(event["sequence"]) < requested_offset:
-                        continue
-                    if len(window) >= page_limit:
-                        truncated = True
-                        break
-                    window.append(event)
-                if truncated:
+            for turn in _iter_session_turns(rows):
+                observed_turns = int(turn["sequence"]) + 1
+                if int(turn["sequence"]) < requested_offset:
+                    continue
+                if len(window) >= page_limit:
+                    truncated = True
                     break
+                window.append(turn)
     except sqlite3.Error:
         return None
-    # 为判断 truncated 只多读一个事件；未到会话末尾时不扫描余下消息，
-    # 因而 total_events 暂未知。到末页后 sequence 即为准确总事件数。
-    total_events = None if truncated else sequence
+    # 为判断 truncated 只多读一个回合；未到会话末尾时不扫描余下消息，
+    # 因而 total_turns 暂未知。到末页后 observed_turns 即为准确总数。
+    total_turns = None if truncated else observed_turns
     return {
+        "format": "turns-v1",
         "session_id": str(session_id or ""),
         "total_messages": total_messages,
-        "total_events": total_events,
+        "total_turns": total_turns,
         "offset": requested_offset,
         "returned": len(window),
         "truncated": truncated,
         "next_offset": requested_offset + len(window),
-        "events": window,
+        "turns": window,
+    }
+
+
+def session_raw_messages(
+    session_id: str,
+    *,
+    offset: int = 0,
+    limit: int = DEFAULT_PAGE_SIZE,
+) -> dict[str, Any] | None:
+    """分页读取未裁剪的原始 message；内部推理 block 仍被移除。"""
+    db_path = transcripts_db_path()
+    if not db_path.is_file():
+        return None
+    requested_offset = max(0, int(offset))
+    page_limit = max(1, min(int(limit), MAX_PAGE_SIZE))
+    try:
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10) as conn:
+            total_row = conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ?",
+                (str(session_id or ""),),
+            ).fetchone()
+            total_messages = int((total_row or [0])[0])
+            if total_messages <= 0:
+                return None
+            rows = conn.execute(
+                """
+                SELECT id, role, content_json, created_at, token_count
+                FROM messages
+                WHERE session_id = ?
+                ORDER BY created_at, id
+                LIMIT ? OFFSET ?
+                """,
+                (str(session_id or ""), page_limit, requested_offset),
+            ).fetchall()
+    except sqlite3.Error:
+        return None
+    messages = [
+        {
+            "sequence": requested_offset + index,
+            "message_id": int(row[0]),
+            "role": str(row[1] or ""),
+            "created_at": str(row[3] or ""),
+            "token_count": int(row[4] or 0),
+            "content": _untrimmed_message_content(row[2]),
+        }
+        for index, row in enumerate(rows)
+    ]
+    next_offset = requested_offset + len(messages)
+    return {
+        "format": "raw-messages-v1",
+        "session_id": str(session_id or ""),
+        "total_messages": total_messages,
+        "offset": requested_offset,
+        "returned": len(messages),
+        "truncated": next_offset < total_messages,
+        "next_offset": next_offset,
+        "omitted_block_types": sorted(_SKIPPED_BLOCK_TYPES),
+        "messages": messages,
     }
 
 
@@ -174,6 +347,7 @@ __all__ = [
     "DEFAULT_PAGE_SIZE",
     "MAX_PAGE_SIZE",
     "session_exists",
+    "session_raw_messages",
     "session_transcript",
     "transcripts_db_path",
 ]

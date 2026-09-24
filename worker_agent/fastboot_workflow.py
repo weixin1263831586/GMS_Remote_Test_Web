@@ -159,11 +159,18 @@ class FastbootPreparer:
         sleep: Callable[[float], None] = time.sleep,
         on_transport_reset: TransportResetCallback | None = None,
         bootloader_timeout: int = 120,
+        bootloader_probe_timeout: int = 8,
+        monotonic: Callable[[], float] = time.monotonic,
     ):
         self.runner = runner
         self.sleep = sleep
         self.on_transport_reset = on_transport_reset
         self.bootloader_timeout = max(1, int(bootloader_timeout))
+        # 单笔 fastboot 探测子进程的超时（fastboot devices / getvar）。
+        self.bootloader_probe_timeout = max(1, int(bootloader_probe_timeout))
+        # 可注入单调时钟：默认 time.monotonic；测试用假时钟确定性推进
+        # deadline，不引入真实等待；必须用单调时钟而非循环次数。
+        self.monotonic = monotonic
 
     def _notify_transport_reset(
         self,
@@ -205,10 +212,13 @@ class FastbootPreparer:
         except (IndexError, ValueError):
             return 0
 
-    def fastboot_mode(self, serial: str) -> str:
+    def fastboot_mode(self, serial: str, *, timeout: int | None = None) -> str:
+        """探测设备当前 fastboot 模式；``timeout`` 是整次探测预算。"""
+        call_timeout = self.bootloader_probe_timeout if timeout is None else max(1, int(timeout))
+        deadline = self.monotonic() + call_timeout
         listed = self._execute(
             ["fastboot", "devices"],
-            timeout=8,
+            timeout=call_timeout,
             required=False,
         )
         state = self._parse_fastboot_state(listed.output, serial)
@@ -216,9 +226,14 @@ class FastbootPreparer:
             return ""
         if state == "fastbootd":
             return "userspace"
+        remaining = deadline - self.monotonic()
+        if remaining <= 0:
+            # devices 已吃完整笔预算，不再另外启动一个同样
+            # 长的 getvar 子进程；本轮保守返回未知。
+            return ""
         userspace = self._execute(
             ["fastboot", "-s", serial, "getvar", "is-userspace"],
-            timeout=8,
+            timeout=max(1, int(remaining)),
             required=False,
         )
         return (
@@ -227,25 +242,39 @@ class FastbootPreparer:
             else "bootloader"
         )
 
-    def _wait_for_bootloader(self, serial: str, timeout: int | None = None) -> None:
-        timeout = self.bootloader_timeout if timeout is None else max(1, int(timeout))
-        for _attempt in range(timeout):
-            if self.fastboot_mode(serial) == "bootloader":
+    def _wait_for_mode(
+        self, serial: str, target: str, label: str, timeout: int | None = None
+    ) -> None:
+        """以单调时钟 deadline 等待设备进入目标 fastboot 模式。
+
+        ``fastboot_mode()`` 每次内部可能阻塞 8~16 秒（fastboot devices +
+        getvar is-userspace 两笔子进程调用），按循环次数计数会让名义
+        “120 秒超时”实际持续几十分钟。deadline 用
+        ``time.monotonic()``，每笔探测子进程的 timeout 收紧为剩余预算。
+        """
+        budget = float(self.bootloader_timeout if timeout is None else max(1, int(timeout)))
+        deadline = self.monotonic() + budget
+        while True:
+            remaining = deadline - self.monotonic()
+            if remaining <= 0:
+                break
+            probe_timeout = max(
+                1, int(min(float(self.bootloader_probe_timeout), remaining))
+            )
+            if self.fastboot_mode(serial, timeout=probe_timeout) == target:
                 return
-            self.sleep(1)
+            if self.monotonic() >= deadline:
+                break
+            self.sleep(min(1.0, deadline - self.monotonic()))
         raise FastbootPreparationError(
-            f"device {serial} did not enter bootloader Fastboot within {timeout}s"
+            f"device {serial} did not enter {label} within {int(budget)}s"
         )
 
+    def _wait_for_bootloader(self, serial: str, timeout: int | None = None) -> None:
+        self._wait_for_mode(serial, "bootloader", "bootloader Fastboot", timeout)
+
     def _wait_for_fastbootd(self, serial: str, timeout: int | None = None) -> None:
-        timeout = self.bootloader_timeout if timeout is None else max(1, int(timeout))
-        for _attempt in range(timeout):
-            if self.fastboot_mode(serial) == "userspace":
-                return
-            self.sleep(1)
-        raise FastbootPreparationError(
-            f"device {serial} did not enter Fastbootd within {timeout}s"
-        )
+        self._wait_for_mode(serial, "userspace", "Fastbootd", timeout)
 
     def prepare_bootloader(self, serial: str) -> PreparedFastbootDevice:
         mode = self.fastboot_mode(serial)

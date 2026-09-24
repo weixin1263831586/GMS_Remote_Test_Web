@@ -1,7 +1,8 @@
 """Daily Brief 数据模型（纯数据契约，无 I/O）。
 
 Schema 常量与 dataclass 供 repository / service / analyzer / UI 共享；
-分析契约见 docs/architecture/adr/0008-daily-brief-triage-and-diagnosis.md。
+当前分析契约见 docs/architecture/adr/0013-daily-brief-batch-matches-single-issue-diagnosis.md
+（ADR 0008 已被 0013 supersede，仅作历史背景）。
 """
 
 from __future__ import annotations
