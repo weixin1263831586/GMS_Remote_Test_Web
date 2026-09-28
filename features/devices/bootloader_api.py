@@ -11,7 +11,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from features.auth import require_elevated_admin_when_auth_required
 from foundation.config_paths import default_suites_path
-from foundation.error_model import ApiError
+from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response, success_response
 from foundation.security import sanitize_device_ids
 from worker_agent.fastboot_workflow import (
@@ -134,9 +134,11 @@ async def _manage_bootloader_lock(
         )
     except HTTPException:
         raise
-    except Exception as exc:
-        logger.error("Error managing device lock: %s", exc)
-        return _api_error(str(exc), status_code=500)
+    except Exception:
+        message = record_internal_error(
+            logger, "管理 bootloader 锁", "Error managing device lock"
+        )
+        return ApiError.internal(message).to_response()
 
 
 def _run_bootloader_lock_block(
@@ -318,9 +320,11 @@ async def check_bootloader_status(
             return _api_success({"results": results}, "Lock status check completed")
     except HTTPException:
         raise
-    except Exception as exc:
-        logger.error("Error checking lock status: %s", exc)
-        return _api_error(str(exc), status_code=500)
+    except Exception:
+        message = record_internal_error(
+            logger, "查询 bootloader 锁状态", "Error checking lock status"
+        )
+        return ApiError.internal(message).to_response()
 
 
 @router.post("/api/devices/info")
@@ -385,6 +389,8 @@ async def get_device_info(req: DeviceActionRequest, request: Request):
             return _api_success({"results": results}, "Device info retrieved")
     except HTTPException:
         raise
-    except Exception as exc:
-        logger.error("Error getting device info: %s", exc)
-        return _api_error(str(exc), status_code=500)
+    except Exception:
+        message = record_internal_error(
+            logger, "读取设备信息", "Error getting device info"
+        )
+        return ApiError.internal(message).to_response()

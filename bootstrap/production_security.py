@@ -58,7 +58,7 @@ def validate_production_security_configuration() -> None:
     if not tokens:
         raise RuntimeError(
             "worker tokens are required in production "
-            "(configure configs/worker_tokens.json)"
+            "(configure GMS_WORKER_TOKENS_FILE or configs/secrets/worker_tokens.json)"
         )
     for worker_id, token in tokens.items():
         if not worker_id.strip():

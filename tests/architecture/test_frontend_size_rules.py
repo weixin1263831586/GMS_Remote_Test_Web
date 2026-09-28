@@ -48,7 +48,7 @@ def _limit_for(relative: str) -> int:
 class FrontendSizeRuleTests(unittest.TestCase):
     @staticmethod
     def _scanned_assets():
-        """全部第一方前端资产：web 三个根 + features/*/ui（评审 P2）。
+        """全部第一方前端资产：web 三个根 + features/*/ui。
 
         此前只扫 web/shell 与 web/static，页面模块化到 features/*/ui
         后（如 features/redmine/ui/page.js ≈ 244KB）完全脱离门禁——

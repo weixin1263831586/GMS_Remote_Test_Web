@@ -22,7 +22,7 @@ DEFAULT_GERRIT_DASHBOARD = {
     "base_url": "",
     "rest_username": "",
     "rest_password": "",
-    # REST 走 Basic Auth，TLS 校验默认必须开启（评审 P1：verify=False +
+    # REST 走 Basic Auth，TLS 校验默认必须开启（verify=False +
     # Basic Auth 组合存在 MITM 凭据泄露面）。自签内网 Gerrit 用
     # rest_ca_cert 提供私有 CA；确需关闭校验只能对已保存配置显式写
     # rest_verify_ssl=false（旧部署兼容），新配置一律默认校验。

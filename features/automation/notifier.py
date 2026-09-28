@@ -15,6 +15,8 @@ import logging
 import threading
 from typing import Any
 
+from foundation.error_model import record_internal_error
+
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +94,11 @@ def _send_email(run: dict[str, Any], reporting: dict[str, Any]) -> dict[str, Any
             ),
         )
         return {"transport": "email", **result}
-    except Exception as exc:
-        logger.exception("email notification failed")
-        return {"transport": "email", "sent": False, "error": str(exc)}
+    except Exception:
+        message = record_internal_error(
+            logger, "邮件通知发送", "email notification failed"
+        )
+        return {"transport": "email", "sent": False, "error": message}
 
 
 def _send_gerrit(run: dict[str, Any], reporting: dict[str, Any]) -> dict[str, Any]:
@@ -120,9 +124,11 @@ def _send_gerrit(run: dict[str, Any], reporting: dict[str, Any]) -> dict[str, An
             verified=verified,
         ))
         return {"transport": "gerrit", **result}
-    except Exception as exc:
-        logger.exception("gerrit notification failed")
-        return {"transport": "gerrit", "sent": False, "error": str(exc)}
+    except Exception:
+        message = record_internal_error(
+            logger, "Gerrit 通知发送", "gerrit notification failed"
+        )
+        return {"transport": "gerrit", "sent": False, "error": message}
 
 
 def _send_redmine(run: dict[str, Any], reporting: dict[str, Any]) -> dict[str, Any]:
@@ -167,9 +173,11 @@ def _send_redmine(run: dict[str, Any], reporting: dict[str, Any]) -> dict[str, A
 
         _run_async(publish())
         return {"transport": "redmine", "sent": True, "issue_id": str(issue_id)}
-    except Exception as exc:
-        logger.exception("redmine notification failed")
-        return {"transport": "redmine", "sent": False, "error": str(exc)}
+    except Exception:
+        message = record_internal_error(
+            logger, "Redmine 通知发送", "redmine notification failed"
+        )
+        return {"transport": "redmine", "sent": False, "error": message}
 
 
 def notify_run_completion(run: dict[str, Any]) -> dict[str, Any]:
@@ -202,8 +210,14 @@ def notify_run_completion(run: dict[str, Any]) -> dict[str, Any]:
             continue
         try:
             results.append(handler(run, reporting))
-        except Exception as exc:
-            results.append({"transport": transport, "sent": False, "error": str(exc)})
+        except Exception:
+            message = record_internal_error(
+                logger,
+                f"{transport} 通知发送",
+                "%s notification dispatch failed",
+                transport,
+            )
+            results.append({"transport": transport, "sent": False, "error": message})
     required = reporting.get("required_transports") or []
     if reporting.get("required") is True:
         required = list(transports)

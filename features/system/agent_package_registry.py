@@ -34,6 +34,7 @@ from fastapi import Request
 from fastapi.responses import Response
 
 from features.system.agent_package_builder import build_package_bytes
+from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response
 
 
@@ -139,12 +140,11 @@ async def agent_package_manifest(request: Request):
         return error_response("agent package payload 未生成", status_code=404)
     try:
         archive = _immutable_archive(version)
-    except DriftedVersionError as error:
-        logger.error("agent package build failed: %s", error)
-        return error_response(str(error), status_code=500)
-    except FileNotFoundError as error:
-        logger.error("agent package build failed: %s", error)
-        return error_response(f"agent package 构建失败: {error}", status_code=500)
+    except (DriftedVersionError, FileNotFoundError):
+        message = record_internal_error(
+            logger, "Agent package 构建", "agent package manifest build failed"
+        )
+        return ApiError.internal(message).to_response()
     sha256_hex = hashlib.sha256(archive).hexdigest()
     signature = _manifest_signature(version, sha256_hex, len(archive))
     # Production refuses to publish an unsigned manifest —
@@ -181,10 +181,11 @@ async def agent_package_download(version: str, request: Request):
         )
     try:
         archive = _immutable_archive(version)
-    except DriftedVersionError as error:
-        return error_response(str(error), status_code=500)
-    except FileNotFoundError as error:
-        return error_response(f"agent package 构建失败: {error}", status_code=500)
+    except (DriftedVersionError, FileNotFoundError):
+        message = record_internal_error(
+            logger, "Agent package 构建", "agent package download build failed"
+        )
+        return ApiError.internal(message).to_response()
     return Response(
         content=archive,
         media_type="application/zip",

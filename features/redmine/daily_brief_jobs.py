@@ -236,8 +236,11 @@ class DailyBriefJobStore:
             )
             while True:
                 row = conn.execute(
-                    "SELECT * FROM redmine_daily_brief_jobs WHERE status='queued' "
-                    "ORDER BY requested_at,job_id LIMIT 1"
+                    "SELECT queued.* FROM redmine_daily_brief_jobs AS queued "
+                    "WHERE queued.status='queued' AND NOT EXISTS ("
+                    "SELECT 1 FROM redmine_daily_brief_jobs AS active "
+                    "WHERE active.run_id=queued.run_id AND active.status='running'"
+                    ") ORDER BY queued.requested_at,queued.job_id LIMIT 1"
                 ).fetchone()
                 if row is None:
                     return None

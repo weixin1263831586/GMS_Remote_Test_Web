@@ -1,7 +1,7 @@
 """Shared size-ratchet plumbing for the architecture size gates.
 
 「历史债务只减不增」此前只是约定：ceiling 和代码写在同一个测试文件里，
-开发者同时上调 ``MIGRATION_LINE_LIMITS`` 就能绕过门禁（评审 P2）。现在的
+开发者同时上调 ``MIGRATION_LINE_LIMITS`` 就能绕过门禁。现在的
 棘轮语义：
 
 * ceilings 独立持久化在 ``baselines/*.json``（本目录随仓库提交）；

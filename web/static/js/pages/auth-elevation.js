@@ -51,6 +51,7 @@ function closeUsernameDetectModal() {
 // 敏感操作管理员二次认证。
 
 let _elevationExpiryTimer = null;
+const _MAX_ELEVATION_TIMER_MS = 0x7fffffff;
 
 function _clearElevationExpiryTimer() {
     if (_elevationExpiryTimer) {
@@ -64,14 +65,30 @@ function _markElevated(elevatedUntilIso) {
     state.elevatedUntil = elevatedUntilIso || null;
     _clearElevationExpiryTimer();
     if (elevatedUntilIso) {
-        const ms = new Date(elevatedUntilIso).getTime() - Date.now();
-        if (ms > 0) {
-            _elevationExpiryTimer = setTimeout(() => {
+        const expiresAt = new Date(elevatedUntilIso).getTime();
+        if (!Number.isFinite(expiresAt)) {
+            state.elevated = false;
+            state.elevatedUntil = null;
+            return;
+        }
+        const scheduleExpiry = () => {
+            const remaining = expiresAt - Date.now();
+            if (remaining <= 0) {
+                _elevationExpiryTimer = null;
                 state.elevated = false;
                 state.elevatedUntil = null;
                 debugLog('[Elevation] expired, admin elevation cleared');
-            }, ms);
-        }
+                return;
+            }
+            // Browsers clamp delays above signed 32-bit milliseconds; passing
+            // a farther expiry can otherwise fire almost immediately. Re-arm
+            // long grants in bounded segments and check the absolute deadline.
+            _elevationExpiryTimer = setTimeout(
+                scheduleExpiry,
+                Math.min(remaining, _MAX_ELEVATION_TIMER_MS)
+            );
+        };
+        scheduleExpiry();
     }
 }
 

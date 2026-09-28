@@ -25,31 +25,6 @@ let refreshPromise=null;
 let clusterInitialRefreshSettled=false;
 let clusterRefreshInterval=null;
 let toastTimer=null;
-const clusterModalStack=[];
-function syncClusterModalState(){
- const visible=Array.from(document.querySelectorAll('.modal-backdrop:not([hidden])'));
- const visibleIds=new Set(visible.map(modal=>modal.id));
- const active=clusterModalStack.filter(id=>visibleIds.has(id));
- visible.forEach(modal=>{if(!active.includes(modal.id))active.push(modal.id)});
- clusterModalStack.length=0;active.forEach(id=>clusterModalStack.push(id));
- const topIndex=clusterModalStack.length-1;
- clusterModalStack.forEach((id,index)=>{
-  const modal=document.getElementById(id);if(!modal)return;
-  modal.style.zIndex=String(10000+index*20);modal.inert=index!==topIndex;
-  modal.setAttribute('role','dialog');modal.setAttribute('aria-hidden',index===topIndex?'false':'true');
-  if(index===topIndex)modal.setAttribute('aria-modal','true');else modal.removeAttribute('aria-modal');
- });
- document.querySelectorAll('.modal-backdrop[hidden]').forEach(modal=>{modal.inert=false;modal.setAttribute('aria-hidden','true');modal.removeAttribute('aria-modal');modal.style.removeProperty('z-index')});
- document.body.classList.toggle('modal-open',clusterModalStack.length>0);
-}
-function closeTopClusterModal(){
- const id=clusterModalStack[clusterModalStack.length-1],modal=id&&document.getElementById(id);
- if(!modal)return;modal.hidden=true;syncClusterModalState();
-}
-document.addEventListener('keydown',event=>{if(event.key==='Escape'&&clusterModalStack.length){event.preventDefault();event.stopPropagation();closeTopClusterModal()}});
-document.addEventListener('click',event=>{const modal=event.target?.classList?.contains('modal-backdrop')?event.target:null;if(modal&&clusterModalStack[clusterModalStack.length-1]===modal.id){modal.hidden=true;syncClusterModalState()}});
-new MutationObserver(syncClusterModalState).observe(document.body,{subtree:true,attributes:true,attributeFilter:['hidden']});
-syncClusterModalState();
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const oneDecimal=value=>(Number(value)||0).toFixed(1);
 const relativeTime=value=>{const timestamp=Date.parse(value||'');if(!Number.isFinite(timestamp))return '-';const seconds=Math.max(0,Math.floor((Date.now()-timestamp)/1000));if(seconds<60)return `${seconds}秒前`;if(seconds<3600)return `${Math.floor(seconds/60)}分钟前`;if(seconds<86400)return `${Math.floor(seconds/3600)}小时前`;return `${Math.floor(seconds/86400)}天前`};
@@ -666,7 +641,7 @@ async function openWorkerConfig(id){
  document.querySelector('#config-error').hidden=true;document.querySelector('#config-error').textContent='';
  const input=document.querySelector('#config-max-jobs');input.value='';input.disabled=true;input.placeholder='加载中…';
  modal.hidden=false;
- try{const d=await api(`/api/cluster/workers/${encodeURIComponent(id)}/config`);const cfg=d.config||{};input.value=cfg.max_jobs??'';input.disabled=false;input.placeholder=window.GMS_CLUSTER_DEFAULT_MAX_JOBS||''}
+ try{const d=await api(`/api/cluster/workers/${encodeURIComponent(id)}/config`);const cfg=d.config||{};input.value=cfg.max_jobs??'';input.disabled=false;input.placeholder=window.GMS_CLUSTER_DEFAULT_MAX_JOBS||'';input.focus({preventScroll:true})}
  catch(e){document.querySelector('#config-error').hidden=false;document.querySelector('#config-error').textContent=e.message}
 }
 async function saveWorkerConfig(){

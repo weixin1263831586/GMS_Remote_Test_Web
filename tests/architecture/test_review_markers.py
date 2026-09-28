@@ -81,6 +81,8 @@ FORBIDDEN_PATTERNS = [
         re.compile(r"评审意见|评审第|评审项|评审批注|审核意见|[一二三四五六七八九十\d]+轮评审|工单\s*P"),
         "review-round wording",
     ),
+    (re.compile(r"评审\s*[MLPR]\d", re.IGNORECASE), "review priority wording"),
+    (re.compile(r"审核第[一二三四五六七八九十\d]+节"), "review-section wording"),
     (re.compile(r"^\s*(?:#|//|/\*|\*)\s*[MLPR]\d+[a-z]?[：:]", re.IGNORECASE),
      "bare review priority"),
 ]

@@ -1,6 +1,7 @@
 """foundation/error_model.py 的全局错误模型回归测试。"""
 
 import unittest
+from unittest.mock import Mock
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -92,6 +93,37 @@ class HandlerIntegrationTests(unittest.TestCase):
         client = TestClient(self._app(), raise_server_exceptions=False)
         resp = client.get('/http-exc')
         self.assertEqual(resp.status_code, 404)
+
+    def test_internal_error_message_hides_exception_and_carries_request_id(self):
+        from foundation.error_model import internal_error_message
+
+        first = internal_error_message('烧写固件')
+        second = internal_error_message('烧写固件')
+        # 动作名可见、每次请求生成不同的 request id（用于回查日志）。
+        self.assertIn('烧写固件', first)
+        self.assertIn('request_id=', first)
+        self.assertIn('已记录日志', first)
+        self.assertNotEqual(first, second)
+        # 不接受调用方把异常文本拼进动作名后整段回显给客户端的用法：
+        # 消息只包含动作短语与 request id，不包含调用方额外塞入的内容。
+        self.assertTrue(all(part not in first for part in ('Secret', '/home/')))
+
+    def test_record_internal_error_logs_the_returned_request_id(self):
+        from foundation.error_model import record_internal_error
+
+        logger = Mock()
+        message = record_internal_error(
+            logger,
+            '烧写固件',
+            'firmware burn failed for %s',
+            'device-1',
+        )
+
+        logger.error.assert_called_once()
+        args, kwargs = logger.error.call_args
+        self.assertIn(message, args)
+        self.assertIn('device-1', args)
+        self.assertTrue(kwargs['exc_info'])
 
 
 if __name__ == '__main__':

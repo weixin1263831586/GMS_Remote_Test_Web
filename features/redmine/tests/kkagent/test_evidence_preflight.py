@@ -193,7 +193,7 @@ class EvidencePreflightTests(unittest.TestCase):
         run.assert_not_awaited()
 
     def test_cancel_interrupts_running_preflight_command(self):
-        """评审 P2：communicate 期间请求停止须在轮询间隔级（≈0.25s）终止
+        """communicate 期间请求停止须在轮询间隔级（≈0.25s）终止
         preflight CLI，而不是等满 90s 超时。"""
 
         async def scenario():

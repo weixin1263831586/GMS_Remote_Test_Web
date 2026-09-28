@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from features.auth import CurrentUser, require_authenticated_user_when_auth_required
 from foundation.command_result import CommandResult
+from foundation.error_model import ApiError, record_internal_error
 from foundation.networking import is_local_host
 
 from . import runtime
@@ -574,6 +575,8 @@ async def devices_management(request: Request):
             return response(payload)
         finally:
             await asyncio.to_thread(runtime.ssh_manager.return_connection, ssh)
-    except Exception as exc:
-        logger.error("Error getting devices management: %s", exc, exc_info=True)
-        return response({"success": False, "error": str(exc)}, status_code=500)
+    except Exception:
+        message = record_internal_error(
+            logger, "获取设备管理信息", "Error getting devices management"
+        )
+        return ApiError.internal(message).to_response()

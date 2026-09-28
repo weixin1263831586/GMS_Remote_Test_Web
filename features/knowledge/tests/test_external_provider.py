@@ -291,7 +291,7 @@ class ProviderTests(unittest.TestCase):
             self.assertEqual(provider.search("doFrame"), [])
 
     def test_rerank_window_extends_beyond_output_limit(self):
-        """候选池与输出上限分离回归（评审 P2）。
+        """候选池与输出上限分离回归。
 
         limit=10 时旧实现理论候选 30 实际只有 MAX_HITS_CAP=10——第
         11~30 名里版本更匹配的页面 reranker 根本看不到。本用例构造

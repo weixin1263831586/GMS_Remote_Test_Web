@@ -1,4 +1,4 @@
-"""stream-json 事件 → 分析进度 sink 的归一化分流器（评审 L2+）。
+"""stream-json 事件 → 分析进度 sink 的归一化分流器。
 
 从 consume_line 的 on_event 回调接入：只消费结构化执行事件
 （tool_call/tool_result/llm_retry），不外显 reasoning/assistant 文本；

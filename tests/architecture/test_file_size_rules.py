@@ -1,7 +1,7 @@
 """Python file size ratchet (baseline persisted in baselines/file_size.json).
 
 历史 ceiling 原来以字典形式写在测试内，与代码同文件——同时上调
-``MIGRATION_LINE_LIMITS`` 即可绕过「只减不增」约定（评审 P2）。现在
+``MIGRATION_LINE_LIMITS`` 即可绕过「只减不增」约定。现在
 ceilings 独立持久化，本测试负责：
 
 1. 运行时校验：文件行数不超过各自 ceiling（未登记走 600 默认）；

@@ -23,7 +23,7 @@ class GerritConfigTests(unittest.TestCase):
         self.secret_env.stop()
 
     def test_rest_tls_defaults_to_verified_with_ca_support(self):
-        """评审 P1：Basic Auth 出站必须默认校验 TLS；自签 CA 走 rest_ca_cert。"""
+        """Basic Auth 出站必须默认校验 TLS；自签 CA 走 rest_ca_cert。"""
         from features.gerrit.config import (
             DEFAULT_GERRIT_DASHBOARD,
             denormalize_gerrit_dashboard_config,

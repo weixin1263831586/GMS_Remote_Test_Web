@@ -1740,11 +1740,12 @@ function jumpToBuildLog(jobId) {
 
 function openTrace() {
     window.atsTraceFocusOrigin = document.activeElement;
-    qs('ats-trace-drawer').classList.add('open');
+    const drawer = qs('ats-trace-drawer');
+    drawer.classList.add('open');
     qs('ats-trace-backdrop').classList.add('open');
-    qs('ats-trace-drawer').setAttribute('aria-hidden', 'false');
+    drawer.setAttribute('aria-hidden', 'false');
     syncAutomationOverlayState();
-    qs('ats-trace-drawer').querySelector('button')?.focus({preventScroll: true});
+    drawer.focus({preventScroll: true});
 }
 function closeTrace() {
     qs('ats-trace-drawer').classList.remove('open');

@@ -64,9 +64,8 @@ def new_run_id() -> str:
 class DailyBriefRepository:
     """一个 owner 一个实例；线程安全由 RLock + SQLite 自身保证。"""
 
-    # 当前 schema 版本（PRAGMA user_version）。每次改 _init_db 的表结构
-    # 都必须 +1，让旧库在下一次启动时重放迁移；版本历史见
-    # docs/redmine-daily-brief.md 的 schema migration 契约一节。
+    # 当前 schema 版本（PRAGMA user_version）：每次改 _init_db 表结构必须 +1，
+    # 旧库下次启动重放迁移；版本历史见 docs/redmine-daily-brief.md。
     _SCHEMA_VERSION = 5
 
     def __init__(self, owner_root: Path):
@@ -87,16 +86,12 @@ class DailyBriefRepository:
     def _init_db(self) -> None:
         with self._lock, self._connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
-            # 跨进程 schema 迁移必须持有 SQLite 写锁：Web 进程、daily_brief
-            # worker、systemd、CLI 可能并发初始化同一库，进程内 _lock 覆盖
-            # 不了 TOCTOU——两进程同时 PRAGMA table_info 判列缺失、同时
-            # ALTER TABLE ADD COLUMN 会以 "duplicate column name" 失败。
-            # 先 BEGIN IMMEDIATE 拿写锁，再读 schema、再迁移，迁移天然幂等。
-            #
-            # Schema versioning uses PRAGMA user_version.
-            # 已是当前版本的库直接跳过全部 DDL（快路径）；旧库按迁移步骤
-            # 逐版升级，每步自身幂等（列存在检查在写锁内进行，无竞态），
-            # 即使 user_version 意外回退/丢失也能安全重放。
+            # 跨进程 schema 迁移必须持有 SQLite 写锁：Web/worker/systemd/CLI
+            # 可能并发初始化同一库，进程内 _lock 覆盖不了 TOCTOU（并发
+            # ALTER TABLE 会以 duplicate column name 失败）。先 BEGIN IMMEDIATE
+            # 拿写锁，再读 schema、再迁移，每步幂等（列存在检查在写锁内进行）。
+            # 版本用 PRAGMA user_version：当前版本直接走快路径跳过全部 DDL；
+            # 意外回退/丢失也能安全重放。
             conn.execute("BEGIN IMMEDIATE")
             current_version = conn.execute("PRAGMA user_version").fetchone()[0]
             if current_version == self._SCHEMA_VERSION:
@@ -267,9 +262,8 @@ class DailyBriefRepository:
                 WHERE status IN ('queued', 'running')
                 """
             )
-            # AI 执行轨迹（每次 attempt 一行）：session_id / tool trace 摘要
-            # / token usage。完整输出留在 kkagent session，本表只存证据索引
-            # （Evidence Provenance 的落库起点）。
+            # AI 执行轨迹（每次 attempt 一行）：session_id / tool trace 摘要 /
+            # token usage。完整输出留在 kkagent session，本表只存证据索引。
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS redmine_daily_brief_ai_executions (
@@ -289,12 +283,10 @@ class DailyBriefRepository:
                 ON redmine_daily_brief_ai_executions(run_id, issue_id)
                 """
             )
-            # v5：owner 身份收敛回填。同一 per-owner 库里历史上混有原始
-            # display id（`user@ip`，Web 写入）与 sanitize 目录名
-            # （systemd/CLI 写入）两种 owner_id，导致按 owner 过滤的查询
-            # 丢失对方写入的 run。统一改写为 canonical；与既有 canonical
-            # 行 (owner_id, brief_date, mode) 冲突的 legacy run 连同子表
-            # 记录一起删除（保留 canonical 孪生）。
+            # v5：owner 身份收敛回填。同一 per-owner 库里历史上有原始 display
+            # id（user@ip，Web 写入）与 sanitize 目录名（systemd/CLI 写入）两种
+            # owner_id，按 owner 过滤会丢对方写入的 run。统一改写为 canonical；
+            # 与既有 canonical 行冲突的 legacy run 连同子表记录一起删除。
             for (raw_owner,) in conn.execute(
                 "SELECT DISTINCT owner_id FROM redmine_daily_brief_runs"
             ).fetchall():
@@ -379,25 +371,34 @@ class DailyBriefRepository:
             return self._row_to_run(row) if row else None
 
     def latest_run(self, owner_id: str, brief_date: str | None = None) -> DailyBriefRun | None:
-        """Latest morning brief; prefer the full nightly run over its delta.
+        """The run the dashboard should display for the latest brief date.
 
-        A delta is an incremental refresh, not a replacement report.  In
-        particular, a zero-change delta must not hide the day's full nightly
-        brief from the dashboard.
+        Display priority within the latest date: in-flight manual run
+        （重新分析全部 must stay visible while running）> terminal manual run
+        （replacement report, not an incremental refresh）> full nightly run
+        （a delta must never hide it）> delta; cancelled/failed manual never
+        outranks nightly.
         """
         owner_id = canonical_owner_id(owner_id)
+        display_rank = (
+            "CASE "
+            "WHEN mode='manual' AND status IN ('pending','snapshotting','analyzing') THEN 0 "
+            "WHEN mode='manual' AND status IN ('completed','partial') THEN 1 "
+            "WHEN mode='nightly' THEN 2 "
+            "ELSE 3 END"
+        )
         with self._connect() as conn:
             if brief_date:
                 row = conn.execute(
-                    "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? AND brief_date=? AND mode NOT LIKE 'issue:%' "
-                    "ORDER BY CASE mode WHEN 'nightly' THEN 0 WHEN 'delta' THEN 1 ELSE 2 END, "
+                    "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? AND brief_date=? "
+                    f"AND mode NOT LIKE 'issue:%' ORDER BY {display_rank}, "
                     "started_at DESC, rowid DESC LIMIT 1",
                     (owner_id, brief_date),
                 ).fetchone()
             else:
                 row = conn.execute(
                     "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? AND mode NOT LIKE 'issue:%' "
-                    "ORDER BY brief_date DESC, CASE mode WHEN 'nightly' THEN 0 WHEN 'delta' THEN 1 ELSE 2 END, "
+                    f"ORDER BY brief_date DESC, {display_rank}, "
                     "started_at DESC, rowid DESC LIMIT 1",
                     (owner_id,),
                 ).fetchone()
@@ -659,9 +660,8 @@ class DailyBriefRepository:
 
     # ------------------------------------------------------------------ jobs
 
-    # durable job 队列已拆分至 daily_brief_jobs.DailyBriefJobStore；这里
-    # 保留薄委托，既有调用方（dispatch/worker/service/测试）无需改动。
-    # 原子化入口（run+job 同一事务）见 create_run_and_enqueue_job。
+    # durable job 队列已拆分至 daily_brief_jobs.DailyBriefJobStore；这里保留
+    # 薄委托，既有调用方无需改动。原子化入口见 create_run_and_enqueue_job。
 
     def enqueue_job(
         self, run_id: str, *, kind: str = "run", issue_id: int = 0

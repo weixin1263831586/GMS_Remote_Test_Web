@@ -984,7 +984,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(output, '["2026-06-12","2026-06-13"]')
 
     def test_redmine_markdown_link_href_has_scheme_whitelist(self):
-        """Markdown 链接 URL 必须过 sanitizeHref 白名单(评审 P1)。
+        """Markdown 链接 URL 必须过 sanitizeHref 白名单。
 
         _inlineMd 的输入已 esc():javascript:/data: 等危险 scheme 渲染为
         href="#",合法 http(s) 与站内相对路径原样保留。

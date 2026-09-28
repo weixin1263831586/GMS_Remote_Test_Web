@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.31"
+GMS_RT_VERSION="0.22.32"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -1012,7 +1012,7 @@ gms-rt-approval-create() {
         shift
     done
     [ -n "$tool" ] && [ -n "$device" ] || {
-        error "Usage: gms-rt-approval-create --tool <gms_rt_tool> --device <serial>[,<serial>...] [--command <command>|--firmware-sha256 <sha256> [--wipe-data true|false] [--burn-mode auto|uf]]"
+        error "Usage: gms-rt-approval-create --tool <tool> --device <serial>[,<serial>...] [--command <command>|--firmware-sha256 <sha256> [--wipe-data true|false] [--burn-mode auto|uf]]"
         return "$GMS_RT_EXIT_USAGE"
     }
     check_jq || return 1
@@ -5809,7 +5809,7 @@ _gms_rt_command_usage() {
         gms-rt-agent-tokens) printf '%s' 'gms-rt-agent-tokens' ;;
         gms-rt-agent-enroll-code) printf '%s' 'gms-rt-agent-enroll-code --name <NAME> [--scopes s1,s2] [--workers w1,w2|*] [--devices d1,d2|*] [--expires-days N] [--ttl-minutes N]' ;;
         gms-rt-agent-token-revoke) printf '%s' 'gms-rt-agent-token-revoke <TOKEN_ID>' ;;
-        gms-rt-approval-create) printf '%s' 'gms-rt-approval-create --tool <gms_rt_tool> --device <serial>[,<serial>...] [--command <command>|--firmware-sha256 <sha256> [--wipe-data true|false] [--burn-mode auto|uf]]' ;;
+        gms-rt-approval-create) printf '%s' 'gms-rt-approval-create --tool <tool> --device <serial>[,<serial>...] [--command <command>|--firmware-sha256 <sha256> [--wipe-data true|false] [--burn-mode auto|uf]]' ;;
         gms-rt-burn-firmware) printf '%s' 'gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--approval-token TOKEN] [--wait-online[=SECONDS]]' ;;
         gms-rt-burn-gsi) printf '%s' 'gms-rt-burn-gsi <gsi_path> <devices> [wipe_data] [--wait-online[=SECONDS]]' ;;
         gms-rt-burn-serial) printf '%s' 'gms-rt-burn-serial <device_id> <serial>' ;;
@@ -5818,7 +5818,7 @@ _gms_rt_command_usage() {
         gms-rt-config-update) printf '%s' 'gms-rt-config-update <key> <value>' ;;
         gms-rt-desktop-validate) printf '%s' 'gms-rt-desktop-validate <user@ip>' ;;
         gms-rt-desktop-vnc-start) printf '%s' 'gms-rt-desktop-vnc-start [host] [password] [vnc_password]' ;;
-        gms-rt-system-command-describe) printf '%s' 'gms-rt-system-command-describe <gms-rt-command>' ;;
+        gms-rt-system-command-describe) printf '%s' 'gms-rt-system-command-describe <command>' ;;
         gms-rt-devices-info|gms-rt-devices-reboot|gms-rt-devices-remount|gms-rt-devices-bootloader-lock|gms-rt-devices-bootloader-unlock|gms-rt-devices-bootloader-status)
             printf '%s' "$1 <devices>"
             ;;
@@ -6144,7 +6144,7 @@ gms-rt-system-commands() {
 gms-rt-system-command-describe() {
     local requested="${1:-}"
     [ -n "$requested" ] || {
-        error "Usage: gms-rt-system-command-describe <gms-rt-command>"
+        error "Usage: gms-rt-system-command-describe <command>"
         return "$GMS_RT_EXIT_USAGE"
     }
     check_jq || return "$GMS_RT_EXIT_OPERATION"

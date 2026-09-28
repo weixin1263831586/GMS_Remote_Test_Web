@@ -8146,6 +8146,106 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_main_shell_form_modals_focus_the_form_instead_of_close_button(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof ModalManager === 'object'")
+            for modal_id, expected_focus in (
+                ("wifi-modal", "wifi-ssid"),
+                ("gms-assistant-config-modal", "gms-assistant-url"),
+            ):
+                with self.subTest(modal=modal_id):
+                    page.evaluate("id => ModalManager.open(id)", modal_id)
+                    page.wait_for_function(
+                        "id => document.activeElement?.id === id", arg=expected_focus
+                    )
+                    self.assertFalse(
+                        page.locator(f"#{modal_id} .modal-close").evaluate(
+                            "button => button === document.activeElement"
+                        )
+                    )
+                    page.evaluate("id => ModalManager.close(id)", modal_id)
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_main_shell_modal_focus_skips_css_hidden_and_falls_back_to_content(self):
+        """CSS 隐藏控件不参与初始焦点；纯说明弹框回退聚焦内容容器。
+
+        - 首个表单控件 display:none 时聚焦下一个可见输入框（而不是 ×）；
+        - 全部控件不可聚焦时聚焦 .modal-content（此前会落到关闭按钮）。
+        """
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof ModalManager === 'object'")
+            page.evaluate(
+                """() => {
+                  const host = document.createElement('div');
+                  host.id = 'focus-probe-modal';
+                  host.className = 'modal';
+                  host.innerHTML = (
+                    '<div class="modal-content">'
+                    + '<div class="modal-header">'
+                    + '<span class="modal-title">焦点探针</span>'
+                    + '<button type="button" class="modal-close" aria-label="关闭">'
+                    + '&times;</button></div>'
+                    + '<div class="modal-body">'
+                    + '<input id="focus-probe-hidden" type="text" style="display:none">'
+                    + '<input id="focus-probe-visible" type="text">'
+                    + '</div></div>'
+                  );
+                  document.body.appendChild(host);
+                }"""
+            )
+            try:
+                with self.subTest(case="skips_css_hidden_control"):
+                    page.evaluate("ModalManager.open('focus-probe-modal')")
+                    page.wait_for_function(
+                        "() => document.activeElement?.id === 'focus-probe-visible'")
+                with self.subTest(case="falls_back_to_content"):
+                    page.evaluate(
+                        "() => { document.getElementById('focus-probe-visible')"
+                        ".style.display = 'none';"
+                        " ModalManager.close('focus-probe-modal');"
+                        " ModalManager.open('focus-probe-modal'); }")
+                    page.wait_for_function(
+                        "() => document.activeElement?.classList"
+                        "?.contains('modal-content')")
+            finally:
+                page.evaluate("ModalManager.close('focus-probe-modal')")
+                page.evaluate("document.getElementById('focus-probe-modal')?.remove()")
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_cluster_worker_config_modal_focuses_input_and_escapes(self):
+        """Cluster 独立控制器：打开即聚焦首个输入框，Escape 关闭弹框。"""
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            page.goto(f"{self.base_url}/cluster", wait_until="domcontentloaded")
+            page.wait_for_function("typeof ClusterModalController === 'object'")
+            page.evaluate(
+                "() => { document.getElementById('worker-config-modal')"
+                ".hidden = false; }")
+            page.wait_for_function(
+                "() => document.activeElement?.id === 'config-max-jobs'")
+            self.assertFalse(page.evaluate(
+                "() => document.activeElement?.id === 'close-config-modal'"))
+            page.keyboard.press("Escape")
+            page.wait_for_function(
+                "() => document.getElementById('worker-config-modal').hidden")
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
     def test_main_shell_modals_fit_supported_viewports_and_stack_in_order(self):
         page = self.new_page()
         page_errors = []
@@ -8775,6 +8875,9 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             redmine.wait_for_function("typeof showSettingsModal === 'function'")
             redmine.evaluate("showSettingsModal()")
             expect(redmine.locator("#settingsModal")).to_have_class(re.compile(r"show"))
+            redmine.wait_for_function(
+                "document.activeElement?.id === 'settingStaleDays'"
+            )
             redmine.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape'}))")
             expect(redmine.locator("#settingsModal")).not_to_have_class(re.compile(r"show"))
 
@@ -8783,6 +8886,9 @@ class RuntimeUiSmokeTests(RuntimeUiHarness):
             gerrit.wait_for_function("typeof showSettings === 'function'")
             gerrit.evaluate("showSettings()")
             expect(gerrit.locator("#settingsModal")).to_have_class(re.compile(r"show"))
+            gerrit.wait_for_function(
+                "document.activeElement?.id === 'settingBaseUrl'"
+            )
             gerrit.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape'}))")
             expect(gerrit.locator("#settingsModal")).not_to_have_class(re.compile(r"show"))
         finally:

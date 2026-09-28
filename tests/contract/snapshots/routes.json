@@ -2942,19 +2942,7 @@
     "methods": [
       "GET"
     ],
-    "path": "/cluster/page-boot.js"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/cluster/page-echarts.js"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/cluster/page.js"
+    "path": "/cluster/{ui_asset}"
   },
   {
     "methods": [

@@ -1,6 +1,6 @@
 """Backward-compatible re-export shim for the former monolithic inventory module.
 
-inventory.py 在 2026-08 审核第七节拆分后仅保留稳定导入面：
+inventory.py 拆分后仅保留稳定导入面：
 - 设备探测 / USB/IP / 设备操作 / 固件与 GSI 烧写 / 主机指标 → device_actions
 - 套件执行 / 导出 / 报告导入 / 套件扫描 → suite_actions
 

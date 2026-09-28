@@ -35,6 +35,7 @@ from features.test_execution import (
 )
 from features.users import get_client_id_from_request
 from foundation.config import config_manager
+from foundation.error_model import record_internal_error
 from foundation.responses import error_response, success_response
 
 
@@ -385,9 +386,7 @@ def _build_plan(
 ) -> dict[str, Any]:
     workspace = workspace_context or {}
     test_suite = (suite.get("tools_path") or suite.get("full_path") or "") if suite else ""
-    test_type = intent.get("test_type") or (
-        suite.get("test_type") or suite.get("suite_type") or "" if suite else ""
-    )
+    test_type = intent.get("test_type") or (suite.get("test_type") or suite.get("suite_type") or "" if suite else "")
     if not test_type and test_suite:
         test_type = detect_test_type_from_suite_path(test_suite).upper()
 
@@ -595,9 +594,9 @@ async def _analyze_saved_report(session: dict[str, Any], report_timestamp: str) 
         detail = f"总计 {summary.get('total', 0)}，通过 {summary.get('pass', 0)}，失败 {summary.get('fail', summary.get('failed', 0))}"
         _append_step(session, "报告分析", "done", detail, {"report_analysis": analysis})
         return analysis
-    except Exception as e:
-        logger.error("[Agent] report analysis failed: %s", e, exc_info=True)
-        _append_step(session, "报告分析失败", "error", str(e))
+    except Exception:
+        message = record_internal_error(logger, "报告分析", "[Agent] report analysis failed")
+        _append_step(session, "报告分析失败", "error", message)
         return None
 
 
@@ -641,9 +640,9 @@ async def _diagnose_report_failure(session: dict[str, Any], report: dict[str, An
             },
         )
         return diagnosis
-    except Exception as e:
-        logger.error("[Agent] failure diagnosis failed: %s", e, exc_info=True)
-        _append_step(session, "失败诊断异常", "error", str(e))
+    except Exception:
+        message = record_internal_error(logger, "失败诊断", "[Agent] failure diagnosis failed")
+        _append_step(session, "失败诊断异常", "error", message)
         return None
 
 
@@ -770,9 +769,9 @@ async def _run_apk_source_analysis(
         result = {"task_id": task_id, "task": task, "status": status, "snippet": snippet, "artifact": artifact}
         _append_step(session, "APK/源码分析", "done", detail, result)
         return result
-    except Exception as e:
-        logger.error("[Agent] APK source analysis failed: %s", e, exc_info=True)
-        _append_step(session, "APK/源码分析异常", "error", str(e))
+    except Exception:
+        message = record_internal_error(logger, "APK/源码分析", "[Agent] APK source analysis failed")
+        _append_step(session, "APK/源码分析异常", "error", message)
         return None
 
 
@@ -1098,11 +1097,11 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
         session["active_run"] = None
         _append_step(session, "Agent 监控已停止", "warning", "用户取消了 Agent 后台监控")
         raise
-    except Exception as e:
-        logger.error("[Agent] monitor failed: %s", e, exc_info=True)
+    except Exception:
         session["status"] = "error"
-        _append_step(session, "Agent 监控异常", "error", str(e))
-        _append_message(session, "assistant", f"Agent 监控异常：{e}")
+        err = record_internal_error(logger, "Agent 监控", "[Agent] monitor failed")
+        _append_step(session, "Agent 监控异常", "error", err)
+        _append_message(session, "assistant", err)
     finally:
         _agent_monitor_tasks.pop(session_id, None)
 
@@ -1324,9 +1323,7 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     # --- 2d. Run test: generate an explicit test-execution plan ---
     if intent.is_run_test:
         test_intent = dict(intent.params)
-        test_intent["device_count"] = (
-            len(test_intent.get("devices") or []) or _extract_device_count(message)
-        )
+        test_intent["device_count"] = (len(test_intent.get("devices") or []) or _extract_device_count(message))
         selected_devices, device_details = _select_devices(test_intent, workspace)
         suite = _select_suite(test_intent, workspace)
         plan = _build_plan(

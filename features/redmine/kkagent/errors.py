@@ -79,6 +79,28 @@ def llm_stream_timeout(stderr: str) -> bool:
     return "kind=timeout" in stderr or "operation timed out" in stderr
 
 
+def provider_overloaded(stderr: str) -> bool:
+    """上游模型服务过载/限流（kkagent stderr 实测形态）：
+
+    ``LLM stream error: OpenAI stream error: The request queue is full.``
+    这是服务端瞬时拥堵：kkagent 流式重试耗尽后常以 turn-limit 信封
+    收场（表象），必须先于 max_turns 判定，否则根因被误标成
+    "步数预算耗尽"，诱导运维去调一个并不存在的步数限制。
+    """
+    lowered = stderr.lower()
+    provider_context = (
+        "llm stream error" in lowered
+        or "openai stream error" in lowered
+        or "anthropic stream error" in lowered
+    )
+    if not provider_context:
+        return False
+    return any(
+        marker in lowered
+        for marker in ("queue is full", "overloaded", "rate limit", "code 429")
+    )
+
+
 def turn_limit_reached(raw: str, stderr: str, *, envelope_subtype: str = "") -> bool:
     """--max-turns 预算用尽。
 
@@ -125,6 +147,13 @@ def classify_failure(
     ——信封 subtype=max_turns 只是表象）。
     """
     summary = summarize_stderr(stderr_text)
+    if provider_overloaded(stderr_text):
+        return "provider_overloaded", (
+            "模型服务队列已满（上游过载/限流）。将自动重试一次；"
+            "若反复出现请稍后重试或更换更快的模型"
+            "（如 glm-5.3-flash）。\n"
+            + (summary or f"exit {exit_code}")
+        )
     if llm_stream_timeout(stderr_text):
         return "llm_timeout", (
             "模型服务流式响应超时（大上下文请求超过服务端/客户端"
@@ -133,11 +162,20 @@ def classify_failure(
             + (summary or f"exit {exit_code}")
         )
     if turn_limit_reached(raw, stderr_text, envelope_subtype=envelope_subtype):
-        return "max_turns", (
-            f"kkagent 未在 {max_turns} 步预算内完成分析"
-            "（可在晨报设置中调大步数上限后重试）。\n"
-            + (summary or f"exit {exit_code}")
-        )
+        if max_turns > 0:
+            head = (
+                f"kkagent 未在 {max_turns} 步预算内完成分析"
+                "（可在晨报设置中调大步数上限后重试）。"
+            )
+        else:
+            # 晨报侧未设限制（max_turns=0）时仍收到 turn-limit 信封，
+            # 说明是 kkagent 内部（如子任务）预算或 CLI 默认值——
+            # 不是用户可调的晨报设置，文案不得误导。
+            head = (
+                "kkagent 内部步数预算耗尽（晨报侧未限制步数）。"
+                "若上游服务当时拥堵，实为拥堵的连带表象。"
+            )
+        return "max_turns", head + "\n" + (summary or f"exit {exit_code}")
     interrupted = interrupted_exit(exit_code, stderr_text) or turn_was_interrupted(
         stderr_text
     )

@@ -124,6 +124,111 @@ class DailyBriefCancellationTests(unittest.TestCase):
             self.service.repository.get_issue(run_id, 101).status, "cancelled"
         )
 
+    def test_reanalyze_revives_terminal_run_and_converges_after_failure(self):
+        """终态 run 单条重分析必须先把 run 置回非终态（analyzing）。
+
+        run 行停在 completed/failed + 旧 finished_at 时：purge_expired
+        会把重分析刚写入的实时事件当过期数据删掉，events 端点的
+        terminal=true 也会让前端无法进入实时轮询；异常路径也必须收敛
+        回终态，run 不得停留在 analyzing。
+        """
+        started = self.service.start_run("manual")
+        run_id = started["run_id"]
+
+        async def initial_analyze(_entry):
+            return KkAgentAnalysisResult(
+                ok=False, error="bad output", error_type="schema_mismatch"
+            )
+
+        with self._patch_snapshot(), patch.object(
+            self.service, "_build_analyzer"
+        ) as builder:
+            builder.return_value.env_extra = {}
+            builder.return_value.analyze = initial_analyze
+            asyncio.run(self.service.execute_run(run_id))
+        terminal = self.service.repository.get_run(run_id)
+        self.assertIn(terminal.status, ("failed", "partial"))
+
+        states_during_retry = []
+
+        async def retry_analyze(_entry):
+            row = self.service.repository.get_run(run_id)
+            states_during_retry.append((row.status, row.finished_at))
+            raise RuntimeError("analysis exploded")
+
+        with patch.object(self.service, "_build_analyzer") as builder:
+            builder.return_value.env_extra = {}
+            builder.return_value.analyze = retry_analyze
+            with self.assertRaises(RuntimeError):
+                asyncio.run(self.service.reanalyze_issue(
+                    terminal.brief_date, 101, run_id=run_id,
+                ))
+
+        # 重分析进行中：run 非终态且无 finished_at。
+        self.assertEqual(states_during_retry[0], ("analyzing", ""))
+        # 异常路径也必须收敛回终态，run 不得停留在 analyzing。
+        converged = self.service.repository.get_run(run_id)
+        self.assertIn(
+            converged.status, ("completed", "partial", "failed", "cancelled")
+        )
+        self.assertTrue(converged.finished_at)
+        # 通用异常路径：issue 行也必须收敛为 failed，不得停留 running。
+        self.assertEqual(
+            self.service.repository.get_issue(run_id, 101).status, "failed"
+        )
+
+    def test_parallel_issue_reanalysis_rebuilds_final_aggregate(self):
+        started = self.service.start_run("manual")
+        run_id = started["run_id"]
+
+        async def initial_analyze(_entry):
+            return KkAgentAnalysisResult(ok=True, result=dict(VALID))
+
+        with self._patch_snapshot(), patch.object(
+            self.service, "_build_analyzer"
+        ) as builder:
+            builder.return_value.env_extra = {}
+            builder.return_value.analyze = initial_analyze
+            completed = asyncio.run(self.service.execute_run(run_id))
+
+        second_entered = asyncio.Event()
+        release_second = asyncio.Event()
+
+        async def concurrent_analyze(entry):
+            if int(entry["issue_id"]) == 102:
+                second_entered.set()
+                await release_second.wait()
+            return KkAgentAnalysisResult(ok=True, result=dict(VALID))
+
+        async def scenario():
+            with patch.object(self.service, "_build_analyzer") as builder:
+                builder.return_value.env_extra = {}
+                builder.return_value.analyze = concurrent_analyze
+                second = asyncio.create_task(
+                    self.service.reanalyze_issue(
+                        completed.brief_date, 102, run_id=run_id
+                    )
+                )
+                await asyncio.wait_for(second_entered.wait(), timeout=2)
+                first = asyncio.create_task(
+                    self.service.reanalyze_issue(
+                        completed.brief_date, 101, run_id=run_id
+                    )
+                )
+                await asyncio.wait_for(first, timeout=2)
+                release_second.set()
+                await asyncio.wait_for(second, timeout=2)
+
+        asyncio.run(scenario())
+
+        final = self.service.repository.get_run(run_id)
+        self.assertEqual(final.status, "completed")
+        self.assertEqual(final.report_json["counts"]["completed"], 2)
+        self.assertEqual(
+            {issue.status for issue in self.service.repository.list_issues(run_id)},
+            {"completed"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
