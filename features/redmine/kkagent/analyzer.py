@@ -33,7 +33,8 @@ DAILY_BRIEF_MCP_TOOLSETS = "evidence"
 logger = logging.getLogger(__name__)
 
 # v18: 晨报与单号分析统一走 diagnostic 深度诊断（ADR 0013）。
-PROMPT_VERSION = "redmine_daily_triage_v18"
+# v19: 删"处理时间线"节；概况表分测试类/非测试类，钉死报告人=issue.author、单号格式、禁内部 id、北京时间。
+PROMPT_VERSION = "redmine_daily_triage_v19"
 
 REPAIR_MAX_TURNS = 0
 # 同一 session 最多纠正两轮，不重开会话。
@@ -221,9 +222,8 @@ class KkAgentRedmineAnalyzer:
         return prompt
 
     def build_command(self, prompt: str) -> list[str]:
-        # 注意：kkagent 0.4.x 的 CLI 没有 --model 参数（传了会 exit 2）。
-        # 模型经 KKAGENT_DEFAULT_MODEL 环境变量按次覆盖（见 analyze）。
-        # stream-json：逐行 NDJSON 事件流——result 行很小且不会重复塞入
+        # kkagent 0.4.x 的 CLI 没有 --model 参数（传了会 exit 2），模型经
+        # KKAGENT_DEFAULT_MODEL 覆盖；stream-json 的 result 行小且不重复塞
         # 全量 tool_calls[]，避免大日志把最终 JSON 挤出 head/tail 截断窗口。
         return [
             self.binary,
@@ -258,7 +258,9 @@ class KkAgentRedmineAnalyzer:
         retries_by_error: dict[str, int] = {}
         while True:
             outcome = await self._analyze_once(entry)
-            retryable = outcome.error_type in ("interrupted", "llm_timeout")
+            retryable = outcome.error_type in (
+                "interrupted", "llm_timeout", "provider_overloaded",
+            )
             retry_count = retries_by_error.get(outcome.error_type, 0)
             if not retryable or retry_count >= self.interrupted_retries:
                 return outcome
@@ -435,9 +437,8 @@ class KkAgentRedmineAnalyzer:
 
         result, errors = parse_issue_result(trace=trace, raw=raw.text())
         if result is None:
-            # schema 失败（缺字段/类型不符）与 gate 失败一样是"可精确
-            # 修复"的：findings 明确，--resume 同一 session 让模型补齐
-            # JSON 即可。无法 resume 或修复轮仍失败时保持失败分类。
+            # schema 失败与 gate 失败一样"可精确修复"：findings 明确，--resume
+            # 同一 session 补齐 JSON；无法 resume 或修复轮仍失败保持失败分类。
             schema_failed = bool(errors) and errors[0].startswith("schema")
             if schema_failed:
                 repaired, trace = await self._repair(entry, trace, errors)
@@ -604,10 +605,9 @@ def _merge_traces(first: KkAgentTrace, second: KkAgentTrace) -> KkAgentTrace:
     )
     merged.tool_calls = list(first.tool_calls)
     for index, call in enumerate(first.tool_calls):
-        # 修复轮 replay 同 id 的调用（resume 会重放工具调用）：优先保留
-        # 「有结果」的一侧——初跑只有 pending tool_call、修复轮带回成功
-        # result 时，旧去重无条件保留 first 会把已成功的取证永远留在
-        # pending，gate 误判取证缺失并烧光修复轮次。
+        # 修复轮 replay 同 id 的调用（resume 重放工具调用）：优先保留「有结果」
+        # 的一侧——初跑只有 pending tool_call、修复轮带回成功 result 时，旧去重
+        # 保留 first 会把已成功的取证留在 pending，gate 误判缺失并烧光修复轮次。
         if not call.tool_call_id:
             continue
         for later in second.tool_calls:

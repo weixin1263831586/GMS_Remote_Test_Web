@@ -44,6 +44,7 @@ from features.system.websocket_security import (
 from features.users import runtime as users_runtime
 from foundation.cluster_port import get_local_worker_id as _get_local_worker_id
 from foundation.config import DEFAULT_SERVER_URL, PROJECT_ROOT, config_manager
+from foundation.error_model import ApiError, record_internal_error
 from foundation.files import FileUtils
 from foundation.responses import error_response
 
@@ -299,7 +300,6 @@ async def get_architecture():
 
 
 # ==================== API Docs ====================
-
 @router.get("/api/system/docs")
 async def get_api_docs():
     """获取所有API文档"""
@@ -316,9 +316,9 @@ async def get_api_docs():
                 "X-Content-Type-Options": "nosniff"
             }
         )
-    except Exception as e:
-        logger.error(f"Error getting API docs: {e}")
-        return error_response(str(e), status_code=500)
+    except Exception:
+        message = record_internal_error(logger, "读取 API 文档", "Error getting API docs")
+        return ApiError.internal(message).to_response()
 
 
 # ==================== API Help ====================
@@ -388,9 +388,9 @@ async def get_api_help(api_path: str | None = None):
         )
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error getting API help: {e}")
-        return error_response(str(e), status_code=500)
+    except Exception:
+        message = record_internal_error(logger, "读取 API 帮助", "Error getting API help")
+        return ApiError.internal(message).to_response()
 
 
 # ==================== WebSocket ====================

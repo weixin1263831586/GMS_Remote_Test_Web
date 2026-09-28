@@ -28,7 +28,7 @@ gms-rt-system-doctor test          # 二进制、认证、设备、套件按域�
 
 ```bash
 gms-rt-system-commands --json              # 全量命令目录（含风险模式与 agent_safe_unattended 标记）
-gms-rt-system-command-describe devices-wait  # 单条命令的用法/风险/认证要求
+gms-rt-system-command-describe gms-rt-devices-wait  # 单条命令的用法/风险/认证要求
 ```
 
 ### 3. 设备确认

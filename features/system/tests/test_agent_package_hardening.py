@@ -194,7 +194,7 @@ class TomlProfileTests(unittest.TestCase):
 
 
 class InstallerTlsPolicyTests(unittest.TestCase):
-    """install.sh 渲染必须 TLS fail-closed(评审 P0)。
+    """install.sh 渲染必须 TLS fail-closed。
 
     - 模板本身不得再含 curl -k / wget --no-check-certificate 的无条件降级;
     - 默认路径使用系统信任链;显式降级仅 GMS_INSTALL_ALLOW_INSECURE=1;
@@ -238,7 +238,7 @@ class InstallerTlsPolicyTests(unittest.TestCase):
         self.assertLess(guard_index, tofu_index)
 
     def test_template_passes_enroll_code_via_env_not_argv(self):
-        """配对码不得进 argv/ps/shell history(评审 P2/P3)。
+        """配对码不得进 argv/ps/shell history。
 
         install.sh 把位置参数/--enroll-code 转为 GMS_AGENT_ENROLL_CODE
         环境变量;gms-agent 端环境变量优先于 --enroll-code。

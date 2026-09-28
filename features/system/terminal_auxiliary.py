@@ -9,6 +9,7 @@ from fastapi import WebSocket
 from features.system.ssh import ssh_manager
 from foundation.config import config_manager
 from foundation.device_locks import device_lock_manager
+from foundation.error_model import record_internal_error
 
 
 logger = logging.getLogger(__name__)
@@ -46,12 +47,14 @@ async def refresh_devices_websocket(
             )
         finally:
             ssh_manager.return_connection(ssh)
-    except Exception as exc:
-        logger.error("Error refreshing devices: %s", exc)
-        # 异常详情只留服务端日志；原始 SSH/系统错误串不透传给浏览器。
+    except Exception:
+        message = record_internal_error(
+            logger, "刷新设备列表", "Error refreshing devices"
+        )
         await websocket.send_json({
             "type": "error",
-            "message": "设备列表刷新失败，请稍后重试",
+            "code": "INTERNAL_ERROR",
+            "message": message,
         })
 
 
@@ -110,13 +113,18 @@ async def handle_tradefed_list_results(
                     "command": command,
                 }
             )
-    except Exception as exc:
-        logger.error("[TRADEFED_LIST_RESULTS] Error: %s", exc)
+    except Exception:
+        message = record_internal_error(
+            logger,
+            "列出 Tradefed 结果",
+            "[TRADEFED_LIST_RESULTS] Error",
+        )
         await websocket.send_json(
             {
                 "type": "tradefed_list_results_error",
                 "success": False,
-                "error": str(exc),
+                "code": "INTERNAL_ERROR",
+                "error": message,
             }
         )
     finally:

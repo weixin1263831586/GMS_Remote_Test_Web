@@ -26,7 +26,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
+from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -142,3 +143,44 @@ def register_api_error_handler(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
         return exc.to_response()
+
+
+def internal_error_message(action: str) -> str:
+    """未知异常的统一对外文案（与 assistant.execution_result.internal_error_result 同构）。
+
+    未知异常的 ``str(e)`` 可能内嵌路径/凭据片段，不得回显给客户端；
+    完整 traceback 只进服务端日志。调用方必须把本消息与 ``exc_info=True``
+    写进同一条日志记录，客户端才能凭 request_id 回查定位：
+
+        message = record_internal_error(logger, "烧写固件", "Firmware burn error")
+        return ApiError.internal(message).to_response()
+    """
+    return (
+        f'{action}失败：服务内部错误'
+        f'（request_id={uuid4().hex[:12]}，已记录日志）'
+    )
+
+
+class _ErrorLogger(Protocol):
+    def error(self, message: str, *args: Any, **kwargs: Any) -> None: ...
+
+
+def record_internal_error(
+    logger: _ErrorLogger,
+    action: str,
+    log_context: str,
+    *context_args: Any,
+) -> str:
+    """生成安全对外文案，并把同一个 request_id 写入异常日志。
+
+    必须在 ``except`` 块内调用，以便 ``exc_info=True`` 记录当前 traceback。
+    ``log_context`` 只描述代码位置；异常原文由 traceback 保存，不进入响应。
+    """
+    message = internal_error_message(action)
+    logger.error(
+        f"{log_context}: %s",
+        *context_args,
+        message,
+        exc_info=True,
+    )
+    return message

@@ -95,11 +95,12 @@ class GsiBurnPartialFailureStatusTests(unittest.TestCase):
         )
 
     def test_unexpected_gsi_error_is_500(self):
-        """外层兜底仍保留 500：str(e) 的裸 error_response 默认 500。"""
+        """外层兜底保持 500，且不回显 str(e)（request_id 文案 + 日志回查）。"""
         import inspect
 
         source = inspect.getsource(gsi_sn_burn)
-        self.assertIn("return error_response(str(e), 500)", source)
+        self.assertIn("return ApiError.internal(message).to_response()", source)
+        self.assertNotIn("error_response(str(e)", source)
 
 
 if __name__ == "__main__":

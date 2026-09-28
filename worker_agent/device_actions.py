@@ -1,6 +1,6 @@
 """Device-facing worker actions: probing, USB/IP, allow-listed ops, flashing, metrics.
 
-从 inventory.py 拆出（2026-08 审核第七节）：设备探测/USB/IP/设备操作/固件与
+从 inventory.py 拆出：设备探测/USB/IP/设备操作/固件与
 GSI 烧写/主机指标。套件执行逻辑见 suite_actions.py。
 """
 

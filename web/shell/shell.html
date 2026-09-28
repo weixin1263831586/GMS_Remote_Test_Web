@@ -2030,7 +2030,7 @@
                 </div>
                 <div class="modal-body">
                     <div class="modal-info-text">支持 PDF / TXT / MD / 代码 / DOCX，上传后解析正文并作为当前目录文档。</div>
-                    <div style="border:2px dashed var(--border-color);border-radius:8px;padding:24px;text-align:center;cursor:pointer;margin:10px 0;" data-click="_actClickById" data-a0="kb-upload-input">
+                    <div id="kb-upload-drop-zone" role="button" tabindex="0" data-modal-initial-focus style="border:2px dashed var(--border-color);border-radius:8px;padding:24px;text-align:center;cursor:pointer;margin:10px 0;" data-click="_actClickById" data-keydown="_actClickById" data-key="13,32" data-prevent data-a0="kb-upload-input">
                         <div style="font-size:28px;">📤</div>
                         <div style="font-size: 13px; margin-top: 6px;">点击选择或拖拽文件到此处</div>
                         <input type="file" id="kb-upload-input" style="display:none;" data-change="kbHandleFileSelect" data-r0="el" multiple />
@@ -2250,7 +2250,7 @@
                 <form id="wifi-form" data-submit="submitWifiConfig" data-prevent autocomplete="off">
                 <div class="modal-form-row">
                     <label>Wi-Fi 名称:</label>
-                    <input type="text" id="wifi-ssid" placeholder="留空使用 config.wifi.ssid" autocomplete="off" />
+                    <input type="text" id="wifi-ssid" data-modal-initial-focus placeholder="留空使用 config.wifi.ssid" autocomplete="off" />
                 </div>
                 <div class="modal-form-row">
                     <label>Wi-Fi 密码:</label>

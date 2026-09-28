@@ -23,7 +23,7 @@
 | `gms-rt-apk-source` | Browse the decompiled source tree (read file windows with gms-rt-apk-source-read) | gms-rt-apk-source <task_id> [path] |
 | `gms-rt-apk-source-read` | Read a window of one decompiled source file by task-relative path | gms-rt-apk-source-read <task_id> <path> [--offset N] [--limit N] |
 | `gms-rt-apk-status` | Get one APK analysis task status, or list all tasks when no task id is given | gms-rt-apk-status [task_id] |
-| `gms-rt-approval-create` | Create a one-shot approval token for a destructive agent action (human session only) | gms-rt-approval-create --tool <gms_rt_tool> --device <serial>[,<serial>...] [--command <command>\|--firmware-sha256 <sha256> [--wipe-data true\|false] [--burn-mode auto\|uf]] |
+| `gms-rt-approval-create` | Create a one-shot approval token for a destructive agent action (human session only) | gms-rt-approval-create --tool <tool> --device <serial>[,<serial>...] [--command <command>\|--firmware-sha256 <sha256> [--wipe-data true\|false] [--burn-mode auto\|uf]] |
 | `gms-rt-artifact-read` | Read a text/log artifact derived text by char window (--offset/--limit) | gms-rt-artifact-read <artifact_id> [--offset N] [--limit N] |
 | `gms-rt-artifact-search` | Search description, journals, and artifact text for a fixed query with evidence refs | gms-rt-artifact-search <snapshot_id> <query> [--limit N] |
 | `gms-rt-auth-credential-mode` | Show whether this CLI invocation uses an Agent Token file or a session cookie |  |
@@ -92,7 +92,7 @@
 | `gms-rt-ssh-route` | Read the configured SSH route information |  |
 | `gms-rt-ssh-sshd` | Inspect SSHD status locally or on a user@host target and show setup guidance | gms-rt-ssh-sshd [user@ip] |
 | `gms-rt-system-capabilities` | Print the CLI contract, global options, and exit codes |  |
-| `gms-rt-system-command-describe` | Describe one CLI command for machine execution | gms-rt-system-command-describe <gms-rt-command> |
+| `gms-rt-system-command-describe` | Describe one CLI command for machine execution | gms-rt-system-command-describe <command> |
 | `gms-rt-system-commands` | Print the machine-readable command inventory |  |
 | `gms-rt-system-docs` | Read the Controller API documentation catalog |  |
 | `gms-rt-system-doctor` | Check controller, session, tools, devices, and suites for an operation scope | gms-rt-system-doctor [read\|device\|firmware\|gsi\|test] |

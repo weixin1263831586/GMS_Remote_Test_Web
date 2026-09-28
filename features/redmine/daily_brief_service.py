@@ -67,17 +67,14 @@ from .daily_brief_config import (  # noqa: E402
 class DailyBriefService(DailyBriefRunStarterMixin):
     """一个 owner 一个实例（内部持有该 owner 的 repository）。"""
 
-    # 同 run_id 的执行协调器（跨实例/跨请求共享）：防止 force 重试、
-    # refresh、reanalyze 与仍在运行的旧任务并发写同一 run。
-    # 注意：仅本进程有效——Web/Worker/CLI 是多进程架构，跨进程的正确性
-    # 完全依赖 SQLite job/lease/run 状态与唯一约束；此 map 只做本进程
-    # 去重与取消加速，不得升级为跨进程锁。
+    # 同 run_id 的执行协调器（跨实例/跨请求共享）：防止 force 重试、refresh、
+    # reanalyze 与仍在运行的旧任务并发写同一 run。仅本进程有效——跨进程正确
+    # 性依赖 SQLite job/lease/run 状态与唯一约束，此 map 不得升级为跨进程锁。
     _RUN_EXECUTIONS: dict[str, asyncio.Task[DailyBriefRun | None]] = {}
 
     def __init__(self, owner_id: str, config_manager: Any | None = None):
-        # owner 身份统一收敛为 sanitize 目录名：Web 匿名会话传入原始
-        # display id（user@ip），systemd/CLI 传入目录名，两者必须指向同
-        # 一份 per-owner 数据（run.owner_id 比较与库路径都依赖这一点）。
+        # owner 身份统一收敛为 sanitize 目录名：Web 匿名会话传 display id、
+        # systemd/CLI 传目录名，两者必须指向同一份 per-owner 数据。
         self.owner_id = canonical_owner_id(str(owner_id or "anonymous"))
         self.config_manager = config_manager
         self.repository: DailyBriefRepository = owner_daily_brief_repository(self.owner_id)
@@ -348,9 +345,8 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         try:
             if self.repository.is_cancel_requested(run_id):
                 raise cancellation.RunCancelledError()
-            # 认证预检：token 被吊销时逐条分析只会把 turn 预算烧在 MCP
-            # 401 上，不如整 run 快速失败并给出重注册指引（fail-closed；
-            # 预检自身故障则放行，不阻塞分析）。
+            # 认证预检：token 被吊销时整 run 快速失败并给出重注册指引
+            #（fail-closed）；预检自身故障则放行，不阻塞分析。
             auth_ok, auth_reason = await preflight_gms_auth(
                 analyzer_env_extra(config.get("agent_profile"))
             )
@@ -449,9 +445,8 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         run.snapshot_at = str(frozen.get("generated_at") or "")
         run.snapshot_hash = str(frozen.get("snapshot_hash") or "")
         run.source_sync_status = str(frozen.get("source_sync_status") or "")
-        # Keep execution status separate from data quality.
-        # 同步成功的快照生成时间即 last_sync_at；失败/跳过时留空，由
-        # data_quality=sync_failed/unknown 表达"这不是最新数据"。
+        # Keep execution status separate from data quality：同步成功的快照
+        # 生成时间即 last_sync_at；失败/跳过时留空，由 data_quality 表达。
         if run.source_sync_status == "synced":
             run.last_sync_at = run.snapshot_at
         run.data_quality = derive_data_quality(
@@ -505,9 +500,8 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         async def _one(issue_id: int) -> None:
             async with semaphore:
                 # 与「Redmine 单号分析」完全同语义（reanalyze_issue →
-                # _analyze_one，深度诊断 diagnostic）。晨报只是触发来源
-                # 不同（固定时间调度），逐 issue 分析不降级为轻量 triage；
-                # triage 分支仅保留用于渲染历史持久化结果。
+                # _analyze_one，深度诊断 diagnostic）：晨报只是触发来源不同
+                # （固定时间调度），不降级为轻量 triage（仅渲染历史结果用）。
                 entry = dict(entries.get(issue_id, {}))
                 await self._analyze_one(run, issue_id, entry, analyzer, config)
 
@@ -542,9 +536,8 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         record = self.repository.get_issue(run.run_id, issue_id)
         if record is None:
             return
-        # 协作式取消点：每个 issue 开始前查一次标志位（廉价 SELECT）。
-        # 用户点「停止分析」后，正在跑的 issue 由 task.cancel()/gather 兜底，
-        # 未开始的 issue 从这里直接终止整个 phase。
+        # 协作式取消点：每个 issue 开始前查一次标志位；用户点「停止分析」后，
+        # 未开始的 issue 从这里直接终止整个 phase（正在跑的由 cancel 兜底）。
         if self.repository.is_cancel_requested(run.run_id):
             raise cancellation.RunCancelledError()
         record.status = "running"
@@ -580,11 +573,21 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         except (cancellation.RunCancelledError, asyncio.CancelledError):
             cancellation.reset_cancelled_issue(self.repository, record)
             raise
+        except Exception as exc:
+            # 通用异常也必须收敛 issue 行（否则停留 running、汇总计数错），
+            # 标记 failed 后按原语义继续向上传播（run 级收敛由调用方负责）。
+            record.status = "failed"
+            record.finished_at = _now()
+            record.duration_ms = int((time.monotonic() - started) * 1000)
+            record.error = mask_secrets(f"analysis crashed: {exc}", 200)
+            record.error_type = "exception"
+            self.repository.upsert_issue(record)
+            raise
         record.finished_at = _now()
         record.duration_ms = int((time.monotonic() - started) * 1000)
         record.raw_response = outcome.raw_output
-        # 每次 AI attempt 的可审计轨迹（session/tool/usage）独立落库：
-        # Evidence Provenance 的查询起点；不塞进 issue 单条记录。
+        # 每次 AI attempt 的可审计轨迹（session/tool/usage）独立落库（Evidence
+        # Provenance 的查询起点），不塞进 issue 单条记录。
         try:
             self.repository.record_ai_execution(
                 run.run_id, issue_id,
@@ -658,9 +661,8 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         )
         if not auth_ok:
             return {"error": auth_reason}
-        # 优先取冻结快照里的 entry（完整字段），持久化快照不在时退化为
-        # issue 记录上的标题、桶和规则优先级，避免 MCP 暂时不可用时退化
-        # 成只有 issue id。
+        # 优先取冻结快照里的 entry（完整字段）；快照不在时退化为 issue 行上的
+        # 标题/桶/优先级，避免 MCP 暂时不可用时退化成只有 issue id。
         entry = self._snapshot_entries(run.run_id).get(issue_id) or {
             "issue_id": issue_id,
             "subject": record.subject,
@@ -669,8 +671,7 @@ class DailyBriefService(DailyBriefRunStarterMixin):
         }
         if not str(entry.get("author_name") or "").strip():
             # 单号 run 没有晨报快照，entry 缺报告人/指派/建单时间会让分析
-            # prompt 只能去附件里翻 author（历史失败现场）。本地 Redmine
-            # 镜像已有这些列，直接补齐；镜像不可用时保持缺省。
+            # prompt 去附件里翻 author；本地镜像已有这些列，直接补齐。
             try:
                 from .api import get_redmine_service_for_owner
 
@@ -692,14 +693,13 @@ class DailyBriefService(DailyBriefRunStarterMixin):
             entry = {**entry, "analysis_hint": run.analysis_hint}
         analyzer = self._build_analyzer(config)
         try:
+            # 终态 run 重分析前先回非终态（防 purge 误删实时事件 + 恢复实时轮询）。
+            cancellation.revive_run_for_reanalysis(self.repository, run)
             await self._analyze_one(run, issue_id, entry, analyzer, config)
         except cancellation.RunCancelledError:
-            return cancellation.mark_reanalysis_cancelled(
-                self.repository, run, issue_id
-            )
-        # 单条状态变化必须同步刷新整份汇总，否则页头的成功/失败/人工确认
-        # 数量、Markdown 与 run.status 会互相矛盾。
-        self._summarize_phase(run)
+            return cancellation.mark_reanalysis_cancelled(self.repository, run, issue_id)
+        finally:
+            cancellation.converge_reanalysis_run(self.repository, run, self._summarize_phase)
         refreshed = self.repository.get_issue(run.run_id, issue_id)
         if refreshed is None:
             # 并发重跑可能已清空该 run 的 issue 行;不伪造状态,同入参校验语义。

@@ -3,14 +3,14 @@
 # knowledge-quality CI job (and any local golden-query replay).
 #
 # CI 的普通 unit job 不部署 tools/android-internals-wiki（gitignored），
-# Golden Query 语料级测试会静默 skip——"看起来在跑 knowledge tests，实际
-# 召回质量零验证"（评审 P1）。本脚本为专用 knowledge-quality job 服务：
+# Golden Query 语料级测试会静默 skip，导致 knowledge tests 表面通过但
+# 没有验证召回质量。本脚本为专用 knowledge-quality job 服务：
 #
 #   clone（pinned revision，fail-closed）→ 临时 DB 全量 reindex → 跑 golden recall
 #
 # 环境变量：
-#   GMS_WIKI_PINNED_REVISION  必填。上游 commit/短 SHA（评审要求 pinned），
-#                             pin 变更必须走评审提交。
+#   GMS_WIKI_PINNED_REVISION  必填。固定的上游 commit/短 SHA；
+#                             pin 变更必须随代码变更提交。
 #   GMS_DATA_ROOT             索引落根（android_internals.sqlite3 写在
 #                             $GMS_DATA_ROOT/knowledge/external/ 下；默认
 #                             mktemp -d，与本地共享索引隔离）。

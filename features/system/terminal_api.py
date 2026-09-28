@@ -13,6 +13,7 @@ from features.auth import CurrentUser, require_elevated_admin
 from features.system.ssh import ssh_manager
 from features.system.terminal_service import resolve_authorized_terminal_target
 from foundation.config import config_manager
+from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response
 from foundation.uploads import (
     merge_files_to_path,
@@ -55,9 +56,11 @@ async def get_ssh_terminal_info(
                 "4. You will have terminal access to the test host",
             ],
         })
-    except Exception as e:
-        logger.error(f"Error getting SSH terminal info: {e}")
-        return error_response(str(e), 500)
+    except Exception:
+        message = record_internal_error(
+            logger, "读取 SSH 终端信息", "Error getting SSH terminal info"
+        )
+        return ApiError.internal(message).to_response()
 
 
 # ==================== File Upload ====================
@@ -149,9 +152,11 @@ async def upload_file(
             async with ssh_manager.async_optional_connection(config) as ssh:
                 if not ssh:
                     os.remove(temp_path)
-                    # SSH 是基础设施故障：按统一错误模型映射 502，500 仅留给
-                    # 意外编程错误（foundation.error_model）。
-                    return error_response("SSH connection failed", 502)
+                    return ApiError.upstream_failure(
+                        "SSH connection failed",
+                        service="ssh",
+                        next_actions=({"action": "检查目标主机 SSH 服务与凭据"},),
+                    ).to_response()
 
                 # Determine target path and upload via SFTP. sftp.put is a
                 # blocking transfer (files can be GB-sized) — run the whole
@@ -194,9 +199,11 @@ async def upload_file(
             raise e
 
 
-    except Exception as e:
-        logger.error(f"Error uploading file: {e}")
-        return error_response(str(e), status_code=500)
+    except Exception:
+        message = record_internal_error(
+            logger, "上传终端文件", "Error uploading file"
+        )
+        return ApiError.internal(message).to_response()
 
 
 async def _upload_file_chunk(
@@ -289,10 +296,15 @@ async def _upload_file_chunk(
                         os.remove(merge_lock_path)
                     except OSError:
                         pass
-                    return JSONResponse(content={
-                        "success": False, "error": "SSH connection failed",
-                        "chunks_uploaded": len(uploaded_chunks), "total_chunks": total_chunks,
-                    }, status_code=502)
+                    return ApiError.upstream_failure(
+                        "SSH connection failed",
+                        service="ssh",
+                        details={
+                            "chunks_uploaded": len(uploaded_chunks),
+                            "total_chunks": total_chunks,
+                        },
+                        next_actions=({"action": "检查目标主机 SSH 服务与凭据"},),
+                    ).to_response()
 
                 try:
                     remote_filename = os.path.basename(merged_file)
@@ -317,16 +329,25 @@ async def _upload_file_chunk(
                         "success": True, "upload_complete": True,
                         "remote_path": remote_path, "message": f"File uploaded to {remote_path}",
                     })
-                except Exception as e:
+                except Exception:
                     try:
                         os.remove(merge_lock_path)
                     except OSError:
                         pass
-                    logger.error(f"Error uploading merged file: {e}")
-                    return JSONResponse(content={
-                        "success": False, "error": f"Upload failed: {e!s}",
-                        "chunks_uploaded": len(uploaded_chunks), "total_chunks": total_chunks,
-                    }, status_code=500)
+                    message = record_internal_error(
+                        logger,
+                        "上传合并文件",
+                        "Error uploading merged file",
+                    )
+                    return ApiError.upstream_failure(
+                        message,
+                        service="ssh",
+                        details={
+                            "chunks_uploaded": len(uploaded_chunks),
+                            "total_chunks": total_chunks,
+                        },
+                        next_actions=({"action": "检查目标主机 SSH/SFTP 服务"},),
+                    ).to_response()
 
         return JSONResponse(content={
             "success": True, "chunk_index": chunk_index,
@@ -334,11 +355,18 @@ async def _upload_file_chunk(
             "upload_complete": False, "progress": round((len(uploaded_chunks) / total_chunks) * 100, 2),
         })
 
-    except Exception as e:
+    except Exception:
         if "merge_lock_path" in locals():
             try:
                 os.remove(merge_lock_path)
             except OSError:
                 pass
-        logger.error(f"Error uploading chunk {chunk_index}: {e}")
-        return error_response(str(e), 500, chunk_index=chunk_index)
+        message = record_internal_error(
+            logger,
+            "上传文件分片",
+            "Error uploading chunk %s",
+            chunk_index,
+        )
+        return ApiError.internal(
+            message, details={"chunk_index": chunk_index}
+        ).to_response()

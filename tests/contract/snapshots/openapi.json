@@ -22046,9 +22046,20 @@
         "summary": "Cluster Novnc Http Proxy"
       }
     },
-    "/cluster/page-boot.js": {
+    "/cluster/{ui_asset}": {
       "get": {
-        "description": "embedded-workspace 就绪标记脚本（原单行内联块外置）。",
+        "description": "Cluster 页面脚本统一路由（CSP 收紧后禁止 inline <script>）。\n\n- page.js: 页面主体脚本，运行配置由模板以 body data 属性注入；\n- page-boot.js: embedded-workspace 就绪标记（原单行内联块外置）；\n- page-echarts.js: ECharts 本地 vendor 加载器（原单行内联块外置）；\n- modal-controller.js: 弹框焦点控制器（初始焦点/Tab 陷阱/关闭恢复）。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ui_asset",
+            "required": true,
+            "schema": {
+              "title": "Ui Asset",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -22057,41 +22068,19 @@
               }
             },
             "description": "Successful Response"
-          }
-        },
-        "summary": "Cluster Page Boot Js"
-      }
-    },
-    "/cluster/page-echarts.js": {
-      "get": {
-        "description": "ECharts 本地 vendor 加载器（原单行内联块外置）。",
-        "responses": {
-          "200": {
+          },
+          "422": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "Validation Error"
           }
         },
-        "summary": "Cluster Page Echarts Js"
-      }
-    },
-    "/cluster/page.js": {
-      "get": {
-        "description": "页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。\n\n运行配置由模板以 body data 属性注入，page.js 头部读取。",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Cluster Page Js"
+        "summary": "Cluster Ui Asset"
       }
     },
     "/devices-console": {

@@ -44,7 +44,7 @@ PREFLIGHT_TIMEOUT_SECONDS = 90.0
 NETWORK_RETRY_ATTEMPTS = 3
 NETWORK_RETRY_BACKOFF_SECONDS = (1.0, 3.0)
 # 运行中取消轮询间隔：与 kkagent 正式阶段的 CANCEL_POLL_SECONDS 一致，
-# 保证"点击停止 → 进程终止"延迟全阶段一致（评审 P2）。
+# 保证"点击停止 → 进程终止"延迟在全部阶段一致。
 CANCEL_POLL_SECONDS = 0.25
 
 
@@ -101,7 +101,7 @@ async def _run_readonly_command(
 ) -> tuple[int, bytes, str]:
     """Run one bounded, read-only CLI call and return its exit/output summary.
 
-    ``should_cancel`` 与超时一起参与同一个 wait（评审 P2：此前用户在
+    ``should_cancel`` 与超时一起参与同一个 wait（此前用户在
     communicate 期间点击停止，最多要等满一次 90s 调用才能停止）。取消
     先到 → 立即整树终止 CLI 并抛 ``PreflightCancelledError``。
     """

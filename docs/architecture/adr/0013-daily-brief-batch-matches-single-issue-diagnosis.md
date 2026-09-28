@@ -49,3 +49,19 @@ that refreeze a snapshot) use the diagnostic contract.
 
 The skill reference is updated to `redmine_daily_triage_v12` to describe the
 unified workflow; the packaging test pins that version string.
+
+## Addendum (2026-09-28): prompt contract v19
+
+After the first nightly runs on this ADR, the report contract advanced to
+`redmine_daily_triage_v19`:
+
+- The report no longer contains a "处理时间线" (processing timeline) section;
+  it duplicated Redmine's own journal stream.
+- The problem-overview table splits test-class issues from non-test issues,
+  and pins reporter = issue author, issue id format `#<issue_id>`, forbids
+  internal evidence/user ids, and normalizes all times to Beijing time
+  (UTC+8).
+
+`redmine_daily_triage_v12` remains the independent skill-workflow contract
+axis pinned by the packaging test; v19 only advances the prompt/report
+contract axis.

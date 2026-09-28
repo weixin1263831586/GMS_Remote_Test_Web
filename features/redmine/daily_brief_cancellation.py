@@ -8,6 +8,7 @@ from contextlib import suppress
 from typing import Any
 
 from .daily_brief_analysis_events import finish_analysis_progress
+from .daily_brief_repository import TERMINAL_RUN_STATUSES
 from .users import _now
 
 
@@ -58,6 +59,12 @@ async def analyze_with_persisted_cancel(
             await analysis_task
         finish_analysis_progress(progress, ok=False, cancelled=True)
         raise
+    except Exception:
+        # 分析器抛出普通异常（非取消）时同样收敛进度时间线终态，
+        # 否则该 issue 的实时时间线会停留在"进行中"。
+        with suppress(Exception):
+            finish_analysis_progress(progress, ok=False, error_type="exception")
+        raise
 
 
 async def gather_cancel_on_error(coroutines: list[Any]) -> None:
@@ -85,6 +92,36 @@ def reset_cancelled_issue(repository: Any, record: Any) -> None:
     repository.upsert_issue(record)
 
 
+def revive_run_for_reanalysis(repository: Any, run: Any) -> None:
+    """终态 run 单条重分析前先把 run 行置回非终态（analyzing）。
+
+    run 行停在终态 + 旧 finished_at 时：后台 purge_expired（终态 +
+    finished_at 超过保留期）会把重分析正在写入的事件（含 session_started）
+    当过期数据删掉，events 端点的 terminal=true 也会让前端无法进入实时
+    轮询。调用方收尾必须走 :func:`converge_reanalysis_run`，run 不得
+    停留在 analyzing。
+    """
+    if run.status not in TERMINAL_RUN_STATUSES and not run.finished_at:
+        return
+    run.status = "analyzing"
+    run.error = ""
+    run.finished_at = ""
+    repository.update_run(run)
+
+
+def converge_reanalysis_run(repository: Any, run: Any, summarize: Any) -> None:
+    """单条重分析收尾（含异常路径）：刷新汇总并盖回终态戳。
+
+    不仅非终态需要汇总：两个不同 issue 的重分析若被不同 Worker 并行执行，
+    先完成者可能把 run 暂时写成 partial；后完成者必须再次汇总，才能让
+    report_json 与全部 issue 的最终状态一致。只有显式取消的 cancelled 终态
+    由 mark_reanalysis_cancelled 独占，不得被普通汇总覆盖。
+    """
+    latest = repository.get_run(run.run_id) or run
+    if latest.status != "cancelled":
+        summarize(latest)
+
+
 def mark_reanalysis_cancelled(repository: Any, run: Any, issue_id: int) -> dict[str, Any]:
     """Converge a cancelled single-issue job without classifying it as failure.
 
@@ -109,7 +146,9 @@ def mark_reanalysis_cancelled(repository: Any, run: Any, issue_id: int) -> dict[
 __all__ = [
     "RunCancelledError",
     "analyze_with_persisted_cancel",
+    "converge_reanalysis_run",
     "gather_cancel_on_error",
     "mark_reanalysis_cancelled",
     "reset_cancelled_issue",
+    "revive_run_for_reanalysis",
 ]

@@ -55,7 +55,7 @@ async def post_gerrit_review(
 
 
 def _rest_ssl(cfg: dict[str, Any]):
-    """REST outbound TLS 策略（评审 P1）。
+    """REST outbound TLS 策略。
 
     默认校验证书（与 Basic Auth 配套，防 MITM 凭据泄露）；自签内网
     Gerrit 经 ``rest_ca_cert`` 提供私有 CA。仅当已保存配置显式写

@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from features.auth import ensure_agent_device_allowed
 from foundation.command_result import CommandResult
+from foundation.error_model import ApiError, record_internal_error
 from foundation.networking import is_local_host
 from foundation.responses import error_response
 
@@ -246,9 +247,14 @@ async def ui_screenshot(req: UiControlRequest, request: Request):
             "serial": serial,
             "image": "data:image/png;base64," + base64.b64encode(data).decode("ascii"),
         })
-    except Exception as exc:
-        logger.warning("[UI Control] screenshot failed for %s: %s", serial, exc)
-        return error_response(str(exc), 500)
+    except Exception:
+        message = record_internal_error(
+            logger,
+            "截取设备屏幕",
+            "[UI Control] screenshot failed for %s",
+            serial,
+        )
+        return ApiError.internal(message).to_response()
 
 
 def _scp_read(ssh, remote_path: str) -> bytes:
@@ -319,9 +325,14 @@ async def ui_layout(req: UiControlRequest, request: Request):
             "source": "android-cli",
             "elements": _simplify_layout(layout),
         })
-    except Exception as exc:
-        logger.warning("[UI Control] layout failed for %s: %s", serial, exc)
-        return error_response(str(exc), 500)
+    except Exception:
+        message = record_internal_error(
+            logger,
+            "读取界面布局",
+            "[UI Control] layout failed for %s",
+            serial,
+        )
+        return ApiError.internal(message).to_response()
 
 
 def _simplify_layout(layout) -> list[dict]:
@@ -390,6 +401,11 @@ async def ui_tap(req: UiTapRequest, request: Request):
         if code != 0:
             return error_response(f"tap failed: {(err or out).strip()}", 502)
         return JSONResponse(content={"success": True, "serial": serial, "x": req.x, "y": req.y})
-    except Exception as exc:
-        logger.warning("[UI Control] tap failed for %s: %s", serial, exc)
-        return error_response(str(exc), 500)
+    except Exception:
+        message = record_internal_error(
+            logger,
+            "模拟点击",
+            "[UI Control] tap failed for %s",
+            serial,
+        )
+        return ApiError.internal(message).to_response()

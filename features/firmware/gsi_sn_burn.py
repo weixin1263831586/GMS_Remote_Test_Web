@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 
 from features.auth import require_elevated_admin_when_auth_required
 from features.test_execution import get_default_suites_path
+from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response
 
 from . import runtime
@@ -333,20 +334,25 @@ async def burn_gsi(
                         status_code=502,
                     )
 
-            except Exception as e:
+            except Exception:
+                message = record_internal_error(
+                    logger, "GSI 烧写", "GSI burn error"
+                )
                 try:
-                    runtime.store_notification(client_id, "GSI burn error", str(e)[:300], "error", "firmware", {"devices": online_devices})
+                    runtime.store_notification(client_id, "GSI burn error", message[:300], "error", "firmware", {"devices": online_devices})
                 except Exception as notify_error:
                     logger.warning("[GSI Burn] Failed to store error notification: %s", notify_error)
                 try:
                     await runtime.release_firmware_devices(client_id, locked_devices)
                 except Exception as release_error:
                     logger.warning("[GSI Burn] Failed to release device locks after error: %s", release_error)
-                return error_response(str(e))
+                return ApiError.internal(message).to_response()
 
-    except Exception as e:
-        logger.error(f"Error in burn_gsi: {e}")
-        return error_response(str(e), 500)
+    except Exception:
+        message = record_internal_error(
+            logger, "GSI 烧写", "Error in burn_gsi"
+        )
+        return ApiError.internal(message).to_response()
 
 
 
@@ -382,6 +388,8 @@ async def burn_sn(
             return JSONResponse(content={"success": True, "results": results})
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error burning SN: {e}")
-        return error_response(str(e), status_code=500)
+    except Exception:
+        message = record_internal_error(
+            logger, "写入 SN", "Error burning SN"
+        )
+        return ApiError.internal(message).to_response()

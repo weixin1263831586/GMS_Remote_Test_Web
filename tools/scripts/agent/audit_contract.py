@@ -11,8 +11,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from _common import find_repo_root  # noqa: E402
+from _common import find_repo_root
 
 
 ROOT = find_repo_root()
@@ -36,9 +37,23 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as temporary:
         env = {
             **os.environ,
+            "XDG_CONFIG_HOME": str(Path(temporary) / "config"),
             "XDG_STATE_HOME": str(Path(temporary) / "state"),
             "GMS_AUTH_COOKIE_JAR": str(Path(temporary) / "cookies"),
         }
+        # Contract discovery must not inherit a developer's selected Controller,
+        # token, or installed profiles. The command catalog is local and should
+        # produce the same result on a configured workstation and in fresh CI.
+        for variable in (
+            "GMS_AGENT_PROFILE",
+            "GMS_AUTH_TOKEN_FILE",
+            "GMS_CURL_CA_CERT",
+            "GMS_CURL_INSECURE",
+            "GMS_REMOTE_TEST_SERVER",
+            "GMS_RT_HUMAN_SESSION",
+            "GMS_RT_PROFILE",
+        ):
+            env.pop(variable, None)
         completed = subprocess.run(
             [
                 "bash",

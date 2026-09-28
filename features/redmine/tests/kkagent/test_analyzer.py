@@ -19,6 +19,7 @@ from features.redmine.kkagent.analyzer import (
     _StreamFallback,
     classify_gate_failure,
 )
+from features.redmine.kkagent.errors import classify_failure
 from features.redmine.kkagent.mcp_health import McpHealthProbe
 from features.redmine.kkagent.trace import KkAgentTrace, ToolTrace
 from features.redmine.tests.kkagent.test_process import (
@@ -149,7 +150,10 @@ class AnalyzerE2ETests(unittest.TestCase):
         outcome = asyncio.run(analyzer.analyze(ENTRY))
         self.assertFalse(outcome.ok)
         self.assertEqual(outcome.error_type, "max_turns")
-        self.assertIn("步预算", outcome.error)
+        # 晨报侧 max_turns=0（不限制）：文案必须如实说"内部步数预算"，
+        # 不得渲染成 "0 步预算" 或诱导用户去调不存在的晨报设置。
+        self.assertIn("内部步数预算", outcome.error)
+        self.assertNotIn("0 步预算", outcome.error)
 
     def test_signal_exit_is_interrupted(self):
         analyzer = self._analyzer("interrupted", timeout_seconds=20,
@@ -166,6 +170,56 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertFalse(outcome.ok)
         self.assertEqual(outcome.error_type, "llm_timeout")
         self.assertIn("模型服务流式响应超时", outcome.error)
+
+    def test_provider_queue_full_beats_max_turns_envelope(self):
+        """上游队列满（654649 实测）必须归类 provider_overloaded，
+        即使 kkagent 以 turn-limit 信封收场；文案不得误导用户调步数。"""
+        stderr = (
+            "2026-09-28T02:50:56.917Z ERROR kkagent_core::agent_loop: "
+            "LLM stream error: OpenAI stream error: The request queue is full.\n"
+            "2026-09-28T02:52:16.108Z ERROR kkagent_core::agent_loop: "
+            "Stream error: OpenAI stream error: The request queue is full."
+        )
+        error_type, message = classify_failure(
+            3, "", stderr, envelope_subtype="max_turns", max_turns=0,
+        )
+        self.assertEqual(error_type, "provider_overloaded")
+        self.assertIn("队列已满", message)
+        self.assertNotIn("步数上限", message)
+        # 晨报侧未设限制时，turn-limit 文案不得渲染成 "0 步预算"。
+        _, max_turns_message = classify_failure(
+            3, "", "Agent turn limit reached", max_turns=0,
+        )
+        self.assertNotIn("0 步预算", max_turns_message)
+        self.assertIn("内部步数预算", max_turns_message)
+
+    def test_tool_rate_limit_is_not_misclassified_as_model_overload(self):
+        error_type, message = classify_failure(
+            3,
+            "",
+            "MCP tool gms_rt_redmine_issue_fetch failed: HTTP 429 rate limit",
+            envelope_subtype="max_turns",
+            max_turns=0,
+        )
+
+        self.assertEqual(error_type, "max_turns")
+        self.assertNotIn("模型服务队列已满", message)
+
+    def test_provider_overloaded_is_retryable_then_recovers(self):
+        analyzer = self._analyzer("ok-result", interrupted_retries=1)
+        overloaded = KkAgentAnalysisResult(
+            ok=False, error_type="provider_overloaded", error="queue is full",
+        )
+        succeeded = KkAgentAnalysisResult(ok=True, result={"ok": True})
+        sequence = [overloaded, succeeded]
+
+        async def outcomes(_entry):
+            return sequence.pop(0)
+
+        with patch.object(analyzer, "_analyze_once", side_effect=outcomes) as run_once:
+            outcome = asyncio.run(analyzer.analyze(ENTRY))
+        self.assertTrue(outcome.ok)
+        self.assertEqual(run_once.await_count, 2)
 
     def test_each_transient_error_type_gets_its_own_retry(self):
         analyzer = self._analyzer("ok-result", interrupted_retries=1)
@@ -275,7 +329,22 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v18")
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v19")
+
+    def test_diagnostic_prompt_has_no_journal_timeline_section(self):
+        """v19: 处理时间线只是 Redmine journal 流水的复述，读者点开工单就有；
+        问题概况须钉死报告人=author、单号格式、禁内部 id、时间统一 UTC+8。"""
+        prompt = KkAgentRedmineAnalyzer().build_prompt({
+            **ENTRY, "analysis_mode": "diagnostic",
+        })
+        self.assertNotIn("处理时间线", prompt)
+        self.assertIn("journal timeline of who changed what", prompt)
+        self.assertIn("## 一、问题概况", prompt)
+        self.assertIn("## 六、建议下一步", prompt)
+        self.assertIn("issue author (创建人) field", prompt)
+        self.assertIn("`#<issue_id>`", prompt)
+        self.assertIn("(`ev_*`)", prompt)
+        self.assertIn("北京时间（UTC+8）", prompt)
 
     def test_prompt_includes_operator_observation_as_verifiable_context(self):
         prompt = KkAgentRedmineAnalyzer().build_prompt({

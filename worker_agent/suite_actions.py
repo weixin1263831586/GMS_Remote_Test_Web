@@ -1,6 +1,6 @@
 """Suite-facing worker actions: execution, export, and report import.
 
-从 inventory.py 拆出（2026-08 审核第七节）：套件枚举/下载/解压、Tradefed 执行、
+从 inventory.py 拆出：套件枚举/下载/解压、Tradefed 执行、
 报告导入与导出打包。设备探测与烧写见 device_actions.py。
 """
 
@@ -473,4 +473,3 @@ def scan_suites(config: WorkerConfig) -> list[dict[str, Any]]:
                     "available": os.access(executable, os.X_OK),
                 })
     return suites
-

@@ -79,38 +79,25 @@ def cluster_page():
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
-@page_router.get("/cluster/page.js")
-def cluster_page_js():
-    """页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。
+@page_router.get("/cluster/{ui_asset}")
+def cluster_ui_asset(ui_asset: str):
+    """Cluster 页面脚本统一路由（CSP 收紧后禁止 inline <script>）。
 
-    运行配置由模板以 body data 属性注入，page.js 头部读取。
+    - page.js: 页面主体脚本，运行配置由模板以 body data 属性注入；
+    - page-boot.js: embedded-workspace 就绪标记（原单行内联块外置）；
+    - page-echarts.js: ECharts 本地 vendor 加载器（原单行内联块外置）；
+    - modal-controller.js: 弹框焦点控制器（初始焦点/Tab 陷阱/关闭恢复）。
     """
+    if ui_asset not in {
+        "page.js", "page-boot.js", "page-echarts.js", "modal-controller.js",
+    }:
+        raise HTTPException(404, "cluster ui asset not found")
     ui_dir = Path(__file__).with_name("ui")
-    js = ui_dir / "page.js"
+    js = (ui_dir / ui_asset).read_text(encoding="utf-8")
     return Response(
-        js.read_text(encoding="utf-8"),
+        js,
         media_type="application/javascript",
         headers={"Cache-Control": "no-cache"},
-    )
-
-
-@page_router.get("/cluster/page-boot.js")
-def cluster_page_boot_js():
-    """embedded-workspace 就绪标记脚本（原单行内联块外置）。"""
-    ui_dir = Path(__file__).with_name("ui")
-    js = ui_dir / "page-boot.js"
-    return Response(
-        js.read_text(encoding="utf-8"), media_type="application/javascript"
-    )
-
-
-@page_router.get("/cluster/page-echarts.js")
-def cluster_page_echarts_js():
-    """ECharts 本地 vendor 加载器（原单行内联块外置）。"""
-    ui_dir = Path(__file__).with_name("ui")
-    js = ui_dir / "page-echarts.js"
-    return Response(
-        js.read_text(encoding="utf-8"), media_type="application/javascript"
     )
 
 

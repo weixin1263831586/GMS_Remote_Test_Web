@@ -221,14 +221,25 @@ enum labels or duplicate summaries). The FIRST paragraph is a standalone
 conclusion line: `**结论：**` + 2-3 sentences stating whether this is a real
 device/platform failure or a test-side/noise artifact, the exact failing point
 and the owner direction. Then structure the report with EXACTLY these level-2
-sections, in order:
-1. "## 一、问题概况" — a compact Markdown table (one row per key): 单号/链接,
-   报告人, 报告设备, 系统/构建版本, 测试套件/复现环境, 执行命令, 失败用例,
-   当前状态; facts from the issue and journals only, cell text short; paths,
-   commands and test names go in `code` spans.
-2. "## 二、处理时间线" — dated bullets of the journals (who changed what,
-   which attachments were added), oldest first; cite ids like [journal:ID].
-3. "## 三、失败链路还原（日志时间线）" — for test/log failures: when evidence
+sections, in order (do NOT invent extra sections; do NOT output a dated
+journal timeline of who changed what — Redmine already shows it):
+1. "## 一、问题概况" — a compact Markdown table (one row per key); facts from
+   the issue and journals only, cell text short; paths, commands and test
+   names go in `code` spans. Test-failure issues (subject mentions
+   CTS/VTS/GTS/STS/LTP or a test-case fail) use rows: 单号, 报告人,
+   报告设备, 系统/构建版本, 测试套件/复现环境, 执行命令, 失败用例,
+   当前状态. Every other issue uses rows: 单号, 报告人, 报告设备,
+   系统/构建版本, 复现方式, 失败现象, 当前状态. Hard rules:
+   - 单号 is just `#<issue_id>`; never print evidence snapshot ids (`ev_*`),
+     Redmine numeric user ids, controller URLs or site-internal paths.
+   - 报告人 is the issue author (创建人) field; the FAE who triaged or is
+     currently assigned is NOT the reporter.
+   - 当前状态 is one short clause: status plus the current blocker or who
+     must act next (e.g. 等客户回传新 log / 等模组侧补丁).
+   - Issue/journal timestamps are UTC; convert to 北京时间（UTC+8）and state
+     the convention once where first used. Device-log timestamps stay as
+     recorded in the log.
+2. "## 二、失败链路还原（日志时间线）" — for test/log failures: when evidence
    spans multiple log directories, runs or attachments, FIRST give a small
    table marking each segment 真实失败/未执行/噪音, THEN a numbered timeline of
    the decisive device/host log events with second-level timestamps, quoting
@@ -236,19 +247,21 @@ sections, in order:
    narration is 中文). Explicitly label unrelated records (cache/UID warnings,
    system-checker messages) as 噪音 so readers do not chase them. If no logs
    exist, write 无可用日志，改为引用工单描述中的关键句。
-4. "## 四、机制分析（源码级）" — how the tested feature/mechanism actually
+3. "## 三、机制分析（源码级）" — how the tested feature/mechanism actually
    works, citing real host/device/AOSP source paths and key logic; when source
    evidence is unavailable, describe the mechanism and say so instead of
    inventing paths.
-5. "## 五、根因分析（按可能性排序）" — numbered hypotheses, most likely
+4. "## 四、根因分析（按可能性排序）" — numbered hypotheses, most likely
    first, each with how to verify it (config/file/log to check); mark each
    hypothesis 待验证 unless backed by direct causal evidence.
-6. "## 六、本地设备现状" — only live device/tool output, with ✅/⚠️ markers;
+5. "## 五、本地设备现状" — only live device/tool output, with ✅/⚠️ markers;
    if no device was inspected write "未检查本地设备。" and skip the rest.
-7. "## 七、建议下一步" — numbered concrete actions; adb/shell commands in a
+6. "## 六、建议下一步" — numbered concrete actions; adb/shell commands in a
    fenced code block; state preconditions explicitly (SSI/GRF, dpi, version).
-Cite actual issue/journal/attachment/source references where relevant. Prefer
-tables and lists over prose; keep the report readable, not exhaustive.
+Cite actual issue/journal/attachment/source references where relevant — cite
+journal ids inline like [journal:ID] when a fact depends on one, but never as
+a standalone timeline section. Prefer tables and lists over prose; keep the
+report readable, not exhaustive.
 WEB SEARCH (when used): keep queries to 2-4 simple space-separated keywords;
 no boolean operators (OR/AND/NOT), no quoted phrase nesting — complex queries
 fail. If one query returns nothing useful, reword with different domain terms

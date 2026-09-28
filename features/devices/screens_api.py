@@ -7,6 +7,7 @@ import shlex
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from foundation.error_model import ApiError, record_internal_error
 from foundation.novnc import novnc_url
 from foundation.security import sanitize_device_ids
 
@@ -271,8 +272,8 @@ async def show_device_screens(req: DeviceActionRequest, request: Request):
             except Exception:
                 raise
 
-    except Exception as e:
-        logger.error(f"Error showing device screens: {e}")
-        return JSONResponse(
-            content={"success": False, "error": str(e)}, status_code=500
+    except Exception:
+        message = record_internal_error(
+            logger, "读取设备画面", "Error showing device screens"
         )
+        return ApiError.internal(message).to_response()

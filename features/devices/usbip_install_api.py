@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from features.auth import require_permission_when_auth_required
 from features.users import get_client_display_id_from_request
+from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response
 
 from . import runtime
@@ -103,9 +104,11 @@ async def install_usbipd(
             return JSONResponse(
                 content=usbip_manager.install_usbipd(win_ssh, config)
             )
-    except Exception as exc:
-        logger.error("Error installing usbipd: %s", exc)
-        return error_response(str(exc), status_code=500)
+    except Exception:
+        message = record_internal_error(
+            logger, "安装 usbipd", "Error installing usbipd"
+        )
+        return ApiError.internal(message).to_response()
 
 
 __all__ = ["install_usbipd", "router"]

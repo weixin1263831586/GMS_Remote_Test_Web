@@ -4,12 +4,17 @@
 处理客户端IP检测、用户识别等功能
 """
 
+import logging
 from typing import Any
 
 import paramiko
 
 from foundation.common_utils import CommonUtils
+from foundation.error_model import record_internal_error
 from foundation.ssh_security import configure_strict_host_keys
+
+
+logger = logging.getLogger(__name__)
 
 
 class ClientManager:
@@ -108,7 +113,15 @@ class ClientManager:
                     return False, '', 'SSH 认证失败：请检查用户名和密码是否正确'
                 elif 'connection refused' in error_msg.lower():
                     return False, '', f'SSH 连接被拒绝：{client_ip} 未开启 SSH 服务（端口 22）'
-                return False, '', error_msg
+                # 未分类 SSH 异常的原文可能内嵌主机/路径细节，不外显；
+                # 原文带 exc_info 进日志，客户端拿统一文案凭 request_id 回查。
+                message = record_internal_error(
+                    logger,
+                    "SSH 登录校验",
+                    "SSH credential check failed for %s",
+                    client_ip,
+                )
+                return False, '', message
 
         # 检查已保存的映射
         if client_ip in self.client_hosts:

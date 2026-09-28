@@ -431,7 +431,7 @@ async def serial_console_websocket(websocket: WebSocket, port_key: str):
                 await websocket.send_json({"type": "error", "error": str(exc)})
             except Exception:
                 # 未知异常（pyserial/OS 路径/驱动/内部状态）不得把内部
-                # 细节原样发给客户端（评审 P2）。
+                # 细节原样发给客户端。
                 logger.exception("serial write failed for %s", port_key)
                 await websocket.send_json({
                     "type": "error",

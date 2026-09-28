@@ -40,12 +40,8 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertEqual(loaded.snapshot_hash, "sha")
 
     def test_find_and_latest_run(self):
-        nightly = make_run(
-            mode="nightly", date="2026-09-13", started_at="2026-09-13T00:00:00"
-        )
-        delta = make_run(
-            mode="delta", date="2026-09-13", started_at="2026-09-13T06:00:00"
-        )
+        nightly = make_run(mode="nightly", date="2026-09-13", started_at="2026-09-13T00:00:00")
+        delta = make_run(mode="delta", date="2026-09-13", started_at="2026-09-13T06:00:00")
         older = make_run(mode="nightly", date="2026-09-12")
         for run in (older, nightly, delta):
             self.repo.create_run(run)
@@ -57,6 +53,28 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertEqual(self.repo.latest_run("u1", "2026-09-13").run_id, nightly.run_id)
         self.assertEqual(self.repo.latest_run("u1", "2026-09-12").run_id, older.run_id)
         self.assertIsNone(self.repo.latest_run("other-owner"))
+
+    def test_manual_rerun_display_priority(self):
+        """manual run（重新分析全部）执行中与完成后都必须成为看板显示对象
+        （否则重分析不可见）；cancelled 的 manual 不得遮蔽 nightly。"""
+        nightly = make_run(date="2026-09-13", started_at="2026-09-13T00:00:00")
+        delta = make_run(mode="delta", date="2026-09-13", started_at="2026-09-13T06:00:00")
+        self.repo.create_run(nightly)
+        self.repo.create_run(delta)
+        manual = make_run(mode="manual", status="analyzing", date="2026-09-13", started_at="2026-09-13T10:04:00")
+        self.repo.create_run(manual)
+        # 执行中：进度可见。
+        self.assertEqual(self.repo.latest_run("u1", "2026-09-13").run_id, manual.run_id)
+        # 完成后：替换报告。
+        manual.status = "completed"
+        self.repo.update_run(manual)
+        self.assertEqual(self.repo.latest_run("u1", "2026-09-13").run_id, manual.run_id)
+        self.assertEqual(self.repo.latest_run("u1").run_id, manual.run_id)
+        # 取消后：回到 nightly 完整报告；delta 依旧不遮蔽 nightly。
+        manual.status = "cancelled"
+        self.repo.update_run(manual)
+        self.assertEqual(self.repo.latest_run("u1", "2026-09-13").run_id, nightly.run_id)
+        self.assertEqual(self.repo.latest_run("u1").run_id, nightly.run_id)
 
     def test_run_owner_id_normalized_to_canonical(self):
         """Web 原始 display id 与 sanitize 目录名必须读写同一份数据。"""
@@ -83,10 +101,7 @@ class DailyBriefRepositoryTests(unittest.TestCase):
                     ("db_web_only", "hcq@172.16.14.66", "2026-09-17", "issue:648526", "completed"),
                 ],
             )
-            conn.execute(
-                "INSERT INTO redmine_daily_brief_issues (run_id, issue_id) "
-                "VALUES ('db_web_only', 648526)"
-            )
+            conn.execute("INSERT INTO redmine_daily_brief_issues (run_id, issue_id) VALUES ('db_web_only', 648526)")
             conn.commit()
         finally:
             conn.close()
@@ -106,13 +121,10 @@ class DailyBriefRepositoryTests(unittest.TestCase):
 
         self.assertEqual(version, DailyBriefRepository._SCHEMA_VERSION)
         # 孪生行被删除，其余改写为 canonical
-        self.assertEqual(
-            rows,
-            {
-                "db_twin": "hcq_172_16_14_66",
-                "db_web_only": "hcq_172_16_14_66",
-            },
-        )
+        self.assertEqual(rows, {
+            "db_twin": "hcq_172_16_14_66",
+            "db_web_only": "hcq_172_16_14_66",
+        })
         self.assertEqual(issue_run_ids, ["db_web_only"])
         self.assertIsNone(reopened.get_run("db_web_dup"))
         # canonical 视角可读到 Web 写入的历史单号分析
@@ -126,18 +138,11 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         active = make_run(mode="issue:200", status="analyzing", started_at="2026-09-13T11:00:00")
         for run in (batch, completed, active):
             self.repo.create_run(run)
-        self.repo.upsert_issue(DailyBriefIssue(
-            run_id=active.run_id, issue_id=200, buckets=[], status="pending",
-        ))
+        self.repo.upsert_issue(DailyBriefIssue(run_id=active.run_id, issue_id=200, buckets=[], status="pending"))
         self.repo.enqueue_job(active.run_id, kind="issue", issue_id=200)
 
-        self.assertEqual(
-            self.repo.latest_active_issue_run("u1").run_id,
-            active.run_id,
-        )
-        self.assertIsNone(
-            self.repo.latest_active_issue_run("other-owner")
-        )
+        self.assertEqual(self.repo.latest_active_issue_run("u1").run_id, active.run_id)
+        self.assertIsNone(self.repo.latest_active_issue_run("other-owner"))
         claimed = self.repo.claim_next_job("worker-a")
         self.repo.finish_job(
             claimed["job_id"], "worker-a", claimed["lease_token"],
@@ -358,9 +363,7 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         """活跃 run-job 存在时，排队 issue-job 被作废而不是领取。"""
         run = make_run(status="pending")
         self.repo.create_run(run)
-        self.repo.upsert_issue(DailyBriefIssue(
-            run_id=run.run_id, issue_id=100, buckets=[], status="completed"
-        ))
+        self.repo.upsert_issue(DailyBriefIssue(run_id=run.run_id, issue_id=100, buckets=[], status="completed"))
         issue_job_row, _ = self.repo.enqueue_job(run.run_id, kind="issue", issue_id=100)
         issue_job_id = issue_job_row["job_id"]
         run_job, _ = self.repo.enqueue_job(run.run_id, kind="run")
@@ -376,9 +379,7 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         """refreeze 重置作废排队 issue-job（源头清除）。"""
         run = make_run(status="failed")
         self.repo.create_run(run)
-        self.repo.upsert_issue(DailyBriefIssue(
-            run_id=run.run_id, issue_id=100, buckets=[], status="completed"
-        ))
+        self.repo.upsert_issue(DailyBriefIssue(run_id=run.run_id, issue_id=100, buckets=[], status="completed"))
         self.repo.enqueue_job(run.run_id, kind="issue", issue_id=100)
         cancelled = self.repo.jobs.cancel_queued_issue_jobs(run.run_id)
         self.assertEqual(cancelled, 1)
@@ -388,13 +389,11 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertIsNotNone(self.repo.claim_next_job("worker-a", lease_seconds=30))
 
     def test_distinct_reanalysis_targets_are_never_coalesced(self):
-        """评审 P1:不同 issue 的 reanalyze 请求绝不能互相吞掉。"""
+        """不同 issue 的 reanalyze 请求绝不能互相吞掉。"""
         run = make_run(status="completed")
         self.repo.create_run(run)
         for issue_id in (100, 200):
-            self.repo.upsert_issue(DailyBriefIssue(
-                run_id=run.run_id, issue_id=issue_id, buckets=[], status="completed"
-            ))
+            self.repo.upsert_issue(DailyBriefIssue(run_id=run.run_id, issue_id=issue_id, buckets=[], status="completed"))
         job_a, created_a = self.repo.enqueue_job(run.run_id, kind="issue", issue_id=100)
         job_b, created_b = self.repo.enqueue_job(run.run_id, kind="issue", issue_id=200)
         self.assertTrue(created_a)
@@ -466,9 +465,7 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         run = make_run(status="completed")
         self.repo.create_run(run)
         for issue_id in (1, 2):
-            self.repo.upsert_issue(DailyBriefIssue(
-                run_id=run.run_id, issue_id=issue_id, buckets=[], status="completed"
-            ))
+            self.repo.upsert_issue(DailyBriefIssue(run_id=run.run_id, issue_id=issue_id, buckets=[], status="completed"))
         job, created = self.repo.enqueue_job(run.run_id, kind="issue", issue_id=2)
         self.assertTrue(created)
         self.assertEqual(job["issue_id"], 2)

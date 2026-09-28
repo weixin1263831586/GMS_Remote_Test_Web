@@ -38,8 +38,12 @@
 - Dependency directions: `features/*` may import `foundation/`;
   `foundation/` must never import `features/`; cross-feature imports go
   through a feature's public surface (`features/<name>/__init__.py`), not
-  its internals; the Controller never imports `worker_agent/` for request
-  handling. Enforced by `tests/architecture/`.
+  its internals. Enforced by `tests/architecture/`.
+- Controller↔Worker interaction crosses the SSH execution boundary only
+  (ADR 0004). `worker_agent/` imports inside `features/` stay confined to
+  the worker-role execution surfaces and the same-host bridge modules and
+  must not spread; this one is review-enforced (no dedicated architecture
+  test yet).
 - Agent profiles are the canonical Agent-side config: one profile binds
   exactly one client to one Controller
   (`~/.config/gms-agent/profiles/<profile>.toml`, token in

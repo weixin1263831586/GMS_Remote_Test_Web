@@ -39,6 +39,7 @@ from features.users import (
 )
 from foundation.common_utils import CommonUtils
 from foundation.config import config_manager
+from foundation.error_model import ApiError, record_internal_error
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response
 
@@ -363,7 +364,11 @@ async def get_vpn_connections():
         if not config_manager.is_config_host_local(config):
             ssh = ssh_manager.get_connection(config)
         if not config_manager.is_config_host_local(config) and not ssh:
-            return error_response("SSH连接失败", status_code=500)
+            return ApiError.upstream_failure(
+                "VPN 主机 SSH 连接失败",
+                service="ssh",
+                next_actions=({"action": "检查 VPN 主机 SSH 配置与连通性"},),
+            ).to_response()
 
         cmd = "nmcli -t -f NAME,TYPE connection show 2>/dev/null"
         result = await execute_config_host_command(config, ssh, cmd, timeout=5)
@@ -372,12 +377,11 @@ async def get_vpn_connections():
         if ssh:
             ssh_manager.return_connection(ssh)
         return JSONResponse(content={"success": True, "connections": vpn_names})
-    except Exception as e:
+    except Exception:
         if ssh:
             ssh_manager.return_connection(ssh)
-        logger.error(f"Error listing VPN connections: {e}")
-        return error_response(str(e), status_code=500)
-
+        message = record_internal_error(logger, "列出 VPN 连接", "Error listing VPN connections")
+        return ApiError.internal(message).to_response()
 
 @router.get("/api/vpn/status")
 @handle_api_errors
@@ -464,10 +468,11 @@ async def connect_vpn(
             ssh = ssh_manager.get_connection(config)
 
         if not is_local and not ssh:
-            return JSONResponse(
-                content={"success": False, "error": "SSH连接失败"},
-                status_code=500
-            )
+            return ApiError.upstream_failure(
+                "VPN 主机 SSH 连接失败",
+                service="ssh",
+                next_actions=({"action": "检查 VPN 主机 SSH 配置与连通性"},),
+            ).to_response()
 
         try:
             # 优先使用前端指定的 VPN 名称，否则自动发现
@@ -553,12 +558,9 @@ async def connect_vpn(
                 ssh_manager.return_connection(ssh)
             raise
 
-    except Exception as e:
-        logger.error(f"Error connecting VPN: {e}")
-        return JSONResponse(
-            content={"success": False, "error": str(e)},
-            status_code=500
-        )
+    except Exception:
+        message = record_internal_error(logger, "连接 VPN", "Error connecting VPN")
+        return ApiError.internal(message).to_response()
 
 
 @router.post("/api/vpn/disconnect", dependencies=_HUMAN_ONLY)
@@ -572,10 +574,11 @@ async def disconnect_vpn():
             ssh = ssh_manager.get_connection(config)
 
         if not is_local and not ssh:
-            return JSONResponse(
-                content={"success": False, "error": "SSH连接失败"},
-                status_code=500
-            )
+            return ApiError.upstream_failure(
+                "VPN 主机 SSH 连接失败",
+                service="ssh",
+                next_actions=({"action": "检查 VPN 主机 SSH 配置与连通性"},),
+            ).to_response()
 
         try:
             vpn_name = await resolve_vpn_connection_name(config, ssh, active_only=True)
@@ -610,9 +613,6 @@ async def disconnect_vpn():
                 ssh_manager.return_connection(ssh)
             raise
 
-    except Exception as e:
-        logger.error(f"Error disconnecting VPN: {e}")
-        return JSONResponse(
-            content={"success": False, "error": str(e)},
-            status_code=500
-        )
+    except Exception:
+        message = record_internal_error(logger, "断开 VPN", "Error disconnecting VPN")
+        return ApiError.internal(message).to_response()

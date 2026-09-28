@@ -3,7 +3,7 @@
 // 可聚焦元素选择器：focus trap 与初始聚焦共用同一契约。
 const MODAL_FOCUSABLE_SELECTOR = [
     '[autofocus]',
-    'input:not([disabled])',
+    'input:not([disabled]):not([type="hidden"])',
     'select:not([disabled])',
     'textarea:not([disabled])',
     'button:not([disabled])',
@@ -220,7 +220,7 @@ const ModalManager = {
                 }
                 const focusables = Array.from(
                     modal.querySelectorAll(MODAL_FOCUSABLE_SELECTOR)
-                ).filter(el => !el.disabled && el.getAttribute('tabindex') !== '-1');
+                ).filter(el => this._isVisibleFocusTarget(el));
                 if (focusables.length === 0) {
                     event.preventDefault();
                     modal.focus({ preventScroll: true });
@@ -347,13 +347,61 @@ const ModalManager = {
         this._originalZIndexes.delete(modalId);
     },
 
+    _initialFocusTarget(modal) {
+        // 标题栏关闭按钮通常排在 DOM 最前面，但不应成为表单弹框的
+        // 默认焦点。页面可显式指定目标；否则优先首个表单控件，再选
+        // 正文中的其他操作，最后才回退到关闭按钮。
+        const firstVisible = selector => Array.from(
+            modal.querySelectorAll(selector)
+        ).find(element => this._isVisibleFocusTarget(element));
+        const explicit = firstVisible('[data-modal-initial-focus]');
+        if (explicit) return explicit;
+        const autofocus = firstVisible('[autofocus]');
+        if (autofocus) return autofocus;
+        const formControl = firstVisible([
+            'input:not([type="hidden"])',
+            'select',
+            'textarea',
+            '[contenteditable="true"]'
+        ].join(', '));
+        if (formControl) return formControl;
+        const nonCloseControl = Array.from(
+            modal.querySelectorAll(MODAL_FOCUSABLE_SELECTOR)
+        ).find(element => (
+            this._isVisibleFocusTarget(element) && !this._isCloseControl(element)
+        ));
+        return nonCloseControl || null;
+    },
+
+    _isVisibleFocusTarget(element) {
+        if (!element || element.disabled || element.hidden
+            || element.getAttribute('tabindex') === '-1'
+            || element.getAttribute('aria-hidden') === 'true'
+            || element.getAttribute('aria-disabled') === 'true'
+            || element.closest('[hidden], [inert]')) {
+            return false;
+        }
+        const style = window.getComputedStyle(element);
+        return style.display !== 'none' && style.visibility !== 'hidden'
+            && element.getClientRects().length > 0;
+    },
+
+    _isCloseControl(element) {
+        const action = `${element.getAttribute('data-click') || ''} ${element.getAttribute('data-action') || ''}`;
+        const text = String(element.textContent || '').trim();
+        return element.classList.contains('modal-close')
+            || element.getAttribute('aria-label') === '关闭'
+            || text === '×' || text === '关闭'
+            || /close|hide|remove/i.test(action);
+    },
+
     _focusModal(modalId) {
         const modal = document.getElementById(modalId);
         if (!modal || this._activeModals[this._activeModals.length - 1] !== modalId) {
             return;
         }
-        const content = modal.querySelector('.modal-content');
-        const focusTarget = modal.querySelector(MODAL_FOCUSABLE_SELECTOR) || content;
+        const content = modal.querySelector('.modal-content') || modal;
+        const focusTarget = this._initialFocusTarget(modal) || content;
         if (focusTarget) {
             if (focusTarget === content && !content.hasAttribute('tabindex')) {
                 content.setAttribute('tabindex', '-1');
