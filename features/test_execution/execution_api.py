@@ -60,7 +60,11 @@ async def start_test(
         if req.worker_id:
             ensure_agent_worker_allowed(request, req.worker_id)
 
-    owner_id = runtime.get_client_id_from_request(request)
+    owner_id = (
+        principal.resource_owner_id
+        if principal is not None
+        else runtime.get_client_id_from_request(request)
+    )
     try:
         from foundation.cluster_port import get_cluster_service
 
@@ -187,7 +191,11 @@ async def stop_test(
     if principal is not None and not principal.has_permission("tests.cancel"):
         return error_response("缺少 tests.cancel 权限", status_code=403)
 
-    owner_id = runtime.get_client_id_from_request(request)
+    owner_id = (
+        principal.resource_owner_id
+        if principal is not None
+        else runtime.get_client_id_from_request(request)
+    )
     try:
         from foundation.cluster_port import (
             cancel_durable_job,

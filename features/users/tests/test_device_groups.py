@@ -91,7 +91,7 @@ class DeviceGroupPersistenceTests(unittest.TestCase):
         legacy_dir = (
             Path(self.runtime_dir.name)
             / 'user_prefs'
-            / device_groups._owner_storage_key(f'agent:{token_id}')
+            / device_groups._legacy_owner_storage_key(f'agent:{token_id}')
         )
         legacy_dir.mkdir(parents=True)
         (legacy_dir / 'device_groups.json').write_text(

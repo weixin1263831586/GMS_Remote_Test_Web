@@ -128,6 +128,42 @@ def test_codex_reconcile_idempotent(tmp_path):
     assert config.read_text() == before
 
 
+def test_kkagent_reconcile_replaces_local_plugin_launcher(tmp_path):
+    config = tmp_path / "config.toml"
+    config.write_text(
+        'model = "agent-model"\n\n'
+        "[mcp_servers.other]\n"
+        'command = "other"\n\n'
+        "[mcp_servers.gms]\n"
+        'command = "python3"\n'
+        'args = ["/home/u/.kkagent/plugins/local/gms-remote-test/scripts/mcp_launcher.py"]\n'
+        "\n[mcp_servers.gms.env]\n"
+        'GMS_REMOTE_TEST_SERVER = "https://old:5001"\n',
+        encoding="utf-8",
+    )
+
+    result = mod.reconcile_kkagent(config, MCP, SERVER, PROFILE, TOKEN, CA)
+
+    assert "updated" in result
+    text = config.read_text(encoding="utf-8")
+    assert 'model = "agent-model"' in text
+    assert "[mcp_servers.other]" in text
+    assert "[mcp_servers.gms]" in text
+    assert "[mcp_servers.gms.env]" in text
+    assert f'args = ["{MCP}"]' in text
+    assert ".kkagent/plugins/local/gms-remote-test" not in text
+    assert 'GMS_AGENT_CLIENT = "kkagent"' in text
+
+
+def test_kkagent_reconcile_is_idempotent(tmp_path):
+    config = tmp_path / "config.toml"
+    mod.reconcile_kkagent(config, MCP, SERVER, PROFILE, TOKEN, CA)
+    before = config.read_text(encoding="utf-8")
+    result = mod.reconcile_kkagent(config, MCP, SERVER, PROFILE, TOKEN, CA)
+    assert result.startswith("unchanged")
+    assert config.read_text(encoding="utf-8") == before
+
+
 def test_cli_wrapper_exit_codes(tmp_path):
     import subprocess
 

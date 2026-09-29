@@ -8,8 +8,9 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from fastapi import HTTPException
 from fastapi.responses import JSONResponse
+
+from foundation.error_model import ApiError
 
 from . import runtime
 from .locks import device_lock_manager
@@ -479,9 +480,10 @@ class SSHConnection:
     def __enter__(self):
         self.ssh = self._ssh_manager.get_connection(self.config)
         if not self.ssh:
-            raise HTTPException(
-                status_code=500,
-                detail="SSH连接失败"
+            raise ApiError.upstream_failure(
+                "SSH连接失败",
+                service="ssh",
+                next_actions=({"action": "检查 SSH 配置和目标主机可达性"},),
             )
         return self.ssh
 
@@ -516,9 +518,10 @@ class AsyncSSHConnection:
             self._ssh_manager.get_connection, self.config
         )
         if not self.ssh:
-            raise HTTPException(
-                status_code=500,
-                detail="SSH连接失败"
+            raise ApiError.upstream_failure(
+                "SSH连接失败",
+                service="ssh",
+                next_actions=({"action": "检查 SSH 配置和目标主机可达性"},),
             )
         return self.ssh
 
@@ -554,9 +557,9 @@ class DeviceSSHConnection:
     def __enter__(self):
         self._pool_key = self._get_pool_key()
         if not self._pool_key:
-            raise HTTPException(
-                status_code=500,
-                detail="无效的设备主机配置"
+            raise ApiError.dependency_unavailable(
+                "无效的设备主机配置",
+                next_actions=({"action": "配置 Windows 设备主机 (user@ip)"},),
             )
 
         # 从连接池获取或创建连接
@@ -564,13 +567,14 @@ class DeviceSSHConnection:
         if not self.ssh:
             # 避免把内部生成的随机 ID 直接暴露成“主机名”
             if not self._pool_key or "@" not in self._pool_key:
-                raise HTTPException(
-                    status_code=500,
-                    detail="无效的设备主机配置，请确认已设置 Windows 设备主机 (user@ip)",
+                raise ApiError.dependency_unavailable(
+                    "无效的设备主机配置，请确认已设置 Windows 设备主机 (user@ip)",
+                    next_actions=({"action": "配置 Windows 设备主机 (user@ip)"},),
                 )
-            raise HTTPException(
-                status_code=500,
-                detail=f"无法连接到设备主机: {self._pool_key}，请检查网络、SSH 凭据及目标主机是否可达",
+            raise ApiError.upstream_failure(
+                f"无法连接到设备主机: {self._pool_key}，请检查网络、SSH 凭据及目标主机是否可达",
+                service="ssh",
+                next_actions=({"action": "检查网络、SSH 凭据及目标主机"},),
             )
         return self.ssh
 

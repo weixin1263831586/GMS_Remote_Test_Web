@@ -525,6 +525,27 @@ class TestDoctorAndProfiles(EnvSandbox):
         self.assertTrue(report["clients"][0]["token"]["mode_ok"])
         self.assertEqual(report["clients"][0]["profile"]["selected"], profile)
 
+    def test_doctor_reports_host_environment(self):
+        profile = pm.profile_name("codex")
+        pm.write_profile_toml(profile, "codex", "https://ctrl.example:5001", "")
+        report = pm.doctor_report("codex", profile)
+        env_state = report["host_environment"]
+        self.assertTrue(env_state["tmpdir_writable"])
+        self.assertIn("disk_free_gb", env_state)
+
+        # A full or unwritable TMPDIR must surface as an explicit action:
+        # this is the failure that used to masquerade as
+        # "无法解析 Agent profile" in the shell CLI.
+        broken_tmp = self.root / "missing-tmpdir"
+        with mock.patch.dict(os.environ, {"TMPDIR": str(broken_tmp)}):
+            report = pm.doctor_report("codex", profile)
+        self.assertFalse(report["host_environment"]["tmpdir_writable"])
+        self.assertFalse(report["ok"])
+        self.assertTrue(
+            any("TMPDIR" in action for action in report["actions"]),
+            report["actions"],
+        )
+
     def test_profile_list_marks_invalid_controller_url(self):
         profile = pm.profile_name("codex")
         pm.write_profile_toml(profile, "codex", "https://$(unsafe)/host", "")
@@ -596,7 +617,7 @@ class TestDoctorAndProfiles(EnvSandbox):
         self.assertFalse(report["ok"])
         self.assertTrue(
             any(
-                "restore the kkagent gms plugin payload" in action
+                "restore the installed runtime" in action
                 and "sync_package" in action
                 for action in report["actions"]
             )
@@ -617,7 +638,7 @@ class TestDoctorAndProfiles(EnvSandbox):
         pm.write_profile_toml(profile, "kkagent", "https://ctrl.example:5001", "")
         report = pm.doctor_report("kkagent", profile)
         self.assertFalse(
-            any("restore the kkagent gms plugin" in action for action in report["actions"])
+            any("restore the installed runtime" in action for action in report["actions"])
         )
 
     def test_doctor_action_explains_invalid_controller_url(self):
@@ -702,6 +723,26 @@ class TestLocalRuntimeOnlyInstall(EnvSandbox):
 
 
 class TestProfilePreservingReactivation(EnvSandbox):
+    def test_kkagent_activation_installs_plugin_and_reconciles_runtime_launcher(self):
+        with (
+            mock.patch.object(pm, "write_profile", return_value="kkagent-prod"),
+            mock.patch.object(pm, "install_skill"),
+            mock.patch.object(pm, "install_plugin_for_kkagent") as install_plugin,
+            mock.patch.object(pm, "reconcile_mcp") as reconcile,
+        ):
+            names = pm.activate_clients(
+                ["kkagent"], "https://ctrl.example:5001", "/ca.pem"
+            )
+
+        self.assertEqual(names, ["kkagent-prod"])
+        install_plugin.assert_called_once_with(pm.CURRENT_LINK)
+        reconcile.assert_called_once_with(
+            "kkagent",
+            "https://ctrl.example:5001",
+            "kkagent-prod",
+            "/ca.pem",
+        )
+
     def test_reactivation_keeps_custom_profile_identity(self):
         self.make_installed_runtime()
         pm.write_profile_toml(
@@ -715,6 +756,38 @@ class TestProfilePreservingReactivation(EnvSandbox):
             )
         self.assertEqual(pm.profile_store.list_profiles(), ["production"])
         self.assertEqual(reconcile.call_args.args[2], "production")
+
+
+class TestRuntimeVersionRetention(EnvSandbox):
+    def test_prune_keeps_current_and_one_immediate_rollback(self):
+        versions = pm.VERSIONS_DIR
+        current = versions / "0.22.35"
+        previous = versions / "0.22.24"
+        stale = versions / "0.17.0"
+        for path in (current, previous, stale):
+            path.mkdir(parents=True)
+        pm.flip_current(current)
+
+        removed = pm.prune_old_versions(previous)
+
+        self.assertEqual(removed, ["0.17.0"])
+        self.assertTrue(current.is_dir())
+        self.assertTrue(previous.is_dir())
+        self.assertFalse(stale.exists())
+
+    def test_prune_never_follows_symlink_entries(self):
+        versions = pm.VERSIONS_DIR
+        current = versions / "0.22.35"
+        current.mkdir(parents=True)
+        pm.flip_current(current)
+        outside = self.root / "outside-runtime"
+        outside.mkdir()
+        (versions / "unexpected-link").symlink_to(outside)
+
+        pm.prune_old_versions(retain=1)
+
+        self.assertTrue(outside.is_dir())
+        self.assertTrue((versions / "unexpected-link").is_symlink())
 
 
 class TestUpdateManifestPin(EnvSandbox):

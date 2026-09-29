@@ -5,10 +5,8 @@ from __future__ import annotations
 
 import sys
 
-from features.redmine.case_extractor import RedmineCaseExtractor
-
-# 使用已有数据最多的用户知识库。
-from features.reports.api_helpers import _resolve_redmine_knowledge_service
+from features.redmine import RedmineCaseExtractor
+from features.reports import resolve_redmine_knowledge_service
 
 
 # 多屏 IME 超时问题的已验证根因和方案。
@@ -64,7 +62,7 @@ _OVERRIDES: dict[int, dict] = {
 
 
 def seed(target_issue_ids: list[int] | None = None) -> dict:
-    service = _resolve_redmine_knowledge_service(None)
+    service = resolve_redmine_knowledge_service(None)
     if service is None:
         print("No populated per-user knowledge store found; nothing to seed.", file=sys.stderr)
         return {"seeded": [], "skipped": target_issue_ids or list(_OVERRIDES)}

@@ -1,5 +1,9 @@
+import asyncio
 import unittest
 from importlib import import_module
+from unittest.mock import AsyncMock, Mock, patch
+
+from starlette.requests import Request
 
 
 class GerritDashboardStatsTests(unittest.TestCase):
@@ -87,6 +91,45 @@ class GerritDashboardStatsTests(unittest.TestCase):
             owners_for_profile(cfg, cfg["department_profiles"][0]),
             ["all@example.com", "a@example.com", "b@example.com"],
         )
+
+    def test_connectivity_probe_never_interpolates_host_into_shell(self):
+        api = import_module("features.gerrit.api")
+        request = Request({
+            "type": "http",
+            "method": "GET",
+            "path": "/api/gerrit/connectivity",
+            "headers": [],
+        })
+        process = Mock(returncode=0)
+        process.communicate = AsyncMock(return_value=(b"200", b""))
+        writer = Mock()
+        writer.wait_closed = AsyncMock()
+        hostile_host = "gerrit.example;touch-pwn"
+
+        with patch.object(
+            api,
+            "_dashboard_config_for_request",
+            return_value={"ssh_host": hostile_host, "ssh_port": 29418},
+        ), patch.object(
+            api.asyncio,
+            "create_subprocess_exec",
+            new=AsyncMock(return_value=process),
+        ) as create_process, patch.object(
+            api.asyncio,
+            "open_connection",
+            new=AsyncMock(return_value=(Mock(), writer)),
+        ) as open_connection:
+            result = asyncio.run(api.check_gerrit_connectivity(request))
+
+        commands = [call.args for call in create_process.call_args_list]
+        self.assertEqual(commands[0][:7], (
+            "ping", "-c", "2", "-W", "2", "--", hostile_host
+        ))
+        self.assertEqual(commands[1][0], "curl")
+        self.assertEqual(commands[1][-1], f"https://{hostile_host}/")
+        self.assertNotIn("bash", {command[0] for command in commands})
+        open_connection.assert_awaited_once_with(hostile_host, 29418)
+        self.assertTrue(result["data"]["ssh_port_ok"])
 
 
 if __name__ == "__main__":

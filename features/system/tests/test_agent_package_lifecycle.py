@@ -88,6 +88,9 @@ class LifecycleTests(unittest.TestCase):
         self._previous_bin_dir = os.environ.get("GMS_BIN_DIR")
         os.environ["GMS_BIN_DIR"] = str(self.home / ".local" / "bin")
         self.addCleanup(self._restore_bin_dir)
+        self._previous_kkagent_home = os.environ.get("KKAGENT_HOME")
+        os.environ["KKAGENT_HOME"] = str(self.home / ".kkagent")
+        self.addCleanup(self._restore_kkagent_home)
         self.agent = load_gms_agent_module()
         # 拆分后,生命周期函数住在 gms_agent.package_manager;
         # 沙箱化 = 同时替换薄壳与真模块的全局(函数体读的是后者)。
@@ -117,6 +120,12 @@ class LifecycleTests(unittest.TestCase):
             os.environ.pop("GMS_BIN_DIR", None)
         else:
             os.environ["GMS_BIN_DIR"] = self._previous_bin_dir
+
+    def _restore_kkagent_home(self):
+        if self._previous_kkagent_home is None:
+            os.environ.pop("KKAGENT_HOME", None)
+        else:
+            os.environ["KKAGENT_HOME"] = self._previous_kkagent_home
 
     # --- 1. version comes from the PACKAGE, not the running script ------
     def test_install_uses_package_version_not_running_version(self):

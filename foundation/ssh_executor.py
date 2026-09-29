@@ -39,6 +39,7 @@ import paramiko
 
 from foundation.command_result import CommandResult
 from foundation.common_utils import CommonUtils
+from foundation.redaction import redact_sensitive_text
 
 
 logger = logging.getLogger(__name__)
@@ -123,7 +124,9 @@ class SSHExecutor:
             stderr_bytes = 0
             stdout_truncated = False
             stderr_truncated = False
-            deadline = time.monotonic() + timeout if timeout and timeout > 0 else None
+            # timeout 非正值曾意味着 deadline=None（无限等待）；任何超时
+            # 参数至少钳位到 1s，防止调用方误传 0/负值后命令永不超时。
+            deadline = time.monotonic() + max(int(timeout or 0), 1)
             exit_seen_at: float | None = None
             max_captured = self._max_captured_stream_bytes
 
@@ -215,8 +218,9 @@ class SSHExecutor:
             exit_code = channel.recv_exit_status()
             return CommandResult(stdout=stdout_text, stderr=stderr_text, code=exit_code)
         except Exception as e:
-            logger.error(f"[SSH] Command execution error: {e}")
-            return CommandResult(stdout="", stderr=str(e), code=-1)
+            logger.error(f"[SSH] Command execution error: {redact_sensitive_text(e)}")
+            # 返回值与日志同纪律：异常原文可能内嵌凭据，出 SSH 边界前脱敏。
+            return CommandResult(stdout="", stderr=redact_sensitive_text(e), code=-1)
         finally:
             # 无论成功、超时、取消还是异常，都释放本地 channel，
             # 不再让调用方认为已结束的命令继续占用 SSH 资源。
@@ -258,7 +262,7 @@ class SSHExecutor:
           输出同样受总体 deadline 约束；内存捕获有上限（超出打标记），
           退出后的尾部 drain 有时限。
         """
-        logger.info(f"[SSH] Executing command: {command[:100]}")
+        logger.info(f"[SSH] Executing command: {redact_sensitive_text(command)[:100]}")
         channel = None
         try:
             _stdin, stdout, _stderr = await asyncio.to_thread(
@@ -280,7 +284,8 @@ class SSHExecutor:
             stdout_truncated = False
             stderr_truncated = False
             loop = asyncio.get_running_loop()
-            deadline = loop.time() + timeout if timeout and timeout > 0 else None
+            # 与 run() 相同的 timeout 钳位纪律，杜绝无限等待。
+            deadline = loop.time() + max(int(timeout or 0), 1)
             exit_seen_at: float | None = None
 
             def _over_deadline() -> bool:
@@ -415,10 +420,12 @@ class SSHExecutor:
             )
 
         except Exception as e:
-            logger.error(f"[SSH] Error executing command: {e}")
+            logger.error(f"[SSH] Error executing command: {redact_sensitive_text(e)}")
             with suppress(Exception):
-                await log_callback(f"SSH 执行错误: {e!s}", "error")
-            return CommandResult(stdout="", stderr=str(e), code=-1)
+                await log_callback(f"SSH 执行错误: {redact_sensitive_text(e)}", "error")
+            # 同步版 run() 一致：返回值 stderr 也要脱敏，防止凭据
+            # 经 features 层流入 API 响应。
+            return CommandResult(stdout="", stderr=redact_sensitive_text(e), code=-1)
         finally:
             # 无论成功、超时、取消还是异常，都释放本地 channel。
             # 注意：这只是关闭 SSH channel（向远端送 EOF），不能保证

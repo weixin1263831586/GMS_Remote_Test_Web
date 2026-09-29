@@ -871,6 +871,34 @@ def _mcp_registration_status(client: str) -> dict[str, object]:
     }
 
 
+def _host_environment_status() -> dict[str, object]:
+    """Probe the filesystem basics the installed CLI depends on at runtime.
+
+    The shell CLI writes its Bearer header through mktemp under TMPDIR, and
+    full or read-only filesystems have historically surfaced as misleading
+    downstream failures (e.g. "无法解析 Agent profile") instead of an
+    obvious ENOSPC. Keep this secret-free and cheap: one probe file plus a
+    statvfs sample.
+    """
+
+    tmpdir = Path(os.environ.get("TMPDIR", "/tmp"))
+    state: dict[str, object] = {"tmpdir": str(tmpdir), "tmpdir_writable": False}
+    try:
+        probe = tmpdir / f".gms-agent-doctor-{os.getpid()}"
+        probe.write_text("", encoding="utf-8")
+        probe.unlink()
+        state["tmpdir_writable"] = True
+    except OSError:
+        pass
+    try:
+        usage = shutil.disk_usage(tmpdir)
+        state["disk_free_gb"] = round(usage.free / 1024**3, 2)
+        state["disk_total_gb"] = round(usage.total / 1024**3, 2)
+    except OSError:
+        pass
+    return state
+
+
 def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
     """Build a secret-free local installation/profile consistency report."""
 
@@ -948,8 +976,8 @@ def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
             actions.append(f"reconcile the {client_name} MCP registration")
         elif not mcp_state["launchable"]:
             actions.append(
-                f"restore the {client_name} gms plugin payload — the "
-                "registered MCP launcher is missing: "
+                f"restore the installed runtime and reconcile the {client_name} "
+                "MCP registration — the registered launcher is missing: "
                 f"{mcp_state['launcher_path']} (run python "
                 "tools/scripts/agent/sync_package.py . in the repo, then "
                 f"gms-agent install --client {client_name})"
@@ -968,19 +996,30 @@ def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
             }
         )
 
+    host_env = _host_environment_status()
+    if not host_env.get("tmpdir_writable"):
+        actions.append(
+            f"free space or fix permissions for TMPDIR ({host_env['tmpdir']}) — "
+            "the shell CLI needs it for Bearer header temp files"
+        )
+
     versions_consistent = bool(installed and installed == current_cli == running)
     if not versions_consistent:
         actions.append("install/activate one complete package version")
     unique_actions = list(dict.fromkeys(actions))
-    ok = versions_consistent and all(
-        bool(item["skill_present"])
-        and bool(item["profile"]["valid"])
-        and bool(item["token"]["present"])
-        and bool(item["token"]["mode_ok"])
-        and bool(item["token"]["owner_ok"])
-        and bool(item["mcp"]["registered"])
-        and bool(item["mcp"].get("launchable", True))
-        for item in report_clients
+    ok = (
+        versions_consistent
+        and bool(host_env.get("tmpdir_writable"))
+        and all(
+            bool(item["skill_present"])
+            and bool(item["profile"]["valid"])
+            and bool(item["token"]["present"])
+            and bool(item["token"]["mode_ok"])
+            and bool(item["token"]["owner_ok"])
+            and bool(item["mcp"]["registered"])
+            and item["mcp"].get("launchable") is True
+            for item in report_clients
+        )
     )
     return {
         "ok": ok,
@@ -991,6 +1030,7 @@ def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
             "consistent": versions_consistent,
         },
         "runtime_root": str(RUNTIME_ROOT),
+        "host_environment": host_env,
         "clients": report_clients,
         "actions": unique_actions,
     }
@@ -1334,8 +1374,7 @@ def activate_clients(
         install_skill(client, CURRENT_LINK)
         if client == "kkagent":
             install_plugin_for_kkagent(CURRENT_LINK)
-        else:
-            reconcile_mcp(client, server, name, ca_cert)
+        reconcile_mcp(client, server, name, ca_cert)
     return written
 
 
@@ -1399,8 +1438,7 @@ def reactivate_clients(
             install_skill(client, CURRENT_LINK)
             if client == "kkagent":
                 install_plugin_for_kkagent(CURRENT_LINK)
-            else:
-                reconcile_mcp(client, resolved_server, name, resolved_ca)
+            reconcile_mcp(client, resolved_server, name, resolved_ca)
     except (SystemExit, Exception) as error:
         # reconcile_mcp reports failures via SystemExit(1); everything else
         # via ordinary exceptions. Both mean "this activation is broken" —
@@ -1433,7 +1471,7 @@ def reactivate_clients(
                     install_skill(client, CURRENT_LINK)
                     if client == "kkagent":
                         install_plugin_for_kkagent(CURRENT_LINK)
-                    elif server_c:
+                    if server_c:
                         name = write_profile(
                             client, server_c, profile_ca or ca_cert, selected
                         )
@@ -1591,6 +1629,53 @@ def _cmd_install_locked(args: argparse.Namespace) -> int:
 # update / rollback (whole-package activation)
 # ---------------------------------------------------------------------------
 
+def prune_old_versions(
+    previous_target: Path | None = None, *, retain: int = 2
+) -> list[str]:
+    """Remove inactive runtime versions while preserving rollback safety.
+
+    The active ``current`` target is always retained.  A successful update
+    also pins its pre-update target, leaving exactly one immediate rollback
+    version.  Symlinks and non-directories are ignored so cleanup can never
+    follow an unexpected entry outside ``versions/``.
+    """
+
+    if retain < 1 or not VERSIONS_DIR.is_dir():
+        return []
+    candidates = [
+        path
+        for path in VERSIONS_DIR.iterdir()
+        if path.is_dir() and not path.is_symlink()
+    ]
+    candidate_paths = {path.resolve(): path for path in candidates}
+    keep: list[Path] = []
+
+    def remember(path: Path | None) -> None:
+        if path is None:
+            return
+        candidate = candidate_paths.get(path.resolve())
+        if candidate is not None and candidate not in keep:
+            keep.append(candidate)
+
+    remember(CURRENT_LINK.resolve() if CURRENT_LINK.exists() else None)
+    remember(previous_target)
+    for candidate in sorted(
+        candidates,
+        key=lambda path: (path.stat().st_mtime_ns, path.name),
+        reverse=True,
+    ):
+        if len(keep) >= retain:
+            break
+        remember(candidate)
+
+    removed: list[str] = []
+    for candidate in candidates:
+        if candidate in keep:
+            continue
+        shutil.rmtree(candidate)
+        removed.append(candidate.name)
+    return sorted(removed)
+
 def cmd_update(args: argparse.Namespace) -> int:
     reason = sandbox_home_reason()
     if reason and os.environ.get("GMS_INSTALL_ALLOW_SANDBOX_HOME") != "1":
@@ -1706,6 +1791,13 @@ def _cmd_update_locked(args: argparse.Namespace) -> int:
         return 1
     if reactivated:
         print(f"Re-activated: {', '.join(reactivated)}")
+    try:
+        removed_versions = prune_old_versions(VERSIONS_DIR / current)
+    except OSError as error:
+        removed_versions = []
+        print(f"Warning: 无法清理旧 runtime 版本: {error}", file=sys.stderr)
+    if removed_versions:
+        print(f"Pruned old runtime versions: {', '.join(removed_versions)}")
     print("Profiles and tokens preserved. Restart agents to pick up the new runtime.")
     print(f"Rollback anytime: gms-agent rollback {current}")
     return 0
@@ -2033,13 +2125,12 @@ def cmd_profile(args: argparse.Namespace) -> int:
     install_skill(profile_client, CURRENT_LINK)
     if profile_client == "kkagent":
         install_plugin_for_kkagent(CURRENT_LINK)
-    else:
-        reconcile_mcp(
-            profile_client,
-            str(result["controller"]),
-            requested_name,
-            str(result["ca_cert"]),
-        )
+    reconcile_mcp(
+        profile_client,
+        str(result["controller"]),
+        requested_name,
+        str(result["ca_cert"]),
+    )
     print(f"Activated profile {requested_name} for {profile_client}")
     return 0
 

@@ -37,7 +37,7 @@ ADB_PROXY_FORBIDDEN_DEVICE_ACTIONS = adb_proxy_forbidden_device_actions()
 
 def _require_machine_reservation(
     request: Request, worker_id: str, devices: list[str]
-) -> None:
+) -> dict:
     """Restrict machine principals to devices inside their run reservation.
 
     A machine capability (ADR 0012) must not widen into "operate any device
@@ -63,6 +63,7 @@ def _require_machine_reservation(
         raise HTTPException(
             403, "machine principal may only operate devices in its own reservation"
         )
+    return reservation
 
 
 @router.post("/devices/actions")

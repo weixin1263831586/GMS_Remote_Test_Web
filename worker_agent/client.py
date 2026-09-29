@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
@@ -48,7 +49,7 @@ class ControllerClient:
         self.connection_generation = int(result.get("connection_generation") or 0)
         return result
 
-    def download(self, path: str, destination: Path) -> None:
+    def download(self, path: str, destination: Path, max_bytes: int | None = None) -> None:
         headers = {"Authorization": f"Bearer {self.config.token}"}
         if self.session_id:
             headers["X-GMS-Worker-Session"] = self.session_id
@@ -56,8 +57,14 @@ class ControllerClient:
         request = urllib.request.Request(
             f"{self.config.controller_url}{path}", headers=headers
         )
+        # 边下边限：半可信 Controller 返回超大响应时在写盘过程中截断，
+        # 避免下载完成后才校验大小导致磁盘先被填满。
+        written = 0
         with urllib.request.urlopen(request, timeout=3600, context=self.ssl_context) as response, destination.open("wb") as output:
             while block := response.read(4 * 1024 * 1024):
+                written += len(block)
+                if max_bytes is not None and written > max_bytes:
+                    raise ValueError(f"download exceeds {max_bytes} bytes limit")
                 output.write(block)
 
     def heartbeat(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -158,13 +165,18 @@ class ControllerClient:
         path,
         chunk_size: int = 4 * 1024 * 1024,
         filename: str = "",
+        source=None,
     ):
         digest = hashlib.sha256()
         size = 0
         count = 0
-        with path.open("rb") as source:
+        source_context = (
+            contextlib.nullcontext(source) if source is not None
+            else path.open("rb")
+        )
+        with source_context as source_handle:
             while True:
-                block = source.read(chunk_size)
+                block = source_handle.read(chunk_size)
                 if not block:
                     break
                 digest.update(block)

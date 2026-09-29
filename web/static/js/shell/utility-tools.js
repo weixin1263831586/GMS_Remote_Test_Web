@@ -84,6 +84,10 @@ let ut_categorizedTools = {};
 let ut_categoryMeta = {};
 let ut_editingCategory = null;
 let ut_editingTool = null;
+let ut_mainlinePollTimer = null;
+let ut_mainlinePollGeneration = 0;
+let ut_gmsUpdatePollTimer = null;
+let ut_gmsUpdatePollGeneration = 0;
 
 // ==================== 常用工具 UI 逻辑 ====================
 // 原内联于 weekly-report.js 尾部的常用工具网格/编辑/同步逻辑，
@@ -591,15 +595,24 @@ async function ut_confirmMainlineKnownIssuesSync(mode) {
     }
 }
 
-async function ut_pollMainlineKnownIssuesSync(button, originalText) {
+async function ut_pollMainlineKnownIssuesSync(button, originalText, generation = null) {
+    if (generation === null) {
+        if (ut_mainlinePollTimer) clearTimeout(ut_mainlinePollTimer);
+        generation = ++ut_mainlinePollGeneration;
+    }
     try {
         const response = await fetch('/api/mainline-known-issues/sync/status');
         const result = await response.json();
+        if (generation !== ut_mainlinePollGeneration) return;
         const status = result.status || {};
         if (status.running) {
-            setTimeout(() => ut_pollMainlineKnownIssuesSync(button, originalText), 3000);
+            ut_mainlinePollTimer = setTimeout(
+                () => ut_pollMainlineKnownIssuesSync(button, originalText, generation),
+                3000
+            );
             return;
         }
+        ut_mainlinePollTimer = null;
         button.disabled = false;
         button.textContent = originalText;
         if (status.error) {
@@ -609,7 +622,6 @@ async function ut_pollMainlineKnownIssuesSync(button, originalText) {
             }
             return;
         }
-        // 显示扫描完成详情
         let duration = '';
         if (status.started_at && status.finished_at) {
             const sec = Math.round((new Date(status.finished_at) - new Date(status.started_at)) / 1000);
@@ -617,11 +629,12 @@ async function ut_pollMainlineKnownIssuesSync(button, originalText) {
         }
         const msg = `Mainline包豁免项扫描完成${duration ? '（' + duration + '）' : ''}`;
         showToast(msg, 'success');
-        // 发送 Windows 系统通知
         if (typeof notifyOperationResult === 'function') {
             notifyOperationResult('Mainline包豁免项扫描完成', duration || '扫描已完成', 'success', 'system');
         }
     } catch (error) {
+        if (generation !== ut_mainlinePollGeneration) return;
+        ut_mainlinePollTimer = null;
         button.disabled = false;
         button.textContent = originalText;
         showToast('扫描状态查询失败: ' + error.message, 'error');
@@ -693,17 +706,30 @@ async function ut_confirmGmsUpdateMonitorSync(mode, sources, syncTitle) {
     }
 }
 
-async function ut_pollGmsUpdateMonitorSync(button, originalText, syncTitle, sources) {
+async function ut_pollGmsUpdateMonitorSync(
+    button, originalText, syncTitle, sources, generation = null, failures = 0
+) {
     syncTitle = syncTitle || 'GMS/CTS更新';
     sources = Array.isArray(sources) ? sources : [];
+    if (generation === null) {
+        if (ut_gmsUpdatePollTimer) clearTimeout(ut_gmsUpdatePollTimer);
+        generation = ++ut_gmsUpdatePollGeneration;
+    }
     try {
         const response = await fetch('/api/gms-update-monitor/sync/status');
         const result = await response.json();
+        if (generation !== ut_gmsUpdatePollGeneration) return;
         const status = (result.data && result.data.status) || {};
         if (status.running) {
-            setTimeout(() => ut_pollGmsUpdateMonitorSync(button, originalText, syncTitle, sources), 3000);
+            ut_gmsUpdatePollTimer = setTimeout(
+                () => ut_pollGmsUpdateMonitorSync(
+                    button, originalText, syncTitle, sources, generation, 0
+                ),
+                3000
+            );
             return;
         }
+        ut_gmsUpdatePollTimer = null;
         button.disabled = false;
         button.textContent = originalText;
         if (status.error) {
@@ -726,7 +752,21 @@ async function ut_pollGmsUpdateMonitorSync(button, originalText, syncTitle, sour
             ut_promptNewSuiteDownloads(sources);
         }
     } catch (error) {
-        setTimeout(() => ut_pollGmsUpdateMonitorSync(button, originalText, syncTitle, sources), 5000);
+        if (generation !== ut_gmsUpdatePollGeneration) return;
+        if (failures >= 5) {
+            ut_gmsUpdatePollTimer = null;
+            button.disabled = false;
+            button.textContent = originalText;
+            showToast('扫描状态查询失败: ' + error.message, 'error');
+            return;
+        }
+        const delay = Math.min(30000, 3000 * (2 ** failures));
+        ut_gmsUpdatePollTimer = setTimeout(
+            () => ut_pollGmsUpdateMonitorSync(
+                button, originalText, syncTitle, sources, generation, failures + 1
+            ),
+            delay
+        );
     }
 }
 

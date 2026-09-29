@@ -97,11 +97,29 @@ def test_wifi_action_passes_credentials_as_argv_without_shell_interpolation():
             "ssid": "lab wifi; touch /tmp/no", "password": "p a$s",
         })
     assert result["summary"]["success"] == 1
+    # `adb shell` 将参数拼成一行交给设备端 shell 二次解析，SSID/密码
+    # 必须以单引号包裹后的整串下发（见 device_actions.wifi 分支）。
     assert run.call_args_list[1].args[0] == [
-        "adb", "-s", "ABC", "shell", "cmd", "wifi", "connect-network",
-        "lab wifi; touch /tmp/no", "wpa2", "p a$s",
+        "adb", "-s", "ABC", "shell",
+        "cmd wifi connect-network 'lab wifi; touch /tmp/no' wpa2 'p a$s'",
     ]
     assert all(call.kwargs.get("shell") is not True for call in run.call_args_list)
+
+
+def test_wifi_action_rejects_control_characters_before_device_shell():
+    probe = [{"serial": "ABC", "state": "available"}]
+    with patch("worker_agent.device_actions.probe_devices", return_value=probe), patch(
+        "worker_agent.device_actions.subprocess.run"
+    ) as run:
+        try:
+            execute_device_action("wifi", ["worker-246:ABC"], {
+                "ssid": "lab\nwifi", "password": "x",
+            })
+        except ValueError as exc:
+            assert "control characters" in str(exc)
+        else:
+            raise AssertionError("expected control character rejection")
+    run.assert_not_called()
 
 
 def test_scrcpy_action_is_scoped_to_serial_and_starts_detached_process():
@@ -363,6 +381,89 @@ def test_suite_extraction_rejects_special_tar_members(tmp_path):
         assert "unsafe path or link" in str(exc)
     else:
         raise AssertionError("expected unsafe tar member rejection")
+
+
+def test_suite_extraction_rejects_member_and_expanded_size_limits(tmp_path):
+    root = tmp_path / "suites"
+    root.mkdir()
+    archive = root / "limited.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("one.txt", "1234")
+        bundle.writestr("two.txt", "5")
+    config = WorkerConfig(
+        worker_id="w",
+        controller_url="https://controller",
+        token="t",
+        suite_roots=[root],
+        data_root=tmp_path / "data",
+    )
+
+    with patch.dict(
+        "os.environ", {"GMS_WORKER_SUITE_EXTRACT_MAX_MEMBERS": "1"}
+    ):
+        try:
+            execute_suite_action(config, {
+                "action": "extract",
+                "archive_path": str(archive),
+                "target_dir_name": "too-many",
+            })
+        except ValueError as exc:
+            assert "too many members" in str(exc)
+        else:
+            raise AssertionError("expected archive member limit rejection")
+
+    with patch.dict(
+        "os.environ", {"GMS_WORKER_SUITE_EXTRACT_MAX_BYTES": "4"}
+    ):
+        try:
+            execute_suite_action(config, {
+                "action": "extract",
+                "archive_path": str(archive),
+                "target_dir_name": "too-large",
+            })
+        except ValueError as exc:
+            assert "configured size limit" in str(exc)
+        else:
+            raise AssertionError("expected archive expanded-size rejection")
+
+    assert not (root / "too-many").exists()
+    assert not (root / "too-large").exists()
+    assert not list(root.glob(".*.extract-*"))
+
+
+def test_suite_extraction_removes_partial_temporary_directory(tmp_path):
+    root = tmp_path / "suites"
+    root.mkdir()
+    archive = root / "partial.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("android-cts/tools/cts-tradefed", "probe")
+    config = WorkerConfig(
+        worker_id="w",
+        controller_url="https://controller",
+        token="t",
+        suite_roots=[root],
+        data_root=tmp_path / "data",
+    )
+
+    def fail_after_partial_extract(_bundle, destination, *args, **kwargs):
+        destination.mkdir(parents=True)
+        (destination / "partial.txt").write_text("partial", encoding="utf-8")
+        raise OSError("disk full")
+
+    with patch.object(zipfile.ZipFile, "extractall", new=fail_after_partial_extract):
+        try:
+            execute_suite_action(config, {
+                "action": "extract",
+                "archive_path": str(archive),
+                "target_dir_name": "partial",
+            })
+        except OSError as exc:
+            assert "disk full" in str(exc)
+        else:
+            raise AssertionError("expected extraction failure")
+
+    assert not (root / "partial").exists()
+    assert not list(root.glob(".partial.extract-*"))
 
 
 def test_prepare_suite_directory_export_creates_zip(tmp_path):

@@ -1,5 +1,10 @@
 """Persistence facade for the Redmine feature."""
 
+from .org_chart import (
+    load_redmine_user_map_for_owner,
+    load_user_map_payload_for_owner,
+    save_user_map_payload_for_owner,
+)
 from .repository_queries import RepositoryQueryMixin
 from .repository_schema import RepositorySchemaMixin
 from .repository_storage import RepositoryStorageMixin
@@ -15,8 +20,6 @@ from .users import (
     display_names_from_mapping,
     find_user_mapping,
     find_user_mapping_for_names,
-    load_redmine_user_map_for_owner,
-    load_user_map_payload_for_owner,
     name_keys,
     norm_name,
     owner_attachments_dir,
@@ -26,7 +29,6 @@ from .users import (
     owner_runtime_config_path,
     owner_user_map_path,
     refresh_assignee_issue_snapshots,
-    save_user_map_payload_for_owner,
 )
 
 

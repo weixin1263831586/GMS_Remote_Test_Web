@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import threading
@@ -21,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from foundation.native_tools import resolve_native_tool
+from foundation.security import has_control_chars, quote_device_shell_arg
 from foundation.transport_contract import execute_external_transport
 
 from .config import WorkerConfig
@@ -455,18 +457,25 @@ def execute_device_action(action: str, device_ids: list[str], options: dict[str,
         password = str(options.get("password") or "")
         if not ssid:
             raise ValueError("wifi action requires an SSID")
+        if has_control_chars(ssid) or has_control_chars(password):
+            raise ValueError("wifi ssid/password must not contain control characters")
         results = []
         for serial in serials:
             enabled = subprocess.run(
                 ["adb", "-s", serial, "shell", "cmd", "wifi", "set-wifi-enabled", "enabled"],
                 capture_output=True, text=True, timeout=20, check=False,
             )
-            argv = ["adb", "-s", serial, "shell", "cmd", "wifi", "connect-network", ssid]
+            # `adb shell` 会把后续参数拼成一行交给设备端 shell 二次解析，
+            # 因此对 SSID/密码逐个单引号包裹，杜绝元字符注入设备 shell。
+            remote_cmd = "cmd wifi connect-network " + quote_device_shell_arg(ssid)
             if password:
-                argv.extend(["wpa2", password])
+                remote_cmd += " wpa2 " + quote_device_shell_arg(password)
             else:
-                argv.append("open")
-            connected = subprocess.run(argv, capture_output=True, text=True, timeout=30, check=False)
+                remote_cmd += " open"
+            connected = subprocess.run(
+                ["adb", "-s", serial, "shell", remote_cmd],
+                capture_output=True, text=True, timeout=30, check=False,
+            )
             results.append({"device": serial,
                 "success": enabled.returncode == 0 and connected.returncode == 0,
                 "output": "\n".join(filter(None, [enabled.stdout, enabled.stderr,
@@ -548,7 +557,10 @@ def _run_with_output_stream(
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                process.kill()
+                # Popen 用 start_new_session=True 建立独立进程组；超时必须
+                # 杀整个进程组，否则 fastboot/升级工具等孙进程残留并继续
+                # 占用 stdout 管道与 USB 设备。
+                os.killpg(process.pid, signal.SIGKILL)
                 raise subprocess.TimeoutExpired(argv, timeout)
             ready, _f, _e = select.select([fd], [], [], min(remaining, 1.0))
             if not ready:
@@ -582,7 +594,7 @@ def _run_with_output_stream(
         process.wait(timeout=30)
     finally:
         if process.poll() is None:
-            process.kill()
+            os.killpg(process.pid, signal.SIGKILL)
             process.wait(timeout=10)
     return {"stdout": "\n".join(lines), "stderr": "",
             "returncode": process.returncode}

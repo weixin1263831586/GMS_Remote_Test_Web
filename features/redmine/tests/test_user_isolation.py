@@ -9,11 +9,11 @@ from unittest.mock import patch
 from cryptography.fernet import Fernet
 
 from features.redmine.config import RedmineConfig
-from features.redmine.repository import RedmineAgentDB
-from features.redmine.users import (
+from features.redmine.org_chart import (
     load_redmine_user_map_for_owner,
     load_user_map_payload_for_owner,
 )
+from features.redmine.repository import RedmineAgentDB
 
 
 def _issue(issue_id: int, subject: str) -> dict:

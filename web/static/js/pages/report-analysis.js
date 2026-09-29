@@ -442,12 +442,12 @@ async function handleRedmineAttachment(url, context = {}) {
 }
 
 function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill, context = {}) {
-    window._pendingRedmineDropContext = context || {};
-    const escapedUrl = escapeJsAttr(url);
-    // 显示 Redmine 凭证输入对话框
-    const modal = document.createElement('div');
-    modal.id = 'redmine-auth-modal';
-    modal.className = 'modal show';
+    window._pendingRedmineDropContext=context||{};
+    const escapedUrl=escapeJsAttr(url);
+    ModalManager.unregisterDynamic('redmine-auth-modal');
+    const modal=document.createElement('div');
+    modal.id='redmine-auth-modal';
+    modal.className = 'modal';
     modal.style.cssText = 'z-index: 10000;';
     modal.innerHTML = `
         <div class="modal-content modal-xs">

@@ -233,7 +233,12 @@ async def create_remote_report_bundle(
             )
             errors.append(f"{kind}: export timed out")
     if not exports:
-        raise RuntimeError("; ".join(errors) or "Report results and logs are unavailable")
+        message = "; ".join(errors) or "Report results and logs are unavailable"
+        # 全部为超时时抛 TimeoutError：files_api 据此映射 504（可重试），
+        # 与 Worker 离线等 502 故障区分开。
+        if errors and all("timed out" in error for error in errors):
+            raise TimeoutError(message)
+        raise RuntimeError(message)
     bundle = await asyncio.to_thread(merge_remote_report_exports, exports)
     # Clean up the individual Worker transfer archives now that they have been
     # merged into the final bundle.  Leaving them on disk leaks a temp zip per

@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from foundation.config import settings
 from foundation.runtime_settings import is_production_environment
@@ -161,8 +163,18 @@ def derive_application_key(purpose: str) -> bytes:
     Public API for composition roots: callers must not know how the master
     key is loaded (env injection vs key file), only that keys derived here
     survive restarts and stay namespaced per ``purpose``. Use a short ASCII
-    purpose label, e.g. ``derive_application_key(b"gms-sdk-source-v1:")``.
+    purpose label, e.g. ``derive_application_key("gms-sdk-source-v1")``.
+
+    HKDF-SHA256 output is bound to ``purpose`` via the ``info`` field, so a
+    derived key reveals nothing about the master key (a previous concat
+    implementation leaked it: stripping the known prefix restored the key
+    that also protects ``configs/secrets``).
     """
 
     purpose_bytes = purpose.encode("ascii") if isinstance(purpose, str) else bytes(purpose)
-    return purpose_bytes + _load_key()
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=purpose_bytes,
+    ).derive(_load_key())

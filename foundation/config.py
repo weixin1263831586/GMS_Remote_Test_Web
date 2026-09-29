@@ -685,6 +685,43 @@ class ConfigManager(ConfigPersistenceMixin):
                 preserve_redmine_auth=False,
             )
 
+    def delete_client_ssh_credential(self, device_host: str) -> bool:
+        """Delete one client SSH credential (read-modify-write in one lock).
+
+        过滤+落盘必须共用 ``_runtime_write_lock``：路由层“锁外读 → 锁内写”
+        的两步窗口曾可与并发 upsert 交错，用旧列表覆盖刚保存的新凭据。
+        """
+        device_host = str(device_host or '').strip()
+        username, hostname = self._split_device_host(device_host)
+        if not username or not hostname:
+            return False
+
+        with self._runtime_write_lock:
+            runtime = self._load_runtime_config() or {}
+            credentials = runtime.get('client_ssh_credentials') or []
+            if not isinstance(credentials, list):
+                credentials = []
+
+            remaining = []
+            for cred in credentials:
+                if not isinstance(cred, dict):
+                    continue
+                cred_device_host = str(cred.get('device_host') or '').strip()
+                cred_username = str(cred.get('username') or '').strip()
+                cred_host = str(cred.get('host') or cred.get('hostname') or '').strip()
+                is_same = (
+                    (cred_device_host and cred_device_host == device_host)
+                    or (cred_username == username and cred_host == hostname)
+                )
+                if not is_same:
+                    remaining.append(cred)
+
+            runtime['client_ssh_credentials'] = remaining
+            return self._write_runtime_config_file(
+                runtime,
+                preserve_redmine_auth=False,
+            )
+
     def save_redmine_credentials(self, username: str, password: str) -> bool:
         """Encrypt Redmine credentials with the deployment-managed key."""
         try:

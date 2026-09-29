@@ -18,7 +18,11 @@ def test_client_prefers_api_key_over_password_credentials():
             password="password",
             api_key="api-key",
         )
-    redmine.assert_called_once_with("https://redmine.example", key="api-key")
+    # requests={"timeout": 30}：同步 python-redmine 跑在 to_thread，
+    # 必须带显式超时（防 Redmine 卡死占死 worker 线程）。
+    redmine.assert_called_once_with(
+        "https://redmine.example", key="api-key", requests={"timeout": 30},
+    )
 
 
 def test_agent_creates_client_when_only_api_key_is_configured():

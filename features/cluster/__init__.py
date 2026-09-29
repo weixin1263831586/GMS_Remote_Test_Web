@@ -5,6 +5,7 @@ from foundation import cluster_port
 from .api import configure_cluster, device_action, page_router, router
 from .api import service as get_cluster_service
 from .config import ClusterConfig
+from .execution_spec import build_argv_from_spec
 from .job_control_api import cancel_job
 from .local_bridge import start_local_bridge, stop_local_bridge
 from .models import ClusterDeviceAction
@@ -83,6 +84,7 @@ __all__ = [
     "ClusterRepository",
     "ClusterService",
     "authenticate_worker",
+    "build_argv_from_spec",
     "cancel_job",
     "configure_cluster",
     "device_action",

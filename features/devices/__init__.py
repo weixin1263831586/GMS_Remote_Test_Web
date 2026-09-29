@@ -14,7 +14,6 @@ from .models import (
     WifiConnectRequest,
 )
 from .monitor import get_usb_monitor
-from .service import DeviceService
 from .support import (
     DeviceSSHConnection,
     broadcast_device_lock_update,
@@ -40,6 +39,10 @@ _LAZY_API_EXPORTS = {
     'bind_usbip_busid_via_ssh': '.usbip_flash',
     'ensure_usbip_auto_bind_policies': '.usbip_flash',
     'incompatible_test_devices': '.transport_policy',
+    'pause_usbip_reconnect': '.reconnect',
+    'resume_usbip_reconnect': '.reconnect',
+    'schedule_usbip_reconnect': '.reconnect',
+    'usbip_source_host_for_device': '.reconnect',
     'local_proxy_secret': '.adb_proxy_security',
     'pair_code_for_worker': '.adb_proxy_security',
     'reconcile_cluster_usbip_command': '.integrations_api',
@@ -57,7 +60,9 @@ _LAZY_API_EXPORTS = {
     'query_usbipd_busid_instance_ids': '.usbip_identity',
     'query_usbipd_device_states': '.usbip_identity',
     'USBIP_PORT_COMMAND': '.usbip_transaction',
+    'USBIP_DETACH_COMMAND_TEMPLATE': '.usbip_transaction',
     'parse_usbip_port_entries': '.usbip_transaction',
+    'resolve_usbip_command': '.usbip_transaction',
     'validate_pair_grant': '.adb_proxy_security',
 }
 
@@ -80,6 +85,7 @@ def __getattr__(name: str):
 
 __all__ = [
     "ROCKUSB_SYSFS_PROBE_COMMAND",
+    "USBIP_DETACH_COMMAND_TEMPLATE",
     "USBIP_PORT_COMMAND",
     "ADBForwardStartRequest",
     "ADBForwardStopRequest",
@@ -88,7 +94,6 @@ __all__ = [
     "DeviceLockManager",
     "DeviceLockRequest",
     "DeviceSSHConnection",
-    "DeviceService",
     "DeviceShellRequest",
     "DeviceUtils",
     "USBIPDisconnectRequest",
@@ -122,6 +127,7 @@ __all__ = [
     "reconcile_cluster_usbip_heartbeat",
     "record_usbip_source_os",
     "release_device_locks",
+    "resolve_usbip_command",
     "resolve_usbip_flash_routes",
     "rockusb_loader_serials",
     "rockusb_loader_vid_pids",

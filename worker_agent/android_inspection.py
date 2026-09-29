@@ -375,6 +375,9 @@ def execute_inspection_action(action: str, serial: str, options: dict[str, Any])
     raise ValueError(f"unsupported inspection action: {action}")
 
 
+_SAFE_EXPORT_PATH_RE = re.compile(r"\A[A-Za-z0-9._/+-]+\Z")
+
+
 def validate_export_path(path: str) -> str:
     value = str(path or "").strip()
     pure = PurePosixPath(value)
@@ -383,7 +386,11 @@ def validate_export_path(path: str) -> str:
         or pure.suffix.lower() not in {".apk", ".jar"}
         or ".." in pure.parts
         or len(value) > 1024
-        or any(ord(char) < 32 for char in value)
+        # `adb exec-out cat <path>` joins its argv into one line that the
+        # device shell re-parses, so shell metacharacters (`;`, `|`, `$()`,
+        # backticks, spaces, globs) must be rejected outright — the explicit
+        # control-character check below is subsumed by this allow-list.
+        or _SAFE_EXPORT_PATH_RE.match(value) is None
     ):
         raise ValueError("device export path is not an allow-listed APK/JAR path")
     return value

@@ -1095,9 +1095,12 @@ async def get_weekly_report_ai_summary(
 
     system_prompt = "你是资深 Android 系统工程师，擅长把零散的工单、代码提交、移植任务与 GMS 认证测试结果归纳成清晰的中文周报。"
     # 优先使用本地模型 glm_local；若未启用则回退到通用主 provider
-    result = analyzer.generate(
-        user_prompt=user_prompt, system_prompt=system_prompt, max_tokens=2500,
-        preferred_provider="glm_local"
+    result = await asyncio.to_thread(
+        analyzer.generate,
+        user_prompt=user_prompt,
+        system_prompt=system_prompt,
+        max_tokens=2500,
+        preferred_provider="glm_local",
     )
     if not result.get("success"):
         return error_response(result.get("error") or "AI 生成失败", status_code=502)

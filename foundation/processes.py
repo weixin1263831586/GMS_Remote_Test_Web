@@ -8,6 +8,7 @@ import subprocess
 import threading
 
 from foundation.command_result import CommandResult
+from foundation.redaction import redact_sensitive_text
 
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ def run_local_command(
                 process.communicate(timeout=1)
         return CommandResult(stdout="", stderr="Command timed out", code=-1)
     except Exception as exc:
-        return CommandResult(stdout="", stderr=str(exc), code=-1)
+        return CommandResult(stdout="", stderr=redact_sensitive_text(exc), code=-1)
 
 
 def run_local_shell_command(command: str, timeout: int = 30) -> CommandResult:
@@ -95,7 +96,7 @@ def run_local_shell_command(command: str, timeout: int = 30) -> CommandResult:
                 process.communicate(timeout=1)
         return CommandResult(stdout="", stderr="Command timed out", code=-1)
     except Exception as exc:
-        return CommandResult(stdout="", stderr=str(exc), code=-1)
+        return CommandResult(stdout="", stderr=redact_sensitive_text(exc), code=-1)
 
 
 def start_detached_process(

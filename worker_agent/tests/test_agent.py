@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import math
 import os
+import signal
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -692,11 +694,12 @@ def test_firmware_failure_cleans_worker_staging_directory(tmp_path):
     agent = WorkerAgent(worker_config(tmp_path))
     agent.client = MagicMock()
     agent.client.download.side_effect = RuntimeError("download failed")
+    stage_id = "fw-" + "a" * 32
     command = {
         "id": "cmd-firmware",
         "command_type": "flash_firmware",
         "payload": {
-            "stage_id": "fw-123",
+            "stage_id": stage_id,
             "filename": "update.img",
             "size_bytes": 10,
             "sha256": "0" * 64,
@@ -706,16 +709,40 @@ def test_firmware_failure_cleans_worker_staging_directory(tmp_path):
 
     agent.run_firmware_flash(command)
 
-    assert not (agent.config.data_root / "firmware" / "fw-123").exists()
+    assert not (agent.config.data_root / "firmware" / stage_id).exists()
     agent.client.ack.assert_called_once_with(
         "cmd-firmware", "failed", error="download failed"
     )
 
 
+def test_firmware_flash_rejects_path_traversal_stage_id(tmp_path):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+    command = {
+        "id": "cmd-stage-traversal",
+        "command_type": "flash_firmware",
+        "payload": {
+            "stage_id": "../../etc",
+            "filename": "update.img",
+            "size_bytes": 1,
+            "sha256": "0" * 64,
+            "devices": [],
+        },
+    }
+
+    agent.run_firmware_flash(command)
+
+    agent.client.download.assert_not_called()
+    saved = agent.runtime.previous_command("cmd-stage-traversal")
+    assert saved["status"] == "failed"
+    assert "invalid firmware staging id" in saved["error"]
+
+
 def test_file_transfer_uploads_worker_local_file(tmp_path):
     agent = WorkerAgent(worker_config(tmp_path))
     agent.client = MagicMock()
-    source = tmp_path / "images" / "system.img"
+    # 只允许 Worker 数据根/套件根下的文件外传，用例沿用合法来源。
+    source = tmp_path / "data" / "images" / "system.img"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"system-image")
 
@@ -726,8 +753,28 @@ def test_file_transfer_uploads_worker_local_file(tmp_path):
 
     agent.client.upload_transfer.assert_called_once()
     assert agent.client.upload_transfer.call_args.args[0] == "transfer-1"
+    assert agent.client.upload_transfer.call_args.args[1] == source.resolve()
+    assert agent.client.upload_transfer.call_args.kwargs["source"].closed
     saved = agent.runtime.previous_command("cmd-transfer")
     assert saved["status"] == "completed"
+
+
+def test_file_transfer_rejects_paths_outside_allowed_roots(tmp_path):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+    outside = tmp_path / "secrets" / "worker.token"
+    outside.parent.mkdir(parents=True)
+    outside.write_text("token")
+
+    agent.run_file_transfer({
+        "id": "cmd-transfer-escape",
+        "payload": {"transfer_id": "transfer-2", "source_path": str(outside)},
+    })
+
+    agent.client.upload_transfer.assert_not_called()
+    saved = agent.runtime.previous_command("cmd-transfer-escape")
+    assert saved["status"] == "failed"
+    assert "outside Worker-allowed roots" in saved["error"]
 
 
 def test_firmware_flash_local_sources_copy_images_into_staging(tmp_path):
@@ -780,6 +827,124 @@ def test_start_process_closes_parent_log_descriptors(tmp_path):
 
     assert popen.call_args.kwargs["stdout"].closed is True
     assert popen.call_args.kwargs["stderr"].closed is True
+
+
+def test_start_process_kills_child_when_job_persistence_fails(tmp_path):
+    config = worker_config(tmp_path)
+    executable = config.suite_roots[0] / "android-cts" / "tools" / "cts-tradefed"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    runtime = WorkerRuntime(config)
+    process = MagicMock(pid=1234)
+    process.wait.return_value = -signal.SIGKILL
+
+    with patch(
+        "worker_agent.runtime.subprocess.Popen", return_value=process
+    ), patch(
+        "worker_agent.runtime.os.getpgid", return_value=1234
+    ), patch(
+        "worker_agent.runtime.os.killpg"
+    ) as killpg, patch.object(
+        runtime, "connect", side_effect=RuntimeError("database unavailable")
+    ), pytest.raises(RuntimeError, match="database unavailable"):
+        runtime.start_process({
+            "id": "cmd-process",
+            "job_id": "job-1",
+            "attempt_id": "attempt-1",
+            "payload": {"argv": [str(executable), "list", "devices"]},
+        })
+
+    killpg.assert_called_once_with(1234, signal.SIGKILL)
+    process.wait.assert_called_once_with(timeout=5)
+    assert "wj-cmd-process" not in runtime._processes
+
+
+def test_stop_process_escalates_and_persists_cancellation_after_exit(tmp_path):
+    runtime = WorkerRuntime(worker_config(tmp_path))
+    work_dir = runtime.config.data_root / "jobs" / "job-1" / "attempt-1"
+    work_dir.mkdir(parents=True)
+    with runtime.connect() as conn:
+        conn.execute(
+            """INSERT INTO jobs
+               (worker_job_id,job_id,attempt_id,pid,pgid,status,devices_json,
+                work_dir,exit_code,error,command_id)
+               VALUES('wj-1','job-1','attempt-1',1234,1234,'running','[]',?,NULL,'','cmd-1')""",
+            (str(work_dir),),
+        )
+    process = MagicMock(pid=1234)
+    process.wait.side_effect = [
+        subprocess.TimeoutExpired("worker", 0.1),
+        -signal.SIGKILL,
+    ]
+    runtime._processes["wj-1"] = process
+
+    with patch.dict(
+        "os.environ",
+        {
+            "GMS_WORKER_STOP_GRACE_SECONDS": "0.1",
+            "GMS_WORKER_KILL_WAIT_SECONDS": "0.1",
+        },
+    ), patch("worker_agent.runtime.os.killpg") as killpg:
+        result = runtime.stop_process("wj-1")
+
+    assert result == {"worker_job_id": "wj-1", "status": "cancelled"}
+    assert killpg.call_args_list[0].args == (1234, signal.SIGINT)
+    assert killpg.call_args_list[1].args == (1234, signal.SIGKILL)
+    assert process.wait.call_count == 2
+    with runtime.connect() as conn:
+        row = conn.execute(
+            "SELECT status,exit_code FROM jobs WHERE worker_job_id='wj-1'"
+        ).fetchone()
+    assert row["status"] == "cancelled"
+    assert row["exit_code"] == -signal.SIGKILL
+    assert "wj-1" not in runtime._processes
+
+
+def test_recoverable_jobs_finalizes_missing_stopping_process(tmp_path):
+    runtime = WorkerRuntime(worker_config(tmp_path))
+    work_dir = runtime.config.data_root / "jobs" / "job-1" / "attempt-1"
+    work_dir.mkdir(parents=True)
+    with runtime.connect() as conn:
+        conn.execute(
+            """INSERT INTO jobs
+               (worker_job_id,job_id,attempt_id,pid,pgid,status,devices_json,
+                work_dir,exit_code,error,command_id)
+               VALUES('wj-stop','job-1','attempt-1',1234,1234,'stopping',
+                      '[]',?,NULL,'','cmd-stop')""",
+            (str(work_dir),),
+        )
+
+    with patch.object(runtime, "pid_alive", return_value=False):
+        assert runtime.recoverable_jobs() == []
+
+    with runtime.connect() as conn:
+        row = conn.execute(
+            "SELECT status,error FROM jobs WHERE worker_job_id='wj-stop'"
+        ).fetchone()
+    assert row["status"] == "cancelled"
+    assert "restarting" in row["error"]
+
+
+def test_finish_recovered_stopping_job_stays_cancelled(tmp_path):
+    runtime = WorkerRuntime(worker_config(tmp_path))
+    work_dir = runtime.config.data_root / "jobs" / "job-1" / "attempt-1"
+    work_dir.mkdir(parents=True)
+    (work_dir / "exit_code").write_text("0", encoding="utf-8")
+    with runtime.connect() as conn:
+        conn.execute(
+            """INSERT INTO jobs
+               (worker_job_id,job_id,attempt_id,pid,pgid,status,devices_json,
+                work_dir,exit_code,error,command_id)
+               VALUES('wj-stop','job-1','attempt-1',1234,1234,'stopping',
+                      '[]',?,NULL,'','cmd-stop')""",
+            (str(work_dir),),
+        )
+
+    recovered = runtime.recoverable_jobs()
+    assert [job["worker_job_id"] for job in recovered] == ["wj-stop"]
+    result = runtime.finish_recovered_job("wj-stop")
+
+    assert result["status"] == "cancelled"
 
 
 def test_artifact_upload_uses_resumable_bounded_chunks(tmp_path):

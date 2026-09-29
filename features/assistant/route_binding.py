@@ -48,9 +48,9 @@ def get_model_by_tool() -> dict[str, type]:
         )
         from features.firmware import SNBurnRequest
 
-        # features.knowledge 的公共面不含请求模型;经延迟导入引用其 API
-        # 模块(跨 feature 深层内部 import 会被依赖门禁拦截)。
-        from features.knowledge import external_api as _knowledge_external_api
+        # features.knowledge 公共面经 __getattr__ 惰性导出请求模型，
+        # 不再深引其路由模块内部。
+        from features.knowledge import ExternalSearchRequest as _ExternalSearchRequest
         from features.reports import ReportDiagnosisRequest
         from features.system import VNCStartRequest, VPNConnectRequest
         from features.test_execution import (
@@ -88,7 +88,7 @@ def get_model_by_tool() -> dict[str, type]:
             "burn_serial": SNBurnRequest,
             # knowledge external search: 请求体经 ExternalSearchRequest 建模,
             # android_api_level 的范围校验(1-1000)在此生效。
-            "android_internals_search": _knowledge_external_api.ExternalSearchRequest,
+            "android_internals_search": _ExternalSearchRequest,
         }
     return _MODEL_BY_TOOL
 

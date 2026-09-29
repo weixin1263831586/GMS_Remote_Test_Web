@@ -5,8 +5,7 @@ import os
 import re
 from typing import Any
 
-from features.cluster import get_cluster_service
-from features.cluster.execution_spec import build_argv_from_spec
+from features.cluster import build_argv_from_spec, get_cluster_service
 from foundation.responses import error_response, success_response
 
 

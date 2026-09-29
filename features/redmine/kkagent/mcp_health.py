@@ -50,9 +50,10 @@ def _repair_hint(profile: str) -> str:
         f" --profile {profile}" if profile else ""
     )
     return (
-        f"修复：先在仓库内运行 python tools/scripts/agent/sync_package.py . 同步插件"
-        f" payload，再执行 {install}；详情见 gms-agent doctor --client"
-        " kkagent --json。"
+        "修复：先执行 gms-agent update，再执行 "
+        f"{install} 重新绑定 current runtime；仓库开发环境还需运行 "
+        "python tools/scripts/agent/sync_package.py . 同步生成包；详情见 "
+        "gms-agent doctor --client kkagent --json。"
     )
 
 
@@ -106,14 +107,14 @@ def parse_doctor_payload(stdout: bytes) -> tuple[bool, str]:
     mcp = client.get("mcp") if isinstance(client.get("mcp"), dict) else {}
     if mcp.get("registered") is not True:
         problems.append("gms MCP server 未注册到 kkagent 的 config.toml")
-    elif mcp.get("launchable") is False:
+    elif mcp.get("launchable") is not True:
         # #654649 nightly 复盘：config.toml 注册块残留但插件 payload 被清空
         # 时，doctor 的静态注册检查误报 healthy，kkagent 会话内 gms MCP
         # server 起不来，整批晨报分析以 evidence_gate_failed 收场。新版
         # doctor 会检查注册指向的 mcp_launcher.py 是否真实存在。
         launcher = str(mcp.get("launcher_path") or "").strip()
         problems.append(
-            "gms MCP 启动脚本缺失（插件 payload 未安装或被清空）："
+            "gms MCP 启动脚本缺失或 doctor 版本过旧，无法确认可启动性："
             + (launcher or "已注册的 mcp_launcher.py")
         )
     if problems:

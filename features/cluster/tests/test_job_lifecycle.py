@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -141,6 +142,48 @@ class ClusterJobLifecycleTests(unittest.TestCase):
             cluster_api.cluster_service = previous
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["command"]["payload"]["worker_job_id"], f"wj-{job['id']}")
+
+    def test_agent_cancel_requires_tests_cancel_scope(self):
+        self.register()
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1", "running_jobs": [], "suites": [],
+            "devices": [{"serial": "ABC", "state": "available"}],
+        })
+        job = self.repo.create_job_with_leases({
+            "worker_id": "worker-246",
+            "owner_id": "tester",
+            "devices": ["worker-246:ABC"],
+            "suite_key": "CTS:17_r1",
+        })
+        previous = cluster_api.cluster_service
+        cluster_api.cluster_service = ClusterService(self.repo)
+        try:
+            app = FastAPI()
+
+            @app.middleware("http")
+            async def identify_agent(request, call_next):
+                request.state.current_user = CurrentUser(
+                    id="agent:token-1",
+                    username="agent:token-1",
+                    role="agent_service",
+                    extra_permissions=frozenset({"tests.execute"}),
+                    resource_owner_id="tester",
+                )
+                request.state.auth_method = "agent_token"
+                return await call_next(request)
+
+            app.include_router(cluster_api.router)
+            with patch.dict(
+                "os.environ", {"GMS_AUTH_REQUIRED": "true"}
+            ), TestClient(app) as client:
+                response = client.post(
+                    f"/api/cluster/jobs/{job['id']}/cancel"
+                )
+        finally:
+            cluster_api.cluster_service = previous
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.repo.get_job(job["id"])["status"], "assigned")
 
     def test_running_attempt_reconciles_orphaned_lease_after_worker_returns(self):
         self.register()

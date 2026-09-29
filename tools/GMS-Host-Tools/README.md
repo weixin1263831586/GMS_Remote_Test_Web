@@ -23,7 +23,7 @@ file at deployment time through `GMS_GTS_CREDENTIAL_FILE`; the installer copies
 it to `${SOFTWARE_ROOT}/gts-rockchip.json` with mode 0600 and `env.sh` exposes
 it as `APE_API_KEY`. Python remains a target-host system dependency.
 
-Configure the controller through `configs/runtime.json` or its service
+Configure the controller through `configs/local/environment.json` or its service
 environment before deploying/reconfiguring a Worker. The example values are
 optional overrides for an access-controlled mirror; leave them empty to use
 the pinned defaults:

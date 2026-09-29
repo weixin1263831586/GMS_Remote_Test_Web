@@ -26,7 +26,7 @@ from typing import Any
 from foundation.config import settings
 from foundation.config_paths import _prefer_existing, config_root
 
-from .users import _flatten_departments, owner_user_map_path
+from .users import owner_user_map_path
 
 
 __all__ = [
@@ -34,10 +34,13 @@ __all__ = [
     "effective_user_map",
     "get_self_binding",
     "load_org_payload",
+    "load_redmine_user_map_for_owner",
+    "load_user_map_payload_for_owner",
     "load_user_overlay",
     "org_chart_is_legacy_path",
     "org_chart_path",
     "save_org_payload",
+    "save_user_map_payload_for_owner",
     "save_user_overlay",
     "set_member_aliases",
     "set_self_binding",
@@ -109,6 +112,25 @@ def save_user_overlay(owner_id: str, overlay: dict[str, Any]) -> None:
         json.dumps(overlay, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _flatten_departments(payload: Any) -> list[dict[str, Any]]:
+    """Return department member rows from the current departments user-map."""
+    if not isinstance(payload, dict):
+        return []
+    result: list[dict[str, Any]] = []
+    for dept in payload.get("departments") or []:
+        if not isinstance(dept, dict):
+            continue
+        dept_id = str(dept.get("department_id") or "").strip()
+        dept_name = str(dept.get("department") or "").strip()
+        for member in dept.get("members") or []:
+            if isinstance(member, dict) and member.get("id"):
+                flat = dict(member)
+                flat.setdefault("department_id", dept_id)
+                flat.setdefault("department", dept_name)
+                result.append(flat)
+    return result
+
+
 def _overlay_aliases(overlay: dict[str, Any], member_id: Any) -> list[str]:
     raw = (overlay.get("aliases") or {}).get(str(member_id)) or []
     if not isinstance(raw, list):
@@ -134,6 +156,37 @@ def effective_user_map(owner_id: str) -> list[dict[str, Any]]:
             [*(member.get("aliases") or []), *extra]))
         member["aliases"] = merged
     return members
+
+
+def load_redmine_user_map_for_owner(owner_id: str) -> list[dict[str, Any]]:
+    # 方案 2：全局组织架构（共享）+ 个人 overlay 别名合并；此函数是
+    # 全部读消费方（statistics/dashboard/api/daily-brief）的统一入口。
+    return effective_user_map(owner_id)
+
+
+def load_user_map_payload_for_owner(owner_id: str) -> dict[str, Any]:
+    """兼容保留：返回「该 owner 可见的」合并 payload（组织架构 + overlay）。
+
+    组织架构是共享只读的（管理员经 users_api 写全局文件）；写个人数据
+    走 :func:`save_user_map_payload_for_owner`（overlay 语义）。
+    """
+    payload = load_org_payload()
+    payload["overlay"] = load_user_overlay(owner_id)
+    return payload
+
+
+def save_user_map_payload_for_owner(owner_id: str, payload: dict[str, Any]) -> None:
+    """写 per-owner overlay（自我绑定 + 个人别名）。
+
+    传入 payload 里的 ``departments`` 会被剥离——组织架构不再按 owner
+    写入（该写路径收归管理员的全局端点）。
+    """
+    merged = load_user_overlay(owner_id)
+    merged.update({
+        key: value for key, value in (payload or {}).items()
+        if key != "departments"
+    })
+    save_user_overlay(owner_id, merged)
 
 
 def get_self_binding(owner_id: str) -> dict[str, Any] | None:

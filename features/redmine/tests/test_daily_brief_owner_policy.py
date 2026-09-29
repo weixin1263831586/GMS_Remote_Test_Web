@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from features.redmine.daily_brief_owner_policy import is_daily_brief_owner_eligible
-from features.redmine.daily_brief_run_starter import DailyBriefRunStarterMixin
+from features.redmine.daily_brief_service import DailyBriefService
 
 
 class DailyBriefOwnerPolicyTests(unittest.TestCase):
@@ -27,10 +27,10 @@ class DailyBriefOwnerPolicyTests(unittest.TestCase):
             self.assertTrue(is_daily_brief_owner_eligible("development-owner"))
 
     def test_starter_rejects_admin_before_writing_a_job(self):
-        starter = DailyBriefRunStarterMixin.__new__(DailyBriefRunStarterMixin)
+        starter = DailyBriefService.__new__(DailyBriefService)
         starter.owner_id = "gms"
         with patch(
-            "features.redmine.daily_brief_run_starter.is_daily_brief_owner_eligible",
+            "features.redmine.daily_brief_service.is_daily_brief_owner_eligible",
             return_value=False,
         ):
             result = starter.start_run("manual")

@@ -1,5 +1,5 @@
 {
-  "_comment": "Deployment-only artifact manifest (never tracked binaries). Pinned defaults live in this file and scripts/prepare_gms_host_tools.sh; configs/runtime.json or environment variables override per deployment (e.g. an access-controlled mirror). See README.md in this directory.",
+  "_comment": "Deployment-only artifact manifest (never tracked binaries). Pinned defaults live in this file and scripts/prepare_gms_host_tools.sh; configs/local/environment.json or environment variables override per deployment (e.g. an access-controlled mirror). See README.md in this directory.",
   "artifacts": {
     "jdk-11": {
       "role": "fallback Java runtime for older CTS/GTS tools (jadx wrapper)",

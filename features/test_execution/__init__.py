@@ -20,13 +20,22 @@ _LAZY_API_EXPORTS = {
 
 
 def __getattr__(name: str):
-    if name not in _LAZY_API_EXPORTS:
-        raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
-    from . import api
+    if name in _LAZY_API_EXPORTS:
+        from . import api
 
-    value = getattr(api, name)
-    globals()[name] = value
-    return value
+        value = getattr(api, name)
+        globals()[name] = value
+        return value
+    if name == 'runtime':
+        # 组合接缝：bootstrap 通过 runtime.configure_* 注入 ssh_manager /
+        # config_manager（features.test_execution.runtime）。导出模块本身
+        # 作为公共面，weekly_report 等跨特性消费方不再绕过 __init__ 直引
+        # 子模块。
+        from . import runtime as runtime_module
+
+        globals()[name] = runtime_module
+        return runtime_module
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
 
 
 __all__ = [
@@ -42,6 +51,7 @@ __all__ = [
     "get_available_test_suites",
     "get_default_suites_path",
     "parse_tradefed_list_results",
+    "runtime",
     "search_latest_suite_modules",
     "start_test",
 ]

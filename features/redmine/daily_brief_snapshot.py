@@ -17,10 +17,10 @@ from typing import Any
 
 from .api import get_redmine_service_for_owner
 from .daily_brief_models import base_priority_score, priority_from_score
+from .org_chart import load_redmine_user_map_for_owner
 from .users import (
     display_names_from_mapping,
     find_user_mapping_for_names,
-    load_redmine_user_map_for_owner,
 )
 
 

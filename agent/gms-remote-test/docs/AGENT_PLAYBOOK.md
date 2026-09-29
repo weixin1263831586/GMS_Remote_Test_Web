@@ -43,7 +43,8 @@ export GMS_CURL_CA_CERT=/path/to/controller-ca.pem
 2. 替换 `agent/gms-remote-test/` 下的源文件(这是唯一手改源树)
 3. 同步生成树:`python3 tools/scripts/agent/sync_package.py`(生成 `plugins/gms-remote-test/`)
 4. 重新注册 MCP 配置(如 launcher 变更):检查 `~/.kkagent/config.toml` 的
-   `[mcp_servers.gms]` 是否仍指向 `runtime/mcp_launcher.py`,env 中是否带
+   `[mcp_servers.gms]` 是否指向
+   `~/.local/share/gms-remote-test/current/scripts/mcp_launcher.py`,env 中是否带
    正确的 `GMS_RT_PROFILE`；Controller CA 应由该 profile 加载
 5. 验证:`gms-rt-system-version` + `gms-rt-system-selfcheck --json`
 

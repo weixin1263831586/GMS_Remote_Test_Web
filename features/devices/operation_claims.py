@@ -6,7 +6,12 @@ import uuid
 
 from fastapi.responses import JSONResponse
 
-from features.auth import require_authenticated_user
+from features.auth import (
+    ensure_agent_device_allowed,
+    ensure_agent_worker_allowed,
+    require_authenticated_user,
+)
+from foundation.cluster_port import get_cluster_service, get_local_worker_id
 from foundation.security import sanitize_device_ids
 
 from .locks import device_lock_manager
@@ -66,6 +71,34 @@ def _has_permission(user, permission: str) -> bool:
         return False
 
 
+def _machine_reservation_error(request, user, device_keys: list[str]) -> str:
+    if getattr(request.state, "auth_method", None) != "machine_authority":
+        return ""
+    run_id = str(user.actor_id or "").removeprefix("automation:")
+    try:
+        reservation = get_cluster_service().repository.get_reservation_by_source(run_id)
+    except (AttributeError, RuntimeError):
+        reservation = None
+    if not reservation or reservation.get("owner_id") != user.resource_owner_id:
+        return "machine principal has no active reservation"
+    if reservation.get("worker_id") != get_local_worker_id():
+        return "machine principal reservation belongs to another Worker"
+    reserved = {
+        str(item.get("id") or "") for item in reservation.get("devices") or []
+    }
+    if any(device_key not in reserved for device_key in device_keys):
+        return "machine principal may only operate devices in its own reservation"
+    expected_source = f"reservation:{reservation['id']}"
+    active_claims = _owned_local_device_keys(user.resource_owner_id, device_keys)
+    if any(
+        str((active_claims.get(device_key) or {}).get("source_id") or "")
+        != expected_source
+        for device_key in device_keys
+    ):
+        return "machine principal reservation claim is missing or expired"
+    return ""
+
+
 def acquire_device_operation_claim(
     request,
     device_ids: list[str],
@@ -90,6 +123,16 @@ def acquire_device_operation_claim(
     if not devices:
         return "", [], None
     device_keys = [device_lock_manager._device(item)["device_key"] for item in devices]
+    local_worker_id = get_local_worker_id()
+    ensure_agent_worker_allowed(request, local_worker_id)
+    for device in devices:
+        ensure_agent_device_allowed(request, device)
+    reservation_error = _machine_reservation_error(request, user, device_keys)
+    if reservation_error:
+        return "", [], JSONResponse(
+            content={"success": False, "error": reservation_error},
+            status_code=403,
+        )
     # Agent Service Token（ADR 0006）在任何设备操作上都需要显式的
     # devices.use_leased scope。人类普通用户不做“先租后用”限制：常规
     # 操作（wifi/reboot/remount/scrcpy 等）可直接作用于空闲设备，设备

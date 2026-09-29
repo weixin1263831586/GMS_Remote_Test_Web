@@ -114,8 +114,12 @@ async def detect_client(
 
 
 @router.post("/api/users/set-username")
-async def set_client_username(req: ClientInfoRequest, request: Request):
-    """手动设置客户端用户名（不需要SSH密码）"""
+async def set_client_username(
+    req: ClientInfoRequest,
+    request: Request,
+    _user: CurrentUser | None = Depends(require_authenticated_user_when_auth_required),
+):
+    """手动设置客户端用户名（不需要SSH密码，但认证开启时需登录）"""
     client_ip = get_client_ip(request)
     username = req.username
 

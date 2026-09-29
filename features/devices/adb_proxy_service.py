@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
 import uuid
@@ -11,6 +12,9 @@ from fastapi import HTTPException
 from worker_agent.adb_proxy import ADB_PROXY_VERSION
 
 from .adb_proxy_security import create_pair_grant
+
+
+logger = logging.getLogger(__name__)
 
 
 # A successful source_start/target_connect command is reflected by the Worker
@@ -562,7 +566,11 @@ class ADBProxyService:
                     )
                     restored = True
                 except Exception:
-                    pass
+                    logger.warning(
+                        "adb proxy restore failed for source=%s target=%s generation=%s",
+                        source_worker_id, target_worker_id, generation,
+                        exc_info=True,
+                    )
             elif source_started:
                 try:
                     await _run_worker_command(
@@ -576,7 +584,11 @@ class ADBProxyService:
                         timeout=15,
                     )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "adb proxy source_stop failed for source=%s generation=%s",
+                        source_worker_id, generation,
+                        exc_info=True,
+                    )
             with self._lock:
                 assignments = self.assignments()
                 if previous_assignment:

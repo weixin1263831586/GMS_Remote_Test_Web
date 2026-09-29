@@ -177,10 +177,10 @@ def record_internal_error(
     ``log_context`` 只描述代码位置；异常原文由 traceback 保存，不进入响应。
     """
     message = internal_error_message(action)
-    logger.error(
-        f"{log_context}: %s",
-        *context_args,
-        message,
-        exc_info=True,
-    )
+    # 直接拼接而不是 %-format：占位符数量与 *context_args 长度不再需要
+    # 人工对齐，错配时 logging 抛 "not all arguments converted" 的老问题
+    # 从机制上消除。
+    parts = [str(part) for part in (log_context, *context_args) if part]
+    parts.append(message)
+    logger.error(": ".join(parts), exc_info=True)
     return message

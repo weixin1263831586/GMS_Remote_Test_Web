@@ -65,17 +65,42 @@ def assert_no_ceiling_raises(name: str, *, today: date | None = None) -> None:
     current = load_baseline(name)
     today = today or date.today()
 
+    repo_root = Path(__file__).resolve().parents[2]
+    rel_path = f"tests/architecture/{baseline_name}"
+
+    # git 二进制缺失会在下面 subprocess 抛 FileNotFoundError（门禁响亮失败，
+    # 不会静默放行）。此处仅区分两类"合法跳过"：仓库无提交历史、baseline 尚
+    # 未进入 HEAD（首次登记）。除此之外的读取失败一律翻红。
+    head_check = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        cwd=repo_root, capture_output=True, text=True, check=False,
+    )
+    if head_check.returncode != 0:
+        return  # 新仓库 / 无任何提交：没有"上一个承诺"可比对
+    exists = subprocess.run(
+        ["git", "cat-file", "-e", f"HEAD:{rel_path}"],
+        cwd=repo_root, capture_output=True, text=True, check=False,
+    )
+    if exists.returncode != 0:
+        return  # baseline 首次登记，HEAD 中尚不存在：由评审把关
+
     proc = subprocess.run(
-        ["git", "show", f"HEAD:tests/architecture/{baseline_name}"],
-        cwd=Path(__file__).resolve().parents[2],
-        capture_output=True, text=True, check=False,
+        ["git", "show", f"HEAD:{rel_path}"],
+        cwd=repo_root, capture_output=True, text=True, check=False,
     )
     if proc.returncode != 0:
-        return  # baseline 首次提交 / 无 git 历史门禁无法对比
+        raise AssertionError(
+            f"size-ratchet: HEAD:{rel_path} exists but could not be read "
+            f"(git show failed): {proc.stderr.strip() or proc.returncode}. "
+            "Refusing to skip the ceiling-ratchet gate silently."
+        )
     try:
         head = json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        return  # HEAD 里的 baseline 损坏：按首次提交处理，由评审把关
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            f"size-ratchet: HEAD:{rel_path} is corrupt ({exc}). "
+            "Refusing to skip the ceiling-ratchet gate silently."
+        ) from exc
 
     head_ceilings = head.get("ceilings") or {}
     current_ceilings = current["ceilings"]
