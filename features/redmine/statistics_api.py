@@ -9,7 +9,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from features.users import owner_id_from_request
-from foundation.error_model import ApiError
+from foundation.error_model import ApiError, record_internal_error
 
 from .api import (
     _DEPARTMENT_OVERDUE_CACHE,
@@ -403,10 +403,10 @@ async def get_resolved_issues_by_date(
         # 按指派人实时拉取，使部门明细不依赖本地 DB 同步范围
         try:
             client = service.agent._make_client()
-        except Exception as exc:
-            return ApiError.dependency_unavailable(
-                f"Redmine 客户端不可用: {exc}", next_actions=({"action": "检查 Redmine 凭据配置后重试"},),
-            ).to_response()
+        except Exception:
+            return ApiError.dependency_unavailable(record_internal_error(
+                logger, "获取 Redmine 客户端", "redmine client construction failed"
+            ), next_actions=({"action": "检查 Redmine 凭据配置后重试"},)).to_response()
         semaphore = asyncio.Semaphore(4)
 
         async def _user_issues(user: dict[str, Any]) -> list[dict[str, Any]]:
@@ -420,11 +420,10 @@ async def get_resolved_issues_by_date(
 
         try:
             batches = await asyncio.gather(*[_user_issues(u) for u in profile_users])
-        except Exception as exc:
-            return ApiError.upstream_failure(
-                f"Redmine 已解决明细查询失败: {exc}", service="redmine",
-                next_actions=({"action": "稍后重试;若持续失败请检查 Redmine 可用性"},),
-            ).to_response()
+        except Exception:
+            return ApiError.upstream_failure(record_internal_error(
+                logger, "查询已解决明细", "fetch_resolved_issues_by_assignee failed"
+            ), service="redmine", next_actions=({"action": "稍后重试;若持续失败请检查 Redmine 可用性"},)).to_response()
         finally:
             await client.close()
         for batch in batches:
@@ -440,10 +439,10 @@ async def get_resolved_issues_by_date(
             issues = service.repository.get_resolved_issues_by_date(
                 owner_names=owner_names or None, start=start.strip(), end=end.strip(), limit=limit,
             )
-        except Exception as exc:
-            return ApiError.dependency_unavailable(
-                f"本地明细查询失败: {exc}", next_actions=({"action": "稍后重试;请检查本地数据库状态"},),
-            ).to_response()
+        except Exception:
+            return ApiError.dependency_unavailable(record_internal_error(
+                logger, "查询本地明细", "get_resolved_issues_by_date failed"
+            ), next_actions=({"action": "稍后重试;请检查本地数据库状态"},)).to_response()
 
     items = [
         {
@@ -499,10 +498,10 @@ async def get_department_overdue_statistics(
             users = [current_user]
     try:
         client = service.agent._make_client()
-    except Exception as exc:
-        return ApiError.dependency_unavailable(
-            f"Redmine 客户端不可用: {exc}", next_actions=({"action": "检查 Redmine 凭据配置后重试"},),
-        ).to_response()
+    except Exception:
+        return ApiError.dependency_unavailable(record_internal_error(
+            logger, "获取 Redmine 客户端", "redmine client construction failed"
+        ), next_actions=({"action": "检查 Redmine 凭据配置后重试"},)).to_response()
     window_days = int(profile.get("window_days") or stats_cfg["window_days"])
     semaphore = asyncio.Semaphore(4)
 

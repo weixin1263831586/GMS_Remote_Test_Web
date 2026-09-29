@@ -13,6 +13,7 @@ from features.auth import (
     require_permission_when_auth_required,
 )
 from foundation.cluster_port import authenticate_worker
+from foundation.error_model import record_internal_error
 from foundation.responses import error_response
 
 from .adb_forward import adb_forward_manager
@@ -85,9 +86,9 @@ async def start_adb_forward(
         # 属设备/远端环境失败，映射 502；500 保留给编程错误。
         logger.error("ADB proxy operation failed: %s", exc)
         return error_response(f"{exc!s}. 请检查配置和参数是否正确。", status_code=502)
-    except Exception as exc:
-        logger.error("Error starting ADB forward: %s", exc)
-        return error_response(f"{exc!s}. 请检查配置和参数是否正确。", status_code=500)
+    except Exception:
+        message = record_internal_error(logger, "启动 ADB 转发", "Error starting ADB forward")
+        return error_response(f"{message} 请检查配置和参数是否正确。", status_code=500)
 
 
 @router.post("/api/adb-forward/stop")
@@ -117,9 +118,9 @@ async def stop_adb_forward(
         # 与 start 一致：adb-proxy 流程失败映射 502。
         logger.error("ADB proxy stop failed: %s", exc)
         return error_response(f"{exc!s}. 请检查配置和参数是否正确。", status_code=502)
-    except Exception as exc:
-        logger.error("Error stopping ADB forward: %s", exc)
-        return error_response(f"{exc!s}. 请检查配置和参数是否正确。", status_code=500)
+    except Exception:
+        message = record_internal_error(logger, "停止 ADB 转发", "Error stopping ADB forward")
+        return error_response(f"{message} 请检查配置和参数是否正确。", status_code=500)
 
 
 @router.post("/api/cluster/workers/{worker_id}/adb-proxy/pair-code")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from features.auth import (
@@ -7,9 +9,12 @@ from features.auth import (
     require_authenticated_user_when_auth_required,
     require_role_when_auth_required,
 )
+from foundation.error_model import record_internal_error
 
 from .api import _run_worker_command, service
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -76,7 +81,8 @@ async def restart_worker_vnc(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(502, f"restart_vnc failed: {exc}") from exc
+        message = record_internal_error(logger, "重启 VNC", "restart_vnc worker command failed")
+        raise HTTPException(502, message) from exc
     return {"success": result.get("rfb_ok", False), "result": result}
 
 

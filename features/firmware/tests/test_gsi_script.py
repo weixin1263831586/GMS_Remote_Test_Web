@@ -4,7 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from features.firmware.gsi_diagnostics import diagnose_gsi_burn_failure
+from features.firmware.gsi_sn_burn import diagnose_gsi_burn_failure
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]

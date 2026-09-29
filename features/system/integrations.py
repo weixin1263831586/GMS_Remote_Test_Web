@@ -52,6 +52,8 @@ router = APIRouter()
 _AUTH_REQUIRED = [Depends(require_authenticated_user_when_auth_required)]
 # VPN 隧道直接影响 build 集群的可达性——Agent Token（哪怕带全
 # scope）一律拒绝，保持 human-only；MCP 侧不暴露这些端点，此处是兜底边界。
+# /api/ssh/sshd、/api/ssh/route 同理：它们会以服务端存储的凭据对调用者
+# 指定的 user@ip 发起 SSH 连接，属人类运维面（与 /api/ssh/ping、/api/vpn/* 一致）。
 _HUMAN_ONLY = [Depends(require_human_principal_when_auth_required)]
 
 configure_network_dependencies(
@@ -60,7 +62,7 @@ configure_network_dependencies(
 )
 
 
-@router.get("/api/ssh/sshd")
+@router.get("/api/ssh/sshd", dependencies=_HUMAN_ONLY)
 @handle_api_errors
 async def check_ssh_sshd(request: Request, device_host: str | None = Query(None, description="设备主机地址 (user@ip 格式，如 user@192.168.1.100)")):
     """检查SSH服务状态（如未安装则返回安装指南）
@@ -162,7 +164,7 @@ def _get_network_address(ip: str) -> str:
         return '.'.join(ip.split('.')[:3]) + '.0'
 
 
-@router.get("/api/ssh/route")
+@router.get("/api/ssh/route", dependencies=_HUMAN_ONLY)
 @handle_api_errors
 async def check_ssh_route(request: Request):
     """检查网络路由 - 检查测试主机和设备主机是否在同一网段"""
@@ -346,12 +348,10 @@ async def ping_route_test(request: Request):
             'route_commands': route_commands
         })
 
-    except Exception as e:
-        logger.error(f"Error in ping route test: {e}")
-        return JSONResponse(
-            content={'success': False, 'error': str(e)},
-            status_code=500
-        )
+    except Exception:
+        # str(e) 可能内嵌 SSH 命令/主机名/网络路径，只进日志不回显。
+        message = record_internal_error(logger, "Ping 路由测试", "Error in ping route test")
+        return JSONResponse(content={'success': False, 'error': message}, status_code=500)
 
 
 @router.get("/api/vpn/connections")

@@ -16,10 +16,10 @@ from features.automation.executors import (
 from features.automation.gerrit_trigger import (
     match_profiles,
     normalize_gerrit_event,
+    profile_matches_event,
 )
 from features.automation.models import TERMINAL_STATUSES, AutomationRunCreateRequest
 from features.automation.orchestrator import AutomationOrchestrator
-from features.automation.profile_dry_run import dry_run_profile
 from features.automation.profiles import load_profiles, upsert_profile
 from features.automation.repository import AutomationStore
 from foundation.secrets import decrypt_secret, encrypt_secret
@@ -768,3 +768,55 @@ class AutomationService:
             'existing': existing,
             'rejected': rejected,
         }
+
+
+# ---- merged from profile_dry_run.py ----
+
+
+def dry_run_profile(
+    service: Any,
+    profile_id: str,
+    request: dict[str, Any],
+    *,
+    not_found_error: type[Exception],
+) -> dict[str, Any]:
+    profile = next(
+        (
+            item
+            for item in service.list_profiles()
+            if item.get("id") == profile_id
+        ),
+        None,
+    )
+    if profile is None:
+        raise not_found_error("Automation profile not found")
+    event = normalize_gerrit_event(
+        {
+            "type": "dry-run",
+            "change": {
+                "project": request.get("project", ""),
+                "branch": request.get("branch", ""),
+                "number": request.get("change_id")
+                or request.get("number")
+                or "",
+                "subject": request.get("subject", ""),
+                "owner": {"email": request.get("owner", "")},
+            },
+            "patchSet": {
+                "number": request.get("patchset", ""),
+                "revision": request.get("revision", ""),
+            },
+        }
+    )
+    matched = profile_matches_event(profile, event)
+    run_request = (
+        service._run_request_from_gerrit_event(event, profile).model_dump()
+        if matched
+        else {}
+    )
+    return {
+        "matched": matched,
+        "event": event,
+        "profile": profile,
+        "run_request": run_request,
+    }

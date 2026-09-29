@@ -33,7 +33,9 @@ scripts/         部署、运维与脱敏脚本
 - **Feature 之间不互相 import 对方内部模块**，跨 Feature 协作只能经由对方
   的公开包边界或下沉到 `foundation/` 的共享 Port。
 - `worker_agent/` 负责设备探测、ADB/Fastboot/Tradefed 执行、USB/IP、Artifact
-  上传等 Worker 侧工作，与 Controller 只通过带 Worker Token 的 HTTP(S) 通信。
+  上传等 Worker 侧工作。通信方向：Worker→Controller 的控制面上报（注册、
+  心跳、任务状态、Artifact）走带 Worker Token 的 HTTP(S)；Controller 发起的
+  远程执行只走 SSH 执行边界（ADR 0004）。
 
 依赖方向：
 
@@ -54,9 +56,10 @@ bootstrap/           →  foundation/ / features/
 常用「棘轮」模式是——历史债务登记为显式预算，预算**只减不增**。
 
 - **文件行数预算**（`test_file_size_rules.py`）：`bootstrap/`、`foundation/`、
-  `features/`、`workflows/` 下**未被登记**的新 Python 模块上限 **600 行**；
-  历史超限模块登记在 `MIGRATION_LINE_LIMITS` 中，不得超过各自登记值（债务可
-  缩小、不可增长）。真正拆小文件后应同步收紧预算值，可用
+  `features/`、`workflows/` 下**未被登记**的 Python 模块上限 **1200 行**
+  （2026-09 起：默认值放宽是为了避免同功能模块被行数门禁逼得拆分过细，
+  模块内聚优先于行数）；历史超限模块登记在 baselines 中，不得超过各自
+  登记值（债务可缩小、不可增长）。真正拆小文件后应同步收紧预算值，可用
   `python tools/scripts/maintenance/update_size_baseline.py --shrink-only` 一键把预算降到当前
   实际行数（只降不升；增长中的文件保持原预算让门禁继续报警）。
 - **前端体积预算**（`test_frontend_size_rules.py`）：扫描 `web/shell/`、

@@ -22,12 +22,10 @@ from starlette.concurrency import run_in_threadpool
 from features.auth import require_elevated_admin_when_auth_required
 from features.users import get_client_username_from_request
 from foundation.responses import error_response, success_response
-from foundation.secrets import encrypt_secret
+from foundation.secrets import decrypt_secret, encrypt_secret
 from foundation.ssh_security import configure_strict_host_keys
 
 from . import runtime
-from .share_records import public_record as _public_record
-from .share_records import record_password as _record_password
 
 
 router = APIRouter()
@@ -632,3 +630,40 @@ async def download_firmware_share(share_id: str, request: Request):
         media_type="application/octet-stream",
         headers=headers,
     )
+
+
+# ---- merged from share_records.py ----
+
+
+def _public_record(record: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "id",
+        "name",
+        "host",
+        "user",
+        "path",
+        "filename",
+        "size",
+        "mtime",
+        "created_at",
+        "created_by",
+        "expires_at",
+        "downloads",
+        "last_downloaded_at",
+    }
+    public = {key: record.get(key) for key in allowed if key in record}
+    public["has_password"] = bool(
+        record.get("password") or record.get("password_encrypted")
+    )
+    return public
+
+
+def _record_password(record: dict[str, Any]) -> str | None:
+    """Resolve a share's SSH password (encrypted or legacy plaintext)."""
+    encrypted = record.get("password_encrypted")
+    if encrypted:
+        try:
+            return decrypt_secret(encrypted) or None
+        except RuntimeError:
+            return None
+    return record.get("password") or None

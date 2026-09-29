@@ -11,7 +11,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
 
-from features.redmine.daily_brief_execution_statistics import DEFAULT_MODEL_LABEL
+from features.redmine.daily_brief_report import DEFAULT_MODEL_LABEL
 from features.redmine.kkagent import KkAgentAnalysisResult
 from features.redmine.tests.test_daily_brief_service import (
     SNAPSHOT,
@@ -94,8 +94,8 @@ class RunPayloadExecutionViewTests(unittest.TestCase):
         self.assertNotIn("PRIVATE", str(statistics))
 
     def test_device_service_outage_is_not_presented_as_a_device_failure(self):
-        from features.redmine.daily_brief_execution_view import issue_payload
         from features.redmine.daily_brief_models import DailyBriefIssue
+        from features.redmine.daily_brief_report import issue_payload
 
         payload = issue_payload(DailyBriefIssue(
             run_id="db", issue_id=1, buckets=[]
@@ -110,8 +110,8 @@ class RunPayloadExecutionViewTests(unittest.TestCase):
         )
 
     def test_pending_device_trace_on_failed_run_is_not_presented_as_collecting(self):
-        from features.redmine.daily_brief_execution_view import issue_payload
         from features.redmine.daily_brief_models import DailyBriefIssue
+        from features.redmine.daily_brief_report import issue_payload
 
         payload = issue_payload(DailyBriefIssue(
             run_id="db", issue_id=1, buckets=[]

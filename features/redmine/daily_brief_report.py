@@ -1,4 +1,10 @@
-"""Summary payload and Markdown rendering for a completed Daily Brief run."""
+"""Summary payload and Markdown rendering for a completed Daily Brief run.
+
+聚合三块「执行结果呈现」职责（原 daily_brief_report /
+daily_brief_execution_view / daily_brief_execution_statistics，单一消费方
+均为 service，按内聚原则并回一处）：run 汇总 + Markdown 渲染、UI 脱敏
+issue payload、AI 执行用量统计。
+"""
 
 from __future__ import annotations
 
@@ -7,6 +13,9 @@ from typing import Any
 from .daily_brief_models import DailyBriefIssue, DailyBriefRun
 from .daily_brief_repository import DailyBriefRepository
 from .users import _now
+
+
+DEFAULT_MODEL_LABEL = "kkagent 默认模型（未记录具体名称）"
 
 
 def summarize_daily_brief(
@@ -145,4 +154,276 @@ def render_daily_brief_markdown(
     return "\n".join(lines)
 
 
-__all__ = ["render_daily_brief_markdown", "summarize_daily_brief"]
+def _number(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def summarize_execution_statistics(
+    executions: list[dict[str, Any]],
+    *,
+    fallback_model: str = "",
+) -> dict[str, Any]:
+    """Summarize persisted trace metadata without exposing tool inputs/output."""
+    fallback = str(fallback_model or "").strip() or DEFAULT_MODEL_LABEL
+    tokens = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "total_tokens": 0,
+    }
+    timing = {
+        "total_duration_ms": 0,
+        "average_duration_ms": 0,
+        "measured_execution_count": 0,
+    }
+    models: dict[str, dict[str, Any]] = {}
+    tools: dict[str, dict[str, Any]] = {}
+    issue_ids: set[int] = set()
+
+    for execution in executions:
+        if not isinstance(execution, dict):
+            continue
+        issue_id = _number(execution.get("issue_id"))
+        if issue_id:
+            issue_ids.add(issue_id)
+        model_name = str(execution.get("model_name") or fallback).strip() or fallback
+        model = models.setdefault(model_name, {
+            "model_name": model_name,
+            "execution_count": 0,
+            "issue_ids": set(),
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_creation_tokens": 0,
+        })
+        model["execution_count"] += 1
+        if issue_id:
+            model["issue_ids"].add(issue_id)
+
+        duration_keys = ("wall_duration_ms", "duration_ms")
+        if any(key in execution for key in duration_keys):
+            timing["measured_execution_count"] += 1
+            timing["total_duration_ms"] += _number(
+                execution.get("wall_duration_ms") or execution.get("duration_ms")
+            )
+
+        for key in (
+            "input_tokens", "output_tokens", "cache_read_tokens",
+            "cache_creation_tokens",
+        ):
+            value = _number(execution.get(key))
+            tokens[key] += value
+            model[key] += value
+
+        for tool in execution.get("tools") or []:
+            if not isinstance(tool, dict):
+                continue
+            # Controller 侧预检探针（tool_call_id 带 preflight: 前缀）不是
+            # agent 的真实调用，不计入工具用量统计。
+            if str(tool.get("tool_call_id") or "").startswith("preflight:"):
+                continue
+            # kkagent 子进程记录的 MCP 工具名是 mcp__<server>__<tool> 形式
+            # （如 mcp__gms__gms_rt_redmine_issue_fetch）；归一到 CLI 工具名
+            # 后再匹配，否则真实调用会被整体漏计，只剩预检探针的计数。
+            tool_name = str(tool.get("tool_name") or "").strip()
+            if tool_name.startswith("mcp__"):
+                parts = tool_name.split("__", 2)
+                tool_name = parts[2] if len(parts) == 3 else tool_name
+            if not tool_name.startswith("gms_rt_"):
+                continue
+            row = tools.setdefault(tool_name, {
+                "tool_name": tool_name,
+                "call_count": 0,
+                "succeeded_count": 0,
+                "failed_count": 0,
+                "pending_count": 0,
+                "issue_ids": set(),
+            })
+            row["call_count"] += 1
+            if issue_id:
+                row["issue_ids"].add(issue_id)
+            status = str(tool.get("status") or "").lower()
+            if status == "succeeded" or (
+                not status and not tool.get("is_error")
+                and bool(tool.get("output_sha256"))
+            ):
+                row["succeeded_count"] += 1
+            elif status == "failed" or tool.get("is_error"):
+                row["failed_count"] += 1
+            else:
+                row["pending_count"] += 1
+
+    tokens["total_tokens"] = tokens["input_tokens"] + tokens["output_tokens"]
+    if timing["measured_execution_count"]:
+        timing["average_duration_ms"] = round(
+            timing["total_duration_ms"] / timing["measured_execution_count"]
+        )
+    model_rows = []
+    for model in models.values():
+        row = {key: value for key, value in model.items() if key != "issue_ids"}
+        row["issue_count"] = len(model["issue_ids"])
+        row["total_tokens"] = row["input_tokens"] + row["output_tokens"]
+        model_rows.append(row)
+    model_rows.sort(key=lambda row: (-row["execution_count"], row["model_name"]))
+
+    tool_rows = []
+    recommendations = []
+    for tool in tools.values():
+        row = {key: value for key, value in tool.items() if key != "issue_ids"}
+        row["issue_count"] = len(tool["issue_ids"])
+        row["failure_rate"] = (
+            round(row["failed_count"] / row["call_count"], 4)
+            if row["call_count"] else 0
+        )
+        tool_rows.append(row)
+        if row["failed_count"]:
+            recommendations.append({
+                "tool_name": row["tool_name"],
+                "kind": "reliability",
+                "message": (
+                    f"{row['failed_count']}/{row['call_count']} 次调用失败；"
+                    "优先补充失败码、参数校验和重试指引。"
+                ),
+            })
+        elif row["call_count"] >= max(3, row["issue_count"] * 2):
+            recommendations.append({
+                "tool_name": row["tool_name"],
+                "kind": "efficiency",
+                "message": (
+                    f"覆盖 {row['issue_count']} 个单号却调用 {row['call_count']} 次；"
+                    "评估批量查询、结果缓存或提示词去重。"
+                ),
+            })
+    tool_rows.sort(key=lambda row: (-row["call_count"], row["tool_name"]))
+    recommendations.sort(key=lambda row: (row["kind"] != "reliability", row["tool_name"]))
+
+    return {
+        "execution_count": len(executions),
+        "issue_count": len(issue_ids),
+        "tokens": tokens,
+        "timing": timing,
+        "models": model_rows,
+        "gms_tool_call_count": sum(row["call_count"] for row in tool_rows),
+        "gms_tools": tool_rows,
+        "tool_improvement_recommendations": recommendations[:8],
+    }
+
+
+def _tool_succeeded(tools: list[Any], name_fragment: str) -> bool:
+    """Accept current traces and the previous persisted trace shape."""
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = str(tool.get("tool_name") or "")
+        has_result = tool.get("status") == "succeeded" or (
+            not tool.get("status")
+            and not tool.get("is_error")
+            and bool(tool.get("output_sha256"))
+        )
+        if has_result and name_fragment in name:
+            return True
+    return False
+
+
+def _tool_status(tools: list[Any], name_fragment: str) -> str:
+    """Return a presentation-safe evidence state from the latest trace."""
+    matched = [
+        tool for tool in tools
+        if isinstance(tool, dict) and name_fragment in str(tool.get("tool_name") or "")
+    ]
+    if not matched:
+        return "not_collected"
+    if any(_tool_succeeded([tool], name_fragment) for tool in matched):
+        return "succeeded"
+    failure_kinds = {
+        str(tool.get("failure_kind") or "") for tool in matched
+        if str(tool.get("failure_kind") or "")
+    }
+    for status in ("service_unavailable", "invalid_request", "device_unavailable"):
+        if status in failure_kinds:
+            return status
+    if any(str(tool.get("status") or "").lower() == "failed" for tool in matched):
+        return "unavailable"
+    return "collecting"
+
+
+def issue_payload(
+    issue: DailyBriefIssue,
+    execution: dict[str, Any] | None = None,
+    execution_statistics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the browser payload without raw model or tool output."""
+    payload = issue.to_row()
+    payload.pop("raw_response", None)
+    if execution_statistics:
+        payload["ai_statistics"] = execution_statistics
+    if not execution:
+        return payload
+
+    tools = execution.get("tools") or []
+    gate = (issue.result or {}).get("evidence_gate") or {}
+    failure_stage = str(
+        execution.get("failure_stage") or execution.get("error_type") or ""
+    )
+    final_ok = bool(execution.get("final_ok"))
+    schema_status = (
+        "failed"
+        if failure_stage == "schema_mismatch"
+        else "passed"
+        if final_ok or failure_stage == "evidence_gate_failed"
+        else "unknown"
+    )
+    payload["ai_execution"] = {
+        "session_id": execution.get("session_id") or "",
+        "status": execution.get("status") or "",
+        "failure_stage": failure_stage,
+        "failure_message": execution.get("failure_message") or "",
+        "schema_status": schema_status,
+        "issue_fetched": _tool_succeeded(tools, "redmine_issue_fetch"),
+        "device_evidence_status": (
+            # 终态失败的 execution 里残留 pending 取证 trace 只说明进程在
+            # 取证完成前死亡；"collecting" 仅对仍在运行的 run 有意义，
+            # 否则 UI 会把已结束的 run 永久标成"实机取证中"。
+            "unavailable"
+            if (_tool_status(tools, "gms_rt_devices_snapshot") == "collecting" and not final_ok)
+            else _tool_status(tools, "gms_rt_devices_snapshot")
+        ),
+        "journals_checked": _tool_succeeded(tools, "redmine_journals"),
+        "attachments_checked": gate.get("attachments_checked") is True,
+        "source_evidence_checked": bool(
+            execution.get("source_evidence_checked")
+        ) or _tool_succeeded(tools, "gms_rt_sdk_") or _tool_succeeded(
+            tools, "gms_rt_apk_"
+        ),
+        "source_evidence_tool_count": int(
+            execution.get("source_evidence_tool_count") or 0
+        ),
+        "history_search_count": int(execution.get("history_search_count") or 0),
+        "distinct_history_search_count": int(
+            execution.get("distinct_history_search_count") or 0
+        ),
+        "tool_call_count": int(execution.get("tool_call_count") or 0),
+        "repair_attempts": int(execution.get("repair_attempts") or 0),
+        "duration_ms": int(
+            execution.get("wall_duration_ms")
+            or execution.get("duration_ms")
+            or 0
+        ),
+        "input_tokens": int(execution.get("input_tokens") or 0),
+        "output_tokens": int(execution.get("output_tokens") or 0),
+        "recorded_at": execution.get("recorded_at") or "",
+    }
+    return payload
+
+
+__all__ = [
+    "DEFAULT_MODEL_LABEL",
+    "issue_payload",
+    "render_daily_brief_markdown",
+    "summarize_daily_brief",
+    "summarize_execution_statistics",
+]

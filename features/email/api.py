@@ -27,6 +27,7 @@ from fastapi import APIRouter, Request
 
 from features.auth import require_authenticated_user
 from features.email.service import normalize_email_addresses, send_email
+from foundation.error_model import record_internal_error
 from foundation.responses import error_response, success_response
 
 
@@ -173,9 +174,11 @@ async def send_email_endpoint(request: Request):
             attachments, denied = await asyncio.to_thread(
                 _attachment_resolver, request, report_ids
             )
-        except Exception as exc:
-            logger.exception("resolving report attachments failed")
-            return error_response(f"附件解析失败: {exc}", status_code=500)
+        except Exception:
+            message = record_internal_error(
+                logger, "解析报告附件", "resolving report attachments failed"
+            )
+            return error_response(message, status_code=500)
         if denied:
             return error_response(
                 "附件报告不存在或无权访问: " + ", ".join(sorted(set(denied))),
@@ -191,9 +194,9 @@ async def send_email_endpoint(request: Request):
 
     try:
         result = await asyncio.to_thread(send_email, to, subject, content, **kwargs)
-    except Exception as exc:
-        logger.exception("send_email failed")
-        return error_response(f"邮件发送失败: {exc}", status_code=500)
+    except Exception:
+        message = record_internal_error(logger, "发送邮件", "send_email failed")
+        return error_response(message, status_code=500)
     finally:
         for path in kwargs.get("attachment_paths") or []:
             # 临时 ZIP 仅服务本次发送，读完即清理。

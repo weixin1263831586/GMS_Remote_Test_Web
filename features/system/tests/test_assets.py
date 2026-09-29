@@ -7,8 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from features.system import assets, tools_data_api
-from features.system.favicon_security import FaviconResolver
-from features.system.icon_fetcher import IconFetcher
+from features.system.icon_fetcher import FaviconResolver, IconFetcher
 from foundation.command_result import CommandResult
 from foundation.outbound import ResolvedOutboundTarget
 
@@ -114,7 +113,7 @@ class FaviconSecurityTests(unittest.TestCase):
             addresses=("93.184.216.34",),
         )
         with patch(
-            "features.system.favicon_security.resolve_outbound_target",
+            "features.system.icon_fetcher.resolve_outbound_target",
             return_value=target,
         ):
             resolved = asyncio.run(FaviconResolver().resolve("example.com", 443))

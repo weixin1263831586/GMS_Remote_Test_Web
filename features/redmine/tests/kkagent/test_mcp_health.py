@@ -60,6 +60,28 @@ class ParseDoctorPayloadTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("未包含 kkagent", reason)
 
+    # #654649 nightly 复盘：老版 doctor 只查注册文本，payload 被清空也报
+    # healthy。新版 doctor 的 launchable=False 必须拦下并给出恢复路径；
+    # 旧版 payload（无 launchable 字段）保持兼容。
+    def test_registered_but_missing_launcher_fails_probe(self):
+        payload = json.loads(json.dumps(HEALTHY))
+        payload["clients"][0]["mcp"] = {
+            "registered": True,
+            "launchable": False,
+            "launcher_path": "/home/u/.kkagent/plugins/local/gms-remote-test/scripts/mcp_launcher.py",
+            "config_path": "/home/u/.kkagent/config.toml",
+        }
+        ok, reason = parse_doctor_payload(json.dumps(payload).encode())
+        self.assertFalse(ok)
+        self.assertIn("启动脚本缺失", reason)
+        self.assertIn("mcp_launcher.py", reason)
+        self.assertIn("sync_package", reason)
+
+    def test_missing_launchable_field_stays_back_compatible(self):
+        ok, reason = parse_doctor_payload(json.dumps(HEALTHY).encode())
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+
     def test_each_unhealthy_bit_is_reported(self):
         payload = {
             "ok": True,

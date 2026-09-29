@@ -7,7 +7,7 @@ session_id 就转发给 sink.session_available()，只发一次；sink 不支持
 
 import unittest
 
-from features.redmine.kkagent.progress_tap import ProgressTap
+from features.redmine.kkagent.analyzer import ProgressTap
 
 
 class _Sink:

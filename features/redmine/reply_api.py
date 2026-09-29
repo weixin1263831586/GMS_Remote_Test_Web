@@ -10,6 +10,7 @@ from features.auth import (
 )
 from features.redmine.api import get_redmine_config_for_request
 from features.redmine.client import RedmineClient
+from foundation.error_model import record_internal_error
 from foundation.responses import error_response, success_response
 
 
@@ -84,9 +85,8 @@ async def redmine_reply(
         logger.info(f"[Redmine Reply] 回复已成功发送到 Issue #{issue_id}{attachment_info}")
         return success_response(result, message=f'回复已发送到 Redmine Issue #{issue_id}{attachment_info}')
 
-    except Exception as e:
-        logger.error(f"[Redmine Reply] 发送回复失败：{e}")
-        return error_response(
-            f'发送失败：{e!s}',
-            status_code=500,
+    except Exception:
+        message = record_internal_error(
+            logger, "回复发送", "[Redmine Reply] send reply failed"
         )
+        return error_response(message, status_code=500)

@@ -587,6 +587,42 @@ class GateFailureClassificationTests(unittest.TestCase):
         self.assertEqual(status, "evidence_gate_failed")
         self.assertEqual(error, "; ".join(findings))
 
+    # #654649 nightly 复盘：Controller preflight（tool_call_id 带
+    # "preflight:" 前缀）也以 gms_rt_* 工具名记入 trace，但不经过 kkagent
+    # 会话的 gms MCP server。preflight 成功 + 会话内 MCP 缺失时必须分类为
+    # mcp_evidence_unavailable，而不是普通 evidence_gate_failed。
+    def test_preflight_successes_do_not_mask_missing_session_mcp(self):
+        trace = KkAgentTrace(session_id="s1")
+        trace.tool_calls = [
+            ToolTrace(
+                tool_call_id="preflight:mcp_doctor:abc",
+                tool_name="mcp_doctor",
+                tool_input={"--client": "kkagent"},
+                status="succeeded",
+            ),
+            ToolTrace(
+                tool_call_id="preflight:gms_rt_redmine_issue_fetch:def",
+                tool_name="gms_rt_redmine_issue_fetch",
+                tool_input={"issue_id": 1},
+                status="succeeded",
+            ),
+            ToolTrace(
+                tool_call_id="c1",
+                tool_name="Bash",
+                tool_input={"command": "gms-rt-redmine-issue 1 --json"},
+                status="succeeded",
+            ),
+        ]
+        findings = [
+            "history search only used 0 distinct successful query/queries",
+            "test-suite failure: no successful source-level evidence call was made",
+        ]
+        status, error_type, error = classify_gate_failure(trace, findings)
+        self.assertEqual(error_type, "mcp_evidence_unavailable")
+        self.assertEqual(status, "mcp_evidence_unavailable")
+        self.assertIn("gms-agent doctor", error)
+        self.assertIn("原始 findings", error)
+
 
 if __name__ == "__main__":
     unittest.main()

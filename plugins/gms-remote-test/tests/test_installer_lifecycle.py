@@ -566,6 +566,60 @@ class TestDoctorAndProfiles(EnvSandbox):
         )
         self.assertTrue(pm._mcp_registration_status("codex")["registered"])
 
+    # #654649 nightly 复盘：注册块是文本残留、插件 payload 被清空时，gms
+    # MCP server 每个会话都起不来；doctor 必须检查 launcher 可存在性。
+    def _write_kkagent_mcp_config(self, launcher: Path) -> Path:
+        config = pm.client_skill_root("kkagent").parent / "config.toml"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(
+            "[mcp_servers.gms]\n"
+            'command = "python3"\n'
+            f'args = ["{launcher}"]\n'
+            'transport = "stdio"\n',
+            encoding="utf-8",
+        )
+        return config
+
+    def test_doctor_flags_registered_but_missing_launcher_payload(self):
+        launcher = (
+            self.root / "plugins" / "local" / "gms-remote-test"
+            / "scripts" / "mcp_launcher.py"
+        )
+        self._write_kkagent_mcp_config(launcher)
+        status = pm._mcp_registration_status("kkagent")
+        self.assertTrue(status["registered"])
+        self.assertFalse(status["launchable"])
+        self.assertEqual(status["launcher_path"], str(launcher))
+        profile = pm.profile_name("kkagent")
+        pm.write_profile_toml(profile, "kkagent", "https://ctrl.example:5001", "")
+        report = pm.doctor_report("kkagent", profile)
+        self.assertFalse(report["ok"])
+        self.assertTrue(
+            any(
+                "restore the kkagent gms plugin payload" in action
+                and "sync_package" in action
+                for action in report["actions"]
+            )
+        )
+
+    def test_doctor_accepts_registered_launcher_that_exists(self):
+        launcher = (
+            self.root / "plugins" / "local" / "gms-remote-test"
+            / "scripts" / "mcp_launcher.py"
+        )
+        launcher.parent.mkdir(parents=True, exist_ok=True)
+        launcher.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        self._write_kkagent_mcp_config(launcher)
+        status = pm._mcp_registration_status("kkagent")
+        self.assertTrue(status["registered"])
+        self.assertTrue(status["launchable"])
+        profile = pm.profile_name("kkagent")
+        pm.write_profile_toml(profile, "kkagent", "https://ctrl.example:5001", "")
+        report = pm.doctor_report("kkagent", profile)
+        self.assertFalse(
+            any("restore the kkagent gms plugin" in action for action in report["actions"])
+        )
+
     def test_doctor_action_explains_invalid_controller_url(self):
         profile = pm.profile_name("codex")
         pm.write_profile_toml(profile, "codex", "https://$(unsafe)/host", "")

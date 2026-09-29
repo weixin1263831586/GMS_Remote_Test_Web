@@ -1,7 +1,6 @@
 """Tests router - test execution, suite management, and log APIs."""
 
 import logging
-from enum import Enum
 
 from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import PlainTextResponse
@@ -14,31 +13,11 @@ from features.test_execution.models import (
     TestParseArgsRequest,
     TestParseArgsResponse,
 )
-from foundation.responses import error_response, success_response
+from foundation.responses import error_response
 
 from . import runtime
 from .suite_helpers import resolve_suite_reference
 
-
-class LogLevel(str, Enum):
-    INFO = "info"
-    WARNING = "warning"
-    ERROR = "error"
-    SUCCESS = "success"
-
-
-class ApiResponse:
-    @staticmethod
-    def success(data=None, message="操作成功"):
-        return success_response(data=data, message=message)
-
-    @staticmethod
-    def error(error, status_code=500, **extra_fields):
-        return error_response(
-            error,
-            status_code=status_code,
-            **extra_fields,
-        )
 
 logger = logging.getLogger(__name__)
 

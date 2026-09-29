@@ -24,6 +24,7 @@ from features.system.models import VNCStartRequest
 from features.system.novnc_access import novnc_access_service
 from features.system.vnc import NOVNC_WEB_PORT, vnc_manager
 from foundation.config import config_manager
+from foundation.error_model import record_internal_error
 from foundation.responses import error_response, success_response
 
 
@@ -351,9 +352,11 @@ async def get_desktop_vnc_status(
         _vnc_status_cache["ts"] = now
         _vnc_status_cache["value"] = result
         return success_response(result)
-    except Exception as e:
-        logger.error(f"Error getting VNC status: {e}")
-        return error_response(f"{e!s}. 请检查配置和参数是否正确。", status_code=500)
+    except Exception:
+        message = record_internal_error(
+            logger, "获取 VNC 状态", "Error getting VNC status"
+        )
+        return error_response(f"{message} 请检查配置和参数是否正确。", status_code=500)
 
 
 @router.post("/api/desktop/vnc/start")
@@ -511,9 +514,9 @@ async def novnc_http_proxy(
             )
     except aiohttp.ClientConnectorError:
         return error_response("noVNC 服务未运行，请先启动 VNC", status_code=503)
-    except Exception as e:
-        logger.error(f"[noVNC] HTTP proxy error: {e}")
-        return error_response(f"noVNC 代理失败：{e!s}", status_code=502)
+    except Exception:
+        message = record_internal_error(logger, "noVNC 代理转发", "[noVNC] HTTP proxy error")
+        return error_response(f"noVNC 代理失败：{message}", status_code=502)
 
 
 @router.get("/cluster/novnc/{worker_id}")
@@ -553,9 +556,11 @@ async def cluster_novnc_http_proxy(
                             headers={"Cache-Control": cache})
     except ValueError as exc:
         return error_response(str(exc), status_code=409)
-    except Exception as exc:
-        logger.error("[noVNC] Worker %s HTTP proxy error: %s", worker_id, exc)
-        return error_response(f"Worker noVNC 代理失败：{exc}", status_code=502)
+    except Exception:
+        message = record_internal_error(
+            logger, "Worker noVNC 代理转发", "[noVNC] worker HTTP proxy error"
+        )
+        return error_response(f"Worker noVNC 代理失败：{message}", status_code=502)
 
 
 # ==================== Host Validation ====================

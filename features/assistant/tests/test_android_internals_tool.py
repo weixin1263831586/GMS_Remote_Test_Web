@@ -15,7 +15,7 @@ import unittest
 from fastapi import Depends, HTTPException
 
 from features.assistant.executor import ActionExecutor
-from features.assistant.knowledge_tools import knowledge_agent_tools
+from features.assistant.tools import knowledge_agent_tools
 
 
 def _tool():

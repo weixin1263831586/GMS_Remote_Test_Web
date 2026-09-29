@@ -4,7 +4,7 @@
 ``MIGRATION_LINE_LIMITS`` 即可绕过「只减不增」约定。现在
 ceilings 独立持久化，本测试负责：
 
-1. 运行时校验：文件行数不超过各自 ceiling（未登记走 600 默认）；
+1. 运行时校验：文件行数不超过各自 ceiling（未登记走 1200 默认）；
 2. ratchet 校验：相对上一个 commit，ceiling 只减不增；上调必须提供
    带 reason/expiry 的 waiver（见 ``_size_ratchet``）。
 """
@@ -25,7 +25,7 @@ BASELINE_NAME = "file_size.json"
 
 def _limits() -> tuple[dict[str, int], int]:
     data = load_baseline(BASELINE_NAME)
-    return data["ceilings"], int(data.get("default_limit") or 600)
+    return data["ceilings"], int(data.get("default_limit") or 1200)
 
 
 class FileSizeRuleTests(unittest.TestCase):

@@ -21,8 +21,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from foundation.config import settings
-
-from .network import run_local_shell_command
+from foundation.processes import run_local_shell_command
 
 
 logger = logging.getLogger(__name__)

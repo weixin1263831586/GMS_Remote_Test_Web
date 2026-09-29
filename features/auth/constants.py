@@ -2,9 +2,15 @@
 
 Leaf module so agent_tokens.py can import them without a circular import with
 service.py (which mixes the AgentTokenServiceMixin in).
+
+Also hosts the ``CurrentUser`` principal dataclass (merged from the former
+``principal.py`` split) — it only depends on ``ROLE_PERMISSIONS`` above.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
 
 
 # Agent Service Token principal role (ADR 0006): agent tokens are
@@ -93,6 +99,48 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
 DEFAULT_AGENT_TOKEN_DAYS = 90
 APPROVAL_TOKEN_TTL_SECONDS = 300
 
-# ``CurrentUser`` moved to ``principal.py``; re-exported here for the
-# historical ``from .constants import CurrentUser`` import paths.
-from .principal import CurrentUser  # noqa: E402,F401
+
+@dataclass(frozen=True)
+class CurrentUser:
+    id: str
+    username: str
+    role: str
+    display_name: str = ""
+    # Agent Service Token scopes granted to this principal beyond the role
+    # defaults. Human principals keep this empty; role-based admin gates are
+    # decided by ``role`` and never lifted by scopes.
+    extra_permissions: frozenset[str] = frozenset()
+    # Actor vs resource owner (ADR 0010): ``id`` is the ACTING principal
+    # (audit identity). ``resource_owner_id`` is the account that owns
+    # resources created through this principal. Human principals: both are
+    # the account id. Agent principals: ``id`` is the synthetic
+    # ``agent:<token_id>`` (stable for audit), ``resource_owner_id`` is the
+    # token's enrolling account so resources survive token rotation
+    # instead of becoming orphans.
+    resource_owner_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.resource_owner_id:
+            # dataclass(frozen=True) — use object.__setattr__ for the default.
+            object.__setattr__(self, "resource_owner_id", self.id)
+
+    @property
+    def actor_id(self) -> str:
+        """Audit identity of the acting principal (alias of ``id``)."""
+        return self.id
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "username": self.username,
+            "role": self.role,
+            "display_name": self.display_name,
+            "permissions": sorted(self.effective_permissions()),
+            "resource_owner_id": self.resource_owner_id,
+        }
+
+    def effective_permissions(self) -> frozenset[str]:
+        return ROLE_PERMISSIONS.get(self.role, frozenset()) | set(self.extra_permissions)
+
+    def has_permission(self, permission: str) -> bool:
+        return "*" in self.effective_permissions() or permission in self.effective_permissions()

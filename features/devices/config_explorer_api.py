@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from features.users import get_client_id_from_request
 from foundation.config import APK_MAX_FILE_SIZE, APK_UPLOAD_DIR
+from foundation.error_model import record_internal_error
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 
@@ -238,9 +239,14 @@ async def api_explore(
                 effective_limit=effective_limit,
             )
         )
-    except Exception as e:
+    except RuntimeError as e:
+        # explore() 的领域错误文案（设备离线/包不存在/工具失败）由本模块生成，
+        # 面向客户端是安全的；其余未知异常不得回显 str(e)。
         logger.error(f"config-explorer explore failed: {e}")
         return error_response(str(e), status_code=400)
+    except Exception:
+        message = record_internal_error(logger, "查询配置资源", "config-explorer explore error")
+        return error_response(message, status_code=500)
 
     return success_response(
         data={
@@ -299,10 +305,10 @@ async def decompile_device_apk(req: DecompileRequest, request: Request):
                 apk_path,
             )
         )
-    except Exception as e:
+    except Exception:
         _cleanup_files_fn([apk_path])
-        logger.error(f"decompile pull failed: {e}")
-        return error_response(f"拉取 APK 失败: {e}", status_code=400)
+        message = record_internal_error(logger, "拉取 APK", "decompile pull failed")
+        return error_response(f"拉取 APK 失败：{message}", status_code=500)
 
     if os.path.getsize(apk_path) > APK_MAX_FILE_SIZE:
         _cleanup_files_fn([apk_path])

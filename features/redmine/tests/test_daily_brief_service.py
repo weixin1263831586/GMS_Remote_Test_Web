@@ -144,7 +144,7 @@ class RunLifecycleTests(unittest.TestCase):
         preflight.start()
         self.addCleanup(preflight.stop)
         evidence_preflight = patch(
-            "features.redmine.daily_brief_deep_analysis.collect_deep_analysis_evidence",
+            "features.redmine.daily_brief_service.collect_deep_analysis_evidence",
             AsyncMock(return_value=EvidencePreflight()),
         )
         evidence_preflight.start()
@@ -397,7 +397,7 @@ class RunLifecycleTests(unittest.TestCase):
         )
         self.evidence_preflight.stop()
         collector = patch(
-            "features.redmine.daily_brief_deep_analysis.collect_deep_analysis_evidence",
+            "features.redmine.daily_brief_service.collect_deep_analysis_evidence",
             AsyncMock(return_value=evidence),
         )
         collector_mock = collector.start()
@@ -453,7 +453,7 @@ class RunLifecycleTests(unittest.TestCase):
         )
         self.evidence_preflight.stop()
         collector = patch(
-            "features.redmine.daily_brief_deep_analysis.collect_deep_analysis_evidence",
+            "features.redmine.daily_brief_service.collect_deep_analysis_evidence",
             AsyncMock(return_value=evidence),
         )
         collector_mock = collector.start()
@@ -526,7 +526,7 @@ class ReanalyzeMetadataTests(unittest.TestCase):
         preflight.start()
         self.addCleanup(preflight.stop)
         evidence_preflight = patch(
-            "features.redmine.daily_brief_deep_analysis.collect_deep_analysis_evidence",
+            "features.redmine.daily_brief_service.collect_deep_analysis_evidence",
             AsyncMock(return_value=EvidencePreflight()),
         )
         evidence_preflight.start()

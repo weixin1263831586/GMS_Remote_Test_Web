@@ -366,8 +366,9 @@ async def burn_firmware(
                         firmware_stream.seek(0, os.SEEK_END)
                         firmware_size = firmware_stream.tell()
                         firmware_stream.seek(0)
-                    except Exception as e:
-                        return error_response(f"Failed to inspect firmware size: {e}")
+                    except Exception:
+                        message = record_internal_error(logger, "检查固件大小", "Failed to inspect firmware size")
+                        return error_response(message)
 
                     if firmware_size <= 0:
                         return error_response("Uploaded firmware file is empty")
@@ -733,7 +734,7 @@ async def burn_firmware(
                         if not outcome.success:
                             failures.append((device, SourceFlashError(
                                 outcome.error or outcome.status or "烧写失败",
-                                stage=outcome.stage,
+                                status_code=502, stage=outcome.stage,
                             )))
                     if failures:
                         first_device, first_error = failures[0]
@@ -747,7 +748,7 @@ async def burn_firmware(
                         usbip_reconnect_after_finish = True
                         return error_response(
                             f"源端烧写失败（{getattr(first_error, 'stage', 'FLASHING')}）: {detail}",
-                            status_code=getattr(first_error, "status_code", 422),
+                            status_code=getattr(first_error, "status_code", 502),
                         )
 
                     runtime.store_notification(
@@ -887,9 +888,10 @@ async def burn_firmware(
                     "firmware", {"devices": devices, "firmware": firmware_name,
                                  "results": results},
                 )
-                return error_response(
-                    f"Firmware burn failed: {detail}", status_code=422,
-                )
+                # upgrade_tool over SSH 执行失败属设备/基础设施侧故障，按错误码表映射 502；422 保留给前置校验。
+                return ApiError.upstream_failure(
+                    f"Firmware burn failed: {detail}", service="upgrade_tool",
+                ).to_response()
 
             except ApiError as api_error:
                 # 语义化基础设施错误（如 Worker 探测失败 502）按全局

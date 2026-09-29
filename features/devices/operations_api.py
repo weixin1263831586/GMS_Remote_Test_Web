@@ -14,6 +14,7 @@ from features.auth import (
     require_authenticated_user,
     require_elevated_admin,
 )
+from foundation.error_model import record_internal_error
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 from foundation.security import sanitize_device_ids
@@ -297,9 +298,9 @@ async def connect_wifi(req: WifiConnectRequest, request: Request):
                     },
                 }
             )
-    except Exception as e:
-        logger.error(f"Error connecting WiFi: {e}")
-        return error_response(f"{e!s}. Please check configuration and parameters.", status_code=500)
+    except Exception:
+        message = record_internal_error(logger, "连接设备 WiFi", "Error connecting WiFi")
+        return error_response(f"{message} Please check configuration and parameters.", status_code=500)
 
 
 @router.post("/api/devices/shell")
@@ -359,10 +360,10 @@ async def open_device_shell(req: DeviceShellRequest, request: Request):
                     },
                     status_code=400,
                 )
-    except Exception as e:
-        logger.error(f"Error opening device shell: {e}")
+    except Exception:
+        message = record_internal_error(logger, "打开设备 shell", "Error opening device shell")
         return JSONResponse(
-            content={"success": False, "message": f"Failed to open shell: {e!s}"},
+            content={"success": False, "message": message},
             status_code=500,
         )
 

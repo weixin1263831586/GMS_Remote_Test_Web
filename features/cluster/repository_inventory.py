@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from foundation.events import (
+    EVENT_WORKER_AVAILABILITY_CHANGED,
+    event_bus,
+)
+
 from .config import ClusterConfig
 from .state_machine import InvalidJobTransitionError
-from .worker_availability_events import emit_worker_availability
 
 
 def _utc_now() -> str:
@@ -621,3 +626,13 @@ class ClusterInventoryRepositoryMixin:
                     "available", "{}", now, now, now,
                 ),
             )
+
+
+
+def emit_worker_availability(worker: Mapping[str, Any], status: str) -> None:
+    """Broadcast a real Worker online/offline transition to UI subscribers."""
+    event_bus.emit(EVENT_WORKER_AVAILABILITY_CHANGED, {
+        "worker_id": str(worker["id"]),
+        "name": str(worker["name"] or ""),
+        "status": status,
+    })

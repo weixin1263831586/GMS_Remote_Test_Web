@@ -27,6 +27,7 @@ from features.auth import (
 )
 from foundation.config import config_manager
 from foundation.config_paths import certificates_path
+from foundation.error_model import record_internal_error
 from foundation.networking import split_host_port
 from foundation.ssh_security import (
     scan_ssh_host_keys,
@@ -38,7 +39,6 @@ from .config import ClusterConfig
 from .deployment_bundle import add_worker_runtime
 from .repository import utc_now
 from .worker_auth import persist_worker_token, restore_worker_token
-from .worker_token_transfer import remove_remote_files_quietly, write_remote_token_file
 
 
 def _controller_cert_for_bundle(project_root: Path) -> Path:
@@ -407,20 +407,17 @@ async def deploy_adb_proxy_source(
                 raise_on_error=True,
             )
         except paramiko.AuthenticationException as exc:
-            raise RuntimeError(
+            raise HTTPException(
+                502,
                 f"SSH authentication failed for {username}@{hostname}; "
-                "please verify the SSH username and password"
+                "please verify the SSH username and password",
             ) from exc
         except (TimeoutError, OSError) as exc:
-            raise RuntimeError(
-                f"cannot connect to {hostname}:{ssh_port}: {exc}"
-            ) from exc
+            raise HTTPException(502, f"cannot connect to {hostname}:{ssh_port}: {exc}") from exc
         except paramiko.SSHException as exc:
-            raise RuntimeError(
-                f"SSH negotiation failed for {username}@{hostname}: {exc}"
-            ) from exc
+            raise HTTPException(502, f"SSH negotiation failed for {username}@{hostname}: {exc}") from exc
         if ssh is None:
-            raise RuntimeError("SSH connection failed")
+            raise HTTPException(502, "SSH connection failed")
 
         archive_path: Path | None = None
         remote_archive = f"/tmp/gms-adb-source-{worker_id}.tar.gz"
@@ -524,10 +521,7 @@ async def deploy_adb_proxy_source(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(
-            502,
-            f"ADB Proxy source deployment failed: {exc}",
-        ) from exc
+        raise HTTPException(502, record_internal_error(logger, "ADB Proxy 来源部署", "deploy failed")) from exc
 
 
 @router.post("/workers/deploy")
@@ -575,20 +569,17 @@ async def deploy_worker(
                 raise_on_error=True,
             )
         except paramiko.AuthenticationException as exc:
-            raise RuntimeError(
+            raise HTTPException(
+                502,
                 f"SSH authentication failed for {username}@{hostname}; "
-                "please verify the SSH username and password"
+                "please verify the SSH username and password",
             ) from exc
         except (TimeoutError, OSError) as exc:
-            raise RuntimeError(
-                f"cannot connect to {hostname}:{ssh_port}: {exc}"
-            ) from exc
+            raise HTTPException(502, f"cannot connect to {hostname}:{ssh_port}: {exc}") from exc
         except paramiko.SSHException as exc:
-            raise RuntimeError(
-                f"SSH negotiation failed for {username}@{hostname}: {exc}"
-            ) from exc
+            raise HTTPException(502, f"SSH negotiation failed for {username}@{hostname}: {exc}") from exc
         if ssh is None:
-            raise RuntimeError("SSH connection failed")
+            raise HTTPException(502, "SSH connection failed")
         archive_path = None
         try:
             if save_password and password and not config_manager.upsert_device_host_password(
@@ -767,4 +758,23 @@ async def deploy_worker(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(502, f"automatic deployment failed: {exc}") from exc
+        raise HTTPException(502, record_internal_error(logger, "Worker 自动部署", "deploy failed")) from exc
+
+
+# ---- merged from worker_token_transfer.py ----
+
+
+def write_remote_token_file(sftp, remote_path: str, token: str) -> None:
+    """Create remote_path as a 0600 file containing token + newline."""
+    with sftp.open(remote_path, "w") as token_file:
+        sftp.chmod(remote_path, 0o600)
+        token_file.write((token + "\n").encode("utf-8"))
+
+
+def remove_remote_files_quietly(sftp, *remote_paths: str) -> None:
+    """Best-effort cleanup of uploaded staging files on failure."""
+    for remote_path in remote_paths:
+        try:
+            sftp.remove(remote_path)
+        except OSError:
+            pass

@@ -18,7 +18,7 @@ import logging
 import re
 import sqlite3
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import JSONResponse
@@ -30,7 +30,7 @@ from features.auth import (
     require_human_principal_when_auth_required,
 )
 from features.users import owner_id_from_request
-from foundation.error_model import ApiError
+from foundation.error_model import ApiError, record_internal_error
 
 from .api import get_redmine_config_for_request
 from .daily_brief_analysis_events import event_store_for_repository, progress_to_payload
@@ -38,7 +38,6 @@ from .daily_brief_config import (
     list_daily_brief_agent_profiles,
     list_daily_brief_model_options,
 )
-from .daily_brief_dispatch import enqueue_reanalysis, enqueue_refresh, enqueue_run
 from .daily_brief_models import BRIEF_MODES
 from .daily_brief_owner_policy import ADMIN_OWNER_MESSAGE
 from .daily_brief_repository import TERMINAL_RUN_STATUSES
@@ -54,6 +53,69 @@ from .statistics_api import _has_redmine_credentials, _missing_credentials_paylo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/redmine-agent")
+
+
+def enqueue_run(
+    service: DailyBriefService, *, mode: str = "manual", force: bool = False
+) -> dict[str, Any]:
+    """start_run 入队 + 补齐 job 字段（原 daily_brief_dispatch，已并回 API 层）。"""
+    started = service.start_run(mode=mode, force=force)
+    return _with_job_fields(service, started)
+
+
+def enqueue_refresh(service: DailyBriefService, brief_date: str) -> dict[str, Any]:
+    started = service.start_refresh(brief_date)
+    return _with_job_fields(service, started)
+
+
+def enqueue_reanalysis(
+    service: DailyBriefService, brief_date: str, issue_id: int,
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    """单 issue 重新分析入队。
+
+    优先绑定显式 run_id 精确操作；未提供时才回落
+    该日期最新 run（旧 API 兼容）。
+    """
+    if run_id:
+        run = service.repository.get_run(run_id)
+        if run is None or run.owner_id != service.owner_id:
+            return {"error": f"daily brief run not found: {run_id}"}
+    else:
+        run = service.latest_run(brief_date)
+        if run is None:
+            return {"error": f"no daily brief run for {brief_date}"}
+    record = service.repository.get_issue(run.run_id, issue_id)
+    if record is None:
+        return {"error": f"issue {issue_id} not in run {run.run_id}"}
+    if run.status not in ("completed", "partial", "failed", "cancelled"):
+        return {"error": f"run {run.run_id} is still executing; retry after it finishes", "code": "STATE_CONFLICT"}
+    job, created = service.repository.enqueue_job(
+        run.run_id, kind="issue", issue_id=issue_id
+    )
+    return {
+        "run_id": run.run_id,
+        "job_id": job["job_id"],
+        "issue_id": issue_id,
+        "status": "pending",
+        "queued": created,
+    }
+
+
+def _with_job_fields(service: DailyBriefService, started: dict[str, Any]) -> dict[str, Any]:
+    """start_run/start_refresh 的结果补齐 job_id/queued 字段（已有则透传）。"""
+    if "run_id" not in started:
+        return started
+    if "job_id" in started:
+        return started
+    if started.get("reused") or started.get("already_running"):
+        return started
+    job = service.repository.get_active_run_job(started["run_id"])
+    return {
+        **started,
+        "job_id": (job or {}).get("job_id", ""),
+        "queued": bool(started.get("queued", True)),
+    }
 
 
 def _require_read(request: Request) -> None:
@@ -291,9 +353,9 @@ async def get_daily_triage(
         snapshot = await service.build_triage(
             stale_days=stale_days, list_limit=list_limit, refresh=refresh,
         )
-    except Exception as exc:
-        logger.error("daily triage failed: %s", exc)
-        return ApiError.internal(f"每日待办构建失败: {exc}").to_response()
+    except Exception:
+        message = record_internal_error(logger, "每日待办构建", "daily triage failed")
+        return ApiError.internal(message).to_response()
     return {"success": True, "data": snapshot}
 
 

@@ -17,7 +17,7 @@ GitHub CI 结果视为当前工作区的测试结果。
 | --- | --- |
 | 并发 start_run / refresh 返回不存在的 run_id | 使用事务返回的 job 所属 run_id，并返回同一 job_id 和持久化状态；双 Repository 并发测试覆盖 manual/delta |
 | 单条重分析可能执行到同日最新 run | Worker 全程携带入队时的 run_id，服务检查 owner；测试覆盖同一天存在更晚的 run |
-| Prompt 与实际必填字段不一致 | `daily_brief_result.IssueResult` 同时生成 Prompt JSON Schema 并验证返回值，包括嵌套证据、动作和相似工单 |
+| Prompt 与实际必填字段不一致 | `daily_brief_models.IssueResult`（原 daily_brief_result）同时生成 Prompt JSON Schema 并验证返回值，包括嵌套证据、动作和相似工单 |
 | 用 confirmed/likely 补出高置信度 | 删除枚举推算，只接受显式数值；缺失值触发有限次数的 Schema 修复；界面注明“模型自评” |
 | 超时天数无限加分、无附件减分 | 优先级限制在 0–100，7 天后额外年龄分最多 5；取消附件对业务优先级的影响 |
 | 每个工单都强制深度诊断 | 批量晨报使用 triage：读取工单、journals 和相关附件，输出短待办；不要求历史/源码检索、不允许确定性根因；单条按钮执行深度诊断 |

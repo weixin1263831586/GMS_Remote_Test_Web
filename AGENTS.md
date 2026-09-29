@@ -39,11 +39,13 @@
   `foundation/` must never import `features/`; cross-feature imports go
   through a feature's public surface (`features/<name>/__init__.py`), not
   its internals. Enforced by `tests/architecture/`.
-- Controller↔Worker interaction crosses the SSH execution boundary only
-  (ADR 0004). `worker_agent/` imports inside `features/` stay confined to
-  the worker-role execution surfaces and the same-host bridge modules and
-  must not spread; this one is review-enforced (no dedicated architecture
-  test yet).
+- Controller-initiated remote execution crosses the audited SSH boundary only
+  (ADR 0004); Worker→Controller control-plane reporting (registration,
+  heartbeat, job state, artifacts) uses authenticated HTTP(S) with a Worker
+  Token. `worker_agent/` imports inside `features/` stay confined to the
+  worker-role execution surfaces and the same-host bridge modules and
+  must not spread; enforced by
+  `tests/architecture/test_controller_worker_boundary.py`.
 - Agent profiles are the canonical Agent-side config: one profile binds
   exactly one client to one Controller
   (`~/.config/gms-agent/profiles/<profile>.toml`, token in
@@ -90,8 +92,9 @@
 - Do not edit: `plugins/gms-remote-test/**` (generated),
   `tests/contract/snapshots/**` (regenerate deliberately),
   `tests/architecture/test_file_size_rules.py` budgets except to shrink
-  them after a real split, and everything under local `configs/` and
-  `data/`.
+  them after a real split (the 1200-line default is owner-set policy;
+  never raise ceilings without a reviewed waiver), and everything under
+  local `configs/` and `data/`.
 
 ## Verification
 

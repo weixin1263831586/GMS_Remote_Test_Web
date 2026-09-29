@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from features.redmine.daily_brief_execution_statistics import (
+from features.redmine.daily_brief_report import (
     DEFAULT_MODEL_LABEL,
     summarize_execution_statistics,
 )

@@ -17,6 +17,7 @@ from features.auth import (
     require_elevated_admin,
     require_elevated_admin_when_auth_required,
 )
+from foundation.error_model import record_internal_error
 from foundation.responses import error_response, success_response
 from foundation.static_routes import apply_static_routes
 
@@ -283,8 +284,8 @@ async def get_tailscale_status(request: Request):
     """获取 Tailscale 内网访问地址"""
     try:
         status = await asyncio.to_thread(_get_tailscale_status)
-    except Exception as e:
-        return error_response(f'无法获取 Tailscale 信息：{e!s}', status_code=503)
+    except Exception:
+        return error_response(record_internal_error(logger, "获取 Tailscale 状态", "status probe failed"), 503)
 
     if status.get('ip'):
         url = _build_tailscale_url(status['ip'], request)
@@ -319,9 +320,8 @@ async def ensure_tailscale_url(
                 'connected': status.get('connected', False)
             })
         try:
-            # Privilege escalation is never performed by the web process.
-            # Installation enables tailscaled; interactive account enrollment
-            # remains an explicit host-administration action.
+            # Privilege escalation is never performed by the web process;
+            # installation enables tailscaled only, enrollment stays host-admin.
             svc_check = await asyncio.to_thread(
                 subprocess.run,
                 ["systemctl", "is-active", "--quiet", "tailscaled"],
@@ -348,8 +348,8 @@ async def ensure_tailscale_url(
                 '再刷新此页面。',
                 status_code=503
             )
-        except Exception as e:
-            return error_response(f'Tailscale 启动失败：{e!s}', status_code=503)
+        except Exception:
+            return error_response(record_internal_error(logger, "启动 Tailscale", "tailscale up failed"), 503)
 
 
 @router.post("/api/config/update")
