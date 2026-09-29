@@ -1,10 +1,32 @@
 #!/bin/bash
 
 # ============ Configuration ============
-GERRIT_USER="chaoqun.huang"
-GERRIT_HOST="10.10.10.29"
-GERRIT_PORT="29418"
+# 凭证支持环境覆盖，脚本内的个人默认值仅为本地兜底（避免把个人账号/
+# 内网地址硬编码为不可变更事实）。
+GERRIT_USER="${GERRIT_USER:-chaoqun.huang}"
+GERRIT_HOST="${GERRIT_HOST:-10.10.10.29}"
+GERRIT_PORT="${GERRIT_PORT:-29418}"
 # ======================================
+
+# topic/变更号/ref 是 Gerrit 侧输入：进 ssh 远端命令串或 git URL 前必须
+# 过白名单，杜绝借 `--option` 或 shell 元字符改变远端行为。
+_validate_topic() {
+    [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+}
+
+_validate_change_id() {
+    # Gerrit change number 是纯数字（也用作临时目录后缀）。
+    [[ "$1" =~ ^[0-9]{1,12}$ ]]
+}
+
+_validate_ref() {
+    [[ "$1" =~ ^refs/changes/[0-9]{2}/[0-9]+/[0-9]+$ ]]
+}
+
+_validate_project() {
+    # Gerrit 项目路径：字母数字与 ./_- 组合，禁止空白与元字符。
+    [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]
+}
 
 # Gerrit project name prefix (Gerrit URL includes this prefix; manifest name does not)
 GERRIT_PROJECT_PREFIX="android/"
@@ -76,6 +98,13 @@ _fetch_and_format_patch() {
     local patch_dir="$4"
     local gerrit_url="$5"
     local change_id="$6"
+    # 参数来自 Gerrit JSON 解析结果，落进 git URL 与临时目录路径前先过
+    # 白名单；失败直接放弃本 patch，不污染其他并行任务。
+    if ! _validate_project "$project" || ! _validate_change_id "$change_id" \
+        || ! _validate_ref "$ref"; then
+        echo "[ERROR]   Unsafe gerrit input rejected (project=$project change=$change_id ref=$ref)"
+        return 1
+    fi
     # Use change_id as temp dir suffix to ensure uniqueness
     local tmp_dir="${patch_dir}/.tmp_git_${change_id}"
 
@@ -125,6 +154,11 @@ export_patches() {
     echo "[INFO] ========== Start exporting patches =========="
     echo "[INFO] Topic: $topic"
     echo "[INFO] Output Path: $output_path"
+
+    if ! _validate_topic "$topic"; then
+        echo "[ERROR] Invalid topic: $topic (only [A-Za-z0-9._-] allowed)"
+        return 1
+    fi
 
     mkdir -p "$output_path"
 

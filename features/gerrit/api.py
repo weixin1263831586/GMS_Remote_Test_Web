@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import re
-import shlex
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -34,6 +34,7 @@ from features.gerrit.service import (
 from features.gerrit.settings import config_manager
 from features.redmine import load_redmine_user_map_for_owner
 from features.users import owner_id_from_request
+from foundation.error_model import ApiError
 
 
 router = APIRouter(prefix="/api/gerrit-dashboard")
@@ -155,7 +156,7 @@ async def update_gerrit_dashboard_config(request: Request):
         updates["chart_date_ranges"] = body["chart_date_ranges"]
     merged = {**current, **updates}
     if not manager.save_gerrit_dashboard_config(merged):
-        return JSONResponse(status_code=500, content={"success": False, "error": "failed to save Gerrit dashboard config"})
+        return ApiError.internal("failed to save Gerrit dashboard config").to_response()
     _STATS_CACHE.clear()
     return {"success": True, "data": _public_config(_dashboard_config_for_request(request), manager=manager)}
 
@@ -183,7 +184,7 @@ async def create_gerrit_personal_profile(request: Request):
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
     if not manager.save_gerrit_dashboard_config(dashboard_cfg):
-        return JSONResponse(status_code=500, content={"success": False, "error": "failed to save Gerrit personal profile"})
+        return ApiError.internal("failed to save Gerrit personal profile").to_response()
     _STATS_CACHE.clear()
     return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg, manager=manager), "profile": dashboard_cfg["personal_profiles"][-1]}}
 
@@ -207,7 +208,7 @@ async def create_gerrit_department_profile(request: Request):
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
     if not manager.save_gerrit_dashboard_config(dashboard_cfg):
-        return JSONResponse(status_code=500, content={"success": False, "error": "failed to save Gerrit department profile"})
+        return ApiError.internal("failed to save Gerrit department profile").to_response()
     _STATS_CACHE.clear()
     return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg, manager=manager), "profile": dashboard_cfg["department_profiles"][-1]}}
 
@@ -222,7 +223,7 @@ async def add_gerrit_department_owner(profile_id: str, request: Request):
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
     if not manager.save_gerrit_dashboard_config(dashboard_cfg):
-        return JSONResponse(status_code=500, content={"success": False, "error": "failed to save Gerrit department owner"})
+        return ApiError.internal("failed to save Gerrit department owner").to_response()
     _STATS_CACHE.clear()
     profile = select_gerrit_department_profile(dashboard_cfg, profile_id)
     return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg, manager=manager), "profile": profile}}
@@ -238,7 +239,7 @@ async def delete_gerrit_department_owner(profile_id: str, request: Request):
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
     if not manager.save_gerrit_dashboard_config(dashboard_cfg):
-        return JSONResponse(status_code=500, content={"success": False, "error": "failed to remove Gerrit department owner"})
+        return ApiError.internal("failed to remove Gerrit department owner").to_response()
     _STATS_CACHE.clear()
     profile = select_gerrit_department_profile(dashboard_cfg, profile_id)
     return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg, manager=manager), "profile": profile}}
@@ -252,7 +253,7 @@ async def sync_gerrit_redmine_members(request: Request):
         _redmine_users_for_request(request),
     )
     if not manager.save_gerrit_dashboard_config(dashboard_cfg):
-        return JSONResponse(status_code=500, content={"success": False, "error": "failed to sync Redmine members to Gerrit dashboard"})
+        return ApiError.internal("failed to sync Redmine members to Gerrit dashboard").to_response()
     _STATS_CACHE.clear()
     return {"success": True, "data": _public_config(_dashboard_config_for_request(request), manager=manager)}
 
@@ -324,13 +325,15 @@ async def check_gerrit_connectivity(request: Request):
     完全复现查询的真实网络路径，用于在看板全 0 时区分「Gerrit 不可达」与「真没数据」。
     """
     cfg = _dashboard_config_for_request(request)
-    # base_url 可能带 https:// 前缀和路径，ssh_host 是裸 IP/域名；优先 ssh_host。
-    raw_host = (cfg.get("ssh_host") or cfg.get("base_url") or "").strip()
-    host = raw_host.replace("https://", "").replace("http://", "").split("/")[0].strip()
+    raw_host = str(cfg.get("ssh_host") or cfg.get("base_url") or "").strip()
+    try:
+        parsed = urlsplit(raw_host if "://" in raw_host else f"//{raw_host}")
+        host = str(parsed.hostname or "").strip()
+    except ValueError:
+        host = ""
     if not host:
-        return {"success": True, "data": {"configured": False, "host": "", "message": "Gerrit 未配置 ssh_host/base_url"}}
+        return {"success": True, "data": {"configured": False, "host": "", "message": "Gerrit 未配置有效的 ssh_host/base_url"}}
     ssh_port = int(cfg.get("ssh_port") or 29418)
-    safe_host = shlex.quote(host)
 
     async def _run(cmd: list[str], timeout: float = 8.0) -> tuple[int, str]:
         """Run a command on the web host, returning (exit_code, combined_output)."""
@@ -348,27 +351,44 @@ async def check_gerrit_connectivity(request: Request):
         text = (stdout.decode("utf-8", errors="ignore") + stderr.decode("utf-8", errors="ignore")).strip()
         return proc.returncode if proc.returncode is not None else 1, text
 
-    # ICMP 可达性
-    ping_code, ping_text = await _run(["ping", "-c", "2", "-W", "2", host])
+    ping_code, ping_text = await _run(
+        ["ping", "-c", "2", "-W", "2", "--", host]
+    )
     ping_ok = ping_code == 0
     latency = ""
     m = re.search(r"= [\d.]+/([\d.]+)/", ping_text)
     if m:
         latency = f"{m.group(1)}ms"
 
-    # SSH 端口（Gerrit 查询实际走的端口）—— /dev/tcp 探测，成功返回 0
-    ssh_port_code, ssh_port_text = await _run(
-        ["bash", "-c", f"timeout 6 bash -c 'cat < /dev/null > /dev/tcp/{safe_host}/{ssh_port}'"], timeout=10
-    )
-    ssh_port_ok = ssh_port_code == 0
+    ssh_port_text = ""
+    try:
+        _reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, ssh_port), timeout=6
+        )
+        writer.close()
+        await writer.wait_closed()
+        ssh_port_ok = True
+    except (OSError, asyncio.TimeoutError) as exc:
+        ssh_port_ok = False
+        ssh_port_text = str(exc)
 
-    # HTTPS（REST 备用通道）
-    _, https_text = await _run(
-        ["bash", "-c", f"curl -sk -o /dev/null -w '%{{http_code}}' --max-time 6 https://{safe_host}/ || echo 000"],
+    https_host = f"[{host}]" if ":" in host else host
+    https_code_raw, https_text = await _run(
+        [
+            "curl",
+            "-sk",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "--max-time",
+            "6",
+            f"https://{https_host}/",
+        ],
         timeout=10,
     )
     https_code = https_text.strip().splitlines()[-1] if https_text.strip() else "000"
-    https_ok = https_code not in ("000", "")
+    https_ok = https_code_raw == 0 and https_code not in ("000", "")
 
     result = {
         "configured": True,

@@ -17,6 +17,7 @@ from foundation.responses import error_response, success_response
 
 from . import runtime
 from .clients import get_client_id_from_request
+from .storage_paths import owner_storage_key
 
 
 router = APIRouter()
@@ -207,7 +208,7 @@ def current_username_for_request(request: Request) -> str:
     return user.resource_owner_id if user else get_client_id_from_request(request)
 
 
-def _owner_storage_key(username: str) -> str:
+def _legacy_owner_storage_key(username: str) -> str:
     raw = str(username or '').strip()
     key = ''.join(
         character if character.isalnum() or character in {'-', '_'} else '_'
@@ -223,7 +224,7 @@ def _owner_storage_key(username: str) -> str:
 
 def _device_groups_path(username: str) -> Path:
     data_root = Path(runtime.data_root)
-    directory = data_root / 'user_prefs' / _owner_storage_key(username)
+    directory = data_root / 'user_prefs' / owner_storage_key(username)
     directory.mkdir(parents=True, exist_ok=True)
     return directory / 'device_groups.json'
 
@@ -243,32 +244,36 @@ def _agent_token_ids_for_owner(owner: str) -> list[str]:
     ]
 
 
-def _migrate_legacy_agent_groups(username: str, target: Path) -> None:
-    """One-time lazy migration for the ADR 0010 owner-key switch.
+def _migrate_legacy_owner_groups(username: str, target: Path) -> None:
+    """Lazily migrate legacy owner and Agent actor storage directories.
 
-    设备分组曾按 ``user.id`` 落盘：人类账号 id 不变无需迁移；agent 令牌
-    的合成 actor id（``agent:<token_id>``）在切换后会让账号看不到旧分
-    组。这里借 agent_tokens 注册表把该账号名下每个 token 的历史 key 反
-   查出来，取 mtime 最新的分组文件复制到账号 key 下。幂等：仅在目标
-    文件缺失时执行；任何失败都按"无历史数据"处理（fail-open）。
+    Device groups previously used a different filename sanitizer and, before
+    ADR 0010, an Agent token's synthetic actor id. Copy the newest valid legacy
+    file only when the canonical owner target does not exist.
     """
     if target.is_file():
         return
     data_root = Path(runtime.data_root) / 'user_prefs'
-    candidates = []
+    candidates = [
+        data_root / _legacy_owner_storage_key(username) / 'device_groups.json'
+    ]
     for token_id in _agent_token_ids_for_owner(username):
         if not token_id:
             continue
-        legacy = (
+        candidates.append(
             data_root
-            / _owner_storage_key(f'agent:{token_id}')
+            / _legacy_owner_storage_key(f'agent:{token_id}')
             / 'device_groups.json'
         )
+    candidates = [candidate for candidate in candidates if candidate != target]
+    existing = []
+    for legacy in candidates:
         try:
             if legacy.is_file():
-                candidates.append(legacy)
+                existing.append(legacy)
         except OSError:
             continue
+    candidates = existing
     if not candidates:
         return
     legacy_path = max(candidates, key=lambda candidate: candidate.stat().st_mtime)
@@ -302,7 +307,7 @@ def load_device_groups(username: str | None) -> list[dict[str, Any]]:
 
     path = _device_groups_path(username)
     with _storage_lock:
-        _migrate_legacy_agent_groups(username, path)
+        _migrate_legacy_owner_groups(username, path)
         try:
             data = json.loads(path.read_text(encoding='utf-8'))
             return normalize_device_groups(

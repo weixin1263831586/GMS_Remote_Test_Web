@@ -185,6 +185,7 @@ def list_devices(
 @router.post("/workers/{worker_id}/refresh")
 async def refresh_worker_inventory(
     worker_id: str,
+    request: Request,
     inventory: str = Query(
         default="devices",
         pattern="^(devices|suites|devices,suites|suites,devices)$",
@@ -204,8 +205,20 @@ async def refresh_worker_inventory(
     import asyncio
 
     from .api import _local_execute, _require_cluster_enabled, _run_worker_command
+    from .device_actions_api import _require_machine_reservation
 
     svc = service()
+    machine_reservation = None
+    if _user is not None and _user.role == "agent_service":
+        if not _user.has_permission("devices.read"):
+            raise HTTPException(403, "Agent token lacks devices.read scope")
+        auth_method = getattr(request.state, "auth_method", None)
+        if auth_method == "agent_token":
+            ensure_agent_worker_allowed(request, worker_id)
+        elif auth_method == "machine_authority":
+            machine_reservation = _require_machine_reservation(
+                request, worker_id, []
+            )
     _require_cluster_enabled(remote=worker_id != svc.config.local_worker_id)
     if svc.repository.get_worker(worker_id) is None:
         # 与 _run_worker_command 的语义一致：本地 Worker 由
@@ -250,5 +263,24 @@ async def refresh_worker_inventory(
         device for device in devices_list
         if str(device.get("state") or "") not in {"offline", "unknown"}
     ]
+    auth_method = getattr(request.state, "auth_method", None)
+    if auth_method == "agent_token":
+        allowed_raw, allowed_devices = _agent_acl_parts(
+            getattr(request.state, "agent_token_record", None), "devices"
+        )
+        if allowed_raw != "*":
+            devices_list = [
+                device for device in devices_list
+                if str(device.get("serial") or "") in allowed_devices
+            ]
+    elif machine_reservation is not None:
+        reserved = {
+            str(item.get("id") or "")
+            for item in machine_reservation.get("devices") or []
+        }
+        devices_list = [
+            device for device in devices_list
+            if str(device.get("id") or "") in reserved
+        ]
     return {"success": True, "devices": devices_list,
             "refreshed": sorted(requested)}

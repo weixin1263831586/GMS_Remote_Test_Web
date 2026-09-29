@@ -411,7 +411,7 @@
                         <summary>如何获取初始化令牌</summary>
                         在 Controller 服务器上，以服务运行用户或管理员身份进入实际安装目录，执行：
                         <code style="display: block; overflow-wrap: anywhere; margin: 6px 0;">python3 -c 'import json; print(json.load(open("configs/secrets/environment.json"))["GMS_BOOTSTRAP_TOKEN"])'</code>
-                        将输出粘贴到上方。默认安装目录为 <code>/opt/gms-remote-test/web_app</code>。手动部署请使用为 Controller 配置的同名环境变量；旧部署可能保存在 <code>configs/runtime.json</code>（现应迁移到 <code>configs/local/environment.json</code>）中。
+                        将输出粘贴到上方。默认安装目录为 <code>/opt/gms-remote-test/web_app</code>。手动部署请使用为 Controller 配置的同名环境变量；配置统一保存在 <code>configs/local/environment.json</code>。
                     </details>
                 </div>
             </div>

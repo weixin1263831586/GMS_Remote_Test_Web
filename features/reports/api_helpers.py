@@ -152,6 +152,14 @@ def _resolve_redmine_knowledge_service(request: Request | None = None):
     return get_redmine_service_for_owner(user.resource_owner_id).knowledge  # ADR 0010: KB 按创建者账号分区
 
 
+def resolve_redmine_knowledge_service(request: Request | None = None):
+    """返回认证用户自己的 Redmine 知识服务，不跨用户回退。
+
+    公共面导出（scripts/redmine_seed_ime_cases.py 等组合根经
+    ``features.reports`` 引用；下划线名保留为内部别名）。"""
+    return _resolve_redmine_knowledge_service(request)
+
+
 def _get_knowledge_base(request: Request | None = None):
     """Resolve the Redmine knowledge service backing diagnosis lookups.
 

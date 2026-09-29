@@ -7345,6 +7345,7 @@
     },
     "/api/cluster/jobs/{job_id}/timeline": {
       "get": {
+        "description": "Correlated state and command timeline for Cluster Jobs.",
         "parameters": [
           {
             "in": "path",
@@ -21669,7 +21670,7 @@
     },
     "/api/users/set-username": {
       "post": {
-        "description": "手动设置客户端用户名（不需要SSH密码）",
+        "description": "手动设置客户端用户名（不需要SSH密码，但认证开启时需登录）",
         "requestBody": {
           "content": {
             "application/json": {

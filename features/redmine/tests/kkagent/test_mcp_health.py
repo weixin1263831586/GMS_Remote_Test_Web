@@ -22,7 +22,11 @@ HEALTHY = {
         "skill_present": True,
         "profile": {"count": 1, "names": ["p1"], "selected": "p1", "valid": True},
         "token": {"configured": True, "present": True, "mode_ok": True, "owner_ok": True},
-        "mcp": {"registered": True, "config_path": "/home/u/.kkagent/config.toml"},
+        "mcp": {
+            "registered": True,
+            "launchable": True,
+            "config_path": "/home/u/.kkagent/config.toml",
+        },
     }],
 }
 
@@ -62,7 +66,7 @@ class ParseDoctorPayloadTests(unittest.TestCase):
 
     # #654649 nightly 复盘：老版 doctor 只查注册文本，payload 被清空也报
     # healthy。新版 doctor 的 launchable=False 必须拦下并给出恢复路径；
-    # 旧版 payload（无 launchable 字段）保持兼容。
+    # 旧版 payload（无 launchable 字段）无法证明 launcher 存在，必须失败。
     def test_registered_but_missing_launcher_fails_probe(self):
         payload = json.loads(json.dumps(HEALTHY))
         payload["clients"][0]["mcp"] = {
@@ -77,10 +81,12 @@ class ParseDoctorPayloadTests(unittest.TestCase):
         self.assertIn("mcp_launcher.py", reason)
         self.assertIn("sync_package", reason)
 
-    def test_missing_launchable_field_stays_back_compatible(self):
-        ok, reason = parse_doctor_payload(json.dumps(HEALTHY).encode())
-        self.assertTrue(ok)
-        self.assertEqual(reason, "")
+    def test_missing_launchable_field_fails_closed(self):
+        payload = json.loads(json.dumps(HEALTHY))
+        payload["clients"][0]["mcp"].pop("launchable")
+        ok, reason = parse_doctor_payload(json.dumps(payload).encode())
+        self.assertFalse(ok)
+        self.assertIn("无法确认可启动性", reason)
 
     def test_each_unhealthy_bit_is_reported(self):
         payload = {
@@ -109,7 +115,7 @@ class ParseDoctorPayloadTests(unittest.TestCase):
                 "skill_present": True,
                 "profile": {"count": 1, "valid": True},
                 "token": {"present": True, "mode_ok": False, "owner_ok": True},
-                "mcp": {"registered": True},
+                "mcp": {"registered": True, "launchable": True},
             }],
         }
         ok, reason = parse_doctor_payload(json.dumps(payload).encode())

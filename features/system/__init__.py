@@ -18,7 +18,7 @@ from .source_provider import (
     sdk_sources_available,
 )
 from .ssh import ssh_manager
-from .vnc import novnc_url
+from .vnc import novnc_url, vnc_manager
 
 
 __all__ = [
@@ -36,4 +36,5 @@ __all__ = [
     "sdk_sources_available",
     "security_audit_logger",
     "ssh_manager",
+    "vnc_manager",
 ]

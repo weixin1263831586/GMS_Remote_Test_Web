@@ -354,7 +354,7 @@ async def ping_route_test(request: Request):
         return JSONResponse(content={'success': False, 'error': message}, status_code=500)
 
 
-@router.get("/api/vpn/connections")
+@router.get("/api/vpn/connections", dependencies=_HUMAN_ONLY)
 @handle_api_errors
 async def get_vpn_connections():
     """获取系统中所有可用的 VPN 连接"""
@@ -383,7 +383,7 @@ async def get_vpn_connections():
         message = record_internal_error(logger, "列出 VPN 连接", "Error listing VPN connections")
         return ApiError.internal(message).to_response()
 
-@router.get("/api/vpn/status")
+@router.get("/api/vpn/status", dependencies=_HUMAN_ONLY)
 @handle_api_errors
 async def get_vpn_status():
     """获取VPN连接状态

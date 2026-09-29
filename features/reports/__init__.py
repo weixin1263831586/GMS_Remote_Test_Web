@@ -1,6 +1,7 @@
 from .analysis_agent import ReportAnalysisAgent
 from .analyzer import ReportAnalyzer
 from .api import diagnose_report_failure
+from .api_helpers import resolve_redmine_knowledge_service
 from .api_models import ReportDiagnosisRequest
 from .archive import ReportAnalyzer as ArchiveReportAnalyzer
 from .display import (
@@ -27,6 +28,7 @@ __all__ = [
     "diagnose_report_failure",
     "report_client_display_id",
     "report_name_from_result_dir",
+    "resolve_redmine_knowledge_service",
     "save_test_report_to_db",
     "test_report_db",
     "test_report_manager",

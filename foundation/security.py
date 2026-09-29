@@ -34,3 +34,22 @@ def sanitize_device_ids(values) -> list[str]:
     if not values:
         return []
     return [str(v) for v in values if is_safe_device_id(v)]
+
+
+_CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def has_control_chars(value: str | None) -> bool:
+    """True when ``value`` contains ASCII control characters (incl. newline)."""
+    return bool(value) and _CONTROL_CHAR_PATTERN.search(str(value)) is not None
+
+
+def quote_device_shell_arg(value: str) -> str:
+    """Single-quote one argument for the Android device shell (mksh/toybox).
+
+    ``adb shell a b c`` joins its trailing args into one line that the *device*
+    shell re-parses, so free-form values (WiFi SSID/password) carrying ``;``,
+    ``$()`` or backticks would execute on the device. Wrapping each value in
+    single quotes and escaping embedded quotes forces literal interpretation.
+    """
+    return "'" + str(value).replace("'", "'\\''") + "'"

@@ -1,6 +1,6 @@
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from starlette.requests import Request
 
@@ -319,3 +319,85 @@ def test_operation_claim_does_not_borrow_running_cluster_job_claim():
             # The job claim is untouched by the refused operation.
             active = manager.registry.list_active(worker_id="ats-worker-controller")
             assert any(c["source_id"] == "job:job-123" for c in active)
+
+
+def test_machine_principal_cannot_borrow_another_run_reservation():
+    with tempfile.TemporaryDirectory() as directory:
+        manager = DeviceLockManager(
+            Path(directory) / "claims.sqlite3",
+            local_worker_id="ats-worker-controller",
+        )
+        machine = _request_with_owner("automation:run-2", "user-alice")
+        machine.state.auth_method = "machine_authority"
+        cluster = Mock()
+        cluster.repository.get_reservation_by_source.return_value = None
+        with patch.object(operation_claims, "device_lock_manager", manager), patch.object(
+            operation_claims, "get_cluster_service", return_value=cluster
+        ), patch.object(
+            operation_claims,
+            "get_local_worker_id",
+            return_value="ats-worker-controller",
+        ):
+            ok, _ = manager.lock_devices(
+                ["SERIAL-1"],
+                "user-alice",
+                "alice",
+                source_id="reservation:res-run-1",
+                source_type="cluster-reservation",
+                ttl_seconds=3600,
+                allow_existing_source=True,
+            )
+            assert ok
+
+            source_id, records, conflict = support.acquire_device_operation_claim(
+                machine, ["SERIAL-1"], "remount"
+            )
+
+    cluster.repository.get_reservation_by_source.assert_called_once_with("run-2")
+    assert source_id == ""
+    assert records == []
+    assert conflict.status_code == 403
+    assert b"no active reservation" in conflict.body
+
+
+def test_machine_principal_borrows_only_its_run_reservation():
+    with tempfile.TemporaryDirectory() as directory:
+        manager = DeviceLockManager(
+            Path(directory) / "claims.sqlite3",
+            local_worker_id="ats-worker-controller",
+        )
+        machine = _request_with_owner("automation:run-1", "user-alice")
+        machine.state.auth_method = "machine_authority"
+        reservation = {
+            "id": "res-run-1",
+            "owner_id": "user-alice",
+            "worker_id": "ats-worker-controller",
+            "devices": [{"id": "ats-worker-controller:SERIAL-1"}],
+        }
+        cluster = Mock()
+        cluster.repository.get_reservation_by_source.return_value = reservation
+        with patch.object(operation_claims, "device_lock_manager", manager), patch.object(
+            operation_claims, "get_cluster_service", return_value=cluster
+        ), patch.object(
+            operation_claims,
+            "get_local_worker_id",
+            return_value="ats-worker-controller",
+        ):
+            ok, _ = manager.lock_devices(
+                ["SERIAL-1"],
+                "user-alice",
+                "alice",
+                source_id="reservation:res-run-1",
+                source_type="cluster-reservation",
+                ttl_seconds=3600,
+                allow_existing_source=True,
+            )
+            assert ok
+
+            source_id, records, conflict = support.acquire_device_operation_claim(
+                machine, ["SERIAL-1"], "remount"
+            )
+
+    assert conflict is None
+    assert source_id == ""
+    assert records[0]["source_id"] == "reservation:res-run-1"

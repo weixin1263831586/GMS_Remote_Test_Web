@@ -27,7 +27,6 @@ from .clients import (
     get_client_id_from_request,
     hide_sensitive_info,
     owner_id_from_request,
-    parse_client_id,
 )
 from .navigation_preferences import (
     load_navigation_preferences,
@@ -448,27 +447,9 @@ async def delete_client_ssh_credential(
             "设备主机格式错误，应为 user@ip，例如 gms@192.168.1.100",
             status_code=400,
         )
-    username, hostname = parse_client_id(device_host)
-
-    runtime_cfg = config_manager.get_runtime_config()
-    credentials = runtime_cfg.get("client_ssh_credentials") or []
-    if not isinstance(credentials, list):
-        credentials = []
-
-    remaining = []
-    for cred in credentials:
-        if not isinstance(cred, dict):
-            continue
-        cred_device_host = str(cred.get("device_host") or "").strip()
-        cred_username = str(cred.get("username") or "").strip()
-        cred_host = str(cred.get("host") or cred.get("hostname") or "").strip()
-        is_same = (
-            (cred_device_host and cred_device_host == device_host)
-            or (cred_username == username and cred_host == hostname)
-        )
-        if not is_same:
-            remaining.append(cred)
-    if config_manager.save_client_ssh_credentials(remaining):
+    # 删除走 ConfigManager 的单一锁内临界区，避免与并发 upsert 交错丢凭据。
+    # （user@host 拆分与匹配都在 ConfigManager 内部完成。）
+    if config_manager.delete_client_ssh_credential(device_host):
         return success_response(message="凭据已删除")
     return error_response("删除凭据失败", status_code=500)
 
@@ -594,6 +575,7 @@ async def get_sidebar_order(request: Request):
 async def save_sidebar_order(
     request: Request,
     req: dict = Body(default={}),
+    _user: CurrentUser | None = Depends(require_authenticated_user_when_auth_required),
 ):
     """保存侧边栏导航顺序和可见页面。"""
     owner_id = owner_id_from_request(request)

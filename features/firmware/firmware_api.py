@@ -15,6 +15,7 @@ from features.auth import (
     get_authenticated_user,
     require_elevated_admin,
 )
+from features.devices import resume_usbip_reconnect as _resume_usbip_reconnect
 from features.test_execution import get_default_suites_path
 from features.users import get_client_username_from_request
 from foundation.error_model import ApiError, record_internal_error
@@ -53,9 +54,6 @@ from .usbip_transport import (
 )
 from .usbip_transport import (
     schedule_usbip_mode_reconnect as _schedule_usbip_mode_reconnect,
-)
-from .usbip_transport import (
-    usbip_reconnect as _usbip_reconnect,
 )
 from .usbip_transport import (
     wait_for_adb_devices as _wait_for_adb_devices,
@@ -254,6 +252,9 @@ async def burn_firmware(
     # 主机上实际烧写的 remote_firmware 字节；显式初始化避免分支差异导致
     # NameError 500。
     local_firmware_path = None
+    # 通知与异常通知都需要固件名；显式初始化替代脆弱的
+    # `'firmware_name' in dir()` 探测（分支提前 return 时恒为空）。
+    firmware_name = ""
     try:
         client_id = runtime.get_client_id_from_request(request)
 
@@ -899,7 +900,7 @@ async def burn_firmware(
                 return api_error.to_response()
             except Exception:
                 message = record_internal_error(logger, "烧写固件", "Firmware burn error")
-                runtime.store_notification(client_id, "Firmware burn error", message[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name if 'firmware_name' in dir() else ""})
+                runtime.store_notification(client_id, "Firmware burn error", message[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name})
                 return ApiError.internal(message).to_response()
     except Exception:
         message = record_internal_error(logger, "烧写固件", "Error in burn_firmware")
@@ -919,10 +920,10 @@ async def burn_firmware(
         })
         for host in _resume_hosts:
             with contextlib.suppress(Exception):
-                _usbip_reconnect.resume_usbip_reconnect(device_host=host)
+                _resume_usbip_reconnect(device_host=host)
         for device in devices:
             with contextlib.suppress(Exception):
-                _usbip_reconnect.resume_usbip_reconnect(
+                _resume_usbip_reconnect(
                     device_id=str(device or "").strip(),
                 )
         if usbip_reconnect_after_finish:

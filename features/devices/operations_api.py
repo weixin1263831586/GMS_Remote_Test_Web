@@ -14,7 +14,7 @@ from features.auth import (
     require_authenticated_user,
     require_elevated_admin,
 )
-from foundation.error_model import record_internal_error
+from foundation.error_model import ApiError, record_internal_error
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 from foundation.security import sanitize_device_ids
@@ -269,7 +269,9 @@ async def connect_wifi(req: WifiConnectRequest, request: Request):
         password_q = shlex.quote(password)
         async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
-                return error_response("SSH connection failed", status_code=500)
+                return ApiError.upstream_failure(
+                    "SSH connection failed", service="ssh"
+                ).to_response()
 
             def _connect_one(device_id: str) -> dict:
                 enable_cmd = f"adb -s {device_id} shell cmd wifi set-wifi-enabled enabled"
@@ -298,6 +300,8 @@ async def connect_wifi(req: WifiConnectRequest, request: Request):
                     },
                 }
             )
+    except ApiError as exc:
+        return exc.to_response()
     except Exception:
         message = record_internal_error(logger, "连接设备 WiFi", "Error connecting WiFi")
         return error_response(f"{message} Please check configuration and parameters.", status_code=500)
@@ -319,10 +323,9 @@ async def open_device_shell(req: DeviceShellRequest, request: Request):
         config = runtime.config_manager.load_config()
         async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
-                return JSONResponse(
-                    content={"success": False, "message": "SSH connection failed"},
-                    status_code=500,
-                )
+                return ApiError.upstream_failure(
+                    "SSH connection failed", service="ssh"
+                ).to_response()
 
             ready_result = await asyncio.to_thread(
                 wait_for_adb_serial_ready, ssh, req.serial_no, 30
@@ -360,6 +363,8 @@ async def open_device_shell(req: DeviceShellRequest, request: Request):
                     },
                     status_code=400,
                 )
+    except ApiError as exc:
+        return exc.to_response()
     except Exception:
         message = record_internal_error(logger, "打开设备 shell", "Error opening device shell")
         return JSONResponse(

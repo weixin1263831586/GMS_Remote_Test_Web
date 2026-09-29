@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from features.auth import CurrentUser
 from features.cluster import ClusterConfig, ClusterRepository, ClusterService
 from features.cluster import api as cluster_api
 from features.test_execution import execution_api
@@ -70,6 +71,65 @@ class TestDurableStartTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, sentinel)
         start.assert_called_once()
+
+    async def test_agent_start_uses_resource_owner_account(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = ClusterRepository(Path(directory) / "cluster.sqlite3")
+            repository.register_worker({
+                "worker_id": "ats-worker-controller",
+                "agent_version": "0.2.0",
+                "max_jobs": 1,
+                "name": "local",
+                "hostname": "local",
+                "address": "127.0.0.1",
+                "capabilities": {},
+            })
+            previous = cluster_api.cluster_service
+            cluster_api.cluster_service = ClusterService(repository)
+            sentinel = {"success": True, "cluster_job_id": "job-agent"}
+            request = SimpleNamespace(
+                state=SimpleNamespace(
+                    current_user=CurrentUser(
+                        id="agent:token-1",
+                        username="agent:token-1",
+                        role="agent_service",
+                        extra_permissions=frozenset({"tests.execute"}),
+                        resource_owner_id="alice",
+                    ),
+                    auth_method="agent_token",
+                    agent_token_record={
+                        "allowed_workers": "*",
+                        "allowed_devices": "*",
+                    },
+                ),
+                headers={},
+                cookies={},
+            )
+            try:
+                with (
+                    patch.object(
+                        execution_api.runtime,
+                        "generate_help_or_continue",
+                        return_value=None,
+                    ),
+                    patch.object(
+                        execution_api.runtime,
+                        "start_cluster_test",
+                        return_value=sentinel,
+                    ) as start,
+                ):
+                    result = await execution_api.start_test(
+                        request,
+                        req=StartRequest(
+                            worker_id="ats-worker-controller",
+                            devices=["SERIAL-1"],
+                        ),
+                    )
+            finally:
+                cluster_api.cluster_service = previous
+
+        self.assertEqual(result, sentinel)
+        self.assertEqual(start.call_args.args[1], "alice")
 
     async def test_configured_local_worker_id_is_not_dispatched_as_remote(self):
         with tempfile.TemporaryDirectory() as directory:

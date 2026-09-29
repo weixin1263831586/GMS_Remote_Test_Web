@@ -166,10 +166,10 @@ async function _apiCallOnce(url, method, data, opts) {
             );
             error.status = response.status;
             const structured = detail && typeof detail === 'object' ? detail : result;
-            error.code = structured?.error_code || '';
+            error.code = structured?.code || structured?.error_code || '';
             error.retryable = structured?.retryable === true;
-            error.remediation = structured?.remediation || '';
-            error.details = structured?.error_details || structured?.network_quality || {};
+            error.remediation = structured?.next_actions || structured?.remediation || '';
+            error.details = structured?.details || structured?.error_details || structured?.network_quality || {};
             if (response.status === 401) {
                 error.suppressToast = true;
                 // 用户主动发起的请求失败才重新弹出登录层；后台轮询

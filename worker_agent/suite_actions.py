@@ -36,11 +36,11 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
         for root in roots:
             for path in root.iterdir():
                 if path.is_file() and path.name.lower().endswith(extensions):
-                    stat = path.stat()
+                    st = path.stat()
                     name = path.name
                     default = next((name[:-len(ext)] for ext in extensions if name.lower().endswith(ext)), path.stem)
-                    archives.append({"name": name, "path": str(path), "size": stat.st_size,
-                                     "modified": int(stat.st_mtime), "default_dir_name": default})
+                    archives.append({"name": name, "path": str(path), "size": st.st_size,
+                                     "modified": int(st.st_mtime), "default_dir_name": default})
         return {"archives": sorted(archives, key=lambda item: item["modified"], reverse=True)}
     if action == "download_url":
         url = str(payload.get("url") or "").strip()
@@ -154,37 +154,59 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
         destination = (root / folder).resolve()
         if not destination.is_relative_to(root) or destination.exists():
             raise ValueError("extraction destination already exists or is invalid")
-        if zipfile.is_zipfile(archive):
-            with zipfile.ZipFile(archive) as bundle:
-                members = bundle.infolist()
-                if any(not (destination / item.filename).resolve().is_relative_to(destination) for item in members):
-                    raise ValueError("archive contains an unsafe path")
-                # Every archive path is resolved and confined above.
-                bundle.extractall(destination)  # nosec B202
-                # 恢复压缩包中的 Unix 权限，确保测试启动脚本可执行。
-                for item in members:
-                    mode = (item.external_attr >> 16) & 0o777
-                    target = (destination / item.filename).resolve()
-                    if mode and target.exists():
-                        target.chmod(mode)
-        elif tarfile.is_tarfile(archive):
-            with tarfile.open(archive) as bundle:
-                members = bundle.getmembers()
-                if any(not (destination / item.name).resolve().is_relative_to(destination)
-                           or not (item.isfile() or item.isdir()) for item in members):
-                    raise ValueError("archive contains an unsafe path or link")
-                # Paths and member types are prevalidated above; the data
-                # filter adds stdlib ownership/mode/link protections.
-                bundle.extractall(destination, members=members, filter="data")
-        else:
-            if archive.name.lower().endswith(".zip"):
-                # is_zipfile 失败多为传输截断：ZIP 缺少结尾 EOCD 记录。
-                raise ValueError(
-                    f"suite archive {archive.name} is incomplete or corrupted "
-                    "(missing ZIP end-of-central-directory record); "
-                    "delete and re-download the archive"
-                )
-            raise ValueError("unsupported suite archive format")
+        max_members = int(os.getenv(
+            "GMS_WORKER_SUITE_EXTRACT_MAX_MEMBERS", "200000"
+        ))
+        max_bytes = int(os.getenv(
+            "GMS_WORKER_SUITE_EXTRACT_MAX_BYTES", str(200 * 1024 ** 3)
+        ))
+        temporary = root / f".{folder}.extract-{uuid.uuid4().hex}"
+        try:
+            if zipfile.is_zipfile(archive):
+                with zipfile.ZipFile(archive) as bundle:
+                    members = bundle.infolist()
+                    if len(members) > max_members:
+                        raise ValueError("archive contains too many members")
+                    if sum(item.file_size for item in members) > max_bytes:
+                        raise ValueError("archive expands beyond configured size limit")
+                    if any(
+                        not (temporary / item.filename).resolve().is_relative_to(temporary)
+                        or stat.S_IFMT(item.external_attr >> 16) == stat.S_IFLNK
+                        for item in members
+                    ):
+                        raise ValueError("archive contains an unsafe path or link")
+                    bundle.extractall(temporary)  # nosec B202
+                    for item in members:
+                        mode = (item.external_attr >> 16) & 0o777
+                        target = (temporary / item.filename).resolve()
+                        if mode and target.exists():
+                            target.chmod(mode)
+            elif tarfile.is_tarfile(archive):
+                with tarfile.open(archive) as bundle:
+                    members = bundle.getmembers()
+                    if len(members) > max_members:
+                        raise ValueError("archive contains too many members")
+                    if sum(item.size for item in members if item.isfile()) > max_bytes:
+                        raise ValueError("archive expands beyond configured size limit")
+                    if any(
+                        not (temporary / item.name).resolve().is_relative_to(temporary)
+                        or not (item.isfile() or item.isdir())
+                        for item in members
+                    ):
+                        raise ValueError("archive contains an unsafe path or link")
+                    bundle.extractall(temporary, members=members, filter="data")
+            else:
+                if archive.name.lower().endswith(".zip"):
+                    raise ValueError(
+                        f"suite archive {archive.name} is incomplete or corrupted "
+                        "(missing ZIP end-of-central-directory record); "
+                        "delete and re-download the archive"
+                    )
+                raise ValueError("unsupported suite archive format")
+            temporary.replace(destination)
+        except Exception:
+            shutil.rmtree(temporary, ignore_errors=True)
+            raise
         return {"extracted_path": str(destination), "message": f"extracted {archive.name}"}
     suite_path = Path(str(payload.get("suite_path") or "")).expanduser().resolve()
     suite_root = suite_path.parent if suite_path.name == "tools" else suite_path
@@ -243,14 +265,14 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
         items = []
         for entry in sorted(target.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower())):
             try:
-                stat = entry.stat()
+                st = entry.stat()
             except OSError:
                 continue
             rel = str(entry.relative_to(suite_root))
             items.append({"name": entry.name, "path": rel,
                           "type": "directory" if entry.is_dir() else "file",
-                          "size": 0 if entry.is_dir() else stat.st_size,
-                          "modified": int(stat.st_mtime),
+                          "size": 0 if entry.is_dir() else st.st_size,
+                          "modified": int(st.st_mtime),
                           "is_apk": entry.suffix.lower() == ".apk",
                           "is_jar": entry.suffix.lower() == ".jar"})
         return {"suite_path": str(suite_path), "suite_root": str(suite_root),
@@ -261,19 +283,23 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
         limit = max(1, min(200, int(payload.get("limit") or 30)))
         items = []
         for current, dirs, files in os.walk(suite_root):
+            # 深度预算：套件根下超过 6 层的冷门查询不再无限下钻，
+            # 防止单次 search 遍历整树阻塞心跳。
+            if len(Path(current).relative_to(suite_root).parts) >= 6:
+                dirs[:] = []
             dirs[:] = [name for name in dirs if not name.startswith(".")]
             for name in sorted(dirs) + sorted(files):
                 if query not in name.lower():
                     continue
                 entry = Path(current) / name
                 try:
-                    stat = entry.stat()
+                    st = entry.stat()
                 except OSError:
                     continue
                 items.append({"name": name, "path": str(entry.relative_to(suite_root)),
                               "type": "directory" if entry.is_dir() else "file",
-                              "size": 0 if entry.is_dir() else stat.st_size,
-                              "modified": int(stat.st_mtime),
+                              "size": 0 if entry.is_dir() else st.st_size,
+                              "modified": int(st.st_mtime),
                               "is_apk": entry.suffix.lower() == ".apk",
                               "is_jar": entry.suffix.lower() == ".jar"})
                 if len(items) >= limit:

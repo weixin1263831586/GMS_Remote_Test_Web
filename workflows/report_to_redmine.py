@@ -3,17 +3,19 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from features.redmine.client import RedmineClient
-from features.redmine.config import config_manager as redmine_config_manager
-from features.redmine.utils import (
+from features.redmine import (
     COMPILED_REDMINE_ATTACHMENT_PATTERN,
     COMPILED_REDMINE_ISSUE_PATTERN,
     COMPILED_REPORT_NAME_PATTERN,
     REDMINE_ISSUE_PATTERN,
+    RedmineClient,
     create_basic_auth_header,
     extract_filename_from_content_disposition,
     extract_redmine_issue_id_from_text,
     strip_redmine_report_prefix,
+)
+from features.redmine import (
+    config_manager as redmine_config_manager,
 )
 
 

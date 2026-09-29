@@ -332,6 +332,16 @@ class WorkerRuntime:
                 os.killpg(int(row["pgid"]), signal.SIGINT)
             except ProcessLookupError:
                 pass
+            # SIGINT 可能被忽略（tradefed 吞信号）；限期后升级 SIGKILL，
+            # 否则取消命令会留下永久 running 的僵尸 attempt。
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline and self.pid_alive(int(row["pid"])):
+                time.sleep(0.1)
+            if self.pid_alive(int(row["pid"])):
+                try:
+                    os.killpg(int(row["pgid"]), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
             revoked.append(row["worker_job_id"])
         with self.connect() as conn:
             conn.execute(
@@ -358,7 +368,7 @@ class WorkerRuntime:
                 """SELECT * FROM commands WHERE status='running'
                    AND id NOT IN (
                        SELECT command_id FROM jobs
-                       WHERE status='running' AND command_id!=''
+                       WHERE status IN ('running','stopping') AND command_id!=''
                    )"""
             ).fetchall()
             conn.executemany(
@@ -509,17 +519,34 @@ class WorkerRuntime:
                 stderr=stderr_file,
                 start_new_session=True,
             )
-        with self._lock:
-            self._processes[worker_job_id] = process
-        with self.connect() as conn:
-            conn.execute("""INSERT OR REPLACE INTO jobs
-                (worker_job_id,job_id,attempt_id,pid,pgid,status,devices_json,
-                 work_dir,exit_code,error,command_id,trace_id,operation_id)
-                 VALUES(?,?,?,?,?,'running',?,?,NULL,'',?,?,?)""",
-                (worker_job_id, command.get("job_id", ""), command.get("attempt_id", ""),
-                 process.pid, os.getpgid(process.pid), json.dumps(payload.get("devices", [])),
-                 str(work_dir), command["id"], command.get("trace_id", ""),
-                 command.get("operation_id", "")))
+        try:
+            pgid = os.getpgid(process.pid)
+            with self._lock:
+                self._processes[worker_job_id] = process
+            with self.connect() as conn:
+                conn.execute("""INSERT OR REPLACE INTO jobs
+                    (worker_job_id,job_id,attempt_id,pid,pgid,status,devices_json,
+                     work_dir,exit_code,error,command_id,trace_id,operation_id)
+                     VALUES(?,?,?,?,?,'running',?,?,NULL,'',?,?,?)""",
+                    (worker_job_id, command.get("job_id", ""), command.get("attempt_id", ""),
+                     process.pid, pgid, json.dumps(payload.get("devices", [])),
+                     str(work_dir), command["id"], command.get("trace_id", ""),
+                     command.get("operation_id", "")))
+        except Exception:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.error(
+                    "[Worker] process %s did not exit after persistence failure",
+                    process.pid,
+                )
+            with self._lock:
+                self._processes.pop(worker_job_id, None)
+            raise
         return {"worker_job_id": worker_job_id, "pid": process.pid, "work_dir": str(work_dir)}
 
     def stop_process(self, worker_job_id: str) -> dict[str, Any]:
@@ -529,12 +556,69 @@ class WorkerRuntime:
             raise ValueError("worker job not found")
         if row["status"] != "running":
             return {"worker_job_id": worker_job_id, "status": row["status"]}
+        with self._lock:
+            process = self._processes.get(worker_job_id)
+        pgid = int(row["pgid"])
+        pid = int(row["pid"])
+        grace_seconds = max(
+            0.1, float(os.getenv("GMS_WORKER_STOP_GRACE_SECONDS", "10"))
+        )
+        kill_wait_seconds = max(
+            0.1, float(os.getenv("GMS_WORKER_KILL_WAIT_SECONDS", "5"))
+        )
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE jobs SET status='stopping' WHERE worker_job_id=?",
+                (worker_job_id,),
+            )
         try:
-            os.killpg(int(row["pgid"]), signal.SIGINT)
+            os.killpg(pgid, signal.SIGINT)
         except ProcessLookupError:
             pass
+        if process is not None:
+            try:
+                exit_code = process.wait(timeout=grace_seconds)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    exit_code = process.wait(timeout=kill_wait_seconds)
+                except subprocess.TimeoutExpired as exc:
+                    with self.connect() as conn:
+                        conn.execute(
+                            "UPDATE jobs SET status='running' WHERE worker_job_id=?",
+                            (worker_job_id,),
+                        )
+                    raise RuntimeError("worker process did not stop after SIGKILL") from exc
+        else:
+            deadline = time.monotonic() + grace_seconds
+            while self.pid_alive(pid) and time.monotonic() < deadline:
+                time.sleep(0.1)
+            if self.pid_alive(pid):
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                deadline = time.monotonic() + kill_wait_seconds
+                while self.pid_alive(pid) and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                if self.pid_alive(pid):
+                    with self.connect() as conn:
+                        conn.execute(
+                            "UPDATE jobs SET status='running' WHERE worker_job_id=?",
+                            (worker_job_id,),
+                        )
+                    raise RuntimeError("worker process did not stop after SIGKILL")
+            exit_code = None
+        with self._lock:
+            self._processes.pop(worker_job_id, None)
         with self.connect() as conn:
-            conn.execute("UPDATE jobs SET status='cancelled' WHERE worker_job_id=?", (worker_job_id,))
+            conn.execute(
+                "UPDATE jobs SET status='cancelled',exit_code=? WHERE worker_job_id=?",
+                (exit_code, worker_job_id),
+            )
         return {"worker_job_id": worker_job_id, "status": "cancelled"}
 
     def wait_process(self, worker_job_id: str) -> dict[str, Any]:
@@ -546,7 +630,9 @@ class WorkerRuntime:
         with self.connect() as conn:
             row = conn.execute("SELECT work_dir FROM jobs WHERE worker_job_id=?", (worker_job_id,)).fetchone()
             existing = conn.execute("SELECT status FROM jobs WHERE worker_job_id=?", (worker_job_id,)).fetchone()
-            status = "cancelled" if existing and existing["status"] == "cancelled" else (
+            status = "cancelled" if existing and existing["status"] in {
+                "stopping", "cancelled"
+            } else (
                 "completed" if exit_code == 0 else "failed"
             )
             conn.execute("UPDATE jobs SET status=?,exit_code=? WHERE worker_job_id=?",
@@ -578,12 +664,22 @@ class WorkerRuntime:
 
     def recoverable_jobs(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            rows = conn.execute("SELECT * FROM jobs WHERE status='running'").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM jobs WHERE status IN ('running','stopping')"
+            ).fetchall()
         result = []
         for row in rows:
             item = dict(row)
             if self.pid_alive(int(item["pid"])) or (Path(item["work_dir"]) / "exit_code").exists():
                 result.append(item)
+            elif item["status"] == "stopping":
+                with self.connect() as conn:
+                    conn.execute(
+                        "UPDATE jobs SET status='cancelled',error=? "
+                        "WHERE worker_job_id=? AND status='stopping'",
+                        ("process stopped while Worker Agent was restarting",
+                         item["worker_job_id"]),
+                    )
             else:
                 with self.connect() as conn:
                     conn.execute("UPDATE jobs SET status='failed',error='process missing after agent restart' WHERE worker_job_id=?",
@@ -597,10 +693,15 @@ class WorkerRuntime:
             raise ValueError("worker job not found")
         exit_path = Path(row["work_dir"]) / "exit_code"
         exit_code = int(exit_path.read_text().strip()) if exit_path.exists() else -1
-        status = "completed" if exit_code == 0 else "failed"
+        status = (
+            "cancelled" if row["status"] == "stopping"
+            else ("completed" if exit_code == 0 else "failed")
+        )
         with self.connect() as conn:
             conn.execute("UPDATE jobs SET status=?,exit_code=?,error=? WHERE worker_job_id=?",
-                         (status, exit_code, "" if status == "completed" else "recovered process failed", worker_job_id))
+                         (status, exit_code,
+                          "" if status in {"completed", "cancelled"}
+                          else "recovered process failed", worker_job_id))
         return {"worker_job_id": worker_job_id, "status": status, "exit_code": exit_code,
                 "work_dir": row["work_dir"], "command_id": row["command_id"],
                 "job_id": row["job_id"], "attempt_id": row["attempt_id"]}

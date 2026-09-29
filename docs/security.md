@@ -22,7 +22,7 @@
   由 `require_authenticated_user` 直接 401。
 
 此外还有第三条面向 **Worker** 的机器凭据：Worker 使用按 worker id 独立的
-bearer token（`features/cluster/worker_tokens`，配置 `configs/worker_tokens.json`），
+bearer token（`features/cluster/worker_tokens`，配置 `configs/secrets/worker_tokens.json`），
 生产模式下强制存在（见下「生产启动自检」）。Worker 与 Controller 只通过带
 Worker Token 的 HTTP(S) 通信，设备所在主机无需开放入站执行通道
 （[ADR-0001](architecture/adr/0001-controller-worker-boundary.md)）。

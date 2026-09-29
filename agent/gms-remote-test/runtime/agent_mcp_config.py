@@ -122,21 +122,23 @@ def reconcile_kimi(
     return f"{action}: {path}"
 
 
-def reconcile_codex(
+def _reconcile_toml(
     config_path: str | Path,
     mcp_server_path: str,
     server_url: str,
     profile: str,
     token_file: str,
-    ca_cert: str = "",
-    client: str = "codex",
+    ca_cert: str,
+    *,
+    table_name: str,
+    client: str,
 ) -> str:
-    """Reconcile the [mcp_servers.gms_remote_test] table of Codex config.toml.
+    """Reconcile one client-owned ``[mcp_servers.*]`` TOML table.
 
     TOML is edited with a targeted block replace: everything between the
-    ``[mcp_servers.gms_remote_test]`` header and the next ``[`` header (or
-    EOF) is regenerated from the desired state; the rest of the file is
-    preserved byte-for-byte.
+    selected table header and the next unrelated ``[`` header (or EOF) is
+    regenerated from the desired state; the rest of the file is preserved
+    byte-for-byte.
     """
     path = Path(config_path).expanduser()
     env = _desired_env(server_url, profile, token_file, ca_cert, client)
@@ -151,11 +153,11 @@ def reconcile_codex(
         return f'"{escaped}"'
 
     lines = [
-        "[mcp_servers.gms_remote_test]",
+        f"[mcp_servers.{table_name}]",
         'command = "python3"',
         f"args = [{toml_str(mcp_server_path)}]",
         "",
-        "[mcp_servers.gms_remote_test.env]",
+        f"[mcp_servers.{table_name}.env]",
     ]
     for key in DESIRED_ENV_KEYS:
         if key in env:
@@ -163,7 +165,8 @@ def reconcile_codex(
     desired_block = "\n".join(lines) + "\n"
 
     text = path.read_text(encoding="utf-8") if path.exists() else ""
-    marker = "[mcp_servers.gms_remote_test]"
+    marker = f"[mcp_servers.{table_name}]"
+    table_prefix = f"[mcp_servers.{table_name}"
     if marker in text:
         start = text.index(marker)
         # The block runs to the next TOML section header (a line starting
@@ -173,7 +176,7 @@ def reconcile_codex(
         next_section = len(text)
         for match in re.finditer(r"^(\[.+)\]$", text[start + 1:], flags=re.M):
             header = match.group(1)
-            if header.startswith("[mcp_servers.gms_remote_test"):
+            if header.startswith(table_prefix):
                 continue
             next_section = start + 1 + match.start()
             break
@@ -193,12 +196,58 @@ def reconcile_codex(
     return f"{action}: {path}"
 
 
+def reconcile_codex(
+    config_path: str | Path,
+    mcp_server_path: str,
+    server_url: str,
+    profile: str,
+    token_file: str,
+    ca_cert: str = "",
+    client: str = "codex",
+) -> str:
+    """Reconcile Codex's ``[mcp_servers.gms_remote_test]`` table."""
+
+    return _reconcile_toml(
+        config_path,
+        mcp_server_path,
+        server_url,
+        profile,
+        token_file,
+        ca_cert,
+        table_name="gms_remote_test",
+        client=client,
+    )
+
+
+def reconcile_kkagent(
+    config_path: str | Path,
+    mcp_server_path: str,
+    server_url: str,
+    profile: str,
+    token_file: str,
+    ca_cert: str = "",
+    client: str = "kkagent",
+) -> str:
+    """Reconcile kkagent's ``[mcp_servers.gms]`` table."""
+
+    return _reconcile_toml(
+        config_path,
+        mcp_server_path,
+        server_url,
+        profile,
+        token_file,
+        ca_cert,
+        table_name="gms",
+        client=client,
+    )
+
+
 def main() -> int:
-    # Thin CLI wrapper: agent_mcp_config.py codex|kimi <config> <mcp_server>
+    # Thin CLI wrapper: agent_mcp_config.py codex|kimi|kkagent <config> <mcp_server>
     #                    <server_url> <profile> <token_file> [ca_cert]
     if len(sys.argv) < 7:
         print(
-            "usage: agent_mcp_config.py codex|kimi CONFIG MCP_SERVER SERVER_URL "
+            "usage: agent_mcp_config.py codex|kimi|kkagent CONFIG MCP_SERVER SERVER_URL "
             "PROFILE TOKEN_FILE [CA_CERT]",
             file=sys.stderr,
         )
@@ -210,6 +259,8 @@ def main() -> int:
             print(reconcile_kimi(config, mcp_server, server_url, profile, token_file, ca_cert, client))
         elif client == "codex":
             print(reconcile_codex(config, mcp_server, server_url, profile, token_file, ca_cert, client))
+        elif client == "kkagent":
+            print(reconcile_kkagent(config, mcp_server, server_url, profile, token_file, ca_cert, client))
         else:
             print(f"unknown client: {client}", file=sys.stderr)
             return 2

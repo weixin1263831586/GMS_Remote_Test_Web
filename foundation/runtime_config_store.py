@@ -37,8 +37,8 @@ def is_secret_field(key: str) -> bool:
         name = name.removesuffix("_static_config")
     if name.endswith(("_file", "_path", "_env")):
         return False
-    return name in {"password", "token", "secret", "api_key", "authorization", "ubuntu_pswd"} or name.endswith(
-        ("_password", "_pswd", "_token", "_secret", "_api_key", "_password_encrypted", "_api_key_encrypted")
+    return name in {"password", "passwd", "token", "secret", "api_key", "authorization", "ubuntu_pswd"} or name.endswith(
+        ("_password", "_passwd", "_pswd", "_token", "_secret", "_api_key", "_password_encrypted", "_api_key_encrypted")
     )
 
 

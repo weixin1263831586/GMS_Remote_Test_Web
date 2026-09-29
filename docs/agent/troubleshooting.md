@@ -88,7 +88,9 @@ export。不同 Controller 或不同 token 不会自动选择；人工 cookie �
   kimi 检查 `~/.kimi-code/mcp.json` 的 `mcpServers.gms`，
   kkagent 检查 `~/.kkagent/config.toml` 的 `[mcp_servers.gms]`，
   codex 检查 `~/.codex/config.toml` 的 `[mcp_servers.gms_remote_test]`；
-  三者均要求 args 指向 `mcp_launcher.py`。
+  三者的显式 MCP 注册均要求 args 指向
+  `~/.local/share/gms-remote-test/current/scripts/mcp_launcher.py`，不要绑定
+  仓库 checkout、`dist/`、缓存或 kkagent 的插件镜像路径。
 - **codex 原生插件**：其 MCP 注册由插件 manifest 拥有，不期望独立的
   `[mcp_servers.*]` 块；doctor 会识别已启用的
   `[plugins."gms-remote-test@<channel>"]`（`enabled = true`）条目。

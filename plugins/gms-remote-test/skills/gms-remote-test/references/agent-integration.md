@@ -150,9 +150,13 @@ even when every profile currently points to the same Controller.
 for every detected agent (Codex/Kimi/kkagent), reconciles each client's MCP
 registration (update-in-place; corrupt client configs fail with a backup
 rather than being overwritten), and writes per-agent TOML profiles under
-`~/.config/gms-agent/profiles/`. The profiles are loaded automatically by
-`scripts/mcp_launcher.py`, which is
-what the plugin manifests use to start the MCP server — nothing to `source`.
+`~/.config/gms-agent/profiles/`. Explicit client registrations point to the
+single active launcher at
+`~/.local/share/gms-remote-test/current/scripts/mcp_launcher.py`; repository
+checkouts, `dist/`, caches, historical `versions/`, and kkagent's copied plugin
+payload are not runtime selectors. The profiles are loaded automatically by
+the launcher, which is also bundled behind relative paths in portable plugin
+manifests — nothing to `source`.
 Agents authenticate with an Agent Service
 Token instead of a password: mint a one-shot enrollment code in the web UI
 (and run `gms-rt-agent-enroll CODE` once, or `python3 gms-agent enroll CODE`
@@ -164,6 +168,9 @@ serves the runtime itself — `curl ... /api/agent/install -o gms-agent &&
 python3 gms-agent install --server https://CONTROLLER:5001`, then
 `gms-agent update` / `gms-agent rollback <version>` / `gms-agent status`
 for upgrades with instant rollback (`versions/<ver>/` + `current` symlink).
+After a successful update and client re-activation, the lifecycle keeps only
+the active runtime and its immediate predecessor; older versions are pruned
+automatically. Failed activation compensates first and never runs cleanup.
 
 Admins can drive the whole enrollment lifecycle from a terminal:
 `gms-rt-agent-enroll-code` mints a one-shot pairing code (admin + elevation),
@@ -197,7 +204,9 @@ bound to tool + device + burn command (5-minute TTL, single use), minted by
 the user under their own session:
 
 ```bash
-# 1. User (human session) mints the approval — the agent only learns the token:
+# 1. User (human session) mints the approval — the agent only learns the token.
+#    On a host with agent profiles enter the human session first:
+#    GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login <username>   (see agent-workflows 5.3)
 gms-rt-approval-create --tool gms_rt_burn_firmware --device RK3572GMS1 \
   --command "burn_firmware:RK3572GMS1" --json --non-interactive
 # 2. Agent executes the burn with that approval token; without it the

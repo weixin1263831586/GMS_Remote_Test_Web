@@ -31,6 +31,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "agent" / "gms-remote-test" / "runtime" / "gms-remote-test.sh"
+SCRIPT_ARG = SCRIPT.as_posix()
+BASH = os.environ.get("SHELL", "")
+if Path(BASH).name.lower() not in {"bash", "bash.exe"} or not Path(BASH).is_file():
+    BASH = "bash"
 
 # Controller URL on loopback keeps _is_test_host() true so the local adb
 # branch (stubbed via PATH) is exercised without SSH or a real device.
@@ -61,9 +65,11 @@ class CliDiagnosticsTests(unittest.TestCase):
     def run_cli(self, *args: str) -> subprocess.CompletedProcess:
         """Execute the real script through its dispatcher (production path)."""
         return subprocess.run(
-            ["bash", str(SCRIPT), *args],
+            [BASH, SCRIPT_ARG, *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=self.env,
         )
 
@@ -71,9 +77,11 @@ class CliDiagnosticsTests(unittest.TestCase):
         """Source the script and run a snippet (for overriding inner helpers)."""
         command = f'source "$1"\n{snippet}\n'
         return subprocess.run(
-            ["bash", "-c", command, "bash", str(SCRIPT)],
+            [BASH, "-c", command, "bash", SCRIPT_ARG],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=self.env,
         )
 
@@ -192,6 +200,31 @@ class CliDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 4)
         self.assertIn("元字符", result.stderr)
 
+    def test_diag_allows_single_restricted_pipe_like_mcp(self):
+        # MCP gms_rt_shell 放行 "getprop | grep build" 一类的单管道过滤；
+        # CLI typed-readonly 门禁必须接受同一形态（工具契约一致）。
+        self._service_token_env()
+        self._stub_adb()
+        result = self.run_cli("gms-rt-devices-diag", "DIAGDEV", "getprop | grep build")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("stub-adb: -s DIAGDEV shell getprop | grep build", result.stdout)
+
+    def test_diag_rejects_non_filter_pipe_tail(self):
+        self._service_token_env()
+        self._stub_adb()
+        result = self.run_cli("gms-rt-devices-diag", "DIAGDEV", "getprop | reboot")
+        self.assertEqual(result.returncode, 4)
+        self.assertIn("grep/wc/head/tail", result.stderr)
+
+    def test_diag_rejects_double_pipe(self):
+        self._service_token_env()
+        self._stub_adb()
+        result = self.run_cli(
+            "gms-rt-devices-diag", "DIAGDEV", "getprop | grep a | wc -l"
+        )
+        self.assertEqual(result.returncode, 4)
+        self.assertIn("管道", result.stderr)
+
     # ------------------------------------------------------------------
     # Snapshot diagnostic bundle
     # ------------------------------------------------------------------
@@ -266,6 +299,65 @@ gms-rt-devices-snapshot DIAGDEV
         self.assertEqual(diag["output_shape"], "data-object")
         self.assertEqual(commands["gms-rt-devices-list"]["output_shape"], "data-array")
         self.assertEqual(commands["gms-rt-devices-console"]["output_shape"], "data-mixed")
+
+    def test_catalog_is_available_without_controller_or_profile(self):
+        env = dict(self.env)
+        env.pop("GMS_REMOTE_TEST_SERVER", None)
+        env.pop("GMS_RT_PROFILE", None)
+        env.pop("GMS_AGENT_PROFILE", None)
+        env["GMS_PORT"] = "65534"
+        result = subprocess.run(
+            [
+                BASH,
+                SCRIPT_ARG,
+                "gms-rt-system-commands",
+                "--json",
+                "--non-interactive",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["ok"])
+        self.assertGreater(len(payload["data"]["commands"]), 0)
+
+    # ------------------------------------------------------------------
+    # Profile resolution resilience (sys2206 triage: a full /tmp used to
+    # zero the profile context via the heredoc temp file and masquerade
+    # as "无法解析 Agent profile")
+    # ------------------------------------------------------------------
+
+    def test_profile_resolution_does_not_need_writable_tmpdir(self):
+        self.env["TMPDIR"] = str(self.root / "no-such-tmpdir")
+        result = self.run_snippet('printf "mode=%s\\n" "$_gms_profile_mode"')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # No profile store entries + explicit GMS_REMOTE_TEST_SERVER in the
+        # sandbox => the resolver must answer "human", never the generic
+        # resolution failure.
+        self.assertEqual(result.stdout.strip(), "mode=human")
+        self.assertNotIn("无法解析", result.stderr)
+        self.assertNotIn("解析器", result.stderr)
+
+    def test_approval_create_help_documents_human_session_path(self):
+        # The dispatcher answers a sole --help with the catalog usage line;
+        # the detailed human-session guidance lives in the command's own
+        # -h branch, reached when --help appears among other arguments or
+        # when the function is called directly (sourced mode).
+        result = self.run_cli("gms-rt-approval-create", "--help")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Usage: gms-rt-approval-create", result.stdout)
+        detailed = self.run_snippet("gms-rt-approval-create --help")
+        self.assertEqual(detailed.returncode, 0, detailed.stderr)
+        self.assertIn("Usage: gms-rt-approval-create", detailed.stdout)
+        self.assertIn("GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login", detailed.stdout)
+        catalog = self.run_cli("gms-rt-system-command-describe",
+                               "gms-rt-approval-create")
+        self.assertEqual(catalog.returncode, 0, catalog.stderr)
+        self.assertIn("GMS_RT_HUMAN_SESSION", catalog.stdout)
 
 
 if __name__ == "__main__":

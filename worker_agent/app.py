@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import threading
 import time
@@ -127,7 +128,9 @@ def stop_local_worker_agent() -> None:
 
 
 def _port_listening(port: int) -> bool:
-    result = subprocess.run(["ss", "-ltn"], capture_output=True, text=True)
+    result = subprocess.run(
+        ["ss", "-ltn"], capture_output=True, text=True, timeout=5, check=False,
+    )
     return f":{port} " in result.stdout
 
 
@@ -295,7 +298,12 @@ class WorkerAgent:
         previous = self.runtime.previous_command(command["id"])
         if previous:
             # Controller 可能重复投递，运行中的命令不得再次执行。
-            if command.get("command_type") == "device_action":
+            # 仅在首投递已到终态时才释放 fencing：running 中释放会拆掉
+            # 仍在执行的独占租约，让另一 attempt 形成并发设备操作。
+            if (
+                command.get("command_type") == "device_action"
+                and previous["status"] in {"completed", "failed"}
+            ):
                 self.runtime.release_fencing(command)
             self._ack_command(command["id"], previous["status"], previous["result"], previous["error"])
             return
@@ -864,9 +872,32 @@ class WorkerAgent:
             transfer_id = str(payload.get("transfer_id") or "")
             if not source_path.is_file():
                 raise ValueError("source file not found on Worker")
-            self.client.upload_transfer(transfer_id, source_path)
-            summary = {"transfer_id": transfer_id, "filename": source_path.name,
-                       "size_bytes": source_path.stat().st_size}
+            # file_transfer 面向跨 Worker 的 GSI/固件搬运：只允许 Worker
+            # 数据根与套件根下的文件外传，防止半可信 Controller 借此读走
+            # Agent 凭据等任意本地文件（token 位于 ~/.local/state）。
+            resolved = source_path.resolve()
+            allowed_roots = [Path(self.config.data_root).expanduser().resolve()]
+            allowed_roots += [
+                root.expanduser().resolve() for root in self.config.suite_roots
+            ]
+            if not any(root == resolved or root in resolved.parents
+                       for root in allowed_roots):
+                raise ValueError("source path is outside Worker-allowed roots")
+            max_bytes = int(os.getenv(
+                "GMS_WORKER_FILE_TRANSFER_MAX_BYTES", str(80 * 1024 ** 3)))
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(resolved, flags)
+            with os.fdopen(descriptor, "rb") as source:
+                source_stat = os.fstat(source.fileno())
+                if not stat.S_ISREG(source_stat.st_mode):
+                    raise ValueError("source path is not a regular file")
+                if source_stat.st_size > max_bytes:
+                    raise ValueError("source file exceeds Worker transfer size limit")
+                self.client.upload_transfer(
+                    transfer_id, resolved, source=source,
+                )
+            summary = {"transfer_id": transfer_id, "filename": resolved.name,
+                       "size_bytes": source_stat.st_size}
             self.runtime.save_command(command["id"], "completed", summary)
             self._retry(lambda: self._ack_command(command["id"], "completed", summary))
         except Exception as exc:
@@ -879,17 +910,25 @@ class WorkerAgent:
 
     def run_report_import(self, command: dict):
         directory = None
+        owns_directory = False
         try:
             payload = command.get("payload", {})
             transfer_id = str(payload.get("transfer_id") or "")
             if not re.fullmatch(r"transfer-[a-f0-9]{32}", transfer_id):
                 raise ValueError("invalid report copy transfer")
             directory = self.config.data_root / "report-copies" / transfer_id
-            directory.mkdir(parents=True, exist_ok=False)
+            try:
+                directory.mkdir(parents=True, exist_ok=False)
+            except FileExistsError as exc:
+                # 同 transfer 并发重投递：目录归另一命令所有，绝不能在
+                # finally 里把它删掉（会拆掉对方正在下载的 staging）。
+                raise ValueError("report copy staging already owned by another command") from exc
+            owns_directory = True
             archive = directory / "report.zip"
             self.client.download(
                 f"/api/cluster/workers/{self.config.worker_id}/report-copies/{transfer_id}",
                 archive,
+                max_bytes=int(payload.get("size_bytes") or 0) + (64 * 1024 * 1024),
             )
             digest = hashlib.sha256()
             with archive.open("rb") as source:
@@ -917,7 +956,7 @@ class WorkerAgent:
             except Exception:
                 logger.exception("failed to acknowledge report import failure")
         finally:
-            if directory is not None:
+            if directory is not None and owns_directory:
                 shutil.rmtree(directory, ignore_errors=True)
 
     def run_device_export(self, command: dict):
@@ -953,7 +992,13 @@ class WorkerAgent:
         uploader = None
         try:
             payload = command.get("payload", {})
-            directory = self.config.data_root / "firmware" / payload["stage_id"]
+            stage_id = str(payload.get("stage_id") or "")
+            # Controller 侧 staging id 形如 fw-<32hex>（transfers_staging.py）。
+            # Worker 侧同样强制校验：否则路径穿越可把 finally 的 rmtree
+            # 变成任意目录删除。
+            if not re.fullmatch(r"fw-[a-f0-9]{32}", stage_id):
+                raise ValueError("invalid firmware staging id")
+            directory = self.config.data_root / "firmware" / stage_id
             directory.mkdir(parents=True, exist_ok=False)
             import hashlib
             from urllib.parse import quote, urlencode
@@ -981,7 +1026,11 @@ class WorkerAgent:
                     continue
                 endpoint = (f"/api/cluster/workers/{quote(self.config.worker_id)}/firmware/"
                             f"{quote(payload['stage_id'])}?{urlencode({'filename': spec['filename']})}")
-                self.client.download(endpoint, target)
+                # 边下边限：声明大小 + 64MB 余量，防止超大响应填满磁盘。
+                self.client.download(
+                    endpoint, target,
+                    max_bytes=int(spec["size_bytes"]) + (64 * 1024 * 1024),
+                )
                 digest = hashlib.sha256()
                 with target.open("rb") as source:
                     while block := source.read(4 * 1024 * 1024):

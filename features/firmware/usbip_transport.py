@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import time
 
 from features.devices import (
@@ -12,17 +13,34 @@ from features.devices import (
     DeviceUtils,
     ensure_usbip_auto_bind_policies,
     parse_adb_device_states,
+    pause_usbip_reconnect,
     resolve_usbip_flash_routes,
     rockusb_loader_serials,
     rockusb_loader_vid_pids,
+    schedule_usbip_reconnect,
+    usbip_source_host_for_device,
 )
-from features.devices import reconnect as usbip_reconnect
 from foundation.error_model import ApiError
 
 from . import runtime
 
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_usbip_host(value: object) -> str:
+    """归一化 usbip 主机地址用于全等比较（剥端口/方括号/大小写）。
+
+    parse_usbip_port_entries 的契约要求 host 未知条目按"不匹配"处理；
+    这里把 ``10.0.0.5:3240``、``[fd00::5]``、``10.0.0.5`` 统一成可比较
+    形态，任一侧为空即不匹配（宁可漏 detach 也不误拆他源端口）。
+    """
+    text = str(value or "").strip().strip("[]").lower()
+    if ":" in text:
+        head, _, tail = text.rpartition(":")
+        if tail.isdigit() and "." in head:
+            text = head
+    return text
 
 
 def _configured_loader_pids() -> set[str] | None:
@@ -48,10 +66,10 @@ def _configured_loader_pids() -> set[str] | None:
 def schedule_usbip_mode_reconnect(device: str, target_protocol: str) -> bool:
     """Rebind a USB/IP device after its USB identity changes."""
     try:
-        device_host = usbip_reconnect.usbip_source_host_for_device(device)
+        device_host = usbip_source_host_for_device(device)
         if not device_host:
             return False
-        return usbip_reconnect.schedule_usbip_reconnect(
+        return schedule_usbip_reconnect(
             device_host,
             reason=f"USB/IP {device} switching to {target_protocol}",
             expected_devices=[device],
@@ -177,7 +195,7 @@ async def prepare_usbip_firmware_routes(
 
     usbip_devices = [
         device for device in devices
-        if usbip_reconnect.usbip_source_host_for_device(device)
+        if usbip_source_host_for_device(device)
     ]
     if not usbip_devices:
         return [], ""
@@ -234,7 +252,12 @@ async def release_usbip_devices_to_source(
     3. 确认 target 侧端口已消失（fail closed：查询失败视为未释放）。
     返回 (released, error)。调用方在 SOURCE_OWNED 状态后才允许下发烧写。
     """
-    from features.devices import USBIP_PORT_COMMAND, parse_usbip_port_entries
+    from features.devices import (
+        USBIP_DETACH_COMMAND_TEMPLATE,
+        USBIP_PORT_COMMAND,
+        parse_usbip_port_entries,
+        resolve_usbip_command,
+    )
 
     if not routes:
         return True, ""
@@ -243,7 +266,7 @@ async def release_usbip_devices_to_source(
         all_busids.extend(str(b) for b in route.get("busids") or [])
         device_host = str(route.get("device_host") or "").strip()
         if device_host:
-            usbip_reconnect.pause_usbip_reconnect(
+            pause_usbip_reconnect(
                 device_host=device_host,
                 device_ids=[str(d) for d in route.get("device_ids") or []],
             )
@@ -251,6 +274,15 @@ async def release_usbip_devices_to_source(
         return True, ""
 
     # 1) target 侧 detach：按 host/busid 结构化匹配，只拆本次路由的端口。
+    # host 也必须相等：两个源主机可导出相同的远端 busid，仅按 busid
+    # 匹配会连坐 detach 其他 assignment 的端口（parse 契约：host 未知
+    # 条目按不匹配处理，宁可漏 detach，verify 的 fail-closed 兜底）。
+    route_targets = {
+        (_normalize_usbip_host(route.get("device_host")), str(busid))
+        for route in routes
+        for busid in route.get("busids") or []
+        if _normalize_usbip_host(route.get("device_host"))
+    }
     port_result = await asyncio.to_thread(
         runtime.ssh_manager.execute_command, ssh, USBIP_PORT_COMMAND, timeout=10,
     )
@@ -259,15 +291,22 @@ async def release_usbip_devices_to_source(
             "无法确认目标主机 USB/IP 端口状态，拒绝进入源端烧写: "
             + (port_result.stderr or port_result.stdout or "").strip()
         )
-    target_busids = set(all_busids)
     ports_to_detach = [
         entry for entry in parse_usbip_port_entries(port_result.stdout or "")
-        if entry["busid"] in target_busids
+        if (_normalize_usbip_host(entry["host"]), entry["busid"])
+        in route_targets
     ]
     for entry in ports_to_detach:
+        # port 来自 usbip port 输出的 (\d+) 捕获组；插值前仍强制校验，
+        # 防止未来解析改动把元字符带进命令模板。
+        if not re.fullmatch(r"\d{1,3}", entry["port"]):
+            return False, f"USB/IP 端口号异常，拒绝 detach: {entry['port']!r}"
+        detach_command = USBIP_DETACH_COMMAND_TEMPLATE.format(
+            usbip=resolve_usbip_command(), port=entry["port"],
+        )
         await asyncio.to_thread(
             runtime.ssh_manager.execute_command,
-            ssh, f"sudo -n usbip detach -p {entry['port']}", timeout=15,
+            ssh, detach_command, timeout=15,
         )
 
     # 2) fail-closed 复核：目标端口必须已消失；列表不可解析时按未释放
@@ -279,7 +318,8 @@ async def release_usbip_devices_to_source(
         return False, "USB/IP 释放后无法复核目标主机端口状态，拒绝继续烧写"
     remaining = [
         entry["port"] for entry in parse_usbip_port_entries(verify.stdout or "")
-        if entry["busid"] in target_busids
+        if (_normalize_usbip_host(entry["host"]), entry["busid"])
+        in route_targets
     ]
     if remaining:
         return False, (

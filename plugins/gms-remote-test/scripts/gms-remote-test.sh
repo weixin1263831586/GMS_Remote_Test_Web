@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.33"
+GMS_RT_VERSION="0.22.36"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -34,11 +34,21 @@ GMS_WEB_APP_DIR="${GMS_WEB_APP_DIR:-${HOME}/GMS_Remote_Test/web_app}"
 GMS_PORT="${GMS_PORT:-5001}"
 SERVER_URL="${GMS_REMOTE_TEST_SERVER:-}"
 _gms_runtime_dir=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
-if [ -r "$_gms_runtime_dir/gms_agent/profile_store.py" ]; then
+_gms_rt_local_catalog=0
+if [[ "${BASH_SOURCE[0]}" = "$0" ]] \
+    && [ "${1:-}" = "gms-rt-system-commands" ]; then
+    _gms_rt_local_catalog=1
+fi
+if [ "$_gms_rt_local_catalog" = "1" ]; then
+    _gms_profile_context=(none "" "" "" "" "" "")
+elif [ -r "$_gms_runtime_dir/gms_agent/profile_store.py" ]; then
+    # Resolve via `python3 -c`, NOT a heredoc: heredocs need a writable
+    # temp file for the script text, so a full or read-only /tmp used to
+    # zero the context array and masquerade as "无法解析 Agent profile"。
+    # Fields stay NUL-terminated and stream through the <() pipe — a
+    # plain $() would strip the trailing empty fields.
     mapfile -d '' -t _gms_profile_context < <(
-        PYTHONPATH="$_gms_runtime_dir${PYTHONPATH:+:$PYTHONPATH}" python3 - \
-            "${GMS_RT_PROFILE:-}" "$SERVER_URL" <<'PY'
-import os
+        PYTHONPATH="$_gms_runtime_dir${PYTHONPATH:+:$PYTHONPATH}" python3 -c '
 import sys
 from gms_agent.profile_store import resolve_direct_cli_context
 
@@ -46,8 +56,13 @@ context = resolve_direct_cli_context(sys.argv[1], sys.argv[2])
 for key in ("mode", "profile", "server", "ca_cert", "token_file", "insecure", "error"):
     sys.stdout.write(context[key])
     sys.stdout.write("\0")
-PY
+' "${GMS_RT_PROFILE:-}" "$SERVER_URL"
     )
+    if [ "${#_gms_profile_context[@]}" -lt 7 ]; then
+        echo "Error: Agent profile 解析器未产生完整输出 (${#_gms_profile_context[@]}/7 字段)。" >&2
+        echo "  这通常是环境问题而非配置问题: 检查磁盘空间与临时目录可写性 (df -h /tmp; df -i /tmp) 以及 python3 是否可用。" >&2
+        exit 2
+    fi
 else
     # A standalone copied helper has no profile store. This compatibility
     # path is valid only when no named profile was requested.
@@ -59,7 +74,15 @@ else
 fi
 _gms_profile_mode="${_gms_profile_context[0]:-error}"
 if [ "$_gms_profile_mode" = "error" ]; then
-    echo "Error: ${_gms_profile_context[6]:-无法解析 Agent profile。}" >&2
+    if [ -n "${_gms_profile_context[6]:-}" ]; then
+        # profile_store produced a concrete diagnosis (missing or
+        # ambiguous profile, controller mismatch, ...) — relay verbatim.
+        echo "Error: ${_gms_profile_context[6]}" >&2
+    else
+        # mode=error without a message means the resolver contract broke,
+        # not the user's profile selection — say so honestly.
+        echo "Error: Agent profile 解析器返回了未知错误形态。" >&2
+    fi
     echo "  运行 gms-agent profile list 查看可用 profile。" >&2
     exit 2
 fi
@@ -71,11 +94,15 @@ if [ "$_gms_profile_mode" != "none" ]; then
     if [ -z "${GMS_CURL_CA_CERT:-}" ] \
         && [ "${_gms_profile_context[5]}" = "true" ]; then
         GMS_CURL_INSECURE=1
+        # Sticky-insecure profile 是安装期一次性环境的遗留物；每次使用
+        # 都必须让操作者看见 TLS 校验被关闭，防止长期静默裸奔。
+        echo "WARNING: profile '$(_gms_profile_context[1])' 以 insecure 模式安装（GMS_CURL_INSECURE=1），TLS 证书校验已关闭。" >&2
+        echo "  仅限一次性环境使用；正式环境请运行 gms-agent profile 配置 ca_cert 后重装。" >&2
     fi
     export GMS_RT_PROFILE GMS_CURL_CA_CERT GMS_AUTH_TOKEN_FILE GMS_CURL_INSECURE
 fi
 
-if [ -z "$SERVER_URL" ]; then
+if [ "$_gms_rt_local_catalog" != "1" ] && [ -z "$SERVER_URL" ]; then
     # Check if we're running on the server machine (use dynamic IP detection)
     # Try to get local IP using the same method as get_local_ip() in Python
     LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
@@ -900,6 +927,9 @@ gms-rt-agent-enroll() {
     umask 077
     printf '%s\n' "$token" > "$out_file"
     umask "$_old_umask"
+    # 权限不依赖调用方 shell 的 umask 语境，显式钉死 0600（与
+    # profile_store.py 的 os.open(0o600) 纪律一致）。
+    chmod 600 "$out_file" 2>/dev/null || true
     unset token data code response body
     local used_profile="${profile_flag:-${GMS_RT_PROFILE}}"
     success "Agent token enrolled (0600): $out_file"
@@ -993,6 +1023,24 @@ gms-rt-approval-create() {
     local firmware_sha256="" wipe_data="true" burn_mode="auto"
     while [ "$#" -gt 0 ]; do
         case "$1" in
+            -h|--help)
+                printf 'Usage: gms-rt-approval-create --tool <tool> --device <serial>[,<serial>...]\n'
+                printf '       [--command <command> | --firmware-sha256 <sha256>\n'
+                printf '        [--wipe-data true|false] [--burn-mode auto|uf]]\n'
+                printf '\n'
+                printf 'Mint a one-shot approval token (5-minute TTL) bound to the exact\n'
+                printf 'tool + device + command. Requires a HUMAN session: the server rejects\n'
+                printf 'agent service tokens here (agent_forbidden).\n'
+                printf '\n'
+                printf 'On a host with agent profiles, a plain gms-rt-* call resolves to an\n'
+                printf 'agent token — enter the human session first, in the same shell:\n'
+                printf '\n'
+                printf '  GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login <username>\n'
+                printf '\n'
+                printf 'then re-run this command (env-prefix form, NOT "VAR=x && cmd":\n'
+                printf 'a bare && does not export the variable into the command).\n'
+                return 0
+                ;;
             --tool) shift; tool="${1:-}" ;;
             --tool=*) tool="${1#*=}" ;;
             --device) shift; device="${1:-}" ;;
@@ -1035,10 +1083,18 @@ gms-rt-approval-create() {
     body=$(_body_from_http_response "$response")
     http_status=$(_status_from_http_response "$response")
     if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]] || ! echo "$body" | jq -e '.success == true' >/dev/null 2>&1; then
+        local _agent_forbidden
+        _agent_forbidden=$(printf '%s' "$body" | jq -r '.detail.agent_forbidden // .agent_forbidden // empty' 2>/dev/null || true)
         error "Approval creation failed: $(extract_api_error "$body")"
+        if [ -n "$_agent_forbidden" ] && [ "$_agent_forbidden" != "false" ]; then
+            diagnostic "审批令牌仅限人工会话铸造。多 profile 主机请先: GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login <用户名>, 再在同一 shell 重试。"
+        elif [ "$http_status" = "401" ]; then
+            diagnostic "未登录或会话已过期: GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login <用户名> 后重试。"
+        fi
         return "$GMS_RT_EXIT_PERMISSION"
     fi
     echo "$body" | jq '.approval // .'
+    [ "$GMS_RT_OUTPUT" = "json" ] || info "approval token: 5 分钟 TTL、单次有效, 仅绑定该 tool+device+command。"
 }
 
 # List Agent Service Tokens (admin session required). The raw token is
@@ -2688,6 +2744,38 @@ gms-rt-devices-shell() {
             error "Service-token 模式下执行设备命令必须携带一次性审批令牌: gms-rt-devices-shell $device_id --approval-token TOKEN '$shell_command'（请让用户运行 gms-rt-approval-create --tool gms_rt_shell_exec --device $device_id --command '$shell_command' 铸造令牌）"
             return "$GMS_RT_EXIT_PERMISSION"
         fi
+        # 与 MCP _validate_shell_command 对齐：允许且仅允许一个受限管道
+        # "readonly | grep|wc|head|tail ..."。切分后两侧分别过同一套
+        # 只读白名单与元字符检查（管道符本身不进入任一侧），修复
+        # "MCP 放行、CLI 拒绝" 的工具契约漂移。
+        local _ro_check="$shell_command"
+        local _ro_pipe_tail=""
+        if [[ "$shell_command" == *"|"* ]]; then
+            case "$shell_command" in
+                *\|*\|*)
+                    error "只读路径至多允许一个管道"
+                    return "$GMS_RT_EXIT_PERMISSION"
+                    ;;
+            esac
+            _ro_check="${shell_command%%|*}"
+            _ro_pipe_tail="${shell_command#*|}"
+            # 两侧去首尾空白（对应 MCP 切分后的 segment.strip()）。
+            _ro_check="${_ro_check#"${_ro_check%%[![:space:]]*}"}"
+            _ro_check="${_ro_check%"${_ro_check##*[![:space:]]}"}"
+            _ro_pipe_tail="${_ro_pipe_tail#"${_ro_pipe_tail%%[![:space:]]*}"}"
+            _ro_pipe_tail="${_ro_pipe_tail%"${_ro_pipe_tail##*[![:space:]]}"}"
+            if [ -z "$_ro_check" ] || [ -z "$_ro_pipe_tail" ]; then
+                error "空管道段（'||' 链式被拒绝）"
+                return "$GMS_RT_EXIT_PERMISSION"
+            fi
+            # 管道尾段仅允许过滤类二进制（MCP _SHELL_FILTER_BINARIES）；
+            # grep/wc/head/tail 本身已在下方无条件只读白名单内。
+            local _ro_tail_first=${_ro_pipe_tail%%[[:space:]]*}
+            case "$_ro_tail_first" in
+                grep|wc|head|tail) ;;
+                *) error "管道尾段仅允许 grep/wc/head/tail: '$_ro_tail_first'"; return "$GMS_RT_EXIT_PERMISSION" ;;
+            esac
+        fi
         # Typed-readonly allowlist (mirror of the MCP adapter's structured
         # allowlist). Binaries with mutating subcommands (settings/cmd/am/
         # pm/dpm/content/device_config/wm/logcat/dmesg/dumpsys) are verified
@@ -2695,17 +2783,17 @@ gms-rt-devices-shell() {
         # (a forged marker previously let `settings put` through when only
         # the leading binary was checked).
         local _ro_first
-        _ro_first=${shell_command%% *}
+        _ro_first=${_ro_check%% *}
         # Binaries whose read-only surface is unconditional.
         case "$_ro_first" in
             getprop|ls|cat|ps|pidof|stat|uptime|vmstat|df|id|printenv|grep|head|tail|wc|pgrep) ;;
             settings)
-                case "$shell_command" in
+                case "$_ro_check" in
                     "settings get "*) ;;
                     *) error "Service-token 只读白名单仅允许 'settings get'"; return "$GMS_RT_EXIT_PERMISSION" ;;
                 esac ;;
             wm)
-                case "$shell_command" in
+                case "$_ro_check" in
                     "wm size"|"wm density") ;;
                     *) error "Service-token 只读白名单仅允许 'wm size'/'wm density'"; return "$GMS_RT_EXIT_PERMISSION" ;;
                 esac ;;
@@ -2714,22 +2802,22 @@ gms-rt-devices-shell() {
                 # runtime/mcp_server.py (17 words). Any word added there
                 # MUST be added here too — this gate is the CLI mirror of
                 # the MCP typed-readonly allowlist.
-                case " $shell_command " in
+                case " $_ro_check " in
                     *" unplug "*|*" reset "*|*" disable "*|*" enable "*|*" kill "*|*" force-stop "*|*" set "*|\
                     *" whitelist "*|*" set-debug-app "*|*" suspend "*|*" resume "*|*" reset-role "*|\
                     *" plug "*|*" charge "*|*" nocharge "*|*" persist "*|*" import "*)
                         error "dumpsys 参数可能改变设备状态，需一次性审批令牌"; return "$GMS_RT_EXIT_PERMISSION" ;;
                 esac ;;
             logcat)
-                case "$shell_command" in
+                case "$_ro_check" in
                     *-c*|*" -f"*) error "logcat -c/-f 属破坏性参数，需一次性审批令牌"; return "$GMS_RT_EXIT_PERMISSION" ;;
                 esac ;;
             dmesg)
-                case "$shell_command" in
+                case "$_ro_check" in
                     *-c*|*-C*) error "dmesg -c/-C 清空内核环形缓冲，需一次性审批令牌"; return "$GMS_RT_EXIT_PERMISSION" ;;
                 esac ;;
             device_config)
-                case "$shell_command" in
+                case "$_ro_check" in
                     "device_config get "*|"device_config list"*) ;;
                     *) error "Service-token 只读白名单仅允许 'device_config get/list'"; return "$GMS_RT_EXIT_PERMISSION" ;;
                 esac ;;
@@ -2741,7 +2829,7 @@ gms-rt-devices-shell() {
                 # "cmd package list"* 等价于 startswith——但 MCP 还接受
                 # joined == sub（无参数形式，如 "pm help"），CLI 用裸 *
                 # 或精确串覆盖这两种形态。
-                case "$shell_command" in
+                case "$_ro_check" in
                     "cmd list"*|"cmd help"*|\
                     "cmd package list"*|"cmd package path"*|"cmd package dump"*|\
                     "cmd package help"*|"cmd package query-activities"*|\
@@ -2761,20 +2849,26 @@ gms-rt-devices-shell() {
                 return "$GMS_RT_EXIT_PERMISSION"
                 ;;
         esac
-        # Shell metacharacters — full mirror of _SHELL_FORBIDDEN_CHARS in
+        # Shell metacharacters — per-segment mirror of the MCP gate: the
+        # command is split on at most one '|' above, then each side must
+        # pass the same forbidden set as _SHELL_FORBIDDEN_CHARS in
         # runtime/mcp_server.py. The command string is finally parsed by the
         # device-side `sh` (adb shell), so quote/glob/backslash/whitespace
         # metachars can smuggle a second command just like `;` does.
-        case "$shell_command" in
-            *[\\\"\;\|\&\>\<\`\$\(\)\{\}\[\]\'\*\?]*)
-                error "Service-token 只读路径禁止 shell 元字符: $shell_command"
+        local _ro_segment
+        for _ro_segment in "$_ro_check" "$_ro_pipe_tail"; do
+            [ -n "$_ro_segment" ] || continue
+            case "$_ro_segment" in
+                *[\\\"\;\|\&\>\<\`\$\(\)\{\}\[\]\'\*\?]*)
+                    error "Service-token 只读路径禁止 shell 元字符: $_ro_segment"
+                    return "$GMS_RT_EXIT_PERMISSION"
+                    ;;
+            esac
+            if [[ "$_ro_segment" == *[$'\t\r\n']* ]]; then
+                error "Service-token 只读路径禁止制表符/换行符: $_ro_segment"
                 return "$GMS_RT_EXIT_PERMISSION"
-                ;;
-        esac
-        if [[ "$shell_command" == *[$'\t\r\n']* ]]; then
-            error "Service-token 只读路径禁止制表符/换行符: $shell_command"
-            return "$GMS_RT_EXIT_PERMISSION"
-        fi
+            fi
+        done
     fi
 
     if _is_test_host && command -v adb &> /dev/null && adb devices 2>/dev/null | grep -q "$device_id"; then
@@ -5927,7 +6021,7 @@ _gms_rt_command_summary() {
         gms-rt-agent-tokens) printf '%s' 'List Agent Service Tokens (admin; metadata only, raw tokens are never stored)' ;;
         gms-rt-agent-enroll-code) printf '%s' 'Mint a one-shot enrollment code for a build server agent (admin + elevation)' ;;
         gms-rt-agent-token-revoke) printf '%s' 'Revoke an Agent Service Token by id (admin + elevation)' ;;
-        gms-rt-approval-create) printf '%s' 'Create a one-shot approval token for a destructive agent action (human session only)' ;;
+        gms-rt-approval-create) printf '%s' 'Create a one-shot approval token for a destructive agent action (human session only; multi-profile hosts: GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login <user> first)' ;;
         gms-rt-cluster-workers) printf '%s' 'List registered Cluster Workers and their current availability' ;;
         gms-rt-cluster-devices) printf '%s' 'List the authoritative cross-Worker device inventory, optionally filtered by Worker or serial' ;;
         gms-rt-cluster-resolve) printf '%s' 'Resolve an exact device serial to its owning Worker without guessing ambiguous matches' ;;

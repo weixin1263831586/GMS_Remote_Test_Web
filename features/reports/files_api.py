@@ -333,6 +333,15 @@ async def download_report(
                             report,
                             owner_id=principal.resource_owner_id,
                         )
+                    except TimeoutError as exc:
+                        logger.warning(
+                            "[DOWNLOAD] Remote report bundle timed out: %s",
+                            redact_sensitive_text(exc),
+                        )
+                        return error_response(
+                            "远端报告导出超时，请稍后重试",
+                            504,
+                        )
                     except RuntimeError as exc:
                         logger.warning(
                             "[DOWNLOAD] Remote report bundle failed: %s",
@@ -410,7 +419,8 @@ async def download_report(
 
             logger.info(f"[DOWNLOAD] Get report file list: timestamp='{report_timestamp}'")
             if FileUtils is None:
-                return error_response("Report file service is not configured", 500)
+                # 依赖缺失是 503（dependency unavailable），不是 500。
+                return error_response("Report file service is not configured", 503)
             all_files = []
             result_files = FileUtils.list_directory_files(report_dir, max_files=100, relative_to=report_dir)
             all_files.extend(result_files)

@@ -171,9 +171,17 @@ When a task genuinely needs a state-changing device command (`am`, `pm`,
 forever (interactive/manual by catalog). The approval path:
 
 1. Tell the user the exact command and device, and get their approval.
-2. The user runs, in their own (human) session:
+2. The user runs, in their own (human) session. On a host with agent
+   profiles, a plain `gms-rt-*` call resolves to an agent service token and
+   the server rejects the mint with `agent_forbidden` — enter the human
+   session first, in the same shell:
 
-```
+```bash
+# 0. One-time per shell: switch this shell to a human session
+#    (env-prefix form; "VAR=x && cmd" does NOT export the variable):
+GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login <username>
+
+# 1. Mint the one-shot approval token:
 gms-rt-approval-create --tool gms_rt_shell_exec \
     --device RK3562GMS7 \
     --command 'am broadcast -a android.intent.action.BOOT_COMPLETED'

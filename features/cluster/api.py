@@ -19,6 +19,7 @@ from features.auth import (
     require_authenticated_user,
     require_authenticated_user_when_auth_required,
     require_elevated_admin_when_auth_required,
+    require_resource_owner,
     require_role,
 )
 from foundation.archives import is_complete_archive_file
@@ -504,11 +505,26 @@ def _update_local_worker_config(updates: dict) -> dict:
                 changed[key] = raw[key]
             except (TypeError, ValueError):
                 raise HTTPException(400, f"invalid value for {key}") from None
-    if changed:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
-        subprocess.Popen(["systemctl", "--user", "restart", "gms-worker-agent"])
-    return {"updated": changed, "restarted": bool(changed)}
+    if not changed:
+        return {"updated": changed, "restarted": False}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+    # 配置已落盘；重启 Worker agent 并回传真实结果，不再发后即忘地谎报成功。
+    result: dict = {"updated": changed, "restarted": False}
+    try:
+        restart = subprocess.run(
+            ["systemctl", "--user", "restart", "gms-worker-agent"],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        result["restart_error"] = str(exc)
+        return result
+    result["restarted"] = restart.returncode == 0
+    if not result["restarted"]:
+        result["restart_error"] = (
+            restart.stderr or restart.stdout or "restart failed"
+        ).strip()
+    return result
 
 
 async def _run_worker_command(worker_id: str, command_type: str, payload: dict, timeout: float = 10):
@@ -715,6 +731,31 @@ def create_command(
     return {"success": True, "command": service().repository.create_command(body.model_dump())}
 
 
+@router.get("/jobs/{job_id}/timeline")
+def list_job_timeline(
+    job_id: str,
+    request: Request,
+    after: int = Query(default=0, ge=0),
+    limit: int = Query(default=500, ge=1, le=2000),
+):
+    """Correlated state and command timeline for Cluster Jobs."""
+    job = service().repository.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    require_resource_owner(
+        request,
+        job.get("owner_id"),
+        not_found_detail="job not found",
+    )
+    return {
+        "success": True,
+        "trace_id": job.get("trace_id", ""),
+        "events": service().repository.list_timeline(
+            job_id=job_id, after=after, limit=limit
+        ),
+    }
+
+
 def _mount_subrouters() -> None:
     """Mount split routers after this module's shared dependencies exist."""
     global device_action
@@ -727,7 +768,6 @@ def _mount_subrouters() -> None:
     from .job_control_api import router as job_control_router
     from .jobs_api import router as jobs_router
     from .suite_library_api import router as suite_library_router
-    from .timeline_api import router as timeline_router
     from .transfers_api import router as transfers_router
     from .worker_settings_api import router as worker_settings_router
 
@@ -739,7 +779,6 @@ def _mount_subrouters() -> None:
     router.include_router(jobs_router)
     router.include_router(artifacts_router)
     router.include_router(job_control_router)
-    router.include_router(timeline_router)
     router.include_router(suite_library_router)
     router.include_router(worker_settings_router)
 

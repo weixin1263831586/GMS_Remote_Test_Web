@@ -102,7 +102,7 @@ mcp_tool_schemas = _load_tool_schemas()
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.33"
+SERVER_VERSION = "0.22.36"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -329,8 +329,18 @@ def normalize_command(command: str) -> str:
     return f"gms-rt-{value}"
 
 
+def _bash_executable() -> str:
+    configured = os.environ.get("SHELL", "")
+    if (
+        Path(configured).name.lower() in {"bash", "bash.exe"}
+        and Path(configured).is_file()
+    ):
+        return configured
+    return "bash"
+
+
 def build_argv(command: str, args: list[str] | str | None) -> list[str]:
-    argv = ["bash", str(cli_script()), normalize_command(command)]
+    argv = [_bash_executable(), cli_script().as_posix(), normalize_command(command)]
     items: list[str] = []
     if args is not None:
         if isinstance(args, str):
@@ -607,6 +617,8 @@ def run_cli(
             input=stdin_text,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=effective_timeout,
             check=False,
             env=child_env,

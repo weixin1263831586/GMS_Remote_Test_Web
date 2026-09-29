@@ -190,7 +190,7 @@ class AgentScopeBoundaryTests(unittest.TestCase):
     def test_state_changing_routes_use_authorization_not_mere_authentication(self):
         offenders: list[tuple[str, str]] = []
         for path in sorted((ROOT / "features").rglob("*.py")):
-            relative = str(path.relative_to(ROOT))
+            relative = path.relative_to(ROOT).as_posix()
             if "/tests/" in relative or "__pycache__" in relative:
                 continue
             tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -237,7 +237,7 @@ class AgentScopeBoundaryTests(unittest.TestCase):
     def test_auth_only_allowlist_entries_still_exist(self):
         existing = set()
         for path in sorted((ROOT / "features").rglob("*.py")):
-            relative = str(path.relative_to(ROOT))
+            relative = path.relative_to(ROOT).as_posix()
             if "/tests/" in relative or "__pycache__" in relative:
                 continue
             tree = ast.parse(path.read_text(encoding="utf-8"))

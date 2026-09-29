@@ -10,6 +10,8 @@ import time
 
 import scp
 
+from foundation.error_model import ApiError
+
 from . import runtime
 
 
@@ -99,9 +101,11 @@ async def upload_firmware_to_test_host(
 
         thread.join(timeout=300)
         if thread.is_alive():
-            raise RuntimeError('Upload timed out')
+            # SCP 卡死属依赖超时（504），不能落进通用 RuntimeError→500。
+            raise ApiError.dependency_timeout('Firmware upload to test host timed out')
         if upload_error[0]:
-            raise RuntimeError(f'Upload failed: {upload_error[0]}')
+            # SCP 传输失败属远端基础设施故障（502）。
+            raise ApiError.upstream_failure(f'Upload failed: {upload_error[0]}', service='scp')
         await _send_progress(client_id, filename, 100, file_size, file_size)
         await runtime.safe_websocket_send(client_id, {
             'type': 'log_update',

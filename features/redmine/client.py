@@ -55,13 +55,17 @@ class RedmineClient(RedmineAttachmentMixin):
         self.password = password or ""
         self.api_key = api_key or ""
         kwargs = {"key": self.api_key} if self.api_key else ({"username": self.username, "password": self.password} if self.username and self.password else {})
-        self._redmine = Redmine(self.base_url, **kwargs)
+        # 显式超时：python-redmine 同步调用跑在 to_thread 里，无超时会在
+        # Redmine 端卡死时永久占死 worker 线程。
+        self._redmine = Redmine(self.base_url, requests={"timeout": 30}, **kwargs)
         self._session: aiohttp.ClientSession | None = None
 
     def _get_session(self) -> aiohttp.ClientSession:
         """Return a reusable aiohttp session (created on first use)."""
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=300),
+            )
         return self._session
 
     async def close(self) -> None:

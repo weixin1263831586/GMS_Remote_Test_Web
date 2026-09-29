@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
-from features.auth import require_resource_owner_when_auth_required
+from features.auth import (
+    require_permission_when_auth_required,
+    require_resource_owner_when_auth_required,
+)
 
 from .api import service
 
@@ -26,6 +29,7 @@ def cancel_job(job_id: str, request: Request):
     if not job:
         raise HTTPException(404, "job not found")
     _require_job_access(request, job)
+    require_permission_when_auth_required("tests.cancel")(request)
     request.state.device_lease_tokens = [
         {
             "lease_id": lease["id"],

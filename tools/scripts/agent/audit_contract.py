@@ -23,6 +23,16 @@ MCP = AGENT_ROOT / "runtime" / "mcp_server.py"
 CATALOG = AGENT_ROOT / "skill" / "references" / "api-catalog.md"
 
 
+def bash_executable() -> str:
+    configured = os.environ.get("SHELL", "")
+    if (
+        Path(configured).name.lower() in {"bash", "bash.exe"}
+        and Path(configured).is_file()
+    ):
+        return configured
+    return "bash"
+
+
 def main() -> int:
     errors: list[str] = []
     source = CLI.read_text(encoding="utf-8")
@@ -56,8 +66,8 @@ def main() -> int:
             env.pop(variable, None)
         completed = subprocess.run(
             [
-                "bash",
-                str(CLI),
+                bash_executable(),
+                CLI.as_posix(),
                 "gms-rt-system-commands",
                 "--json",
                 "--non-interactive",
@@ -66,13 +76,15 @@ def main() -> int:
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
     if completed.returncode:
-        errors.append(f"CLI catalog failed: {completed.stderr.strip()}")
+        errors.append(f"CLI catalog failed: {(completed.stderr or '').strip()}")
         catalog_commands: dict[str, object] = {}
     else:
-        payload = json.loads(completed.stdout)
+        payload = json.loads(completed.stdout or "{}")
         items = payload.get("data", payload).get("commands", [])
         catalog_commands = {item["name"]: item for item in items}
 
@@ -121,7 +133,7 @@ def main() -> int:
         "documented_commands": len(documented),
         "errors": errors,
     }
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print(json.dumps(result, ensure_ascii=True, indent=2))
     return 0 if not errors else 1
 
 

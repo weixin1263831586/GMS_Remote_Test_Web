@@ -18,6 +18,12 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def resolve_usbip_command() -> str:
+    """Public alias of :func:`_resolve_usbip_command` for cross-feature use."""
+
+    return _resolve_usbip_command()
+
+
 def _resolve_usbip_command() -> str:
     """定位目标侧 usbip 客户端二进制。
 
@@ -35,6 +41,8 @@ def _resolve_usbip_command() -> str:
 
 
 USBIP_PORT_COMMAND = f"sudo -n {_resolve_usbip_command()} port"
+
+USBIP_DETACH_COMMAND_TEMPLATE = "sudo -n {usbip} detach -p {port}"
 
 # usbip port 输出的设备行，例如：
 #     1-2 | 05ac:12a8 | Remix Mini | Remote USB/IP host 10.0.0.5

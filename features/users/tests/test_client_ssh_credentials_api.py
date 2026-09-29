@@ -36,6 +36,20 @@ class ClientSshCredentialsApiTests(unittest.TestCase):
                 saved_sink["list"] = list(credentials)
                 return True
 
+            def delete_client_ssh_credential(self, device_host):
+                # 仿 foundation/config.py：锁内过滤+写回单一临界区。
+                username, _, hostname = device_host.partition("@")
+                remaining = []
+                for cred in saved_sink["list"]:
+                    same = (
+                        (cred.get("device_host") or "") == device_host
+                        or (cred.get("username") == username and cred.get("host") == hostname)
+                    )
+                    if not same:
+                        remaining.append(cred)
+                saved_sink["list"] = remaining
+                return True
+
         fake = FakeConfigManager()
         self._old = config_api.config_manager
         config_api.config_manager = fake

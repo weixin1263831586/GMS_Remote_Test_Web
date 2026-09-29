@@ -80,8 +80,12 @@ class BuildArgvTests(unittest.TestCase):
         self.assertEqual(
             argv,
             [
-                "bash", str(mcp_server.cli_script()), "gms-rt-devices-list",
-                "D1", "--json", "--non-interactive",
+                mcp_server._bash_executable(),
+                mcp_server.cli_script().as_posix(),
+                "gms-rt-devices-list",
+                "D1",
+                "--json",
+                "--non-interactive",
             ],
         )
 
@@ -321,6 +325,12 @@ class RunCliTests(unittest.TestCase):
         text, is_error = mcp_server.run_cli("gms-rt-system-version")
         self.assertFalse(is_error)
         self.assertIn("plain human output", text)
+
+    def test_run_cli_replaces_invalid_utf8_output(self):
+        self._write_stub("printf '\\377'")
+        text, is_error = mcp_server.run_cli("gms-rt-system-version")
+        self.assertFalse(is_error)
+        self.assertEqual(text, "\ufffd")
 
     def test_stdin_secret_is_forwarded(self):
         received = {}

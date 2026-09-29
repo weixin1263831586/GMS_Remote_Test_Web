@@ -33,7 +33,8 @@ def _candidate_paths() -> list[Path]:
 
 
 def load_runtime_env() -> dict[str, str]:
-    """Merge configs/runtime.json into ``os.environ``.
+    """Merge the runtime environment file (configs/local/environment.json)
+    into ``os.environ``.
 
     Existing environment variables always win (the explicit ``systemd``
     ``Environment=`` directive or a real shell variable takes precedence over

@@ -25,6 +25,9 @@ ALLOWED_SHELL_TRUE_FILES = {
     "features/build/executor.py",
 }
 SCAN_DIRS = ("features", "foundation", "worker_agent", "workflows", "bootstrap")
+# 受控逃生口：确因模板/生成物而无法用 ast 解析的源码文件才登记在此，
+# 默认必须为空——否则损坏文件会静默绕过 shell 边界检查。
+UNPARSEABLE_ALLOWLIST: set[str] = set()
 
 
 class _ShellTrueVisitor(ast.NodeVisitor):
@@ -59,6 +62,7 @@ class _ShellTrueVisitor(ast.NodeVisitor):
 class ShellExecutionBoundaryTests(unittest.TestCase):
     def test_shell_true_only_in_audited_boundaries(self):
         violations: list[str] = []
+        parse_errors: list[str] = []
         for scan_dir in SCAN_DIRS:
             for path in sorted((ROOT / scan_dir).rglob("*.py")):
                 if "tests" in path.relative_to(ROOT).parts:
@@ -66,13 +70,23 @@ class ShellExecutionBoundaryTests(unittest.TestCase):
                 relative = path.relative_to(ROOT).as_posix()
                 try:
                     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-                except (OSError, SyntaxError):
+                except (OSError, SyntaxError) as exc:
+                    # 损坏/不可读文件不得静默绕过：未登记豁免即翻红。
+                    if relative not in UNPARSEABLE_ALLOWLIST:
+                        parse_errors.append(f"{relative}: {exc}")
                     continue
                 if relative in ALLOWED_SHELL_TRUE_FILES:
                     continue
                 visitor = _ShellTrueVisitor(relative)
                 visitor.visit(tree)
                 violations.extend(visitor.violations)
+        self.assertEqual(
+            parse_errors,
+            [],
+            "unparseable source files in shell-boundary scan dirs (would silently "
+            "bypass the shell=True gate); register in UNPARSEABLE_ALLOWLIST only if "
+            "genuinely a template/generated artifact:\n" + "\n".join(parse_errors),
+        )
         self.assertEqual(
             violations,
             [],
