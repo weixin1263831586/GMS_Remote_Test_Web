@@ -14,9 +14,9 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from foundation.errors import handle_api_errors
+from foundation.responses import ApiResponse
 
 from . import runtime
-from .api_support import ApiResponse
 from .suite_modules import search_latest_suite_modules
 
 

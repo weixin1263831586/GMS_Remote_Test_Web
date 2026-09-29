@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 
+# Jobs that still own a worker lease or may still produce events; consumers
+# (e.g. the conversation Agent) poll until a job leaves this set.
+ACTIVE_CLUSTER_JOB_STATUSES = frozenset({
+    "created", "queued", "leasing", "assigned", "dispatching", "running",
+    "stopping", "collecting", "worker_lost",
+})
+
 TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled"}
 
 _ALLOWED_TRANSITIONS = {

@@ -368,7 +368,7 @@ BUSID  VID:PID    DEVICE                                                        
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
 
         with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
-                patch.object(integrations, "usbip_manager", fake_manager), \
+                patch("features.devices.usbip_connect_api.usbip_manager", fake_manager), \
                 patch.object(
                     integrations.runtime,
                     "get_client_id_from_request",
@@ -1116,7 +1116,7 @@ BUSID  VID:PID    DEVICE                                                        
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
         req = USBIPStartRequest(device_host="hcq@172.16.14.66", device_password="secret")
         with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
-                patch.object(integrations, "usbip_manager", FakeUsbipManager()), \
+                patch("features.devices.usbip_connect_api.usbip_manager", FakeUsbipManager()), \
                 patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
             response = asyncio.run(integrations.start_usbip(req=req, request=request, help=False))
         self.assertEqual(response.status_code, 200)
@@ -1169,7 +1169,7 @@ BUSID  VID:PID    DEVICE                                                        
                     "timestamp": 1,
                 }
             with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
-                    patch.object(integrations, "usbip_manager", FakeUsbipManager()), \
+                    patch("features.devices.usbip_connect_api.usbip_manager", FakeUsbipManager()), \
                     patch.object(integrations.runtime, "get_client_id_from_request", return_value="waha@172.16.14.64"):
                 response = asyncio.run(integrations.start_usbip(
                     req=USBIPStartRequest(device_host="waha@172.16.14.64"),
@@ -1214,7 +1214,7 @@ BUSID  VID:PID    DEVICE                                                        
         req = USBIPStartRequest(device_host="hcq@172.16.14.66")
 
         with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
-                patch.object(integrations, "usbip_manager", FakeUsbipManager()), \
+                patch("features.devices.usbip_connect_api.usbip_manager", FakeUsbipManager()), \
                 patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
             response = asyncio.run(integrations.start_usbip(req=req, request=request, help=False))
 
@@ -1249,17 +1249,14 @@ BUSID  VID:PID    DEVICE                                                        
         )
         with patch.object(
             integrations.runtime, "config_manager", FakeConfigManager()
-        ), patch.object(
-            integrations, "usbip_manager", manager
+        ), patch("features.devices.usbip_connect_api.usbip_manager", manager
         ), patch.object(
             integrations.runtime,
             "get_client_id_from_request",
             return_value="hcq@172.16.14.66",
         ), patch.object(
             cluster_module, "get_cluster_service", return_value=cluster
-        ), patch.object(
-            integrations,
-            "_adb_proxy_target_assignments",
+        ), patch("features.devices.usbip_connect_api._adb_proxy_target_assignments",
             return_value=[{
                 "source_worker_id": "ats-worker-118",
                 "devices": ["RK3576GMS6"],
@@ -1315,17 +1312,14 @@ BUSID  VID:PID    DEVICE                                                        
         )
         with patch.object(
             integrations.runtime, "config_manager", FakeConfigManager()
-        ), patch.object(
-            integrations, "usbip_manager", manager
+        ), patch("features.devices.usbip_connect_api.usbip_manager", manager
         ), patch.object(
             integrations.runtime,
             "get_client_id_from_request",
             return_value="hcq@172.16.14.66",
         ), patch.object(
             cluster_module, "get_cluster_service", return_value=cluster
-        ), patch.object(
-            integrations,
-            "_adb_proxy_target_assignments",
+        ), patch("features.devices.usbip_connect_api._adb_proxy_target_assignments",
             return_value=[{
                 "source_worker_id": "ats-worker-246",
                 "devices": ["ATS357629"],
@@ -1375,24 +1369,19 @@ BUSID  VID:PID    DEVICE                                                        
         )
         with patch.object(
             integrations.runtime, "config_manager", FakeConfigManager()
-        ), patch.object(
-            integrations, "usbip_manager", manager
+        ), patch("features.devices.usbip_connect_api.usbip_manager", manager
         ), patch.object(
             integrations.runtime,
             "get_client_id_from_request",
             return_value="hcq@172.16.14.66",
         ), patch.object(
             cluster_module, "get_cluster_service", return_value=cluster
-        ), patch.object(
-            integrations,
-            "_adb_proxy_target_assignments",
+        ), patch("features.devices.usbip_connect_api._adb_proxy_target_assignments",
             return_value=[{
                 "source_worker_id": "ats-worker-246",
                 "devices": ["ATS357629"],
             }],
-        ), patch.object(
-            integrations,
-            "_rollback_local_usbip_attach",
+        ), patch("features.devices.usbip_connect_api._rollback_local_usbip_attach",
             return_value={"success": True, "errors": []},
         ) as rollback:
             response = asyncio.run(integrations.start_usbip(
@@ -1452,17 +1441,14 @@ BUSID  VID:PID    DEVICE                                                        
         )
         with patch.object(
             integrations.runtime, "config_manager", FakeConfigManager()
-        ), patch.object(
-            integrations, "usbip_manager", manager
+        ), patch("features.devices.usbip_connect_api.usbip_manager", manager
         ), patch.object(
             integrations.runtime,
             "get_client_id_from_request",
             return_value="hcq@172.16.14.66",
         ), patch.object(
             cluster_module, "get_cluster_service", return_value=cluster
-        ), patch.object(
-            integrations,
-            "_adb_proxy_target_assignments",
+        ), patch("features.devices.usbip_connect_api._adb_proxy_target_assignments",
             return_value=[{
                 "source_worker_id": "ats-worker-246",
                 "devices": ["ATS357629", "ATS357631"],
@@ -1523,17 +1509,14 @@ BUSID  VID:PID    DEVICE                                                        
         try:
             with patch.object(
                 integrations.runtime, "config_manager", FakeConfigManager()
-            ), patch.object(
-                integrations, "usbip_manager", manager
+            ), patch("features.devices.usbip_connect_api.usbip_manager", manager
             ), patch.object(
                 integrations.runtime,
                 "get_client_id_from_request",
                 return_value="hcq@172.16.14.66",
             ), patch.object(
                 cluster_module, "get_cluster_service", return_value=cluster
-            ), patch.object(
-                integrations,
-                "_adb_proxy_target_assignments",
+            ), patch("features.devices.usbip_connect_api._adb_proxy_target_assignments",
                 return_value=[],
             ):
                 response = asyncio.run(integrations.start_usbip(
@@ -1882,9 +1865,7 @@ BUSID  VID:PID    DEVICE                                                        
             return_value="hcq@172.16.14.66",
         ), patch.object(
             integrations.runtime, "resolve_tailscale_device_host", None
-        ), patch.object(
-            integrations,
-            "probe_existing_local_usbip_transport",
+        ), patch("features.devices.usbip_status_api.probe_existing_local_usbip_transport",
             return_value={
                 "transport_connected": True,
                 "device_list": ["RK3576GMS6"],
@@ -1967,12 +1948,9 @@ BUSID  VID:PID    DEVICE                                                        
                 return_value="hcq@172.16.14.66",
             ), patch.object(
                 integrations.runtime, "resolve_tailscale_device_host", None
-            ), patch.object(
-                integrations,
-                "probe_existing_local_usbip_transport",
+            ), patch("features.devices.usbip_status_api.probe_existing_local_usbip_transport",
                 return_value=None,
-            ), patch.object(
-                integrations, "_local_worker_id",
+            ), patch("features.devices.usbip_status_api._local_worker_id",
                 return_value="ats-worker-controller",
             ), patch.object(
                 integrations.device_manager,
@@ -2072,7 +2050,7 @@ BUSID  VID:PID    DEVICE                                                        
         reconnect.suppress_usbip_reconnect("hcq@172.16.14.66", ["USBIP001"])
         try:
             with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
-                    patch.object(integrations, "usbip_manager", FakeUsbipManager()), \
+                    patch("features.devices.usbip_connect_api.usbip_manager", FakeUsbipManager()), \
                     patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
                 auto_response = asyncio.run(integrations.start_usbip(
                     req=USBIPStartRequest(device_host="hcq@172.16.14.66"),
@@ -2111,7 +2089,7 @@ BUSID  VID:PID    DEVICE                                                        
         reconnect.suppress_usbip_reconnect("hcq@172.16.14.66", ["USBIP001"])
         try:
             with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
-                    patch.object(integrations, "usbip_manager", FakeUsbipManager()), \
+                    patch("features.devices.usbip_connect_api.usbip_manager", FakeUsbipManager()), \
                     patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
                 response = asyncio.run(integrations.start_usbip(
                     req=USBIPStartRequest(device_host="hcq@172.16.14.66", manual_connect=True),
@@ -2321,13 +2299,13 @@ BUSID  VID:PID    DEVICE                                                        
                 patch.object(integrations.runtime, "ssh_manager", FakeSshManager()), \
                 patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"), \
                 patch.object(integrations.runtime, "resolve_tailscale_device_host", return_value=(None, None)), \
-                patch.object(integrations, "DeviceSSHConnection", FakeDeviceSSHConnection), \
-                patch.object(integrations, "notify_device_change", AsyncMock()), \
-                patch.object(integrations, "acquire_device_operation_claim", return_value=("operation:usbip:test", [{"id": "claim-1", "device_key": "ats-worker-controller:USBIP001", "generation": 1, "owner_id": "user-id"}], None)), \
-                patch.object(integrations, "release_device_operation_claim"), \
-                patch.object(integrations, "audit_device_operation"), \
+                patch("features.devices.usbip_disconnect_api.DeviceSSHConnection", FakeDeviceSSHConnection), \
+                patch("features.devices.usbip_disconnect_api.notify_device_change", AsyncMock()), \
+                patch("features.devices.usbip_disconnect_api.acquire_device_operation_claim", return_value=("operation:usbip:test", [{"id": "claim-1", "device_key": "ats-worker-controller:USBIP001", "generation": 1, "owner_id": "user-id"}], None)), \
+                patch("features.devices.usbip_disconnect_api.release_device_operation_claim"), \
+                patch("features.devices.usbip_disconnect_api.audit_device_operation"), \
                 patch("features.devices.reconnect.stop_usbip_reconnect_for_host") as stop_reconnect, \
-                patch.object(integrations, "detach_ubuntu_usbip_ports", return_value=["00"] ) as detach:
+                patch("features.devices.usbip_support.detach_ubuntu_usbip_ports", return_value=["00"] ) as detach:
             response = asyncio.run(integrations.stop_usbip(request=request, req=None))
 
         body = json.loads(response.body.decode("utf-8"))
@@ -2414,20 +2392,14 @@ BUSID  VID:PID    DEVICE                                                        
             return_value="hcq@172.16.14.66",
         ), patch.object(
             cluster_module, "get_cluster_service", return_value=fake_cluster
-        ), patch.object(
-            integrations, "DeviceSSHConnection", FakeDeviceSSHConnection
-        ), patch.object(
-            integrations, "_detach_ubuntu_usbip_for_devices",
+        ), patch("features.devices.usbip_disconnect_api.DeviceSSHConnection", FakeDeviceSSHConnection
+        ), patch("features.devices.usbip_disconnect_api._detach_ubuntu_usbip_for_devices",
             return_value=detach_result,
-        ), patch.object(
-            integrations, "notify_device_change", AsyncMock()
-        ), patch.object(
-            integrations, "acquire_device_operation_claim",
+        ), patch("features.devices.usbip_disconnect_api.notify_device_change", AsyncMock()
+        ), patch("features.devices.usbip_disconnect_api.acquire_device_operation_claim",
             return_value=("", [], None),
-        ), patch.object(
-            integrations, "release_device_operation_claim"
-        ), patch.object(
-            integrations, "audit_device_operation"
+        ), patch("features.devices.usbip_disconnect_api.release_device_operation_claim"
+        ), patch("features.devices.usbip_disconnect_api.audit_device_operation"
         ), patch(
             "features.devices.reconnect.stop_usbip_reconnect_for_host"
         ):
@@ -2504,14 +2476,14 @@ BUSID  VID:PID    DEVICE                                                        
                 patch.object(integrations.runtime, "ssh_manager", FakeSshManager()), \
                 patch.object(integrations.runtime, "get_client_id_from_request", return_value="NqWo58sh1jr5c6ZiyxxPtQ"), \
                 patch.object(integrations.runtime, "resolve_tailscale_device_host", return_value=(None, None)), \
-                patch.object(integrations, "get_client_display_id_from_request", return_value="hcq@172.16.14.66"), \
-                patch.object(integrations, "DeviceSSHConnection", FakeDeviceSSHConnection), \
-                patch.object(integrations, "notify_device_change", AsyncMock()), \
-                patch.object(integrations, "acquire_device_operation_claim", return_value=("operation:usbip:test", [{"id": "claim-1", "device_key": "ats-worker-controller:USBIP001", "generation": 1, "owner_id": "user-id"}], None)), \
-                patch.object(integrations, "release_device_operation_claim"), \
-                patch.object(integrations, "audit_device_operation"), \
+                patch("features.devices.usbip_support.get_client_display_id_from_request", return_value="hcq@172.16.14.66"), \
+                patch("features.devices.usbip_disconnect_api.DeviceSSHConnection", FakeDeviceSSHConnection), \
+                patch("features.devices.usbip_disconnect_api.notify_device_change", AsyncMock()), \
+                patch("features.devices.usbip_disconnect_api.acquire_device_operation_claim", return_value=("operation:usbip:test", [{"id": "claim-1", "device_key": "ats-worker-controller:USBIP001", "generation": 1, "owner_id": "user-id"}], None)), \
+                patch("features.devices.usbip_disconnect_api.release_device_operation_claim"), \
+                patch("features.devices.usbip_disconnect_api.audit_device_operation"), \
                 patch("features.devices.reconnect.stop_usbip_reconnect_for_host"), \
-                patch.object(integrations, "detach_ubuntu_usbip_ports", return_value=["00"]) as detach:
+                patch("features.devices.usbip_support.detach_ubuntu_usbip_ports", return_value=["00"]) as detach:
             response = asyncio.run(integrations.stop_usbip(request=request, req=None))
 
         body = json.loads(response.body.decode("utf-8"))
@@ -2540,7 +2512,7 @@ BUSID  VID:PID    DEVICE                                                        
             return ["00"] if not detach_all else ["01"]
 
         with patch.object(integrations.runtime, "ssh_manager", FakeSshManager()), \
-                patch.object(integrations, "detach_ubuntu_usbip_ports", side_effect=fake_detach):
+                patch("features.devices.usbip_support.detach_ubuntu_usbip_ports", side_effect=fake_detach):
             result = integrations._detach_ubuntu_usbip_for_devices(
                 "ubuntu-ssh",
                 device_host="hcq@172.16.14.66",
@@ -2568,9 +2540,7 @@ BUSID  VID:PID    DEVICE                                                        
 
         with patch.object(
             integrations.runtime, "ssh_manager", FakeSshManager()
-        ), patch.object(
-            integrations,
-            "detach_ubuntu_usbip_ports",
+        ), patch("features.devices.usbip_support.detach_ubuntu_usbip_ports",
             return_value=["00"],
         ), patch.object(integrations.time, "sleep") as sleep:
             result = integrations._detach_ubuntu_usbip_for_devices(

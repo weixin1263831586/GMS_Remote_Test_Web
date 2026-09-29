@@ -67,9 +67,13 @@ def windows_queue_dir(device_host: str) -> str:
 
 
 class SourceFlashError(RuntimeError):
-    """Raised when a source-side flash step fails."""
+    """Raised when a source-side flash step fails.
 
-    def __init__(self, message: str, *, status_code: int = 500,
+    默认 502：烧写失败属源主机 / Source Agent / SSH 基础设施故障；
+    客户端输入问题（如非法设备号）必须显式传 4xx。
+    """
+
+    def __init__(self, message: str, *, status_code: int = 502,
                  stage: str = "") -> None:
         super().__init__(message)
         self.status_code = status_code
@@ -211,7 +215,8 @@ def _sync_flash_flow(
 
     if not _SOURCE_DEVICE_ID_RE.fullmatch(device or ""):
         raise SourceFlashError(
-            f"invalid source device id: {device!r}", stage="FLASHING")
+            f"invalid source device id: {device!r}",
+            status_code=422, stage="FLASHING")
 
     def log(message: str) -> None:
         if on_log is not None:

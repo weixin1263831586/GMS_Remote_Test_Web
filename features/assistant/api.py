@@ -13,7 +13,6 @@ from typing import Any
 from fastapi import APIRouter, Body, Request
 from pydantic import BaseModel, Field
 
-from features.assistant.cluster_runtime import ACTIVE_CLUSTER_JOB_STATUSES as _ACTIVE_CLUSTER_JOB_STATUSES
 from features.assistant.context import _parse_chinese_number, record_user_message, update_context
 from features.assistant.executor import _json_body, executor
 from features.assistant.response import (
@@ -26,6 +25,9 @@ from features.assistant.response import (
     page_quick_actions,
 )
 from features.assistant.tools import registry
+from features.cluster import (
+    ACTIVE_CLUSTER_JOB_STATUSES as _ACTIVE_CLUSTER_JOB_STATUSES,
+)
 from features.devices import device_lock_manager, device_manager, get_or_create_user_state
 from features.reports import ReportDiagnosisRequest, test_report_db
 from features.test_execution import (

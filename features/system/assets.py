@@ -18,10 +18,10 @@ from features.auth import CurrentUser, require_elevated_admin_when_auth_required
 from features.system.icon_fetcher import IconFetcher
 from features.system.ssh import ssh_manager
 from foundation.config import DEFAULT_FAVICON_TIMEOUT, MAX_BATCH_SIZE, config_manager
+from foundation.error_model import ApiError
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 
-from .assets_ssh import ssh_connection_failed_response
 from .tools_data_api import router as tools_data_router
 from .utility_tools_api import (
     browse_utility_tools as browse_utility_tools,
@@ -379,3 +379,18 @@ async def batch_fetch_favicons(
         })
     finally:
         await fetcher.close()
+
+
+
+
+
+def ssh_connection_failed_response() -> JSONResponse:
+    """Return an actionable, semantic failure for an unavailable SSH host."""
+    return ApiError.upstream_failure(
+        "SSH connection failed",
+        service="ssh",
+        next_actions=[
+            {"action": "verify host sshd", "command": "ping <host>"},
+            {"action": "retry after fixing SSH access"},
+        ],
+    ).to_response()

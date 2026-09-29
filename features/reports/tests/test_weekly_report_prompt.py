@@ -1,7 +1,6 @@
 from unittest.mock import patch
 
-from features.reports.weekly_config import android17_sheet_url
-from features.reports.weekly_report_api import _issue_body_for_ai
+from features.reports.weekly_report_api import _issue_body_for_ai, android17_sheet_url
 
 
 def test_issue_body_bounds_large_redmine_journal_notes():
@@ -24,12 +23,12 @@ def test_issue_body_bounds_large_redmine_journal_notes():
 
 def test_android17_sheet_url_prefers_environment_then_config():
     with patch.dict("os.environ", {"GMS_ANDROID17_SHEET_URL": "https://env.example/sheet"}), \
-            patch("features.reports.weekly_config.config_manager") as manager:
+            patch("features.reports.weekly_report_api.config_manager") as manager:
         assert android17_sheet_url() == "https://env.example/sheet"
         manager.get_runtime_config.assert_called_once()
 
     with patch.dict("os.environ", {}, clear=True), \
-            patch("features.reports.weekly_config.config_manager") as manager:
+            patch("features.reports.weekly_report_api.config_manager") as manager:
         manager.get_runtime_config.return_value = {}
         manager.load_config.return_value = {
             "weekly_report": {"android17_sheet_url": "https://config.example/sheet"}

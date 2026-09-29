@@ -18,7 +18,8 @@ with business priority and made the aggregate morning report difficult to act on
 - A user-triggered single-issue reanalysis performs diagnosis. The durable job's
   exact run ID is carried through execution; the worker never substitutes a newer
   run on the same date.
-- `daily_brief_result.IssueResult` defines both runtime validation and the JSON
+- `daily_brief_models.IssueResult`（原 `daily_brief_result.IssueResult`）defines
+  both runtime validation and the JSON
   Schema embedded in prompts. Historical persisted results remain readable by
   the tolerant UI; new model results must pass the current contract.
 - Confidence is an explicit numeric model estimate. The runtime does not invent

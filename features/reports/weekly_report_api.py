@@ -2,12 +2,12 @@
 
 数据源缺少凭证或配置时单项降级，不影响其他数据源。
 """
-
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import os
 import re
 import urllib.parse
 from datetime import date, datetime, timedelta
@@ -29,13 +29,13 @@ from features.test_execution import (
 from features.test_execution import (
     runtime as te_runtime,
 )
+from foundation.config import config_manager
+from foundation.error_model import record_internal_error
 from foundation.responses import error_response, success_response
-from foundation.time import parse_datetime
-
-from .weekly_config import android17_sheet_url
 
 
 logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 def _last_week_range(today: date | None = None) -> tuple[date, date]:
@@ -1083,16 +1083,15 @@ async def get_weekly_report_ai_summary(
         f"=== GMS 认证测试进展（平台 × 模块当前态）===\n{gms_blocks or '(无)'}\n"
     )
 
-    # AI 分析器由组合根注入（configure_report_dependencies）。
-    from features.reports.dependencies import dependencies
+    from features.reports.dependencies import dependencies  # AI 分析器由组合根注入（configure_report_dependencies）
 
     factory = dependencies.universal_analyzer_factory
     if factory is None:
         return error_response("AI 分析器未配置", status_code=500)
     try:
         analyzer = factory()
-    except Exception as e:
-        return error_response(f"AI 分析器初始化失败: {e}", status_code=500)
+    except Exception:
+        return error_response(record_internal_error(logger, "AI 分析器初始化失败", "factory failed"), status_code=500)
 
     system_prompt = "你是资深 Android 系统工程师，擅长把零散的工单、代码提交、移植任务与 GMS 认证测试结果归纳成清晰的中文周报。"
     # 优先使用本地模型 glm_local；若未启用则回退到通用主 provider
@@ -1110,3 +1109,34 @@ async def get_weekly_report_ai_summary(
                   "label": "上周" if is_default else "自定义"},
         "issue_count": len(rep_issues),
     }, message="AI 周报总结已生成")
+
+
+# ---- merged from weekly_config.py ----
+
+
+DEFAULT_ANDROID17_SHEET_URL = "https://docs.qq.com/sheet/DQnVLa3NVeHdISXpy?tab=BB08J2"
+
+
+def android17_sheet_url() -> str:
+    runtime = config_manager.get_runtime_config()
+    configured = (runtime.get("weekly_report") or {}).get("android17_sheet_url")
+    if not configured:
+        configured = (config_manager.load_config().get("weekly_report") or {}).get("android17_sheet_url")
+    return str(os.getenv("GMS_ANDROID17_SHEET_URL") or configured or DEFAULT_ANDROID17_SHEET_URL).strip()
+
+
+# ---- merged from foundation/time.py ----
+
+
+def parse_datetime(value: Any) -> datetime | None:
+    if value in (None, ''):
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+    text = str(value).strip().replace('Z', '+00:00')
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None

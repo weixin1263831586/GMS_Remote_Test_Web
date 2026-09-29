@@ -19,10 +19,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from foundation.config import settings
+from foundation.processes import run_local_shell_command
 
 from .adb_ops import mount_point_is_rw, reboot_with_runner, root_and_remount
 from .config_explorer import _aapt2_path, _adb_path, _pull_apk, _resolve_package_apk
-from .network import run_local_shell_command
 
 
 logger = logging.getLogger(__name__)

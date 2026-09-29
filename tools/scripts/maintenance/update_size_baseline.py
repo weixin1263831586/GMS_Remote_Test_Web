@@ -18,7 +18,7 @@ Entries whose file GREW beyond its ceiling are reported but left untouched:
 growth means either a regression the gate must keep failing on, or a
 deliberate raise that needs a waiver entry (reason + expiry) reviewed in the
 commit, not an automated bump. Files missing from the baseline are policed by
-the 600-line / 50 KB default limits in the owning tests.
+the 1200-line / 50 KB default limits in the owning tests.
 """
 
 from __future__ import annotations

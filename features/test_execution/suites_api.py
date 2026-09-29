@@ -23,9 +23,9 @@ from features.auth import (
 )
 from features.devices import ssh_connection_failed_response
 from foundation.errors import handle_api_errors
+from foundation.responses import ApiResponse
 
 from . import runtime
-from .api_support import ApiResponse
 from .models import SuiteApkAnalyzeRequest, SuiteDiagnosisTargetRequest
 from .suite_helpers import (
     get_available_test_suites,

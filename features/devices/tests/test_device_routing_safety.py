@@ -221,24 +221,15 @@ async def test_local_usbip_partial_disconnect_preserves_sibling_assignment_and_s
         integrations.runtime, "resolve_tailscale_device_host", return_value=(None, None)
     ), patch.object(
         cluster_module, "get_cluster_service", return_value=fake_cluster
-    ), patch.object(
-        integrations, "DeviceSSHConnection", DeviceConnection
-    ), patch.object(
-        integrations,
-        "_detach_ubuntu_usbip_for_devices",
+    ), patch("features.devices.usbip_disconnect_api.DeviceSSHConnection", DeviceConnection
+    ), patch("features.devices.usbip_disconnect_api._detach_ubuntu_usbip_for_devices",
         return_value={"detached_ports": ["00"], "remaining_devices": []},
-    ) as detach, patch.object(
-        integrations, "_clear_usbip_device_sources", clear_sources
-    ), patch.object(
-        integrations, "notify_device_change", AsyncMock()
-    ), patch.object(
-        integrations,
-        "acquire_device_operation_claim",
+    ) as detach, patch("features.devices.usbip_disconnect_api._clear_usbip_device_sources", clear_sources
+    ), patch("features.devices.usbip_disconnect_api.notify_device_change", AsyncMock()
+    ), patch("features.devices.usbip_disconnect_api.acquire_device_operation_claim",
         return_value=("", [], None),
-    ), patch.object(
-        integrations, "release_device_operation_claim"
-    ), patch.object(
-        integrations, "audit_device_operation"
+    ), patch("features.devices.usbip_disconnect_api.release_device_operation_claim"
+    ), patch("features.devices.usbip_disconnect_api.audit_device_operation"
     ), patch("features.devices.reconnect.stop_usbip_reconnect_for_host"):
         response = await integrations.stop_usbip(
             request=_request(),

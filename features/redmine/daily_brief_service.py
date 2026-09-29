@@ -18,15 +18,16 @@ from typing import Any
 
 from . import daily_brief_cancellation as cancellation
 from .daily_brief_analysis_events import mask_secrets, start_analysis_progress
-from .daily_brief_deep_analysis import precollect_deep_evidence
-from .daily_brief_execution_statistics import summarize_execution_statistics
-from .daily_brief_execution_view import issue_payload
 from .daily_brief_models import (
     DailyBriefIssue,
     DailyBriefRun,
     derive_data_quality,
 )
-from .daily_brief_report import summarize_daily_brief
+from .daily_brief_report import (
+    issue_payload,
+    summarize_daily_brief,
+    summarize_execution_statistics,
+)
 from .daily_brief_repository import (
     TERMINAL_RUN_STATUSES,
     DailyBriefRepository,
@@ -46,6 +47,7 @@ from .kkagent import (
     KkAgentRedmineAnalyzer,
     preflight_gms_auth,
 )
+from .kkagent.evidence_preflight import collect_deep_analysis_evidence
 from .users import _now
 
 
@@ -62,6 +64,61 @@ from .daily_brief_config import (  # noqa: E402
     build_brief_analyzer,
     normalize_daily_brief_config,
 )
+
+
+async def precollect_deep_evidence(
+    *, repository: Any, run: Any, issue_id: int,
+    analyzer: Any, entry: dict[str, Any],
+) -> None:
+    """Deterministic read-only evidence baseline for one analysis.
+
+    成功时写入 ``entry["_precollected_tool_traces"]`` 与
+    ``entry["_evidence_preflight"]``（模型可见的持久化溯源，原样输出不落
+    库）。取消标志在每次 CLI 尝试与退避间隙被轮询；preflight 期间被请求
+    停止时抛 ``RunCancelledError``，不再启动 kkagent 子进程。
+
+    未绑定 agent profile 时跳过：认证预检已按 fail-closed 拦截该配置，
+    preflight 不承担重复报错职责。triage 只收 Redmine 基线
+    （``include_device=False``），设备取证仍是深度诊断专属。
+
+    ``entry["_progress_recorder"]`` 存在时，preflight 每步 CLI 调用同步
+    写入实时进度时间线（tool_started / tool_completed / tool_failed），
+    让「查看分析」弹框覆盖 Controller 证据预采集阶段而不只 kkagent。
+    """
+    evidence_env = dict(getattr(analyzer, "env_extra", {}) or {})
+    if not str(evidence_env.get("GMS_RT_PROFILE") or "").strip():
+        return
+    triage = entry.get("analysis_mode") == "triage"
+    progress = entry.get("_progress_recorder")
+    if progress is not None:
+        progress.stage_changed("正在执行 Controller 证据预采集（Redmine/设备快照）")
+    preflight = await collect_deep_analysis_evidence(
+        issue_id=issue_id,
+        device_serial="" if triage else str(entry.get("device_serial") or ""),
+        include_device=not triage,
+        env_extra=evidence_env,
+        should_cancel=lambda: repository.is_cancel_requested(run.run_id),
+        on_tool_event=(
+            lambda tool_name, tool_input, phase, ok: _emit_preflight_progress(
+                progress, tool_name, tool_input, phase, ok,
+            )
+        ) if progress is not None else None,
+    )
+    entry["_precollected_tool_traces"] = preflight.traces
+    entry["_evidence_preflight"] = preflight.prompt_context()
+    if repository.is_cancel_requested(run.run_id):
+        raise cancellation.RunCancelledError()
+
+
+def _emit_preflight_progress(
+    progress: Any, tool_name: str, tool_input: Any, phase: str, ok: bool,
+) -> None:
+    if progress is None:
+        return
+    if phase == "started":
+        progress.tool_started(tool_name, tool_input, stage="preflight")
+        return
+    progress.tool_finished(tool_name, None, ok=ok, stage="preflight")
 
 
 class DailyBriefService(DailyBriefRunStarterMixin):
@@ -557,7 +614,7 @@ class DailyBriefService(DailyBriefRunStarterMixin):
             if config.get("analysis_hint"):
                 analyze_entry.setdefault("analysis_hint", config["analysis_hint"])
             # Deep analysis owns a deterministic read-only baseline（含取消
-            # 轮询与 profile 判定，编排拆在 daily_brief_deep_analysis）。
+            # 轮询与 profile 判定；原独立模块，已并回服务层编排）。
             analyze_entry["_progress_recorder"] = progress
             await precollect_deep_evidence(
                 repository=self.repository, run=run, issue_id=issue_id,

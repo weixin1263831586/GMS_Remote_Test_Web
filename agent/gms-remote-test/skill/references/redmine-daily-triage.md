@@ -73,7 +73,7 @@ diagnostic（当前唯一新生成模式）的结果是最终中文 Markdown 报
 `detailed_report` / `problem_summary` / `evidence_gate`），取证完成状态
 仍由 Controller 从 stream-json 工具轨迹派生的 Evidence Gate 强制校验。
 
-`features/redmine/daily_brief_result.py::IssueResult` JSON Schema 现仅
+`features/redmine/daily_brief_models.py::IssueResult` JSON Schema 现仅
 约束历史 triage 结果（含嵌套 evidence/action/similar issue），保留用于
 历史持久化结果的兼容渲染。以下仅为字段示意，
 不是可直接提交的示例（枚举须选一个值，相似工单 ID 必须为真实正整数）。

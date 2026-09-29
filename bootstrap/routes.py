@@ -24,7 +24,6 @@ from features.devices import config_override_api as device_config_override
 from features.devices import integrations_api as device_integrations
 from features.devices import serial_console_api as device_serial_console
 from features.devices.dependencies import configure_device_dependencies
-from features.devices.network import run_local_shell_command
 from features.devices.support import get_or_create_user_state
 from features.email import api as email
 from features.firmware import api as firmware
@@ -106,6 +105,7 @@ from foundation.config import (
     config_manager,
 )
 from foundation.files import FileUtils
+from foundation.processes import run_local_shell_command
 from workflows.cluster_test_execution import start_cluster_test
 from workflows.firmware_device import (
     lock_firmware_devices,

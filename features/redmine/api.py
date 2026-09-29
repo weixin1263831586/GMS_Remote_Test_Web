@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from typing import Any
 
@@ -39,6 +40,10 @@ from features.redmine.service import RedmineService
 from features.redmine.utils import attachment_content_disposition, sanitize_attachment_filename
 from features.users import owner_id_from_request
 from foundation.config import settings
+from foundation.error_model import record_internal_error
+
+
+logger = logging.getLogger(__name__)
 
 
 __all__ = ["page_router", "router"]
@@ -199,19 +204,6 @@ def _department_from_profiles(profile_ids: list[str]) -> dict[str, str]:
                 "department": str(profile.get("name") or ""),
             }
     return {"department_id": profile_ids[0], "department": ""}
-
-
-def _send_reminder_email(to_addr: str, subject: str, body: str, manager=None) -> dict[str, Any]:
-    """发送部门提醒邮件。
-
-    SMTP 发送逻辑（含 163 企业邮兼容、SSL/TLS 判定、认证错误兜底）已统一到
-    :func:`features.email.send_email`，这里仅做透传，保持调用方与返回
-    结构 ``{"sent", "mode", "error"}`` 不变。
-    """
-    selected_manager = manager or config_manager
-    result = send_email(to_addr, subject, body, manager=selected_manager)
-    # 仅保留对外约定的字段（sent/mode/error），丢弃 send_email 附加的明细
-    return {"sent": result["sent"], "mode": result["mode"], "error": result.get("error")}
 
 
 def _check_ttl_cache(cache_dict: dict, cache_key: str, ttl: int, now_ts: float, refresh: bool = False) -> dict | None:
@@ -490,8 +482,11 @@ async def download_issue_attachment(issue_id: int, attachment_id: int, request: 
         tmp_name = tmp_path.name
     try:
         await client.download_attachment(str(attachment_id), tmp_name, content_url)
-    except Exception as exc:
-        return JSONResponse(status_code=502, content={"success": False, "error": f"Redmine 下载失败: {exc}"})
+    except Exception:
+        message = record_internal_error(
+            logger, "下载 Redmine 附件", "download_attachment failed"
+        )
+        return JSONResponse(status_code=502, content={"success": False, "error": message})
     finally:
         await client.close()
 
@@ -746,8 +741,11 @@ async def send_department_reminder_email(request: Request):
     manager = get_redmine_config_for_request(request)
     try:
         result = await asyncio.to_thread(_send_reminder_email, to_addr, subject, body_text, manager)
-    except Exception as exc:
-        return JSONResponse(status_code=500, content={"success": False, "error": f"邮件发送失败: {exc}"})
+    except Exception:
+        message = record_internal_error(
+            logger, "发送提醒邮件", "_send_reminder_email failed"
+        )
+        return JSONResponse(status_code=500, content={"success": False, "error": message})
     if not result.get("sent"):
         return JSONResponse(status_code=503, content={"success": False, "error": result.get("error", "邮件发送失败"), "data": result})
     return {"success": True, "data": {"to": to_addr, "subject": subject, "body": body_text, **result}}
@@ -906,3 +904,19 @@ get_resolved_issues_by_date = _statistics_api.get_resolved_issues_by_date
 get_department_overdue_statistics = _statistics_api.get_department_overdue_statistics
 get_project_statistics = _statistics_api.get_project_statistics
 _department_user_overdue = _statistics_api._department_user_overdue
+
+
+# ---- merged from reminder_email.py ----
+
+
+def _send_reminder_email(to_addr: str, subject: str, body: str, manager=None) -> dict[str, Any]:
+    """发送部门提醒邮件。
+
+    SMTP 发送逻辑（含 163 企业邮兼容、SSL/TLS 判定、认证错误兜底）已统一到
+    :func:`features.email.send_email`，这里仅做透传，保持调用方与返回
+    结构 ``{"sent", "mode", "error"}`` 不变。
+    """
+    selected_manager = manager or config_manager
+    result = send_email(to_addr, subject, body, manager=selected_manager)
+    # 仅保留对外约定的字段（sent/mode/error），丢弃 send_email 附加的明细
+    return {"sent": result["sent"], "mode": result["mode"], "error": result.get("error")}

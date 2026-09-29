@@ -1,12 +1,12 @@
 """Headless kkagent 单 issue 分析：stream-json → Evidence Gate →
 同 session 修复。进程始终使用 ``create_subprocess_exec``，禁止 shell、
 自动授权和 Redmine 指令注入；诊断结果保留 native Markdown。"""
-
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -22,7 +22,6 @@ from .process import (
     settle_reader_future,
     terminate_process_tree,
 )
-from .progress_tap import ProgressTap
 from .trace import KkAgentTrace, ToolTrace, consume_line
 
 
@@ -101,9 +100,20 @@ def classify_gate_failure(
     nightly 复盘：模型全程 CLI 兜底取证，gate 按工具名判失败，修复轮原样
     重放也无法恢复）。此时终态标记为 ``mcp_evidence_unavailable`` 并给出
     可操作的恢复步骤，而不是把 findings 原样抛给晨报。
+
+    判定只看**会话内**调用：Controller 预采集（preflight）也以 gms_rt_*
+    工具名记入 trace（tool_call_id 带 "preflight:" 前缀），不能作为 gms
+    MCP server 已连接的证据——#654649 nightly 中 preflight 三个 CLI 调用
+    全部成功，而 kkagent 会话内 gms MCP 缺失，若把 preflight 计入就会把
+    "MCP 不可用" 误分类成普通 gate 失败，掩盖真实恢复路径。
     """
     findings = "; ".join(gate_errors_list)
-    if any("gms_rt_" in name for name in trace.successful_tool_names()):
+    session_tool_names = [
+        call.tool_name
+        for call in trace.tool_calls
+        if call.succeeded and not call.tool_call_id.startswith("preflight:")
+    ]
+    if any("gms_rt_" in name for name in session_tool_names):
         return ("evidence_gate_failed", "evidence_gate_failed", findings)
     recovery = (
         "kkagent 会话内没有任何成功的 gms_rt_* MCP 取证调用（gms MCP server "
@@ -669,5 +679,49 @@ __all__ = [
     "REPAIR_MAX_TURNS",
     "KkAgentAnalysisResult",
     "KkAgentRedmineAnalyzer",
+    "ProgressTap",
     "ToolTrace",
 ]
+
+
+# ---- merged from progress_tap.py ----
+
+
+class ProgressTap:
+    """一次 kkagent 流的 tool_call/tool_result → 进度事件适配。"""
+
+    def __init__(self, sink: Any):
+        self.sink = sink
+        self._started: dict[str, float] = {}
+        self._inputs: dict[str, Any] = {}
+        self._session_reported = False
+
+    def on_event(self, event: dict[str, Any]) -> None:
+        if self.sink is None:
+            return
+        event_type = str(event.get("type") or "")
+        if event_type == "session":
+            if not self._session_reported:
+                session_id = str(event.get("session_id") or "")
+                if session_id:
+                    self._session_reported = True
+                    reporter = getattr(self.sink, "session_available", None)
+                    if callable(reporter):
+                        reporter(session_id)
+            return
+        if event_type == "tool_call":
+            call_id = str(event.get("tool_call_id") or "")
+            self._started[call_id] = time.monotonic()
+            self._inputs[call_id] = event.get("input")
+            self.sink.tool_started(str(event.get("tool_name") or ""), event.get("input"))
+        elif event_type == "tool_result":
+            call_id = str(event.get("tool_call_id") or "")
+            started = self._started.pop(call_id, None)
+            tool_input = self._inputs.pop(call_id, None)
+            duration_ms = int((time.monotonic() - started) * 1000) if started is not None else 0
+            self.sink.tool_finished(
+                str(event.get("tool_name") or ""), tool_input,
+                ok=not bool(event.get("is_error")), duration_ms=duration_ms,
+            )
+        elif event_type == "llm_retry":
+            self.sink.progress("模型服务暂时不稳定，已自动重试")

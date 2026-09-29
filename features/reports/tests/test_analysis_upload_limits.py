@@ -8,7 +8,7 @@ from starlette.requests import Request
 
 from features.auth import CurrentUser
 from features.reports import analysis_api
-from features.reports import uploads as report_uploads
+from features.reports import analysis_api as report_uploads
 from features.reports.api_helpers import AnalysisMode
 
 

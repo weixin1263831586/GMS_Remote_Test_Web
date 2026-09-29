@@ -10,7 +10,7 @@ from .apk import (
     safe_join,
 )
 from .apk_api import analyze_apk, find_apk_symbol_definition, get_apk_source, get_apk_status
-from .models import SNBurnRequest
+from .gsi_sn_burn import SNBurnRequest
 
 
 __all__ = [

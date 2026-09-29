@@ -12,7 +12,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from features.auth.principal import CurrentUser
+from features.auth.constants import CurrentUser
 from features.users.clients import owner_id_from_request
 
 

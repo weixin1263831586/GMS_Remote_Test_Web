@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import codecs
 import contextlib
+import errno
 import logging
 import os
 import re
@@ -13,6 +14,7 @@ import threading
 import time
 import uuid
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -22,7 +24,6 @@ import pyudev
 
 from foundation.config import settings
 
-from .serial_console_errors import friendly_serial_error
 from .serial_console_identity import serial_port_identity
 from .serial_console_storage import (
     SUPPORTED_NEWLINES,
@@ -32,7 +33,6 @@ from .serial_console_storage import (
     validate_newline,
     validate_port_key,
 )
-from .serial_console_subscribers import schedule_idle_stop, signal_subscriber_close
 
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,58 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_LOG_BYTES = 50 * 1024 * 1024
 DEFAULT_LOG_RETENTION_DAYS = 14
 DATE_RE = re.compile(r"^\d{8}$")
+
+
+# ---- merged from serial_console_errors.py ----
+
+def friendly_serial_error(exc: Exception) -> str:
+    number = getattr(exc, "errno", None)
+    text = str(exc)
+    lowered = text.lower()
+    if number in {errno.EACCES, errno.EPERM} or "permission denied" in lowered:
+        return "串口权限不足：服务用户需加入 dialout 组并重新登录"
+    if number == errno.EBUSY or "resource busy" in lowered:
+        return "串口被占用，请关闭 picocom/minicom 等程序"
+    if "no such file" in lowered or number == errno.ENOENT:
+        return "串口已拔出或设备节点不存在"
+    if number in {errno.EIO, getattr(errno, "EPROTO", 71)} or any(
+        marker in lowered for marker in ("input/output error", "protocol error")
+    ):
+        return "USB 串口通信异常：请重新插拔 FTDI 或更换 USB 端口，系统将自动重连"
+    return f"串口错误：{text}"
+
+
+# ---- merged from serial_console_subscribers.py ----
+
+def _enqueue_close(queue: asyncio.Queue[Any]) -> None:
+    while not queue.empty():
+        with contextlib.suppress(asyncio.QueueEmpty):
+            queue.get_nowait()
+    with contextlib.suppress(asyncio.QueueFull):
+        queue.put_nowait(None)
+
+
+def signal_subscriber_close(subscribers: Iterable[Any]) -> None:
+    """Wake subscribers with a priority close signal, tolerating stale loops."""
+
+    for subscriber in subscribers:
+        with contextlib.suppress(RuntimeError):
+            subscriber.loop.call_soon_threadsafe(_enqueue_close, subscriber.queue)
+
+
+def schedule_idle_stop(service: Any, port_key: str, *, delay: float = 5.0) -> None:
+    """Keep the physical port open briefly so a page refresh can reconnect."""
+
+    if service._desired(port_key):
+        return
+
+    def stop_if_still_idle() -> None:
+        if not service._desired(port_key):
+            service._stop_worker(port_key)
+
+    timer = threading.Timer(delay, stop_if_still_idle)
+    timer.daemon = True
+    timer.start()
 
 
 @dataclass

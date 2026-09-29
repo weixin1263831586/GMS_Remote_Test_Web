@@ -7,6 +7,7 @@ Mounted under the existing ``/api/redmine-agent`` prefix via
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
@@ -14,11 +15,13 @@ from fastapi.responses import JSONResponse
 
 from features.auth import require_authenticated_user, require_human_principal_when_auth_required
 from features.users import owner_id_from_request
-from foundation.error_model import ApiError
+from foundation.error_model import ApiError, record_internal_error
 
 from .api import get_redmine_service_for_request
 from .daily_brief_repository import canonical_owner_id, owner_daily_brief_repository
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -112,13 +115,14 @@ async def similar_for_issue(issue_id: int, request: Request, limit: int = Query(
 async def issue_workbench(issue_id: int, request: Request, similar_limit: int = Query(6, ge=1, le=20)):
     try:
         return {"success": True, "data": _knowledge(request).issue_workbench(issue_id, similar_limit=similar_limit)}
-    except Exception as exc:
+    except Exception:
         # 返回非 2xx 状态，便于前端区分失败和空数据。
+        message = record_internal_error(logger, "加载知识依据", "issue workbench failed")
         return JSONResponse(
             status_code=502,
             content={
                 "success": False,
-                "error": f"知识依据加载失败: {exc}",
+                "error": message,
                 "issue_id": int(issue_id),
             },
         )

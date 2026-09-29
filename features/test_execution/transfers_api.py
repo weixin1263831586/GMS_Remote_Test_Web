@@ -21,6 +21,7 @@ from foundation.archives import (
     sanitize_suite_dir_name,
     sanitize_suite_filename_from_url,
 )
+from foundation.error_model import record_internal_error
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response
 
@@ -463,8 +464,9 @@ async def extract_test_suite_archive(req: TestSuiteExtractRequest):
             os.makedirs(extract_dir, exist_ok=True)
             result = await asyncio.to_thread(_extract_archive_local_with_progress, archive_path, extract_dir, target_dir_name)
             return JSONResponse(content={"success": True, **result})
-        except Exception as e:
-            return error_response(f"Extraction failed: {e!s}", 500)
+        except Exception:
+            message = record_internal_error(logger, "解压归档", "Archive extraction failed")
+            return error_response(message, 500)
     else:
         async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:

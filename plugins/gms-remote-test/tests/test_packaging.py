@@ -96,7 +96,7 @@ def test_daily_triage_reference_matches_runtime_evidence_contract():
     assert "批量晨报 = 单条深度分析" in reference
     assert "仅保留用于渲染历史持久化结果" in reference
     assert "result_format=kkagent_markdown" in reference
-    assert "daily_brief_result.py::IssueResult" in reference
+    assert "daily_brief_models.py::IssueResult" in reference
     assert "distinct_history_search_count" in reference
     assert "history_checked` 不由模型填写" in reference
     assert "--resume <该 issue 的精确 session_id>" in reference

@@ -774,16 +774,60 @@ def _token_file_status(value: str) -> dict[str, object]:
     }
 
 
-def _mcp_registration_status(client: str) -> dict[str, object]:
-    """Inspect only the client's GMS MCP registration marker."""
+_LAUNCHER_MARKER = "mcp_launcher.py"
 
+
+def _launcher_from_args(args: list) -> str:
+    """Return the mcp_launcher.py path inside an MCP args list ("")."""
+    for item in args:
+        text = str(item)
+        if _LAUNCHER_MARKER in text:
+            return text
+    return ""
+
+
+def _launcher_from_toml_block(text: str, marker: str) -> str:
+    """Extract the mcp_launcher.py path from one [mcp_servers.*] block."""
+
+    block = re.search(
+        r"(?ms)^" + re.escape(marker) + r"\]\s*(?P<body>.*?)(?=^\[|\Z)", text
+    )
+    if block is None:
+        return ""
+    args_match = re.search(r"(?m)^args\s*=\s*\[(.*?)\]", block.group("body"), re.S)
+    if args_match is None:
+        return ""
+    # TOML basic strings use "..."; literal strings use '...'. Only the
+    # launcher path is extracted — no full TOML parse needed here.
+    items = [
+        value
+        for pair in re.findall(r'"([^"]*)"|\'([^\']*)\'', args_match.group(1))
+        for value in pair
+        if value
+    ]
+    return _launcher_from_args(items)
+
+
+def _mcp_registration_status(client: str) -> dict[str, object]:
+    """Inspect the client's GMS MCP registration marker and launchability.
+
+    ``registered`` only says a registration block exists; ``launchable``
+    says the referenced mcp_launcher.py payload is really on disk (#654649
+    nightly 复盘：config.toml 注册块残留而 ~/.kkagent/plugins/local/
+    gms-remote-test payload 被清空，kkagent 每个会话都起不来 gms MCP
+    server，四条晨报分析全部 evidence_gate_failed）。doctor 必须两者都查，
+    否则文本残留会误报 healthy。
+    """
+
+    launcher = ""
     if client == "kimi":
         path = client_skill_root(client).parent / "mcp.json"
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             block = (payload.get("mcpServers") or {}).get("gms") or {}
             args = block.get("args") or []
-            registered = any("mcp_launcher.py" in str(item) for item in args)
+            registered = any(_LAUNCHER_MARKER in str(item) for item in args)
+            launcher = _launcher_from_args(args)
         except (OSError, ValueError, AttributeError):
             registered = False
     else:
@@ -796,14 +840,15 @@ def _mcp_registration_status(client: str) -> dict[str, object]:
             "[mcp_servers.gms]" if client == "kkagent"
             else "[mcp_servers.gms_remote_test]"
         )
-        registered = marker in text and "mcp_launcher.py" in text
+        registered = marker in text and _LAUNCHER_MARKER in text
+        launcher = _launcher_from_toml_block(text, marker.rstrip("]"))
         if client == "codex" and not registered:
             # Codex native plugins own their MCP registration through the
             # plugin manifest, so no standalone [mcp_servers.*] block is
             # expected. Recognize an enabled personal/team marketplace entry.
             plugin_block = re.search(
                 r'(?ms)^\[plugins\."gms-remote-test@[^"\n]+"\]\s*'
-                r'(?P<body>.*?)(?=^\[|\Z)',
+                r"(?P<body>.*?)(?=^\[|\Z)",
                 text,
             )
             registered = bool(
@@ -812,7 +857,18 @@ def _mcp_registration_status(client: str) -> dict[str, object]:
                     r"(?m)^enabled\s*=\s*true\s*$", plugin_block.group("body")
                 )
             )
-    return {"registered": registered, "config_path": str(path)}
+            # The launcher lives inside the plugin payload managed by the
+            # host client; doctor cannot verify it from here.
+            launcher = ""
+    launchable = True
+    if registered and launcher:
+        launchable = Path(launcher).expanduser().is_file()
+    return {
+        "registered": registered,
+        "config_path": str(path),
+        "launchable": launchable,
+        "launcher_path": launcher,
+    }
 
 
 def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
@@ -890,6 +946,14 @@ def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
         mcp_state = _mcp_registration_status(client_name)
         if not mcp_state["registered"]:
             actions.append(f"reconcile the {client_name} MCP registration")
+        elif not mcp_state["launchable"]:
+            actions.append(
+                f"restore the {client_name} gms plugin payload — the "
+                "registered MCP launcher is missing: "
+                f"{mcp_state['launcher_path']} (run python "
+                "tools/scripts/agent/sync_package.py . in the repo, then "
+                f"gms-agent install --client {client_name})"
+            )
         skill_path = client_skill_root(client_name) / "gms-remote-test"
         if not (skill_path / "SKILL.md").is_file():
             actions.append(f"install the {client_name} Skill payload")
@@ -915,6 +979,7 @@ def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
         and bool(item["token"]["mode_ok"])
         and bool(item["token"]["owner_ok"])
         and bool(item["mcp"]["registered"])
+        and bool(item["mcp"].get("launchable", True))
         for item in report_clients
     )
     return {
