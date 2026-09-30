@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 from pathlib import Path
@@ -10,6 +11,9 @@ from .users import (
     DOCS_DIR,
     _now,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class RepositorySchemaMixin:
@@ -191,8 +195,12 @@ class RepositorySchemaMixin:
                     )
                     """
                 )
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as exc:
+                # FTS5 表是可选加速结构（search_issues 在缺失时回退 LIKE），
+                # 缺 fts5 模块或并发初始化拿不到写锁都不该让建库失败；但静默
+                # pass 会让「检索长期退化为 LIKE」「索引从未写入」无人察觉，
+                # 留 warning 痕迹（本路径只在冷启动/重建时执行一次，快路径跳过）。
+                logger.warning("redmine_agent_issue_fts 创建失败，检索将退化为 LIKE: %s", exc)
 
             # --- safe migrations for columns added after initial schema ---
             self._migrate_columns(conn)
@@ -286,8 +294,10 @@ class RepositorySchemaMixin:
             )
             try:
                 conn.execute("DELETE FROM redmine_agent_issue_fts")
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as exc:
+                # reset 是管理动作且随后冲掉 issue 表：这里失败只意味着 FTS
+                # 残留旧行（旧库缺 fts5），留痕便于排查「重置后仍搜到旧工单」。
+                logger.warning("redmine_agent_issue_fts 清空失败，可能残留旧索引: %s", exc)
 
     # Runs
 

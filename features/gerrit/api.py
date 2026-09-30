@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +40,7 @@ from foundation.error_model import ApiError
 
 router = APIRouter(prefix="/api/gerrit-dashboard")
 page_router = APIRouter()
+logger = logging.getLogger(__name__)
 _STATS_CACHE: dict[str, Any] = {}
 
 
@@ -78,8 +80,14 @@ def _name_by_email(request: Request) -> dict[str, str]:
             name = str(entry.get("name") or "").strip()
             if email and name:
                 name_by_email[email] = name
-    except Exception:
-        pass
+    except Exception as exc:
+        # Redmine 用户表拉取失败时退回 personal_profiles 拼名。该映射
+        # 驱动部门统计的中文姓名展示，静默会表现成"整页显示邮箱前缀"。
+        logger.debug(
+            "redmine user list unavailable for email->name mapping; "
+            "falling back to personal profiles",
+            exc_info=exc,
+        )
     for p in cfg.get("personal_profiles") or []:
         email = str(p.get("owner") or "").strip().lower()
         name = str(p.get("name") or "").strip()
@@ -662,11 +670,34 @@ async def gerrit_dashboard_page():
     return HTMLResponse(page_path.read_text(encoding="utf-8"))
 
 
+# 显式白名单的页面资产（ADR 0015 同款模式）：只允许列名的 JS 文件，
+# 不暴露目录、不读白名单外的任何路径。具体路径（/page.js）必须在
+# 参数路由之前注册，否则会被 {asset_name} 吞掉。
+_PAGE_ASSET_TYPES = {
+    "page.js": "application/javascript",
+    "render.js": "application/javascript",
+}
+
+
 @page_router.get("/gerrit-dashboard/page.js")
 def gerrit_dashboard_page_js():
     """页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。"""
-    page_path = Path(__file__).with_name("ui") / "page.html"
-    js = page_path.parent / "page.js"
+    return _serve_page_asset("page.js")
+
+
+@page_router.get("/gerrit-dashboard/{asset_name}", include_in_schema=False)
+def gerrit_dashboard_asset(asset_name: str):
+    """Serve only explicitly allowlisted gerrit dashboard page assets."""
+    return _serve_page_asset(asset_name)
+
+
+def _serve_page_asset(asset_name: str) -> Response:
+    media_type = _PAGE_ASSET_TYPES.get(asset_name)
+    if media_type is None:
+        raise ApiError.not_found("unknown gerrit dashboard asset")
+    asset = Path(__file__).with_name("ui") / asset_name
     return Response(
-        js.read_text(encoding="utf-8"), media_type="application/javascript"
+        asset.read_text(encoding="utf-8"),
+        media_type=media_type,
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
     )

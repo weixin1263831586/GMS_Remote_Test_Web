@@ -3,44 +3,16 @@
   "unit": "bytes",
   "ceilings": {
     "web/shell/shell.html": 257481,
-    "web/static/css/common.css": 148154,
     "web/static/js/api-constants.js": 35745,
     "web/static/js/navigation.js": 39268,
     "web/static/js/pages/api-docs.js": 50374,
-    "web/static/js/pages/firmware-burn.js": 129988,
     "web/static/js/pages/report-analysis.js": 93063,
-    "web/static/js/pages/test-suite-browser.js": 125689,
-    "web/static/js/shell/shell-main.js": 288095,
-    "web/static/js/shell/weekly-report.js": 41351,
-    "features/automation/ui/page.js": 89446,
-    "features/cluster/ui/page.js": 78038,
-    "features/gerrit/ui/page.js": 57023,
-    "features/redmine/ui/page.js": 51200
+    "web/static/js/shell/weekly-report.js": 41351
   },
   "waivers": {
-    "features/automation/ui/page.js": {
-      "reason": "评审 P2:features/*/ui 此前不在扫描范围,首次登记现状作为 shrink-only 起点;后续按域拆分回落",
-      "expires": "2027-01-31"
-    },
-    "features/cluster/ui/page.js": {
-      "reason": "评审 P2:features/*/ui 此前不在扫描范围,首次登记现状作为 shrink-only 起点;后续按域拆分回落",
-      "expires": "2027-01-31"
-    },
-    "features/gerrit/ui/page.js": {
-      "reason": "评审 P2:features/*/ui 此前不在扫描范围,首次登记现状作为 shrink-only 起点;后续按域拆分回落",
-      "expires": "2027-01-31"
-    },
     "web/static/js/navigation.js": {
       "reason": "登记时文件已超旧 ceiling(并发改动);后续拆分回落",
       "expires": "2026-11-06"
-    },
-    "web/static/js/pages/test-suite-browser.js": {
-      "reason": "XSS 修复:下载/解压日志插值补 escapeHtml(6 处);后续公共日志组件拆分回落",
-      "expires": "2026-11-04"
-    },
-    "web/static/css/common.css": {
-      "reason": "UI release blocker:删除 19px 局部按钮 hack,新增 .page-title-row/.page-title-action 公共标题行规范(净增 39 字节);后续前端按域拆分回落",
-      "expires": "2027-01-31"
     },
     "web/shell/shell.html": {
       "reason": "a11y:知识库上传区补键盘可达属性(id/role/tabindex/data-key,+86 字节),弹框焦点修复配套;后续 shell 拆分回落",

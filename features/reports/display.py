@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
 from typing import Any
 
+
+logger = logging.getLogger(__name__)
 
 _RESULT_DIRECTORY_RE = re.compile(r"RESULT DIRECTORY\s*:\s*(\S+)")
 _TRADEFED_RESULT_FOLDER_RE = re.compile(
@@ -91,8 +94,15 @@ def report_client_display_id(
             ).strip()
             if ssh_user and address:
                 return f"{ssh_user}@{address}"
-        except Exception:
-            pass
+        except Exception as exc:
+            # 报告归属显示的 SSH 目标解析链第一跳失败。静默会表现成
+            # 报告页 client 名解析回退到 owner 维度，无从排查。
+            logger.debug(
+                "worker %s capabilities lookup failed while resolving report "
+                "ssh target; falling through to local identity",
+                worker_id,
+                exc_info=exc,
+            )
         if worker_id == get_local_worker_id():
             try:
                 from foundation.config import config_manager
@@ -102,8 +112,12 @@ def report_client_display_id(
                 address = str(config.get("ubuntu_host") or "").strip()
                 if ssh_user and address:
                     return f"{ssh_user}@{address}"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(
+                    "local worker config lookup failed while resolving report "
+                    "ssh target; falling through to owner identity",
+                    exc_info=exc,
+                )
 
     from features.users import resolve_client_display_id
 

@@ -583,8 +583,14 @@ async def _collect_gerrit(request: Request, start: date, end: date, owner: str =
         rq = await get_review_queue_count(request, owner=owner, refresh=False)
         if rq.get("success"):
             review_queue_count = ((rq.get("data") or {}).get("count"))
-    except Exception:
-        pass
+    except Exception as exc:
+        # 周报的可选指标：拉取失败时置 None，前端显示占位。留 debug
+        # 痕迹以便区分"gerrit 未配置"与"查询异常"。
+        logger.debug(
+            "review queue count unavailable for owner %s in weekly report",
+            owner,
+            exc_info=exc,
+        )
 
     return {
         "available": True,

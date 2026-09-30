@@ -38,6 +38,10 @@ def dashboard():
                 "/gerrit-dashboard/page.js": (
                     ROOT / "features/gerrit/ui/page.js", "text/javascript",
                 ),
+                # 2026-09-30 域拆分：渲染 chunk 先于入口加载。
+                "/gerrit-dashboard/render.js": (
+                    ROOT / "features/gerrit/ui/render.js", "text/javascript",
+                ),
                 "/static/js/utils.js": (
                     ROOT / "web/static/js/utils.js", "text/javascript",
                 ),

@@ -318,7 +318,7 @@ async def handle_adb_shell_connect(
         # 绝对路径与环境变量取值仍按不可信字符串处理：shlex.quote 同时
         # 覆盖 executable 与序列号，含空格/元字符的 GMS_ADB_PATH 不会
         # 破坏命令边界。远程 Worker 上保持 `adb` 由其自身环境解析。
-        # 前端 shell-main.js 的 `\badb\s+-s` 正则对绝对路径同样
+        # 前端 shell-terminal-workspace.js 的 `\badb\s+-s` 正则对绝对路径同样
         # 命中（路径末尾的 adb 与 -s 之间存在词边界），启动判定不受影响。
         adb_cmd = "adb"
         if backend_mode == "local_adb":

@@ -70,6 +70,9 @@ class AnalysisTimelineInvariantTests(unittest.TestCase):
     def test_cancel_before_provider_submission_fails_receipt_early(self):
         run = self._make_run("db_cancel_before_provider")
         ledger = Mock()
+        # _analyze_one 把 keep_alive 包进 asyncio.create_task 心跳任务，
+        # Mock 必须返回协程（AsyncMock），否则 create_task 直接 TypeError。
+        ledger.keep_alive = AsyncMock()
         ledger.begin.return_value = {"duplicate": False, "receipt_id": "rcp_early"}
         self.service._ai_ledger = ledger
         with patch(

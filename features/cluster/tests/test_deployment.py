@@ -315,9 +315,13 @@ class WorkerDeploymentTests(unittest.TestCase):
                 self.assertTrue((install_dir / binary_name).is_file())
 
     def test_manual_deploy_command_includes_offline_adbproxy_package(self):
-        page_js = (
-            Path(__file__).resolve().parents[1] / "ui/page.js"
-        ).read_text(encoding="utf-8")
+        # 2026-09-30 域拆分后部署命令文本位于 management chunk；断言面
+        # 覆盖 page.html 声明的全部脚本（concat 等价旧单文件）。
+        ui_dir = Path(__file__).resolve().parents[1] / "ui"
+        page_js = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted(ui_dir.glob("*.js"))
+        )
 
         self.assertIn("scripts/install_adbproxy_rs.sh", page_js)
         self.assertIn("tools/adbproxy-rs/dist", page_js)

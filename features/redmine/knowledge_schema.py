@@ -11,10 +11,14 @@ join against the scan store.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from pathlib import Path
 from typing import Any
+
+
+logger = logging.getLogger(__name__)
 
 
 class KnowledgeSchemaMixin:
@@ -45,8 +49,12 @@ class KnowledgeSchemaMixin:
         try:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA busy_timeout=30000")
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as exc:
+            # 只吞 "locked/busy"（多进程并发建库时的竞争窗口），其余
+            # OperationalError（磁盘/权限/corruption）照常上抛，避免
+            # 掩盖真实故障。
+            if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
+                raise
         return conn
 
     def connect(self) -> sqlite3.Connection:
@@ -188,8 +196,11 @@ class KnowledgeSchemaMixin:
                     )
                     """
                 )
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as exc:
+                # 与 redmine_agent_issue_fts 同理：FTS5 缺失或并发建库竞争
+                # 不该让建库失败（检索侧有回退），但静默 pass 会让知识库
+                # 检索长期退化无人察觉，留 warning 痕迹。
+                logger.warning("redmine_case_facts_fts 创建失败，检索将退化: %s", exc)
 
             self._migrate_indexes(conn)
 
@@ -225,8 +236,10 @@ class KnowledgeSchemaMixin:
             )
             try:
                 conn.execute("DELETE FROM redmine_case_facts_fts")
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as exc:
+                # reset 是管理动作且随后冲掉 case_facts 表：这里失败只意味着
+                # FTS 残留旧行（旧库缺 fts5），留痕便于排查「重置后仍搜到旧案例」。
+                logger.warning("redmine_case_facts_fts 清空失败，可能残留旧索引: %s", exc)
 
     # Shared helpers
 

@@ -1,0 +1,1521 @@
+/* ==================== Form Elements ==================== */
+.form-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    min-width: 0;
+}
+
+.form-row label {
+    width: auto;
+    color: var(--text-secondary);
+    font-size: 12px;
+    text-align: left;
+    white-space: nowrap;
+    font-weight: 600;
+    line-height: 30px;
+    display: flex;
+    align-items: center;
+    margin: 0;
+    padding: 0;
+}
+
+.entry-field {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 4px;
+    background: var(--darker-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 12px;
+    transition: var(--transition-normal);
+    height: 30px;
+    box-sizing: border-box;
+    margin: 0;
+}
+
+.entry-field:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    background: var(--light-bg);
+}
+
+.entry-field.readonly {
+    background: var(--darker-bg);
+    color: var(--text-secondary);
+    cursor: not-allowed;
+    border-color: var(--border-color);
+}
+
+.entry-field:disabled,
+select:disabled {
+    background: var(--darker-bg) !important;
+    color: var(--text-secondary) !important;
+    cursor: not-allowed;
+    border-color: var(--border-color);
+    opacity: 0.6;
+}
+
+/* 修复浏览器自动填充导致的白色背景 */
+.entry-field:-webkit-autofill,
+.entry-field:-webkit-autofill:hover,
+.entry-field:-webkit-autofill:focus,
+.entry-field:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 30px var(--darker-bg) inset !important;
+    -webkit-text-fill-color: #fff !important;
+    transition: background-color 5000s ease-in-out 0s;
+}
+
+/* 修复禁用状态下的自动填充 */
+.entry-field:disabled:-webkit-autofill,
+.entry-field:disabled:-webkit-autofill:hover,
+.entry-field:disabled:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 30px var(--darker-bg) inset !important;
+    -webkit-text-fill-color: var(--text-secondary) !important;
+}
+
+.entry-field:disabled:focus,
+select:disabled:focus {
+    outline: none;
+    border-color: var(--border-color);
+    box-shadow: none;
+}
+
+/* 禁用状态下的按钮 */
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* 确保 select 元素在各种状态下保持正确的背景色 */
+select {
+    background-color: var(--darker-bg) !important;
+    color: #fff !important;
+}
+
+select:focus {
+    background-color: var(--light-bg) !important;
+}
+
+select option {
+    background-color: var(--darker-bg);
+    color: #fff;
+}
+
+/* ==================== Drop Zone ==================== */
+.drop-zone {
+    flex: 1;
+    padding: 4px 8px; /* further reduce vertical padding */
+    background: var(--darker-bg);
+    border: 2px dashed var(--border-color);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 11px; /* slightly smaller text */
+    transition: var(--transition-normal);
+    cursor: pointer;
+    min-height: 20px; /* lower minimum height */
+    max-height: 48px; /* tighter cap */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    overflow: hidden;
+}
+
+.drop-zone:hover {
+    border-color: var(--primary-color);
+    background: rgba(59, 130, 246, 0.05);
+}
+
+.drop-zone.drag-over {
+    border-color: var(--primary-color);
+    background: rgba(59, 130, 246, 0.1);
+    transform: scale(1.02);
+}
+
+.drop-zone-text {
+    pointer-events: none;
+}
+
+.drop-zone-filename {
+    margin-top: 2px;
+    color: var(--primary-color);
+    font-weight: 500;
+    font-size: 11px;
+    word-break: break-all;
+    max-height: 28px;
+    overflow: hidden;
+}
+
+.combo-box {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 8px;
+    background: var(--darker-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+    height: 30px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    line-height: 1.4;
+}
+
+.combo-box option {
+    background: var(--light-bg);
+    color: #fff;
+    padding: 4px 8px;
+}
+
+.input-with-btn {
+    display: flex;
+    gap: 5px;
+    flex: 1;
+    align-items: stretch;
+}
+
+.input-with-btn .entry-field {
+    flex: 1;
+    height: 28px;
+    margin: 0;
+    padding: 4px 8px;
+}
+
+.input-with-btn .btn-small {
+    margin: 0;
+    padding: 4px 8px;
+    white-space: nowrap;
+    height: auto;
+    align-self: center;
+}
+
+/* ==================== Progress Bar ==================== */
+.progress-container {
+    display: flex !important;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 20px;
+    background: var(--darker-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.3);
+    display: flex;
+    align-items: center;
+    position: relative;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--primary-gradient);
+    width: 0%;
+    transition: width 0.3s ease;
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 1;
+}
+
+.progress-info {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 500;
+    position: relative;
+    z-index: 2;
+    padding-left: 8px;
+    white-space: nowrap;
+}
+
+/* ==================== Buttons ==================== */
+.btn-xxs, .btn-xs, .btn-small {
+    padding: 5px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    background: var(--light-bg);
+    color: #fff;
+    transition: var(--transition-fast);
+    box-shadow: var(--shadow-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1.4;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.btn-xxs {
+    min-height: 26px;
+    min-width: 80px;
+}
+
+.btn-xs {
+    padding: 6px 12px;
+    min-height: 28px;
+}
+
+.btn-small {
+    min-height: 26px;
+}
+
+.btn-xxs:hover, .btn-xs:hover, .btn-small:hover {
+    background: var(--lighter-bg);
+    border-color: var(--primary-light);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+/* 共享固件操作列：收窄 .btn-xxs（默认 min-width:80px），作用域限定。 */
+.firmware-share-actions .btn-xxs {
+    min-width: 0;
+    padding: 4px 8px;
+    font-size: 11px;
+}
+
+.btn-xxs:active {
+    transform: translateY(0);
+}
+
+.btn-xxs:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-primary, .btn-danger {
+    color: var(--text-primary);
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1.4;
+}
+
+.btn-primary {
+    background: var(--primary-gradient);
+    box-shadow: var(--shadow-md);
+    font-weight: 700;
+}
+
+.btn-primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-glow);
+}
+
+.btn-danger {
+    background: linear-gradient(135deg, var(--danger-color), #dc2626);
+    box-shadow: var(--shadow-sm);
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: linear-gradient(135deg, #f87171, var(--danger-color));
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-lg {
+    padding: 10px 20px;
+    font-size: 14px;
+    border-radius: 6px;
+    min-height: 40px;
+}
+
+/* ==================== Modal ==================== */
+.modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: var(--modal-z-index, 10000);
+    width: auto;
+    height: auto;
+    padding: clamp(8px, 2.5vw, 20px);
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.7);
+    overflow: hidden;
+    overscroll-behavior: contain;
+}
+
+.modal.show {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-content {
+    background: var(--light-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    width: min(500px, 100%);
+    max-width: 500px;
+    max-height: min(80vh, calc(100dvh - 16px));
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden; /* 防止整个modal-content滚动 */
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+}
+
+/* ==================== 弹框统一尺寸档位 ==================== */
+.modal-content.modal-xs { width: min(420px, 96vw); max-width: min(420px, 96vw); min-height: 180px; }
+.modal-content.modal-s  { width: min(500px, 96vw); max-width: min(500px, 96vw); min-height: 240px; }
+.modal-content.modal-m  { width: min(620px, 96vw); max-width: min(620px, 96vw); min-height: 280px; max-height: min(620px, 85vh, calc(100dvh - 16px)); }
+.modal-content.modal-l  { width: min(760px, 96vw); max-width: min(760px, 96vw); max-height: min(85vh, calc(100dvh - 16px)); }
+
+/* 跨主机报告拷贝：异步加载和状态提示不改变弹框外框尺寸。 */
+#report-copy-modal .report-copy-modal-content {
+    width: 760px;
+    max-width: calc(100vw - 40px);
+    height: 500px;
+    max-height: calc(100dvh - 40px);
+}
+
+#report-copy-modal select.combo-box {
+    display: block;
+    height: 36px;
+    padding: 6px 10px;
+    line-height: 20px;
+}
+
+#report-copy-modal input[type="text"] {
+    height: 36px;
+    box-sizing: border-box;
+}
+
+/* ADB Proxy 与 USB/IP 接入/断开共用同一弹框骨架。 */
+.device-routing-modal-content {
+    width: min(620px, 100%);
+    max-width: 620px;
+    height: min(540px, 88vh, calc(100dvh - 16px));
+    max-height: min(540px, 88vh, calc(100dvh - 16px));
+    resize: none;
+}
+
+.device-routing-modal-content .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 14px 16px;
+}
+
+.device-routing-modal-content select:not(.usbip-device-select) {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.adb-proxy-section-title {
+    margin: 0 0 6px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+/* 与 .dx-title-row/.dx-section-head/.dx-list-head 同一规则体（合并选择器） */
+.adb-proxy-section-head,
+.dx-title-row,
+.dx-section-head,
+.dx-list-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.adb-proxy-section-head .adb-proxy-section-title {
+    margin-bottom: 0;
+}
+
+.adb-proxy-assignments {
+    min-height: 32px;
+    max-height: 104px;
+    margin: 7px 0 10px;
+    padding: 6px 8px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--card-bg);
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.adb-proxy-assignment {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.adb-proxy-assignment:last-child {
+    border-bottom: 0;
+}
+
+.adb-proxy-assignment-info {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.usbip-transport-state {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    white-space: nowrap;
+    background: var(--bg-color, var(--darker-bg));
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+}
+
+.device-routing-actions {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(56px, auto);
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.transport-diagnostics-output {
+    max-height: 240px;
+    overflow: auto;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-color, var(--darker-bg));
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+}
+
+.routing-status-connected .adb-proxy-assignment-info,
+.routing-status-attached .adb-proxy-assignment-info {
+    color: var(--success-color);
+}
+
+.routing-status-connecting .adb-proxy-assignment-info,
+.routing-status-attaching .adb-proxy-assignment-info,
+.routing-status-unknown .adb-proxy-assignment-info,
+.routing-status-host_offline .adb-proxy-assignment-info {
+    color: var(--warning-color);
+}
+
+.routing-status-recovering .adb-proxy-assignment-info,
+.routing-status-device_missing .adb-proxy-assignment-info,
+.routing-status-detaching .adb-proxy-assignment-info {
+    color: var(--warning-color);
+}
+
+.routing-status-connect_failed .adb-proxy-assignment-info,
+.routing-status-disconnect_failed .adb-proxy-assignment-info,
+.routing-status-cleanup_required .adb-proxy-assignment-info {
+    color: var(--danger-color);
+}
+
+.routing-status-degraded_source .adb-proxy-assignment-info,
+.routing-status-degraded_target .adb-proxy-assignment-info {
+    color: var(--danger-color);
+}
+
+.device-routing-device-row {
+    align-items: flex-start;
+    min-height: 76px;
+    margin-bottom: 4px;
+}
+
+.adb-proxy-host-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+}
+
+.device-routing-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.adb-proxy-host-grid .modal-form-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+}
+
+.device-routing-fields .modal-form-row label,
+.device-routing-modal-content > .modal-body > .modal-form-row > label {
+    min-width: 66px;
+}
+
+.device-routing-checkbox-row {
+    align-items: center;
+}
+
+.device-routing-checkbox-label {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 7px;
+    width: auto;
+    text-align: left;
+}
+
+.adb-proxy-host-grid .modal-form-row label {
+    min-width: 0;
+}
+
+.adb-proxy-ubuntu-source-panel {
+    margin: 0 0 10px;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: rgba(59, 130, 246, 0.06);
+}
+
+.adb-proxy-inline-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.device-routing-modal-content .modal-info-text {
+    margin-top: 7px;
+    padding: 7px 9px;
+}
+
+.device-routing-modal-buttons {
+    flex: 0 0 auto;
+    margin-top: 10px;
+    padding: 0 16px 14px;
+    border-top: 1px solid var(--border-color);
+    background: var(--light-bg);
+}
+
+.usbip-device-select {
+    flex: 1;
+    width: 100%;
+    min-width: 0;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    font-size: 13px;
+    resize: none;
+}
+
+@media (max-width: 640px) {
+    .adb-proxy-host-grid {
+        grid-template-columns: 1fr;
+        gap: 0;
+    }
+
+    .adb-proxy-inline-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+}
+
+/* 设备配置弹框加宽大尺寸 */
+#device-config-modal .modal-content {
+    width: 96vw;
+    max-width: 1500px;
+    height: 92vh;
+    max-height: 92vh;
+    min-height: 0;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0; /* 防止header被压缩 */
+    position: relative; /* 相对定位，固定在顶部 */
+    background: var(--light-bg);
+    z-index: 10;
+}
+
+.modal-title {
+    min-width: 0;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.modal-close {
+    /* 关闭按钮原生 <button>（a11y 契约）：重置浏览器默认外观。 */
+    background: none;
+    border: none;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    font: inherit;
+    font-size: 28px;
+    font-weight: bold;
+    line-height: 1;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.modal-close:hover {
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    flex: 1; /* 占据剩余空间 */
+    min-height: 0; /* 允许flex子元素正确收缩 */
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.modal-body > *,
+.modal-header > *,
+.modal-buttons > * {
+    min-width: 0;
+    max-width: 100%;
+}
+
+body.modal-open {
+    overflow: hidden;
+}
+
+/* 设备配置资源查看弹框：复用 .modal-header/.modal-body，补充专用样式 */
+.dcfg-header {
+    gap: 16px;
+}
+
+.dcfg-header .dcfg-tabs {
+    display: flex;
+    gap: 4px;
+    margin: 0;
+    border-bottom: none;
+}
+
+.dcfg-header .dcfg-tabbtn {
+    padding: 3px 14px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+.dcfg-header .dcfg-tabbtn:hover {
+    color: var(--text-primary);
+}
+
+.dcfg-header .dcfg-tabbtn.active {
+    color: var(--primary-color);
+    border-bottom-color: var(--primary-color);
+}
+
+.dcfg-header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.dcfg-serial {
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-family: "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+#device-config-modal .dcfg-body {
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    flex: 1;          /* 撑满 .modal-content 减去 header 后的剩余高度 */
+    min-height: 0;    /* 允许在 flex 父级内收缩，是内部滚动链生效的前提 */
+    overflow: hidden;
+}
+
+#device-config-modal .dcfg-tab {
+    flex: 1;
+    min-height: 0;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#device-config-modal .dcfg-tab.active {
+    display: flex;
+}
+
+/* 结果容器：flex:1 + min-height:0 随 92vh 弹框伸缩并独立滚动，
+   不被钉死在固定像素高度（否则弹框大部分垂直空间变成不可滚动的死区）；
+   sticky 表头在该 overflow:auto 容器内生效。 */
+#device-config-modal #dcfg-results,
+#device-config-modal #dcfg-pkg-results,
+#device-config-modal #dcfg-feat-results,
+#device-config-modal #dcfg-prop-results,
+#device-config-modal #dcfg-ovr-results {
+    padding: 0 !important;
+    overflow-y: auto;
+    overflow-x: hidden;
+    flex: 1 1 auto;
+    min-height: 0; /* 允许在 flex 父级(.dcfg-tab)内正确收缩，是 overflow 生效的前提 */
+    display: block;
+    box-sizing: border-box;
+    position: relative;
+}
+
+#device-config-modal #dcfg-results table,
+#device-config-modal #dcfg-pkg-results table,
+#device-config-modal #dcfg-feat-results table,
+#device-config-modal #dcfg-prop-results table,
+#device-config-modal #dcfg-ovr-results table {
+    margin: 0;
+}
+
+#device-config-modal .dcfg-empty {
+    font-size: 13px;
+    color: var(--text-muted);
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* 同 .dcfg-results 自适应高度：查询前后弹框不抖动。 */
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 12px 10px;
+    box-sizing: border-box;
+}
+
+/* configs tab 的查询控件栏与其他 tab 对齐：统一高度与间距，并防止过滤时换行导致弹框高度变化 */
+#device-config-modal .dcfg-toolbar {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+    min-height: 34px;
+    max-height: 34px;
+    overflow: hidden;
+}
+
+#device-config-modal .dcfg-toolbar input,
+#device-config-modal .dcfg-toolbar select {
+    min-width: 0;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    padding: 4px 8px;
+    font-size: 13px;
+}
+
+#device-config-modal .dcfg-toolbar input#dcfg-package {
+    min-width: 240px;
+}
+
+#device-config-modal .dcfg-toolbar input#dcfg-name,
+#device-config-modal .dcfg-toolbar input#dcfg-pkg-filter,
+#device-config-modal .dcfg-toolbar input#dcfg-feat-filter,
+#device-config-modal .dcfg-toolbar input#dcfg-prop-filter {
+    flex: 1;
+    min-width: 200px;
+}
+
+#device-config-modal .dcfg-toolbar .btn-xxs {
+    flex-shrink: 0;
+    min-width: auto;
+}
+
+#device-config-modal .dcfg-toolbar .dcfg-refresh-action {
+    min-width: 72px;
+    background: var(--light-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+}
+
+#device-config-modal .dcfg-toolbar .dcfg-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+}
+
+/* 响应式：窄 viewport 下 nowrap + overflow:hidden 会把
+ * 240px/200px min-width 的输入框直接裁掉。允许换行并解除 min-width。 */
+@media (max-width: 700px) {
+    #device-config-modal .dcfg-toolbar {
+        flex-wrap: wrap;
+        overflow: visible;
+        min-height: 0;
+        max-height: none;
+    }
+
+    #device-config-modal .dcfg-toolbar input,
+    #device-config-modal .dcfg-toolbar select {
+        flex: 1 1 140px;
+        min-width: 0;
+    }
+
+    #device-config-modal .dcfg-toolbar input#dcfg-package {
+        flex-basis: 100%;
+    }
+
+    #device-config-modal .dcfg-toolbar .dcfg-label {
+        flex-wrap: wrap;
+    }
+}
+
+#device-config-modal .dcfg-stat {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    display: none;
+    flex-shrink: 0;
+    min-height: 17px;
+}
+
+#device-config-modal .dcfg-stat.active {
+    display: block;
+}
+
+/* 表头固定在结果容器顶部；结果容器本身有独立滚动条，因此 top:0 即贴顶 */
+#device-config-modal .dcfg-tab .dcfg-th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--card-bg);
+    box-shadow: inset 0 -1px 0 var(--border-color);
+}
+
+/* 表格单元格默认左对齐，避免 th 被全局 table 样式居中影响 */
+#device-config-modal .dcfg-tab table th,
+#device-config-modal .dcfg-tab table td {
+    text-align: left;
+}
+
+#device-config-modal .dcfg-tab table th {
+    padding: 5px 8px;
+}
+
+#device-config-modal .dcfg-tab table td {
+    padding: 4px 8px;
+}
+
+#device-config-modal .dcfg-tab table td .dcell {
+    font-family: monospace;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+#device-config-modal .dcfg-tab table td .dcell .dcfg-changed,
+#device-config-modal .dcfg-changed {
+    color: var(--warning-color);
+}
+
+#device-config-modal .dcfg-status {
+    font-weight: 600;
+}
+
+#device-config-modal .dcfg-muted {
+    color: var(--text-muted);
+}
+
+#device-config-modal .dcfg-danger {
+    color: var(--danger-color);
+}
+
+#device-config-modal .dcfg-hint {
+    font-size: 11px;
+}
+
+#device-config-modal .dcfg-type-badge {
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: var(--card-bg);
+    font-size: 11px;
+}
+
+/* ===== override tab (RRO config override) ===== */
+#device-config-modal .dcfg-ovr-toolbar {
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+#device-config-modal .dcfg-ovr-status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 0;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+#device-config-modal .dcfg-ovr-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    background: var(--card-bg);
+    white-space: nowrap;
+}
+
+#device-config-modal .dcfg-ovr-ok {
+    color: var(--success-color, #2e7d32);
+}
+
+#device-config-modal .dcfg-ovr-bad {
+    color: var(--danger-color);
+}
+
+#device-config-modal .dcfg-ovr-warn {
+    width: 100%;
+    padding: 6px 10px;
+    margin-top: 4px;
+    border-radius: 4px;
+    background: rgba(255, 193, 7, 0.12);
+    color: #b8860b;
+    font-size: 12px;
+}
+
+#device-config-modal .dcfg-ovr-warn code {
+    background: var(--darker-bg, #000);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+}
+
+#device-config-modal .dcfg-ovr-add {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 0;
+    border-top: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+#device-config-modal .dcfg-ovr-add input[type="text"],
+#device-config-modal .dcfg-ovr-add select {
+    flex: 1 1 0;
+    min-width: 90px;
+}
+
+#device-config-modal .dcfg-ovr-add #dcfg-ovr-value {
+    flex: 2 1 160px;
+}
+
+#device-config-modal .dcfg-ovr-add #dcfg-ovr-value-arr {
+    flex: 2 1 200px;
+    font-family: "SF Mono", Consolas, Menlo, monospace;
+    font-size: 12px;
+}
+
+#device-config-modal .dcfg-ovr-preview {
+    flex-shrink: 0;
+    margin-top: 8px;
+    font-size: 12px;
+}
+
+#device-config-modal .dcfg-ovr-pre {
+    max-height: 360px;
+    overflow: auto;
+    background: var(--darker-bg, #000);
+    color: var(--text-secondary);
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.dcfg-minimized {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 10001;
+    align-items: center;
+    gap: 10px;
+    max-width: min(520px, calc(100vw - 36px));
+    padding: 10px 12px;
+    background: var(--bg-color, var(--light-bg));
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.32);
+}
+
+.dcfg-minimized-title {
+    min-width: 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ==================== Modal Form ==================== */
+.modal-form-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    margin-bottom: 8px;
+}
+
+.modal-form-row label {
+    min-width: 50px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+
+.modal-form-row input[type="text"],
+.modal-form-row input[type="password"],
+.modal-form-row input[type="number"],
+.modal-form-row input[type="search"],
+.modal-form-row select,
+.modal-form-row textarea {
+    flex: 1;
+    min-width: 0;
+    max-width: 100%;
+    padding: 8px 10px;
+    background: var(--darker-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.modal-form-row input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
+.modal-form-row input.readonly {
+    background: #1a1a1a;
+    color: var(--text-muted);
+    cursor: not-allowed;
+}
+
+.modal-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+.modal-buttons button {
+    min-width: 80px;
+}
+
+.modal-info-text {
+    padding: 10px;
+    background: rgba(255, 152, 0, 0.1);
+    border-left: 3px solid var(--warning-color);
+    border-radius: 4px;
+    color: var(--warning-color);
+    font-size: 12px;
+    margin-top: 10px;
+    overflow-wrap: anywhere;
+}
+
+.modal-ssh-info {
+    padding: 10px;
+    background: rgba(52, 152, 219, 0.1);
+    border-left: 3px solid var(--primary-color);
+    border-radius: 4px;
+    color: var(--primary-color);
+    font-size: 16px;
+    margin-top: 10px;
+    overflow-wrap: anywhere;
+}
+
+@media (max-height: 560px) {
+    .modal {
+        align-items: stretch;
+    }
+
+    .modal-content {
+        max-height: calc(100dvh - 16px);
+    }
+
+    .modal-header {
+        padding-block: 9px;
+    }
+
+    .modal-body {
+        padding-block: 12px;
+    }
+}
+
+/* ==================== File Browser ==================== */
+.file-browser-path {
+    padding: 10px;
+    background: var(--darker-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: monospace;
+    margin-bottom: 10px;
+    word-break: break-all;
+}
+
+.file-browser-list {
+    max-height: 400px;
+    overflow-y: auto;
+    background: var(--darker-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 5px;
+}
+
+.file-browser-header {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) 90px 140px;
+    align-items: center;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.file-browser-item {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) 90px 140px;
+    align-items: center;
+    padding: 8px 10px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.2s;
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.file-browser-item:hover {
+    background: var(--light-bg);
+}
+
+.file-browser-item.selected {
+    background: var(--primary-color);
+    color: var(--text-primary);
+}
+
+.file-browser-icon {
+    font-size: 16px;
+}
+
+.file-browser-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding-right: 16px;
+}
+
+.file-browser-meta {
+    color: var(--text-muted);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.file-browser-breadcrumb {
+    display: flex;
+    gap: 5px;
+    padding: 8px 10px;
+    background: var(--light-bg);
+    border-radius: 4px;
+    margin-bottom: 10px;
+    font-size: 12px;
+}
+
+.file-browser-breadcrumb-item {
+    color: var(--primary-color);
+    cursor: pointer;
+}
+
+.file-browser-breadcrumb-item:hover {
+    text-decoration: underline;
+}
+
+.file-browser-breadcrumb-separator {
+    color: var(--text-muted);
+}
+
+/* ==================== Toast Notification ==================== */
+.toast {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.9);
+    padding: 18px 28px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    visibility: hidden;
+    transition: var(--transition-normal);
+    z-index: 10000;
+    font-size: 14px;
+    font-weight: 600;
+    min-width: 320px;
+    max-width: 520px;
+    text-align: center;
+    backdrop-filter: blur(20px);
+}
+
+.toast.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.toast.success {
+    border-left: 5px solid var(--success-color);
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, var(--card-bg) 100%);
+}
+
+.toast.error {
+    border-left: 5px solid var(--danger-color);
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, var(--card-bg) 100%);
+}
+
+.toast.info {
+    border-left: 5px solid var(--primary-color);
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, var(--card-bg) 100%);
+}
+
+.toast.warning {
+    border-left: 5px solid var(--warning-color);
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, var(--card-bg) 100%);
+}
+
+.notification-panel {
+    position: fixed;
+    bottom: 12px;
+    left: 142px;
+    width: min(420px, calc(100vw - 160px));
+    max-height: calc(100vh - 24px);
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: var(--shadow-lg);
+    z-index: 10020;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.notification-dismiss-layer {
+    position: fixed;
+    z-index: 10019;
+    inset: 0;
+    display: none;
+    background: transparent;
+}
+
+.notification-dismiss-layer.show {
+    display: block;
+}
+
+.notification-panel.show {
+    display: flex;
+}
+
+.notification-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.notification-close {
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+}
+
+.notification-close:hover {
+    background: var(--light-bg);
+    color: var(--text-primary);
+}
+
+.notification-actions {
+    display: flex;
+    gap: 6px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.notification-list {
+    overflow-y: auto;
+    max-height: calc(100vh - 120px);
+}
+
+.notification-item {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    display: grid;
+    grid-template-columns: 8px 1fr;
+    gap: 10px;
+}
+
+.notification-item:hover {
+    background: var(--light-bg);
+}
+
+.notification-item.unread {
+    background: rgba(59, 130, 246, 0.08);
+}
+
+.notification-level-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-top: 7px;
+    background: var(--primary-color);
+}
+
+.notification-item.success .notification-level-dot { background: var(--success-color); }
+.notification-item.warning .notification-level-dot { background: var(--warning-color); }
+.notification-item.error .notification-level-dot { background: var(--danger-color); }
+
+.notification-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.notification-message {
+    margin-top: 3px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.notification-time {
+    margin-top: 5px;
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.notification-empty {
+    padding: 28px 12px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+/* ==================== Scrollbar ==================== */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--darker-bg);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* ==================== Responsive ==================== */
+@media (max-width: 1400px) {
+    .input-container {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .right-frame {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 5px;
+    }
+}
+
+@media (max-width: 1024px) {
+    .middle-row {
+        grid-template-columns: 1fr;
+    }
+
+    .input-container {
+        grid-template-columns: 1fr;
+    }
+
+    .right-frame {
+        display: flex;
+        flex-direction: column;
+    }
+}
+
+

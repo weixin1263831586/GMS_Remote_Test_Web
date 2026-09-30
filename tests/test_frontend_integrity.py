@@ -56,6 +56,11 @@ BUILTINS = {
 def read_text(path: str) -> str:
     if path == "features/redmine/ui/page.js":
         return read_page_scripts("features/redmine/ui/page.html")
+    if path == "features/automation/ui/page.js":
+        # 2026-09-30 automation 领域拆分：page.js 变成入口 chunk，域逻辑在
+        # 同目录兄弟 chunk（page.html 按 script 顺序引用）；拼接读取与
+        # redmine 既有特判一致，断言盯得住拆分后的全部源码。
+        return read_page_scripts("features/automation/ui/page.html")
     return Path(path).read_text(encoding="utf-8", errors="ignore")
 
 
@@ -91,6 +96,25 @@ def read_all_frontend_js() -> str:
         for js_file in sorted(pages_dir.glob("*.js")):
             parts.append(read_text(str(js_file)))
     return "\n".join(parts)
+
+
+def read_common_css() -> str:
+    """shell 通用样式表：common.css 已按顶层分节边界拆分为 4 个连续分块
+    （common-components/-layout/-page.css，按 link 顺序空串拼接即等价原
+    文件逐字节）。断言面向"通用样式整体"，组合读取避免拆分后断言盯不
+    住源码；仅纳入模板实际引用的 common 分块，孤儿文件不兜底。"""
+    html = Path("web/shell/shell.html").read_text(encoding="utf-8", errors="ignore")
+    parts = []
+    for href in re.findall(
+        r'<link\b[^>]*\bhref=["\']([^"\']+)["\']', html, re.IGNORECASE
+    ):
+        href_path = href.split("?", 1)[0]
+        if not href_path.startswith("/static/css/common"):
+            continue
+        css_file = Path("web/static") / href_path.removeprefix("/static/")
+        if css_file.is_file():
+            parts.append(read_text(str(css_file)))
+    return "".join(parts)
 
 
 def declared_functions(text: str) -> set[str]:
@@ -150,7 +174,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertNotIn("resetElevationForNewBrowserTab", api)
 
     def test_cluster_dashboard_excludes_offline_devices_from_distribution(self):
-        cluster_page = read_text("features/cluster/ui/page.js")
+        cluster_page = read_page_scripts("features/cluster/ui/page.html")
         names_start = cluster_page.index("const dashStateNames=")
         names_end = cluster_page.index(";", names_start)
 
@@ -343,7 +367,9 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_cluster_dashboard_has_stable_refresh_and_safe_dynamic_actions(self):
         html = read_text("features/cluster/ui/page.html")
-        script = read_text("features/cluster/ui/page.js")
+        # 拆分为 chunk 后断言面覆盖 page.html 声明的全部脚本（与 redmine
+        # 同模式，见 snapshot_tools.read_page_scripts）。
+        script = read_page_scripts("features/cluster/ui/page.html")
 
         for control_id in ("dash-refresh-charts", "refresh", "reload-library"):
             self.assertRegex(
@@ -426,7 +452,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("formData.append('chunk_size', chunkSize)", chunks)
         self.assertIn("chunk-upload.js?v=20260910-elev-recovery", shell)
         self.assertNotIn("普通固件烧写需要 ADB 设备", firmware)
-        self.assertIn("firmware-burn.js?v=20260910-elev-recovery", shell)
+        self.assertIn("firmware-burn.js?v=20260930-pages-split", shell)
         # 提权过期（403 elevation_required）时：分片不再整块重试，
         # 烧录页弹出管理员提权后续传，elevation 状态检查失败不 fail-open。
         self.assertIn("chunkUploadHttpError", chunks)
@@ -667,7 +693,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_suite_report_copy_modal_uses_worker_and_suite_choices(self):
         main_text = read_shell_bundle()
-        common_text = read_text("web/static/css/common.css")
+        common_text = read_common_css()
         navigation_text = read_all_frontend_js()
 
         self.assertIn('id="btn-copy-test-report"', main_text)
@@ -790,7 +816,7 @@ class FrontendIntegrityTests(unittest.TestCase):
     def test_unselectable_devices_stay_selected_but_render_unchecked(self):
         navigation = read_text("web/static/js/navigation.js")
         workspace_devices = read_text("web/static/js/shell/workspace-devices.js")
-        browser = read_text("web/static/js/pages/test-suite-browser.js")
+        browser = read_text("web/static/js/pages/test-suite-browser-devices.js")
 
         # loadDevices：只从选中集合删除已消失的设备，回填仅按存在性判断；
         # 不可选（占用/状态异常）设备保留勾选状态，恢复可选后自动回选。
@@ -814,7 +840,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("loadBuildJobs().catch(err => toast(err.message))", automation_text)
 
     def test_local_software_reconfigure_elevates_before_posting(self):
-        cluster_text = read_text("features/cluster/ui/page.js")
+        cluster_text = read_page_scripts("features/cluster/ui/page.html")
         function_text = cluster_text.split(
             "async function reconfigureLocalSoftware(button)",
             1,
@@ -830,7 +856,7 @@ class FrontendIntegrityTests(unittest.TestCase):
     def test_user_actions_use_stable_grid_and_safe_event_binding(self):
         main_text = read_shell_bundle()
         navigation_text = read_all_frontend_js()
-        css_text = read_text("web/static/css/common.css")
+        css_text = read_common_css()
 
         self.assertIn('class="user-actions-grid"', main_text)
         self.assertIn('data-remove-user=', navigation_text)
@@ -850,12 +876,19 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertNotIn("`已应用 ${entryCount", main_text)
 
     def test_modal_pages_support_escape_close(self):
+        # 2026-09 shell-main 领域拆分：Escape 关闭本体在 modal.js(ModalManager)，
+        # shell 侧持有 ModalManager open/close 调用的模块按拆分后归属列出。
         for label, paths in [
             (
                 "main",
                 [
                     "web/shell/shell.html",
-                    "web/static/js/shell/shell-main.js",
+                    "web/static/js/shell/shell-device-groups.js",
+                    "web/static/js/shell/shell-device-uiaction.js",
+                    "web/static/js/shell/shell-device-config-viewer.js",
+                    "web/static/js/shell/shell-device-override.js",
+                    "web/static/js/shell/shell-page-switching.js",
+                    "web/static/js/shell/shell-personal-knowledge.js",
                 ],
             ),
             (
