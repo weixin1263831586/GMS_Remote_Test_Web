@@ -523,6 +523,7 @@ async function checkGerritRoute() {
 const gerritInitPromise = init().finally(function() {
   window.GmsEmbeddedWorkspace && window.GmsEmbeddedWorkspace.markReady();
 });
+resolveGerritEntryReady();
 async function saveChangeToWiki(changeId) {
   const item = (window.__changeCache || {})[String(changeId)];
   if (!item) {

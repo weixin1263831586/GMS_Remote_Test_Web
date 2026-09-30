@@ -1,9 +1,11 @@
 // Cluster job lifecycle chunk (form/workspace/vpn/refresh/reports); loaded by page.html in dependency order.
 function clusterDeviceId(workerId,value){const text=String(value||'');return !text||workerId==='auto'||text.startsWith(`${workerId}:`)?text:`${workerId}:${text}`}
+// Test admission comes from the Controller; command targets also serve suite deployment.
+function jobWorkers(){return commandWorkers().filter(worker=>!worker.admission_blocked)}
 function renderJobForm(){
  const worker=document.querySelector('#job-worker'),suite=document.querySelector('#job-suite'),device=document.querySelector('#job-device');if(!worker||!suite||!device)return;
  const previousWorker=worker.value||((clusterWorkspace.scope_mode==='cluster'&&clusterWorkspace.worker_id)||'auto');
- const workers=commandWorkers(),localIndex=workers.findIndex(item=>item.id===localWorkerId()),workerOptions=workers.map(w=>`<option value="${esc(w.id)}">${esc(w.name||w.id)}</option>`);
+ const workers=commandWorkers(),localIndex=workers.findIndex(item=>item.id===localWorkerId()),workerOptions=workers.map(w=>`<option value="${esc(w.id)}"${w.admission_blocked?' disabled':''}>${esc((w.name||w.id)+(w.admission_blocked?' · 已阻止派发'+admissionReasonSuffix(w):''))}</option>`);
  worker.innerHTML=localIndex>=0?workerOptions[localIndex]+'<option value="auto">自动选择</option>'+workerOptions.filter((_,index)=>index!==localIndex).join(''):'<option value="auto">自动选择</option>'+workerOptions.join('');
  worker.value=Array.from(worker.options).some(o=>o.value===previousWorker)?previousWorker:'auto';
  updateJobOptions();
@@ -11,17 +13,20 @@ function renderJobForm(){
 function updateJobOptions(){
  const wid=document.querySelector('#job-worker').value,suite=document.querySelector('#job-suite'),device=document.querySelector('#job-device');
  const previousSuite=suite.value||clusterWorkspace.suite_key||'',previousDevice=device.value||(clusterWorkspace.device_ids||[])[0]||'';
- const eligibleIds=new Set(commandWorkers().map(worker=>worker.id));
- const availableSuites=state.suites.filter(s=>(wid==='auto'?eligibleIds.has(s.worker_id):s.worker_id===wid)&&s.available);
+ const eligibleIds=new Set(jobWorkers().map(worker=>worker.id));
+ const selectedEligible=wid==='auto'?eligibleIds.size>0:eligibleIds.has(wid);
+ const availableSuites=state.suites.filter(s=>eligibleIds.has(s.worker_id)&&(wid==='auto'||s.worker_id===wid)&&s.available);
  suite.innerHTML=[...new Map(availableSuites.map(s=>[s.suite_key,s])).values()].map(s=>`<option value="${esc(s.suite_key)}">${esc(s.suite_type)} ${esc(s.suite_version)}</option>`).join('');
  if(Array.from(suite.options).some(o=>o.value===previousSuite))suite.value=previousSuite;
- device.innerHTML=wid==='auto'?'<option value="">自动选择设备</option>':'<option value="">自动选择设备</option>'+state.devices.filter(d=>d.worker_id===wid&&d.state==='available').map(d=>`<option value="${esc(d.id)}">${esc(d.serial)}</option>`).join('');
+ device.innerHTML=wid==='auto'||!selectedEligible?'<option value="">自动选择设备</option>':'<option value="">自动选择设备</option>'+state.devices.filter(d=>d.worker_id===wid&&d.state==='available').map(d=>`<option value="${esc(d.id)}">${esc(d.serial)}</option>`).join('');
  const normalized=clusterDeviceId(wid,previousDevice);if(Array.from(device.options).some(o=>o.value===normalized))device.value=normalized;
- const create=document.querySelector('#create-job');if(create){create.disabled=!commandWorkers().length||!suite.value;create.title=create.disabled?'没有满足条件的在线 Worker 和套件':''}
+ const create=document.querySelector('#create-job');if(create){create.disabled=!selectedEligible||!suite.value;create.title=create.disabled?'没有满足准入条件的 Worker 和套件':''}
 }
 function syncClusterWorkspace(extra={}){
  if(applyingClusterWorkspace)return;const worker=document.querySelector('#job-worker')?.value||'auto',device=document.querySelector('#job-device')?.value||'',suite=document.querySelector('#job-suite')?.value||'';
- window.GmsEmbeddedWorkspace?.update({scope_mode:'cluster',worker_id:worker==='auto'?(clusterWorkspace.worker_id||commandWorkers()[0]?.id||localWorkerId()):worker,device_ids:device?[device]:[],suite_key:suite,origin_page:'cluster',...extra});
+ const eligible=jobWorkers(),autoWorker=eligible.find(item=>item.id===clusterWorkspace.worker_id)||eligible[0];
+ if(worker==='auto'&&!autoWorker)return;
+ window.GmsEmbeddedWorkspace?.update({scope_mode:'cluster',worker_id:worker==='auto'?autoWorker.id:worker,device_ids:device?[device]:[],suite_key:suite,origin_page:'cluster',...extra});
 }
 async function applyClusterWorkspace(next,navigate=false){
  clusterWorkspace={...clusterWorkspace,...(next||{})};applyingClusterWorkspace=true;
@@ -76,7 +81,7 @@ async function refresh(showBusy=false){
   if(showBusy)setClusterRefreshBusy(false);
  }
 }
-async function createJob(){try{const device=document.querySelector('#job-device').value;const body={worker_id:document.querySelector('#job-worker').value,suite_key:document.querySelector('#job-suite').value,devices:device?[device]:[],device_count:1};if(!body.worker_id||!body.suite_key)throw new Error('请选择 Worker 和套件');const d=await api('/api/cluster/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast(`任务已创建 ${d.job.id}`);syncClusterWorkspace({cluster_job_id:d.job.id,attempt_id:d.job.current_attempt_id||'',worker_id:d.job.assigned_worker_id||body.worker_id,device_ids:(d.job.leases||[]).map(x=>x.device_id),suite_key:d.job.suite_key||body.suite_key});await refresh();showJob(d.job.id)}catch(e){toast(e.message)}}
+async function createJob(){try{const device=document.querySelector('#job-device').value;const body={worker_id:document.querySelector('#job-worker').value,suite_key:document.querySelector('#job-suite').value,devices:device?[device]:[],device_count:1};if(!jobWorkers().some(worker=>body.worker_id==='auto'||worker.id===body.worker_id))throw new Error('没有满足准入条件的 Worker');if(!body.worker_id||!body.suite_key)throw new Error('请选择 Worker 和套件');const d=await api('/api/cluster/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast(`任务已创建 ${d.job.id}`);syncClusterWorkspace({cluster_job_id:d.job.id,attempt_id:d.job.current_attempt_id||'',worker_id:d.job.assigned_worker_id||body.worker_id,device_ids:(d.job.leases||[]).map(x=>x.device_id),suite_key:d.job.suite_key||body.suite_key});await refresh();showJob(d.job.id)}catch(e){toast(e.message)}}
 function displayJobData(job){
  const client=String(job?.client_display_id||job?.owner_id||'unknown');
  const convert=value=>{

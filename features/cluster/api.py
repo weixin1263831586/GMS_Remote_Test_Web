@@ -23,6 +23,7 @@ from features.auth import (
     require_role,
 )
 from foundation.archives import is_complete_archive_file
+from foundation.error_model import ApiError
 
 from .config import ClusterConfig
 from .models import (
@@ -97,7 +98,9 @@ def cluster_ui_asset(ui_asset: str):
         "state.js", "jobs.js", "workers.js", "dash-charts.js",
         "dash-render.js", "library.js", "management.js",
     }:
-        raise HTTPException(404, "cluster ui asset not found")
+        # 与 redmine/gerrit 资产路由同语义（foundation.error_model 统一
+        # envelope），不用裸 HTTPException。
+        raise ApiError.not_found("cluster ui asset not found")
     ui_dir = Path(__file__).with_name("ui")
     js = (ui_dir / ui_asset).read_text(encoding="utf-8")
     return Response(

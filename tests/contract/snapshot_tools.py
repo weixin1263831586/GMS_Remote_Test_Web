@@ -63,16 +63,23 @@ def read_shell_bundle() -> str:
     return '\n'.join(parts)
 
 
-def read_page_scripts(html_relative: str) -> str:
-    """Read only local scripts actually declared by an embedded page, in order."""
+def page_script_paths(html_relative: str) -> list[Path]:
+    """Return local scripts actually declared by an embedded page, in order."""
     html = ROOT / html_relative
     html_text = html.read_text(encoding='utf-8')
-    parts = []
+    paths = []
     for source in SCRIPT_SRC_RE.findall(html_text):
         path = html.parent / Path(source.split('?', 1)[0]).name
         if path.is_file() and path.suffix == '.js':
-            parts.append(path.read_text(encoding='utf-8'))
-    return '\n'.join(parts)
+            paths.append(path)
+    return paths
+
+
+def read_page_scripts(html_relative: str) -> str:
+    """Read only local scripts actually declared by an embedded page, in order."""
+    return '\n'.join(
+        path.read_text(encoding='utf-8') for path in page_script_paths(html_relative)
+    )
 
 
 def read_page_bundle(html_relative: str) -> str:
@@ -145,7 +152,7 @@ def ui_source_groups() -> dict[str, list[Path]]:
         'redmine-agent': sorted(redmine_ui.glob('*.*')),
         'gerrit-dashboard': [
             ROOT / 'features/gerrit/ui/page.html',
-            ROOT / 'features/gerrit/ui/page.js',
+            *page_script_paths('features/gerrit/ui/page.html'),
         ],
         'gms-update-monitor': [
             ROOT / 'features/system/update_monitor/ui/page.html',

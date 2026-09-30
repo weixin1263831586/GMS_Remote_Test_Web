@@ -41,6 +41,8 @@ import re
 import time
 from typing import Any
 
+from foundation.redaction import redact_sensitive_text
+
 from .archive import codesearch_script_location, run_codesearch_process
 
 
@@ -231,7 +233,8 @@ def verify_background_anchors(
                             )
                         except Exception as exc:
                             logger.warning(
-                                "anchor verification failed for %s: %s", key[1], exc
+                                "anchor verification failed for %s: %s",
+                                key[1], redact_sensitive_text(exc),
                             )
                             outcome = {
                                 "path_present": None,
