@@ -71,12 +71,20 @@ class GradeReport:
 
 
 def load_corpus(split: str | None = None) -> list[dict[str, Any]]:
-    """读取全部语料；``split`` 过滤 development/holdout 池。"""
+    """读取全部语料；``split`` 过滤 development/holdout 池。
+
+    fail-closed（全局审查第九节）：声明的 corpus 文件缺失直接抛
+    ``FileNotFoundError``——静默跳过会让整池语料悄悄变成 0 条、
+    quality gate 变成空转，契约测试必须在这里暴露。
+    """
     cases: list[dict[str, Any]] = []
     for name in CORPUS_FILES:
         path = CORPUS_DIR / name
         if not path.exists():
-            continue
+            raise FileNotFoundError(
+                f"declared corpus file missing: {path} "
+                "(quality gate fail-closed: never silently skip)"
+            )
         for line in path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line or line.startswith("#"):

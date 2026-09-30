@@ -140,6 +140,37 @@ def _aggregate_anchor_status(item: dict[str, Any]) -> str:
     return "unknown"
 
 
+def _normalize_section(item: dict[str, Any]) -> dict[str, Any] | None:
+    """归一化 wiki section 行号锚点 ``{heading, start_line, end_line}``。
+
+    schema v4 的 section 检索给每条命中提供源文件精确锚点（heading 行
+    起至正文末行，全局审查 off-by-one 修复后的语义）。生产方形状两种：
+    ``item.extra.section``（联邦 ``to_dict`` 白名单透传）或平铺
+    ``item.section``；行号非正整数视为缺失，返回 ``None``——锚点是
+    Agent 引用用途，坏锚点宁可不给也不能给错的。
+    """
+    extra = item.get("extra")
+    raw = None
+    if isinstance(extra, dict):
+        raw = extra.get("section")
+    if not isinstance(raw, dict):
+        raw = item.get("section")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        start_line = int(raw.get("start_line") or 0)
+        end_line = int(raw.get("end_line") or 0)
+    except (TypeError, ValueError):
+        return None
+    if start_line <= 0 or end_line < start_line:
+        return None
+    return {
+        "heading": _clean_str(raw.get("heading"), 200),
+        "start_line": start_line,
+        "end_line": end_line,
+    }
+
+
 def normalize_background_entries(items: Any) -> list[dict[str, Any]]:
     """归一化背景知识条目（ADR 0014：永远是 background，不作根因证据）。
 
@@ -148,6 +179,8 @@ def normalize_background_entries(items: Any) -> list[dict[str, Any]]:
     path_matched / path_missing / unknown）。provenance 键
     （source_revision / license / last_verified）随条目透传：消费方引用
     外部知识时必须能履行 license 署名义务并判断条目新鲜度。
+    ``section`` 携带 wiki 源文件行号锚点（schema v4 闭环，全局审查第七
+    节：索引层已 section-aware，canonical 读模型必须同样携带）。
     显式不带 fact 语义字段——背景条目回答「Android 为什么这样工作」，
     不进入 conclusion。
     """
@@ -164,6 +197,7 @@ def normalize_background_entries(items: Any) -> list[dict[str, Any]]:
             "source": source,
             "path": _clean_str(item.get("path") or item.get("url") or item.get("source_path")),
             "detail": _clean_str(item.get("detail") or item.get("snippet") or item.get("summary")),
+            "section": _normalize_section(item),
             "evidence_level": _clean_str(item.get("evidence_level"), 32),
             "anchor_status": _aggregate_anchor_status(item),
             "source_revision": _clean_str(item.get("source_revision"), 64),

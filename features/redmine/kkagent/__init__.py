@@ -13,6 +13,7 @@ from .analyzer import (
     PROMPT_VERSION,
     KkAgentAnalysisResult,
     KkAgentRedmineAnalyzer,
+    analyzer_version,
 )
 from .auth_preflight import preflight_gms_auth
 from .errors import classify_failure, summarize_stderr
@@ -50,6 +51,7 @@ __all__ = [
     "KkAgentRedmineAnalyzer",
     "KkAgentTrace",
     "ToolTrace",
+    "analyzer_version",
     "apply_gate",
     "child_env",
     "classify_failure",

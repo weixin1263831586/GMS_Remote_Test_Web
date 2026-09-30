@@ -16,6 +16,7 @@ from pathlib import Path
 from features.redmine.ai_execution_ledger import (
     RECEIPT_LEASE_SECONDS,
     AIExecutionLedger,
+    input_digest,
     logical_key,
 )
 
@@ -42,10 +43,34 @@ def _begin_kwargs(**overrides):
 
 class LogicalKeyTests(unittest.TestCase):
     def test_stable_and_input_sensitive(self):
-        first = logical_key("a", 1, "h", "v7")
-        self.assertEqual(first, logical_key("a", 1, "h", "v7"))
-        self.assertNotEqual(first, logical_key("a", 1, "h", "v8"))
-        self.assertNotEqual(first, logical_key("a", 2, "h", "v7"))
+        def _key(**over):
+            kwargs = dict(
+                owner_id="a", purpose="daily_brief_issue", provider="kkagent",
+                issue_id=1, input_hash="h", prompt_version="v7",
+            )
+            kwargs.update(over)
+            return logical_key(**kwargs)
+
+        first = _key()
+        self.assertEqual(first, _key())
+        self.assertNotEqual(first, _key(prompt_version="v8"))
+        self.assertNotEqual(first, _key(issue_id=2))
+        # purpose / provider 必须入 key（全局审查问题 3：多调用方共享
+        # Ledger 时不得互相 dedupe）。
+        self.assertNotEqual(first, _key(purpose="report_diagnosis"))
+        self.assertNotEqual(first, _key(provider="openai"))
+
+    def test_input_digest_is_sha256_and_stable(self):
+        digest = input_digest("material")
+        self.assertEqual(digest, input_digest("material"))
+        self.assertEqual(len(digest), 64)
+        self.assertNotEqual(digest, input_digest("material2"))
+        # dict 形状 canonical 化：键序不影响 digest。
+        self.assertEqual(
+            input_digest({"a": 1, "b": "x"}), input_digest({"b": "x", "a": 1}),
+        )
+        # digest 不含原文材料（敏感自由文本不以明文持久化）。
+        self.assertNotIn("hint text", input_digest({"hint": "hint text"}))
 
 
 class ReceiptLifecycleTests(unittest.TestCase):
@@ -111,6 +136,27 @@ class ReceiptLifecycleTests(unittest.TestCase):
         # unknown 不可改写。
         self.ledger.finish(receipt["receipt_id"], ok=True)
         self.assertEqual(self.ledger.get(receipt["receipt_id"])["status"], "unknown")
+
+    def test_fail_early_before_submission_is_failed_not_unknown(self):
+        # 全局审查问题 1：提交前异常（AI 请求没发出去）是确定的 failed，
+        # 不是 unknown。
+        receipt = self.ledger.begin(**_begin_kwargs())
+        self.ledger.fail_early(receipt["receipt_id"], error="precollect crashed")
+        stored = self.ledger.get(receipt["receipt_id"])
+        self.assertEqual(stored["status"], "failed")
+        self.assertEqual(stored["error"], "precollect crashed")
+
+    def test_fail_early_never_overrides_received_or_terminal(self):
+        receipt = self.ledger.begin(**_begin_kwargs())
+        self.ledger.mark_received(receipt["receipt_id"])
+        self.ledger.fail_early(receipt["receipt_id"], error="late deterministic failure")
+        self.assertEqual(
+            self.ledger.get(receipt["receipt_id"])["status"], "received",
+        )
+        self.ledger.fail_early(receipt["receipt_id"], error="again")
+        self.assertEqual(
+            self.ledger.get(receipt["receipt_id"])["status"], "received",
+        )
 
     def test_input_change_produces_independent_key(self):
         self.ledger.begin(**_begin_kwargs())

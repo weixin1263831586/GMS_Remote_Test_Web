@@ -17,11 +17,20 @@ Daily Brief 已有 per-attempt 的执行轨迹审计
        │            │
        │            ├──► failed
        │            └──► unknown
-       └──► completed / failed / unknown
+       └──► completed / failed（请求从未发出时，异常走 fail_early）
 
-- ``logical_key`` = sha256(owner, issue, input_hash, prompt_version,
-  analyzer_version, model)。同一逻辑键存在活跃 receipt（pending/received）
-  时 ``begin()`` 返回 ``duplicate=True``，调用方不得重复发送。
+- ``logical_key`` = sha256(owner, **purpose, provider**, issue, input_hash,
+  prompt_version, analyzer_version, model)（全局审查问题 3：purpose/
+  provider 不进 key 时，未来第二个调用方共享 Ledger 会错误 dedupe）。
+- ``input_hash`` 落库前做 canonical sha256（问题 4）：调用方传原文材料
+  （含较长的 analysis_hint 自由文本），begin() 只落 digest——字段名叫
+  hash，存储也必须是 hash。
+- ``analyzer_version``：调用方必须传 analyzer 实现版本（全局审查问题
+  2），实现升级而 prompt/model 不变时逻辑键也必须变化。
+- ``fail_early``：AI 请求**发出前**的确定性失败（证据预采集崩溃、
+  prompt 构造失败）走 pending → failed。``unknown`` 只表示「请求可能
+  已被 provider 接收/执行但结果未知」；提交前异常不是 unknown（问题 1：
+  receipt 建得太早时 catch 一律 mark_unknown 在语义上不准）。
 - pending/received 的 receipt 有租约上限（``RECEIPT_LEASE_SECONDS``）：
   超时视为持有进程已死，置为 unknown 并允许新建 receipt，避免僵尸
   pending 永久阻塞重试。
@@ -92,10 +101,48 @@ _SCHEMA = (
 )
 
 
-def logical_key(*parts: Any) -> str:
-    """稳定派生逻辑调用键；任何输入变化都会产生新键。"""
-    joined = "\x00".join(str(part) for part in parts)
+def logical_key(
+    *,
+    owner_id: str,
+    purpose: str,
+    provider: str,
+    issue_id: int,
+    input_hash: str,
+    prompt_version: str,
+    analyzer_version: str = "",
+    model: str = "",
+) -> str:
+    """稳定派生逻辑调用键；任何输入变化都会产生新键。
+
+    ``purpose`` / ``provider`` 显式入 key（全局审查问题 3）：多个调用方
+    （daily_brief_issue / report_diagnosis / reply_draft / ...）共享
+    Ledger 时不得互相 dedupe。保持关键字签名强制调用方写全参数，
+    防止位置参数串位。
+    """
+    joined = "\x00".join(
+        str(part)
+        for part in (
+            owner_id, purpose, provider, issue_id, input_hash,
+            prompt_version, analyzer_version, model,
+        )
+    )
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+def input_digest(material: Any) -> str:
+    """canonical JSON → sha256 digest（全局审查问题 4）。
+
+    调用方把原始输入材料（快照 hash、设备 serial、analysis_hint 自由
+    文本）交给 begin() 前，先用本函数折成 digest：``input_hash`` 字段
+    名副其实，敏感自由文本不以明文持久化。
+    """
+    if isinstance(material, dict):
+        payload = json.dumps(
+            material, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+    else:
+        payload = str(material)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _lease_expired(row: dict[str, Any], now: str) -> bool:
@@ -144,8 +191,16 @@ class AIExecutionLedger:
         返回的 dict 含 ``duplicate`` 布尔位：True 时调用方**不得**再次
         发送 AI 请求（防重复发送），并应把 ``receipt_id`` 记入日志。
         """
+        digest = input_digest(input_hash)
         key = logical_key(
-            owner_id, issue_id, input_hash, prompt_version, analyzer_version, model
+            owner_id=owner_id,
+            purpose=purpose,
+            provider=provider,
+            issue_id=issue_id,
+            input_hash=digest,
+            prompt_version=prompt_version,
+            analyzer_version=analyzer_version,
+            model=model,
         )
         now = _now()
         with self._lock, self._connect() as conn:
@@ -185,7 +240,7 @@ class AIExecutionLedger:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     receipt_id, key, owner_id, purpose, subject, int(issue_id),
-                    provider, model, prompt_version, analyzer_version, input_hash,
+                    provider, model, prompt_version, analyzer_version, digest,
                     STATUS_PENDING, attempt, now, now,
                 ),
             )
@@ -239,6 +294,29 @@ class AIExecutionLedger:
             )
             if not changed:
                 logger.info("receipt %s already terminal; keeping first outcome", receipt_id)
+
+    def fail_early(self, receipt_id: str, *, error: str) -> None:
+        """AI 请求发出前的确定性失败（pending → failed）。
+
+        语义边界（全局审查问题 1）：``unknown`` 只属于「请求可能已被
+        provider 执行但结果未知」；证据预采集崩溃、prompt 构造失败这类
+        提交前异常是确定的 failed——AI 请求根本没发出去。请求一旦提交
+        （``mark_received`` 之后），异常路径必须走 ``mark_unknown``。
+        """
+        now = _now()
+        with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            changed = self._transition(
+                conn, receipt_id, STATUS_FAILED,
+                error=str(error or "")[:1000],
+                finished_at=now,
+                allowed_from=(STATUS_PENDING,),
+            )
+            if not changed:
+                logger.info(
+                    "receipt %s cannot fail_early (already submitted or terminal)",
+                    receipt_id,
+                )
 
     def mark_unknown(self, receipt_id: str, *, reason: str) -> None:
         """调用结果不确定（崩溃/取消/断电）时的终态。不可改写为其他终态。"""

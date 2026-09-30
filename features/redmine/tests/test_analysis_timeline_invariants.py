@@ -12,7 +12,7 @@ import asyncio
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from features.redmine.daily_brief_analysis_events import (
     event_store_for_repository,
@@ -66,6 +66,27 @@ class AnalysisTimelineInvariantTests(unittest.TestCase):
         self.assertEqual(terminal[0]["event_type"], "analysis_failed")
         self.assertEqual(terminal[0]["status"], "failed")
         self.assertIn("ai_call_in_flight", terminal[0]["summary"])
+
+    def test_cancel_before_provider_submission_fails_receipt_early(self):
+        run = self._make_run("db_cancel_before_provider")
+        ledger = Mock()
+        ledger.begin.return_value = {"duplicate": False, "receipt_id": "rcp_early"}
+        self.service._ai_ledger = ledger
+        with patch(
+            "features.redmine.daily_brief_service.precollect_deep_evidence",
+            AsyncMock(side_effect=asyncio.CancelledError()),
+        ), self.assertRaises(asyncio.CancelledError):
+            asyncio.run(self.service._analyze_one(
+                run, 652654,
+                {"issue_id": 652654, "analysis_mode": "diagnostic"},
+                object(), {},
+            ))
+
+        ledger.fail_early.assert_called_once_with(
+            "rcp_early", error="cancelled before provider submission"
+        )
+        ledger.mark_unknown.assert_not_called()
+        ledger.mark_received.assert_not_called()
 
 
 if __name__ == "__main__":

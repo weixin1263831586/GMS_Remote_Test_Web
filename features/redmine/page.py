@@ -73,3 +73,15 @@ def redmine_agent_markdown_table_js():
         media_type="application/javascript",
         headers={"Cache-Control": "no-store"},
     )
+
+
+@page_router.get("/redmine-agent/daily-brief-diagnosis.js")
+def redmine_agent_daily_brief_diagnosis_js():
+    """诊断呈现辅助（取证标签/门禁提示/系统元数据/证据质量）独立资源，
+    诊断 UI 增量不再回流 page.js 单体（size ratchet）。"""
+    js = Path(__file__).with_name("ui") / "daily-brief-diagnosis.js"
+    return Response(
+        js.read_text(encoding="utf-8"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
+    )

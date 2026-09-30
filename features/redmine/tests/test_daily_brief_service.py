@@ -360,6 +360,34 @@ class RunLifecycleTests(unittest.TestCase):
         self.assertIn("李 煌", issue.error)
         self.assertNotEqual(issue.status, "completed")
 
+    def test_owner_revalidation_failure_fails_issue_instead_of_completed(self):
+        # 全局审查 P0：revalidate_issue_pending_for_owner 抛异常（Redmine
+        # live refresh 失败）时，成功的 AI 结论绝不允许标 completed——
+        # 刷新失败必须显式 owner_revalidation_failed → failed。
+        started = self.service.start_run("nightly")
+        run_id = started["run_id"]
+
+        async def fake_analyze(_entry):
+            return KkAgentAnalysisResult(
+                ok=True, result=dict(VALID), raw_output="{}"
+            )
+
+        import asyncio
+        with self._patch_snapshot(), patch.object(
+            self.service, "_build_analyzer"
+        ) as builder, patch(
+            "features.redmine.daily_brief_service.revalidate_issue_pending_for_owner",
+            AsyncMock(side_effect=RuntimeError("Redmine credentials not configured")),
+        ):
+            builder.return_value.analyze = fake_analyze
+            run = asyncio.run(self.service.execute_run(run_id))
+
+        issue = self.service.repository.get_issue(run_id, 101)
+        self.assertEqual(issue.status, "failed")
+        self.assertEqual(issue.error_type, "owner_revalidation_failed")
+        self.assertIn("owner revalidation failed", issue.error.lower())
+        self.assertNotEqual(run.status, "completed")
+
     def test_execute_run_all_failed_marks_failed(self):
         started = self.service.start_run("manual")
         run_id = started["run_id"]

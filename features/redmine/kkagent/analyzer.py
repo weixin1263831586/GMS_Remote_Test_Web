@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
+import pathlib
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -34,6 +36,26 @@ logger = logging.getLogger(__name__)
 # v18: 晨报与单号分析统一走 diagnostic 深度诊断（ADR 0013）。
 # v19: 删"处理时间线"节；概况表分测试类/非测试类，钉死报告人=issue.author、单号格式、禁内部 id、北京时间。
 PROMPT_VERSION = "redmine_daily_triage_v20"
+
+# analyzer 实现版本（Ledger logical_key 组成项）：kkagent analyzer 实现
+# 升级但 prompt/model 不变时，逻辑键也必须变化（全局审查：否则错误
+# dedupe）。以 agent 包版本为准，包描述读不到（非仓库部署）时回退
+# prompt 版本——宁可键位偏保守，也不能让不同实现共享键。
+@functools.lru_cache(maxsize=1)
+def analyzer_version() -> str:
+    """agent 包版本（读一次缓存）；非仓库部署回退 :data:`PROMPT_VERSION`。"""
+    path = (
+        pathlib.Path(__file__).resolve().parents[3]
+        / "agent" / "gms-remote-test" / "package.yaml"
+    )
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("version: "):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return PROMPT_VERSION
+
 
 REPAIR_MAX_TURNS = 0
 # 同一 session 最多纠正两轮，不重开会话。
@@ -295,7 +317,7 @@ class KkAgentRedmineAnalyzer:
     # ------------------------------------------------------------ process
 
     async def _run_stream(
-        self, command: list[str], progress: Any = None
+        self, command: list[str], progress: Any = None, on_started: Any = None
     ) -> tuple[KkAgentTrace, _StreamFallback, bool]:
         """启动 kkagent 并实时消费 stream-json；返回 (轨迹, 原始兜底, 超时)。"""
         env = child_env(self.env_extra)
@@ -321,6 +343,18 @@ class KkAgentRedmineAnalyzer:
             trace.error = f"kkagent binary not found: {self.binary}"
             trace.error_type = "kkagent_unavailable"
             return trace, raw, False
+
+        # create_subprocess_exec 返回后才表示 provider 进程确实已启动。账本的
+        # pending -> received 边界必须落在这里，不能由上层在构造 prompt、
+        # MCP 健康检查等仍可能失败时提前猜测。
+        if callable(on_started):
+            try:
+                on_started()
+            except BaseException:
+                # 账本回调失败时不得把已启动的 provider/MCP 进程树
+                # 遗留在后台。
+                await terminate_process_tree(process)
+                raise
 
         async def _pump_stderr() -> None:
             assert process.stderr is not None
@@ -418,7 +452,10 @@ class KkAgentRedmineAnalyzer:
             return self._failure(trace, _StreamFallback())
         prompt = self.build_prompt(entry)
         command = self.build_command(prompt)
-        trace, raw, timed_out = await self._run_stream(command, progress)
+        on_started = entry.get("_provider_started") if isinstance(entry, dict) else None
+        trace, raw, timed_out = await self._run_stream(
+            command, progress, on_started=on_started
+        )
         _merge_precollected_traces(trace, entry)
         if not health.skipped:
             trace.tool_calls.insert(0, health.tool_trace())

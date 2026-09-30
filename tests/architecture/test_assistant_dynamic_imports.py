@@ -195,17 +195,48 @@ def _collect_dynamic_refs():
     return refs, banned
 
 
+def _facade_or_pending_violation(module: str) -> str | None:
+    """Return an offense message when a dynamic target module escapes the
+    facade-OR-pending rule, else ``None``.
+
+    全局审查 P1：规则「dynamic target 必须是 feature facade 已公开，
+    或在 FACADE_PENDING_MODULES」必须真实 enforce——否则以后写
+    ``features.system.some_internal:dangerous_helper`` 只要 feature 在
+    allowlist 就能绕过（AST 看不到字符串依赖，这里是唯一防线）。
+    """
+    parts = module.split(".")
+    if len(parts) < 2 or parts[0] != "features":
+        return None
+    feature = parts[1]
+    if feature == "assistant":
+        return None  # same-domain: governed by ordinary import rules
+    submodule = ".".join(parts[2:])
+    if not submodule:
+        return None
+    if submodule in _facade_declared_modules(feature):
+        return None
+    if f"{feature}.{submodule}" in FACADE_PENDING_MODULES:
+        return None
+    return (
+        f"{module}: submodule not exported by facade "
+        f"and missing from FACADE_PENDING_MODULES"
+    )
+
+
 class AssistantDynamicImportGateTests(unittest.TestCase):
     def test_dynamic_targets_resolve_and_stay_public(self):
         refs, _ = _collect_dynamic_refs()
         offenders = []
         for (module, symbol), _sources in sorted(refs.items()):
-            feature = module.split(".")[1]
-            if feature == "assistant":
+            if module.split(".")[1] == "assistant":
                 # Same-domain calls: governed by ordinary import rules.
                 continue
-            if feature not in ALLOWED_DYNAMIC_TARGET_FEATURES:
+            if module.split(".")[1] not in ALLOWED_DYNAMIC_TARGET_FEATURES:
                 offenders.append(f"{module}: feature not allowlisted")
+                continue
+            violation = _facade_or_pending_violation(module)
+            if violation:
+                offenders.append(violation)
                 continue
             module_path = ROOT / pathlib.Path(*module.split(".")).with_suffix(".py")
             if not module_path.exists():
@@ -224,6 +255,35 @@ class AssistantDynamicImportGateTests(unittest.TestCase):
             "assistant dynamic refs (executor_ref / _fetch_router_json) must "
             "point at existing, public features.* symbols: "
             + "; ".join(offenders),
+        )
+
+    def test_facade_or_pending_rule_rejects_undeclared_submodule(self):
+        # 新增 cross-feature dynamic internal module 既不在 facade 也不在
+        # pending manifest 时必须被拒绝（全局审查第八节漏洞）。
+        self.assertIn(
+            "not exported by facade",
+            _facade_or_pending_violation("features.system.some_internal"),
+        )
+        # facade 已声明的模块放行（redmine.__init__ re-export api 模块）。
+        declared = [
+            module
+            for module in (
+                "features.redmine.api",
+                "features.reports.analysis_api",
+                "features.users.users_api",
+            )
+            if ".".join(module.split(".")[2:])
+            in _facade_declared_modules(module.split(".")[1])
+        ]
+        for module in declared:
+            self.assertIsNone(_facade_or_pending_violation(module))
+        # pending manifest 中的模块放行。
+        self.assertIsNone(
+            _facade_or_pending_violation("features.system.integrations")
+        )
+        # assistant 同域调用不受此规则约束。
+        self.assertIsNone(
+            _facade_or_pending_violation("features.assistant.tools")
         )
 
     def test_no_legacy_execution_channels(self):
