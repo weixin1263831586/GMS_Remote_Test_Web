@@ -35,8 +35,10 @@ def bash_executable() -> str:
 
 def main() -> int:
     errors: list[str] = []
-    source = CLI.read_text(encoding="utf-8")
-    implemented = set(re.findall(r"^(gms-rt-[a-z0-9-]+)\(\)", source, re.M))
+    sys.path.insert(0, str(CLI.parent))
+    from gms_agent.cli_inventory import cli_command_names
+
+    implemented = cli_command_names(CLI)
     documented = set(
         re.findall(
             r"`(gms-rt-[a-z0-9-]+)(?:\s[^`]*)?`",

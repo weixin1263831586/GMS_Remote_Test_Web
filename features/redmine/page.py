@@ -1,87 +1,80 @@
+"""Redmine page and explicitly allowlisted UI assets."""
+
 from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, Response
 
+from foundation.error_model import ApiError
+
 
 page_router = APIRouter()
+_UI_DIR = Path(__file__).with_name("ui")
+PAGE_SCRIPTS = (
+    "core.js",
+    "settings.js",
+    "issues.js",
+    "statistics.js",
+    "knowledge.js",
+    "markdown-table.js",
+    "daily-brief-diagnosis.js",
+    "daily-brief-session.js",
+    "daily-brief-timeline.js",
+    "analysis-timeline.js",
+    "single-issue.js",
+    "daily-brief.js",
+    "page.js",
+)
+_ASSET_TYPES = {
+    **{name: "application/javascript" for name in PAGE_SCRIPTS},
+    "daily-brief-session.css": "text/css",
+}
+_LEGACY_ASSETS = frozenset({
+    "page.js", "markdown-table.js", "daily-brief-diagnosis.js",
+    "daily-brief-session.js", "daily-brief-session.css", "daily-brief-timeline.js",
+})
 
 
 @page_router.get("/redmine-agent", response_class=HTMLResponse)
 async def redmine_agent_page():
-    ui_dir = Path(__file__).with_name("ui")
-    html = (ui_dir / "page.html").read_text(encoding="utf-8")
+    html = (_UI_DIR / "page.html").read_text(encoding="utf-8")
     html = html.replace(
         "{{REDMINE_CSS}}",
-        (ui_dir / "page.css").read_text(encoding="utf-8").rstrip(),
+        (_UI_DIR / "page.css").read_text(encoding="utf-8").rstrip(),
     )
-    # CSS is embedded in this iframe page.  Do not let a previously opened
-    # Redmine frame retain an older embedded stylesheet after a UI deploy.
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
-@page_router.get("/redmine-agent/page.js")
-def redmine_agent_page_js():
-    """页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。"""
-    js = Path(__file__).with_name("ui") / "page.js"
+def _asset_response(asset_name: str) -> Response:
+    media_type = _ASSET_TYPES.get(asset_name)
+    if media_type is None:
+        raise ApiError.not_found("UI asset not found")
     return Response(
-        js.read_text(encoding="utf-8"),
-        media_type="application/javascript",
-        headers={"Cache-Control": "no-store"},
+        (_UI_DIR / asset_name).read_text(encoding="utf-8"),
+        media_type=media_type,
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
     )
 
 
-@page_router.get("/redmine-agent/daily-brief-session.js")
-def redmine_agent_daily_brief_session_js():
-    """会话回放独立资源，避免 daily-brief 主脚本继续膨胀。"""
-    js = Path(__file__).with_name("ui") / "daily-brief-session.js"
-    return Response(
-        js.read_text(encoding="utf-8"),
-        media_type="application/javascript",
-        headers={"Cache-Control": "no-store"},
-    )
+@page_router.get("/redmine-agent/assets/{asset_name}", include_in_schema=False)
+def redmine_agent_asset(asset_name: str):
+    """Serve only named JS/CSS assets; never expose directories or other sources."""
+    return _asset_response(asset_name)
 
 
-@page_router.get("/redmine-agent/daily-brief-session.css")
-def redmine_agent_daily_brief_session_css():
-    """会话回放组件样式，避免主页面样式超过体积预算。"""
-    css = Path(__file__).with_name("ui") / "daily-brief-session.css"
-    return Response(
-        css.read_text(encoding="utf-8"),
-        media_type="text/css",
-        headers={"Cache-Control": "no-store"},
-    )
-
-
-@page_router.get("/redmine-agent/daily-brief-timeline.js")
-def redmine_agent_daily_brief_timeline_js():
-    """实时会话轨迹辅助独立资源，避免主页面脚本继续膨胀。"""
-    js = Path(__file__).with_name("ui") / "daily-brief-timeline.js"
-    return Response(
-        js.read_text(encoding="utf-8"),
-        media_type="application/javascript",
-        headers={"Cache-Control": "no-store"},
-    )
-
-
-@page_router.get("/redmine-agent/markdown-table.js")
-def redmine_agent_markdown_table_js():
-    """Markdown 表格解析 helper 独立资源。"""
-    js = Path(__file__).with_name("ui") / "markdown-table.js"
-    return Response(
-        js.read_text(encoding="utf-8"),
-        media_type="application/javascript",
-        headers={"Cache-Control": "no-store"},
-    )
-
-
-@page_router.get("/redmine-agent/daily-brief-diagnosis.js")
-def redmine_agent_daily_brief_diagnosis_js():
-    """诊断呈现辅助（取证标签/门禁提示/系统元数据/证据质量）独立资源，
-    诊断 UI 增量不再回流 page.js 单体（size ratchet）。"""
-    js = Path(__file__).with_name("ui") / "daily-brief-diagnosis.js"
-    return Response(
-        js.read_text(encoding="utf-8"),
-        media_type="application/javascript",
-        headers={"Cache-Control": "no-store"},
-    )
+@page_router.get("/redmine-agent/{asset_name}", include_in_schema=False)
+def redmine_agent_legacy_asset(asset_name: str):
+    """Compatibility for previously served resource URLs."""
+    if asset_name not in _LEGACY_ASSETS:
+        raise ApiError.not_found("UI asset not found")
+    if asset_name == "page.js":
+        # Old documents load one page.js. Keep its complete dependency bundle.
+        body = "\n;\n".join(
+            (_UI_DIR / name).read_text(encoding="utf-8") for name in PAGE_SCRIPTS
+            if name == "page.js" or name not in _LEGACY_ASSETS
+        )
+        return Response(
+            body, media_type="application/javascript",
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
+    return _asset_response(asset_name)

@@ -1,7 +1,10 @@
 """FailureIdentity 确定性指纹与关系层契约测试（全局审查：失败身份与关系分层）。"""
 
+import json
 import unittest
 
+from features.redmine.case_extractor import RedmineCaseExtractor
+from features.redmine.daily_brief_case_fact import build_issue_failure_identity
 from features.redmine.failure_identity import (
     VALID_RELATIONS,
     assertion_class,
@@ -11,6 +14,7 @@ from features.redmine.failure_identity import (
     normalize_error_signature,
     relation_class,
 )
+from foundation.diagnosis_read_model import build_failure_cluster_stub
 
 
 def _identity(**overrides):
@@ -147,6 +151,14 @@ class IdentityTests(unittest.TestCase):
         identity = failure_identity([], **_identity())
         self.assertTrue(identity["fingerprint"])
         self.assertEqual(identity["error_signature"], "")
+        self.assertFalse(identity["clusterable"])
+
+    def test_incomplete_rows_never_synthesize_an_identity(self):
+        identity = failure_identity([
+            {"module": "M", "name": "T"},
+            {"reason": "AssertionError: unrelated failure"},
+        ])
+        self.assertFalse(identity["clusterable"])
 
 
 class RelationTests(unittest.TestCase):
@@ -202,6 +214,14 @@ class RelationTests(unittest.TestCase):
 
 
 class ClusterTests(unittest.TestCase):
+    def test_low_information_identities_never_cluster(self):
+        for rows in ([], [{"module": "M", "name": "T", "reason": "failed"}],
+                     [{"module": "M", "reason": "timeout"}]):
+            identity = failure_identity(rows)
+            self.assertEqual(relation_class(identity, identity), "UNRELATED")
+            self.assertEqual(build_failure_clusters([identity, identity]), [])
+        self.assertEqual(relation_class({}, {}), "UNRELATED")
+
     def test_only_exact_fingerprints_cluster(self):
         identities = [
             failure_identity([{"module": "M", "name": "T", "reason": "AssertionError: x at 0x1"}], **_identity()),
@@ -224,6 +244,55 @@ class ClusterTests(unittest.TestCase):
         clusters = build_failure_clusters([identity], subject_ids=[7])
         self.assertEqual(clusters[0]["identity"]["module"], "M")
         self.assertEqual(clusters[0]["identity"]["testcase"], "T")
+
+
+def issue(reason, *, chip="RK3576", android="16"):
+    return {
+        "subject": f"{chip} Android{android} CTS CtsSecurityHostTestCases failure",
+        "failures_json": json.dumps([{
+            "module": "CtsSecurityHostTestCases", "name": "SecurityTest#testKey",
+            "reason": reason,
+        }]),
+    }
+
+
+def test_same_title_different_assertions_are_different_causes():
+    first = build_issue_failure_identity(issue("AssertionError: expected 32 but was 0"))
+    second = build_issue_failure_identity(issue("java.lang.NullPointerException: key lookup"))
+    assert first["device_class"] == "RK3576"
+    assert first["android_version"] == "Android16"
+    assert first["suite"] == "CTS"
+    assert relation_class(first, second) == "SAME_TEST_DIFFERENT_CAUSE"
+
+
+def test_context_changes_and_serial_observations():
+    first = build_issue_failure_identity(issue("AssertionError: key mismatch"), device_serial="A")
+    second = build_issue_failure_identity(issue("AssertionError: key mismatch"), device_serial="B")
+    assert first["fingerprint"] == second["fingerprint"]
+    for other in (issue("AssertionError: key mismatch", chip="RK3588"),
+                  issue("AssertionError: key mismatch", android="17")):
+        assert build_issue_failure_identity(other)["fingerprint"] != first["fingerprint"]
+
+
+def test_attachment_rows_share_the_case_extractor_without_mutating_issue():
+    stored = issue("AssertionError: key mismatch")
+    stored["failures_json"] = []
+    stored["attachments_json"] = [{"analysis_json": json.dumps({"failures": [
+        {"module": "M", "testcase": "T", "message": "AssertionError: report mismatch"},
+    ]})}]
+    first = build_issue_failure_identity(stored)
+    assert first["testcase"] == "T"
+    assert first["error_signature"] == "assertionerror report mismatch"
+    assert first["clusterable"]
+    assert stored["failures_json"] == []
+    assert len(RedmineCaseExtractor.extract(stored)["failures"]) == 1
+
+
+def test_title_only_never_becomes_a_cluster():
+    identity = build_issue_failure_identity({"subject": "CTS CtsCameraTestCases fails"})
+    assert not identity["clusterable"]
+    assert not identity["error_signature"]
+    assert build_failure_cluster_stub(identity) is None
 
 
 if __name__ == "__main__":

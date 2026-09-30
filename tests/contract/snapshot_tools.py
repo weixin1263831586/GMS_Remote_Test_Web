@@ -63,23 +63,22 @@ def read_shell_bundle() -> str:
     return '\n'.join(parts)
 
 
-def read_page_bundle(html_relative: str) -> str:
-    """嵌入式页面 page.html + 同目录 page.js 的组合文本。
-
-    页面脚本外置后，"HTML 里的 API/标记引用"部分落在 page.js；
-    需要跨两者断言时用本函数。
-    """
+def read_page_scripts(html_relative: str) -> str:
+    """Read only local scripts actually declared by an embedded page, in order."""
     html = ROOT / html_relative
     html_text = html.read_text(encoding='utf-8')
-    parts = [html_text]
-    js = html.with_suffix('.js')
-    references_page_js = any(
-        source.split('?', 1)[0].endswith('/page.js')
-        for source in SCRIPT_SRC_RE.findall(html_text)
-    )
-    if references_page_js and js.is_file():
-        parts.append(js.read_text(encoding='utf-8'))
+    parts = []
+    for source in SCRIPT_SRC_RE.findall(html_text):
+        path = html.parent / Path(source.split('?', 1)[0]).name
+        if path.is_file() and path.suffix == '.js':
+            parts.append(path.read_text(encoding='utf-8'))
     return '\n'.join(parts)
+
+
+def read_page_bundle(html_relative: str) -> str:
+    """Embedded HTML and its declared local scripts, including split modules."""
+    html_text = (ROOT / html_relative).read_text(encoding='utf-8')
+    return html_text + '\n' + read_page_scripts(html_relative)
 
 def normalized_routes(app) -> list[dict[str, Any]]:
     result = []

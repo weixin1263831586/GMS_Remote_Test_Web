@@ -170,7 +170,9 @@ class SkillCliTests(unittest.TestCase):
             self.assertTrue(commands[name]["requires_elevation"], name)
 
     def test_human_help_and_api_catalog_cover_every_command(self):
-        source = HELPER.read_text(encoding="utf-8")
+        source = HELPER.read_text(encoding="utf-8") + "\n" + "\n".join(
+            path.read_text(encoding="utf-8") for path in sorted((HELPER.parent / "cli").glob("*.sh"))
+        )
         implemented = set(re.findall(r"^(gms-rt-[a-z0-9-]+)\(\)", source, re.M))
         helped = self._run("gms-rt-system-help")
         self.assertEqual(helped.returncode, 0, helped.stderr)

@@ -279,7 +279,7 @@ def build_failure_cluster_stub(
     的已知同簇成员；没有指纹时整节为 ``None``。检索召回的相似案例**不得**
     计入 members——那是 SIMILAR_SYMPTOM 级候选，合并需过 relation judge。
     """
-    if not identity:
+    if not identity or identity.get("clusterable") is False:
         return None
     fingerprint = _clean_str(identity.get("fingerprint"), 128)
     if not fingerprint:

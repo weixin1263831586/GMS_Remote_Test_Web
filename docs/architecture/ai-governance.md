@@ -17,26 +17,29 @@
 ## 1. AI Execution Ledger（逻辑调用账本）
 
 `features/redmine/ai_execution_ledger.py`。每次 AI 逻辑调用先登记
-receipt，`logical_key = sha256(owner, issue, input_hash, prompt_version,
+receipt，`logical_key = sha256(owner, purpose, provider, issue, input_hash, prompt_version,
 analyzer_version, model)`；同一逻辑键存在活跃 receipt 时拒绝重复发送。
 
 ```mermaid
 flowchart TD
     Begin[service._analyze_one 开始] --> LedgerBegin["ai_ledger.begin()
-    logical_key = sha256(owner, issue,
-    input_hash, prompt_version, model)"]
+    logical_key = sha256(owner, purpose, provider, issue,
+    input_hash, prompt_version, analyzer_version, model)"]
     LedgerBegin -->|"活跃 receipt 存在"| Duplicate["record.status = failed
     error_type = ai_call_in_flight
     （页面重复点击 / worker 重试被挡）"]
     LedgerBegin -->|无活跃| Pending["receipt: pending"]
     Pending -->|请求发出| Received["mark_received()
     receipt: received"]
+    Pending -->|提交前失败或取消| Early["fail_early(): failed"]
+    Pending -->|每分钟 touch| Pending
+    Received -->|每分钟 touch| Received
     Received -->|outcome 确定| Finish["ai_ledger.finish(ok)
     completed / failed（首终态不可改写）"]
     Received -->|取消 / 进程异常| Unknown["mark_unknown()
     unknown = 结果不确定（终态）"]
-    Pending -->|租约 4h 超时
-    （持有进程已死）| Expired["置 unknown + 放行新 attempt"]
+    Pending -->|连续 4h 无续租| Expired["置 unknown + 放行新 attempt"]
+    Received -->|连续 4h 无续租| Expired
     Finish --> Retry["同一逻辑键再次 begin()
     → 新 receipt（attempt+1）"]
     Unknown --> Retry
@@ -47,6 +50,13 @@ flowchart TD
 - `unknown` 是**一等终态**，不是 failed 的别名——后续重试据此知道前一次
   outcome 未知，而不是误以为干净的失败。
 - 终态不可改写：迟到的 completed 不得覆盖已记录的 failed/unknown。
+- `input_hash` 是输入材料 canonical JSON 的 SHA-256，不存储 hint 原文。
+  `analyzer_version` 使用 Agent 包版本，升级实现会改变逻辑键。
+- `_analyze_one` 从预采集到实时 owner 校验期间每分钟续租，即使 provider
+  没有输出也保持活跃；完成、异常或取消均停止续租。4 小时是连续无生命信号
+  的窗口，不是分析时长预算；`touch` 不修改终态。
+- 提交前异常/取消走 `fail_early`；provider 进程启动后结果不确定才走
+  `mark_unknown`。
 - per-owner SQLite（与 daily brief 同库），建表走 `BEGIN IMMEDIATE`，
   Web/Worker/CLI 并发迁移安全。
 - `record_ai_execution` 的 per-attempt 轨迹审计照旧保留；ledger 是其上的
@@ -59,12 +69,16 @@ retrieval score）与关系判定明确分层：score 高 ≠ 同一失败。
 
 ```mermaid
 flowchart TD
-    Failure[Test Failure] --> Identity["failure_identity()
+    Failure[Redmine issue / report attachment] --> Facts["RedmineCaseExtractor
+    failures / module / Android / chip / certification"]
+    Facts --> Identity["failure_identity()
     suite/module/testcase/assertion_class
     + normalized error signature
     + android_version/device_class"]
     Identity --> FP["fingerprint = sha256(canonical)"]
-    FP --> Exact{"relation_class()"}
+    FP --> Quality{"clusterable?"}
+    Quality -->|否| Insufficient["UNRELATED / 不进入 Cluster"]
+    Quality -->|是| Exact{"relation_class()"}
     Exact -->|"指纹一致"| Same["SAME_FAILURE"]
     Exact -->|"同 module+testcase，签名不同"| Diff["SAME_TEST_DIFFERENT_CAUSE
     （同名用例不同根因：禁止合 Cluster）"]
@@ -81,8 +95,15 @@ flowchart TD
 
 要点：
 
-- 归一化剥掉地址/十六进制/时间戳/计数——同一根因两次失败得到同一指纹，
-  异常类型/调用点不同不会被归一掉。
+- 归一化只剥易变噪声：地址、UUID、IP、时间戳、PID/TID/UID、时长、明确
+  标记的计数和引用号；保留 expected/actual、size、API、errno、status、版本数字。
+- 生产晨报与 Case Fact 共用 `RedmineCaseExtractor`；真实报告 failure 的
+  testcase/reason 保持同一行配对，附件 failure 也纳入事实。无报告时只用
+  提取器识别出的真实错误签名，不把标题或 analysis hint 当成 assertion。
+- `device_class` 来自 chip_platform，`android_version` 来自工单事实；
+  `device_serial` 仅是观察元数据，不进入 fingerprint。
+- `clusterable` 要求 testcase + 有效签名，或 module + 强签名；空身份与
+  泛化的 failed/error 不参与关系合并。指纹仍保留用于追踪。
 - 同名 CTS 用例在设备 A/B/C 上完全可能各有根因；`SAME_TEST_DIFFERENT_
   CAUSE` 从确定性层就禁止合并。
 - 指纹随 AI 执行轨迹落库（`record_ai_execution` 的 `failure_identity`
@@ -110,9 +131,9 @@ flowchart LR
     test_source_used / no_forbidden_claims /
     conclusion_anchored"]
     Grade -->|development| Dev["日常调 Prompt 只看开发集"]
-    Grade -->|holdout| Hold["release candidate 才跑，
+    Grade -->|holdout| Hold["nightly / 手动工作流，
     防'对着考卷调参'"]
-    Contract --> CI["CI：语料本身永远合法"]
+    Contract --> CI["CI：语料契约 + development 离线回放"]
 ```
 
 要点：
@@ -120,6 +141,13 @@ flowchart LR
 - 根因类 / 禁止声明的**封闭词表**：语料不会漂移出无法统计的自由文本。
 - `history_checked` 由运行时从工具轨迹注入，模型自报不算——防"编造查过
   历史"。
+- `diagnosis_replay_fixtures.jsonl` 保存脱敏的原生结果、工具返回与冻结的
+  读模型字段。`--replay` 经生产 Redmine/reports 适配器投影后评分；工具必须
+  成功并返回事实，取证 reference 必须出现在 canonical evidence，历史 ID
+  必须同时出现在工具返回和 similar_cases。缺失、重复结果和映射漂移均失败。
+- 日常 `knowledge-quality` CI 跑 development，nightly 的独立 hosted job 跑
+  holdout。离线回放覆盖适配器和证据映射回归，不衡量实时 LLM 的 Prompt 质量；
+  Prompt 修改仍需采集新的脱敏执行结果进行评测。
 
 ## 4. 外部知识 Section 级检索（schema v4）
 

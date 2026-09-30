@@ -1281,8 +1281,10 @@ def install_cli_dispatcher() -> list[Path]:
     if cli.is_file():
         # gms-rt-* links must go through the dispatcher: gms-remote-test.sh
         # resolves its command from $1, never from argv0.
-        for match in re.finditer(r"^(gms-rt-[a-z0-9-]+)\(\)", cli.read_text(encoding="utf-8"), re.M):
-            links.setdefault(match.group(1), dispatcher)
+        from .cli_inventory import cli_command_names
+
+        for command_name in cli_command_names(cli):
+            links.setdefault(command_name, dispatcher)
     # Update/rollback can change the public command inventory. Remove only
     # stale links that this installer owns; never touch a user-managed file
     # or a symlink with a different target.

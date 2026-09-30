@@ -337,6 +337,10 @@ jobs:
           test -f "${idx}" || { echo "::error::temp index missing: ${idx}"; exit 1; }
           GMS_WIKI_INDEX_DB="${idx}" pytest \
             "features/knowledge/tests/test_external_provider.py::GoldenQueryCorpusTests" -v
+      - name: Diagnosis development replay quality gate
+        run: |
+          pytest tests/quality -q
+          python tools/scripts/testing/eval_diagnosis_quality.py --split development --replay tests/quality/diagnosis_replay_fixtures.jsonl --json
 
   worker-agent:
     name: worker-agent
@@ -452,7 +456,7 @@ jobs:
             python -m playwright install chromium
 
       - name: Browser E2E and smoke tests
-        run: pytest tests/e2e tests/test_runtime_ui_smoke.py -q
+        run: pytest tests/e2e tests/runtime_ui -q
 
   release-ready:
     name: release-ready

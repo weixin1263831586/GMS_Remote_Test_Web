@@ -3090,31 +3090,13 @@
     "methods": [
       "GET"
     ],
-    "path": "/redmine-agent/daily-brief-session.css"
+    "path": "/redmine-agent/assets/{asset_name}"
   },
   {
     "methods": [
       "GET"
     ],
-    "path": "/redmine-agent/daily-brief-session.js"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/redmine-agent/daily-brief-timeline.js"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/redmine-agent/markdown-table.js"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/redmine-agent/page.js"
+    "path": "/redmine-agent/{asset_name}"
   },
   {
     "methods": [

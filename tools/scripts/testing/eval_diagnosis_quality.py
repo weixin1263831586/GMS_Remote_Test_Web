@@ -15,6 +15,8 @@
     python tools/scripts/testing/eval_diagnosis_quality.py --validate
     python tools/scripts/testing/eval_diagnosis_quality.py --split development \
         --results /tmp/diagnosis_results.jsonl
+    python tools/scripts/testing/eval_diagnosis_quality.py --split development \
+        --replay tests/quality/diagnosis_replay_fixtures.jsonl
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from _common import find_repo_root
 
 REPO_ROOT = find_repo_root()
 sys.path.insert(0, str(REPO_ROOT / "tests" / "quality"))
+sys.path.insert(0, str(REPO_ROOT))
 
 from diagnosis_corpus import grade_result, load_corpus  # noqa: E402
 
@@ -48,6 +51,10 @@ def main() -> int:
         type=Path,
         default=None,
         help="JSONL 结果文件（每行 {case_id, result}）；缺省时只校验语料",
+    )
+    parser.add_argument(
+        "--replay", type=Path,
+        help="Sanitized native results + tool traces + frozen read-model fields (offline)",
     )
     parser.add_argument(
         "--validate",
@@ -83,14 +90,18 @@ def main() -> int:
                 print(f"ERROR: {error}")
         return 1 if errors else 0
 
-    if not args.results or not args.results.exists():
-        print("ERROR: --results JSONL file required for grading", file=sys.stderr)
+    if bool(args.results) == bool(args.replay):
+        print("ERROR: provide exactly one of --results or --replay", file=sys.stderr)
+        return 2
+    source = args.results or args.replay
+    if not source.is_file():
+        print("ERROR: results/replay file missing", file=sys.stderr)
         return 2
 
     by_id = {str(case["id"]): case for case in cases}
     reports = []
     missing_results: list[str] = []
-    for line in args.results.read_text(encoding="utf-8").splitlines():
+    for line in source.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
@@ -98,9 +109,27 @@ def main() -> int:
         case_id = str(row.get("case_id") or "")
         case = by_id.get(case_id)
         if case is None:
+            if args.replay and args.split and row.get("split") != args.split:
+                continue
             errors.append(f"result references unknown case: {case_id}")
             continue
-        report = grade_result(row.get("result") or {}, case)
+        if case_id in {report.case_id for report in reports}:
+            errors.append(f"duplicate result: {case_id}")
+            continue
+        if args.replay:
+            from diagnosis_replay import replay_fixture
+
+            if row.get("purpose") != case["purpose"] or row.get("split") != case["split"]:
+                errors.append(f"replay purpose/split mismatch: {case_id}")
+                continue
+            try:
+                result = replay_fixture(row)
+            except (KeyError, TypeError, ValueError) as exc:
+                errors.append(f"replay failed: {case_id}: {exc}")
+                continue
+        else:
+            result = row.get("result") or {}
+        report = grade_result(result, case)
         reports.append(report)
     missing_results = sorted(set(by_id) - {r.case_id for r in reports})
 

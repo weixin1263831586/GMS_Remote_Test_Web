@@ -166,15 +166,6 @@ def extract_test_identity(text: str) -> dict[str, str]:
     return {"suite": suite, "module": module, "testcase": testcase}
 
 
-def _first_failure_value(failures: list[dict[str, Any]], *keys: str) -> str:
-    for failure in failures[:5]:
-        for key in keys:
-            value = str(failure.get(key) or "").strip()
-            if value:
-                return value
-    return ""
-
-
 def failure_identity(
     failures: list[dict[str, Any]],
     *,
@@ -198,12 +189,17 @@ def failure_identity(
           "error_signature", "android_version", "device_class",
           "device_serial",  # 观察元数据，不进指纹
           "fingerprint",    # sha256(canonical fields, 不含 device_serial)
+          "clusterable",    # testcase + signature 或 module + strong signature
         }
     """
     failure_list = [f for f in (failures or []) if isinstance(f, dict)]
-    module = _first_failure_value(failure_list, "module")
-    testcase = _first_failure_value(failure_list, "name", "testcase")
-    reason = _first_failure_value(failure_list, "reason", "message")
+    # Keep the testcase and reason paired; never join facts from different rows.
+    row = next((f for f in failure_list if (f.get("name") or f.get("testcase"))
+                and (f.get("reason") or f.get("message"))),
+               next(iter(failure_list), {}))
+    module = str(row.get("module") or "").strip()
+    testcase = str(row.get("name") or row.get("testcase") or "").strip()
+    reason = str(row.get("reason") or row.get("message") or "").strip()
     aclass = assertion_class(reason)
     signature = normalize_error_signature(reason)
     identity = {
@@ -217,7 +213,15 @@ def failure_identity(
         "device_serial": str(device_serial or "").strip(),
     }
     identity["fingerprint"] = _fingerprint(identity)
+    identity["clusterable"] = _clusterable(identity)
     return identity
+
+
+def _clusterable(identity: dict[str, Any]) -> bool:
+    signature = str(identity.get("error_signature") or "").strip()
+    informative = signature.lower() not in {"", "fail", "failed", "failure", "error", "unknown"}
+    strong = bool(identity.get("assertion_class")) or (len(signature) >= 12 and len(signature.split()) >= 2)
+    return bool(informative and (identity.get("testcase") or (identity.get("module") and strong)))
 
 
 #: 参与指纹的字段（``device_serial`` 是观察元数据，刻意不在其中）。
@@ -245,7 +249,10 @@ def relation_class(first: dict[str, Any], second: dict[str, Any]) -> str:
       只能作为候选，合并需 relation judge 二次确认。
     - ``UNRELATED``：以上皆不满足。
     """
-    if first.get("fingerprint") == second.get("fingerprint"):
+    if (not _clusterable(first) or not _clusterable(second)
+            or first.get("clusterable") is False or second.get("clusterable") is False):
+        return "UNRELATED"
+    if first.get("fingerprint") and first.get("fingerprint") == second.get("fingerprint"):
         return "SAME_FAILURE"
     same_test = (
         str(first.get("module") or "") == str(second.get("module") or "")
@@ -277,7 +284,7 @@ def build_failure_clusters(
     groups: dict[str, dict[str, Any]] = {}
     for index, identity in enumerate(identities):
         fingerprint = str(identity.get("fingerprint") or "")
-        if not fingerprint:
+        if not fingerprint or not _clusterable(identity) or identity.get("clusterable") is False:
             continue
         group = groups.setdefault(
             fingerprint,
