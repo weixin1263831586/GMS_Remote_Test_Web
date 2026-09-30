@@ -10,8 +10,13 @@
 - stats 治理视图。
 """
 
+import asyncio
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 
 from features.redmine.ai_execution_ledger import (
     RECEIPT_LEASE_SECONDS,
@@ -19,6 +24,8 @@ from features.redmine.ai_execution_ledger import (
     input_digest,
     logical_key,
 )
+from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
+from features.redmine.daily_brief_service import DailyBriefService
 
 
 def _ledger(tmp: Path) -> AIExecutionLedger:
@@ -74,6 +81,22 @@ class LogicalKeyTests(unittest.TestCase):
 
 
 class ReceiptLifecycleTests(unittest.TestCase):
+    def test_touch_renews_long_running_receipt_without_changing_state(self):
+        from unittest.mock import patch
+
+        with patch("features.redmine.ai_execution_ledger._now", return_value="2026-09-30T00:00:00"):
+            receipt = self.ledger.begin(**_begin_kwargs())
+            self.ledger.mark_received(receipt["receipt_id"])
+        with patch("features.redmine.ai_execution_ledger._now", return_value="2026-09-30T03:59:00"):
+            assert self.ledger.touch(receipt["receipt_id"])
+        with patch("features.redmine.ai_execution_ledger._now", return_value="2026-09-30T05:00:00"):
+            assert self.ledger.begin(**_begin_kwargs())["duplicate"]
+            self.ledger.finish(receipt["receipt_id"], ok=True)
+        terminal = self.ledger.get(receipt["receipt_id"])
+        assert not self.ledger.touch(receipt["receipt_id"])
+        assert self.ledger.get(receipt["receipt_id"]) == terminal
+        assert not self.ledger.touch("missing")
+
     def setUp(self):
         import tempfile
 
@@ -193,6 +216,103 @@ class ReceiptLifecycleTests(unittest.TestCase):
 
     def test_lease_constant_is_explicit(self):
         self.assertGreater(RECEIPT_LEASE_SECONDS, 0)
+
+
+def test_heartbeat_renews_quiet_session_and_stops_at_terminal(tmp_path):
+    async def run():
+        ledger = AIExecutionLedger(tmp_path / "receipts.sqlite3")
+        receipt = ledger.begin(owner_id="a", purpose="diagnosis", issue_id=1)
+        touched = asyncio.Event()
+        touch = ledger.touch
+
+        def observe(receipt_id):
+            result = touch(receipt_id)
+            touched.set()
+            return result
+
+        with patch("features.redmine.ai_execution_ledger.RECEIPT_HEARTBEAT_SECONDS", 0.001), \
+                patch.object(ledger, "touch", side_effect=observe):
+            task = asyncio.create_task(ledger.keep_alive(receipt["receipt_id"]))
+            try:
+                await asyncio.wait_for(touched.wait(), timeout=2)
+                ledger.finish(receipt["receipt_id"], ok=True)
+                await asyncio.wait_for(task, timeout=2)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(run())
+
+
+def test_cancelled_heartbeat_leaves_no_further_refreshes(tmp_path):
+    async def run():
+        ledger = AIExecutionLedger(tmp_path / "receipts.sqlite3")
+        with patch("features.redmine.ai_execution_ledger.asyncio.sleep", new_callable=AsyncMock) as sleep:
+            sleep.side_effect = asyncio.CancelledError
+            with patch.object(ledger, "touch") as touch:
+                try:
+                    await ledger.keep_alive("receipt")
+                except asyncio.CancelledError:
+                    pass
+                touch.assert_not_called()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_service_owns_heartbeat_and_uses_stored_issue_facts(tmp_path, cancelled):
+    async def run():
+        service = DailyBriefService.__new__(DailyBriefService)
+        service.owner_id = "a"
+        record = DailyBriefIssue(run_id="run", issue_id=1, buckets=[], subject="Title only")
+        repository = Mock(db_path=tmp_path / "ledger.sqlite3")
+        repository.get_issue.return_value = record
+        repository.is_cancel_requested.return_value = False
+        service.repository = repository
+        brief = DailyBriefRun(owner_id="a", brief_date="2026-09-30", mode="issue:1", run_id="run")
+        alive = asyncio.Event()
+        stopped = asyncio.Event()
+
+        async def heartbeat(receipt_id):
+            alive.set()
+            try:
+                await asyncio.Future()
+            finally:
+                stopped.set()
+
+        async def analyze(*args):
+            args[-1]["_provider_started"]()
+            await alive.wait()
+            if cancelled:
+                raise asyncio.CancelledError
+            return SimpleNamespace(ok=False, raw_output="", trace={}, error="failed", error_type="test")
+
+        stored = {"subject": "RK3576 Android16 CTS", "failures_json": [{
+            "module": "M", "name": "T", "reason": "AssertionError: expected 32 but was 0",
+        }]}
+        redmine = Mock()
+        redmine.repository.get_issue.return_value = stored
+        with patch.object(service.ai_ledger, "keep_alive", side_effect=heartbeat), \
+                patch("features.redmine.daily_brief_service.start_analysis_progress", return_value=None), \
+                patch("features.redmine.daily_brief_service.precollect_deep_evidence", new_callable=AsyncMock), \
+                patch("features.redmine.daily_brief_service._sdk_sources_available", return_value=False), \
+                patch("features.redmine.daily_brief_cancellation.analyze_with_persisted_cancel", side_effect=analyze), \
+                patch("features.redmine.daily_brief_cancellation.reset_cancelled_issue"), \
+                patch("features.redmine.api.get_redmine_service_for_owner", return_value=redmine):
+            try:
+                await service._analyze_one(brief, 1, {}, Mock(), {})
+            except asyncio.CancelledError:
+                assert cancelled
+        assert stopped.is_set()
+        if cancelled:
+            assert service.ai_ledger.stats("a")["unknown"] == 1
+        else:
+            execution = repository.record_ai_execution.call_args.args[-1]
+            assert execution["failure_identity"]["device_class"] == "RK3576"
+            assert execution["failure_identity"]["error_signature"] == "assertionerror expected 32 but was 0"
+            assert service.ai_ledger.get(execution["receipt_id"])["status"] == "failed"
+
+    asyncio.run(run())
 
 
 if __name__ == "__main__":

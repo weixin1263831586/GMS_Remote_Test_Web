@@ -129,7 +129,8 @@ def _facade_declared_modules(feature: str) -> set[str]:
         if isinstance(node, ast.ImportFrom) and node.level >= 1:
             if node.module:
                 declared.add(node.module.lstrip("."))
-            declared.update(alias.name for alias in node.names)
+            else:
+                declared.update(alias.name for alias in node.names)
         elif (
             isinstance(node, ast.Constant)
             and isinstance(node.value, str)
@@ -329,6 +330,14 @@ class AssistantDynamicImportGateTests(unittest.TestCase):
             f"pending entries no longer referenced dynamically: {stale}; "
             "delete them to keep the manifest accurate.",
         )
+
+
+def test_symbol_export_does_not_declare_a_module(tmp_path, monkeypatch):
+    facade = tmp_path / "features" / "foo" / "__init__.py"
+    facade.parent.mkdir(parents=True)
+    facade.write_text("from .api import service\nfrom . import routes\n")
+    monkeypatch.setattr(__name__ + ".ROOT", tmp_path)
+    assert _facade_declared_modules("foo") == {"api", "routes"}
 
 
 if __name__ == "__main__":  # pragma: no cover

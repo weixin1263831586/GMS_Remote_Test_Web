@@ -812,6 +812,9 @@ class DailyBriefService:
 
         started = time.monotonic()
         provider_submitted = False
+        receipt_heartbeat = asyncio.create_task(
+            self.ai_ledger.keep_alive(receipt["receipt_id"])
+        )
 
         def mark_provider_started() -> None:
             nonlocal provider_submitted
@@ -912,28 +915,21 @@ class DailyBriefService:
             record.error_type = "exception"
             self.repository.upsert_issue(record)
             raise
+        finally:
+            receipt_heartbeat.cancel()
+            await asyncio.gather(receipt_heartbeat, return_exceptions=True)
         record.finished_at = _now()
         record.duration_ms = int((time.monotonic() - started) * 1000)
         record.raw_response = outcome.raw_output
-        # Failure Identity（确定性指纹，见 failure_identity.py 模块文档）：suite/
-        # module/testcase 从 issue 主题 + hint 的 xTS 形状提取（全局审查 4.1：
-        # 不再退化成「主题文本签名」）；device serial 只作观察元数据（4.2：
-        # 不进指纹，否则同型号两台设备同一失败会被 serial 拆散、阻断跨设备
-        # Cluster）；SIMILAR_SYMPTOM 级别的候选合并留给 relation judge。
+        # Share the Issue→Case facts used by knowledge storage. A title or AI
+        # hint alone is not an assertion reason and cannot authorize clustering.
         try:
-            from .failure_identity import extract_test_identity, failure_identity
+            from .api import get_redmine_service_for_owner
+            from .daily_brief_case_fact import build_issue_failure_identity
 
-            subject_text = record.subject or f"#{issue_id}"
-            hint_text = str(config.get("analysis_hint") or "")
-            extracted = extract_test_identity(f"{subject_text} {hint_text}")
-            identity = failure_identity(
-                [{
-                    "module": extracted["module"],
-                    "name": extracted["testcase"],
-                    "reason": subject_text,
-                }],
-                suite=extracted["suite"],
-                android_version=str(entry.get("android_version") or ""),
+            stored = get_redmine_service_for_owner(self.owner_id).repository.get_issue(issue_id)
+            identity = build_issue_failure_identity(
+                stored or {**entry, "subject": record.subject},
                 device_serial=str(
                     entry.get("device_serial") or config.get("device_serial") or ""
                 ),

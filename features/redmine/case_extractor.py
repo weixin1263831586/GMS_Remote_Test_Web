@@ -196,9 +196,9 @@ class RedmineCaseExtractor:
     @classmethod
     def extract(cls, issue: dict[str, Any], *, failures: list | None = None, journals: list | None = None, attachments: list | None = None) -> dict[str, Any]:
         issue = issue or {}
-        failures = failures or issue.get("failures_json") or []
-        journals = journals or issue.get("journals_json") or []
-        attachments = attachments or issue.get("attachments_json") or []
+        attachments = decode_json_list(attachments or issue.get("attachments_json"))
+        failures = cls.failure_rows(issue, failures=failures, attachments=attachments)
+        journals = decode_json_list(journals or issue.get("journals_json"))
 
         subject = str(issue.get("subject") or "")
         description = str(issue.get("description") or "")
@@ -284,6 +284,7 @@ class RedmineCaseExtractor:
             "product_form": cls._detect_product_form(full_text),
             "region": region,
             "error_signature": error_signature,
+            "failures": failures,
             "problem_summary": problem_summary,
             "symptoms": symptoms,
             "root_cause": root_cause,
@@ -296,6 +297,23 @@ class RedmineCaseExtractor:
             "confidence": confidence,
             "source_quality": source_quality,
         }
+
+    @staticmethod
+    def failure_rows(issue: dict[str, Any], *, failures=None, attachments=None) -> list[dict[str, Any]]:
+        """Canonical failure rows from the issue and parsed report attachments."""
+        rows = list(decode_json_list(failures or issue.get("failures_json")))
+        for attachment in decode_json_list(attachments or issue.get("attachments_json")):
+            if isinstance(attachment, dict):
+                analysis = decode_json_obj(attachment.get("analysis_json"))
+                rows.extend(decode_json_list(analysis.get("failures")))
+        return [
+            {
+                **row,
+                "name": str(row.get("name") or row.get("testcase") or ""),
+                "reason": str(row.get("reason") or row.get("message") or ""),
+            }
+            for row in rows if isinstance(row, dict)
+        ]
 
     # Detection rules
 
@@ -354,7 +372,7 @@ class RedmineCaseExtractor:
         for item in attachments or []:
             if not isinstance(item, dict):
                 continue
-            analysis = item.get("analysis_json") or {}
+            analysis = decode_json_obj(item.get("analysis_json"))
             for failure in analysis.get("failures") or []:
                 if isinstance(failure, dict):
                     chunks.append(str(failure.get("reason") or ""))
@@ -396,7 +414,7 @@ class RedmineCaseExtractor:
         for item in (attachments or [])[:20]:
             if not isinstance(item, dict):
                 continue
-            analysis = item.get("analysis_json") or {}
+            analysis = decode_json_obj(item.get("analysis_json"))
             details = analysis.get("details") or {}
             failures = analysis.get("failures") or []
             excerpt = (analysis.get("text_excerpt") or details.get("ocr_text") or "")[:400]

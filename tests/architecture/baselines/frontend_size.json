@@ -15,7 +15,7 @@
     "features/automation/ui/page.js": 89446,
     "features/cluster/ui/page.js": 78038,
     "features/gerrit/ui/page.js": 57023,
-    "features/redmine/ui/page.js": 244380
+    "features/redmine/ui/page.js": 51200
   },
   "waivers": {
     "features/automation/ui/page.js": {
@@ -28,10 +28,6 @@
     },
     "features/gerrit/ui/page.js": {
       "reason": "评审 P2:features/*/ui 此前不在扫描范围,首次登记现状作为 shrink-only 起点;后续按域拆分回落",
-      "expires": "2027-01-31"
-    },
-    "features/redmine/ui/page.js": {
-      "reason": "评审 P2:244KB 页面单体,首次登记现状作为 shrink-only 起点;优先拆 daily-brief/* 子模块回落;+511: GFM 表格转义管道符\\|与行列不齐对齐修复",
       "expires": "2027-01-31"
     },
     "web/static/js/navigation.js": {

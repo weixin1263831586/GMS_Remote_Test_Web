@@ -16,7 +16,8 @@ systemd timer 每分钟检查一次（Persistent=true；按 owner trigger_time �
       → KkAgentRedmineAnalyzer（headless，--output-format stream-json，无 yolo）
       → Schema Gate + Runtime Evidence Gate
       → 任一门禁失败时 --resume 精确 session，限次修复
-      → ai_ledger.finish()/mark_unknown()（completed/failed/unknown 终态收敛）
+      → ai_ledger.touch()（预采集及运行期间每分钟续租，无输出也保持活跃）
+      → ai_ledger.finish()/fail_early()/mark_unknown()（确定结果/提交前失败/提交后不确定）
       → 聚合报告 + Markdown → daily_brief.sqlite3（per-owner）
 Web 手动触发 → SQLite 持久 job 队列 → 独立 daily_brief_worker
       → 同一套 DailyBriefService / KkAgentRedmineAnalyzer
@@ -27,12 +28,17 @@ Web 手动触发 → SQLite 持久 job 队列 → 独立 daily_brief_worker
 
 关键文件：
 
+前端按统计、工单、知识库、设置、单号诊断和实时会话拆分，`ui/page.js`
+只负责最后的初始化。JS/CSS 通过显式白名单的 `/redmine-agent/assets/{asset_name}`
+加载；旧 URL 保留兼容，内部资源不进入 OpenAPI。详见
+[ADR 0015](architecture/adr/0015-ui-assets-and-domain-modules.md)。
+
 | 文件 | 职责 |
 | --- | --- |
 | `features/redmine/daily_brief_models.py` | Run/Issue 数据模型、schema 校验、优先级规则 |
 | `features/redmine/daily_brief_repository.py` | per-owner SQLite（runs/issues，幂等唯一索引） |
 | `features/redmine/ai_execution_ledger.py` | AI 逻辑调用账本（receipt：pending→received→completed/failed/unknown，防重复发送） |
-| `features/redmine/failure_identity.py` | 失败确定性身份（fingerprint/relation/cluster；同用例不同根因不合 Cluster） |
+| `features/redmine/failure_identity.py` | 失败确定性身份（共用 RedmineCaseExtractor 事实；clusterable 门禁；同用例不同根因不合 Cluster） |
 | `features/redmine/daily_brief_snapshot.py` | triage 快照（去重/bucket/fingerprint/delta） |
 | `features/redmine/daily_brief_service.py` | 编排：幂等 run、并发控制、失败隔离、聚合 |
 | `features/redmine/kkagent/` | stream-json 进程、轨迹、schema 与 runtime evidence gate、同会话修复 |

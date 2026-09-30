@@ -24,6 +24,21 @@ from typing import Any
 
 from .case_extractor import RedmineCaseExtractor
 from .daily_brief_models import DailyBriefIssue, DailyBriefRun
+from .failure_identity import failure_identity
+
+
+def build_issue_failure_identity(issue: dict[str, Any], *, device_serial: str = "") -> dict[str, Any]:
+    """Use the same Redmine facts as case storage, without AI/title error guesses."""
+    base = RedmineCaseExtractor.extract(issue)
+    rows = [dict(row, module=row.get("module") or base.get("module") or "")
+            for row in base["failures"]]
+    if not rows:
+        rows = [{"module": base.get("module"), "reason": base.get("error_signature")}]
+    return failure_identity(
+        rows, suite=base.get("certification_type", ""),
+        android_version=base.get("android_version", ""),
+        device_class=base.get("chip_platform", ""), device_serial=device_serial,
+    )
 
 
 def _first_line(text: Any, limit: int = 200) -> str:

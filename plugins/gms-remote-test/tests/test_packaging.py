@@ -85,6 +85,9 @@ def test_plugin_payload_matches_skill_source():
     for plugin_rel, source_file in pairs:
         plugin_file = PLUGIN_DIR / plugin_rel
         assert plugin_file.read_bytes() == source_file.read_bytes(), plugin_rel
+    for source_file in (RUNTIME_DIR / "cli").glob("*.sh"):
+        plugin_file = PLUGIN_DIR / "scripts" / "cli" / source_file.name
+        assert plugin_file.read_bytes() == source_file.read_bytes(), source_file.name
 
 
 def test_daily_triage_reference_matches_runtime_evidence_contract():

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from features.redmine.repository import RedmineAgentDB
+from tests.contract.snapshot_tools import read_page_scripts
 
 
 def _issue(issue_id, assigned_to_name, status_name="新建", closed_on="", journals=None):
@@ -956,7 +957,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             self.assertEqual(issues[0]["resolved_on"][:10], "2026-06-12")
 
     def test_redmine_week_trend_click_uses_iso_week_start(self):
-        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
+        source = read_page_scripts("features/redmine/ui/page.html")
         match = re.search(r"function utcDateText\(date\) \{.*?function trendLabelToDateRange\(granularity, label\) \{.*?\n\}", source, re.S)
         self.assertIsNotNone(match)
         script = match.group(0) + "\nconsole.log(JSON.stringify(trendLabelToDateRange('week', '2026-W24')));"
@@ -964,7 +965,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(output, '["2026-06-08","2026-06-15"]')
 
     def test_redmine_daily_trend_click_uses_next_day_as_exclusive_end(self):
-        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
+        source = read_page_scripts("features/redmine/ui/page.html")
         match = re.search(r"function utcDateText\(date\) \{.*?function trendLabelToDateRange\(granularity, label\) \{.*?\n\}", source, re.S)
         self.assertIsNotNone(match)
         script = match.group(0) + "\nconsole.log(JSON.stringify(trendLabelToDateRange('date', '2026-06-12')));"
@@ -977,7 +978,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         _inlineMd 的输入已 esc():javascript:/data: 等危险 scheme 渲染为
         href="#",合法 http(s) 与站内相对路径原样保留。
         """
-        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
+        source = read_page_scripts("features/redmine/ui/page.html")
         match = re.search(
             r"function esc\(s\) \{.*?\n\}(?=\nfunction)", source, re.S
         )
@@ -1022,7 +1023,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_redmine_markdown_link_renderer_keeps_label_escaped(self):
         """链接 label(已 esc)不再二次转义,url 再过 esc 防 attr 注出。"""
-        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
+        source = read_page_scripts("features/redmine/ui/page.html")
         match = re.search(r"function esc\(s\) \{.*?\n\}(?=\nfunction)", source, re.S)
         href_match = re.search(r"function sanitizeHref\(raw\) \{.*?\n\}", source, re.S)
         inline_match = re.search(r"function _inlineMd\(text\) \{.*?\n\}", source, re.S)
@@ -1038,7 +1039,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertNotIn('" onclick', output)
 
     def test_redmine_trend_detail_title_displays_inclusive_end_date(self):
-        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
+        source = read_page_scripts("features/redmine/ui/page.html")
         match = re.search(r"function utcDateText\(date\) \{.*?function displayTrendRange\(range\) \{.*?\n\}", source, re.S)
         self.assertIsNotNone(match)
         script = match.group(0) + "\nconsole.log(displayTrendRange(['2026-06-12', '2026-06-13']));"
@@ -1046,7 +1047,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(output, "2026-06-12 至 2026-06-12")
 
     def test_personal_trend_uses_meta_owner_names_when_selected_name_is_empty(self):
-        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
+        source = read_page_scripts("features/redmine/ui/page.html")
         match = re.search(r"function updateRedmineTrendNames\(selectedName, meta\) \{.*?\n\}", source, re.S)
         self.assertIsNotNone(match)
         script = (
@@ -1059,7 +1060,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(output, '["黄 超群","chaoqun.huang@rock-chips.com"]')
 
     def test_redmine_department_trend_binds_department_names_in_click_handler(self):
-        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
+        source = read_page_scripts("features/redmine/ui/page.html")
         match = re.search(r"function renderTrend\(title, items, keyName, chartKey, detailNames, detailProfileId\) \{.*?\n\}", source, re.S)
         self.assertIsNotNone(match)
         script = (
@@ -1075,12 +1076,12 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         self.assertEqual(output, "true")
 
     def test_redmine_department_trend_detail_uses_profile_id(self):
-        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
+        source = read_page_scripts("features/redmine/ui/page.html")
         self.assertIn("profile_id=' + encodeURIComponent(profileId)", source)
         self.assertIn("departmentProfileId)", source)
 
     def test_redmine_trend_detail_issue_number_links_to_redmine(self):
-        source = Path("features/redmine/ui/page.js").read_text(encoding="utf-8")
+        source = read_page_scripts("features/redmine/ui/page.html")
         self.assertIn("redmineIssueUrl(issueId)", source)
         self.assertIn('target="_blank" rel="noopener"', source)
         self.assertIn("'#' + id", source)

@@ -31,8 +31,8 @@ Daily Brief 已有 per-attempt 的执行轨迹审计
   prompt 构造失败）走 pending → failed。``unknown`` 只表示「请求可能
   已被 provider 接收/执行但结果未知」；提交前异常不是 unknown（问题 1：
   receipt 建得太早时 catch 一律 mark_unknown 在语义上不准）。
-- pending/received 的 receipt 有租约上限（``RECEIPT_LEASE_SECONDS``）：
-  超时视为持有进程已死，置为 unknown 并允许新建 receipt，避免僵尸
+- pending/received 的 receipt 通过 ``touch`` 每分钟续租（静默分析也续租）；
+  连续 ``RECEIPT_LEASE_SECONDS`` 无续租时置为 unknown 并允许新建 receipt，避免僵尸
   pending 永久阻塞重试。
 - unknown 是**终态**：不允许改写，只允许新建 receipt（携带递增 attempt）。
   "诊断不设预算"（ADR 0013 相关决策）不受影响——本账本是操作安全层，
@@ -44,6 +44,7 @@ Daily Brief 已有 per-attempt 的执行轨迹审计
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import hashlib
 import json
@@ -59,8 +60,9 @@ from .users import _now
 
 logger = logging.getLogger(__name__)
 
-#: receipt 活跃租约：超过该时长的 pending/received 视为持有进程已死亡。
+#: receipt 活跃租约：连续超过该时长无续租的 pending/received 视为失活。
 RECEIPT_LEASE_SECONDS = 4 * 3600
+RECEIPT_HEARTBEAT_SECONDS = 60
 
 STATUS_PENDING = "pending"
 STATUS_RECEIVED = "received"
@@ -252,6 +254,27 @@ class AIExecutionLedger:
             result["duplicate"] = False
             return result
 
+    def touch(self, receipt_id: str) -> bool:
+        """Refresh only an active receipt; terminal receipts remain immutable."""
+        with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute(
+                "UPDATE redmine_ai_execution_receipts SET updated_at=? "
+                "WHERE receipt_id=? AND status IN (?, ?)",
+                (_now(), receipt_id, *_ACTIVE_STATUSES),
+            )
+            return cursor.rowcount == 1
+
+    async def keep_alive(self, receipt_id: str) -> None:
+        """Renew while the owning analysis task is alive, including quiet streams."""
+        while True:
+            await asyncio.sleep(RECEIPT_HEARTBEAT_SECONDS)
+            try:
+                if not await asyncio.to_thread(self.touch, receipt_id):
+                    return
+            except Exception:
+                logger.exception("receipt heartbeat failed for %s", receipt_id)
+
     def mark_received(
         self, receipt_id: str, *, session_id: str = "", provider_request_id: str = ""
     ) -> None:
@@ -391,4 +414,3 @@ class AIExecutionLedger:
             [*columns.values(), receipt_id, *allowed_from],
         )
         return cursor.rowcount == 1
-

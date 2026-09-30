@@ -32,6 +32,9 @@ class SkillUpdateEnvTests(unittest.TestCase):
             scripts_dir.mkdir()
             helper_copy = scripts_dir / "gms-remote-test.sh"
             helper_copy.write_bytes(HELPER.read_bytes())
+            import shutil
+
+            shutil.copytree(HELPER.parent / "cli", scripts_dir / "cli")
             # Stub gms-agent（与真实入口一致：#!/usr/bin/env python3）：
             # 记录收到的关键环境变量后成功退出。
             env_dump = Path(temporary) / "agent-env.json"

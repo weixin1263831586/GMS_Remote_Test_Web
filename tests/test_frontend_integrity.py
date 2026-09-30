@@ -2,6 +2,8 @@ import re
 import unittest
 from pathlib import Path
 
+from tests.contract.snapshot_tools import read_page_scripts
+
 
 # 事件名与 tests/test_inline_handler_ratchet.py 的 INLINE_HANDLER_RE 保持
 # 一致（act-bridge 支持的全集，含 = 两侧空白），防止新事件名（如
@@ -52,6 +54,8 @@ BUILTINS = {
 
 
 def read_text(path: str) -> str:
+    if path == "features/redmine/ui/page.js":
+        return read_page_scripts("features/redmine/ui/page.html")
     return Path(path).read_text(encoding="utf-8", errors="ignore")
 
 
