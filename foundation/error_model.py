@@ -169,18 +169,30 @@ def record_internal_error(
     logger: _ErrorLogger,
     action: str,
     log_context: str,
-    *context_args: Any,
+    *,
+    context: dict[str, object] | None = None,
 ) -> str:
     """生成安全对外文案，并把同一个 request_id 写入异常日志。
 
     必须在 ``except`` 块内调用，以便 ``exc_info=True`` 记录当前 traceback。
-    ``log_context`` 只描述代码位置；异常原文由 traceback 保存，不进入响应。
+    ``log_context`` 只描述代码位置，必须是普通字面文本：不要在里面留
+    ``%s`` 之类的 logging 占位符（占位符错配曾导致 "not all arguments
+    converted" 或字面 ``%s`` 残留进日志）；需要附加定位信息时用结构化
+    ``context`` 字典，按 ``key=value`` 追加在上下文之后。异常原文由
+    traceback 保存，不进入响应。
+
+        message = record_internal_error(
+            logger,
+            "SSH 登录校验",
+            "SSH credential check failed",
+            context={"client_ip": client_ip},
+        )
     """
     message = internal_error_message(action)
-    # 直接拼接而不是 %-format：占位符数量与 *context_args 长度不再需要
-    # 人工对齐，错配时 logging 抛 "not all arguments converted" 的老问题
-    # 从机制上消除。
-    parts = [str(part) for part in (log_context, *context_args) if part]
-    parts.append(message)
-    logger.error(": ".join(parts), exc_info=True)
+    # 单一固定格式串 + 预渲染 context：占位符数量永远匹配，调用方无法
+    # 再制造 logging "not all arguments converted" 或字面 %s 残留。
+    suffix = ""
+    if context:
+        suffix = " " + " ".join(f"{key}={value}" for key, value in context.items())
+    logger.error("%s%s: %s", log_context, suffix, message, exc_info=True)
     return message

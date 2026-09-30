@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -108,6 +110,70 @@ class SnapshotAuthorTests(unittest.TestCase):
 
 
 class SnapshotScopingTests(unittest.TestCase):
+    def test_snapshot_rechecks_pending_candidate_and_excludes_reassigned_issue(self):
+        """按负责人批量拉取看不到已转派工单，须用单号详情纠正旧镜像。"""
+        from features.redmine.repository import RedmineAgentDB
+
+        old_issue = {
+            "issue_id": 651998,
+            "subject": "GTS fail",
+            "status_name": "Confirmed",
+            "priority_name": "Normal",
+            "assigned_to_name": "黄 超群",
+            "updated_on": "2026-09-17 13:05:56",
+            "journals_json": [{
+                "user": "客户",
+                "created_on": "2026-09-17 13:05:56",
+                "notes": "请继续处理",
+            }],
+        }
+
+        class _LiveClient(_FakeClient):
+            async def fetch_issue_metadata_snapshot(self, issue_id):
+                self.asserted_issue_id = issue_id
+                return {
+                    **old_issue,
+                    "assigned_to_name": "李 煌",
+                    "updated_on": "2026-09-30 08:00:00",
+                }
+
+        class _LiveAgent(_FakeAgent):
+            def _make_client(self):
+                return _LiveClient(self._user)
+
+        user = SimpleNamespace(
+            id=8912,
+            firstname="超群",
+            lastname="黄",
+            login="hcq",
+            mail="chaoqun.huang@rock-chips.com",
+        )
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repository = RedmineAgentDB(
+                db_path=root / "redmine.sqlite3", docs_dir=root / "docs"
+            )
+            repository.upsert_issue(old_issue)
+            service = SimpleNamespace(
+                agent=_LiveAgent(user, {}), repository=repository,
+            )
+            with patch.object(
+                snapshot_mod, "get_redmine_service_for_owner", lambda owner: service
+            ), patch.object(
+                snapshot_mod, "load_redmine_user_map_for_owner", lambda owner: []
+            ), patch.object(
+                snapshot_mod, "_sync_owner_issue_snapshots", _async(True)
+            ):
+                snapshot = asyncio.run(
+                    build_daily_triage_snapshot("owner-a", refresh=True)
+                )
+
+            self.assertEqual(snapshot["issues"], [])
+            self.assertEqual(snapshot["counts"]["waiting_my_reply"], 0)
+            self.assertEqual(
+                repository.get_issue(651998)["assigned_to_name"], "李 煌"
+            )
+
     def test_snapshot_uses_single_owner_names_never_none(self):
         captured: dict = {}
 

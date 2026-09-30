@@ -1,14 +1,15 @@
-"""Controller -> worker_agent import boundary gate (AGENTS.md hard rule).
+"""Controller <-> worker_agent import boundary gate (AGENTS.md hard rule).
 
 ``features/`` must not reach into ``worker_agent/`` implementation except for
 the audited same-host bridge surfaces listed below (ADR 0004: Controller and
 Worker interact across the SSH execution boundary; these modules are the
-documented same-host exceptions).  New imports of ``worker_agent`` from
-``features/`` fail here until the allowlist is extended deliberately in
-review — shrinking the allowlist (sinking shared logic into ``foundation/``)
-is the intended direction.
+documented same-host exceptions).  The allowlist is two-dimensional and
+shrink-only: each features/ file names the *exact* ``worker_agent.*`` modules
+it may import — adding another worker module to an already-allowlisted file
+still fails here until the set is extended deliberately in review.  Shrinking
+(sinking shared logic into ``foundation/``) is the intended direction.
 
-The reverse direction is also snapshotted: ``worker_agent`` must not import
+The reverse direction is also exact: ``worker_agent`` must not import
 ``features/`` except for the shared device-action spec contract, which is a
 pure specification module without feature-internal dependencies.
 """
@@ -20,34 +21,67 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# Exact allowlist of features/ files that may import worker_agent modules.
-ALLOWED_FEATURES_IMPORTING_WORKER = frozenset(
-    {
-        # Same-host bridge: the documented exception in AGENTS.md.
-        "features/cluster/local_bridge.py",
-        # Cluster suite transfer/execution surfaces (worker-role execution).
-        "features/cluster/api.py",
-        "features/cluster/deployment_api.py",
-        "features/cluster/device_actions_api.py",
-        "features/cluster/transfer_ingest_api.py",
-        "features/cluster/transfers_api.py",
-        # adb proxy + fastboot workflow execution surfaces.
-        "features/devices/adb_proxy_security.py",
-        "features/devices/adb_proxy_service.py",
-        "features/devices/api.py",
-        "features/devices/bootloader_api.py",
-        "features/firmware/api_helpers.py",
-        "features/firmware/gsi_transport.py",
-    }
-)
+# features/ file -> exact worker_agent modules it may import.  Any worker
+# module outside a file's set is a violation even when the file itself is
+# allowlisted (prevents silent boundary creep inside trusted files).
+ALLOWED_FEATURE_WORKER_IMPORTS: dict[str, set[str]] = {
+    # Same-host bridge: the documented exception in AGENTS.md.
+    "features/cluster/local_bridge.py": {
+        "worker_agent.adb_proxy",
+        "worker_agent.inventory",
+        "worker_agent.process_inventory",
+        "worker_agent.suite_actions",
+        "worker_agent.suite_detection",
+    },
+    # Cluster suite transfer/execution surfaces (worker-role execution).
+    "features/cluster/api.py": {
+        "worker_agent.adb_proxy",
+        "worker_agent.config",
+        "worker_agent.device_actions",
+        "worker_agent.inventory",
+    },
+    "features/cluster/deployment_api.py": {
+        "worker_agent.process_inventory",
+    },
+    "features/cluster/device_actions_api.py": {
+        "worker_agent.inventory",
+    },
+    "features/cluster/transfer_ingest_api.py": {
+        "worker_agent.android_inspection",
+    },
+    "features/cluster/transfers_api.py": {
+        "worker_agent.config",
+        "worker_agent.inventory",
+    },
+    # adb proxy + fastboot workflow execution surfaces.
+    "features/devices/adb_proxy_security.py": {
+        "worker_agent.adb_proxy",
+    },
+    "features/devices/adb_proxy_service.py": {
+        "worker_agent.adb_proxy",
+    },
+    "features/devices/api.py": {
+        "worker_agent.adb_proxy",
+    },
+    "features/devices/bootloader_api.py": {
+        "worker_agent.adb_proxy",
+        "worker_agent.fastboot_workflow",
+    },
+    "features/firmware/api_helpers.py": {
+        "worker_agent.adb_proxy",
+    },
+    "features/firmware/gsi_transport.py": {
+        "worker_agent.fastboot_workflow",
+    },
+}
 
-# worker_agent files allowed to import features/ modules.  Only the shared
-# device-action spec contract (a pure spec module) is exempt today.
-ALLOWED_WORKER_IMPORTING_FEATURES = frozenset(
-    {
-        "worker_agent/device_actions.py",
-    }
-)
+# worker_agent file -> exact features/ modules it may import.  Only the
+# shared device-action spec contract (a pure spec module) is exempt today.
+ALLOWED_WORKER_FEATURE_IMPORTS: dict[str, set[str]] = {
+    "worker_agent/device_actions.py": {
+        "features.cluster.device_action_spec",
+    },
+}
 
 
 def imported_modules(path: Path) -> set[str]:
@@ -69,40 +103,93 @@ def feature_modules(modules: set[str]) -> set[str]:
     return {name for name in modules if name.split(".")[0] == "features"}
 
 
+def _iter_source_files(package: str):
+    for path in (ROOT / package).rglob("*.py"):
+        relative = path.relative_to(ROOT).as_posix()
+        if "/tests/" in relative or "__pycache__" in relative:
+            continue
+        yield relative, path
+
+
 class ControllerWorkerBoundaryTests(unittest.TestCase):
     def test_features_import_worker_agent_only_via_allowlist(self):
         offenders = []
-        for path in (ROOT / "features").rglob("*.py"):
-            relative = path.relative_to(ROOT).as_posix()
-            if "/tests/" in relative or "__pycache__" in relative:
+        for relative, path in _iter_source_files("features"):
+            imported = worker_modules(imported_modules(path))
+            if not imported:
                 continue
-            if not worker_modules(imported_modules(path)):
+            allowed = ALLOWED_FEATURE_WORKER_IMPORTS.get(relative)
+            if allowed is None:
+                offenders.append(
+                    f"{relative}: file not allowlisted to import worker_agent"
+                )
                 continue
-            if relative not in ALLOWED_FEATURES_IMPORTING_WORKER:
-                offenders.append(relative)
+            unexpected = imported - allowed
+            if unexpected:
+                offenders.append(
+                    f"{relative}: worker modules outside the exact allowlist: "
+                    f"{sorted(unexpected)}"
+                )
         self.assertEqual(
             offenders,
             [],
-            "features/ must not import worker_agent/; extend the allowlist in "
+            "features/ must import only its exact allowlisted worker_agent "
+            "modules; extend ALLOWED_FEATURE_WORKER_IMPORTS in "
             "tests/architecture/test_controller_worker_boundary.py only after "
             "review (preferred: sink shared logic into foundation/).",
         )
 
     def test_worker_agent_imports_features_only_via_allowlist(self):
         offenders = []
-        for path in (ROOT / "worker_agent").rglob("*.py"):
-            relative = path.relative_to(ROOT).as_posix()
-            if "/tests/" in relative or "__pycache__" in relative:
+        for relative, path in _iter_source_files("worker_agent"):
+            imported = feature_modules(imported_modules(path))
+            if not imported:
                 continue
-            if not feature_modules(imported_modules(path)):
+            allowed = ALLOWED_WORKER_FEATURE_IMPORTS.get(relative)
+            if allowed is None:
+                offenders.append(
+                    f"{relative}: file not allowlisted to import features"
+                )
                 continue
-            if relative not in ALLOWED_WORKER_IMPORTING_FEATURES:
-                offenders.append(relative)
+            unexpected = imported - allowed
+            if unexpected:
+                offenders.append(
+                    f"{relative}: features modules outside the exact "
+                    f"allowlist: {sorted(unexpected)}"
+                )
         self.assertEqual(
             offenders,
             [],
-            "worker_agent/ must not import features/; the only sanctioned "
-            "dependency is the shared device-action spec contract.",
+            "worker_agent/ must import only its exact allowlisted features "
+            "modules; the only sanctioned dependency today is the shared "
+            "device-action spec contract.",
+        )
+
+    def test_allowlist_entries_point_at_real_dependencies(self):
+        # Ratchet hygiene: allowlist entries that no longer match a real
+        # import must be removed, so the gate shrinks with the code.
+        stale = []
+        for relative, allowed in ALLOWED_FEATURE_WORKER_IMPORTS.items():
+            path = ROOT / relative
+            if not path.exists():
+                stale.append(f"{relative}: file missing")
+                continue
+            unused = allowed - worker_modules(imported_modules(path))
+            if unused:
+                stale.append(f"{relative}: unused entries {sorted(unused)}")
+        for relative, allowed in ALLOWED_WORKER_FEATURE_IMPORTS.items():
+            path = ROOT / relative
+            if not path.exists():
+                stale.append(f"{relative}: file missing")
+                continue
+            unused = allowed - feature_modules(imported_modules(path))
+            if unused:
+                stale.append(f"{relative}: unused entries {sorted(unused)}")
+        self.assertEqual(
+            stale,
+            [],
+            "allowlist entries must match real imports; delete stale entries "
+            "to keep the boundary shrink-only.",
         )
 
 

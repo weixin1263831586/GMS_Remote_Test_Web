@@ -115,15 +115,51 @@ class HandlerIntegrationTests(unittest.TestCase):
         message = record_internal_error(
             logger,
             '烧写固件',
-            'firmware burn failed for %s',
-            'device-1',
+            'firmware burn failed',
+            context={'serial': 'device-1'},
         )
 
         logger.error.assert_called_once()
         args, kwargs = logger.error.call_args
-        self.assertIn(message, args)
-        self.assertIn('device-1', args)
+        # 固定格式的 %-format：message / context 只作为参数，不拼进格式串，
+        # 占位符数量恒为 3，杜绝字面 %s 残留与 "not all arguments converted"。
+        self.assertEqual(args[0], '%s%s: %s')
+        self.assertEqual(args[1], 'firmware burn failed')
+        self.assertEqual(args[2], ' serial=device-1')
+        self.assertEqual(args[3], message)
         self.assertTrue(kwargs['exc_info'])
+
+    def test_record_internal_error_without_context_has_empty_suffix(self):
+        from foundation.error_model import record_internal_error
+
+        logger = Mock()
+        message = record_internal_error(logger, '烧写固件', 'firmware burn error')
+
+        logger.error.assert_called_once()
+        args, kwargs = logger.error.call_args
+        self.assertEqual(args[1], 'firmware burn error')
+        self.assertEqual(args[2], '')
+        self.assertEqual(args[3], message)
+        self.assertTrue(kwargs['exc_info'])
+
+    def test_record_internal_error_placeholder_mismatch_cannot_crash(self):
+        from foundation.error_model import record_internal_error
+
+        logger = Mock()
+        # 旧契约下占位符与参数错配会让 logging 抛 "not all arguments
+        # converted"；新契约格式串固定，任何调用都恰好 3 个占位参数。
+        record_internal_error(
+            logger,
+            'SSH 登录校验',
+            'SSH credential check failed',
+            context={'client_ip': '172.16.0.9'},
+        )
+
+        args, _ = logger.error.call_args
+        self.assertEqual(args[0].count('%s'), 3)
+        # 按 logging 的真实渲染方式展开，保证 logging 层永不报占位符错配。
+        rendered = args[0] % tuple(args[1:4])
+        self.assertIn('client_ip=172.16.0.9', rendered)
 
 
 if __name__ == '__main__':

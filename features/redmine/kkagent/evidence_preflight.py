@@ -47,6 +47,12 @@ NETWORK_RETRY_BACKOFF_SECONDS = (1.0, 3.0)
 # 保证"点击停止 → 进程终止"延迟在全部阶段一致。
 CANCEL_POLL_SECONDS = 0.25
 
+# MCP 名称与历史 standalone CLI 名称并非全部一一对应。集中维护显式映射，
+# 避免机械替换生成不存在的 gms-rt-redmine-artifact-read。
+_CLI_COMMAND_OVERRIDES = {
+    "gms_rt_redmine_artifact_read": "gms-rt-artifact-read",
+}
+
 
 class PreflightCancelledError(Exception):
     """用户在 preflight CLI 运行中请求停止（区别于超时/网络失败）。"""
@@ -180,7 +186,11 @@ async def _collect(
     （``started``）与结束（``finished``）时回调，供实时进度时间线使用；
     回调异常不影响 preflight 本身。
     """
-    command = _gms_command(tool_name.replace("gms_rt_", "gms-rt-").replace("_", "-"), arguments)
+    cli_name = _CLI_COMMAND_OVERRIDES.get(
+        tool_name,
+        tool_name.replace("gms_rt_", "gms-rt-").replace("_", "-"),
+    )
+    command = _gms_command(cli_name, arguments)
     if command is None:
         return _summary_trace(
             tool_name=tool_name, tool_input=tool_input, status="failed",
@@ -236,13 +246,20 @@ async def _collect(
         or payload.get("ok", payload.get("success", True)) is not False
     )
     data = payload.get("data", payload) if isinstance(payload, dict) else {}
+    payload_error = ""
+    if isinstance(payload, dict):
+        payload_error = str(
+            payload.get("error")
+            or (data.get("error") if isinstance(data, dict) else "")
+            or ""
+        ).strip()
     snapshot_id = str(data.get("snapshot_id") or "") if isinstance(data, dict) else ""
     trace = _summary_trace(
         tool_name=tool_name,
         tool_input=tool_input,
         status="succeeded" if success else "failed",
         output=output,
-        error=error or f"GMS CLI exited with code {exit_code}",
+        error=error or payload_error or f"GMS CLI exited with code {exit_code}",
         evidence_issue_ids=evidence_issue_ids,
         snapshot_ids=[snapshot_id] if snapshot_id else [],
         failure_kind=(
@@ -330,6 +347,28 @@ async def collect_deep_analysis_evidence(
                 attachments.all_artifact_ids,
             ) = _attachment_manifest(data)
         result.traces.extend([journals, attachments])
+        # 文本附件是硬门禁。由 Controller 对 manifest 中每个 ready/partial
+        # 文本至少读取首个窗口，既保证覆盖，又避免模型因上下文/工具选择漏
+        # 读后再烧修复轮。大文件的后续定向 search/read 仍交给模型。
+        for artifact_id in attachments.text_artifact_ids:
+            if should_cancel is not None and should_cancel():
+                break
+            artifact, _ = await _collect(
+                tool_name="gms_rt_redmine_artifact_read",
+                arguments=[
+                    artifact_id, "--offset", "0", "--limit", "4096",
+                    "--json", "--non-interactive",
+                ],
+                tool_input={
+                    "artifact_id": artifact_id, "offset": 0, "limit": 4096,
+                },
+                env_extra=env_extra,
+                evidence_issue_ids=[issue_id],
+                should_cancel=should_cancel,
+                on_tool_event=on_tool_event,
+            )
+            artifact.all_artifact_ids = [artifact_id]
+            result.traces.append(artifact)
     devices = (
         [item.strip() for item in str(device_serial or "").split(",") if item.strip()]
         if include_device else []

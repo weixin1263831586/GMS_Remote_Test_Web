@@ -82,6 +82,22 @@ class SessionTranscriptTests(unittest.TestCase):
         self.assertEqual(orphan_result["kind"], "tool_result")
         self.assertTrue(orphan_result["is_error"])
 
+    def test_source_search_zero_hits_is_visible_as_invalid_evidence(self):
+        turn = {"blocks": [{
+            "kind": "tool_use", "tool_call_id": "sdk-1",
+            "tool_name": "gms_rt_sdk_search", "tool_input": "{}",
+        }]}
+        results = [{
+            "kind": "tool_result", "tool_call_id": "sdk-1",
+            "is_error": False, "output": '{"total": 0}',
+            "raw_output": '{"total": 0}',
+        }]
+        self.assertEqual(session_module._attach_tool_results(turn, results, "now"), [])
+        evidence = turn["blocks"][0]["result"]["evidence"]
+        self.assertFalse(evidence["valid"])
+        self.assertEqual(evidence["result_count"], 0)
+        self.assertNotIn("raw_output", results[0])
+
     def test_pagination_is_stable_across_turns(self):
         with mock.patch.object(
             session_module,

@@ -55,18 +55,24 @@ function renderReportSystemBackgroundPanel(backgroundResults) {
             item.last_verified ? `验证于: ${item.last_verified}` : '',
         ].filter(Boolean).join(' | ');
         const anchors = Array.isArray(item.source_anchors) ? item.source_anchors : [];
-        // Wiki→codesearch 串联验证结论（内嵌在每条命中上）：
-        // verified: true=本地源码树已找到对应文件（绿）；
-        // false=codesearch 未命中（红）；null/无字段=验证器不可用（灰）。
+        // Wiki→codesearch 串联验证结论（内嵌在每条命中上，ADR 0014）。
+        // 消费 evidence_level 封闭三态（后端唯一语义标签，见
+        // anchor_verification.py——后端从不产出 verified 字段）：
+        // path_matched=本地源码树找到同路径文件（绿）；
+        // path_missing=codesearch 可用但未命中（红）；
+        // unknown/无字段=验证器不可用或预算耗尽（灰）。
         const verifications = Array.isArray(item.anchor_verifications) ? item.anchor_verifications : [];
-        const verifyByPath = new Map();
-        verifications.forEach(v => { if (v && v.anchor) verifyByPath.set(v.anchor.path || '', v); });
+        // 回挂键与后端 (repo, path) 复合键一致：同 path 异 repo 不交叉绑定。
+        const verifyByKey = new Map();
+        verifications.forEach(v => {
+            if (v && v.anchor) verifyByKey.set(`${v.anchor.repo || ''}/${v.anchor.path || ''}`, v);
+        });
         const anchorHtml = anchors.length ? `
                 <div class="dx-list-meta">锚点: ${anchors.map(a => {
-                    const v = verifyByPath.get(a.path || '');
-                    const badge = v && v.verified === true
-                        ? '<span style="color:var(--success-color)">✔ 已在源码树验证</span>'
-                        : (v && v.verified === false
+                    const v = verifyByKey.get(`${a.repo || ''}/${a.path || ''}`);
+                    const badge = v && v.evidence_level === 'path_matched'
+                        ? '<span style="color:var(--success-color)">✔ 已在源码树找到同路径文件</span>'
+                        : (v && v.evidence_level === 'path_missing'
                             ? '<span style="color:var(--danger-color)">✘ 源码树未命中</span>'
                             : '<span style="color:var(--text-secondary)">◌ 未验证</span>');
                     const label = [a.repo, a.path].filter(Boolean).join('/') || a.url || '';

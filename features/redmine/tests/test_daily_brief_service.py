@@ -143,6 +143,16 @@ class RunLifecycleTests(unittest.TestCase):
         preflight = patch_preflight_ok()
         preflight.start()
         self.addCleanup(preflight.stop)
+        owner_revalidation = patch(
+            "features.redmine.daily_brief_service.revalidate_issue_pending_for_owner",
+            AsyncMock(return_value={
+                "pending": True,
+                "assigned_to_name": "张三",
+                "status_name": "New",
+            }),
+        )
+        owner_revalidation.start()
+        self.addCleanup(owner_revalidation.stop)
         evidence_preflight = patch(
             "features.redmine.daily_brief_service.collect_deep_analysis_evidence",
             AsyncMock(return_value=EvidencePreflight()),
@@ -300,6 +310,12 @@ class RunLifecycleTests(unittest.TestCase):
         by_id = {i.issue_id: i for i in issues}
         self.assertEqual(by_id[101].status, "completed")
         self.assertEqual(by_id[101].result["problem_summary"], "summary")
+        self.assertEqual(
+            by_id[101].result["report_metadata"]["source"], "redmine_live"
+        )
+        self.assertEqual(
+            by_id[101].result["report_metadata"]["assigned_to_name"], "张三"
+        )
         self.assertEqual(by_id[102].status, "failed")
         self.assertEqual(by_id[102].error_type, "kkagent_error")
         self.assertEqual(run.report_json["counts"]["completed"], 1)
@@ -307,6 +323,42 @@ class RunLifecycleTests(unittest.TestCase):
         self.assertNotIn("### 详细分析报告", run.report_markdown)
         self.assertNotIn("## 一、问题概况", run.report_markdown)
         self.assertIn("工单详情", run.report_markdown)
+
+    def test_successful_ai_result_is_not_completed_after_owner_reassignment(self):
+        started = self.service.start_run("nightly")
+        run_id = started["run_id"]
+        snapshot = dict(SNAPSHOT)
+        snapshot["issues"] = [dict(SNAPSHOT["issues"][0])]
+        snapshot["counts"] = {
+            "waiting_my_reply": 1, "no_reply_3_days": 0, "total": 1,
+        }
+
+        async def fake_analyze(_entry):
+            return KkAgentAnalysisResult(
+                ok=True, result=dict(VALID), raw_output="{}"
+            )
+
+        import asyncio
+        with patch.object(
+            self.service, "build_triage", AsyncMock(return_value=snapshot)
+        ), patch.object(
+            self.service, "_build_analyzer"
+        ) as builder, patch(
+            "features.redmine.daily_brief_service.revalidate_issue_pending_for_owner",
+            AsyncMock(return_value={
+                "pending": False,
+                "assigned_to_name": "李 煌",
+                "status_name": "Confirmed",
+            }),
+        ):
+            builder.return_value.analyze = fake_analyze
+            asyncio.run(self.service.execute_run(run_id))
+
+        issue = self.service.repository.get_issue(run_id, 101)
+        self.assertEqual(issue.status, "stale")
+        self.assertEqual(issue.error_type, "no_longer_pending")
+        self.assertIn("李 煌", issue.error)
+        self.assertNotEqual(issue.status, "completed")
 
     def test_execute_run_all_failed_marks_failed(self):
         started = self.service.start_run("manual")
@@ -664,6 +716,16 @@ class FrozenSnapshotTests(unittest.TestCase):
         preflight = patch_preflight_ok()
         preflight.start()
         self.addCleanup(preflight.stop)
+        owner_revalidation = patch(
+            "features.redmine.daily_brief_service.revalidate_issue_pending_for_owner",
+            AsyncMock(return_value={
+                "pending": True,
+                "assigned_to_name": "张三",
+                "status_name": "New",
+            }),
+        )
+        owner_revalidation.start()
+        self.addCleanup(owner_revalidation.stop)
 
     def _execute_failed_run(self, service) -> str:
         from unittest.mock import AsyncMock

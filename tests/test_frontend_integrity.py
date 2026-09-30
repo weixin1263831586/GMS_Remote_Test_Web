@@ -108,6 +108,22 @@ def inline_handler_calls(text: str) -> list[tuple[str, str]]:
 
 
 class FrontendIntegrityTests(unittest.TestCase):
+    def test_anchor_badges_consume_evidence_level_not_verified(self):
+        """ADR 0014 锚点徽标消费后端真实产出的 evidence_level 三态。
+
+        回归钉：后端 anchor_verification 从不产出 ``verified`` 键（单测
+        assertNotIn 钉死），徽标读错字段名会让三态在唯一消费 UI 上全部
+        退化为灰色"未验证"且测试不可见（全局审查 P0）。
+        """
+        page = read_text("web/static/js/pages/report-analysis-diagnosis.js")
+        self.assertNotIn("v.verified", page)
+        self.assertIn("evidence_level", page)
+        self.assertIn("path_matched", page)
+        self.assertIn("path_missing", page)
+        # 回挂键必须与后端 (repo, path) 复合键一致，防止同 path 异 repo
+        # 交叉绑定。
+        self.assertIn("${v.anchor.repo || ''}/${v.anchor.path || ''}", page)
+
     def test_daily_brief_analysis_button_has_a_global_modal_handler(self):
         page = (
             read_text("features/redmine/ui/page.html")

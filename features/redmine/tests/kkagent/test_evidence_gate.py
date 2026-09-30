@@ -114,6 +114,20 @@ class EvidenceGateTests(unittest.TestCase):
         gate = evaluate_evidence_gate(trace, {"attachment_count": 2})
         self.assertTrue(gate["attachments_checked"])
 
+    def test_manifest_attachments_cannot_be_bypassed_by_stale_zero_count(self):
+        trace = _full_trace()
+        attachment_call = next(
+            call for call in trace.tool_calls if "redmine_attachments" in call.tool_name
+        )
+        attachment_call.text_artifact_ids = ["text-live"]
+
+        gate = evaluate_evidence_gate(trace, {"attachment_count": 0})
+
+        self.assertEqual(gate["listed_attachment_count"], 3)
+        self.assertFalse(gate["attachments_checked"])
+        self.assertIn("text-live", gate["unread_text_artifact_ids"])
+        self.assertTrue(any("text-live" in error for error in gate_errors(gate)))
+
     def test_unrecoverable_read_failure_satisfies_attachment_gate(self):
         # 「没有可用文本」是基础设施事实（PDF 无文字层等），重试永远失败；
         # 门禁必须把这次失败读取视为已核验，否则模型被锁死在重试循环
@@ -222,15 +236,48 @@ class TestFailureSourceEvidenceGateTests(unittest.TestCase):
 
     def test_sdk_search_call_satisfies_source_gate(self):
         trace = _full_trace()
-        trace.tool_calls.append(ToolTrace(
-            tool_call_id="sdk1",
-            tool_name="gms_rt_sdk_search",
-            status="succeeded",
-        ))
+        consume_line(trace, json.dumps({
+            "type": "tool_call", "tool_call_id": "sdk1",
+            "tool_name": "gms_rt_sdk_search", "input": {"query": "symbol"},
+        }))
+        consume_line(trace, json.dumps({
+            "type": "tool_result", "tool_call_id": "sdk1", "is_error": False,
+            "output": json.dumps({"success": True, "data": {
+                "total": 1, "results": [{"path": "a.c", "line": 10}],
+                "reproducible": True,
+            }}),
+        }))
         gate = evaluate_evidence_gate(trace, self._entry())
         self.assertEqual(gate["source_evidence_tool_count"], 1)
         self.assertTrue(gate["source_evidence_checked"])
         self.assertFalse(any("source-level" in e for e in gate_errors(gate)))
+
+    def test_successful_sdk_search_with_zero_hits_does_not_count(self):
+        trace = _full_trace()
+        consume_line(trace, json.dumps({
+            "type": "tool_call", "tool_call_id": "sdk-zero",
+            "tool_name": "gms_rt_sdk_search", "input": {"query": "missing"},
+        }))
+        consume_line(trace, json.dumps({
+            "type": "tool_result", "tool_call_id": "sdk-zero",
+            "is_error": False,
+            "output": json.dumps({"success": True, "data": {
+                "total": 0, "results": [], "reproducible": True,
+            }}),
+        }))
+        gate = evaluate_evidence_gate(trace, self._entry())
+        self.assertEqual(gate["source_evidence_tool_count"], 0)
+        self.assertFalse(gate["source_evidence_checked"])
+
+    def test_apk_resolve_or_analyze_success_is_not_source_evidence(self):
+        trace = _full_trace()
+        for index, name in enumerate(("gms_rt_apk_resolve", "gms_rt_apk_analyze")):
+            trace.tool_calls.append(ToolTrace(
+                tool_call_id=f"apk-{index}", tool_name=name, status="succeeded",
+            ))
+        gate = evaluate_evidence_gate(trace, self._entry())
+        self.assertEqual(gate["source_evidence_tool_count"], 0)
+        self.assertFalse(gate["source_evidence_checked"])
 
     def test_failed_source_call_does_not_count(self):
         trace = _full_trace()
@@ -356,6 +403,7 @@ class ReproducibleSourceEvidenceTests(unittest.TestCase):
             tool_call_id="sdk1",
             tool_name="gms_rt_sdk_search",
             status="succeeded",
+            source_evidence_valid=True,
         ))
         # 模拟 _record_tool_result 对 provider 信封的 reproducible 提取。
         from features.redmine.kkagent.trace import _source_reproducible_flag
@@ -382,6 +430,7 @@ class ReproducibleSourceEvidenceTests(unittest.TestCase):
             tool_name="gms_rt_sdk_read",
             status="succeeded",
             tool_input={"path": "kernel/drivers/gpu/drm/panel/panel-rk3576.c"},
+            source_evidence_valid=True,
         )
         trace.tool_calls.append(sdk_call)
         from features.redmine.kkagent.trace import _source_reproducible_flag
@@ -422,6 +471,7 @@ class ReproducibleSourceEvidenceTests(unittest.TestCase):
         trace = _full_trace()
         trace.tool_calls.append(ToolTrace(
             tool_call_id="sdk1", tool_name="gms_rt_sdk_search", status="succeeded",
+            source_evidence_valid=True,
         ))
         result: dict = {"root_cause_type": "likely"}
         _gate, errors = gate_and_errors(trace, self._entry(), result)
@@ -449,6 +499,7 @@ class ClaimEvidenceLedgerTests(unittest.TestCase):
             tool_name="gms_rt_sdk_read",
             status="succeeded",
             tool_input={"path": "kernel/mm/mmap.c"},
+            source_evidence_valid=True,
         )
         call.source_reproducible = _source_reproducible_flag(
             json.dumps({"success": True, "data": {

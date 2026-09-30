@@ -112,5 +112,56 @@ class ApiErrorSemanticsTests(unittest.TestCase):
         )
 
 
+class RecordInternalErrorContractTests(unittest.TestCase):
+    """record_internal_error 只接受 (logger, action, log_context) 位置参数。
+
+    旧 API 的 ``*context_args`` 曾鼓励 "log_context 里写 %s + 位置参数"
+    的 logging 占位符用法：占位符数量错配会触发 logging 的
+    "not all arguments converted"，未 format 时字面 ``%s`` 残留进日志。
+    现在附加定位信息一律走 keyword-only ``context={...}``（预渲染为
+    ``key=value`` 追加），此门禁防止旧用法回潮。
+    """
+
+    def test_call_sites_use_keyword_context_and_no_placeholders(self):
+        offenders = []
+        for scan_root in SCAN_ROOTS:
+            for path in (ROOT / scan_root).rglob("*.py"):
+                relative = path.relative_to(ROOT).as_posix()
+                if "__pycache__" in relative:
+                    continue
+                try:
+                    tree = ast.parse(path.read_text(encoding="utf-8"))
+                except SyntaxError:
+                    continue
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.Call):
+                        continue
+                    func = node.func
+                    name = getattr(func, "id", getattr(func, "attr", ""))
+                    if name != "record_internal_error":
+                        continue
+                    star_args = [a for a in node.args if isinstance(a, ast.Starred)]
+                    if len(node.args) > 3 or star_args:
+                        offenders.append(
+                            f"{relative}:{node.lineno} positional args beyond "
+                            "log_context; use context={...}"
+                        )
+                    if len(node.args) >= 3 and isinstance(node.args[2], ast.Constant):
+                        text = node.args[2].value
+                        if isinstance(text, str) and "%" in text:
+                            offenders.append(
+                                f"{relative}:{node.lineno} log_context contains "
+                                "'%'; placeholders are no longer formatted, "
+                                "move the value into context={...}"
+                            )
+        self.assertEqual(
+            offenders,
+            [],
+            "record_internal_error call sites must be "
+            "(logger, action, log_context[, context={...}]) with literal "
+            "log_context free of '%' placeholders.",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

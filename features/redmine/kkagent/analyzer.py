@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # v18: 晨报与单号分析统一走 diagnostic 深度诊断（ADR 0013）。
 # v19: 删"处理时间线"节；概况表分测试类/非测试类，钉死报告人=issue.author、单号格式、禁内部 id、北京时间。
-PROMPT_VERSION = "redmine_daily_triage_v19"
+PROMPT_VERSION = "redmine_daily_triage_v20"
 
 REPAIR_MAX_TURNS = 0
 # 同一 session 最多纠正两轮，不重开会话。
@@ -183,6 +183,15 @@ class KkAgentRedmineAnalyzer:
                 f"issue changed after the preflight."
             )
         if entry.get("analysis_mode") != "triage":
+            prompt += (
+                "\n\nAUDITABLE CLAIM CONTRACT (mandatory): include a `## 关键结论` "
+                "section. Each bullet must be exactly `- [事实][EV-001] ...`, "
+                "`- [推断][EV-001] ...`, or `- [待验证] ...`. EV IDs come only "
+                "from evidence returned by Controller tools. Facts require at least "
+                "one real EV ID; never relabel an inference as a fact. Do not render "
+                "reporter/assignee/status/update-time metadata yourself; the Controller "
+                "renders authoritative Redmine metadata outside your Markdown."
+            )
             metadata = {
                 "reporter(author)": entry.get("author_name"),
                 "assignee": entry.get("assigned_to_name"),
@@ -432,6 +441,7 @@ class KkAgentRedmineAnalyzer:
                 trace.error = "kkagent 未返回最终分析总结。"
                 return self._failure(trace, raw)
             _gate, findings = gate_and_errors(trace, entry, result)
+            findings.extend(result.get("claim_binding_errors") or [])
             if not findings:
                 trace.status = "completed"
                 return self._success(result, trace, raw)
@@ -440,6 +450,7 @@ class KkAgentRedmineAnalyzer:
                 return repaired
             result = native_summary_result(trace, entry) or result
             _gate, findings = gate_and_errors(trace, entry, result)
+            findings.extend(result.get("claim_binding_errors") or [])
             trace.status, trace.error_type, trace.error = classify_gate_failure(
                 trace, findings
             )
@@ -533,6 +544,8 @@ class KkAgentRedmineAnalyzer:
                 merged.errors.extend(findings[:10])
                 continue
             _gate, findings = gate_and_errors(merged, entry, result)
+            if native_summary:
+                findings.extend(result.get("claim_binding_errors") or [])
             if findings:
                 merged.errors.extend(findings[:10])
                 continue
@@ -568,7 +581,9 @@ class KkAgentRedmineAnalyzer:
         return KkAgentAnalysisResult(
             ok=True,
             result=result,
-            raw_output=raw.text()[:20000],
+            # CappedCapture 已把内存限制在 head+tail（约 272 KiB）；这里再切
+            # 20k 会丢掉大部分审计轨迹。完整保存这个有界捕获结果。
+            raw_output=raw.text(),
             exit_code=trace.exit_code,
             trace=trace.to_summary(),
             session_id=trace.session_id,
@@ -581,7 +596,7 @@ class KkAgentRedmineAnalyzer:
             ok=False,
             error=trace.error or trace.error_type or "analysis failed",
             error_type=trace.error_type or "kkagent_error",
-            raw_output=raw.text()[:20000],
+            raw_output=raw.text(),
             exit_code=trace.exit_code,
             trace=trace.to_summary(),
             session_id=trace.session_id,

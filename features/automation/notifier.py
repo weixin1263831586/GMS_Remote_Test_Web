@@ -214,8 +214,8 @@ def notify_run_completion(run: dict[str, Any]) -> dict[str, Any]:
             message = record_internal_error(
                 logger,
                 f"{transport} 通知发送",
-                "%s notification dispatch failed",
-                transport,
+                "notification dispatch failed",
+                context={"transport": transport},
             )
             results.append({"transport": transport, "sent": False, "error": message})
     required = reporting.get("required_transports") or []

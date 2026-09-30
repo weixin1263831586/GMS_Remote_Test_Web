@@ -25,6 +25,16 @@ class DailyBriefCancellationTests(unittest.TestCase):
         preflight = patch_preflight_ok()
         preflight.start()
         self.addCleanup(preflight.stop)
+        owner_revalidation = patch(
+            "features.redmine.daily_brief_service.revalidate_issue_pending_for_owner",
+            AsyncMock(return_value={
+                "pending": True,
+                "assigned_to_name": "张三",
+                "status_name": "New",
+            }),
+        )
+        owner_revalidation.start()
+        self.addCleanup(owner_revalidation.stop)
 
     def _patch_snapshot(self):
         return patch.object(

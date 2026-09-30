@@ -38,6 +38,20 @@ def summarize_daily_brief(
             for item in completed
             if bool((item.result or {}).get("needs_human_review"))
         ),
+        # 执行完成不等于证据闭环；三个质量桶单独汇总，禁止 UI 用
+        # completed 数量冒充“已验证”数量。
+        "evidence_verified": sum(
+            1 for item in completed
+            if (item.result or {}).get("evidence_quality") == "verified"
+        ),
+        "evidence_partial": sum(
+            1 for item in completed
+            if (item.result or {}).get("evidence_quality") == "partial"
+        ),
+        "evidence_insufficient": sum(
+            1 for item in completed
+            if (item.result or {}).get("evidence_quality") == "insufficient"
+        ),
     }
     top = [
         {
@@ -361,6 +375,21 @@ def issue_payload(
     payload.pop("raw_response", None)
     if execution_statistics:
         payload["ai_statistics"] = execution_statistics
+    # DiagnosisReadModel（全局审查第二十节）：canonical 诊断读模型，供
+    # CLI/MCP/Assistant 与 Web 按同一种形状消费；Web 的完整展示字段
+    # （suggested_reply_* 等）仍在原生 result 里。
+    try:
+        from .diagnosis_read_model import read_model_from_issue_result
+
+        read_model = read_model_from_issue_result(
+            issue.result, issue_id=issue.issue_id,
+            subject=issue.subject, execution=execution,
+        )
+        if read_model is not None:
+            payload["read_model"] = read_model
+    except Exception:
+        # 投影是纯增量展示能力，任何异常都不影响既有 payload 返回。
+        pass
     if not execution:
         return payload
 

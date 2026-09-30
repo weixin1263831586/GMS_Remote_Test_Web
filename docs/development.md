@@ -79,6 +79,18 @@ bootstrap/           →  foundation/ / features/
   `test_dependency_security.py`：`cryptography`、`requests`、`requests-toolbelt`
   等需锁定含上游修复的精确版本）、**个人环境硬编码禁用**（
   `test_no_regression_rules.py` 扫描 `C:\Users\<name>`、`172.16.*` 等）。
+- **Controller/Worker 精确边界**（`test_controller_worker_boundary.py`）：
+  features 文件 → 精确 `worker_agent.*` module 两级 allowlist（双向），
+  新增文件/新增 worker module 都会失败；僵尸 allowlist 条目一并拦截。
+- **Assistant 动态依赖**（`test_assistant_dynamic_imports.py`）：executor_ref /
+  `_fetch_router_json` 字符串通道的目标模块/符号必须存在且公开、feature
+  白名单 shrink-only、禁 `routers./core./modules.` 死通道；facade 未声明的
+  跨 feature 模块登记在 `FACADE_PENDING_MODULES`（只减不增）。
+- **公共表面可解析**（`tests/contract/test_feature_public_surfaces.py`）：
+  每个 feature `__all__` 逐个 `getattr`，声明为 public 必须真正可 import。
+- **AI 诊断质量**（`tests/quality/`）：诊断 golden corpus 语料契约 +
+  `tools/scripts/testing/eval_diagnosis_quality.py` 确定性评分
+  （evidence recall / 禁止声明 / 结论证据锚点），development/holdout 分池。
 - **前端完整性静态扫描**（`tests/test_frontend_integrity.py`）：解析 HTML 内联
   事件处理（`onclick` 等）并比对页面定义的函数/符号，确保内联处理器可解析；
   同时固化一批前端行为回归断言（初始化去重、导航引导失败即停、登录/烧录/集群
@@ -88,6 +100,8 @@ bootstrap/           →  foundation/ / features/
 [0001](architecture/adr/0001-controller-worker-boundary.md) Controller/Worker、
 [0002](architecture/adr/0002-feature-foundation-boundary.md) Feature/Foundation、
 [0004](architecture/adr/0004-ssh-execution-boundary.md) SSH/shell 边界。
+门禁与 AI 治理子系统的全景图见
+[architecture/ai-governance.md](architecture/ai-governance.md)。
 
 ## 测试组织
 

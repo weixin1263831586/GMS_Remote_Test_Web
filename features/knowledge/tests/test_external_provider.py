@@ -67,6 +67,7 @@ schema_version: 1
 distribution:
   android_internals:
     default: include-body-markdown
+    projection_revision: 3
     included_paths:
       - src/part2/**
     excluded_paths:
@@ -118,6 +119,64 @@ class _WikiRepo:
         _git(self.repo, "init", "-q")
         _git(self.repo, "add", "-A")
         _git(self.repo, "commit", "-qm", "init")
+
+
+class KnowledgeHitToDictTests(unittest.TestCase):
+    """联邦边界序列化契约：``extra`` 按白名单透传，白名单外不外发。"""
+
+    def test_extra_whitelisted_keys_survive_to_dict(self):
+        from features.knowledge.external.base import KnowledgeHit
+
+        hit = KnowledgeHit(
+            source="android_internals", title="LMKD", snippet="…",
+            extra={
+                "status": "stable",
+                "tags": ["memory"],
+                "section": {"heading": "Reclaim", "start_line": 12, "end_line": 40},
+                "secret_internal": "must-not-leak",
+            },
+        )
+        payload = hit.to_dict()
+        self.assertEqual(payload["extra"]["status"], "stable")
+        self.assertEqual(payload["extra"]["section"]["heading"], "Reclaim")
+        self.assertNotIn("secret_internal", payload["extra"])
+
+    def test_extra_empty_stays_empty(self):
+        from features.knowledge.external.base import KnowledgeHit
+
+        self.assertEqual(
+            KnowledgeHit(source="s", title="t", snippet="…").to_dict()["extra"],
+            {},
+        )
+
+
+class SectionSplitTests(unittest.TestCase):
+    """Section 切分（schema v4）：页 → heading section → 行号锚点。"""
+
+    def test_sections_carry_file_line_offsets(self):
+        from features.knowledge.external.android_internals import _split_sections
+
+        body = "intro\n## A\nalpha\nbeta\n### B\ngamma\n"
+        sections = _split_sections(body, line_offset=6)
+        self.assertEqual(
+            [(s["heading"], s["start_line"], s["end_line"]) for s in sections],
+            [("", 7, 7), ("A", 8, 9), ("B", 11, 11)],
+        )
+
+    def test_section_content_hash_is_stable(self):
+        from features.knowledge.external.android_internals import _split_sections
+
+        first = _split_sections("## H\ncontent line\n")
+        second = _split_sections("## H\ncontent line\n")
+        self.assertEqual(
+            first[0]["content_hash"], second[0]["content_hash"]
+        )
+
+    def test_empty_body_yields_no_sections(self):
+        from features.knowledge.external.android_internals import _split_sections
+
+        self.assertEqual(_split_sections(""), [])
+        self.assertEqual(_split_sections("   \n\n"), [])
 
 
 class FrontmatterTests(unittest.TestCase):
@@ -408,6 +467,54 @@ class ProviderTests(unittest.TestCase):
 
         self.assertTrue(policy.degraded)
         self.assertEqual(policy.included_paths, ())
+
+    def test_policy_distribution_selection_is_explicit(self):
+        # ADR 0014：distribution 选择不得依赖"字典里的第一个"。上游把
+        # 某个未知消费方排在最前时，GMS 投影必须保持稳定并显式记录来源。
+        policy_path = self.root / "wiki/knowledge-pack/policy.yaml"
+        original = policy_path.read_text(encoding="utf-8")
+        reordered = original.replace(
+            "distribution:\n",
+            "distribution:\n  another_consumer:\n    included_paths:\n      - src/other/**\n",
+            1,
+        )
+        policy_path.write_text(reordered, encoding="utf-8")
+        policy = load_policy(self.root / "wiki")
+        # android_internals 在候选列表里，优先级高于插入在前面的未知项。
+        self.assertEqual(policy.policy_distribution, "android_internals")
+        self.assertFalse(policy.degraded)
+        self.assertIn("src/part2/**", policy.included_paths)
+
+    def test_policy_unknown_distribution_only_fails_closed(self):
+        # 上游只声明了 GMS 不认识的消费方：投影边界对 GMS 不适用，
+        # 必须 fail-closed 并把原因写进 status 可见的 parse_warning。
+        policy_path = self.root / "wiki/knowledge-pack/policy.yaml"
+        policy_path.write_text(
+            "schema_version: 1\n"
+            "distribution:\n"
+            "  some_new_consumer:\n"
+            "    included_paths:\n"
+            "      - src/**\n",
+            encoding="utf-8",
+        )
+        policy = load_policy(self.root / "wiki")
+        self.assertTrue(policy.degraded)
+        self.assertIn("some_new_consumer", policy.parse_warning)
+        from features.knowledge.external.content_policy import policy_state_summary
+
+        summary = policy_state_summary(policy)
+        self.assertTrue(summary["degraded"])
+        self.assertIn("policy_distribution", summary)
+        self.assertIn("policy_projection_revision", summary)
+
+    def test_policy_projection_revision_recorded_in_summary(self):
+        policy = load_policy(self.root / "wiki")
+        self.assertEqual(policy.policy_distribution, "android_internals")
+        from features.knowledge.external.content_policy import policy_state_summary
+
+        summary = policy_state_summary(policy)
+        self.assertEqual(summary["policy_distribution"], "android_internals")
+        self.assertGreaterEqual(summary["policy_projection_revision"], 1)
 
     def test_policy_excludes_non_canonical_paths(self):
         # scratch.md 位于 included_paths 之外；doc_count 不含它。

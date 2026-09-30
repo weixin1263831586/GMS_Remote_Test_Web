@@ -24,6 +24,8 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
+from .kkagent.trace import source_evidence_result
+
 
 # 单条工具输出的预览上限：足够看清关键报错，又不会把弹框渲染成日志页。
 TOOL_OUTPUT_PREVIEW_CHARS = 2000
@@ -85,6 +87,7 @@ def _parse_message_blocks(blocks: Any) -> list[dict[str, Any]]:
         elif block_type == "tool_result":
             item["tool_call_id"] = str(block.get("tool_use_id") or "")
             item["is_error"] = bool(block.get("is_error"))
+            item["raw_output"] = block.get("content")
             item["output"] = _clip(
                 block.get("content"), TOOL_OUTPUT_PREVIEW_CHARS
             )
@@ -133,6 +136,7 @@ def _attach_tool_results(
     for result in results:
         tool = tools.get(str(result.get("tool_call_id") or ""))
         if tool is None:
+            result.pop("raw_output", None)
             unmatched.append(result)
             continue
         tool["result"] = {
@@ -140,6 +144,12 @@ def _attach_tool_results(
             "output": str(result.get("output") or ""),
             "created_at": created_at,
         }
+        evidence = source_evidence_result(
+            str(tool.get("tool_name") or ""), result.get("raw_output")
+        )
+        if evidence is not None:
+            tool["result"]["evidence"] = evidence
+        result.pop("raw_output", None)
     return unmatched
 
 

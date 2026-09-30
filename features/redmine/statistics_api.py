@@ -312,12 +312,24 @@ async def get_workload_statistics(
                 exc,
             )
     if refresh:
-        stale_items = list((data.get("lists") or {}).get("no_reply_3_days") or [])
+        lists = data.get("lists") or {}
+        pending_items = list(lists.get("waiting_my_reply") or [])
+        pending_items.extend(lists.get("no_reply_3_days") or [])
+        candidates: list[dict[str, Any]] = []
+        seen_issue_ids: set[int] = set()
+        for item in pending_items:
+            try:
+                issue_id = int(item.get("issue_id") or 0)
+            except (AttributeError, TypeError, ValueError):
+                issue_id = 0
+            if issue_id and issue_id not in seen_issue_ids:
+                seen_issue_ids.add(issue_id)
+                candidates.append(item)
         refresh_one = getattr(service, "refresh_issue_metadata", None)
-        if callable(refresh_one) and stale_items:
+        if callable(refresh_one) and candidates:
             refreshed = False
             refresh_errors: list[str] = []
-            for item in stale_items[: min(list_limit, 30)]:
+            for item in candidates[: min(list_limit, 30)]:
                 try:
                     issue_id = int(item.get("issue_id") or 0)
                 except (TypeError, ValueError):

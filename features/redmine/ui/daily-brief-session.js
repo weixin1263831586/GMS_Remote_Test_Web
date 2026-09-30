@@ -94,11 +94,20 @@ function renderIssueSessionTool(block) {
   var failed = Boolean(result && result.is_error);
   var status = result ? (failed ? '失败' : '完成') : '无返回';
   var hint = issueSessionToolHint(block.tool_input);
+  var evidence = result && result.evidence;
+  var evidenceLabel = '';
+  if (evidence) {
+    evidenceLabel = evidence.valid
+      ? ('有效证据 · ' + Number(evidence.result_count || 0) + ' 命中 · '
+        + (evidence.reproducible === true ? '可复现' : '动态/未固定版本'))
+      : '0 命中 · 不计入证据';
+  }
   return '<details class="issue-session-tool' + (failed ? ' error' : '') + '"'
     + (failed ? ' open' : '') + '><summary>'
     + '<span class="issue-session-tool-icon">' + (failed ? '×' : (result ? '✓' : '•')) + '</span>'
     + '<code>' + esc(block.tool_name || 'unknown_tool') + '</code>'
     + '<span class="issue-session-tool-status">' + status + '</span>'
+    + (evidenceLabel ? '<span class="issue-session-tool-hint">' + esc(evidenceLabel) + '</span>' : '')
     + (hint ? '<span class="issue-session-tool-hint">' + esc(hint) + '</span>' : '')
     + '</summary><div class="issue-session-tool-body">'
     + '<div class="issue-session-payload-label">输入</div><pre>'

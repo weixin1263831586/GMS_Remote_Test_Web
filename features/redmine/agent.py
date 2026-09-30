@@ -198,6 +198,7 @@ class RedmineAgent(
             new_count = 0
             updated_count = 0
             detail_refreshed = 0
+            reassigned_refreshed = 0
             to_analyze: list[list] = []
 
             for issue_stub in all_issues:
@@ -243,6 +244,51 @@ class RedmineAgent(
                     new_count += 1
                     to_analyze.append((issue_stub, issue_id))
 
+            # An assignee-filtered Redmine query cannot return issues that
+            # were transferred to somebody else.  Recheck locally-open rows
+            # missing from a complete result so the issues page, personal
+            # dashboard, and daily brief all observe the current assignee.
+            sync_limit = int(_agent_cfg["sync_max_issues"])
+            if len(all_issues) < sync_limit:
+                compact_assignee = assigned_to.replace(" ", "")
+                assignee_names = list(dict.fromkeys(filter(None, (
+                    assigned_to,
+                    compact_assignee,
+                    (
+                        compact_assignee[0] + " " + compact_assignee[1:]
+                        if len(compact_assignee) >= 3 else ""
+                    ),
+                ))))
+                live_ids = {
+                    int(getattr(issue, "id", 0) or 0) for issue in all_issues
+                }
+                local_open_ids = self.db.list_open_issue_ids_by_assignee(
+                    assignee_names
+                )
+                for issue_id in sorted(set(local_open_ids) - live_ids):
+                    try:
+                        existing = self.db.get_issue(issue_id) or {}
+                        refreshed = await self.fetch_issue_snapshot(
+                            client, issue_id, run_id
+                        )
+                        if existing:
+                            refreshed["attachments_json"] = self._merge_attachment_analysis(
+                                existing.get("attachments_json") or [],
+                                refreshed.get("attachments_json") or [],
+                            )
+                            self._preserve_existing_analysis_fields(refreshed, existing)
+                        refreshed["is_resolved"] = int(
+                            refreshed.get("status_name") in RESOLVED_STATUSES
+                        )
+                        self.db.upsert_issue(refreshed)
+                        reassigned_refreshed += 1
+                    except Exception as exc:
+                        logger.warning(
+                            "[RedmineAgent] reassigned issue refresh failed for %s: %s",
+                            issue_id,
+                            exc,
+                        )
+
             # Analyze unanalyzed issues
             processed = 0
             failed = 0
@@ -266,6 +312,7 @@ class RedmineAgent(
                 "new_count": new_count,
                 "updated_count": updated_count,
                 "detail_refreshed": detail_refreshed,
+                "reassigned_refreshed": reassigned_refreshed,
                 "analyzed_count": processed,
                 "failed_count": failed,
             }

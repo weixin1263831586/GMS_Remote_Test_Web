@@ -173,6 +173,10 @@ def verify_background_anchors(
     ——两个知识条目同 title 时 title 回挂会交叉绑定。
     全部 anchor 的 codesearch 调用共享 ``CODESEARCH_ANCHOR_TIMEOUT_SECONDS``
     总时间预算，每笔调用只拿到剩余预算。
+    预算语义：超出数量/时间预算的 anchor 产出显式 ``unknown`` 条目（带
+    ``reason=budget_exhausted`` / ``time_budget_exhausted``），消费方可与
+    「codesearch 不可用」区分；裸文件名（无 ``/``）与 url-only anchor
+    直接跳过，不扣预算、不产条目。
     """
     verifications: list[dict[str, Any]] = []
     budget = MAX_VERIFIED_ANCHORS
@@ -191,45 +195,54 @@ def verify_background_anchors(
             if not isinstance(anchor, dict):
                 continue
             key = (str(anchor.get("repo") or ""), str(anchor.get("path") or ""))
-            if not key[1]:
-                # 无 path 的 anchor（url-only）无从做文件级溯源：跳过，
-                # 不产生 path_missing 的误导条目。
+            if not key[1] or "/" not in key[1]:
+                # 无 path（url-only）或仅裸文件名（无目录层级）的 anchor
+                # 无从做文件级溯源：跳过，不扣预算、不产生误导条目。
                 continue
             outcome = outcome_cache.get(key)
             if outcome is None:
                 if budget <= 0:
-                    # 新 anchor 超出数量预算；继续遍历是为了让后面
-                    # 可能出现的已缓存 anchor 仍能回挂到对应 hit。
-                    continue
-                budget -= 1
-                if time_budget <= 0:
+                    # 数量预算耗尽：不再跑子进程，但显式产出 unknown 条目
+                    # （reason 与「codesearch 不可用」可区分）；继续遍历是
+                    # 为了让后面可能出现的已缓存 anchor 仍能回挂到对应 hit。
                     outcome = {
                         "path_present": None,
                         "evidence_level": EVIDENCE_UNKNOWN,
                         "verification": None,
+                        "reason": "budget_exhausted",
                     }
+                    outcome_cache[key] = outcome
                 else:
-                    started = time.monotonic()
-                    try:
-                        outcome = verify_anchor_in_codesearch(
-                            anchor,
-                            android_version=android_version,
-                            timeout=time_budget,
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "anchor verification failed for %s: %s", key[1], exc
-                        )
+                    budget -= 1
+                    if time_budget <= 0:
                         outcome = {
                             "path_present": None,
                             "evidence_level": EVIDENCE_UNKNOWN,
                             "verification": None,
+                            "reason": "time_budget_exhausted",
                         }
-                    time_budget = max(
-                        0.0, time_budget - (time.monotonic() - started)
-                    )
+                    else:
+                        started = time.monotonic()
+                        try:
+                            outcome = verify_anchor_in_codesearch(
+                                anchor,
+                                android_version=android_version,
+                                timeout=time_budget,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "anchor verification failed for %s: %s", key[1], exc
+                            )
+                            outcome = {
+                                "path_present": None,
+                                "evidence_level": EVIDENCE_UNKNOWN,
+                                "verification": None,
+                            }
+                        time_budget = max(
+                            0.0, time_budget - (time.monotonic() - started)
+                        )
                 outcome_cache[key] = outcome
-            verifications.append({
+            row = {
                 "hit_title": str(hit.get("title") or ""),
                 # 结构化回挂 key：召回层无 id 时留空，消费方据此跳过该
                 # 条目而不是按 title 误绑定。
@@ -247,7 +260,11 @@ def verify_background_anchors(
                 "path_present": outcome["path_present"],
                 "evidence_level": outcome["evidence_level"],
                 "verification": outcome["verification"],
-            })
+            }
+            if outcome.get("reason"):
+                # 预算耗尽的 unknown 与「溯源器不可用」需要可区分。
+                row["reason"] = outcome["reason"]
+            verifications.append(row)
     return verifications
 
 

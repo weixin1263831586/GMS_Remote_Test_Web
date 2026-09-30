@@ -196,6 +196,29 @@ class RepositoryQueryMixin:
             row = conn.execute(f"SELECT COUNT(*) AS cnt FROM redmine_agent_issues {where}", params).fetchone()
         return int(row["cnt"]) if row else 0
 
+    def list_open_issue_ids_by_assignee(
+        self,
+        assignee_names: list[str],
+    ) -> list[int]:
+        """Return every locally open issue id matching one assignee.
+
+        This unpaginated id-only query is used after a complete Redmine sync to
+        find rows that disappeared from the assignee result because they were
+        reassigned.  Keeping it separate from ``list_all_issues`` avoids that
+        UI method's intentional 100-row page cap.
+        """
+        where, params = self._build_issue_where(
+            "", "", "", "", assignee_names=assignee_names,
+        )
+        conjunction = " AND " if where else " WHERE "
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"SELECT issue_id FROM redmine_agent_issues {where}"
+                f"{conjunction}is_resolved = 0 ORDER BY issue_id",
+                params,
+            ).fetchall()
+        return [int(row["issue_id"]) for row in rows]
+
     def get_issue_statistics(self) -> dict[str, Any]:
         with self.connect() as conn:
             # Single query for total, unresolved, and all group-by counts

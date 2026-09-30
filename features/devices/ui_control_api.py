@@ -251,8 +251,8 @@ async def ui_screenshot(req: UiControlRequest, request: Request):
         message = record_internal_error(
             logger,
             "截取设备屏幕",
-            "[UI Control] screenshot failed for %s",
-            serial,
+            "[UI Control] screenshot failed",
+            context={"serial": serial},
         )
         return ApiError.internal(message).to_response()
 
@@ -329,8 +329,8 @@ async def ui_layout(req: UiControlRequest, request: Request):
         message = record_internal_error(
             logger,
             "读取界面布局",
-            "[UI Control] layout failed for %s",
-            serial,
+            "[UI Control] layout failed",
+            context={"serial": serial},
         )
         return ApiError.internal(message).to_response()
 
@@ -405,7 +405,7 @@ async def ui_tap(req: UiTapRequest, request: Request):
         message = record_internal_error(
             logger,
             "模拟点击",
-            "[UI Control] tap failed for %s",
-            serial,
+            "[UI Control] tap failed",
+            context={"serial": serial},
         )
         return ApiError.internal(message).to_response()

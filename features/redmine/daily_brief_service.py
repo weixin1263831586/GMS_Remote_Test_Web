@@ -17,6 +17,7 @@ import time
 from typing import Any
 
 from . import daily_brief_cancellation as cancellation
+from .ai_execution_ledger import AIExecutionLedger
 from .daily_brief_analysis_events import mask_secrets, start_analysis_progress
 from .daily_brief_models import (
     DailyBriefIssue,
@@ -45,6 +46,7 @@ from .daily_brief_snapshot import (
     brief_date_today,
     build_daily_triage_snapshot,
     detect_delta,
+    revalidate_issue_pending_for_owner,
 )
 from .kkagent import (
     PROMPT_VERSION,
@@ -139,6 +141,20 @@ class DailyBriefService:
         self.owner_id = canonical_owner_id(str(owner_id or "anonymous"))
         self.config_manager = config_manager
         self.repository: DailyBriefRepository = owner_daily_brief_repository(self.owner_id)
+
+    @property
+    def ai_ledger(self) -> AIExecutionLedger:
+        """AI 逻辑调用账本（receipt），与 repository 共用 per-owner sqlite。
+
+        惰性创建：测试辅助（make_service）用 ``__new__`` 绕过 ``__init__``
+        构造实例，账本只能在首次访问时绑定 repository。职责是操作安全
+        （防重复发送 / unknown 终态），不截断任何分析的取证深度。
+        """
+        ledger = self.__dict__.get("_ai_ledger")
+        if ledger is None:
+            ledger = AIExecutionLedger(self.repository.db_path)
+            self._ai_ledger = ledger
+        return ledger
 
     # ------------------------------------------------------------------ config
 
@@ -754,6 +770,39 @@ class DailyBriefService:
         # analyze_with_persisted_cancel 收敛为完成/已停止）。
         progress = start_analysis_progress(self.repository, run, issue_id, record)
 
+        # AI 逻辑调用账本（receipt）：同一逻辑键（owner+issue+证据快照+
+        # 设备/hint+prompt+model）存在活跃 receipt 时拒绝重复发送。挡的是
+        # 页面重复点击、job lease 丢失后的 worker 重试这类重复 AI 调用；
+        # 证据变化（快照/设备/hint 任一不同）或上次已终态时正常放行新 attempt。
+        receipt = self.ai_ledger.begin(
+            owner_id=self.owner_id,
+            purpose="daily_brief_issue",
+            issue_id=issue_id,
+            subject=record.subject,
+            model=run.model_name,
+            prompt_version=run.prompt_version or PROMPT_VERSION,
+            input_hash=(
+                f"{run.snapshot_hash}:{config.get('device_serial', '')}:"
+                f"{config.get('analysis_hint', '')}"
+            ),
+        )
+        if receipt.get("duplicate"):
+            record.status = "failed"
+            record.error_type = "ai_call_in_flight"
+            record.error = (
+                "duplicate AI call blocked by execution ledger: active receipt "
+                f"{receipt['receipt_id']} already covers this issue with the "
+                "same evidence snapshot"
+            )
+            # 时间线收敛不变量：上面 start_analysis_progress 已经写入
+            # analysis_started，而 duplicate 早退之后没有其他终态写入点；
+            # 不在这里落一条失败终态，时间线会永远悬在 in-progress，污染
+            # 时长统计与卡死检测（全局审查 P1）。
+            if progress is not None:
+                progress.analysis_finished(ok=False, error_type=record.error_type)
+            self.repository.upsert_issue(record)
+            return
+
         started = time.monotonic()
         try:
             analyze_entry = dict(entry) if entry else {"issue_id": issue_id}
@@ -772,14 +821,60 @@ class DailyBriefService:
             # 部署事实 hint：SDK 源可用性决定源码取证门禁是否强制
             #（evidence_gate 降级依据），只进本次调用，不回写快照。
             analyze_entry["sdk_sources_available"] = _sdk_sources_available()
+            # 请求即将发出（本地子进程 provider）：pending → received。
+            self.ai_ledger.mark_received(receipt["receipt_id"])
             outcome = await cancellation.analyze_with_persisted_cancel(
                 self.repository, run.run_id, analyzer,
                 analyze_entry,
             )
+            # Batch snapshots are frozen, but ownership/status can change while
+            # a long diagnosis is running.  Never publish a successful AI
+            # answer as completed until Redmine confirms the issue still
+            # belongs in this owner's pending-reply buckets.  Explicit
+            # ``issue:<id>`` analyses remain available for arbitrary IDs.
+            live_metadata: dict[str, Any] | None = None
+            if outcome.ok and not str(run.mode or "").startswith("issue:"):
+                if progress is not None:
+                    progress.stage_changed("正在校验 Redmine 实时负责人和待回复状态")
+                try:
+                    pending = await revalidate_issue_pending_for_owner(
+                        self.owner_id,
+                        issue_id,
+                    )
+                    live_metadata = pending
+                except Exception as exc:
+                    outcome.ok = False
+                    outcome.error_type = "owner_revalidation_failed"
+                    outcome.error = mask_secrets(
+                        f"Redmine owner revalidation failed: {exc}", 1000
+                    )
+                else:
+                    if not pending.get("pending"):
+                        outcome.ok = False
+                        outcome.error_type = "no_longer_pending"
+                        outcome.error = mask_secrets(
+                            "issue is no longer pending for this owner; "
+                            f"current assignee={pending.get('assigned_to_name') or 'unknown'}, "
+                            f"status={pending.get('status_name') or 'unknown'}",
+                            1000,
+                        )
+                if not outcome.ok and progress is not None:
+                    progress.analysis_finished(
+                        ok=False, error_type=outcome.error_type,
+                        model_name=run.model_name,
+                    )
         except (cancellation.RunCancelledError, asyncio.CancelledError):
+            # 取消发生在 AI 调用在途时：结果不确定（unknown），不是干净的
+            # failed——后续重试据此知道前一次 outcome 未知。
+            self.ai_ledger.mark_unknown(
+                receipt["receipt_id"], reason="cancelled while analysis in flight",
+            )
             cancellation.reset_cancelled_issue(self.repository, record)
             raise
         except Exception as exc:
+            self.ai_ledger.mark_unknown(
+                receipt["receipt_id"], reason=f"analysis crashed: {exc}"[:1000],
+            )
             # 通用异常也必须收敛 issue 行（否则停留 running、汇总计数错），
             # 标记 failed 后按原语义继续向上传播（run 级收敛由调用方负责）。
             record.status = "failed"
@@ -792,6 +887,21 @@ class DailyBriefService:
         record.finished_at = _now()
         record.duration_ms = int((time.monotonic() - started) * 1000)
         record.raw_response = outcome.raw_output
+        # Failure Identity（确定性指纹，见 failure_identity.py 模块文档）：从 issue 主题与
+        # 运行上下文派生稳定身份，随 AI 执行轨迹落库，供跨 attempt/跨 issue
+        # 聚合 Cluster；SIMILAR_SYMPTOM 级别的候选合并留给 relation judge。
+        try:
+            from .failure_identity import failure_identity
+
+            identity = failure_identity(
+                [{"module": "", "name": "", "reason": record.subject or f"#{issue_id}"}],
+                suite="",
+                android_version=str(entry.get("android_version") or ""),
+                device_class=str(entry.get("device_serial") or ""),
+            )
+        except Exception:
+            logger.exception("failed to derive failure identity")
+            identity = {}
         # 每次 AI attempt 的可审计轨迹（session/tool/usage）独立落库（Evidence
         # Provenance 的查询起点），不塞进 issue 单条记录。
         try:
@@ -800,6 +910,11 @@ class DailyBriefService:
                 {
                     "attempt_no": record.attempt_count,
                     "model_name": run.model_name,
+                    "receipt_id": receipt["receipt_id"],
+                    "receipt_status": (
+                        "completed" if outcome.ok else "failed"
+                    ),
+                    "failure_identity": identity,
                     **(outcome.trace or {}),
                     "final_ok": bool(outcome.ok),
                     "failure_stage": outcome.error_type,
@@ -809,6 +924,20 @@ class DailyBriefService:
             )
         except Exception:
             logger.exception("failed to persist ai execution trace")
+        # 账本终态收敛：outcome 已确定（completed/failed）；不会覆盖任何
+        # 先前终态（unknown 已在异常路径写下的场景）。
+        trace_usage = (
+            (outcome.trace or {}).get("usage")
+            if isinstance(outcome.trace, dict) else None
+        )
+        self.ai_ledger.finish(
+            receipt["receipt_id"],
+            ok=bool(outcome.ok),
+            error=mask_secrets(outcome.error, 1000),
+            usage=trace_usage if isinstance(trace_usage, dict) else None,
+            latency_ms=record.duration_ms,
+            session_id=getattr(outcome, "session_id", ""),
+        )
         if outcome.ok and outcome.result:
             record.status = "completed"
             record.error = ""
@@ -817,8 +946,23 @@ class DailyBriefService:
             record.result["issue_id"] = issue_id
             record.result["buckets"] = record.buckets
             record.result["priority"] = record.priority
+            metadata = live_metadata or {
+                "issue_id": issue_id,
+                "subject": record.subject,
+                "author_name": entry.get("author_name") or "",
+                "assigned_to_name": entry.get("assigned_to_name") or "",
+                "status_name": entry.get("status_name") or "",
+                "updated_on": entry.get("updated_on") or "",
+            }
+            record.result["report_metadata"] = {
+                **metadata,
+                "source": "redmine_live" if live_metadata else "analysis_snapshot",
+                "verified_at": record.finished_at,
+            }
         else:
-            record.status = "failed"
+            record.status = (
+                "stale" if outcome.error_type == "no_longer_pending" else "failed"
+            )
             # 与 run.error 同规：stderr/异常文本可能含 URL/header/token
             # 片段，落库前打码（该字段会经 issue_payload 进 API）。
             record.error = mask_secrets(outcome.error, 1000)
