@@ -248,8 +248,11 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
                 ),
             )
         except sqlite3.OperationalError as exc:
-            # FTS 半更新（DELETE 成功、INSERT 失败）会让该案例静默退出
-            # 检索；至少留下可排查的日志。
+            # 旧库缺 FTS5 表属 legacy 容忍（建表失败时 knowledge_schema 已留
+            # warning）；FTS 半更新（DELETE 成功、INSERT 失败）会让该案例静默
+            # 退出检索，至少留下可排查的日志。
+            if "no such table" in str(exc).lower():
+                return
             logger.warning("FTS index update failed for issue %s: %s", fields["issue_id"], exc)
 
     @staticmethod

@@ -80,17 +80,22 @@ def cluster_page():
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
-@page_router.get("/cluster/{ui_asset}")
+@page_router.get("/cluster/{ui_asset}", include_in_schema=False)
 def cluster_ui_asset(ui_asset: str):
     """Cluster 页面脚本统一路由（CSP 收紧后禁止 inline <script>）。
 
-    - page.js: 页面主体脚本，运行配置由模板以 body data 属性注入；
+    - page.js: 入口 chunk（事件接线与初始化，最后加载）；
+    - state.js: 顶层状态与共享助手（最先加载）；
     - page-boot.js: embedded-workspace 就绪标记（原单行内联块外置）；
     - page-echarts.js: ECharts 本地 vendor 加载器（原单行内联块外置）；
-    - modal-controller.js: 弹框焦点控制器（初始焦点/Tab 陷阱/关闭恢复）。
+    - modal-controller.js: 弹框焦点控制器（初始焦点/Tab 陷阱/关闭恢复）；
+    - 其余 chunk 按域拆分（jobs/workers/dash/library/management），由
+      page.html 按 script 顺序引用，拼接语义等价拆分前单文件。
     """
     if ui_asset not in {
         "page.js", "page-boot.js", "page-echarts.js", "modal-controller.js",
+        "state.js", "jobs.js", "workers.js", "dash-charts.js",
+        "dash-render.js", "library.js", "management.js",
     }:
         raise HTTPException(404, "cluster ui asset not found")
     ui_dir = Path(__file__).with_name("ui")

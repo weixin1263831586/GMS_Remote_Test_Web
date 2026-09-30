@@ -31,11 +31,16 @@ _PYTHON_ALLOWED = {
 _JS_ALLOWED = {
     "web/static/js/workspace-context.js",  # fallback inside bootstrap chain
     "web/static/js/shell/workspace-devices.js",  # fallback at chain tail
-    "features/automation/ui/page.js",  # fallback inside bootstrap chain
+    # 2026-09-30 automation 领域拆分：fallback 字面量随顶层状态迁至 state.js。
+    "features/automation/ui/state.js",
     "features/cluster/ui/page.js",  # fallback inside bootstrap chain
+    # 2026-09-30 cluster 领域拆分：fallback 字面量随顶层状态迁至 state.js。
+    "features/cluster/ui/state.js",
     # 2026-09 CSP 前置迁移：shell.html 内联脚本拆出，default 视图沿用
     # 既有 fallback（__GMS_BOOTSTRAP__ 注入后即被覆盖）。
-    "web/static/js/shell/shell-main.js",
+    # 2026-09-30 shell-main 领域拆分：fallback 字面量随设备 config 查看节
+    # 迁至 shell-device-config-viewer.js。
+    "web/static/js/shell/shell-device-config-viewer.js",
 }
 
 

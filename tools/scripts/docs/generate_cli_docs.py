@@ -27,6 +27,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _common import find_repo_root  # noqa: E402
 
+REPO_ROOT = find_repo_root()
+sys.path.insert(0, str(REPO_ROOT / "agent" / "gms-remote-test" / "runtime"))
+from gms_agent.cli_inventory import cli_command_names  # noqa: E402
+
 
 PROJECT_ROOT = find_repo_root()
 CLI_SCRIPT = PROJECT_ROOT / "agent/gms-remote-test/runtime/gms-remote-test.sh"
@@ -112,10 +116,23 @@ def _escape(cell: str) -> str:
 
 
 def build_document() -> str:
-    script = CLI_SCRIPT.read_text(encoding="utf-8")
-    commands = sorted(set(_FUNCTION_DEF.findall(script)))
+    # 拆分为 runtime/cli/*.sh 后命令定义分散在各模块；与
+    # audit_contract/gms-rt-system-commands 同源（cli_inventory 负责按
+    # source 行聚合主脚本与模块）。
+    commands = sorted(cli_command_names(CLI_SCRIPT))
     if not commands:
         raise SystemExit(f"no gms-rt-* functions found in {CLI_SCRIPT}")
+
+    # usage/summary case 表仍从主脚本与全部模块的拼接文本解析。
+    module_names = re.findall(
+        r'^source "\$_gms_runtime_dir/cli/([a-z0-9-]+\.sh)"',
+        CLI_SCRIPT.read_text(encoding="utf-8"), re.M,
+    )
+    script = "\n".join(
+        [CLI_SCRIPT.read_text(encoding="utf-8")]
+        + [(CLI_SCRIPT.parent / "cli" / name).read_text(encoding="utf-8")
+           for name in module_names]
+    )
 
     usage_exact, usage_wild = _parse_case_table(_function_body(script, "_gms_rt_command_usage"))
     summary_exact, summary_wild = _parse_case_table(_function_body(script, "_gms_rt_command_summary"))

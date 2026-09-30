@@ -383,8 +383,14 @@ class RepositoryStorageMixin:
                     payload.get("doc_content") or "",
                 ),
             )
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as exc:
+            # 两级分类：旧库缺 FTS5 表属 legacy 容忍（init_db 建表失败时已留
+            # warning，检索侧回退 LIKE，不掩盖真实错误）；其余 OperationalError
+            # （半更新：DELETE 成功 INSERT 失败 / 磁盘错误）会让该 issue 静默
+            # 退出检索，至少留下可排查的日志（同 knowledge_repository._replace_fts）。
+            if "no such table" in str(exc).lower():
+                return
+            logger.warning("redmine_agent_issue_fts 更新失败 (issue %s): %s", payload.get("issue_id"), exc)
 
     @staticmethod
     def _build_issue_where(status: str = "", priority: str = "", category: str = "", search: str = "", assignee_names: list[str] | None = None) -> tuple:

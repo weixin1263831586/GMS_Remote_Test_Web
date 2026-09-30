@@ -2912,7 +2912,7 @@
     "methods": [
       "GET"
     ],
-    "path": "/automation/page.js"
+    "path": "/automation/{ui_asset}"
   },
   {
     "methods": [
@@ -2985,6 +2985,12 @@
       "GET"
     ],
     "path": "/gerrit-dashboard/page.js"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/gerrit-dashboard/{asset_name}"
   },
   {
     "methods": [

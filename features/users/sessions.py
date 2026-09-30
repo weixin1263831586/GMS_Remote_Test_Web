@@ -138,7 +138,13 @@ class ClientManager:
                 self._save_client_runtime()
 
                 return True, detected_username, None
-            except Exception:
+            except Exception as exc:
+                # 身份探测失败只影响该凭据候选，逐条留 debug 痕迹：
+                # 静默会让"客户端一直识别成 unknown"无从排查。
+                logger.debug(
+                    "ssh whoami probe failed for client %s with stored credential %s",
+                    client_ip, cred['username'], exc_info=exc,
+                )
                 continue
 
         # 如果客户端 IP 与 local_server 中的 IP 匹配，通过 SSH 获取真实登录用户
@@ -151,7 +157,12 @@ class ClientManager:
                     try:
                         real_username = self._ssh_whoami(client_ip, cred['username'], cred['password'])
                         return True, real_username, None
-                    except Exception:
+                    except Exception as exc:
+                        logger.debug(
+                            "ssh whoami probe (local server) failed for client %s "
+                            "with stored credential %s",
+                            client_ip, cred['username'], exc_info=exc,
+                        )
                         continue
 
         # 客户端用户名不使用 ubuntu_user 默认值。

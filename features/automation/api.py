@@ -99,13 +99,26 @@ async def automation_page():
     return HTMLResponse(html, headers={'Cache-Control': 'no-store, no-cache, must-revalidate'})
 
 
-@page_router.get('/automation/page.js')
-def automation_page_js():
-    """页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。"""
+@page_router.get('/automation/{ui_asset}', include_in_schema=False)
+def automation_ui_asset(ui_asset: str):
+    """Automation 页面脚本统一路由（CSP 收紧后禁止 inline <script>）。
+
+    - page.js: 入口 chunk（事件接线、定时刷新与 DOMContentLoaded，最后加载）；
+    - state.js: 顶层状态与共享助手（最先加载，worker id fallback 在此）；
+    - 其余 chunk 按域拆分，由 page.html 按 script 顺序引用；拼接语义
+      等价拆分前单文件（共享助手前移 / 入口初始化后移，无逻辑改写）。
+    """
+    if ui_asset not in {
+        'page.js', 'state.js', 'workflow.js', 'devices.js',
+        'build-config.js', 'build-jobs.js', 'events.js', 'runs.js',
+        'run-launch.js', 'run-actions.js', 'runs-payload.js', 'trace.js',
+        'patch-utils.js', 'view-restore.js',
+    }:
+        raise HTTPException(404, 'automation ui asset not found')
     ui_dir = Path(__file__).with_name('ui')
-    js = ui_dir / 'page.js'
+    js = (ui_dir / ui_asset).read_text(encoding='utf-8')
     return Response(
-        js.read_text(encoding='utf-8'),
+        js,
         media_type='application/javascript',
         headers={'Cache-Control': 'no-store, no-cache, must-revalidate'},
     )
