@@ -29,6 +29,7 @@ from features.cluster import get_cluster_service
 from features.users import owner_id_from_request
 from foundation.config import settings
 from foundation.config_paths import automation_profiles_path
+from foundation.error_model import ApiError
 from foundation.responses import error_response
 
 
@@ -114,7 +115,9 @@ def automation_ui_asset(ui_asset: str):
         'run-launch.js', 'run-actions.js', 'runs-payload.js', 'trace.js',
         'patch-utils.js', 'view-restore.js',
     }:
-        raise HTTPException(404, 'automation ui asset not found')
+        # 与 redmine/gerrit 资产路由同语义（foundation.error_model 统一
+        # envelope），不用裸 HTTPException。
+        raise ApiError.not_found('automation ui asset not found')
     ui_dir = Path(__file__).with_name('ui')
     js = (ui_dir / ui_asset).read_text(encoding='utf-8')
     return Response(

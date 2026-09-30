@@ -3,11 +3,138 @@
 import json
 import re
 import time
+from urllib.parse import urlparse
 
 from tests.runtime_ui.harness import PlaywrightError, RuntimeUiHarness, expect
 
 
 class RuntimeClusterTests(RuntimeUiHarness):
+    def test_job_form_tracks_worker_admission_and_preserves_selected_target(self):
+        page = self.new_page()
+        errors = []
+        page.on("pageerror", lambda exc: errors.append(str(exc)))
+        healthy = {
+            "id": "review-healthy", "name": "Healthy Worker", "status": "online",
+            "agent_version": "1", "running_jobs": 0, "max_jobs": 2,
+            "admission_blocked": False, "admission_reasons": [],
+        }
+        blocked = {
+            **healthy, "id": "review-blocked", "name": "Blocked Worker",
+            "admission_blocked": True, "admission_reasons": ["low_disk"],
+        }
+        payloads = {
+            "/api/cluster/status": {
+                "enabled": True, "remote_dispatch_enabled": True,
+                "local_worker_id": "review-local",
+            },
+            "/api/cluster/workers": {"workers": [healthy, blocked]},
+            "/api/cluster/devices": {"devices": [
+                {"id": "review-healthy:ABC", "worker_id": healthy["id"],
+                 "serial": "ABC", "state": "available"},
+            ]},
+            "/api/cluster/suites": {"suites": [
+                {"worker_id": healthy["id"], "suite_key": "CTS:17_r1",
+                 "suite_type": "CTS", "suite_version": "17_r1", "available": True},
+                {"worker_id": blocked["id"], "suite_key": "GTS:17_r1",
+                 "suite_type": "GTS", "suite_version": "17_r1", "available": True},
+            ]},
+            "/api/cluster/jobs": {"jobs": []},
+            "/api/cluster/worker-tests": {"tests": []},
+            "/api/cluster/suite-library": {"archives": [
+                {"name": "android-cts.zip", "size": 1024, "modified": 1},
+            ]},
+        }
+        submitted_jobs = []
+
+        def cluster_response(route):
+            path = urlparse(route.request.url).path
+            if path == "/api/cluster/jobs" and route.request.method == "POST":
+                submitted_jobs.append(route.request.post_data_json)
+                route.fulfill(
+                    status=409, content_type="application/json",
+                    body='{"success":false,"error":"Test submission intercepted"}',
+                )
+                return
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps({"success": True, **payloads.get(path, {"connected": False})}),
+            )
+
+        try:
+            page.route("**/api/cluster/**", cluster_response)
+            page.goto(f"{self.base_url}/cluster?tab=management", wait_until="domcontentloaded")
+            blocked_option = page.locator('#job-worker option[value="review-blocked"]')
+            expect(blocked_option).to_have_js_property("disabled", True)
+            expect(blocked_option).to_contain_text("磁盘不足")
+            expect(page.locator("#job-suite option")).to_have_count(1)
+            expect(page.locator("#job-suite")).to_have_value("CTS:17_r1")
+            expect(page.locator("#create-job")).to_be_enabled()
+            # Suite deployment can still target a host whose test slots are blocked.
+            expect(page.locator('#library-worker-0 option[value="review-blocked"]')).to_have_js_property(
+                "disabled", False
+            )
+            # The retained form is hidden; exercise its workspace controls without exposing it.
+            page.locator("#job-worker").select_option(healthy["id"], force=True)
+            page.locator("#job-device").select_option("review-healthy:ABC", force=True)
+
+            healthy.update(admission_blocked=True, admission_reasons=["low_memory"])
+            blocked.update(admission_blocked=False, admission_reasons=[])
+            page.evaluate("refresh()")
+            expect(page.locator("#job-worker")).to_have_value(healthy["id"])
+            expect(page.locator("#create-job")).to_be_disabled()
+            # A stale caller with a suite still cannot submit to the blocked draft target.
+            page.locator("#job-suite").evaluate(
+                "select => select.innerHTML = '<option value=\"CTS:17_r1\">CTS</option>'"
+            )
+            page.evaluate("createJob()")
+            page.locator("#job-worker").select_option("auto", force=True)
+            expect(page.locator("#job-suite")).to_have_value("GTS:17_r1")
+            expect(page.locator("#create-job")).to_be_enabled()
+            page.evaluate("document.querySelector('#job-worker').value = 'review-healthy'")
+            blocked.update(admission_blocked=True, admission_reasons=["low_disk"])
+
+            for reason, label in [("low_memory", "内存不足"), ("max_jobs", "任务满载")]:
+                with self.subTest(reason=reason):
+                    healthy.update(admission_blocked=True, admission_reasons=[reason])
+                    page.evaluate("refresh()")
+                    expect(page.locator("#job-worker")).to_have_value(healthy["id"])
+                    selected = page.locator('#job-worker option[value="review-healthy"]')
+                    expect(selected).to_have_js_property("disabled", True)
+                    expect(selected).to_contain_text(label)
+                    expect(page.locator("#job-suite option")).to_have_count(0)
+                    expect(page.locator("#job-device option")).to_have_count(1)
+                    expect(page.locator("#create-job")).to_be_disabled()
+                    page.evaluate("createJob()")
+                    page.locator("#job-worker").select_option("auto", force=True)
+                    expect(page.locator("#job-suite option")).to_have_count(0)
+                    expect(page.locator("#create-job")).to_be_disabled()
+                    page.evaluate("createJob()")
+                    # Restore the explicit draft target for the next refresh.
+                    page.evaluate("document.querySelector('#job-worker').value = 'review-healthy'")
+            self.assertEqual(submitted_jobs, [])
+
+            healthy.update(admission_blocked=False, admission_reasons=[])
+            page.evaluate("refresh()")
+            expect(page.locator("#job-worker")).to_have_value(healthy["id"])
+            expect(page.locator('#job-worker option[value="review-healthy"]')).to_have_js_property(
+                "disabled", False
+            )
+            expect(page.locator("#job-suite")).to_have_value("CTS:17_r1")
+            expect(page.locator("#create-job")).to_be_enabled()
+            page.reload(wait_until="domcontentloaded")
+            expect(page.locator('#job-worker option[value="review-blocked"]')).to_have_js_property(
+                "disabled", True
+            )
+            expect(page.locator("#job-suite option")).to_have_count(1)
+            page.locator("#job-worker").select_option(healthy["id"], force=True)
+            page.locator("#create-job").evaluate("button => button.click()")
+            expect(page.locator("#toast")).to_have_text("Test submission intercepted")
+            self.assertEqual(len(submitted_jobs), 1)
+            self.assertEqual(submitted_jobs[0]["worker_id"], healthy["id"])
+            self.assert_no_page_errors(errors)
+        finally:
+            page.close()
+
     def test_saved_cluster_refresh_has_stable_surface_before_dom_ready(self):
         page = self.new_page()
         try:

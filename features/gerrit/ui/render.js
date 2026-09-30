@@ -440,9 +440,16 @@ document.addEventListener('click', function(event) {
     selectGerritWorkspaceChange(row.dataset.gerritChangeId, row.dataset.gerritPatchset);
   }
 });
+// Keep early workspace events until page.js initializes its shared state.
+let resolveGerritEntryReady;
+const gerritEntryReady = new Promise(function(resolve) {
+  resolveGerritEntryReady = resolve;
+});
 window.addEventListener('gms:embedded-workspace', function(event) {
-  applyGerritWorkspaceContext(
-    event.detail && event.detail.context || {},
-    event.detail && event.detail.type === 'workspace-context-navigate'
-  ).catch(function(error) { notifyUser('打开 Gerrit Change 失败', error.message, 'error'); });
+  gerritEntryReady.then(function() {
+    return applyGerritWorkspaceContext(
+      event.detail && event.detail.context || {},
+      event.detail && event.detail.type === 'workspace-context-navigate'
+    );
+  }).catch(function(error) { notifyUser('打开 Gerrit Change 失败', error.message, 'error'); });
 });

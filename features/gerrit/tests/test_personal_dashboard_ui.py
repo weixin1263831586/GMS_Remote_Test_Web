@@ -59,6 +59,8 @@ def dashboard():
                 ),
             }
             if url.path in assets:
+                if url.path == "/gerrit-dashboard/page.js" and state.get("before_entry"):
+                    state["before_entry"]()
                 path, content_type = assets[url.path]
                 route.fulfill(
                     content_type=content_type, body=path.read_text()
@@ -99,6 +101,49 @@ def open_dashboard(page):
 
 def statistics_requests(state):
     return [url for url in state["requests"] if url.path.endswith("/statistics/personal")]
+
+
+@pytest.mark.parametrize("message_type", ["workspace-context", "workspace-context-navigate"])
+def test_workspace_events_survive_delayed_entry_script(dashboard, message_type):
+    page, state = dashboard
+
+    def before_entry():
+        page.wait_for_function("typeof applyGerritWorkspaceContext === 'function'")
+        page.evaluate(
+            """type => window.postMessage({
+                type, context: {gerrit_change_id: '123', gerrit_patchset: '2'}
+            }, window.location.origin)""",
+            message_type,
+        )
+        page.wait_for_function("GmsEmbeddedWorkspace.get().gerrit_change_id === '123'")
+
+    state["before_entry"] = before_entry
+    open_dashboard(page)
+    page.wait_for_function("gerritWorkspaceContext.gerrit_change_id === '123'")
+    assert page.evaluate("gerritWorkspaceContext.gerrit_patchset") == "2"
+    expected_tab = "query" if message_type.endswith("-navigate") else "personal"
+    playwright_api.expect(page.locator(f'[data-tab="{expected_tab}"]')).to_have_attribute(
+        "aria-selected", "true"
+    )
+    if expected_tab == "query":
+        playwright_api.expect(page.locator("#query")).to_have_value("change:123")
+
+    # Once initialized, later navigation must still reach the requested Change.
+    page.evaluate("""window.postMessage({
+        type: 'workspace-context-navigate', context: {gerrit_change_id: '456'}
+    }, window.location.origin)""")
+    playwright_api.expect(page.locator("#query")).to_have_value("change:456")
+    playwright_api.expect(page.locator('[data-tab="query"]')).to_have_attribute(
+        "aria-selected", "true"
+    )
+    page.wait_for_function("pendingWorkspaceChangeId === ''")
+    change_queries = [
+        parse_qs(url.query)["query"][0]
+        for url in state["requests"] if url.path.endswith("/changes")
+    ]
+    assert "change:456" in change_queries
+    if expected_tab == "query":
+        assert "change:123" in change_queries
 
 
 def test_empty_setup_stays_actionable_on_refresh_and_revisit(dashboard):

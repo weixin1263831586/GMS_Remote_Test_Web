@@ -365,6 +365,24 @@ class FrontendIntegrityTests(unittest.TestCase):
 
                 self.assertEqual(missing, [])
 
+    def test_cluster_admission_label_renders_reasons(self):
+        """Cluster 派发阻断标签必须携带原因（fcba5c1 admission 统一的 UI 面）。
+
+        admission_reasons 由后端 worker_admission_state 产出；UI 侧的
+        原因词表与拼接函数丢失时，"已阻止派发"会退化成裸布尔文案，
+        CI 需要能捕获（外审：文案回归此前无断言固定）。
+        """
+        management = read_text("features/cluster/ui/management.js")
+        self.assertIn("ADMISSION_REASON_LABELS", management)
+        for reason in (
+            "offline", "draining", "low_disk", "low_memory",
+            "max_jobs", "external_tradefed",
+        ):
+            self.assertIn(f"{reason}:", management)
+        self.assertIn("worker.admission_reasons||[]", management)
+        self.assertIn("admissionReasonSuffix(worker)", management)
+        self.assertIn("已阻止派发", management)
+
     def test_cluster_dashboard_has_stable_refresh_and_safe_dynamic_actions(self):
         html = read_text("features/cluster/ui/page.html")
         # 拆分为 chunk 后断言面覆盖 page.html 声明的全部脚本（与 redmine

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from foundation.redaction import redact_sensitive_text
+
 from .diagnosis_quality import calibrate_ai_result, public_provider_error
 
 
@@ -91,13 +93,15 @@ def analyze_failure_with_ai(
                 )
             return calibrate_ai_result(response, error_message, stack_trace)
         ai_error = public_provider_error(result.get('error') or 'AI分析失败')
-        logger.warning("AI分析失败: %s", ai_error)
+        logger.warning("AI分析失败: %s", redact_sensitive_text(ai_error))
     except ImportError:
         ai_error = '通用AI分析器未安装'
         logger.warning("通用AI分析器未安装，使用基于规则的分析")
     except Exception as exc:
         ai_error = public_provider_error(exc)
-        logger.warning("通用AI分析失败: %s，使用基于规则的分析", ai_error)
+        logger.warning(
+            "通用AI分析失败: %s，使用基于规则的分析", redact_sensitive_text(ai_error)
+        )
 
     fallback = rule_based_analysis(
         test_name, error_message, stack_trace, module
