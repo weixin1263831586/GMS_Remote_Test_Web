@@ -133,19 +133,6 @@ _CONFIRM_PATHS = {
     "/api/usbip/install",
 }
 
-# category → routers 模块名映射（当两者不一致时需要）
-_CATEGORY_MODULE_MAP: dict[str, str] = {
-    "device": "devices",      # category="device" → features.devices.api
-    "test": "tests",          # category="test" → features.test_execution.api
-    "report": "reports",      # category="report" → features.reports.api
-    "burn": "firmware",       # category="burn" → features.firmware.firmware_api
-    "ssh": "integrations",    # category="ssh" → routers.integrations
-    "vpn": "integrations",    # category="vpn" → routers.integrations
-    "usbip": "integrations",  # category="usbip" → routers.integrations
-    "file": "system",         # category="file" → routers.system
-    "notification": "notifications",  # category="notification" → routers.notifications
-}
-
 # 响应类型推断
 _RESPONSE_TYPE_MAP = {
     "/api/devices/list": "list",
@@ -356,13 +343,15 @@ class ToolRegistry:
             requires_confirm = path in _CONFIRM_PATHS
             response_type = _RESPONSE_TYPE_MAP.get(path, "detail")
 
-            module_name = _CATEGORY_MODULE_MAP.get(category, category)
             executor_ref = _EXECUTOR_REF_OVERRIDES.get(path, "")
             if path not in _AGENT_UNSUPPORTED_DIRECT_PATHS and not executor_ref:
                 if category == "report":
                     executor_ref = f"features.reports.api:{name}"
                 else:
-                    executor_ref = f"routers.{module_name}:{name}" if category != "other" else ""
+                    # 旧 routers.* 兼容通道已删除：executor_ref 只允许指向
+                    # features.* 公共模块（tests/architecture/
+                    # test_assistant_dynamic_imports.py 强制）。
+                    executor_ref = ""
 
             tool = AgentTool(
                 name=name,

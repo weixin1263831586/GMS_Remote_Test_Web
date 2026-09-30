@@ -3175,6 +3175,30 @@ function dailyBriefEvidenceGateNotice(result) {
     + '</ul></div></div>';
 }
 
+function dailyBriefSystemMetadata(result) {
+  var meta = result && result.report_metadata;
+  if (!meta || typeof meta !== 'object') return '';
+  var source = meta.source === 'redmine_live' ? 'Redmine 实时校验' : '分析快照';
+  var fields = [
+    ['报告人', meta.author_name], ['当前负责人', meta.assigned_to_name],
+    ['状态', meta.status_name], ['Redmine 更新时间', meta.updated_on],
+    ['系统校验时间', meta.verified_at], ['数据来源', source]
+  ].filter(function (item) { return String(item[1] || '').trim(); });
+  return '<div class="daily-brief-section"><div class="daily-brief-section-title">系统权威元数据</div>'
+    + '<div class="daily-brief-section-body">'
+    + fields.map(function (item) { return '<span class="daily-brief-meta-item"><b>'
+      + esc(item[0]) + '</b> ' + esc(item[1]) + '</span>'; }).join(' · ')
+    + '</div></div>';
+}
+
+function dailyBriefQualityNotice(result) {
+  var quality = String((result || {}).evidence_quality || '');
+  if (!quality) return '';
+  var label = ({ verified: '证据已验证', partial: '证据部分闭环', insufficient: '证据不足' })[quality] || quality;
+  return '<div class="daily-brief-warning"><b>执行状态：</b>已完成 · <b>证据质量：</b>'
+    + esc(label) + '</div>';
+}
+
 function singleIssueAnalysisMeta(run, issue) {
   var timestamp = String(run.finished_at || run.started_at || '').replace('T', ' ').slice(0, 16);
   var tags = timestamp ? ['<span>分析时间 ' + esc(timestamp) + '</span>'] : [];
@@ -3207,7 +3231,8 @@ function singleIssueAnalysisReportBody(item) {
       + (previousAt ? '（' + esc(previousAt) + '）' : '') + '。</div>'
     : '';
   if (report) {
-    return previousNotice + dailyBriefEvidenceGateNotice(displayedResult)
+    return previousNotice + dailyBriefSystemMetadata(displayedResult)
+      + dailyBriefQualityNotice(displayedResult) + dailyBriefEvidenceGateNotice(displayedResult)
       + '<div class="daily-brief-section daily-brief-section-md"><div class="daily-brief-section-body analysis-doc">'
       + renderMarkdownDoc(report) + '</div></div>';
   }
@@ -4415,6 +4440,8 @@ function renderDailyBriefInner(data) {
     + '<div class="daily-brief-metric"><span>待回复</span><b>' + esc(run.waiting_my_reply_count || 0) + '</b></div>'
     + '<div class="daily-brief-metric"><span>超 3 天未回复</span><b>' + esc(run.no_reply_3_days_count || 0) + '</b></div>'
     + '<div class="daily-brief-metric"><span>需人工确认</span><b>' + esc(counts.needs_human_review || 0) + '</b></div>'
+    + '<div class="daily-brief-metric"><span>证据已验证</span><b>' + esc(counts.evidence_verified || 0) + '</b></div>'
+    + '<div class="daily-brief-metric"><span>证据部分闭环</span><b>' + esc(counts.evidence_partial || 0) + '</b></div>'
     + '</div></div>';
   if (run.status === 'failed' && run.error) {
     head += '<div class="daily-brief-warning daily-brief-error"><span>❌ ' + esc(run.error) + '</span>'
@@ -4443,6 +4470,9 @@ function renderDailyBriefInner(data) {
     if (issue.status === 'stale') return '<span class="daily-brief-state">⚠ 旧批次结论，可能已被更新分析取代</span>';
     // 模型自评与实际取证完成情况分别展示。
     var labels = [];
+    var qualityLabel = ({ verified: '证据已验证', partial: '证据部分闭环', insufficient: '证据不足' })[r.evidence_quality];
+    labels.push('执行已完成');
+    if (qualityLabel) labels.push(qualityLabel);
     if (r.confidence != null) labels.push('模型自评 ' + esc(r.confidence));
     if (r.needs_human_review) labels.push('⚠️ 取证未闭环 · 需人工确认');
     return '<span class="daily-brief-state">' + labels.join(' · ') + '</span>';

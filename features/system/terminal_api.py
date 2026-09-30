@@ -364,8 +364,8 @@ async def _upload_file_chunk(
         message = record_internal_error(
             logger,
             "上传文件分片",
-            "Error uploading chunk %s",
-            chunk_index,
+            "Error uploading chunk",
+            context={"chunk_index": chunk_index},
         )
         return ApiError.internal(
             message, details={"chunk_index": chunk_index}

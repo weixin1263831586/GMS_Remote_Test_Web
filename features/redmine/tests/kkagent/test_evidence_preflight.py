@@ -95,6 +95,9 @@ class EvidencePreflightTests(unittest.TestCase):
             fetched = ToolTrace(tool_name="gms_rt_redmine_issue_fetch", status="succeeded")
             journals = ToolTrace(tool_name="gms_rt_redmine_journals", status="succeeded")
             attachments = ToolTrace(tool_name="gms_rt_redmine_attachments", status="succeeded")
+            artifact = ToolTrace(
+                tool_name="gms_rt_redmine_artifact_read", status="succeeded"
+            )
             device = ToolTrace(tool_name="gms_rt_devices_snapshot", status="succeeded")
             manifest = {"artifacts": [
                 {"artifact_id": "a1", "kind": "log", "status": "ready"},
@@ -104,7 +107,7 @@ class EvidencePreflightTests(unittest.TestCase):
                 evidence_preflight, "_collect",
                 AsyncMock(side_effect=[
                     (fetched, {"snapshot_id": "ev_9"}), (journals, {}),
-                    (attachments, manifest), (device, {}),
+                    (attachments, manifest), (artifact, {}), (device, {}),
                 ]),
             ):
                 return await evidence_preflight.collect_deep_analysis_evidence(
@@ -120,6 +123,51 @@ class EvidencePreflightTests(unittest.TestCase):
         self.assertEqual(attachments.attachment_count, 2)
         self.assertEqual(attachments.text_artifact_ids, ["a1"])
         self.assertEqual(attachments.all_artifact_ids, ["a1", "a2"])
+        artifact = next(
+            trace for trace in result.traces
+            if trace.tool_name == "gms_rt_redmine_artifact_read"
+        )
+        self.assertEqual(artifact.all_artifact_ids, ["a1"])
+
+    def test_text_artifact_preflight_uses_real_cli_alias_and_bounded_window(self):
+        async def scenario():
+            with patch.object(
+                evidence_preflight, "_gms_command", return_value=["command"]
+            ) as command, patch.object(
+                evidence_preflight, "_run_readonly_command",
+                AsyncMock(return_value=(0, b'{"ok":true,"data":{}}', "")),
+            ):
+                await evidence_preflight._collect(
+                    tool_name="gms_rt_redmine_artifact_read",
+                    arguments=["art_1", "--offset", "0", "--limit", "4096"],
+                    tool_input={"artifact_id": "art_1"}, env_extra={},
+                )
+            return command
+
+        command = asyncio.run(scenario())
+        self.assertEqual(command.call_args.args[0], "gms-rt-artifact-read")
+
+    def test_failed_artifact_read_preserves_nonrecoverable_payload_error(self):
+        async def scenario():
+            with patch.object(
+                evidence_preflight, "_gms_command", return_value=["command"]
+            ), patch.object(
+                evidence_preflight, "_run_readonly_command",
+                AsyncMock(return_value=(
+                    7,
+                    '{"ok":false,"error":"该 artifact 没有可用文本"}'.encode(),
+                    "",
+                )),
+            ):
+                return await evidence_preflight._collect(
+                    tool_name="gms_rt_redmine_artifact_read",
+                    arguments=["art_1"],
+                    tool_input={"artifact_id": "art_1"}, env_extra={},
+                )
+
+        trace, _ = asyncio.run(scenario())
+        self.assertEqual(trace.status, "failed")
+        self.assertIn("没有可用文本", trace.output_preview)
 
     def test_triage_baseline_collects_redmine_without_device(self):
         """#653167 复盘：triage 也要有确定性 Redmine 基线兜底，但不含设备

@@ -329,7 +329,7 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v19")
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v20")
 
     def test_diagnostic_prompt_has_no_journal_timeline_section(self):
         """v19: 处理时间线只是 Redmine journal 流水的复述，读者点开工单就有；
@@ -452,6 +452,7 @@ class MergeTracesReplayTests(unittest.TestCase):
                 tool_name="gms_rt_sdk_search",
                 status="succeeded",
                 source_reproducible=True,
+                source_evidence_valid=True,
             ),
             ToolTrace(tool_call_id="c2", tool_name="other", status="pending"),
         ]
@@ -468,7 +469,10 @@ class MergeTracesReplayTests(unittest.TestCase):
 
         first = KkAgentTrace()
         first.tool_calls = [
-            ToolTrace(tool_call_id="c1", tool_name="gms_rt_sdk_search", status="succeeded")
+            ToolTrace(
+                tool_call_id="c1", tool_name="gms_rt_sdk_search",
+                status="succeeded", source_evidence_valid=True,
+            )
         ]
         second = KkAgentTrace()
         second.tool_calls = [
@@ -505,7 +509,9 @@ class McpHealthPreflightTests(unittest.TestCase):
         skipped = McpHealthProbe(ok=True, skipped=True)
         trace = KkAgentTrace(session_id="s", exit_code=0, final_event={
             "type": "result", "subtype": "success", "exit_code": 0,
-            "session_id": "s", "message": "## 结论",
+            "session_id": "s", "message": (
+                "## 关键结论\n\n- [事实][EV-001] 已读取工单。"
+            ),
         })
         trace.tool_calls = [
             ToolTrace(

@@ -91,10 +91,34 @@ class AnchorVerificationTests(unittest.TestCase):
         with patch.object(av, "run_codesearch_process", stub):
             out = av.verify_background_anchors(hits)
         self.assertEqual(len(stub.calls), av.MAX_VERIFIED_ANCHORS)
-        # 重复 anchor 不重跑子进程，但已缓存结论仍要回挂
+        # 预算内的 anchor 跑子进程（path_missing，无 reason）；超出预算的
+        # anchor 显式产出 unknown + budget_exhausted（可与「codesearch
+        # 不可用」区分）；重复 anchor 不重跑子进程，但已缓存结论仍要回挂
         # 到后续 hit，不能因全局去重丢失关联。
-        self.assertEqual(len(out), av.MAX_VERIFIED_ANCHORS + 1)
+        self.assertEqual(len(out), 8 + 1)
+        exhausted = [v for v in out if v.get("reason") == "budget_exhausted"]
+        self.assertEqual(len(exhausted), 4)
+        self.assertTrue(all(
+            v["evidence_level"] == av.EVIDENCE_UNKNOWN for v in exhausted
+        ))
+        ran = [v for v in out if "reason" not in v]
+        self.assertEqual(len(ran), av.MAX_VERIFIED_ANCHORS + 1)
         self.assertEqual(out[-1]["anchor"]["path"], "a/b/File0.java")
+        self.assertNotIn("reason", out[-1])
+
+    def test_bare_filename_anchor_is_skipped_without_budget(self):
+        """裸文件名（无 /）无从做文件级溯源：跳过、不扣预算、不产条目。"""
+        stub = _CodesearchStub(set())
+        hits = [
+            _hit("bare", [{"repo": "r", "path": "Utils.java"}]),
+            _hit("real", [_anchor()]),
+        ]
+        with patch.object(av, "run_codesearch_process", stub):
+            out = av.verify_background_anchors(hits)
+        self.assertEqual(stub.calls, [_ for _ in stub.calls])  # stub 收到调用
+        self.assertEqual(len(stub.calls), 1)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["hit_title"], "real")
 
     def test_crashing_verifier_degrades_to_unknown(self):
         def boom(cmd: list[str], cwd: str, *, timeout: float = 30.0):

@@ -6,7 +6,7 @@
 
 | 主题 | 入口 | 内容 |
 |---|---|---|
-| 架构 | [architecture/overview.md](architecture/overview.md) | 系统架构、模块边界、ADR 决策记录（Controller/Worker 边界、Feature/Foundation 分层、Agent Profile Store、SSH 执行边界、USB/IP 固件所有权） |
+| 架构 | [architecture/overview.md](architecture/overview.md) | 系统架构、模块边界、ADR 决策记录（Controller/Worker 边界、Feature/Foundation 分层、Agent Profile Store、SSH 执行边界、USB/IP 固件所有权）；[AI 执行治理与诊断质量层](architecture/ai-governance.md)（execution receipt、golden corpus、failure identity、知识 chunk 检索、门禁图） |
 | 部署 | [deployment/quick-install.md](deployment/quick-install.md) | 快速安装、生产部署、配置体系、Worker 部署、升级排障 |
 | USB/IP | [usbip/overview.md](usbip/overview.md) | 设备接入选型、固件烧写流程、ADB Proxy 对比、故障排除 |
 | 设备 | [devices/bootloader-oem-commands.md](devices/bootloader-oem-commands.md) | Bootloader 锁定/解锁与 GSI 烧写的 oem 命令选型矩阵、vendor 版本判据、失败兜底与恢复 |

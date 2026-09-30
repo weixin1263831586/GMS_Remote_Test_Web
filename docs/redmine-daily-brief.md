@@ -12,9 +12,11 @@ systemd timer 每分钟检查一次（Persistent=true；按 owner trigger_time �
   → DailyBriefService（owner-aware 编排）
       → build_daily_triage_snapshot()   ← 唯一事实来源：get_workload_statistics()
       → 冻结快照（counts + issues + SHA256 fingerprint）
+      → AIExecutionLedger.begin()       ← 逻辑调用账本：活跃 receipt 拒绝重复发送
       → KkAgentRedmineAnalyzer（headless，--output-format stream-json，无 yolo）
       → Schema Gate + Runtime Evidence Gate
       → 任一门禁失败时 --resume 精确 session，限次修复
+      → ai_ledger.finish()/mark_unknown()（completed/failed/unknown 终态收敛）
       → 聚合报告 + Markdown → daily_brief.sqlite3（per-owner）
 Web 手动触发 → SQLite 持久 job 队列 → 独立 daily_brief_worker
       → 同一套 DailyBriefService / KkAgentRedmineAnalyzer
@@ -29,6 +31,8 @@ Web 手动触发 → SQLite 持久 job 队列 → 独立 daily_brief_worker
 | --- | --- |
 | `features/redmine/daily_brief_models.py` | Run/Issue 数据模型、schema 校验、优先级规则 |
 | `features/redmine/daily_brief_repository.py` | per-owner SQLite（runs/issues，幂等唯一索引） |
+| `features/redmine/ai_execution_ledger.py` | AI 逻辑调用账本（receipt：pending→received→completed/failed/unknown，防重复发送） |
+| `features/redmine/failure_identity.py` | 失败确定性身份（fingerprint/relation/cluster；同用例不同根因不合 Cluster） |
 | `features/redmine/daily_brief_snapshot.py` | triage 快照（去重/bucket/fingerprint/delta） |
 | `features/redmine/daily_brief_service.py` | 编排：幂等 run、并发控制、失败隔离、聚合 |
 | `features/redmine/kkagent/` | stream-json 进程、轨迹、schema 与 runtime evidence gate、同会话修复 |

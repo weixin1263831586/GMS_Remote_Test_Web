@@ -567,6 +567,11 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
         }
         diagnosis["summary"] = ai_result.get("root_cause") or ai_result.get("analysis") or "Diagnosis orchestration complete"
         diagnosis["patch_draft"] = _build_patch_draft(diagnosis)
+        # DiagnosisReadModel（全局审查第二十节）：canonical 诊断读模型，
+        # CLI/MCP/Assistant 消费该章节，Web 继续用原生字段渲染。
+        from .diagnosis_read_model import read_model_from_report_diagnosis
+
+        diagnosis["read_model"] = read_model_from_report_diagnosis(diagnosis)
 
         return success_response(diagnosis, message="Diagnosis complete")
     except Exception as e:

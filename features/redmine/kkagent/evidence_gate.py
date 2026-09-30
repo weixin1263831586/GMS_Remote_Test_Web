@@ -173,10 +173,15 @@ def evaluate_evidence_gate(
         trace.listed_text_artifact_ids(attachment_calls)
         - trace.read_artifact_ids()
     )
-    attachments_checked = attachment_count == 0 or (
+    # 快照里的 attachment_count 可能因旧缓存/预采集降级而是 0，但实时
+    # attachments manifest 已经列出了附件。此时不能让 ``count == 0``
+    # 短路整个门禁，否则 ready/partial 文本附件即使一个都没读也会被标成
+    # completed。以两侧观测到的最大值作为真实下限。
+    expected_attachment_count = max(attachment_count, listed_attachment_count)
+    attachments_checked = expected_attachment_count == 0 or (
         bool(attachment_calls)
         and attachment_manifest_parsed
-        and listed_attachment_count >= attachment_count
+        and listed_attachment_count >= expected_attachment_count
         and not unread_text_artifact_ids
     )
     test_failure_subject = is_test_failure_subject(entry)

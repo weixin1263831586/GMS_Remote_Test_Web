@@ -33,6 +33,11 @@ POLICY_RELATIVE_PATH = "knowledge-pack/policy.yaml"
 #: src/partN-*/ch* 章节正文（与上游 policy 的 included_paths 语义一致）。
 _FALLBACK_INCLUDED = ["src/part*-*/ch*/**"]
 
+#: GMS 消费的 distribution 名称候选（显式有序）。上游未来新增其他消费方
+#: （如 another_consumer）时，"字典里的第一个"不得成为内容信任边界：
+#: 只有候选列表内的 distribution 才允许决定 included/excluded 投影。
+_DISTRIBUTION_CANDIDATES = ("android_internals", "smartperfetto")
+
 _ALWAYS_EXCLUDED = [
     "src/graphify-out/**",
 ]
@@ -51,6 +56,11 @@ class AIWContentPolicy:
     exported_metadata: tuple[str, ...] = ()
     license_expression: str = ""
     schema_version: int = 0
+    #: 实际采用的 distribution 名称（"" = 上游未声明任何 distribution，
+    #: 使用保守回退）；status 里必须可见，防止投影来源静默漂移。
+    policy_distribution: str = ""
+    #: 所选 distribution 的 projection_revision（上游内容投影版本）。
+    policy_projection_revision: int = 0
     source_revision: str = ""
     content_hash: str = ""
     parse_warning: str = ""
@@ -124,14 +134,35 @@ def load_policy(repo_root: Path) -> AIWContentPolicy:
     schema_version = _as_int(raw.get("schema_version"), 0)
     distributions = raw.get("distribution")
     pack: dict[str, Any] = {}
-    if isinstance(distributions, dict):
-        # GMS 只消费自有的 pack 定义；SmartPerfetto 的分发授权不适用，
-        # 其投影仅作为 included/excluded 边界的参考回退（ADR 0014）。
-        pack = distributions.get("android_internals") or _next_distribution(distributions)
-    included = _as_str_tuple((pack or {}).get("included_paths")) or _FALLBACK_INCLUDED
-    excluded = _as_str_tuple((pack or {}).get("excluded_paths"))
+    policy_distribution = ""
+    if isinstance(distributions, dict) and distributions:
+        # 显式按候选顺序选择，不用"字典第一个"：上游新增其他消费方的
+        # distribution 时投影边界不得静默漂移（ADR 0014）。
+        for name in _DISTRIBUTION_CANDIDATES:
+            candidate = distributions.get(name)
+            if isinstance(candidate, dict):
+                pack = candidate
+                policy_distribution = name
+                break
+        else:
+            # 上游只声明了未知消费方的 distribution：其投影边界对 GMS
+            # 不适用，fail-closed（不索引正文）并由 status 显式暴露。
+            return AIWContentPolicy(
+                degraded=True,
+                parse_warning=(
+                    "policy distribution 不含已知消费方 "
+                    f"{list(_DISTRIBUTION_CANDIDATES)}: {sorted(distributions)}"
+                ),
+                schema_version=schema_version,
+                source_revision=_head_revision(repo_root),
+                content_hash=hashlib.sha256(raw_text.encode("utf-8")).hexdigest(),
+                raw=raw,
+            )
+    projection_revision = _as_int(pack.get("projection_revision"), 0)
+    included = _as_str_tuple(pack.get("included_paths")) or _FALLBACK_INCLUDED
+    excluded = _as_str_tuple(pack.get("excluded_paths"))
     excluded_tags = frozenset(
-        str(tag).strip().lower() for tag in _as_str_tuple((pack or {}).get("excluded_tags"))
+        str(tag).strip().lower() for tag in _as_str_tuple(pack.get("excluded_tags"))
     )
     exported = _as_str_tuple(raw.get("exported_metadata"))
     license_block = raw.get("license")
@@ -147,17 +178,12 @@ def load_policy(repo_root: Path) -> AIWContentPolicy:
         exported_metadata=exported,
         license_expression=license_expression,
         schema_version=schema_version,
+        policy_distribution=policy_distribution,
+        policy_projection_revision=projection_revision,
         source_revision=_head_revision(repo_root),
         content_hash=hashlib.sha256(raw_text.encode("utf-8")).hexdigest(),
         raw=raw if isinstance(raw, dict) else {},
     )
-
-
-def _next_distribution(distributions: dict[str, Any]) -> dict[str, Any]:
-    for value in distributions.values():
-        if isinstance(value, dict):
-            return value
-    return {}
 
 
 def _parse_yaml_mapping(text: str) -> dict[str, Any] | None:
@@ -203,6 +229,8 @@ def policy_state_summary(policy: AIWContentPolicy) -> dict[str, Any]:
     """status/reindex 结果里的 policy 概览（不携带原始 policy 全文）。"""
     return {
         "schema_version": policy.schema_version,
+        "policy_distribution": policy.policy_distribution,
+        "policy_projection_revision": policy.policy_projection_revision,
         "content_hash": policy.content_hash,
         "included_paths": list(policy.included_paths),
         "excluded_paths": list(policy.excluded_paths),

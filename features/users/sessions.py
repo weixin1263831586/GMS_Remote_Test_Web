@@ -118,8 +118,8 @@ class ClientManager:
                 message = record_internal_error(
                     logger,
                     "SSH 登录校验",
-                    "SSH credential check failed for %s",
-                    client_ip,
+                    "SSH credential check failed",
+                    context={"client_ip": client_ip},
                 )
                 return False, '', message
 

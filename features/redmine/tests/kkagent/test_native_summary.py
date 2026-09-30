@@ -10,7 +10,10 @@ from features.redmine.kkagent.trace import KkAgentTrace, ToolTrace
 
 
 ENTRY = {"issue_id": 123, "subject": "CTS fail", "analysis_mode": "diagnostic"}
-REPORT = "## 分析结论\n\n当前证据不足以确认根因，请补充失败日志。\n"
+REPORT = (
+    "## 关键结论\n\n"
+    "- [推断][EV-005] 当前证据不足以确认根因，请补充失败日志。\n"
+)
 
 
 def final_trace(session="same", report=REPORT):
@@ -43,7 +46,7 @@ def complete_trace(session="same", report=REPORT):
         ToolTrace(
             tool_call_id="source", tool_name="gms_rt_sdk_search",
             tool_input={"query": "PackageSignatureTest"}, status="succeeded",
-            source_reproducible=True,
+            source_reproducible=True, source_evidence_valid=True,
         ),
     ]
     return trace
@@ -53,8 +56,20 @@ def test_native_report_is_preserved_without_invented_labels():
     result = native_summary_result(final_trace(), ENTRY)
     assert result["detailed_report"] == REPORT
     assert result["needs_human_review"]
-    assert "confidence" not in result
+    assert result["confidence"] == 0.45
     assert "root_cause_type" not in result
+
+
+def test_native_claims_are_bound_to_controller_evidence_ids():
+    result = native_summary_result(complete_trace(), ENTRY)
+    assert result["claims"] == [{
+        "claim_type": "inference",
+        "text": "当前证据不足以确认根因，请补充失败日志。",
+        "evidence_ids": ["EV-005"],
+    }]
+    assert result["claim_binding_errors"] == []
+    assert result["execution_status"] == "completed"
+    assert result["evidence_quality"] == "verified"
 
 
 def test_partial_or_failed_answer_is_not_a_summary():
@@ -94,12 +109,13 @@ def test_native_summary_passes_without_repair_when_evidence_gate_is_complete():
     assert outcome.ok
     assert outcome.result["detailed_report"] == REPORT
     assert not outcome.result["needs_human_review"]
+    assert outcome.result["confidence"] == 0.85
     assert stream.await_count == 1
 
 
 def test_native_summary_repairs_missing_evidence_in_same_session():
     analyzer = KkAgentRedmineAnalyzer()
-    repaired_report = "## 修正结论\n\n证据已补齐。\n"
+    repaired_report = "## 关键结论\n\n- [事实][EV-005] 证据已补齐。\n"
     stream = AsyncMock(side_effect=[
         (final_trace(), _StreamFallback(), False),
         (complete_trace(report=repaired_report), _StreamFallback(), False),
@@ -112,6 +128,7 @@ def test_native_summary_repairs_missing_evidence_in_same_session():
     assert outcome.ok
     assert outcome.result["detailed_report"] == repaired_report
     assert not outcome.result["needs_human_review"]
+    assert outcome.result["confidence"] == 0.85
     assert stream.await_count == 2
     repair_command = stream.await_args_list[1].args[0]
     assert "--resume" in repair_command
@@ -134,6 +151,30 @@ def test_native_summary_cannot_complete_when_gate_stays_open():
     assert not outcome.ok
     assert outcome.error_type == "mcp_evidence_unavailable"
     assert stream.await_count == 3
+
+
+def test_native_summary_without_reproducible_source_requires_human_review():
+    trace = complete_trace()
+    source = next(call for call in trace.tool_calls if "sdk_search" in call.tool_name)
+    source.source_reproducible = False
+
+    result = native_summary_result(trace, ENTRY)
+
+    assert result["evidence_gate"]["source_evidence_checked"]
+    assert result["confidence"] == 0.58
+    assert result["needs_human_review"]
+
+
+def test_raw_audit_output_is_not_cut_to_twenty_thousand_characters():
+    analyzer = KkAgentRedmineAnalyzer()
+    raw = _StreamFallback()
+    raw.feed_stdout("x" * 25_000)
+
+    outcome = analyzer._success(
+        {"detailed_report": REPORT}, complete_trace(), raw
+    )
+
+    assert len(outcome.raw_output) == 25_000
 
 
 def test_analysis_and_repair_commands_have_no_step_limit():

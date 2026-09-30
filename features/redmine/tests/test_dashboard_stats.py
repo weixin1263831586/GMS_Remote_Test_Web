@@ -581,7 +581,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             self.assertEqual(result["data"]["lists"]["no_reply_3_days"], [])
             self.assertEqual(db.get_issue(632190)["status_name"], "HangUp")
 
-    def test_personal_workload_refresh_rechecks_stale_issue_metadata(self):
+    def test_personal_workload_refresh_excludes_reassigned_pending_issue(self):
         import asyncio
 
         import features.redmine.api as redmine_router
@@ -614,12 +614,9 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 self.assertEqual(issue_id, 634719)
                 db.upsert_issue(_issue(
                     634719,
-                    "黄 超群",
+                    "李 煌",
                     status_name="Confirmed",
-                    journals=[
-                        {"user": "美格 智能", "created_on": "2026-07-01T02:25:00", "notes": "build log 也帮忙确认下"},
-                        {"user": "黄 超群", "created_on": "2026-07-06T09:30:00", "notes": "已回复客户"},
-                    ],
+                    journals=[{"user": "美格 智能", "created_on": "2026-07-01T02:25:00", "notes": "build log 也帮忙确认下"}],
                 ))
                 return {"success": True}
 
@@ -644,7 +641,9 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 "_get_redmine_stats_config",
                 return_value={"stale_days": 3, "window_days": 60, "cache_ttl": 600},
             ), patch("features.redmine.repository_queries.datetime") as mocked_datetime:
-                mocked_datetime.now.return_value = datetime(2026, 7, 7, 12, 0, 0)
+                # 尚未超过三天：验证普通 waiting_my_reply 也会实时校准，
+                # 不能只刷新 no_reply_3_days。
+                mocked_datetime.now.return_value = datetime(2026, 7, 2, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
                 result = asyncio.run(stats_api.get_workload_statistics(
@@ -656,8 +655,11 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 ))
 
             self.assertTrue(result["success"])
+            self.assertEqual(result["data"]["waiting_my_reply"], 0)
+            self.assertEqual(result["data"]["lists"]["waiting_my_reply"], [])
             self.assertEqual(result["data"]["no_reply_3_days"], 0)
             self.assertEqual(result["data"]["lists"]["no_reply_3_days"], [])
+            self.assertEqual(db.get_issue(634719)["assigned_to_name"], "李 煌")
 
     def test_personal_workload_uses_live_resolved_trends_over_incomplete_db(self):
         """Personal dashboard bars must reflect ALL closed issues from Redmine,

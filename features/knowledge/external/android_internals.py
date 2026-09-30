@@ -78,7 +78,7 @@ REINDEX_BUSY_TIMEOUT_MS = 2_000
 _SNIPPET_TOKENS = 24
 
 #: schema 版本；表结构变化时递增并在 _SCHEMA_MIGRATIONS 中登记。
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _SCHEMA_MIGRATIONS: dict[int, str] = {
     1: """
     CREATE TABLE IF NOT EXISTS wiki_pages (
@@ -122,6 +122,30 @@ _SCHEMA_MIGRATIONS: dict[int, str] = {
     3: """
     DELETE FROM wiki_pages;
     """,
+    # v4: Section 级检索。页 → 标题 Section → FTS 命中
+    # 携带 heading + start_line/end_line，Binder/Zygote/LMKD 这类机制词
+    # 不再被上百 KB 的整页 snippet 淹没。Section 派生自 page body（增量
+    # hash 不变时 body 不变，旧 section 仍有效）；清空 pages 触发全量
+    # 重建以填充 sections。
+    4: """
+    DELETE FROM wiki_pages;
+    CREATE TABLE IF NOT EXISTS wiki_sections (
+        rowid_alias INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT NOT NULL,
+        heading TEXT NOT NULL DEFAULT '',
+        start_line INTEGER NOT NULL DEFAULT 0,
+        end_line INTEGER NOT NULL DEFAULT 0,
+        content_hash TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_wiki_sections_path ON wiki_sections(path);
+    CREATE VIRTUAL TABLE IF NOT EXISTS wiki_sections_fts USING fts5(
+        path UNINDEXED,
+        heading,
+        content,
+        cjk,
+        tokenize = 'unicode61'
+    );
+    """,
 }
 
 def index_db_path() -> Path:
@@ -141,6 +165,66 @@ def _cjk_bigramize(text: str) -> str:
 
     return _CJK_RUN_RE.sub(_bigrams, text)
 
+
+_SECTION_HEADING_RE = re.compile(r"^(#{2,6})\s+(.*?)\s*#*\s*$")
+
+
+def _split_sections(body: str, line_offset: int = 0) -> list[dict[str, Any]]:
+    """把 Markdown body 切成 heading section（对齐上游 Knowledge Pack 的 Article→Section→Chunk 语义）。
+
+    上游 Knowledge Pack 的 Article→Section→Chunk 结构里，检索定位的最小
+    有意义单位是 heading section（chunk_id/line range/chunk_hash 的简化
+    版）。``line_offset`` 是 body 在**完整文件**中的起始行号（frontmatter
+    之后），返回的 start_line/end_line 是面向 Agent 的源文件锚点：
+
+        [{"heading": "## zygote 启动流程", "start_line": 120,
+          "end_line": 168, "content": "...", "content_hash": "..."}, ...]
+
+    纯函数：无 IO；首段（第一个 heading 之前）heading 为空串。
+    """
+    if not str(body or "").strip():
+        return []
+    lines = body.splitlines()
+    sections: list[dict[str, Any]] = []
+    heading = ""
+    start = line_offset + 1
+    buffer: list[str] = []
+    for index, line in enumerate(lines):
+        match = _SECTION_HEADING_RE.match(line)
+        if match:
+            if buffer and any(part.strip() for part in buffer):
+                sections.append(_make_section(heading, start, index, buffer))
+            heading = match.group(2).strip()
+            start = line_offset + index + 1
+            buffer = []
+            continue
+        buffer.append(line)
+    if buffer and any(part.strip() for part in buffer):
+        sections.append(_make_section(heading, start, len(lines), buffer))
+    return sections
+
+
+def _make_section(
+    heading: str, start: int, end: int, buffer: list[str]
+) -> dict[str, Any]:
+    content = "\n".join(buffer).strip("\n")
+    return {
+        "heading": heading,
+        "start_line": start,
+        "end_line": line_offset_end(start, end, buffer),
+        "content": content,
+        "content_hash": hashlib.sha256(
+            f"{heading}\n{content}".encode()
+        ).hexdigest(),
+    }
+
+
+def line_offset_end(start: int, end: int, buffer: list[str]) -> int:
+    """Section 末行号（文件坐标）：start + 实际内容行数 - 1。"""
+    trimmed = list(buffer)
+    while trimmed and not str(trimmed[-1]).strip():
+        trimmed.pop()
+    return start + max(0, len(trimmed) - 1)
 
 
 class AndroidInternalsProvider:
@@ -266,6 +350,12 @@ class AndroidInternalsProvider:
         candidate_cap = min(MAX_RERANK_CANDIDATES, max(limit * 3, limit + 5))
         try:
             with self._connect() as conn:
+                # v4 之前部署的伴生索引没有 sections 表：按实际 schema 版本
+                # 决定是否查询 section 命中（reindex 后自动启用）。
+                index_schema = int(
+                    conn.execute("PRAGMA user_version").fetchone()[0] or 0
+                )
+                sections_available = index_schema >= 4
                 rows = conn.execute(
                     """
                     SELECT p.path, p.title, p.chapter, p.status, p.frontmatter,
@@ -279,15 +369,42 @@ class AndroidInternalsProvider:
                     """,
                     {"match": match_query, "snip_tokens": _SNIPPET_TOKENS, "limit": candidate_cap},
                 ).fetchall()
+                # Section 级命中：同一页的机制词命中按
+                # heading+行号区间精确化，page 级 snippet 仍兜底无 section 的页。
+                section_rows = (
+                    conn.execute(
+                        """
+                        SELECT wiki_sections_fts.path AS path,
+                               wiki_sections.heading AS heading,
+                               wiki_sections.start_line AS start_line,
+                               wiki_sections.end_line AS end_line,
+                               snippet(wiki_sections_fts, -1, '[', ']', '…', :snip_tokens) AS snip,
+                               bm25(wiki_sections_fts) AS rank
+                        FROM wiki_sections_fts
+                        JOIN wiki_sections
+                            ON wiki_sections.rowid = wiki_sections_fts.rowid
+                        JOIN wiki_pages p ON p.path = wiki_sections_fts.path
+                        WHERE wiki_sections_fts MATCH :match
+                        ORDER BY rank
+                        LIMIT :limit
+                        """,
+                        {"match": match_query, "snip_tokens": _SNIPPET_TOKENS, "limit": candidate_cap},
+                    ).fetchall()
+                    if sections_available
+                    else []
+                )
                 # revision 读索引内置值（reindex 时写入）：与索引内容严格对应，
                 # 且检索热路径不起 git 子进程。
                 revision = self._stored_revision(conn)
         except sqlite3.Error as exc:
             logger.warning("android_internals search failed: %s", exc)
             return []
-        if not rows:
+        if not rows and not section_rows:
             return []
-        best = min((float(row["rank"]) for row in rows), default=0.0)
+        page_ranks = {str(row["path"]): float(row["rank"] or 0.0) for row in rows}
+        all_ranks = [float(value) for value in page_ranks.values()]
+        all_ranks += [float(row["rank"] or 0.0) for row in section_rows]
+        best = min(all_ranks, default=0.0)
         hits: list[KnowledgeHit] = []
         for row in rows:
             frontmatter = self._load_frontmatter(row["frontmatter"])
@@ -313,6 +430,73 @@ class AndroidInternalsProvider:
                     extra={
                         "status": str(frontmatter.get("status") or row["status"] or ""),
                         "tags": tags,
+                    },
+                )
+            )
+        # 同页 section 命中去重：一页只保留最佳 section，作为该页的
+        # 更精确锚点（heading + 行号区间），不新增重复结果行。
+        best_section: dict[str, sqlite3.Row] = {}
+        for row in section_rows:
+            path = str(row["path"])
+            current = best_section.get(path)
+            if current is None or float(row["rank"] or 0.0) < float(current["rank"] or 0.0):
+                best_section[path] = row
+        for row in hits:
+            section = best_section.pop(str(row.source_path), None)
+            if section is None:
+                continue
+            section_score = _bm25_score(float(section["rank"] or 0.0), best)
+            row.score = max(row.score, section_score)
+            row.extra = {
+                **(row.extra or {}),
+                "section": {
+                    "heading": str(section["heading"] or ""),
+                    "start_line": int(section["start_line"] or 0),
+                    "end_line": int(section["end_line"] or 0),
+                },
+            }
+        # section 命中但页级未命中的路径：以 section snippet 作为补充 hit。
+        for path, section in best_section.items():
+            page_row = next((r for r in rows if str(r["path"]) == path), None)
+            if page_row is None:
+                # 页级 FTS 没命中但 section 命中（title/CJK 权重差异）：
+                # 载入该页 frontmatter 构造完整 hit。
+                try:
+                    with self._connect() as conn:
+                        page_row = conn.execute(
+                            "SELECT path, title, chapter, status, frontmatter "
+                            "FROM wiki_pages WHERE path = ?",
+                            (path,),
+                        ).fetchone()
+                except sqlite3.Error:
+                    page_row = None
+            if page_row is None:
+                continue
+            frontmatter = self._load_frontmatter(page_row["frontmatter"])
+            anchors = extract_source_anchors(frontmatter.get("sources"), revision)
+            hits.append(
+                KnowledgeHit(
+                    source=SOURCE_ID,
+                    title=str(frontmatter.get("title") or page_row["title"] or Path(path).stem),
+                    snippet=str(section["snip"] or "").strip(),
+                    source_path=path,
+                    chapter=str(frontmatter.get("chapter") or page_row["chapter"] or ""),
+                    source_revision=revision,
+                    applicable_versions=_scalarize(frontmatter.get("applicable_versions")),
+                    confidence=_scalarize(frontmatter.get("confidence")),
+                    last_verified=_scalarize(frontmatter.get("last_verified")),
+                    last_verified_against=_scalarize(frontmatter.get("last_verified_against")),
+                    license=self._license_hint(),
+                    score=_bm25_score(float(section["rank"] or 0.0), best),
+                    source_anchors=anchors,
+                    extra={
+                        "status": str(frontmatter.get("status") or page_row["status"] or ""),
+                        "tags": [str(tag) for tag in (frontmatter.get("tags") or []) if str(tag).strip()],
+                        "section": {
+                            "heading": str(section["heading"] or ""),
+                            "start_line": int(section["start_line"] or 0),
+                            "end_line": int(section["end_line"] or 0),
+                        },
                     },
                 )
             )
@@ -493,6 +677,9 @@ class AndroidInternalsProvider:
                 skipped += 1
                 continue
             projected = active_policy.project_frontmatter(frontmatter)
+            # frontmatter 占用的行数（含结束哨兵行）：body 首行在文件中的
+            # 1-based 行号 = 哨兵行号 + 1；解析失败按无 frontmatter 处理。
+            front_matter_lines = text[: len(text) - len(body)].count("\n") if body else 0
             pages[rel_path] = {
                 "path": rel_path,
                 "title": _scalarize(projected.get("title")) or md_path.stem,
@@ -502,6 +689,7 @@ class AndroidInternalsProvider:
                 "content": body,
                 "content_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
                 "mtime": stat.st_mtime,
+                "body_line_offset": front_matter_lines,
             }
         if skipped:
             logger.info(
@@ -532,6 +720,7 @@ class AndroidInternalsProvider:
                     "frontmatter": json.dumps(page["frontmatter"], ensure_ascii=False),
                 },
             )
+            body_offset = int(page.get("body_line_offset") or 0)
             conn.execute("DELETE FROM wiki_fts WHERE path = ?", (page["path"],))
             conn.execute(
                 "INSERT INTO wiki_fts(path, title, content, cjk) VALUES(?, ?, ?, ?)",
@@ -542,11 +731,39 @@ class AndroidInternalsProvider:
                     _cjk_bigramize(f"{page['title']}\n{page['content']}"),
                 ),
             )
+            # Section 索引：heading section 是检索定位的
+            # 最小单位；行号锚点供 Agent 引用 "mechanism @ revision path:
+            # line-range" 后送 codesearch 验证。
+            conn.execute("DELETE FROM wiki_sections WHERE path = ?", (page["path"],))
+            conn.execute("DELETE FROM wiki_sections_fts WHERE path = ?", (page["path"],))
+            for section in _split_sections(page["content"], line_offset=body_offset):
+                conn.execute(
+                    """
+                    INSERT INTO wiki_sections(path, heading, start_line, end_line, content_hash)
+                    VALUES(?, ?, ?, ?, ?)
+                    """,
+                    (
+                        page["path"], section["heading"], section["start_line"],
+                        section["end_line"], section["content_hash"],
+                    ),
+                )
+                section_rowid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                conn.execute(
+                    "INSERT INTO wiki_sections_fts(rowid, path, heading, content, cjk) "
+                    "VALUES(?, ?, ?, ?, ?)",
+                    (
+                        section_rowid, page["path"], section["heading"],
+                        section["content"],
+                        _cjk_bigramize(f"{section['heading']}\n{section['content']}"),
+                    ),
+                )
             updated += 1
         removed = 0
         for stale_path in set(existing) - set(pages):
             conn.execute("DELETE FROM wiki_pages WHERE path = ?", (stale_path,))
             conn.execute("DELETE FROM wiki_fts WHERE path = ?", (stale_path,))
+            conn.execute("DELETE FROM wiki_sections WHERE path = ?", (stale_path,))
+            conn.execute("DELETE FROM wiki_sections_fts WHERE path = ?", (stale_path,))
             removed += 1
         return updated, removed
 

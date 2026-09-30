@@ -52,6 +52,7 @@ Worker 与 Controller 之间通过带 Token 的 HTTP(S) API 进行注册、Heart
 - **Controller ↔ Worker**：带 Worker Token 的 REST 注册 / Heartbeat / 命令轮询 / ACK，按 session 与 generation 管理重连。
 - **Worker ↔ Device**：USB/IP 导入后按本地 USB 设备语义访问（adb server / fastboot / upgrade_tool / Tradefed）。
 - **Controller ↔ 构建服务器**：SSH Backend + 受控 Build Template（见 [ADR-0004](adr/0004-ssh-execution-boundary.md)）。
+- **诊断读模型**：Web / CLI / MCP / Assistant 消费统一的 DiagnosisReadModel（canonical 七节，serve-time 投影、不落库，见 [AI 治理](ai-governance.md)）。
 
 ## 代码组织
 
@@ -83,3 +84,5 @@ Infrastructure
 - [ADR-0005 USB/IP 固件烧写所有权](adr/0005-usbip-firmware-ownership.md)
 - [ADR-0013 Daily Brief 统一诊断流水线](adr/0013-daily-brief-batch-matches-single-issue-diagnosis.md)
 - [ADR-0014 外部知识联邦（background only）](adr/0014-external-knowledge-federation.md)
+- [AI 执行治理与诊断质量层](ai-governance.md)（execution receipt 账本、
+  golden corpus、failure identity、section 级知识检索与全部门禁图）

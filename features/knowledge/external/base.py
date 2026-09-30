@@ -21,6 +21,11 @@ from typing import Any, Protocol, runtime_checkable
 
 EVIDENCE_LEVEL_BACKGROUND = "background"
 
+#: ``KnowledgeHit.extra`` 允许透传联邦边界（``to_dict``）的键白名单：
+#: 目前是 provider 写入的 section 行号锚点 / 状态 / tags；白名单外的键
+#: 视为 provider 内部字段，不外发给消费方。
+EXTRA_SERIALIZED_KEYS = frozenset({"status", "tags", "section"})
+
 #: 上游 knowledge-pack/policy.yaml 的 license.expression（ADR 0014）：
 #: 不要硬编码简化后的 "CC BY-NC-SA 4.0"——上游声明的是双许可表达式，且
 #: Knowledge Pack 重新分发授权（SmartPerfetto 专属）不适用于 GMS。运行期以
@@ -127,6 +132,14 @@ class KnowledgeHit:
             "evidence_level": self.evidence_level,
             "score": round(self.score, 4),
             "source_anchors": [anchor.to_dict() for anchor in self.source_anchors],
+            # provider 附加信息按键白名单透传（section 行号锚点 / 状态 /
+            # tags），联邦边界不再静默丢弃；白名单外的键视为 provider
+            # 内部字段，不外发。
+            "extra": {
+                key: self.extra[key]
+                for key in self.extra or ()
+                if key in EXTRA_SERIALIZED_KEYS
+            },
         }
 
 

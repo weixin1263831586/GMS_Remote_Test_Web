@@ -68,6 +68,10 @@ class ToolTrace:
     # 源码级取证调用是否可复现（provider 返回的 reproducible 标志；
     # None = 输出里没有该标志，无法判定）。
     source_reproducible: bool | None = None
+    # 工具进程成功不等于获得源码证据：搜索 0 命中、仅 resolve 工件、仅
+    # 启动反编译任务都不能通过 Evidence Gate。
+    source_evidence_valid: bool = False
+    source_result_count: int = 0
 
     @property
     def is_error(self) -> bool:
@@ -96,16 +100,70 @@ class ToolTrace:
             "all_artifact_ids": self.all_artifact_ids,
             "snapshot_ids": self.snapshot_ids,
             "source_reproducible": self.source_reproducible,
+            "source_evidence_valid": self.source_evidence_valid,
+            "source_result_count": self.source_result_count,
         }
 
 
 def _is_source_evidence_tool(tool_name: str) -> bool:
-    """是否为源码级取证调用（SDK 源码检索/读取 + 反编译 APK 取证）。"""
-    return (
-        tool_name.startswith(("gms_rt_sdk_", "gms_rt_apk_"))
-        or "_sdk_" in tool_name
-        or "_apk_" in tool_name
-    )
+    """是否为能直接返回源码内容/命中的取证工具。
+
+    ``apk_resolve`` / ``apk_analyze`` / ``apk_status`` 只是定位工件或管理
+    反编译任务；即使调用成功也不是源码证据。必须继续 search/read。
+    """
+    normalized = tool_name.lower()
+    return any(marker in normalized for marker in (
+        "sdk_search", "sdk_read", "apk_search", "apk_source_search",
+        "codesearch__search",
+    ))
+
+
+def _source_evidence_result(tool_name: str, value: Any) -> tuple[bool, int]:
+    """从源码工具结果判定是否真的返回至少一条可用证据。"""
+    parsed = value
+    if isinstance(parsed, str):
+        try:
+            parsed = json.loads(parsed)
+        except (TypeError, ValueError):
+            parsed = None
+
+    counts: list[int] = []
+    nonempty_payload = False
+
+    def walk(item: Any) -> None:
+        nonlocal nonempty_payload
+        if isinstance(item, dict):
+            for key, child in item.items():
+                lowered = str(key).lower()
+                if lowered in {
+                    "total", "result_count", "returned", "returned_chars",
+                    "match_count", "matches_count",
+                }:
+                    count = _as_int(child)
+                    if count >= 0:
+                        counts.append(count)
+                elif lowered in {"results", "matches", "items", "files"}:
+                    if isinstance(child, list):
+                        counts.append(len(child))
+                elif lowered in {"text", "content", "source", "snippet"}:
+                    if isinstance(child, str) and child.strip():
+                        nonempty_payload = True
+                walk(child)
+        elif isinstance(item, list):
+            for child in item:
+                walk(child)
+
+    walk(parsed)
+    normalized = tool_name.lower()
+    # Code Search 的 MCP 输出是可读文本而非 JSON。
+    if parsed is None and isinstance(value, str) and "codesearch__search" in normalized:
+        match = re.search(r"\bresult_count:\s*(\d+)", value)
+        count = int(match.group(1)) if match else 0
+        return count > 0, count
+    positive = max(counts or [0])
+    if "search" in normalized:
+        return positive > 0, positive
+    return nonempty_payload or positive > 0, positive
 
 
 def _source_reproducible_flag(value: Any) -> bool | None:
@@ -135,6 +193,19 @@ def _source_reproducible_flag(value: Any) -> bool | None:
 
     walk(value)
     return any(found) if found else None
+
+
+def source_evidence_result(tool_name: str, value: Any) -> dict[str, Any] | None:
+    """Return Controller-derived source-evidence semantics for UI consumers."""
+    if not _is_source_evidence_tool(tool_name):
+        return None
+    valid, result_count = _source_evidence_result(tool_name, value)
+    return {
+        "kind": "source",
+        "valid": valid,
+        "result_count": result_count,
+        "reproducible": _source_reproducible_flag(value),
+    }
 
 
 @dataclass
@@ -244,11 +315,13 @@ class KkAgentTrace:
 
     @property
     def source_evidence_tool_count(self) -> int:
-        """成功过的源码级取证调用数（SDK 源码检索/读取 + 反编译 APK 取证）。"""
+        """成功且实际返回命中/源码内容的源码级取证调用数。"""
         return sum(
             1
             for call in self.tool_calls
-            if call.succeeded and _is_source_evidence_tool(call.tool_name)
+            if call.succeeded
+            and _is_source_evidence_tool(call.tool_name)
+            and call.source_evidence_valid
         )
 
     @property
@@ -264,6 +337,7 @@ class KkAgentTrace:
             for call in self.tool_calls
             if call.succeeded
             and _is_source_evidence_tool(call.tool_name)
+            and call.source_evidence_valid
             and call.source_reproducible is True
         )
 
@@ -281,7 +355,10 @@ class KkAgentTrace:
         for index, call in enumerate(self.tool_calls, start=1):
             if not call.succeeded:
                 continue
-            is_source = _is_source_evidence_tool(call.tool_name)
+            is_source = (
+                _is_source_evidence_tool(call.tool_name)
+                and call.source_evidence_valid
+            )
             refs: set[str] = set()
             for key in ("issue", "issue_id"):
                 value = _as_int(call.tool_input.get(key))
@@ -488,6 +565,10 @@ def _record_tool_result(trace: KkAgentTrace, event: dict[str, Any]) -> None:
     target.snapshot_ids = _collect_snapshot_ids(output)
     if _is_source_evidence_tool(target.tool_name):
         target.source_reproducible = _source_reproducible_flag(output)
+        (
+            target.source_evidence_valid,
+            target.source_result_count,
+        ) = _source_evidence_result(target.tool_name, output)
 
 
 def _apply_usage(trace: KkAgentTrace, usage: Any, *, override: bool) -> None:

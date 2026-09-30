@@ -19,8 +19,10 @@ from .api import get_redmine_service_for_owner
 from .daily_brief_models import base_priority_score, priority_from_score
 from .org_chart import load_redmine_user_map_for_owner
 from .users import (
+    _merge_issue_snapshot,
     display_names_from_mapping,
     find_user_mapping_for_names,
+    name_keys,
 )
 
 
@@ -126,6 +128,105 @@ async def _sync_owner_issue_snapshots(
         )
     finally:
         await client.close()
+
+
+async def _refresh_pending_issue_metadata(
+    service: Any,
+    workload: dict[str, Any],
+    *,
+    list_limit: int,
+) -> bool:
+    """Refresh live metadata for locally pending candidates.
+
+    An assignee-filtered sync cannot return issues that were reassigned away
+    from the owner.  Without this second pass their old local rows remain
+    assigned to the previous owner and leak into later daily briefs.  Refresh
+    only explicit pending candidates and update a row only after a successful
+    live read; transient Redmine failures therefore keep the existing mirror.
+    """
+    lists = workload.get("lists") or {}
+    candidates = list(lists.get("waiting_my_reply") or [])
+    candidates.extend(lists.get("no_reply_3_days") or [])
+    issue_ids: list[int] = []
+    for item in candidates:
+        try:
+            issue_id = int(item.get("issue_id") or 0)
+        except (AttributeError, TypeError, ValueError):
+            issue_id = 0
+        if issue_id and issue_id not in issue_ids:
+            issue_ids.append(issue_id)
+        if len(issue_ids) >= max(1, min(int(list_limit or 0), 100)):
+            break
+    if not issue_ids:
+        return False
+
+    client = service.agent._make_client()
+    if not hasattr(client, "fetch_issue_metadata_snapshot"):
+        await client.close()
+        return False
+    changed = False
+    try:
+        for issue_id in issue_ids:
+            try:
+                snapshot = await client.fetch_issue_metadata_snapshot(issue_id)
+            except Exception:
+                logger.warning(
+                    "daily brief metadata refresh failed for issue %s", issue_id
+                )
+                continue
+            _merge_issue_snapshot(
+                service.repository,
+                snapshot,
+                resolved=bool(snapshot.get("is_resolved")),
+            )
+            changed = True
+    finally:
+        await client.close()
+    return changed
+
+
+async def revalidate_issue_pending_for_owner(
+    owner_id: str,
+    issue_id: int,
+) -> dict[str, Any]:
+    """Refresh one issue and verify it still belongs in this owner's brief.
+
+    This is the terminal race check used after AI analysis: a frozen snapshot
+    may be correct at enqueue time but become stale while a long diagnosis is
+    running.  A successful live detail fetch is mandatory; callers must not
+    turn refresh failures into ``completed``.
+    """
+    service = get_redmine_service_for_owner(owner_id)
+    identity = await resolve_daily_brief_owner_identity(owner_id, service)
+    owner_names = list(identity.get("names") or [])
+    if not owner_names:
+        raise DailyBriefIdentityError(
+            f"resolved identity for owner {owner_id!r} carries no usable names"
+        )
+    await service.refresh_issue_metadata(int(issue_id))
+    user_map = load_redmine_user_map_for_owner(owner_id)
+    current = service.repository.get_issue(int(issue_id)) or {}
+    owner_keys: set[str] = set()
+    for name in owner_names:
+        owner_keys.update(name_keys(name))
+    pending = bool(
+        current
+        and service.repository._is_assigned_to_owner(current, owner_keys)
+        and not service.repository._is_issue_resolved(current)
+        and service.repository._is_issue_waiting_action(current)
+        and service.repository._reply_wait_info(
+            current, owner_keys, user_map
+        ).get("waiting")
+    )
+    return {
+        "pending": pending,
+        "issue_id": int(issue_id),
+        "subject": str(current.get("subject") or ""),
+        "author_name": str(current.get("author_name") or ""),
+        "assigned_to_name": str(current.get("assigned_to_name") or ""),
+        "status_name": str(current.get("status_name") or ""),
+        "updated_on": str(current.get("updated_on") or ""),
+    }
 
 
 
@@ -283,12 +384,19 @@ async def build_daily_triage_snapshot(
             logger.warning("daily brief pre-sync failed for %s; using local snapshot", owner_id)
 
     snapshot_at = datetime.now()
-    workload = service.repository.get_workload_statistics(
-        owner_names=owner_names,
-        stale_days=stale_days,
-        list_limit=list_limit,
-        organization_user_map=user_map,
-    )
+    workload_kwargs = {
+        "owner_names": owner_names,
+        "stale_days": stale_days,
+        "list_limit": list_limit,
+        "organization_user_map": user_map,
+    }
+    workload = service.repository.get_workload_statistics(**workload_kwargs)
+    if refresh and await _refresh_pending_issue_metadata(
+        service, workload, list_limit=list_limit,
+    ):
+        # A live detail read may reveal reassignment, closure, or a newer
+        # journal.  Recompute before freezing the brief snapshot.
+        workload = service.repository.get_workload_statistics(**workload_kwargs)
     lists = workload.get("lists") or {}
     waiting = list(lists.get("waiting_my_reply") or [])
     stale = list(lists.get("no_reply_3_days") or [])
@@ -335,4 +443,5 @@ __all__ = [
     "detect_delta",
     "issue_fingerprint",
     "resolve_daily_brief_owner_identity",
+    "revalidate_issue_pending_for_owner",
 ]
