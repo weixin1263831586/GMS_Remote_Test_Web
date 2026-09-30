@@ -29,11 +29,14 @@ def _issue(issue_id, assigned_to_name, status_name="新建", closed_on="", journ
     }
 
 
+def _db(root):
+    return RedmineAgentDB(db_path=Path(root) / "redmine.sqlite3", docs_dir=Path(root) / "docs")
+
+
 class RedmineDashboardStatsTests(unittest.TestCase):
     def test_workload_stale_list_means_older_than_threshold(self):
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             db.upsert_issue(_issue(1, "张三", journals=[{"user": "客户", "created_on": "2026-06-01T00:00:00", "notes": "请处理"}]))
             db.upsert_issue(_issue(2, "张三", journals=[{"user": "客户", "created_on": "2026-06-12T00:00:00", "notes": "请处理"}]))
             with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
@@ -47,8 +50,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_hangup_issue_is_not_counted_as_waiting_rk_reply(self):
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             db.upsert_issue(_issue(
                 632190,
                 "黄 超群",
@@ -68,8 +70,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_owner_field_activity_is_not_counted_as_waiting_owner_reply(self):
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             db.upsert_issue(_issue(
                 629401,
                 "黄 超群",
@@ -107,8 +108,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         - 助理模板之后客户有实质回复 → 正常归因客户。
         """
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             template = ("客户，您好！请更新目前最新状况，若问题已解决或无需继续跟进，"
                         "请将状态改为Closed，谢谢！")
             # ① 助理纯状态变更（641827 场景）：上一条实质是客户提单。
@@ -177,8 +177,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_unmapped_rockchip_email_suffix_is_rk_colleague(self):
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             db.upsert_issue(_issue(
                 201,
                 "黄 超群",
@@ -218,8 +217,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         同样只算「等待客户」，并落入 rk_colleague 超期桶。
         """
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             db.upsert_issue(_issue(
                 641832, "黄 超群",
                 journals=[
@@ -259,8 +257,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_unmapped_department_suffix_actor_is_counted_as_customer_reply(self):
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             db.upsert_issue(_issue(
                 635620,
                 "黄 超群",
@@ -307,8 +304,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 return {"total_owned": 0, "open_count": 0, "closed_count": 0}
 
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             stats = asyncio.run(compute_user_overdue_stats(
                 Client(),
                 db,
@@ -338,8 +334,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 return {}
 
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             stats = asyncio.run(compute_user_overdue_stats(
                 Client(),
                 db,
@@ -374,8 +369,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 return {}
 
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             db.upsert_issue(_issue(
                 632190,
                 "黄 超群",
@@ -432,8 +426,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 return {}
 
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             db.upsert_issue(_issue(
                 637669,
                 "黄 超群",
@@ -483,8 +476,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 return {}
 
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             db.upsert_issue(_issue(
                 635620,
                 "黄 超群",
@@ -537,8 +529,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 pass
 
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             db.upsert_issue(_issue(
                 632190,
                 "黄 超群",
@@ -601,8 +592,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 pass
 
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             db.upsert_issue(_issue(
                 634719,
                 "黄 超群",
@@ -689,8 +679,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 pass
 
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             # Local DB only knows about ONE closed issue — far less than the 97
             # Redmine actually has. Without the live override the bars would
             # show count=1 instead of the full history.
@@ -750,8 +739,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 pass
 
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             db.upsert_issue(_issue(700002, "黄 超群", status_name="已解决", closed_on="2026-06-12"))
             service = SimpleNamespace(
                 repository=db,
@@ -846,8 +834,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 pass
 
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             db.upsert_issue(_issue(700003, "黄 超群", status_name="已解决", closed_on="2026-06-12"))
             service = SimpleNamespace(
                 repository=db,
@@ -945,8 +932,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_resolved_detail_uses_journal_resolution_date_when_closed_on_is_empty(self):
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             db.upsert_issue(_issue(
                 101,
                 "黄 超群",
@@ -1149,8 +1135,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
 
     def test_redmine_agent_db_creates_dashboard_indexes(self):
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            db = RedmineAgentDB(db_path=root / "redmine.sqlite3", docs_dir=root / "docs")
+            db = _db(tmp)
             with db.connect() as conn:
                 indexes = {
                     row["name"]

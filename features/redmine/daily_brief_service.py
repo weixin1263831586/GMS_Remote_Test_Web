@@ -51,6 +51,7 @@ from .daily_brief_snapshot import (
 from .kkagent import (
     PROMPT_VERSION,
     KkAgentRedmineAnalyzer,
+    analyzer_version,
     preflight_gms_auth,
 )
 from .kkagent.evidence_preflight import collect_deep_analysis_evidence
@@ -770,10 +771,14 @@ class DailyBriefService:
         # analyze_with_persisted_cancel 收敛为完成/已停止）。
         progress = start_analysis_progress(self.repository, run, issue_id, record)
 
-        # AI 逻辑调用账本（receipt）：同一逻辑键（owner+issue+证据快照+
-        # 设备/hint+prompt+model）存在活跃 receipt 时拒绝重复发送。挡的是
-        # 页面重复点击、job lease 丢失后的 worker 重试这类重复 AI 调用；
-        # 证据变化（快照/设备/hint 任一不同）或上次已终态时正常放行新 attempt。
+        # AI 逻辑调用账本（receipt）：同一逻辑键（owner+purpose+provider+
+        # issue+证据快照+设备/hint+prompt+analyzer+model）存在活跃 receipt
+        # 时拒绝重复发送。挡的是页面重复点击、job lease 丢失后的 worker
+        # 重试这类重复 AI 调用；证据变化（快照/设备/hint 任一不同）或上次
+        # 已终态时正常放行新 attempt。input_hash 由 begin() 内部折成
+        # sha256——字段名叫 hash，存储也必须是 hash（敏感 hint 不落明文）。
+        # analyzer_version 取 agent 包版本：analyzer 实现升级而 prompt/model
+        # 不变时逻辑键也必须变化，否则错误 dedupe。
         receipt = self.ai_ledger.begin(
             owner_id=self.owner_id,
             purpose="daily_brief_issue",
@@ -781,10 +786,12 @@ class DailyBriefService:
             subject=record.subject,
             model=run.model_name,
             prompt_version=run.prompt_version or PROMPT_VERSION,
-            input_hash=(
-                f"{run.snapshot_hash}:{config.get('device_serial', '')}:"
-                f"{config.get('analysis_hint', '')}"
-            ),
+            analyzer_version=analyzer_version(),
+            input_hash={
+                "snapshot_hash": run.snapshot_hash,
+                "device_serial": config.get("device_serial", ""),
+                "analysis_hint": config.get("analysis_hint", ""),
+            },
         )
         if receipt.get("duplicate"):
             record.status = "failed"
@@ -804,6 +811,15 @@ class DailyBriefService:
             return
 
         started = time.monotonic()
+        provider_submitted = False
+
+        def mark_provider_started() -> None:
+            nonlocal provider_submitted
+            if provider_submitted:
+                return
+            self.ai_ledger.mark_received(receipt["receipt_id"])
+            provider_submitted = True
+
         try:
             analyze_entry = dict(entry) if entry else {"issue_id": issue_id}
             analyze_entry.setdefault("analysis_mode", "diagnostic")
@@ -814,6 +830,7 @@ class DailyBriefService:
             # Deep analysis owns a deterministic read-only baseline（含取消
             # 轮询与 profile 判定；原独立模块，已并回服务层编排）。
             analyze_entry["_progress_recorder"] = progress
+            analyze_entry["_provider_started"] = mark_provider_started
             await precollect_deep_evidence(
                 repository=self.repository, run=run, issue_id=issue_id,
                 analyzer=analyzer, entry=analyze_entry,
@@ -821,8 +838,6 @@ class DailyBriefService:
             # 部署事实 hint：SDK 源可用性决定源码取证门禁是否强制
             #（evidence_gate 降级依据），只进本次调用，不回写快照。
             analyze_entry["sdk_sources_available"] = _sdk_sources_available()
-            # 请求即将发出（本地子进程 provider）：pending → received。
-            self.ai_ledger.mark_received(receipt["receipt_id"])
             outcome = await cancellation.analyze_with_persisted_cancel(
                 self.repository, run.run_id, analyzer,
                 analyze_entry,
@@ -864,17 +879,30 @@ class DailyBriefService:
                         model_name=run.model_name,
                     )
         except (cancellation.RunCancelledError, asyncio.CancelledError):
-            # 取消发生在 AI 调用在途时：结果不确定（unknown），不是干净的
-            # failed——后续重试据此知道前一次 outcome 未知。
-            self.ai_ledger.mark_unknown(
-                receipt["receipt_id"], reason="cancelled while analysis in flight",
-            )
+            if provider_submitted:
+                # provider 进程已经启动，取消时结果可能不确定。
+                self.ai_ledger.mark_unknown(
+                    receipt["receipt_id"], reason="cancelled while analysis in flight",
+                )
+            else:
+                # 预采集、健康检查或 prompt 构造阶段取消，请求尚未发送。
+                self.ai_ledger.fail_early(
+                    receipt["receipt_id"], error="cancelled before provider submission",
+                )
             cancellation.reset_cancelled_issue(self.repository, record)
             raise
         except Exception as exc:
-            self.ai_ledger.mark_unknown(
-                receipt["receipt_id"], reason=f"analysis crashed: {exc}"[:1000],
-            )
+            # 提交前（precollect/prompt 构造）崩溃：AI 请求根本没发出去，
+            # 是确定的 failed，不是 unknown（unknown 只属于「请求可能已被
+            # provider 执行但结果未知」）；提交后崩溃仍走 unknown。
+            if provider_submitted:
+                self.ai_ledger.mark_unknown(
+                    receipt["receipt_id"], reason=f"analysis crashed: {exc}"[:1000],
+                )
+            else:
+                self.ai_ledger.fail_early(
+                    receipt["receipt_id"], error=f"pre-submit failure: {exc}"[:1000],
+                )
             # 通用异常也必须收敛 issue 行（否则停留 running、汇总计数错），
             # 标记 failed 后按原语义继续向上传播（run 级收敛由调用方负责）。
             record.status = "failed"
@@ -887,17 +915,28 @@ class DailyBriefService:
         record.finished_at = _now()
         record.duration_ms = int((time.monotonic() - started) * 1000)
         record.raw_response = outcome.raw_output
-        # Failure Identity（确定性指纹，见 failure_identity.py 模块文档）：从 issue 主题与
-        # 运行上下文派生稳定身份，随 AI 执行轨迹落库，供跨 attempt/跨 issue
-        # 聚合 Cluster；SIMILAR_SYMPTOM 级别的候选合并留给 relation judge。
+        # Failure Identity（确定性指纹，见 failure_identity.py 模块文档）：suite/
+        # module/testcase 从 issue 主题 + hint 的 xTS 形状提取（全局审查 4.1：
+        # 不再退化成「主题文本签名」）；device serial 只作观察元数据（4.2：
+        # 不进指纹，否则同型号两台设备同一失败会被 serial 拆散、阻断跨设备
+        # Cluster）；SIMILAR_SYMPTOM 级别的候选合并留给 relation judge。
         try:
-            from .failure_identity import failure_identity
+            from .failure_identity import extract_test_identity, failure_identity
 
+            subject_text = record.subject or f"#{issue_id}"
+            hint_text = str(config.get("analysis_hint") or "")
+            extracted = extract_test_identity(f"{subject_text} {hint_text}")
             identity = failure_identity(
-                [{"module": "", "name": "", "reason": record.subject or f"#{issue_id}"}],
-                suite="",
+                [{
+                    "module": extracted["module"],
+                    "name": extracted["testcase"],
+                    "reason": subject_text,
+                }],
+                suite=extracted["suite"],
                 android_version=str(entry.get("android_version") or ""),
-                device_class=str(entry.get("device_serial") or ""),
+                device_serial=str(
+                    entry.get("device_serial") or config.get("device_serial") or ""
+                ),
             )
         except Exception:
             logger.exception("failed to derive failure identity")

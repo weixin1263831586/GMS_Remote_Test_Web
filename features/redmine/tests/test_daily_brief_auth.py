@@ -28,6 +28,19 @@ class AuthPreflightTests(unittest.TestCase):
         )
         default_ok.start()
         self.addCleanup(default_ok.stop)
+        # 成功路径契约：reanalysis 通过 preflight 后还要过 Redmine 实时
+        # revalidation 才能标 completed（全局审查 P0：单测必须 mock 该
+        # 新契约，否则 owner_revalidation_failed 把 completed 压成 failed）。
+        owner_revalidation = patch(
+            "features.redmine.daily_brief_service.revalidate_issue_pending_for_owner",
+            AsyncMock(return_value={
+                "pending": True,
+                "assigned_to_name": "张三",
+                "status_name": "New",
+            }),
+        )
+        owner_revalidation.start()
+        self.addCleanup(owner_revalidation.stop)
 
     @staticmethod
     def _patch_preflight(ok: bool, reason: str):

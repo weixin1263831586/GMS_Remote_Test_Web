@@ -122,6 +122,34 @@ class NormalizerTests(unittest.TestCase):
         self.assertEqual(entries[0]["license"], "CC BY-NC-SA 4.0")
         self.assertEqual(entries[0]["last_verified"], "2026-09-29")
 
+    def test_background_section_anchor_passthrough(self):
+        # schema v4 闭环（全局审查第七节）：索引层已 section-aware，
+        # canonical 读模型必须携带 {heading, start_line, end_line}。
+        entries = normalize_background_entries([
+            {"title": "LMKD", "source": "s",
+             "extra": {"section": {"heading": "Reclaim",
+                                   "start_line": 120, "end_line": 168}}},
+            {"title": "Flat", "source": "s",
+             "section": {"heading": "Direct", "start_line": 8, "end_line": 10}},
+        ])
+        self.assertEqual(
+            entries[0]["section"],
+            {"heading": "Reclaim", "start_line": 120, "end_line": 168},
+        )
+        self.assertEqual(entries[1]["section"]["start_line"], 8)
+
+    def test_background_section_invalid_anchor_is_none(self):
+        entries = normalize_background_entries([
+            {"title": "Reversed", "source": "s",
+             "extra": {"section": {"heading": "x", "start_line": 10, "end_line": 5}}},
+            {"title": "Zero", "source": "s",
+             "extra": {"section": {"heading": "y", "start_line": 0, "end_line": 3}}},
+            {"title": "Garbage", "source": "s",
+             "extra": {"section": {"heading": "z", "start_line": "a", "end_line": 3}}},
+            {"title": "Missing", "source": "s"},
+        ])
+        self.assertTrue(all(entry["section"] is None for entry in entries))
+
     def test_similar_cases_keep_native_relation_vocabulary(self):
         entries = normalize_similar_cases([
             {"issue_id": 648526, "subject": "s", "similarity": "same",

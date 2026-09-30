@@ -2,6 +2,7 @@
 
 import contextlib
 import logging
+import math
 import os
 import pty
 import re
@@ -22,6 +23,26 @@ def strip_ansi_codes(text: str) -> str:
     return ANSI_ESCAPE_PATTERN.sub("", text or "")
 
 logger = logging.getLogger(__name__)
+
+# Tradefed 控制台冷启动（JVM + 套件 config 加载）在繁忙主机上常超过 15s，
+# 原硬编码 15s 会导致“Tradefed console startup timed out”间歇性失败。
+DEFAULT_TRADEFED_STARTUP_TIMEOUT = 45.0
+MIN_TRADEFED_STARTUP_TIMEOUT = 5.0
+MAX_TRADEFED_STARTUP_TIMEOUT = 600.0
+
+
+def tradefed_console_startup_timeout() -> float:
+    """Tradefed 控制台启动预算（秒），可用 GMS_TRADEFED_STARTUP_TIMEOUT 调整。"""
+    raw = os.environ.get("GMS_TRADEFED_STARTUP_TIMEOUT", "").strip()
+    if raw:
+        with contextlib.suppress(ValueError):
+            value = float(raw)
+            if math.isfinite(value):
+                return min(
+                    max(value, MIN_TRADEFED_STARTUP_TIMEOUT),
+                    MAX_TRADEFED_STARTUP_TIMEOUT,
+                )
+    return DEFAULT_TRADEFED_STARTUP_TIMEOUT
 
 
 def _android_build_tools_paths(platform_tools_path: str) -> list[str]:
@@ -378,7 +399,7 @@ def execute_tradefed_command_local(
         )
         os.close(slave_fd)
 
-        startup_deadline = time.monotonic() + 15
+        startup_deadline = time.monotonic() + tradefed_console_startup_timeout()
         while time.monotonic() < startup_deadline and process.poll() is None:
             output += read_available(0.1)
             if prompt_visible(output):
@@ -386,7 +407,10 @@ def execute_tradefed_command_local(
         if process.poll() is not None and not prompt_visible(output):
             return output, "Tradefed exited before opening its console", process.returncode or -1
         if not prompt_visible(output):
-            return output, "Tradefed console startup timed out", -1
+            return output, (
+                "Tradefed console startup timed out after "
+                f"{tradefed_console_startup_timeout():.0f}s"
+            ), -1
 
         os.write(master_fd, f"{safe_command}\n".encode())
         command_started = len(output)

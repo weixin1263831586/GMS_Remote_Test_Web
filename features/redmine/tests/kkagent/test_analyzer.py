@@ -62,8 +62,12 @@ class AnalyzerE2ETests(unittest.TestCase):
 
     def test_success_stream_end_to_end(self):
         analyzer = self._analyzer("ok-result", timeout_seconds=30)
-        outcome = asyncio.run(analyzer.analyze(ENTRY))
+        provider_started = Mock()
+        outcome = asyncio.run(analyzer.analyze({
+            **ENTRY, "_provider_started": provider_started,
+        }))
         self.assertTrue(outcome.ok, outcome.error)
+        provider_started.assert_called_once_with()
         self.assertEqual(outcome.session_id, "sess-test-1")
         self.assertEqual(outcome.result["confidence"], 0.72)
         # 轨迹：真实工具调用 + usage + 历史检索次数。
@@ -309,9 +313,13 @@ class AnalyzerE2ETests(unittest.TestCase):
 
     def test_missing_binary(self):
         analyzer = KkAgentRedmineAnalyzer(binary=str(self.dir / "no-such-kkagent"))
-        outcome = asyncio.run(analyzer.analyze(ENTRY))
+        provider_started = Mock()
+        outcome = asyncio.run(analyzer.analyze({
+            **ENTRY, "_provider_started": provider_started,
+        }))
         self.assertFalse(outcome.ok)
         self.assertEqual(outcome.error_type, "kkagent_unavailable")
+        provider_started.assert_not_called()
 
     def test_stderr_ansi_codes_are_stripped(self):
         analyzer = self._analyzer("noisy", timeout_seconds=30)

@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.36"
+GMS_RT_VERSION="0.22.37"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -3817,7 +3817,11 @@ gms-rt-knowledge-search() {
         (if ($bad | length) > 0
          then " (sources: " + ([$bad[] | "\(.source)=\(.status)"] | join(", ")) + ")"
          else "" end),
-        (.results[] | "[\(.chapter // "-")] \(.title)\n  \(.snippet)\n  versions: \(.applicable_versions // "-") · confidence: \(.confidence // "-") · verified: \(.last_verified // "-")\n  src: \(.source_path) @ \(.source_revision[0:8] // "-") · \(.license)\n")'
+        (.results[] |
+            (if .extra.section.start_line and .extra.section.start_line > 0
+             then " @ L\(.extra.section.start_line)-L\(.extra.section.end_line)"
+             else "" end) as $range |
+            "[\(.chapter // "-")] \(.title)\($range)\n  \(.snippet)\n  versions: \(.applicable_versions // "-") · confidence: \(.confidence // "-") · verified: \(.last_verified // "-")\n  src: \(.source_path) @ \(.source_revision[0:8] // "-") · \(.license)\n")'
 }
 
 # ==============================================================================

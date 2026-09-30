@@ -42,6 +42,19 @@ function renderReportKbCards(kbResults) {
 }
 
 /**
+ * wiki section 行号锚点（schema v4 闭环）：`文件:L120-L168` + heading。
+ * read model 的 background[].section 由后端归一（行号非法时为 null），
+ * 这里只做展示拼装，不猜格式。
+ */
+function sectionAnchorHtml(item) {
+    const section = item && item.section;
+    if (!section || !section.start_line || !section.end_line) return '';
+    const range = `L${section.start_line}-L${section.end_line}`;
+    const heading = section.heading ? ` · ${String(section.heading).slice(0, 60)}` : '';
+    return ` · ${escapeHtml(range)}${escapeHtml(heading)}`;
+}
+
+/**
  * 系统机制背景知识面板（ADR 0014）。background-only：
  * 展示机制解释与 provenance，明确标注未经过设备/源码证据验证。
  */
@@ -85,7 +98,7 @@ function renderReportSystemBackgroundPanel(backgroundResults) {
                 </div>
                 <div class="dx-list-text">${escapeHtml((item.snippet || '').slice(0, 300))}</div>
                 <div class="dx-list-meta">${escapeHtml(meta || 'provenance 缺失')}</div>
-                <div class="dx-list-meta">来源: ${escapeHtml(item.source || 'android_internals')} @ ${escapeHtml((item.source_revision || '').slice(0, 8))} · ${escapeHtml(item.source_path || '')} · ${escapeHtml(item.license || '')}</div>${anchorHtml}
+                <div class="dx-list-meta">来源: ${escapeHtml(item.source || 'android_internals')} @ ${escapeHtml((item.source_revision || '').slice(0, 8))} · ${escapeHtml(item.source_path || '')} · ${escapeHtml(item.license || '')}${sectionAnchorHtml(item)}</div>${anchorHtml}
             </div>
         `;
     }).join('');

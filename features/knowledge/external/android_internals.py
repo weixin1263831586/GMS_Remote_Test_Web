@@ -180,7 +180,14 @@ def _split_sections(body: str, line_offset: int = 0) -> list[dict[str, Any]]:
         [{"heading": "## zygote 启动流程", "start_line": 120,
           "end_line": 168, "content": "...", "content_hash": "..."}, ...]
 
-    纯函数：无 IO；首段（第一个 heading 之前）heading 为空串。
+    行号区间语义（全局审查 off-by-one 修复）：**heading + section 正文**。
+    有 heading 的 section ``start_line`` 是 heading 行，``end_line`` 是正文
+    末行（``start + len(body_lines)``）；首段（第一个 heading 之前）没有
+    heading 行，``start_line`` 即正文首行。行区间闭区间、必须覆盖正文
+    最后一行——section 索引的目的就是给 Agent 精确引用，少一行会漏掉
+    真正的结论行。
+
+    纯函数：无 IO；首段 heading 为空串。
     """
     if not str(body or "").strip():
         return []
@@ -192,39 +199,38 @@ def _split_sections(body: str, line_offset: int = 0) -> list[dict[str, Any]]:
     for index, line in enumerate(lines):
         match = _SECTION_HEADING_RE.match(line)
         if match:
-            if buffer and any(part.strip() for part in buffer):
-                sections.append(_make_section(heading, start, index, buffer))
+            _append_section(sections, heading, start, buffer)
             heading = match.group(2).strip()
             start = line_offset + index + 1
             buffer = []
             continue
         buffer.append(line)
-    if buffer and any(part.strip() for part in buffer):
-        sections.append(_make_section(heading, start, len(lines), buffer))
+    _append_section(sections, heading, start, buffer)
     return sections
 
 
-def _make_section(
-    heading: str, start: int, end: int, buffer: list[str]
-) -> dict[str, Any]:
-    content = "\n".join(buffer).strip("\n")
-    return {
+def _append_section(
+    sections: list[dict[str, Any]], heading: str, start: int, buffer: list[str]
+) -> None:
+    """按 heading+正文语义追加一个 section（空正文跳过）。"""
+    trimmed = list(buffer)
+    while trimmed and not str(trimmed[-1]).strip():
+        trimmed.pop()
+    if not any(part.strip() for part in trimmed):
+        return
+    # 有 heading 行：range = heading(start) + 正文 start+1..start+len；
+    # 首 section 无 heading 行：start 即正文首行，末行 start+len-1。
+    end = start + len(trimmed) - (0 if heading else 1)
+    content = "\n".join(trimmed).strip("\n")
+    sections.append({
         "heading": heading,
         "start_line": start,
-        "end_line": line_offset_end(start, end, buffer),
+        "end_line": end,
         "content": content,
         "content_hash": hashlib.sha256(
             f"{heading}\n{content}".encode()
         ).hexdigest(),
-    }
-
-
-def line_offset_end(start: int, end: int, buffer: list[str]) -> int:
-    """Section 末行号（文件坐标）：start + 实际内容行数 - 1。"""
-    trimmed = list(buffer)
-    while trimmed and not str(trimmed[-1]).strip():
-        trimmed.pop()
-    return start + max(0, len(trimmed) - 1)
+    })
 
 
 class AndroidInternalsProvider:

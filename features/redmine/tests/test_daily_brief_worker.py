@@ -23,6 +23,23 @@ def patch_preflight_ok():
     )
 
 
+def patch_owner_revalidation_pending():
+    """成功路径必须 mock 实时 revalidation 契约（全局审查 P0）。
+
+    生产语义：AI 成功后要向 Redmine 确认 issue 仍归属当前 owner 且待
+    回复，才允许标 completed；单测不 mock 时真实调用会因凭据缺失而
+    owner_revalidation_failed，把 completed 压成 failed。
+    """
+    return patch(
+        "features.redmine.daily_brief_service.revalidate_issue_pending_for_owner",
+        AsyncMock(return_value={
+            "pending": True,
+            "assigned_to_name": "张三",
+            "status_name": "New",
+        }),
+    )
+
+
 VALID = {
     "problem_summary": "summary",
     "customer_request": "request",
@@ -78,8 +95,14 @@ class DailyBriefWorkerTests(unittest.TestCase):
         preflight.start()
         self.addCleanup(preflight.stop)
 
+    def _patch_revalidation(self):
+        revalidation = patch_owner_revalidation_pending()
+        revalidation.start()
+        self.addCleanup(revalidation.stop)
+
     def test_claimed_run_executes_and_completes_job(self):
         self._patch_preflight()
+        self._patch_revalidation()
         self.repository.create_run(DailyBriefRun(
             owner_id="u1", brief_date="2026-09-13", mode="manual", run_id="db_test"
         ))
@@ -139,6 +162,7 @@ class DailyBriefWorkerTests(unittest.TestCase):
 
     def test_issue_job_uses_single_issue_reanalysis_path(self):
         self._patch_preflight()
+        self._patch_revalidation()
         run = DailyBriefRun(
             owner_id="u1", brief_date="2026-09-13", mode="manual",
             run_id="db_test", status="completed"

@@ -6,9 +6,12 @@ over its vocabularies, and balanced across the development/holdout split.
 They never invoke any AI backend — the corpus contract is pure validation.
 """
 
+import json
 import unittest
 
 from tests.quality.diagnosis_corpus import (
+    CORPUS_DIR,
+    CORPUS_FILES,
     VALID_FORBIDDEN_CLAIMS,
     VALID_PURPOSES,
     VALID_ROOT_CAUSE_CLASSES,
@@ -35,6 +38,34 @@ class CorpusContractTests(unittest.TestCase):
     def test_ids_unique(self):
         ids = [case["id"] for case in self.cases]
         self.assertEqual(len(ids), len(set(ids)))
+
+    def test_every_declared_corpus_file_exists_and_loads(self):
+        # fail-closed（全局审查第九节）：声明过的 corpus 文件缺失必须
+        # 在这里炸出来，不允许静默跳过把语料池清零、gate 空转。
+        for name in CORPUS_FILES:
+            path = CORPUS_DIR / name
+            self.assertTrue(path.exists(), f"declared corpus file missing: {name}")
+        per_file = {
+            name: {
+                json.loads(line)["id"]
+                for line in (CORPUS_DIR / name).read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.strip().startswith("#")
+            }
+            for name in CORPUS_FILES
+        }
+        # 两个池都必须非空，且 purpose 与文件归属一致。
+        self.assertGreater(len(per_file["redmine_diagnosis_cases.jsonl"]), 0)
+        self.assertGreater(len(per_file["report_failure_cases.jsonl"]), 0)
+        for case in self.cases:
+            owner = (
+                "report_failure_cases.jsonl"
+                if case["purpose"] == "report_failure"
+                else "redmine_diagnosis_cases.jsonl"
+            )
+            self.assertIn(
+                case["id"], per_file[owner],
+                f"{case['id']} lives outside its purpose's corpus file",
+            )
 
     def test_schema_fields_closed(self):
         for case in self.cases:
