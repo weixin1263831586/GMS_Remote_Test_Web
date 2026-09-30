@@ -323,25 +323,19 @@ class AutomationService:
                 (item for item in cluster.list_workers() if item.get('id') == worker_id),
                 None,
             )
-            if not worker or worker.get('status') not in {'online', 'busy'}:
+            if not worker:
                 raise ValueError(f'Worker {worker_id} is not online')
             if not cluster.has_command_agent(worker_id):
                 raise ValueError(f'Worker {worker_id} has no durable command Agent')
-            if int(worker.get('running_jobs') or 0) >= int(worker.get('max_jobs') or 1):
-                raise ValueError(f'Worker {worker_id} has no free test slot')
-            minimum_disk = float(os.getenv('GMS_CLUSTER_MIN_DISK_FREE_GB', '50'))
-            disk_free = float(worker.get('disk_free_gb') or 0)
-            if disk_free and disk_free < minimum_disk:
-                raise ValueError(
-                    f'Worker {worker_id} has {disk_free:.1f} GB free; '
-                    f'{minimum_disk:.1f} GB is required'
-                )
-            available_memory = float(worker.get('memory_available_gb') or 0)
-            if required_memory and available_memory and available_memory < required_memory:
-                raise ValueError(
-                    f'Worker {worker_id} has {available_memory:.1f} GB memory; '
-                    f'{required_memory:.1f} GB is required for full CTS'
-                )
+            # Same admission source as the cluster UI and scheduler
+            # (features/cluster/admission.py) — manual Worker selection must
+            # not re-interpret disk/memory/capacity thresholds on its own.
+            from features.cluster import worker_admission_state
+
+            admission = worker_admission_state(worker, required_memory_gb=required_memory)
+            if admission['blocked']:
+                detail = ', '.join(admission['reasons'])
+                raise ValueError(f'Worker {worker_id} is not admissible ({detail})')
             selected = next(
                 (suite for suite in all_suites if suite.get('worker_id') == worker_id),
                 None,

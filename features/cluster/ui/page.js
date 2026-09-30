@@ -300,12 +300,17 @@ async function updateDashTrend(force=false){
  });
 }
 function activeDevices(workerId){return state.devices.filter(device=>device.worker_id===workerId&&!['offline','unknown'].includes(device.state))}
+const ADMISSION_REASON_LABELS={offline:'离线',draining:'排空中',low_disk:'磁盘不足',low_memory:'内存不足',max_jobs:'任务满载',external_tradefed:'外部Tradefed'};
+function admissionReasonSuffix(worker){
+ const reasons=(worker.admission_reasons||[]).map(reason=>ADMISSION_REASON_LABELS[reason]||reason);
+ return reasons.length?`（${reasons.slice(0,2).join('/')}）`:'';
+}
 function workerAssessment(worker){
  const devices=activeDevices(worker.id);
  const cpu=Number(worker.cpu_percent||0),memory=Number(worker.memory_percent||0),activity=workerActivity(worker);
  let labels=[];
  if(worker.status==='offline'){labels=[{text:'离线',cls:'bad'}]}
- else if(worker.admission_blocked||worker.status==='draining'){labels=[{text:'已阻止派发',cls:'bad'}]}
+ else if(worker.admission_blocked||worker.status==='draining'){labels=[{text:'已阻止派发'+admissionReasonSuffix(worker),cls:'bad'}]}
  else{
   if(activity.running>0)labels.push({text:activity.external&&activity.managed?'平台/外部测试中':activity.external?'外部测试中':'平台测试中',cls:'warn'});
   if(cpu>=75||memory>=85)labels.push({text:'高负载',cls:'bad'});

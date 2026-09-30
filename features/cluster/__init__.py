@@ -2,6 +2,7 @@
 
 from foundation import cluster_port
 
+from .admission import worker_admission_state
 from .api import configure_cluster, device_action, page_router, router
 from .api import service as get_cluster_service
 from .config import ClusterConfig
@@ -98,5 +99,6 @@ __all__ = [
     "run_worker_command",
     "start_local_bridge",
     "stop_local_bridge",
+    "worker_admission_state",
     "worker_tokens",
 ]

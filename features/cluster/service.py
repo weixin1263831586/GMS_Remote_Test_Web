@@ -1,12 +1,25 @@
 from __future__ import annotations
 
-import os
+import logging
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any
 
+from .admission import (
+    min_disk_free_gb,
+    min_memory_available_gb,
+    worker_admission_state,
+)
 from .config import ClusterConfig
 from .repository import ClusterRepository
+
+
+logger = logging.getLogger(__name__)
+
+# Watchdog failures are logged at most once per this window so a persistently
+# broken SQLite (or clock) cannot stay invisible without spamming every pass.
+WATCHDOG_ERROR_LOG_INTERVAL_SECONDS = 300.0
 
 
 class ClusterService:
@@ -28,6 +41,7 @@ class ClusterService:
 
         def monitor() -> None:
             interval = max(5.0, min(15.0, self.offline_seconds / 3))
+            last_error_log = 0.0
             while not self._watchdog_stop.wait(interval):
                 try:
                     self.list_workers()
@@ -36,7 +50,16 @@ class ClusterService:
                     )
                 except Exception:
                     # The next pass retries; never terminate the watchdog on a
-                    # transient SQLite or clock parsing failure.
+                    # transient SQLite or clock parsing failure. Log (rate
+                    # limited) so a persistently failing pass is visible in
+                    # diagnostics instead of only surfacing as drifting Worker
+                    # states.
+                    now = time.monotonic()
+                    if now - last_error_log >= WATCHDOG_ERROR_LOG_INTERVAL_SECONDS:
+                        last_error_log = now
+                        logger.exception(
+                            "cluster watchdog pass failed; will retry next interval"
+                        )
                     continue
 
         self._watchdog_thread = threading.Thread(
@@ -63,8 +86,6 @@ class ClusterService:
         tests_by_worker: dict[str, list[dict[str, Any]]] = {}
         for item in self.repository.list_worker_tests():
             tests_by_worker.setdefault(item["worker_id"], []).append(item)
-        minimum_disk = float(os.getenv("GMS_CLUSTER_MIN_DISK_FREE_GB", "50"))
-        minimum_memory = float(os.getenv("GMS_CLUSTER_MIN_MEMORY_AVAILABLE_GB", "8"))
         for worker in workers:
             try:
                 last = datetime.fromisoformat(worker["last_heartbeat_at"].replace("Z", "+00:00"))
@@ -79,18 +100,23 @@ class ClusterService:
                         if item.get("warning")]
             disk_free = float(worker.get("disk_free_gb") or 0)
             memory_available = float(worker.get("memory_available_gb") or 0)
-            if disk_free and disk_free < minimum_disk:
+            if disk_free and disk_free < min_disk_free_gb():
                 warnings.append(
-                    f"Only {disk_free:.1f} GB disk is free (admission threshold {minimum_disk:.1f} GB)"
+                    f"Only {disk_free:.1f} GB disk is free (admission threshold {min_disk_free_gb():.1f} GB)"
                 )
-            if memory_available and memory_available < minimum_memory:
+            if memory_available and memory_available < min_memory_available_gb():
                 warnings.append(
                     f"Only {memory_available:.1f} GB memory is available"
                 )
             if int(worker.get("unknown_external_jobs") or 0):
                 warnings.append("An external Tradefed process has no identifiable device; new tests are blocked")
             worker["warnings"] = list(dict.fromkeys(warnings))
-            worker["admission_blocked"] = worker.get("status") in {"offline", "draining"}
+            # UI, API, scheduler and the claim path consume the same
+            # admission decision (features/cluster/admission.py); the
+            # directory must never re-interpret "schedulable" on its own.
+            admission = worker_admission_state(worker)
+            worker["admission_blocked"] = admission["blocked"]
+            worker["admission_reasons"] = admission["reasons"]
         # All Worker selectors consume this directory directly or through
         # /api/cluster/hosts. Promote the Controller/Local Worker while the
         # stable sort preserves the repository order of every remote Worker.
@@ -124,19 +150,18 @@ class ClusterService:
             ):
                 devices_by_worker.setdefault(device["worker_id"], []).append(device)
         candidates = []
-        minimum_disk = float(os.getenv("GMS_CLUSTER_MIN_DISK_FREE_GB", "50"))
         for worker in self.list_workers():
             devices = devices_by_worker.get(worker["id"], [])
-            if (worker["status"] not in {"online", "busy"}
-                    or (not include_local and worker["id"] == self.config.local_worker_id)
+            if ((not include_local and worker["id"] == self.config.local_worker_id)
                     or (require_agent
                         and worker["id"] == self.config.local_worker_id
                         and str(worker.get("agent_version", "")).startswith("controller-"))
                     or worker["id"] not in suites_by_worker
-                    or len(devices) < device_count
-                    or worker["running_jobs"] >= worker["max_jobs"]
-                    or (float(worker.get("disk_free_gb") or 0) > 0
-                        and float(worker["disk_free_gb"]) < minimum_disk)):
+                    or len(devices) < device_count):
+                continue
+            # Same admission source as the UI directory: a Worker blocked for
+            # low disk/memory/capacity is skipped here too, never silently.
+            if worker_admission_state(worker)["blocked"]:
                 continue
             disk_score = min(10.0, float(worker["disk_free_gb"]) / 50)
             load_score = max(0.0, 10 - float(worker["cpu_percent"]) / 10)
