@@ -342,6 +342,27 @@ jobs:
           pytest tests/quality -q
           python tools/scripts/testing/eval_diagnosis_quality.py --split development --replay tests/quality/diagnosis_replay_fixtures.jsonl --json
 
+  diagnosis-holdout:
+    # Holdout 语料是 release gate，不只是 nightly 监控：release-ready 显式
+    # 依赖本 job，防止 development 全绿但 nightly holdout 未跑/失败时
+    # 仍可发版（外审 P1：holdout 必须真正阻断 release）。
+    name: diagnosis-holdout-replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Diagnosis holdout replay quality gate
+        run: |
+          python tools/scripts/testing/eval_diagnosis_quality.py --split holdout --replay tests/quality/diagnosis_replay_fixtures.jsonl --json
+
   worker-agent:
     name: worker-agent
     runs-on: ubuntu-latest
@@ -466,7 +487,7 @@ jobs:
       secret-scan, lint, dependency-audit, static-sast,
       unit-foundation, unit-feature-auth-system, unit-feature-devices-firmware,
       unit-feature-test-execution, unit-feature-assistant-reports,
-      knowledge-quality,
+      knowledge-quality, diagnosis-holdout,
       worker-agent,
       security, agent-package, browser-e2e,
     ]

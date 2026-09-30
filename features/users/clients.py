@@ -50,8 +50,15 @@ def get_client_username_from_request(request, fallback: str | None = None) -> st
         username = str(client_hosts.get(client_ip) or '').strip()
         if username and username != 'unknown':
             return username
-    except Exception:
-        pass
+    except Exception as exc:
+        # client_hosts 配置异常时退回登录用户名。该 fallback 直接影响
+        # SSH 路由与 USB/IP host 解析，静默会表现成"找不到 Windows Client"
+        # 之类难排查的症状，至少留 debug 痕迹。
+        logger.debug(
+            "client_hosts lookup failed for %s; falling back to session username",
+            client_ip,
+            exc_info=exc,
+        )
 
     user = get_authenticated_user(request)
     username = str(getattr(user, 'username', '') or fallback or '').strip()
@@ -111,8 +118,15 @@ def resolve_client_display_id(
             account_username = normalize_client_display_id(str(
                 account.get("username") or account.get("display_name") or ""
             ).strip())
-    except Exception:
-        pass
+    except Exception as exc:
+        # auth_service.list_users 失败时退回 stored/identity 身份。身份解析
+        # 已被 owner / SSH / USB/IP 路由高度依赖，fallback 到错误 identity
+        # 表现为找不到 Windows Client / SSH 用户名异常，必须可观测。
+        logger.debug(
+            "account lookup failed while resolving client display id %r",
+            identity,
+            exc_info=exc,
+        )
     account_base_username = (
         parse_client_id(account_username)[0] if account_username else ""
     )
@@ -142,8 +156,14 @@ def resolve_client_display_id(
                 return state_display
             if state_username and state_ip:
                 return format_client_display_id(state_username, state_ip)
-    except Exception:
-        pass
+    except Exception as exc:
+        # 会话状态读取失败时退回配置/stored 解析；与上同理，静默 fallback
+        # 会把身份问题伪装成下游 SSH/USB/IP 路由问题。
+        logger.debug(
+            "user_states scan failed while resolving client display id %r",
+            identity,
+            exc_info=exc,
+        )
 
     if account_username:
         try:
@@ -158,8 +178,13 @@ def resolve_client_display_id(
                     account_base_username,
                     matching_ips[0],
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            # config 匹配 IP 失败时退回 stored 展示身份；同上，可观测。
+            logger.debug(
+                "client_hosts reverse lookup failed for %r",
+                account_base_username,
+                exc_info=exc,
+            )
 
     if stored and stored != identity:
         return stored

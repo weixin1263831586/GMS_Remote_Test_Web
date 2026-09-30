@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import threading
 import uuid
@@ -12,6 +11,7 @@ from typing import Any
 from foundation.device_claims import DeviceClaimRegistry
 
 from . import repository_schema
+from .admission import worker_admission_state
 from .repository_claims import ClusterClaimRepositoryMixin
 from .repository_commands import ClusterCommandRepositoryMixin
 from .repository_inventory import ClusterInventoryRepositoryMixin
@@ -355,22 +355,16 @@ class ClusterRepository(
             worker = conn.execute("SELECT * FROM cluster_workers WHERE id=?", (worker_id,)).fetchone()
             if worker is None:
                 raise ValueError("worker not found")
-            if worker["status"] not in {"online", "busy"}:
-                raise ValueError("worker is not online")
-            if int(worker["running_jobs"]) >= int(worker["max_jobs"]):
-                raise ValueError("worker capacity is exhausted")
-            minimum_disk = float(os.getenv("GMS_CLUSTER_MIN_DISK_FREE_GB", "50"))
-            if float(worker["disk_free_gb"] or 0) > 0 and float(worker["disk_free_gb"]) < minimum_disk:
-                raise ValueError(
-                    f"worker has less than {minimum_disk:.1f} GB free disk"
-                )
+            # Claim-time re-check consumes the same admission source as the
+            # UI directory and the scheduler (features/cluster/admission.py);
+            # sqlite3.Row supports mapping access but has no .get, hence dict().
             required_memory_gb = float(data.get("required_memory_gb", 0) or 0)
-            available_memory_gb = float(worker["memory_available_gb"] or 0)
-            if required_memory_gb and available_memory_gb and available_memory_gb < required_memory_gb:
-                raise ValueError(
-                    f"worker has {available_memory_gb:.1f} GB available memory; "
-                    f"{required_memory_gb:.1f} GB is required"
-                )
+            admission = worker_admission_state(
+                dict(worker), required_memory_gb=required_memory_gb
+            )
+            if admission["blocked"]:
+                reasons = ", ".join(admission["reasons"])
+                raise ValueError(f"worker is not admissible ({reasons})")
             active_rows = conn.execute("""SELECT request_json FROM cluster_jobs
                 WHERE assigned_worker_id=? AND status IN ('assigned','dispatching','running','stopping')""",
                 (worker_id,)).fetchall()

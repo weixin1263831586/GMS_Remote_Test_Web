@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 from typing import Any
+
+
+logger = logging.getLogger(__name__)
 
 
 # kkagent 子进程不得继承宿主进程的 Agent 身份环境：多 owner 分析时，
@@ -72,7 +76,9 @@ async def settle_reader_future(reader: asyncio.Future[Any]) -> None:
     except asyncio.CancelledError:
         pass
     except Exception:
-        pass
+        # 与正常 cancel 区分：reader 自身异常（pipe 损坏/解码失败等）
+        # 直接影响实时分析轨迹与 session replay 的故障定位，必须可观测。
+        logger.debug("kkagent stream reader failed", exc_info=True)
 
 
 class CappedCapture:
