@@ -103,7 +103,7 @@ class ClusterJobApiHardeningTests(unittest.TestCase):
             self.assertEqual(replay.json()["job"]["id"], created.json()["job"]["id"])
             self.assertEqual(dispatch.call_count, 1)
 
-    def _commit_job_without_dispatch(self):
+    def _commit_job_without_dispatch(self, *, devices=None):
         from types import SimpleNamespace
 
         from features.cluster.job_requests import request_fingerprint
@@ -112,6 +112,8 @@ class ClusterJobApiHardeningTests(unittest.TestCase):
 
         payload = self._idempotent_job_payload()
         payload["worker_id"] = "worker-246"
+        if devices is not None:
+            payload["devices"] = devices
         body = ClusterJobCreate(**payload)
         request = SimpleNamespace(state=SimpleNamespace(current_user=CurrentUser(
             id="admin-id", username="admin", role="admin",
@@ -134,6 +136,224 @@ class ClusterJobApiHardeningTests(unittest.TestCase):
         with self.repo.connect() as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM cluster_jobs").fetchone()[0], 1)
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM cluster_commands").fetchone()[0], 1)
+
+    def test_replay_repairs_a_legacy_command_without_rewinding_worker_state(self):
+        payload = self._commit_job_without_dispatch()
+        job = self.repo.list_jobs(1)[0]
+        command = self.repo.create_command({
+            "worker_id": job["assigned_worker_id"], "job_id": job["id"],
+            "attempt_id": job["current_attempt_id"], "command_type": "start_test",
+            "operation_id": f"{job['current_attempt_id']}:start_test",
+            "payload": {"devices": job["request"]["devices"]},
+        })
+        self.assertEqual(self.repo.get_job(job["id"])["status"], "assigned")
+        replay = self.client.post("/api/cluster/jobs", json=payload, headers={"Idempotency-Key": "crash-gap"})
+        self.assertEqual(replay.status_code, 200, replay.text)
+        self.assertEqual(replay.json()["command"]["id"], command["id"])
+        self.assertEqual(replay.json()["job"]["status"], "dispatching")
+        acknowledged = self.repo.ack_command(job["assigned_worker_id"], command["id"], {"status": "running"})
+        self.repo.sync_job_from_command(acknowledged)
+        self.repo.attach_command_to_job(job["id"], command)
+        self.assertEqual(self.repo.get_job(job["id"])["status"], "running")
+        with self.repo.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM cluster_commands").fetchone()[0], 1)
+
+    def test_command_and_attachment_roll_back_together_on_process_exit(self):
+        payload = self._commit_job_without_dispatch()
+        job = self.repo.list_jobs(1)[0]
+        original = self.repo._attach_command_to_job_conn
+
+        def exit_after_transition(*args, **kwargs):
+            original(*args, **kwargs)
+            raise KeyboardInterrupt
+
+        with patch.object(self.repo, "_attach_command_to_job_conn", side_effect=exit_after_transition), \
+                self.assertRaises(KeyboardInterrupt):
+            self.repo.replay_job_command(job)
+        self.assertEqual(self.repo.get_job(job["id"])["status"], "assigned")
+        with self.repo.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM cluster_commands").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM cluster_timeline_events WHERE event_type='command.queued'").fetchone()[0], 0)
+        retry = self.client.post("/api/cluster/jobs", json=payload, headers={"Idempotency-Key": "crash-gap"})
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertEqual(retry.json()["job"]["status"], "dispatching")
+
+    def test_command_is_not_visible_until_attachment_commits(self):
+        self._commit_job_without_dispatch()
+        job = self.repo.list_jobs(1)[0]
+        observer = ClusterRepository(self.repo.db_path)
+        original = self.repo._attach_command_to_job_conn
+
+        def inspect_uncommitted_transition(*args, **kwargs):
+            original(*args, **kwargs)
+            with observer.connect() as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM cluster_commands").fetchone()[0], 0)
+            self.assertEqual(observer.get_job(job["id"])["status"], "assigned")
+
+        with patch.object(self.repo, "_attach_command_to_job_conn", side_effect=inspect_uncommitted_transition):
+            command = self.repo.replay_job_command(job)
+        self.assertEqual(observer.get_job(job["id"])["status"], "dispatching")
+        self.assertEqual(observer.poll_commands("worker-246")[0]["id"], command["id"])
+
+    def test_legacy_running_ack_is_applied_after_attachment_recovery(self):
+        payload = self._commit_job_without_dispatch()
+        job = self.repo.list_jobs(1)[0]
+        command = self.repo.create_command({
+            "worker_id": "worker-246", "job_id": job["id"], "command_type": "start_test",
+            "attempt_id": job["current_attempt_id"], "payload": {},
+        })
+        running = self.repo.ack_command("worker-246", command["id"], {"status": "running"})
+        self.repo.sync_job_from_command(running)
+        self.assertEqual(self.repo.get_job(job["id"])["status"], "assigned")
+        replay = self.client.post("/api/cluster/jobs", json=payload, headers={"Idempotency-Key": "crash-gap"})
+        self.assertEqual(replay.status_code, 200, replay.text)
+        self.assertEqual(replay.json()["job"]["status"], "running")
+        self.assertFalse(self.repo.compensate_failed_dispatch(job["id"], ValueError("stale error")))
+        self.assertIsNotNone(self.repo.claims.active_claim("worker-246:ABC"))
+
+    def test_completed_job_retry_returns_original_after_device_release(self):
+        payload = self._idempotent_job_payload()
+        headers = {"Idempotency-Key": "completed-response-lost"}
+        created = self.client.post("/api/cluster/jobs", json=payload, headers=headers)
+        self.assertEqual(created.status_code, 200, created.text)
+        command = created.json()["command"]
+        completed = self.repo.ack_command("worker-246", command["id"], {"status": "completed"})
+        self.repo.sync_job_from_command(completed)
+        replay = self.client.post("/api/cluster/jobs", json=payload, headers=headers)
+        self.assertEqual(replay.status_code, 200, replay.text)
+        self.assertEqual(replay.json()["job"]["id"], created.json()["job"]["id"])
+        self.assertEqual(replay.json()["job"]["status"], "completed")
+        self.assertIsNone(self.repo.claims.active_claim("worker-246:ABC"))
+        with self.repo.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM cluster_jobs").fetchone()[0], 1)
+
+    def test_explicit_worker_empty_devices_selects_and_replays_concrete_devices(self):
+        payload = self._idempotent_job_payload()
+        payload.update(worker_id="worker-246", devices=[])
+        headers = {"Idempotency-Key": "explicit-auto-device"}
+        first = self.client.post("/api/cluster/jobs", json=payload, headers=headers)
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(first.json()["job"]["request"]["devices"], ["worker-246:ABC"])
+        self.assertEqual(first.json()["job"]["leases"][0]["device_id"], "worker-246:ABC")
+        replay = self.client.post("/api/cluster/jobs", json=payload, headers=headers)
+        self.assertEqual(replay.status_code, 200, replay.text)
+        self.assertEqual(first.json()["job"]["id"], replay.json()["job"]["id"])
+
+    def test_empty_devices_dispatch_gap_recovers_with_selected_device_fencing(self):
+        payload = self._commit_job_without_dispatch(devices=[])
+        replay = self.client.post("/api/cluster/jobs", json=payload, headers={"Idempotency-Key": "crash-gap"})
+        self.assertEqual(replay.status_code, 200, replay.text)
+        self.assertEqual(replay.json()["job"]["request"]["devices"], ["worker-246:ABC"])
+        self.assertEqual(replay.json()["command"]["payload"]["lease_tokens"][0]["device_id"], "worker-246:ABC")
+
+    def test_replay_rejects_a_new_claim_generation_and_cancels_legacy_start(self):
+        payload = self._commit_job_without_dispatch()
+        job = self.repo.list_jobs(1)[0]
+        command = self.repo.create_command({
+            "worker_id": "worker-246", "job_id": job["id"], "command_type": "start_test",
+            "attempt_id": job["current_attempt_id"], "payload": {},
+        })
+        self.repo.claims.release(f"job:{job['id']}", status="expired")
+        acquired, _ = self.repo.claims.acquire(
+            [{"device_key": "worker-246:ABC", "worker_id": "worker-246", "serial": "ABC"}],
+            owner_id=job["owner_id"], username="admin", source_type="cluster_job",
+            source_id=f"job:{job['id']}", ttl_seconds=90,
+        )
+        self.assertTrue(acquired)
+        self.assertNotEqual(self.repo.claims.active_claim("worker-246:ABC")["generation"], job["leases"][0]["generation"])
+        replay = self.client.post("/api/cluster/jobs", json=payload, headers={"Idempotency-Key": "crash-gap"})
+        self.assertEqual(replay.status_code, 409, replay.text)
+        self.assertEqual(replay.json()["code"], "STATE_CONFLICT")
+        self.assertEqual(self.repo.get_command(command["id"])["status"], "cancelled")
+        self.assertEqual(self.repo.poll_commands("worker-246"), [])
+        self.assertEqual(self.repo.get_job(job["id"])["leases"][0]["status"], "released")
+
+    def _add_worker_inventory(self, worker_id, devices, tools_path="/srv/GMS-Suite/android-cts/tools"):
+        self.repo.register_worker({
+            "worker_id": worker_id, "name": worker_id, "hostname": worker_id,
+            "address": "192.0.2.1", "agent_version": "1", "max_jobs": 1,
+        })
+        self.repo.heartbeat(worker_id, {
+            "agent_version": "1", "running_jobs": [], "devices": devices,
+            "suites": [{"suite_type": "CTS", "suite_version": "17_r1",
+                        "suite_key": "CTS:17_r1", "available": True, "tools_path": tools_path}],
+        })
+
+    def test_auto_scheduler_applies_usb_requirement_before_worker_scoring(self):
+        payload = self._idempotent_job_payload()
+        self._add_worker_inventory("zz-proxy", [
+            {"serial": f"PROXY-{index}", "state": "available", "transport": "adb_proxy"}
+            for index in range(4)
+        ])
+        payload.update(devices=[], execution_spec={
+            "test_type": "cts", "suite_path": "/srv/GMS-Suite/android-cts/tools",
+            "module": "CtsUsbTestCases",
+        })
+        response = self.client.post("/api/cluster/jobs", json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["job"]["assigned_worker_id"], "worker-246")
+        self.assertEqual(response.json()["command"]["payload"]["execution_spec"]["devices"], ["ABC"])
+
+    def test_auto_scheduler_matches_explicit_devices_and_suite_path(self):
+        self._idempotent_job_payload()
+        self._add_worker_inventory("zz-other", [
+            {"serial": f"OTHER-{index}", "state": "available"} for index in range(4)
+        ], tools_path="/different/cts/tools")
+        for identity in ("ABC", "worker-246:ABC"):
+            with self.subTest(identity=identity):
+                worker_id, devices = cluster_api.cluster_service.select_worker(
+                    "CTS:17_r1", requested_devices=[identity], require_agent=True,
+                )
+                self.assertEqual((worker_id, devices), ("worker-246", ["worker-246:ABC"]))
+        response = self.client.post("/api/cluster/jobs", json={
+            "worker_id": "auto", "suite_key": "CTS:17_r1", "devices": [],
+            "execution_spec": {"test_type": "cts", "suite_path": "/srv/GMS-Suite/android-cts/tools"},
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["job"]["assigned_worker_id"], "worker-246")
+
+    def test_unavailable_or_duplicate_devices_do_not_create_a_job(self):
+        payload = self._idempotent_job_payload()
+        for devices in (["MISSING"], ["ABC", "worker-246:ABC"]):
+            with self.subTest(devices=devices):
+                response = self.client.post("/api/cluster/jobs", json={**payload, "devices": devices})
+                self.assertEqual(response.status_code, 409, response.text)
+                self.assertEqual(response.json()["code"], "STATE_CONFLICT")
+        self.assertEqual(self.repo.list_jobs(10), [])
+
+    def test_qualified_device_identity_takes_precedence_over_a_colon_serial(self):
+        self._idempotent_job_payload()
+        self._add_worker_inventory("zz-other", [
+            {"serial": serial, "state": "available"}
+            for serial in ("worker-246:ABC", "OTHER-1", "OTHER-2", "OTHER-3")
+        ])
+        response = self.client.post("/api/cluster/jobs", json={
+            "worker_id": "auto", "suite_key": "CTS:17_r1", "devices": ["worker-246:ABC"],
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["job"]["assigned_worker_id"], "worker-246")
+
+    def test_spec_devices_are_authoritative_when_job_devices_are_empty(self):
+        self._idempotent_job_payload()
+        self._add_worker_inventory("zz-other", [
+            {"serial": f"OTHER-{index}", "state": "available"} for index in range(4)
+        ])
+        response = self.client.post("/api/cluster/jobs", json={
+            "worker_id": "auto", "suite_key": "CTS:17_r1", "devices": [],
+            "execution_spec": {
+                "test_type": "cts", "suite_path": "/srv/GMS-Suite/android-cts/tools", "devices": ["ABC"],
+            },
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["job"]["assigned_worker_id"], "worker-246")
+
+    def test_empty_selection_requires_the_requested_device_count(self):
+        payload = self._idempotent_job_payload()
+        response = self.client.post("/api/cluster/jobs", json={
+            **payload, "worker_id": "worker-246", "devices": [], "device_count": 2,
+        })
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(self.repo.list_jobs(10), [])
 
     def test_replay_cannot_dispatch_after_device_claim_changes_owner(self):
         payload = self._commit_job_without_dispatch()

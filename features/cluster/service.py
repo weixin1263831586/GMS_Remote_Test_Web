@@ -131,8 +131,18 @@ class ClusterService:
         include_local: bool = True,
         require_agent: bool = False,
         excluded_transports: set[str] | None = None,
+        *,
+        requested_devices: list[str] | None = None,
+        worker_id: str | None = None,
+        suite_path: str = "",
+        allowed_transports: set[str] | None = None,
     ) -> tuple[str, list[str]]:
-        """Select a healthy worker with a local suite and enough devices."""
+        """Match suite, device identity, transport and admission in one decision.
+
+        Explicit devices determine the required count. An empty list selects
+        device_count available devices, including for an explicit Worker.
+        """
+        requested = list(requested_devices or [])
         blocked_transports = {
             str(value).strip().lower()
             for value in (excluded_transports or set())
@@ -140,26 +150,45 @@ class ClusterService:
         }
         suites_by_worker = {}
         for suite in self.repository.list_suites():
-            if suite["available"] and (not suite_key or suite["suite_key"] == suite_key):
+            if (suite["available"] and (not suite_key or suite["suite_key"] == suite_key)
+                    and (not suite_path or suite["tools_path"] == suite_path)):
                 suites_by_worker.setdefault(suite["worker_id"], []).append(suite)
         devices_by_worker = {}
-        for device in self.repository.list_devices():
+        inventory = self.repository.list_devices()
+        inventory_ids = {device["id"] for device in inventory}
+        for device in inventory:
             if (
                 device["state"] == "available"
-                and str(device.get("transport") or "").strip().lower()
+                and str(device.get("transport") or "local_usb").strip().lower()
                 not in blocked_transports
+                and (allowed_transports is None
+                     or str(device.get("transport") or "local_usb").strip().lower()
+                     in allowed_transports)
             ):
                 devices_by_worker.setdefault(device["worker_id"], []).append(device)
         candidates = []
         for worker in self.list_workers():
             devices = devices_by_worker.get(worker["id"], [])
-            if ((not include_local and worker["id"] == self.config.local_worker_id)
+            if ((worker_id and worker["id"] != worker_id)
+                    or (not include_local and worker["id"] == self.config.local_worker_id)
                     or (require_agent
                         and worker["id"] == self.config.local_worker_id
                         and str(worker.get("agent_version", "")).startswith("controller-"))
                     or worker["id"] not in suites_by_worker
-                    or len(devices) < device_count):
+                    or len(devices) < (len(requested) or device_count)):
                 continue
+            selected = devices[:device_count]
+            if requested:
+                selected = []
+                for identity in requested:
+                    match = next((device for device in devices
+                                  if (device["id"] if identity in inventory_ids else device["serial"])
+                                  == identity), None)
+                    if match is None or any(item["id"] == match["id"] for item in selected):
+                        break
+                    selected.append(match)
+                if len(selected) != len(requested):
+                    continue
             # Same admission source as the UI directory: a Worker blocked for
             # low disk/memory/capacity is skipped here too, never silently.
             if worker_admission_state(worker)["blocked"]:
@@ -167,11 +196,11 @@ class ClusterService:
             disk_score = min(10.0, float(worker["disk_free_gb"]) / 50)
             load_score = max(0.0, 10 - float(worker["cpu_percent"]) / 10)
             score = 40 + min(20, len(devices) * 5) + 20 + disk_score + load_score
-            candidates.append((score, worker["id"], devices))
+            candidates.append((score, worker["id"], selected))
         if not candidates:
             raise ValueError("no worker has the requested suite and available devices")
         _, worker_id, devices = max(candidates, key=lambda item: (item[0], item[1]))
-        return worker_id, [item["id"] for item in devices[:device_count]]
+        return worker_id, [item["id"] for item in devices]
 
     def has_command_agent(self, worker_id: str) -> bool:
         """Return whether a Worker has an Agent that consumes queued commands."""

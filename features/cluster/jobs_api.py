@@ -165,6 +165,35 @@ def _replay_job_request(request: Request, job: dict) -> dict:
     }
 
 
+def _resolve_job_placement(data: dict) -> None:
+    from features.devices import test_transport_requirement
+
+    spec = data.get("execution_spec") or {}
+    requested_path = str(spec.get("suite_path") or data.get("suite_path") or "")
+    if spec and data.get("suite_path") and data["suite_path"] != requested_path:
+        raise ApiError.conflict("execution_spec suite_path does not match the job suite_path")
+    requested_devices = data["devices"] or spec.get("devices") or []
+    # Derive transport requirements before assigning a Worker. The placeholder
+    # is used only to classify the spec; actual argv is rebuilt after binding.
+    planned_argv = build_argv_from_spec({**spec, "devices": ["selected-device"]}) if spec else []
+    policy = test_transport_requirement(planned_argv, data.get("env") or {})
+    try:
+        data["worker_id"], selected = service().select_worker(
+            data["suite_key"], data["device_count"], require_agent=True,
+            requested_devices=requested_devices,
+            worker_id=None if data["worker_id"] == "auto" else data["worker_id"],
+            suite_path=requested_path,
+            allowed_transports=set(policy["allowed_transports"]),
+        )
+    except ValueError as exc:
+        raise ApiError.conflict(
+            str(exc), next_actions=[{"action": "Check Worker admission, suite and device transport"}],
+        ) from exc
+    # Preserve explicit serial/qualified-ID ACL semantics; automatic choices
+    # are persisted as concrete inventory IDs for subsequent receipt replays.
+    data["devices"] = requested_devices or selected
+
+
 def _create_job(body: ClusterJobCreate, request: Request, receipt: dict):
     # argv 是服务端从 execution_spec 派生的数据，不是浏览器可提交的输入；
     # 接受 raw argv 会让 ExecutionSpec 校验（test_type/suite/设备绑定）被绕过。
@@ -199,17 +228,7 @@ def _create_job(body: ClusterJobCreate, request: Request, receipt: dict):
     # 所有者必须取自认证账户，不接受浏览器传入值。
     data["owner_id"] = _request_owner_id(request)
     data["owner_username"] = _request_owner_username(request)
-    if data["worker_id"] == "auto":
-        try:
-            data["worker_id"], selected_devices = service().select_worker(
-                data["suite_key"],
-                data["device_count"],
-                require_agent=True,
-            )
-            if not data["devices"]:
-                data["devices"] = selected_devices
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
+    _resolve_job_placement(data)
     # Agent Token 的 Worker/设备 ACL 在最终身份解析完成后统一授权，
     # 覆盖显式 worker、auto 调度与默认 Worker 三条路径。
     from features.auth import ensure_agent_device_allowed, ensure_agent_worker_allowed
@@ -318,7 +337,7 @@ def _create_job(body: ClusterJobCreate, request: Request, receipt: dict):
             )
         except Exception as dispatch_exc:
             service().repository.compensate_failed_dispatch(
-                job["id"], dispatch_exc
+                job["id"], dispatch_exc, attempt_id=job["current_attempt_id"]
             )
             raise HTTPException(
                 503,

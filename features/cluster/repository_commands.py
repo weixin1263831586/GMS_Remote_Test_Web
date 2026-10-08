@@ -95,13 +95,9 @@ class ClusterCommandRepositoryMixin:
     ) -> dict[str, Any]:
         """Queue the start_test command for a freshly leased job.
 
-        Both submission entrances (``/api/cluster/jobs`` and
-        ``/api/test/start``) used to commit the job first and the dispatch
-        command second; a write failure in between left an ``assigned`` job
-        with zero dispatchable commands, active leases and an active device
-        claim. ``create_command`` is idempotent per
-        ``(worker_id, operation_id)``, so a retried submission reuses the
-        queued command instead of duplicating it.
+        Command insertion and the assigned → dispatching transition share one
+        SQLite transaction, so Workers cannot poll an unattached command.
+        Operation IDs reuse an existing command on retries (ADR 0016).
         """
         command = self.create_command({
             "worker_id": job["assigned_worker_id"],
@@ -127,38 +123,71 @@ class ClusterCommandRepositoryMixin:
                     if lease.get("status") == "active"
                 ],
             },
-        })
-        self.attach_command_to_job(job["id"], command)
+        }, attach_to_job=True)
         return command
 
-    def compensate_failed_dispatch(self, job_id: str, exc: Exception) -> None:
-        """Roll back a job whose dispatch command could not be queued.
+    def compensate_failed_dispatch(
+        self, job_id: str, exc: Exception, *, attempt_id: str = "",
+    ) -> bool:
+        """Fail only the awaiting attempt, releasing leases and queued starts.
 
-        Fail the job and release its device claims so the devices do not
-        stay occupied by a job that can never execute. Both release steps
-        are best-effort: if they also fail the job stays visible as failed
-        with its error recorded, instead of silently disappearing.
+        Recovery must not fail an attempt already advanced by a Worker or
+        release its claims when the failure transition itself could not commit.
         """
+        now = _utc_now()
+        error = f"dispatch command failed: {exc}"
         try:
-            self.transition_job(
-                job_id,
-                "failed",
-                error=f"dispatch command failed: {exc}",
-                source="controller",
-                message="任务派发命令写入失败，任务已置为失败",
-            )
+            with self._lock, self.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                job = conn.execute("SELECT * FROM cluster_jobs WHERE id=?", (job_id,)).fetchone()
+                if (not job or job["status"] not in {"assigned", "dispatching"}
+                        or (attempt_id and job["current_attempt_id"] != attempt_id)):
+                    return False
+                self._transition_job_conn(
+                    conn, job_id, "failed", error=error, source="controller",
+                    message="任务派发命令写入失败，任务已置为失败",
+                )
+                conn.execute(
+                    "UPDATE cluster_job_attempts SET status='failed',finished_at=?,error=? WHERE id=?",
+                    (now, error, job["current_attempt_id"]),
+                )
+                conn.execute(
+                    """UPDATE cluster_commands SET status='cancelled',error=?,updated_at=?
+                       WHERE job_id=? AND attempt_id=? AND command_type='start_test'
+                       AND status IN ('queued','delivered')""",
+                    (error, now, job_id, job["current_attempt_id"]),
+                )
+                leases = conn.execute(
+                    "SELECT device_id FROM device_leases WHERE job_id=? AND status='active'", (job_id,),
+                ).fetchall()
+                conn.execute(
+                    "UPDATE device_leases SET status='released',released_at=? WHERE job_id=? AND status='active'",
+                    (now, job_id),
+                )
+                conn.executemany(
+                    "UPDATE cluster_worker_devices SET state='available',updated_at=? WHERE id=? AND state='allocated'",
+                    [(now, lease["device_id"]) for lease in leases],
+                )
         except Exception:
-            # 收敛失败本身要留痕:任务可能停留在派发中状态且 claim 未释放。
             logger.warning(
                 "failed to transition job %s to failed after dispatch error", job_id,
                 exc_info=True,
             )
+            return False
         try:
             self.claims.release(f"job:{job_id}", status="failed")
         except Exception:
             logger.warning("failed to release claim for job %s", job_id, exc_info=True)
+        from foundation.events import EVENT_JOB_TRANSITION, event_bus
 
-    def create_command(self, data: dict[str, Any]) -> dict[str, Any]:
+        if job["owner_id"]:
+            event_bus.emit(EVENT_JOB_TRANSITION, {
+                "job_id": job_id, "status": "failed", "worker_id": job["assigned_worker_id"],
+                "_target_client_id": job["owner_id"],
+            })
+        return True
+
+    def create_command(self, data: dict[str, Any], *, attach_to_job: bool = False) -> dict[str, Any]:
         now = _utc_now()
         command_id = f"cmd-{uuid.uuid4().hex}"
         token = uuid.uuid4().hex
@@ -167,6 +196,7 @@ class ClusterCommandRepositoryMixin:
         job_id = str(data.get("job_id") or "")
         attempt_id = str(data.get("attempt_id") or "")
         with self._lock, self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             if requested_operation_id:
                 existing = conn.execute(
                     """SELECT * FROM cluster_commands
@@ -174,7 +204,10 @@ class ClusterCommandRepositoryMixin:
                     (data["worker_id"], requested_operation_id),
                 ).fetchone()
                 if existing is not None:
-                    return self._decode(existing) or {}
+                    command = self._decode(existing) or {}
+                    if attach_to_job:
+                        self._attach_command_to_job_conn(conn, job_id, command)
+                    return command
             job = conn.execute(
                 "SELECT trace_id FROM cluster_jobs WHERE id=?", (job_id,)
             ).fetchone() if job_id else None
@@ -210,6 +243,11 @@ class ClusterCommandRepositoryMixin:
                 message=f"Queued Worker command {data['command_type']}",
                 payload={"command_id": command_id, "command_type": data["command_type"]},
             )
+            if attach_to_job:
+                command = self._decode(conn.execute(
+                    "SELECT * FROM cluster_commands WHERE id=?", (command_id,),
+                ).fetchone()) or {}
+                self._attach_command_to_job_conn(conn, job_id, command, newly_created=True)
         return self.get_command(command_id) or {}
 
     def append_command_events(
@@ -369,25 +407,37 @@ class ClusterCommandRepositoryMixin:
 
     def attach_command_to_job(self, job_id: str, command: dict[str, Any]) -> None:
         with self._lock, self.connect() as conn:
-            job = conn.execute(
-                "SELECT current_attempt_id FROM cluster_jobs WHERE id=?", (job_id,)
-            ).fetchone()
-            if not job:
-                raise ValueError("job not found")
-            self._transition_job_conn(
-                conn,
-                job_id,
-                "dispatching",
-                source="controller",
-                message="Start command attached to Cluster Job",
-                operation_id=str(command.get("operation_id") or command.get("id") or ""),
-                worker_id=str(command.get("worker_id") or ""),
-                payload={"command_id": command.get("id", "")},
-            )
-            conn.execute(
-                "UPDATE cluster_job_attempts SET status='dispatching' WHERE id=?",
-                (job["current_attempt_id"],),
-            )
+            conn.execute("BEGIN IMMEDIATE")
+            self._attach_command_to_job_conn(conn, job_id, command)
+
+    def _attach_command_to_job_conn(
+        self, conn: Any, job_id: str, command: dict[str, Any], *, newly_created: bool = False,
+    ) -> None:
+        job = conn.execute(
+            "SELECT current_attempt_id,assigned_worker_id,status FROM cluster_jobs WHERE id=?", (job_id,),
+        ).fetchone()
+        if not job:
+            raise ValueError("job not found")
+        if (command.get("job_id") != job_id
+                or command.get("worker_id") != job["assigned_worker_id"]
+                or (command.get("attempt_id") and command["attempt_id"] != job["current_attempt_id"])):
+            raise ValueError("start command does not match the current job attempt")
+        if job["status"] != "assigned":
+            if newly_created:
+                raise ValueError("job is no longer awaiting dispatch")
+            # A replay racing a Worker ack must never rewind its state.
+            return
+        self._transition_job_conn(
+            conn, job_id, "dispatching", source="controller",
+            message="Start command attached to Cluster Job",
+            operation_id=str(command.get("operation_id") or command.get("id") or ""),
+            worker_id=str(command.get("worker_id") or ""),
+            payload={"command_id": command.get("id", "")},
+        )
+        conn.execute(
+            "UPDATE cluster_job_attempts SET status='dispatching' WHERE id=? AND status='assigned'",
+            (job["current_attempt_id"],),
+        )
 
     def sync_job_from_command(self, command: dict[str, Any]) -> None:
         job_id = command.get("job_id", "")

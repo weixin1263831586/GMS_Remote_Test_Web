@@ -294,7 +294,7 @@ class StartClusterTestDispatchCompensationTests(unittest.TestCase):
                 "workflows.cluster_test_execution.get_cluster_service"
             ) as get_service:
                 get_service.return_value = SimpleNamespace(repository=repository)
-                def failing_create_command(data):
+                def failing_create_command(data, **kwargs):
                     raise RuntimeError("disk full")
 
                 repository.create_command = failing_create_command

@@ -246,7 +246,7 @@ def start_cluster_test(request: Any, client_id: str):
         logger.exception(
             "Dispatch command commit failed for job %s; compensating", job["id"]
         )
-        repository.compensate_failed_dispatch(job["id"], exc)
+        repository.compensate_failed_dispatch(job["id"], exc, attempt_id=job["current_attempt_id"])
         return error_response(
             "任务已创建但派发命令写入失败，请稍后重试（任务已回滚为失败状态）", 503
         )
