@@ -1,5 +1,4 @@
 import asyncio
-from contextlib import suppress
 
 from features.auth import require_authenticated_user
 from foundation.outbound import (
@@ -39,7 +38,6 @@ from .api_helpers import (
     os,
     re,
     safe_upload_target_path,
-    shutil,
     strip_redmine_report_prefix,
     tempfile,
     urlparse,
@@ -220,10 +218,8 @@ async def analyze_report_from_url(request: Request):
                     filename = f"attachment_{attachment_id}"
 
         logger.info("[Report Analysis] Downloading staged report")
-        temp_dir = tempfile.mkdtemp(prefix="redmine_download_")
-        temp_file_path = ""
-
-        try:
+        with tempfile.TemporaryDirectory(prefix="redmine_download_") as temp_dir:
+            temp_file_path = ""
             allowed_private_hosts = (
                 {url_hostname(redmine_base_url)} if is_redmine else set()
             )
@@ -307,7 +303,7 @@ async def analyze_report_from_url(request: Request):
                         async for chunk in response.content.iter_chunked(262144):
                             downloaded_size += len(chunk)
                             if downloaded_size > MAX_REPORT_URL_DOWNLOAD_BYTES:
-                                raise ValueError("Report download is too large")
+                                return error_response("Report download is too large", 413)
                             f.write(chunk)
 
                     logger.info(f"[Report Analysis] Download complete: {downloaded_size} bytes")
@@ -319,9 +315,6 @@ async def analyze_report_from_url(request: Request):
                 logger.info(f"[Report Analysis] Analysis complete - failures: {len(result.get('failures', []))}")
             else:
                 logger.warning("[Report Analysis] Empty analysis result")
-
-            with suppress(Exception):
-                shutil.rmtree(temp_dir)
 
             # 解析为空 ≠ 服务器错误：文件下载成功但不是有效的测试报告
             # （HTML/非报告 XML/空内容等）。返回 422 让前端提示「不是有效报告」，
@@ -369,11 +362,6 @@ async def analyze_report_from_url(request: Request):
                         REDMINE_ISSUE_ID_CACHE[attachment_id_for_cache] = original_issue_id
 
             return JSONResponse(content={"success": True, "data": result, "filename": filename, "mode": "url"})
-
-        except Exception as download_error:
-            with suppress(Exception):
-                shutil.rmtree(temp_dir)
-            raise download_error
 
     except Exception as e:
         logger.error(

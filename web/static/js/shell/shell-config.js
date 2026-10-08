@@ -4,8 +4,8 @@
  * 运行时配置（外部服务/品牌/cluster worker ID）由模板以
  * `<script type="application/json" id="gms-runtime-config">` 注入：
  * 数据标签不被浏览器执行，不受 CSP script-src 管制，且杜绝 tojson
- * 内容逃逸出 JS 上下文的注入面。本模块在所有 defer 脚本之前以同步
- * 方式加载，保证 icon-auto.js 等模块的顶层常量读取时数据已就绪。
+ * 内容逃逸出 JS 上下文的注入面。本模块排在 defer 队列首位，保证
+ * icon-auto.js 等模块的顶层常量读取时数据已就绪，同时不阻塞 HTML 解析。
  */
 (function () {
     'use strict';

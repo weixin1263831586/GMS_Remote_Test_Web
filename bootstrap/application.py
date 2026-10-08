@@ -11,8 +11,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -22,6 +20,8 @@ from bootstrap.production_security import (
     validate_production_security_configuration,
 )
 from bootstrap.routes import include_routes
+from bootstrap.shell_assets import ShellStaticFiles
+from bootstrap.shell_templates import create_shell_templates
 from features.auth import (
     AUTH_COOKIE_NAME,
     auth_service,
@@ -448,17 +448,16 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             )
         return response
 
+    templates = create_shell_templates(
+        services.settings.project_root / 'web/shell',
+        production=environment == 'production',
+    )
     static_dir = services.settings.project_root / 'web/static'
     if static_dir.exists():
-        app.mount('/static', StaticFiles(directory=static_dir), name='static')
-    templates = Jinja2Templates(
-        directory=services.settings.project_root / 'web/shell'
-    )
-    templates.env.globals['url_for'] = (
-        lambda endpoint, filename='': (
-            f'/static/{filename}' if endpoint == 'static' else f'/{endpoint}'
-        )
-    )
+        app.mount('/static', ShellStaticFiles(
+            directory=static_dir, runtime_bundle=templates.runtime_bundle,
+            style_bundle=templates.style_bundle,
+        ), name='static')
     include_routes(app, templates, services)
 
     def secured_openapi():

@@ -5,7 +5,27 @@ function jobWorkers(){return commandWorkers().filter(worker=>!worker.admission_b
 let clusterJobWorkerDraft=null;
 let creatingClusterJob=false;
 let pendingClusterJobRequest=null;
+let clusterJobRequestRestored=false;
 function clusterJobRequestKey(){return Array.from(crypto.getRandomValues(new Uint8Array(16)),value=>value.toString(16).padStart(2,'0')).join('')}
+function clusterJobStorageKey(owner){return `gms.cluster.pending-job.v1:${owner}`}
+async function clusterJobRequestOwner(){
+ const status=await api('/api/auth/status');
+ if(status.needs_authentication)throw new Error('请先登录后创建任务');
+ return status.user?.resource_owner_id||status.user?.id||'anonymous';
+}
+function readPendingClusterJob(owner){
+ const raw=sessionStorage.getItem(clusterJobStorageKey(owner));if(!raw)return null;
+ try{const value=JSON.parse(raw),body=JSON.parse(value.body);return value.owner===owner&&/^[a-f0-9]{32}$/.test(value.key)&&typeof body.worker_id==='string'&&typeof body.suite_key==='string'&&Array.isArray(body.devices)?value:null}catch{return null}
+}
+function clusterJobFormBody(){const device=document.querySelector('#job-device').value;return {worker_id:document.querySelector('#job-worker').value,suite_key:document.querySelector('#job-suite').value,devices:device?[device]:[],device_count:1}}
+async function restorePendingClusterJob(){
+ const owner=await clusterJobRequestOwner();pendingClusterJobRequest=readPendingClusterJob(owner);clusterJobRequestRestored=true;
+ if(!pendingClusterJobRequest)return;
+ const body=JSON.parse(pendingClusterJobRequest.body),worker=document.querySelector('#job-worker');
+ if(!Array.from(worker.options).some(option=>option.value===body.worker_id))worker.add(new Option(body.worker_id,body.worker_id));
+ worker.value=body.worker_id;clusterJobWorkerDraft=body.worker_id;updateJobOptions();
+ document.querySelector('#job-suite').value=body.suite_key;document.querySelector('#job-device').value=body.devices[0]||'';updateJobOptions();
+}
 function renderJobForm(){
  const worker=document.querySelector('#job-worker'),suite=document.querySelector('#job-suite'),device=document.querySelector('#job-device');if(!worker||!suite||!device)return;
  const previousWorker=worker.value||clusterJobWorkerDraft||((clusterWorkspace.scope_mode==='cluster'&&clusterWorkspace.worker_id)||'auto');
@@ -24,7 +44,14 @@ function updateJobOptions(){
  if(Array.from(suite.options).some(o=>o.value===previousSuite))suite.value=previousSuite;
  device.innerHTML=wid==='auto'||!selectedEligible?'<option value="">自动选择设备</option>':'<option value="">自动选择设备</option>'+state.devices.filter(d=>d.worker_id===wid&&d.state==='available').map(d=>`<option value="${esc(d.id)}">${esc(d.serial)}</option>`).join('');
  const normalized=clusterDeviceId(wid,previousDevice);if(Array.from(device.options).some(o=>o.value===normalized))device.value=normalized;
- const create=document.querySelector('#create-job');if(create){create.disabled=creatingClusterJob||!selectedEligible||!suite.value;create.title=creatingClusterJob?'正在创建任务':create.disabled?'没有满足准入条件的 Worker 和套件':''}
+ const pending=pendingClusterJobRequest?JSON.parse(pendingClusterJobRequest.body):null;
+ if(pending?.worker_id===wid){
+  if(!Array.from(suite.options).some(o=>o.value===pending.suite_key))suite.add(new Option(pending.suite_key+' · 待确认',pending.suite_key));
+  const savedDevice=pending.devices[0]||'';if(savedDevice&&!Array.from(device.options).some(o=>o.value===savedDevice))device.add(new Option(savedDevice+' · 待确认',savedDevice));
+  if(previousSuite===pending.suite_key)suite.value=previousSuite;if(previousDevice===savedDevice)device.value=savedDevice;
+ }
+ const retry=pendingClusterJobRequest?.body===JSON.stringify(clusterJobFormBody());
+ const create=document.querySelector('#create-job');if(create){create.disabled=creatingClusterJob||(!retry&&(!selectedEligible||!suite.value));create.title=creatingClusterJob?'正在创建任务':retry?'确认上次提交结果':create.disabled?'没有满足准入条件的 Worker 和套件':''}
 }
 function syncClusterWorkspace(extra={}){
  if(applyingClusterWorkspace)return;const worker=document.querySelector('#job-worker')?.value||'auto',device=document.querySelector('#job-device')?.value||'',suite=document.querySelector('#job-suite')?.value||'';
@@ -83,6 +110,7 @@ async function refresh(showBusy=false){
    clusterInitialRefreshSettled=true;
    checkLocalVpn().catch(()=>{});checkWorkerVpn().then(render).catch(()=>{});render();
    await applyClusterWorkspace(clusterWorkspace);
+   if(!clusterJobRequestRestored)await restorePendingClusterJob();
    if(errors.length)toast(`部分数据刷新失败：${errors.join('；')}`);
   })().finally(()=>{refreshPromise=null});
   return await refreshPromise;
@@ -94,14 +122,16 @@ async function createJob(){
  if(creatingClusterJob)return;
  creatingClusterJob=true;updateJobOptions();
  try{
-  const device=document.querySelector('#job-device').value;
-  const body={worker_id:document.querySelector('#job-worker').value,suite_key:document.querySelector('#job-suite').value,devices:device?[device]:[],device_count:1};
+  const body=clusterJobFormBody();
   const serialized=JSON.stringify(body);
+  const owner=await clusterJobRequestOwner();pendingClusterJobRequest=readPendingClusterJob(owner);
   const retry=pendingClusterJobRequest?.body===serialized;
   if(!retry&&!jobWorkers().some(worker=>body.worker_id==='auto'||worker.id===body.worker_id))throw new Error('没有满足准入条件的 Worker');
   if(!body.worker_id||!body.suite_key)throw new Error('请选择 Worker 和套件');
-  if(!retry)pendingClusterJobRequest={body:serialized,key:clusterJobRequestKey()};
+  if(!retry)pendingClusterJobRequest={owner,body:serialized,key:clusterJobRequestKey()};
+  sessionStorage.setItem(clusterJobStorageKey(owner),JSON.stringify(pendingClusterJobRequest));
   const d=await api('/api/cluster/jobs',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':pendingClusterJobRequest.key},body:serialized});
+  sessionStorage.removeItem(clusterJobStorageKey(owner));
   pendingClusterJobRequest=null;
   toast(`任务已创建 ${d.job.id}`);
   clusterJobWorkerDraft=d.job.assigned_worker_id||body.worker_id;

@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 
 from app import app
+from tests.contract.snapshot_tools import read_shell_bundle
 
 
 class DeviceConfigExplorerMigrationTests(unittest.TestCase):
@@ -17,13 +18,7 @@ class DeviceConfigExplorerMigrationTests(unittest.TestCase):
         self.assertIn("/api/config-explorer/decompile", paths)
 
     def test_device_management_ui_exposes_device_info_modal(self):
-        # CSP 前置迁移后 shell 主脚本外置到 web/static/js/shell/shell-*.js。
-        shell_parts = [Path("web/shell/shell.html").read_text(encoding="utf-8")]
-        shell_parts += [
-            p.read_text(encoding="utf-8")
-            for p in sorted(Path("web/static/js/shell").glob("*.js"))
-        ]
-        shell = "\n".join(shell_parts)
+        shell = read_shell_bundle()
         navigation = Path("web/static/js/navigation.js").read_text(encoding="utf-8")
         combined = shell + "\n" + navigation
 

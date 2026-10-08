@@ -9,6 +9,86 @@ from tests.runtime_ui.harness import PlaywrightError, RuntimeUiHarness, expect
 
 
 class RuntimeClusterTests(RuntimeUiHarness):
+    def test_unconfirmed_job_survives_refresh_and_stays_account_scoped(self):
+        page = self.new_page()
+        errors, requests, created_keys = [], [], set()
+        page.on("pageerror", lambda exc: errors.append(str(exc)))
+        owner = {"id": "owner-a"}
+        worker = {
+            "id": "refresh-worker", "name": "refresh-worker", "status": "online",
+            "agent_version": "1", "running_jobs": 0, "max_jobs": 1,
+            "admission_blocked": False,
+        }
+        job = {
+            "id": "job-response-lost", "assigned_worker_id": worker["id"],
+            "current_attempt_id": "attempt-refresh", "suite_key": "CTS:17_r1",
+            "status": "completed", "leases": [],
+        }
+        payloads = {
+            "/api/cluster/status": {"enabled": True, "remote_dispatch_enabled": True, "local_worker_id": "local"},
+            "/api/cluster/workers": {"workers": [worker]},
+            "/api/cluster/suites": {"suites": [{
+                "worker_id": worker["id"], "suite_key": "CTS:17_r1",
+                "suite_type": "CTS", "suite_version": "17_r1", "available": True,
+            }]},
+            "/api/cluster/devices": {"devices": []},
+            "/api/cluster/jobs": {"jobs": [job]},
+            f"/api/cluster/jobs/{job['id']}": {"job": job},
+        }
+
+        def respond(route):
+            path = urlparse(route.request.url).path
+            if path == "/api/cluster/jobs" and route.request.method == "POST":
+                submission = (route.request.post_data_json, route.request.headers["idempotency-key"])
+                requests.append(submission)
+                created_keys.add(submission[1])
+                if len(requests) == 1 or owner["id"] == "owner-b":
+                    route.abort("failed")
+                else:
+                    route.fulfill(status=200, content_type="application/json", body=json.dumps({"success": True, "job": job}))
+                return
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"success": True, **payloads.get(path, {})}))
+
+        try:
+            page.route("**/api/cluster/**", respond)
+            page.route("**/api/auth/status", lambda route: route.fulfill(
+                status=200, content_type="application/json", body=json.dumps({
+                    "authenticated": True, "needs_authentication": False,
+                    "user": {"id": owner["id"], "resource_owner_id": owner["id"]},
+                }),
+            ))
+            page.goto(f"{self.base_url}/cluster?tab=management", wait_until="domcontentloaded")
+            page.wait_for_function("clusterJobRequestRestored")
+            self.assertEqual(requests, [])
+            page.locator("#job-worker").select_option("auto", force=True)
+            page.evaluate("createJob()")
+            self.assertEqual(len(requests), 1)
+            self.assertTrue(page.evaluate("sessionStorage.getItem(clusterJobStorageKey('owner-a'))"))
+            # Account switches cannot reuse another owner's pending request.
+            owner["id"] = "owner-b"
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_function("clusterJobRequestRestored")
+            self.assertIsNone(page.evaluate("pendingClusterJobRequest"))
+            page.locator("#job-worker").select_option("auto", force=True)
+            page.evaluate("createJob()")
+            self.assertNotEqual(requests[0][1], requests[1][1])
+            # The original task can finish while its response remains lost.
+            owner["id"] = "owner-a"
+            worker.update(admission_blocked=True, admission_reasons=["max_jobs"])
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_function("clusterJobRequestRestored")
+            self.assertEqual(len(requests), 2)
+            expect(page.locator("#create-job")).to_be_enabled()
+            page.evaluate("createJob()")
+            self.assertEqual(requests[0], requests[2])
+            self.assertEqual(len(created_keys), 2)
+            self.assertIsNone(page.evaluate("sessionStorage.getItem(clusterJobStorageKey('owner-a'))"))
+            self.assertTrue(page.evaluate("sessionStorage.getItem(clusterJobStorageKey('owner-b'))"))
+            self.assertEqual(page.evaluate("clusterWorkspace.cluster_job_id"), job["id"])
+            self.assert_no_page_errors(errors)
+        finally:
+            page.close()
+
     def test_job_submission_is_single_flight_and_uses_assigned_worker(self):
         page = self.new_page()
         errors, requests, held_routes = [], [], []

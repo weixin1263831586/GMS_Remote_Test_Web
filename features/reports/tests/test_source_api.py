@@ -1,12 +1,108 @@
+import asyncio
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from features.auth import CurrentUser
 
 
 class ReportSourceApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_staging_directory_is_removed_on_every_exit(self):
+        from features.reports import source_api
+
+        class FakeConfig:
+            def get_redmine_config(self):
+                return {"base_url": "https://redmine.example.test", "domain": "redmine.example.test"}
+
+            def get_redmine_base_url(self, config=None):
+                return "https://redmine.example.test"
+
+            def redmine_credentials_error_message(self):
+                return "Credentials required"
+
+        class FakeRequest:
+            state = SimpleNamespace(current_user=CurrentUser(id="test-owner", username="test", role="user"))
+            headers = {}
+            cookies = {}
+
+            async def json(self):
+                return {"url": "https://redmine.example.test/report.zip"}
+
+        class FakeResponse:
+            status = 200
+            headers = {"Content-Type": "application/zip"}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            @property
+            def content(self):
+                return self
+
+            async def iter_chunked(self, _size):
+                yield b"PK\x03\x04test report"
+
+        class FakeSession:
+            def __init__(self, **kwargs):
+                self.connector = kwargs["connector"]
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                await self.connector.close()
+
+            def get(self, *_args, **_kwargs):
+                return response
+
+        directory_factory = tempfile.TemporaryDirectory
+        download_limit = source_api.MAX_REPORT_URL_DOWNLOAD_BYTES
+        with directory_factory() as parent:
+            for outcome in (400, 401, 403, 413, "stream-413", 422, 500, 200, "cancelled"):
+                with self.subTest(outcome=outcome):
+                    created = []
+
+                    def staging_directory(created=created, **kwargs):
+                        directory = directory_factory(dir=parent, **kwargs)
+                        created.append(Path(directory.name))
+                        return directory
+
+                    response = FakeResponse()
+                    response.status = 403 if outcome == 403 else 200
+                    response.headers = {"Content-Type": "application/zip"}
+                    if outcome == 413:
+                        response.headers["Content-Length"] = str(source_api.MAX_REPORT_URL_DOWNLOAD_BYTES + 1)
+                    analyze = AsyncMock(return_value=None if outcome == 422 else {"failures": []})
+                    if outcome == 500:
+                        analyze.side_effect = RuntimeError("Analysis failed")
+                    if outcome == "cancelled":
+                        analyze.side_effect = asyncio.CancelledError
+                    addresses = ["127.0.0.1"] if outcome == 400 else ["93.184.216.34"]
+                    request = FakeRequest()
+                    if outcome == 400:
+                        request.json = AsyncMock(return_value={"url": "https://127.0.0.1/report.zip"})
+                    with patch.object(source_api.tempfile, "TemporaryDirectory", side_effect=staging_directory), \
+                            patch.object(source_api, "_redmine_config_manager_for_request", return_value=FakeConfig()), \
+                            patch.object(source_api, "_load_redmine_credentials", AsyncMock(return_value=None if outcome == 401 else {"username": "test", "password": "test"})), \
+                            patch.object(source_api, "_analyze_report_file", analyze), \
+                            patch.object(source_api, "MAX_REPORT_URL_DOWNLOAD_BYTES", 3 if outcome == "stream-413" else download_limit), \
+                            patch.object(source_api.aiohttp, "ClientSession", FakeSession), \
+                            patch("foundation.outbound.socket.getaddrinfo", return_value=[(2, 1, 6, "", (addresses[0], 443))]):
+                        if outcome == "cancelled":
+                            with self.assertRaises(asyncio.CancelledError):
+                                await source_api.analyze_report_from_url(request)
+                        else:
+                            result = await source_api.analyze_report_from_url(request)
+                            self.assertEqual(result.status_code, 413 if outcome == "stream-413" else outcome, result.body)
+                    self.assertEqual(len(created), 1)
+                    self.assertTrue(all(not path.exists() for path in created))
+
     def test_url_log_target_omits_credentials_query_and_fragment(self):
         from features.reports.source_api import _url_log_target
 

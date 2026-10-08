@@ -11,6 +11,9 @@ from contextlib import contextmanager
 from foundation.error_model import ApiError
 
 
+JOB_REQUEST_LOCK_STRIPES = 256
+
+
 def request_fingerprint(payload: dict) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -31,13 +34,15 @@ class ClusterJobRequestRepositoryMixin:
             raise ApiError.malformed_request("Idempotency-Key must contain 1–128 ASCII letters, digits, or ._:-")
         lock_dir = self.db_path.parent / f".{self.db_path.name}.job-requests"
         lock_dir.mkdir(parents=True, exist_ok=True)
-        lock_name = request_fingerprint({"owner_id": owner_id, "key": key})
+        digest = request_fingerprint({"owner_id": owner_id, "key": key})
+        # Stable stripes bound inode growth without ever unlinking a live lock.
+        lock_name = f"stripe-{int(digest, 16) % JOB_REQUEST_LOCK_STRIPES:03d}"
         with (lock_dir / lock_name).open("a+b") as handle:
             try:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
                 raise ApiError.conflict(
-                    "This job request is still being created",
+                    "Job submission is busy",
                     next_actions=[{"action": "Retry with the same Idempotency-Key"}],
                 ) from exc
             yield
@@ -67,10 +72,10 @@ class ClusterJobRequestRepositoryMixin:
             attempt = conn.execute(
                 "SELECT attempt_number FROM cluster_job_attempts WHERE id=?", (job["current_attempt_id"],),
             ).fetchone()
-        if row:
+        if row and job["status"] != "assigned":
             return self.get_command(row["id"])
         if job["status"] != "assigned" or not attempt or attempt["attempt_number"] != 1:
-            return None
+            return self.get_command(row["id"]) if row else None
         # Resume only the initial job/command commit gap. Later attempts and
         # terminal states are owned by the lifecycle, not submission retries.
         data = job.get("request") or {}
@@ -93,19 +98,34 @@ class ClusterJobRequestRepositoryMixin:
                 fenced = False
                 break
         if not fenced:
-            self.compensate_failed_dispatch(job["id"], ValueError("device claim was lost before dispatch"))
+            compensated = self.compensate_failed_dispatch(
+                job["id"], ValueError("device claim was lost before dispatch"),
+                attempt_id=job["current_attempt_id"],
+            )
+            if not compensated:
+                current = self.get_job(job["id"])
+                if current and (current["status"] != "assigned"
+                                or current["current_attempt_id"] != job["current_attempt_id"]):
+                    return self.replay_job_command(current)
             raise ApiError.conflict(
                 "The original job lost its device claim before dispatch",
                 details={"job_id": job["id"]},
                 next_actions=[{"action": "Inspect the failed job before submitting a new request"}],
             )
         try:
+            if row:
+                command = self.get_command(row["id"])
+                if command is None:
+                    raise ValueError("the original start command is missing")
+                self.attach_command_to_job(job["id"], command)
+                self.sync_job_from_command(command)
+                return command
             return self.dispatch_job_start_command(
                 job, argv=data["argv"], execution_spec=data.get("execution_spec"),
                 env=data.get("env") or {}, devices=data.get("devices") or [],
             )
         except Exception as exc:
-            self.compensate_failed_dispatch(job["id"], exc)
+            self.compensate_failed_dispatch(job["id"], exc, attempt_id=job["current_attempt_id"])
             raise ApiError.dependency_unavailable(
                 "Could not queue the original job", details={"job_id": job["id"]},
             ) from exc

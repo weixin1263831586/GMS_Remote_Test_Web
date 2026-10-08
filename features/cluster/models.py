@@ -129,6 +129,8 @@ class ClusterJobCreate(BaseModel):
     worker_id: str
     suite_key: str = ""
     suite_path: str = ""
+    # Every Job leases devices. An empty request selects device_count devices
+    # on either the explicit Worker or the automatically selected Worker.
     devices: list[str] = Field(default_factory=list)
     # argv is derived server-side from execution_spec (or the default listing
     # command); the browser-facing POST /api/cluster/jobs rejects non-empty
