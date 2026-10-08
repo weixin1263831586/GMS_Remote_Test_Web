@@ -22,6 +22,7 @@ from features.auth import (
     require_authenticated_user_when_auth_required,
 )
 from features.devices import ssh_connection_failed_response
+from foundation.error_model import ApiError
 from foundation.errors import handle_api_errors
 from foundation.responses import ApiResponse
 
@@ -206,6 +207,18 @@ def _run_suite_file_script(ssh, script: str, suite_root: str, remote_path: str, 
         ) from e
 
 
+def suite_dir_zip_timeout() -> int:
+    """远端结果目录打包超时（秒）。
+
+    Tradefed 结果目录可达数 GB，远端 zipfile 压缩耗时远超普通 stat/list
+    脚本；默认 600s，可用 GMS_SUITE_ZIP_TIMEOUT_SECONDS 按主机磁盘速度调整。
+    """
+    try:
+        return max(60, int(os.getenv("GMS_SUITE_ZIP_TIMEOUT_SECONDS", "600")))
+    except ValueError:
+        return 600
+
+
 
 
 # ==================== Suite File Browsing ====================
@@ -379,13 +392,24 @@ async def download_suite_directory(suite_path: str = Query(...), path: str = Que
         return ssh_connection_failed_response()
 
     try:
-        info = _run_suite_file_script(ssh, SUITE_DIR_ZIP_SCRIPT, suite_root, remote_path)
+        info = _run_suite_file_script(
+            ssh, SUITE_DIR_ZIP_SCRIPT, suite_root, remote_path,
+            timeout=suite_dir_zip_timeout(),
+        )
         if not info.get("success"):
             runtime.ssh_manager.return_connection(ssh)
             return ApiResponse.error(info.get("error", "Directory not found"), status_code=404)
 
         sftp = ssh.open_sftp()
         remote_file = sftp.open(info["zip_path"], "rb")
+    except (TimeoutError, RuntimeError) as exc:
+        # 远端 zip 打包是纯基础设施依赖：超时映射为 504 语义码。之前落到
+        # 通用 500 时，浏览器对失败的附件下载只会显示「无法下载 - 网络问题」。
+        runtime.ssh_manager.return_connection(ssh)
+        raise ApiError.dependency_timeout(
+            "远端目录打包超时或失败，请重试或分批下载较小目录",
+            next_actions=[{"action": "Retry the download"}],
+        ) from exc
     except Exception:
         runtime.ssh_manager.return_connection(ssh)
         raise
