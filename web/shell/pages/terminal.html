@@ -1,0 +1,35 @@
+<div class="container page-content" id="page-terminal">
+            <div class="host-workspace-title-row">
+                <div class="section-title" style="margin: 0;">🐧 主机终端</div>
+                <div class="host-workspace-layouts page-title-actions" role="group" aria-label="终端布局">
+                    <button class="btn-xs" data-terminal-layout="single" data-click="setTerminalWorkspaceLayout" data-a0="single">单屏</button>
+                    <button class="btn-xs" data-terminal-layout="horizontal" data-click="setTerminalWorkspaceLayout" data-a0="horizontal">左右</button>
+                    <button class="btn-xs" data-terminal-layout="vertical" data-click="setTerminalWorkspaceLayout" data-a0="vertical">上下</button>
+                    <button class="btn-xs" data-terminal-layout="quad" data-click="setTerminalWorkspaceLayout" data-a0="quad">四屏</button>
+                    <span style="display:none">
+                    <span id="terminal-worker-control" style="display:contents">
+                        <label for="terminal-host-select" style="font-size:11px;color:var(--text-secondary);">主机</label>
+                        <select id="terminal-host-select" data-change="switchTerminalHost" style="padding:3px 6px;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:11px;">
+                            <option value="ats-worker-controller">{{ config.ubuntu_user }}@{{ config.ubuntu_host }}</option>
+                        </select>
+                    </span>
+                    <div style="font-size: 11px; color: var(--text-secondary);">连接: <span id="terminal-connection-label" style="color: var(--text-primary); font-weight: 500;">{{ config.ubuntu_user }}@{{ config.ubuntu_host }}</span></div>
+                    <div class="terminal-status" id="terminal-status" style="font-size: 10px; padding: 3px 6px; border-radius: 3px; background: var(--darker-bg); color: var(--text-secondary);">未连接</div>
+                    <button class="btn-xs" data-click="clearTerminal" style="padding: 2px 6px; font-size: 10px;">🧹</button>
+                    <button class="btn-xs" data-click="reconnectTerminal" style="padding: 2px 6px; font-size: 10px;">🔄</button>
+                    </span>
+                </div>
+                <div class="host-workspace-single-bar host-workspace-title-state page-title-actions">
+                    <span class="host-workspace-pane-status" id="terminal-workspace-status-single">准备中</span>
+                    <button id="terminal-workspace-host-mode-btn" class="btn-xs" data-click="restoreHostTerminalWorkspacePane" data-a0="0" title="关闭当前 ADB Shell，返回这台主机的 SSH 终端" style="display:none">↩ 主机终端</button>
+                    <button class="btn-xs host-workspace-refresh-btn" data-click="refreshTerminalWorkspacePane" data-a0="0" title="重新连接" aria-label="刷新主机终端">🔄</button>
+                </div>
+                <div class="host-workspace-mode-pending host-workspace-title-state page-title-actions">
+                    <span class="host-workspace-pane-status">正在准备工作区…</span>
+                </div>
+            </div>
+            <div id="terminal-workspace-grid" class="host-workspace-grid layout-single"></div>
+            <div style="display:none" aria-hidden="true">
+                <div id="terminal" style="width: 100%; height: 100%;"></div>
+            </div>
+        </div>

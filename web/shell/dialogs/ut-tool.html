@@ -1,0 +1,41 @@
+<div id="ut-tool-modal" class="modal" style="display: none;">
+            <div class="modal-content modal-m">
+                <div class="modal-header">
+                    <span class="modal-title" id="ut-tool-modal-title">添加工具</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="ut_closeToolModal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-form-row">
+                        <label>分类:</label>
+                        <select id="ut-tool-category" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;">
+                        </select>
+                    </div>
+                    <div class="modal-form-row">
+                        <label>工具名称:</label>
+                        <input type="text" id="ut-tool-title" placeholder="例如：Gerrit Patch工具" maxlength="30" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
+                    </div>
+                    <div class="modal-form-row">
+                        <label>图标 (Emoji):</label>
+                        <input type="text" id="ut-tool-icon" placeholder="例如：📦" maxlength="4" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
+                    </div>
+                    <div class="modal-form-row">
+                        <label>说明:</label>
+                        <textarea id="ut-tool-desc" placeholder="工具的功能说明，鼠标悬停时显示" rows="3" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px; resize: vertical;"></textarea>
+                    </div>
+                    <div class="modal-form-row">
+                        <label>文件路径 (tools/):</label>
+                        <div style="display: flex; gap: 6px; align-items: center;">
+                            <input type="text" id="ut-tool-filepath" placeholder="例如：gerrit-patch（可下载工具的稳定 ID）" style="flex: 1; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
+                            <button class="btn-xxs" data-click="ut_browseFiles" style="white-space: nowrap; padding: 6px 10px; flex-shrink: 0;">浏览</button>
+                        </div>
+                    </div>
+                    <div class="modal-info-text">
+                        💡 提示：文件需放在服务器 tools/ 目录下
+                    </div>
+                    <div class="modal-buttons">
+                        <button class="btn-xxs" data-click="ut_closeToolModal">取消</button>
+                        <button class="btn-xxs btn-primary" data-click="ut_saveTool">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>

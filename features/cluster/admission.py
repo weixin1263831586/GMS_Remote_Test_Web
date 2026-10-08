@@ -15,6 +15,8 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
+from .config import normalize_max_jobs
+
 
 def min_disk_free_gb() -> float:
     """Cluster-wide free-disk admission floor (GB)."""
@@ -44,7 +46,7 @@ def worker_admission_state(
     ``offline``, ``draining``, ``low_disk``, ``low_memory``, ``max_jobs``,
     ``external_tradefed``. Statuses other than online/busy fail closed as
     ``offline`` (or ``draining``). Metrics reported as 0/absent are unknown
-    and never block on their own; ``max_jobs <= 0`` counts as a single slot.
+    and never block on their own; Worker capacity is normalized to 1–32 slots.
     """
     reasons: list[str] = []
     status = str(worker.get("status") or "")
@@ -64,9 +66,9 @@ def worker_admission_state(
     if memory_available and required_memory and memory_available < required_memory:
         reasons.append("low_memory")
 
-    max_jobs = int(_positive_metric(worker.get("max_jobs")) or 0)
+    max_jobs = normalize_max_jobs(worker.get("max_jobs") or 0)
     running_jobs = int(_positive_metric(worker.get("running_jobs")) or 0)
-    if running_jobs >= max(max_jobs, 1):
+    if running_jobs >= max_jobs:
         reasons.append("max_jobs")
 
     if int(_positive_metric(worker.get("unknown_external_jobs")) or 0):

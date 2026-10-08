@@ -1,0 +1,47 @@
+<div class="container page-content" id="page-notes">
+            <div class="section-title">📚 个人知识库</div>
+            <div class="kb-layout" style="display:grid;grid-template-columns:220px 300px minmax(0,1fr);gap:10px;flex:1;min-height:0;">
+                <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
+                    <div style="padding: 8px 10px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size:13px;font-weight:600;">知识库</span>
+                        <button class="btn-xs" data-click="kbNewSpace" style="padding:1px 6px;font-size:10px;">＋</button>
+                    </div>
+                    <div id="kb-space-list" style="padding:6px;overflow-y:auto;"></div>
+                    <div style="padding:8px 10px;border-top:1px solid var(--border-color);font-size:12px;font-weight:600;color:var(--text-secondary);">目录</div>
+                    <div id="kb-tree" style="overflow-y:auto;padding:4px 6px;flex:1;"></div>
+                    <div style="padding:8px 10px;border-top:1px solid var(--border-color);display:flex;gap:6px;">
+                        <button class="btn-xs" data-click="kbNewFolder" style="flex:1;">新目录</button>
+                        <button class="btn-xs btn-primary" data-click="kbNewDoc" style="flex:1;">新文档</button>
+                    </div>
+                </div>
+                <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
+                    <div style="padding:8px;border-bottom:1px solid var(--border-color);display:flex;gap:6px;">
+                        <input type="text" id="kb-search-input" class="combo-box" placeholder="全库搜索文档、标签、附件..." style="flex:1;height:28px;font-size:12px;" data-keydown="kbSearch" data-key="Enter" />
+                        <button class="btn-xs" data-click="kbSearch">搜索</button>
+                    </div>
+                    <div id="kb-doc-list" style="overflow-y:auto;flex:1;padding:6px;"><div class="suite-empty">加载中...</div></div>
+                    <div style="border-top:1px solid var(--border-color);padding:8px;">
+                        <button class="btn-xs" data-click="kbOpenUpload" style="width:100%;">上传文件入库</button>
+                    </div>
+                </div>
+                <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
+                    <div id="kb-editor" style="display:flex;flex-direction:column;flex:1;min-height:0;">
+                        <div class="kb-editor-toolbar" style="padding:8px;border-bottom:1px solid var(--border-color);display:flex;gap:6px;align-items:center;">
+                            <input id="kb-doc-title" class="combo-box" placeholder="文档标题" style="flex:1;height:30px;font-size:15px;font-weight:600;" />
+                            <button class="btn-xs" data-click="kbToggleFavorite">收藏</button>
+                            <button class="btn-xs" data-click="kbShowHistory">历史</button>
+                            <button class="btn-xs btn-primary" data-click="kbSaveDoc">保存</button>
+                            <button class="btn-xs" data-click="kbDeleteCurrent">删除</button>
+                        </div>
+                        <div class="kb-editor-tags" style="padding:8px;border-bottom:1px solid var(--border-color);display:flex;gap:6px;">
+                            <input id="kb-doc-tags" class="combo-box" placeholder="标签，逗号分隔" style="flex:1;height:26px;font-size:12px;" />
+                            <button class="btn-xs" data-click="kbAsk">问答</button>
+                        </div>
+                        <textarea id="kb-doc-content" placeholder="记录知识、排查过程、配置、命令、结论..." style="flex:1;min-height:0;border:0;background:transparent;color:var(--text-color);padding:12px;font-family:Consolas,monospace;font-size:13px;line-height:1.6;resize:none;"></textarea>
+                    </div>
+                    <div id="kb-side-info" style="border-top:1px solid var(--border-color);padding:8px;max-height:28%;overflow:auto;font-size:12px;color:var(--text-secondary);">
+                        选择或新建一篇文档。
+                    </div>
+                </div>
+            </div>
+        </div>

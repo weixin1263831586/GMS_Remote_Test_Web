@@ -1,0 +1,79 @@
+<div class="container page-content" id="page-test-suites">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div class="section-title">📚 测试套件</div>
+                <label data-multi-host-control style="font-size:12px;color:var(--text-secondary);">主机
+                    <select id="suite-worker-select" data-change="switchSuiteWorker" disabled style="width:130px;padding:3px 6px;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:11px;box-sizing:border-box;"><option value="">正在加载主机...</option></select>
+                </label>
+            </div>
+
+            <!-- 下载和解压区域 -->
+            <div class="suite-download-section" style="margin-bottom: 10px; padding: 8px; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border-color);">
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; margin-bottom: 8px;">
+                    <div style="flex: 1; min-width: 200px;">
+                        <input type="text" id="suite-download-url" class="combo-box" placeholder="测试套件下载地址，如：https://dl.google.com/android/cts/android-cts-14_r1-linux_x86-arm.zip" style="width: 100%; height: 36px;" />
+                    </div>
+                    <button id="btn-download-suite" class="btn-primary" data-click="downloadTestSuite" style="white-space: nowrap; height: 32px; min-width: 100px;">
+                        ⬇️ 下载套件
+                    </button>
+                    <button id="btn-extract-suite" class="btn-primary" data-click="extractTestSuite" style="white-space: nowrap; height: 32px; min-width: 100px;">
+                        📦 解压套件
+                    </button>
+                </div>
+                <!-- 下载进度 -->
+                <div id="suite-download-progress" style="display: none; margin-top: 10px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span id="suite-progress-status" style="font-size: 12px; color: var(--text-muted); min-width: 80px;">正在下载...</span>
+                        <div style="flex: 1; background: var(--border-color); border-radius: 4px; height: 6px; overflow: hidden;">
+                            <div id="suite-progress-bar" style="background: linear-gradient(90deg, var(--success-color), var(--info-color)); width: 0%; height: 100%; transition: width 0.3s;"></div>
+                        </div>
+                        <span id="suite-progress-percent" style="font-size: 12px; color: var(--success-color); min-width: 40px; text-align: right;">0%</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="suite-browser-layout">
+                <div class="suite-browser-sidebar">
+                    <div class="suite-browser-toolbar">
+                        <button class="btn-xs" data-click="refreshTestSuiteBrowser">🔄 刷新</button>
+                        <span id="suite-browser-count" class="suite-browser-count">0 个套件</span>
+                    </div>
+                    <input type="text" id="suite-browser-filter" class="suite-browser-filter" placeholder="筛选套件..."
+                           data-input="filterTestSuiteBrowserList" />
+                    <div id="suite-browser-list" class="suite-browser-list">
+                        <div class="suite-empty">正在加载...</div>
+                    </div>
+                </div>
+
+                <div class="suite-browser-main">
+                    <div class="suite-browser-header">
+                        <div>
+                            <div id="suite-browser-title" class="suite-browser-title">请选择测试套件</div>
+                            <div id="suite-browser-path" class="suite-browser-path"></div>
+                        </div>
+                        <div style="display: flex; gap: 6px; align-items: center;">
+                            <button id="btn-copy-test-report" class="btn-xs" data-multi-host-control data-click="openReportCopyModal" style="white-space: nowrap; height: 28px;" title="在不同 Worker 的测试套件之间复制 Tradefed results 报告">
+                                🔁 跨主机拷贝报告
+                            </button>
+                            <button id="btn-test-results" class="btn-xs" data-click="openTestResultsModal" style="white-space: nowrap; height: 28px;" title="执行 tradefed list results 查看该套件的测试结果">
+                                📋 测试结果列表
+                            </button>
+                            <button id="btn-add-local-suite" class="btn-xs" data-click="showAddLocalSuiteDialog" style="white-space: nowrap; height: 28px;">
+                                ➕ 添加本地路径
+                            </button>
+                        </div>
+                    </div>
+                    <div id="suite-browser-breadcrumb" class="suite-browser-breadcrumb"></div>
+                    <div class="suite-search-bar">
+                        <input type="text" id="suite-file-search" class="suite-file-search"
+                               placeholder="搜索文件/目录，例如 CtsVirtualDevicesCameraTestCases 或 2026.06.26_20.54.21"
+                               data-keydown="handleSuiteFileSearchKeydown" data-r0="event" autocomplete="off" />
+                        <button class="btn-xs" data-click="searchSuiteFiles">搜索</button>
+                        <button class="btn-xs" data-click="clearSuiteFileSearch">清除</button>
+                    </div>
+                    <div id="suite-search-results" class="suite-search-results"></div>
+                    <div id="suite-file-list" class="suite-file-list">
+                        <div class="suite-empty">从左侧选择一个测试套件</div>
+                    </div>
+                </div>
+            </div>
+        </div>

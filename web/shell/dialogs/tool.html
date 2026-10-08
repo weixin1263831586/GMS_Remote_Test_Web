@@ -1,0 +1,48 @@
+<div id="tool-modal" class="modal" style="display: none;">
+            <div class="modal-content modal-m">
+                <div class="modal-header">
+                    <span class="modal-title" id="tool-modal-title">添加工具</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeToolModal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="tool-index" value="-1" />
+                    <div class="modal-form-row">
+                        <label>分类:</label>
+                        <select id="tool-category" class="combo-box">
+                            <!-- 分类选项将由 JavaScript 动态生成 -->
+                        </select>
+                    </div>
+                    <div class="modal-form-row">
+                        <label>标题:</label>
+                        <input type="text" id="tool-title" placeholder="例如：Google" />
+                    </div>
+                    <div class="modal-form-row">
+                        <label>图标:</label>
+                        <input type="text" id="tool-icon" placeholder="输入Emoji或图片URL" style="width: 100%;" />
+                    </div>
+                    <div class="modal-form-row" id="emoji-picker-row" style="margin-bottom: 8px;">
+                        <label></label>
+                        <div id="emoji-picker" class="emoji-picker-grid">
+                            <!-- Emoji 选项将由 JavaScript 动态生成 -->
+                        </div>
+                    </div>
+                    <div class="modal-form-row">
+                        <label>链接:</label>
+                        <input type="text" id="tool-url" placeholder="例如：https://www.google.com" data-blur="autoFetchIcon" data-r0="value" />
+                    </div>
+                    <div class="modal-info-text">
+                        💡 提示：输入网址后点击外部，系统会自动获取网站图标
+                    </div>
+                    <div id="icon-preview" style="display: none; text-align: center; margin-top: 8px; padding: 8px; background: var(--darker-bg); border-radius: 3px;">
+                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">图标预览：</div>
+                        <div id="preview-container" style="width: 40px; height: 40px; margin: 0 auto; display: flex; align-items: center; justify-content: center;">
+                            <img id="preview-image" src="" alt="预览" style="width: 40px; height: 40px; border-radius: 3px; border: 1px solid var(--border-color); object-fit: contain;">
+                        </div>
+                    </div>
+                    <div class="modal-buttons">
+                        <button class="btn-xxs" data-click="closeToolModal">取消</button>
+                        <button class="btn-xxs btn-primary" data-click="saveTool">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>

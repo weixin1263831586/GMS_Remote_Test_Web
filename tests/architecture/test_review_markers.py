@@ -83,6 +83,8 @@ FORBIDDEN_PATTERNS = [
     ),
     (re.compile(r"评审\s*[MLPR]\d", re.IGNORECASE), "review priority wording"),
     (re.compile(r"审核第[一二三四五六七八九十\d]+节"), "review-section wording"),
+    (re.compile(r"(?:全局)?(?:审查|审核|评审)问题|[（(]问题\s*\d+|^\s*(?:#|//|\*)?\s*问题\s*\d+"),
+     "untraceable review issue"),
     (re.compile(r"^\s*(?:#|//|/\*|\*)\s*[MLPR]\d+[a-z]?[：:]", re.IGNORECASE),
      "bare review priority"),
 ]
@@ -117,6 +119,11 @@ def _candidate_files() -> list[Path]:
 
 
 class ReviewMarkerTests(unittest.TestCase):
+    def test_review_issue_numbers_are_rejected(self):
+        for marker in ("全局审查问题 3", "（问题 4）", "全局审查问题\n  2", "问题 4", "# 问题 4"):
+            with self.subTest(marker=marker):
+                self.assertTrue(any(pattern.search(marker) for pattern, _ in FORBIDDEN_PATTERNS))
+
     def test_production_source_has_no_review_markers(self):
         offenders: list[str] = []
         for path in _candidate_files():

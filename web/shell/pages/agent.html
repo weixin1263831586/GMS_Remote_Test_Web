@@ -1,0 +1,41 @@
+<div class="container page-content" id="page-agent">
+            <div style="position: relative; margin-bottom: 6px;">
+                <div class="section-title" style="margin: 0;">💬 对话Agent</div>
+                <div style="position: absolute; top: 0; right: 0; display: flex; align-items: center; gap: 6px;">
+                    <button class="btn-xs" data-click="newAgentSession" style="padding: 2px 6px; font-size: 10px; min-height: 24px;">新会话</button>
+                    <button class="btn-xs" data-click="cancelAgentSession" style="padding: 2px 6px; font-size: 10px; min-height: 24px;">取消Agent</button>
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 10px; flex: 1; min-height: 0;">
+                <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
+                    <div id="agent-chat-messages" style="flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: rgba(0, 0, 0, 0.08);">
+                        <div class="agent-chat-empty">输入测试需求，例如：跑 CtsWifiTestCases，找一台空闲设备，失败 retry 2 次，还失败就报告分析</div>
+                    </div>
+                    <div style="border-top: 1px solid var(--border-color); padding: 10px; display: flex; gap: 8px; align-items: flex-end; background: var(--darker-bg);">
+                        <textarea id="agent-input" class="entry-field" rows="4" placeholder="告诉 Agent 你要执行的测试、设备选择、retry 策略或分析动作&#10;Shift+Enter 换行，Enter 发送" style="resize: vertical; min-height: 82px; max-height: 220px; flex: 1;"></textarea>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <button class="btn-primary" data-click="sendAgentMessage" data-a0="false" style="padding: 6px 16px; white-space: nowrap; min-width: 64px;">发送</button>
+                            <button class="btn-primary" data-click="sendAgentMessage" data-a0="true" style="padding: 6px 16px; background: var(--success-color); white-space: nowrap; min-width: 64px;">执行</button>
+                        </div>
+                    </div>
+                </div>
+                <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
+                    <div class="agent-run-header">
+                        <div class="agent-run-header-copy">
+                            <div style="font-size: 13px; font-weight: 600;">执行步骤</div>
+                            <div class="agent-model-line">
+                                <span id="agent-model-status" data-state="loading" title="本地/备用模型仅用于报告和知识分析，Agent 指令路由使用确定性规则。">分析模型：读取配置…</span>
+                                <button id="agent-model-check" class="btn-xxs" type="button" data-click="loadAgentModelStatus" data-a0="true">检测</button>
+                            </div>
+                        </div>
+                        <span id="agent-status" style="font-size: 11px; color: var(--text-secondary);">idle</span>
+                    </div>
+                    <div id="agent-steps" style="flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+                        <div class="suite-empty">等待任务</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Agent 接入管理已迁移至用户管理页面（右上角入口） -->
+        </div>

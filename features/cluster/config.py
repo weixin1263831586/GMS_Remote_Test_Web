@@ -14,6 +14,11 @@ def configured_max_bytes(env_name: str, configured: int) -> int:
     return max(1, int(os.getenv(env_name, str(configured))))
 
 
+def normalize_max_jobs(value: int | str) -> int:
+    """Keep configured and legacy Worker capacities within the API's 1–32 range."""
+    return min(32, max(1, int(value)))
+
+
 @dataclass(frozen=True)
 class ClusterConfig:
     enabled: bool = False
@@ -70,5 +75,5 @@ class ClusterConfig:
             log_analysis_max_bytes=max(
                 1, int(raw.get("log_analysis_max_bytes", 5 * 1024**3))
             ),
-            default_max_jobs=max(1, min(32, int(raw.get("default_max_jobs", 6)))),
+            default_max_jobs=normalize_max_jobs(raw.get("default_max_jobs", 6)),
         )

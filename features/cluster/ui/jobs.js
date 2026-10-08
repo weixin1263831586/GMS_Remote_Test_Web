@@ -2,9 +2,13 @@
 function clusterDeviceId(workerId,value){const text=String(value||'');return !text||workerId==='auto'||text.startsWith(`${workerId}:`)?text:`${workerId}:${text}`}
 // Test admission comes from the Controller; command targets also serve suite deployment.
 function jobWorkers(){return commandWorkers().filter(worker=>!worker.admission_blocked)}
+let clusterJobWorkerDraft=null;
+let creatingClusterJob=false;
+let pendingClusterJobRequest=null;
+function clusterJobRequestKey(){return Array.from(crypto.getRandomValues(new Uint8Array(16)),value=>value.toString(16).padStart(2,'0')).join('')}
 function renderJobForm(){
  const worker=document.querySelector('#job-worker'),suite=document.querySelector('#job-suite'),device=document.querySelector('#job-device');if(!worker||!suite||!device)return;
- const previousWorker=worker.value||((clusterWorkspace.scope_mode==='cluster'&&clusterWorkspace.worker_id)||'auto');
+ const previousWorker=worker.value||clusterJobWorkerDraft||((clusterWorkspace.scope_mode==='cluster'&&clusterWorkspace.worker_id)||'auto');
  const workers=commandWorkers(),localIndex=workers.findIndex(item=>item.id===localWorkerId()),workerOptions=workers.map(w=>`<option value="${esc(w.id)}"${w.admission_blocked?' disabled':''}>${esc((w.name||w.id)+(w.admission_blocked?' · 已阻止派发'+admissionReasonSuffix(w):''))}</option>`);
  worker.innerHTML=localIndex>=0?workerOptions[localIndex]+'<option value="auto">自动选择</option>'+workerOptions.filter((_,index)=>index!==localIndex).join(''):'<option value="auto">自动选择</option>'+workerOptions.join('');
  worker.value=Array.from(worker.options).some(o=>o.value===previousWorker)?previousWorker:'auto';
@@ -20,17 +24,22 @@ function updateJobOptions(){
  if(Array.from(suite.options).some(o=>o.value===previousSuite))suite.value=previousSuite;
  device.innerHTML=wid==='auto'||!selectedEligible?'<option value="">自动选择设备</option>':'<option value="">自动选择设备</option>'+state.devices.filter(d=>d.worker_id===wid&&d.state==='available').map(d=>`<option value="${esc(d.id)}">${esc(d.serial)}</option>`).join('');
  const normalized=clusterDeviceId(wid,previousDevice);if(Array.from(device.options).some(o=>o.value===normalized))device.value=normalized;
- const create=document.querySelector('#create-job');if(create){create.disabled=!selectedEligible||!suite.value;create.title=create.disabled?'没有满足准入条件的 Worker 和套件':''}
+ const create=document.querySelector('#create-job');if(create){create.disabled=creatingClusterJob||!selectedEligible||!suite.value;create.title=creatingClusterJob?'正在创建任务':create.disabled?'没有满足准入条件的 Worker 和套件':''}
 }
 function syncClusterWorkspace(extra={}){
  if(applyingClusterWorkspace)return;const worker=document.querySelector('#job-worker')?.value||'auto',device=document.querySelector('#job-device')?.value||'',suite=document.querySelector('#job-suite')?.value||'';
- const eligible=jobWorkers(),autoWorker=eligible.find(item=>item.id===clusterWorkspace.worker_id)||eligible[0];
- if(worker==='auto'&&!autoWorker)return;
- window.GmsEmbeddedWorkspace?.update({scope_mode:'cluster',worker_id:worker==='auto'?autoWorker.id:worker,device_ids:device?[device]:[],suite_key:suite,origin_page:'cluster',...extra});
+ // An automatic draft has no concrete Worker until the Controller assigns it.
+ if(worker==='auto'&&!extra.worker_id)return;
+ const patch={scope_mode:'cluster',worker_id:worker,device_ids:device?[device]:[],suite_key:suite,origin_page:'cluster',...extra};
+ clusterWorkspace={...clusterWorkspace,...patch};
+ window.GmsEmbeddedWorkspace?.update(patch);
 }
 async function applyClusterWorkspace(next,navigate=false){
+ const workerChanged=next?.worker_id&&next.worker_id!==clusterWorkspace.worker_id;
+ const chooseWorkspaceWorker=navigate||workerChanged||clusterJobWorkerDraft===null;
+ if(chooseWorkspaceWorker)clusterJobWorkerDraft=next?.worker_id||clusterJobWorkerDraft;
  clusterWorkspace={...clusterWorkspace,...(next||{})};applyingClusterWorkspace=true;
- try{renderModeStatus();renderJobForm();const worker=document.querySelector('#job-worker');if(clusterWorkspace.scope_mode==='cluster'&&clusterWorkspace.worker_id&&Array.from(worker.options).some(o=>o.value===clusterWorkspace.worker_id)){worker.value=clusterWorkspace.worker_id;updateJobOptions()}const suite=document.querySelector('#job-suite'),device=document.querySelector('#job-device');if(clusterWorkspace.suite_key&&Array.from(suite.options).some(o=>o.value===clusterWorkspace.suite_key))suite.value=clusterWorkspace.suite_key;const wanted=clusterDeviceId(worker.value,(clusterWorkspace.device_ids||[])[0]);if(wanted&&Array.from(device.options).some(o=>o.value===wanted))device.value=wanted;if(navigate&&clusterWorkspace.cluster_job_id&&state.jobs.some(j=>j.id===clusterWorkspace.cluster_job_id))await showJob(clusterWorkspace.cluster_job_id,false)}finally{applyingClusterWorkspace=false}
+ try{renderModeStatus();renderJobForm();const worker=document.querySelector('#job-worker');if(chooseWorkspaceWorker&&clusterJobWorkerDraft&&Array.from(worker.options).some(o=>o.value===clusterJobWorkerDraft)){worker.value=clusterJobWorkerDraft;updateJobOptions()}const suite=document.querySelector('#job-suite'),device=document.querySelector('#job-device');if(chooseWorkspaceWorker&&clusterWorkspace.suite_key&&Array.from(suite.options).some(o=>o.value===clusterWorkspace.suite_key))suite.value=clusterWorkspace.suite_key;const wanted=clusterDeviceId(worker.value,(clusterWorkspace.device_ids||[])[0]);if(wanted&&Array.from(device.options).some(o=>o.value===wanted))device.value=wanted;if(navigate&&clusterWorkspace.cluster_job_id&&state.jobs.some(j=>j.id===clusterWorkspace.cluster_job_id))await showJob(clusterWorkspace.cluster_job_id,false)}finally{applyingClusterWorkspace=false}
 }
 async function checkLocalVpn(){try{const d=await api('/api/vpn/status');localVpnConnected=Boolean(d.connected)}catch(e){localVpnConnected=null}}
 let vpnElevationPromptAt=0;
@@ -81,7 +90,25 @@ async function refresh(showBusy=false){
   if(showBusy)setClusterRefreshBusy(false);
  }
 }
-async function createJob(){try{const device=document.querySelector('#job-device').value;const body={worker_id:document.querySelector('#job-worker').value,suite_key:document.querySelector('#job-suite').value,devices:device?[device]:[],device_count:1};if(!jobWorkers().some(worker=>body.worker_id==='auto'||worker.id===body.worker_id))throw new Error('没有满足准入条件的 Worker');if(!body.worker_id||!body.suite_key)throw new Error('请选择 Worker 和套件');const d=await api('/api/cluster/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast(`任务已创建 ${d.job.id}`);syncClusterWorkspace({cluster_job_id:d.job.id,attempt_id:d.job.current_attempt_id||'',worker_id:d.job.assigned_worker_id||body.worker_id,device_ids:(d.job.leases||[]).map(x=>x.device_id),suite_key:d.job.suite_key||body.suite_key});await refresh();showJob(d.job.id)}catch(e){toast(e.message)}}
+async function createJob(){
+ if(creatingClusterJob)return;
+ creatingClusterJob=true;updateJobOptions();
+ try{
+  const device=document.querySelector('#job-device').value;
+  const body={worker_id:document.querySelector('#job-worker').value,suite_key:document.querySelector('#job-suite').value,devices:device?[device]:[],device_count:1};
+  const serialized=JSON.stringify(body);
+  const retry=pendingClusterJobRequest?.body===serialized;
+  if(!retry&&!jobWorkers().some(worker=>body.worker_id==='auto'||worker.id===body.worker_id))throw new Error('没有满足准入条件的 Worker');
+  if(!body.worker_id||!body.suite_key)throw new Error('请选择 Worker 和套件');
+  if(!retry)pendingClusterJobRequest={body:serialized,key:clusterJobRequestKey()};
+  const d=await api('/api/cluster/jobs',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':pendingClusterJobRequest.key},body:serialized});
+  pendingClusterJobRequest=null;
+  toast(`任务已创建 ${d.job.id}`);
+  clusterJobWorkerDraft=d.job.assigned_worker_id||body.worker_id;
+  syncClusterWorkspace({cluster_job_id:d.job.id,attempt_id:d.job.current_attempt_id||'',worker_id:clusterJobWorkerDraft,device_ids:(d.job.leases||[]).map(x=>x.device_id),suite_key:d.job.suite_key||body.suite_key});
+  await refresh();await showJob(d.job.id);
+ }catch(e){toast(e.message)}finally{creatingClusterJob=false;updateJobOptions()}
+}
 function displayJobData(job){
  const client=String(job?.client_display_id||job?.owner_id||'unknown');
  const convert=value=>{

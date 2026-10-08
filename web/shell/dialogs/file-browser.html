@@ -1,0 +1,35 @@
+<div id="file-browser-modal" class="modal" style="z-index: 10060;">
+        <div class="modal-content" style="width: min(760px, 96vw); max-width: min(760px, 96vw); height: min(560px, 72vh); overflow: hidden;">
+            <div class="modal-header" style="background: linear-gradient(135deg, #667eea, #764ba2);">
+                <span class="modal-title" id="file-browser-title" style="color:#fff;">浏览文件</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeFileBrowserModal" style="color:#fff;">&times;</button>
+            </div>
+            <div class="modal-body" style="overflow: hidden; display: flex; flex-direction: column;">
+                <div id="file-browser-worker-row" style="display:none; align-items:center; gap:8px; margin-bottom:8px;">
+                    <label style="font-size:12px; color: var(--text-secondary); white-space:nowrap;">Worker 主机:</label>
+                    <select id="file-browser-worker-select" data-change="onFileBrowserWorkerChange" style="flex:1; min-width:0; padding:4px 6px;"></select>
+                </div>
+                <div class="file-browser-path" id="file-browser-current-path" style="margin-bottom: 10px;"></div>
+                <div class="file-browser-header">
+                    <span class="file-browser-icon"></span>
+                    <span>名称</span>
+                    <span style="text-align:right;">大小</span>
+                    <span style="text-align:right;">修改时间</span>
+                </div>
+                <div class="file-browser-list" id="file-browser-list" style="flex: 1; overflow-y: auto; min-height: 0;">
+                    <!-- 文件列表将动态生成 -->
+                </div>
+                <div class="modal-buttons" style="justify-content: space-between;">
+                    <div style="display: flex; gap: 5px;">
+                        <button class="btn-xxs" data-click="navigateToRoot" title="根目录">🏠 根目录</button>
+                        <button class="btn-xxs" data-click="navigateToParent" title="返回上级">🔙 返回上级</button>
+                        <button class="btn-xxs" data-click="refreshCurrentDirectory" title="刷新">🔄 刷新</button>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <button class="btn-xxs" data-click="closeFileBrowserModal">取消</button>
+                        <button class="btn-xxs btn-primary" data-click="confirmFileSelection">选择</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>

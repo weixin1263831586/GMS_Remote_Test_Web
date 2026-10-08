@@ -13,7 +13,7 @@ from foundation.events import (
     event_bus,
 )
 
-from .config import ClusterConfig
+from .config import ClusterConfig, normalize_max_jobs
 from .state_machine import InvalidJobTransitionError
 
 
@@ -77,7 +77,7 @@ class ClusterInventoryRepositoryMixin:
                 data["worker_id"], data.get("name", ""), data.get("hostname", ""),
                 data.get("address", ""), data.get("agent_version", ""),
                 json.dumps(data.get("capabilities", {}), separators=(",", ":")),
-                data.get("max_jobs", ClusterConfig.load().default_max_jobs), session_id, generation, "",
+                normalize_max_jobs(data.get("max_jobs", ClusterConfig.load().default_max_jobs)), session_id, generation, "",
                 now if recovered else "", now, now, now,
             ))
             self._append_timeline_conn(

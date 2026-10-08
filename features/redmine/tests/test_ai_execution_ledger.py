@@ -62,8 +62,7 @@ class LogicalKeyTests(unittest.TestCase):
         self.assertEqual(first, _key())
         self.assertNotEqual(first, _key(prompt_version="v8"))
         self.assertNotEqual(first, _key(issue_id=2))
-        # purpose / provider 必须入 key（全局审查问题 3：多调用方共享
-        # Ledger 时不得互相 dedupe）。
+        # purpose / provider prevent unrelated callers from sharing a receipt.
         self.assertNotEqual(first, _key(purpose="report_diagnosis"))
         self.assertNotEqual(first, _key(provider="openai"))
 
@@ -161,8 +160,7 @@ class ReceiptLifecycleTests(unittest.TestCase):
         self.assertEqual(self.ledger.get(receipt["receipt_id"])["status"], "unknown")
 
     def test_fail_early_before_submission_is_failed_not_unknown(self):
-        # 全局审查问题 1：提交前异常（AI 请求没发出去）是确定的 failed，
-        # 不是 unknown。
+        # A failure before submission has a known outcome and is retryable.
         receipt = self.ledger.begin(**_begin_kwargs())
         self.ledger.fail_early(receipt["receipt_id"], error="precollect crashed")
         stored = self.ledger.get(receipt["receipt_id"])

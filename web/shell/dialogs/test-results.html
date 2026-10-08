@@ -1,0 +1,20 @@
+<div id="test-results-modal" class="modal" style="z-index: 10090;">
+        <div class="modal-content" style="max-width: min(1100px, 95vw); width: 95vw; height: 80vh; max-height: 80vh;">
+            <div class="modal-header" style="padding: 8px 20px;">
+                <span class="modal-title">测试结果列表 <span id="test-results-modal-suite" style="font-size: 12px; color: var(--text-secondary); font-weight: normal;"></span></span>
+                <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+                    <button type="button" class="btn-xs" data-click="minimizeTestResultsModal">缩小</button>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeTestResultsModal">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body" style="display: flex; flex-direction: column; height: 100%; overflow: hidden; padding: 0 20px;">
+                <div class="modal-info-text" style="display: flex; justify-content: space-between; align-items: center; padding: 2px 0;">
+                    <span id="test-results-modal-status">点击某一行测试结果可跳转到对应目录</span>
+                    <button class="btn-xxs" data-click="loadTestResults" data-a0="true">🔄 刷新</button>
+                </div>
+                <div id="test-results-list" style="flex: 1; overflow: auto; margin-top: 4px; border: 1px solid var(--border-color); border-radius: 8px;">
+                    <div style="padding: 20px; color: var(--text-secondary); text-align: center;">加载中...</div>
+                </div>
+            </div>
+        </div>
+    </div>

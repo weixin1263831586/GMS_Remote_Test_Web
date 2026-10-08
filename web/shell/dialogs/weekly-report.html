@@ -1,0 +1,35 @@
+<div id="weekly-report-modal" class="modal" style="z-index: 10040;">
+        <div class="modal-content" style="max-width: 1500px; width: 96vw; height: 92vh; max-height: 92vh;">
+            <div class="modal-header">
+                <span class="modal-title">周报总结</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeWeeklyReportModal">&times;</button>
+            </div>
+            <div class="modal-body" style="display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 0;">
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <label style="display:flex; align-items:center; gap:4px; font-size:13px;">成员
+                        <select id="weekly-report-member" data-change="onWeeklyReportMemberChange" style="height: 32px; padding: 0 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); max-width: 220px;">
+                        </select>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:4px; font-size:13px;">起
+                        <input type="date" id="weekly-report-start" style="height: 32px; padding: 4px 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" />
+                    </label>
+                    <label style="display:flex; align-items:center; gap:4px; font-size:13px;">止
+                        <input type="date" id="weekly-report-end" style="height: 32px; padding: 4px 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" />
+                    </label>
+                    <button class="btn-xxs btn-primary" data-click="generateWeeklyReport">生成</button>
+                    <button class="btn-xxs" id="weekly-report-ai-btn" data-click="generateWeeklyReportAi" title="重新生成 AI 周报总结">✨ 重新总结</button>
+                    <button class="btn-xxs" data-click="copyWeeklyReportMarkdown">复制 Markdown</button>
+                    <button class="btn-xxs" data-click="downloadWeeklyReport">下载 .md</button>
+                    <button class="btn-xxs" data-click="sendWeeklyReportEmail">📧 发送邮件</button>
+                    <div style="display:flex; gap:10px; align-items:center; margin-left:auto; flex-wrap:wrap;">
+                        <label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" id="weekly-scope-redmine" checked /> Redmine</label>
+                        <label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" id="weekly-scope-gerrit" checked /> Gerrit</label>
+                        <label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" id="weekly-scope-gms-test" /> GMS_Test</label>
+                        <label style="display:flex; align-items:center; gap:3px; font-size:12px; cursor:pointer;"><input type="checkbox" id="weekly-scope-android17" /> Android17</label>
+                    </div>
+                    <span id="weekly-report-status" style="font-size: 12px; color: var(--text-secondary);"></span>
+                </div>
+                <div id="weekly-report-content" style="flex: 1; min-height: 0; overflow: auto; padding: 4px 2px; font-size: 13px; line-height: 1.6;"></div>
+            </div>
+        </div>
+    </div>

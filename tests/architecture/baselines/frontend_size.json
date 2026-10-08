@@ -2,7 +2,6 @@
   "comment": "前端资源字节 ceiling baseline(独立持久化的 size ratchet)。规则同 file_size.json:只减不增;上调/新增登记必须带 waivers 理由与 expiry。",
   "unit": "bytes",
   "ceilings": {
-    "web/shell/shell.html": 257481,
     "web/static/js/api-constants.js": 35745,
     "web/static/js/navigation.js": 39268,
     "web/static/js/pages/api-docs.js": 50374,
@@ -13,10 +12,6 @@
     "web/static/js/navigation.js": {
       "reason": "登记时文件已超旧 ceiling(并发改动);后续拆分回落",
       "expires": "2026-11-06"
-    },
-    "web/shell/shell.html": {
-      "reason": "a11y:知识库上传区补键盘可达属性(id/role/tabindex/data-key,+86 字节),弹框焦点修复配套;后续 shell 拆分回落",
-      "expires": "2026-11-30"
     }
   }
 }

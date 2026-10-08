@@ -20,6 +20,33 @@ INLINE_HANDLER_RE = re.compile(
 )
 ID_RE = re.compile(r'\bid=["\']([^"\']+)["\']')
 SCRIPT_SRC_RE = re.compile(r'<script\b[^>]*\bsrc=["\']([^"\']+)["\']', re.IGNORECASE)
+SHELL_INCLUDE_RE = re.compile(r"\{%\s*include\s+['\"]([^'\"]+)['\"]\s*%\}")
+
+
+def _shell_template_sources(relative: str, parents: tuple[Path, ...] = ()) -> tuple[str, list[Path]]:
+    root = ROOT / 'web/shell'
+    path = (root / relative).resolve()
+    if not path.is_relative_to(root) or path in parents:
+        raise ValueError(f'Invalid shell template include: {relative}')
+    paths = [path]
+
+    def expand(match):
+        text, included_paths = _shell_template_sources(match[1], (*parents, path))
+        paths.extend(included_paths)
+        return text
+
+    text = SHELL_INCLUDE_RE.sub(expand, path.read_text(encoding='utf-8'))
+    return text, list(dict.fromkeys(paths))
+
+
+def read_shell_template() -> str:
+    """Expand declared Jinja includes while retaining runtime template expressions."""
+    return _shell_template_sources('shell.html')[0]
+
+
+def shell_template_paths() -> list[Path]:
+    """Only templates reachable from the actual shell entry participate in contracts."""
+    return _shell_template_sources('shell.html')[1]
 
 
 def write_json(name: str, value: Any) -> None:
@@ -51,7 +78,7 @@ def read_shell_bundle() -> str:
     读取，避免每个测试各自内联拼接样板。只读取模板真实引用的脚本，
     防止孤儿文件让 wiring 测试产生假阳性。
     """
-    html = (ROOT / 'web/shell/shell.html').read_text(encoding='utf-8')
+    html = read_shell_template()
     parts = [html]
     for source in SCRIPT_SRC_RE.findall(html):
         source_path = source.split('?', 1)[0]
@@ -144,7 +171,7 @@ def ui_source_groups() -> dict[str, list[Path]]:
     redmine_ui = ROOT / 'features/redmine/ui'
     return {
         'shell': [
-            ROOT / 'web/shell/shell.html',
+            *shell_template_paths(),
             # 2026-08 shell 拆分后，页面内联 HTML/JS 也来自 web/static/js/shell/。
             *sorted((ROOT / 'web/static/js').glob('*.js')),
             *sorted((ROOT / 'web/static/js/shell').glob('*.js')),

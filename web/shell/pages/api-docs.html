@@ -1,0 +1,113 @@
+<div class="container page-content" id="page-api-docs">
+            <div class="section-title">📡 系统接口</div>
+
+            <!-- API统计卡片 -->
+            <div style="display: flex; gap: 15px; margin-bottom: 10px;">
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-apis-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">API总数</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="get-apis-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">GET接口</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="post-apis-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">POST接口</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--info-color);" id="filtered-apis-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">筛选结果</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: #8b5cf6;" id="skills-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Skill总数</div>
+                </div>
+            </div>
+
+            <!-- 搜索栏 -->
+            <div style="margin-bottom: 10px;">
+                <input type="text" id="api-search-input" placeholder="🔍 搜索API路径或说明..."
+                       style="width: 100%; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 12px;"
+                       data-input="debounceFilterApiDocs">
+            </div>
+
+            <!-- 分类筛选 - 按钮组 -->
+            <div style="margin-bottom: 10px;">
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button class="filter-btn active" data-category="all" data-click="filterByCategory" data-a0="all">
+                        📁 全部分类
+                    </button>
+                    <button class="filter-btn" data-category="test" data-click="filterByCategory" data-a0="test">
+                        🧪 测试管理
+                    </button>
+                    <button class="filter-btn" data-category="desktop" data-click="filterByCategory" data-a0="desktop">
+                        🖥️ 主机桌面
+                    </button>
+                    <button class="filter-btn" data-category="terminal" data-click="filterByCategory" data-a0="terminal">
+                        🐧 主机终端
+                    </button>
+                    <button class="filter-btn" data-category="device" data-click="filterByCategory" data-a0="device">
+                        📱 设备管理
+                    </button>
+                    <button class="filter-btn" data-category="users" data-click="filterByCategory" data-a0="users">
+                        👥 用户管理
+                    </button>
+                    <button class="filter-btn" data-category="report" data-click="filterByCategory" data-a0="report">
+                        📊 报告管理
+                    </button>
+                    <button class="filter-btn" data-category="burn" data-click="filterByCategory" data-a0="burn">
+                        🔥 固件烧写
+                    </button>
+                    <button class="filter-btn" data-category="file" data-click="filterByCategory" data-a0="file">
+                        📁 文件管理
+                    </button>
+                    <button class="filter-btn" data-category="config" data-click="filterByCategory" data-a0="config">
+                        ⚙️ 配置管理
+                    </button>
+                    <button class="filter-btn" data-category="system" data-click="filterByCategory" data-a0="system">
+                        💚 系统管理
+                    </button>
+                    <button class="filter-btn" data-category="ssh" data-click="filterByCategory" data-a0="ssh">
+                        🔑 SSH管理
+                    </button>
+                    <button class="filter-btn" data-category="vpn" data-click="filterByCategory" data-a0="vpn">
+                        🔐 VPN管理
+                    </button>
+                    <button class="filter-btn" data-category="usbip" data-click="filterByCategory" data-a0="usbip">
+                        📡 USB/IP
+                    </button>
+                    <div style="flex: 1;"></div>
+                    <button class="filter-btn" data-click="showUsageExamples" style="background: var(--primary-color); color: white;">
+                        📖 使用实例
+                    </button>
+                    <button class="filter-btn" data-click="copySkillInstallCommand" style="background: var(--success-color); color: white;" title="复制可在任意 Linux 主机执行的一键安装或更新命令">
+                        📋 安装/更新命令
+                    </button>
+                    <button class="filter-btn" data-click="downloadSkillsZip" title="仅下载 ZIP，用于离线部署或备份">
+                        📦 离线包
+                    </button>
+                </div>
+            </div>
+
+            <!-- API列表 -->
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); flex: 1; min-height: 0; overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+                    <thead style="position: sticky; top: 0; z-index: 10;">
+                        <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
+                            <th style="padding: 10px 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 25%;">API接口</th>
+                            <th style="padding: 10px 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 20%;">接口说明</th>
+                            <th style="padding: 10px 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 20%;">skill方法(点击自动复制)</th>
+                            <th style="padding: 10px 12px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 35%;">使用方法(点击自动复制)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="api-docs-table-body">
+                        <tr>
+                            <td colspan="4" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                                加载中...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>

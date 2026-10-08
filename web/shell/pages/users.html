@@ -1,0 +1,167 @@
+<div class="container page-content" id="page-users">
+            <div class="users-page-header">
+                <div class="section-title" id="users-page-title">👥 用户管理</div>
+                <div class="users-view-tabs" id="users-view-tabs" role="tablist" aria-label="用户管理视图" style="display: none;">
+                    <button id="users-list-tab" class="btn-xs active" type="button" role="tab" aria-selected="true" data-click="agentAccessToggle" data-a0="false">用户列表</button>
+                    <div id="agent-access-entry">
+                        <button id="agent-access-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="agentAccessToggle" data-a0="true">🔑 Agent 接入</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="users-main-view">
+                <!-- 用户统计卡片 -->
+                <div class="users-stats">
+                    <button class="user-stat-card" type="button" data-user-status-card="" data-click="setUsersStatusFilter" data-a0="">
+                        <span class="user-stat-value total" id="total-users-count">-</span>
+                        <span class="user-stat-label">全部用户</span>
+                    </button>
+                    <button class="user-stat-card" type="button" data-user-status-card="online" data-click="setUsersStatusFilter" data-a0="online">
+                        <span class="user-stat-value online" id="active-users-count">-</span>
+                        <span class="user-stat-label">空闲在线</span>
+                    </button>
+                    <button class="user-stat-card" type="button" data-user-status-card="testing" data-click="setUsersStatusFilter" data-a0="testing">
+                        <span class="user-stat-value testing" id="testing-users-count">-</span>
+                        <span class="user-stat-label">正在测试</span>
+                    </button>
+                </div>
+
+                <!-- 用户列表 -->
+                <div class="users-table-wrap">
+                    <table class="users-table">
+                        <thead>
+                            <tr>
+                                <th class="users-col-identity">用户标识</th>
+                                <th class="users-col-ip">IP 地址</th>
+                                <th class="users-col-source">来源</th>
+                                <th>直连设备</th>
+                                <th>占用设备</th>
+                                <th class="users-col-status">状态</th>
+                                <th class="users-col-time">连接时间</th>
+                                <th class="users-col-time">最后活跃</th>
+                                <th class="users-col-actions">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body">
+                            <tr>
+                                <td colspan="9" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                                    加载中...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Agent 接入管理视图：Service Token + 配对码；覆盖用户管理内容 -->
+            <div id="agent-access-panel" style="display: none;">
+                <div class="agent-access-stats" aria-label="Agent Token 统计">
+                    <button class="agent-access-stat" type="button" data-agent-token-status-card="" data-click="agentAccessSetStatusFilter" data-a0="">
+                        <strong id="agent-token-total-count">—</strong><span>Token 总数</span>
+                    </button>
+                    <button class="agent-access-stat" type="button" data-agent-token-status-card="active" data-click="agentAccessSetStatusFilter" data-a0="active">
+                        <strong id="agent-token-active-count">—</strong><span>当前有效</span>
+                    </button>
+                    <button class="agent-access-stat" type="button" data-agent-token-status-card="inactive" data-click="agentAccessSetStatusFilter" data-a0="inactive">
+                        <strong id="agent-token-inactive-count">—</strong><span>已失效</span>
+                    </button>
+                </div>
+
+                <div class="agent-access-toolbar">
+                    <div id="agent-access-summary" title="一次性配对码 5 分钟有效；Agent 换取 Service Token 后，仅可使用授权范围内的能力，平台密码不会下发。">
+                        一次性配对码 5 分钟有效；Agent 换取 Service Token 后，仅可使用授权范围内的能力，平台密码不会下发。
+                    </div>
+                    <button id="agent-access-create-toggle" class="btn-xs btn-primary" type="button" data-click="agentAccessToggleCreate">＋ 创建配对码</button>
+                    <div class="agent-access-list-label">
+                        <strong>Service Token</strong>
+                        <span>只展示 Token 元数据；原始 Token 不会再次显示</span>
+                    </div>
+                    <div class="agent-access-list-actions">
+                        <input id="agent-access-search" class="combo-box" type="search" placeholder="搜索名称或 Token ID" aria-label="搜索 Agent Token" data-input="agentAccessFilterTokens">
+                        <select id="agent-access-status-filter" class="combo-box" aria-label="按状态筛选 Agent Token" data-change="agentAccessFilterTokens">
+                            <option value="">全部状态</option>
+                            <option value="active">有效</option>
+                            <option value="inactive">已失效</option>
+                            <option value="expired">已过期</option>
+                            <option value="revoked">已吊销</option>
+                        </select>
+                        <button id="agent-access-refresh" class="btn-xs" type="button" data-click="agentAccessReload" data-r0="el">↻ 刷新</button>
+                    </div>
+                </div>
+
+                <form id="agent-access-enroll-form" class="agent-access-create-card" style="display: none;" data-submit="agentAccessCreateEnrollment" data-prevent>
+                    <div class="agent-access-card-heading">
+                        <div>
+                            <strong>创建 Agent 配对码</strong>
+                            <span>配对码 5 分钟内有效，只能使用一次</span>
+                        </div>
+                        <button class="btn-xs" type="button" data-click="agentAccessToggleCreate" data-a0="false">取消</button>
+                    </div>
+                    <div class="agent-access-form-grid">
+                        <label class="agent-access-field agent-access-field-wide">
+                            <span>Agent 标识名 <em>必填</em></span>
+                            <input id="agent-access-name" class="combo-box" maxlength="64" required placeholder="例如 codex-build03" autocomplete="off">
+                            <small>建议包含 Agent 类型和主机名，便于审计区分。</small>
+                        </label>
+                        <label class="agent-access-field">
+                            <span>允许的 Worker</span>
+                            <input id="agent-access-workers" class="combo-box mono" value="*" placeholder="* 或逗号分隔的 Worker ID">
+                        </label>
+                        <label class="agent-access-field">
+                            <span>允许的设备</span>
+                            <input id="agent-access-devices" class="combo-box mono" value="*" placeholder="* 或逗号分隔的设备序列号">
+                        </label>
+                        <label class="agent-access-field agent-access-days-field">
+                            <span>Token 有效期</span>
+                            <span class="agent-access-input-suffix"><input id="agent-access-days" class="combo-box" type="number" min="1" max="365" value="90"><b>天</b></span>
+                        </label>
+                    </div>
+                    <fieldset class="agent-access-scope-fieldset">
+                        <div class="agent-access-scope-heading">
+                            <legend>授权范围</legend>
+                            <div>
+                                <button class="btn-xxs" type="button" data-click="agentAccessSetScopeSelection" data-a0="default">推荐</button>
+                                <button class="btn-xxs" type="button" data-click="agentAccessSetScopeSelection" data-a0="all">全选</button>
+                                <button class="btn-xxs" type="button" data-click="agentAccessSetScopeSelection" data-a0="none">清空</button>
+                            </div>
+                        </div>
+                        <div id="agent-access-scopes" class="agent-access-scopes"></div>
+                    </fieldset>
+                    <div class="agent-access-form-actions">
+                        <button id="agent-access-create-submit" class="btn-xs btn-primary" type="submit">生成配对码</button>
+                        <span class="agent-access-form-hint">生成前会要求管理员提权确认</span>
+                    </div>
+                </form>
+
+                <div id="agent-access-code-card" class="agent-access-code-card" hidden>
+                    <div>
+                        <span>一次性配对码</span>
+                        <strong id="agent-access-code-result" class="mono"></strong>
+                        <small id="agent-access-code-expiry">5 分钟内有效，请立即在目标服务器完成接入</small>
+                    </div>
+                    <button class="btn-xs btn-primary" type="button" data-click="agentAccessCopyEnrollmentCode">复制配对码</button>
+                </div>
+
+                <div class="agent-access-table-wrap">
+                    <table class="agent-access-table">
+                        <thead>
+                            <tr>
+                                <th class="agent-token-col-name">Agent</th>
+                                <th class="agent-token-col-id">Token ID</th>
+                                <th class="agent-token-col-status">状态</th>
+                                <th class="agent-token-col-scopes">授权范围</th>
+                                <th class="agent-token-col-worker">Worker</th>
+                                <th class="agent-token-col-device">设备</th>
+                                <th class="agent-token-col-owner">所有者</th>
+                                <th class="agent-token-col-validity">有效期</th>
+                                <th class="agent-token-col-used">最近使用</th>
+                                <th class="agent-token-col-action">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="agent-access-tokens">
+                            <tr><td colspan="10" class="agent-access-empty">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>

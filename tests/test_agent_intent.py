@@ -1,6 +1,7 @@
 import re
 import unittest
-from pathlib import Path
+
+from tests.contract.snapshot_tools import read_shell_template
 
 
 EXPECTED_SIDEBAR_PAGES = {
@@ -31,7 +32,7 @@ EXPECTED_SIDEBAR_PAGES = {
 
 class AgentIntentTests(unittest.TestCase):
     def test_devices_console_follows_device_management_in_default_navigation(self):
-        template = Path("web/shell/shell.html").read_text(encoding="utf-8")
+        template = read_shell_template()
         pages = re.findall(r'class="sidebar-item" data-page="([^"]+)"', template)
         devices_index = pages.index("devices")
         self.assertEqual(pages[devices_index + 1], "devices-console")
@@ -72,7 +73,7 @@ class AgentIntentTests(unittest.TestCase):
     def test_agent_navigation_aliases_cover_all_sidebar_pages(self):
         from features.assistant.intent import _NAV_ALIASES, resolve
 
-        template = Path("web/shell/shell.html").read_text(encoding="utf-8", errors="ignore")
+        template = read_shell_template()
         for page, label in EXPECTED_SIDEBAR_PAGES.items():
             with self.subTest(page=page):
                 self.assertIn(f'data-page="{page}"', template)

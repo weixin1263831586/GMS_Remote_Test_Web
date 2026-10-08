@@ -2,7 +2,7 @@ import re
 import unittest
 from pathlib import Path
 
-from tests.contract.snapshot_tools import read_page_scripts
+from tests.contract.snapshot_tools import read_page_scripts, read_shell_template
 
 
 # 事件名与 tests/test_inline_handler_ratchet.py 的 INLINE_HANDLER_RE 保持
@@ -54,6 +54,8 @@ BUILTINS = {
 
 
 def read_text(path: str) -> str:
+    if path == "web/shell/shell.html":
+        return read_shell_template()
     if path == "features/redmine/ui/page.js":
         return read_page_scripts("features/redmine/ui/page.html")
     if path == "features/automation/ui/page.js":
@@ -69,7 +71,7 @@ def read_shell_bundle() -> str:
     web/static/js/shell/shell-*.js）。断言面向"shell 前端整体"，
     组合读取避免迁移后断言盯不住源码；仅纳入模板实际引用的 shell
     脚本，孤儿文件不能替 wiring 断言兜底。"""
-    html = Path("web/shell/shell.html").read_text(encoding="utf-8", errors="ignore")
+    html = read_shell_template()
     parts = [html]
     sources = re.findall(
         r'<script\b[^>]*\bsrc=["\']([^"\']+)["\']', html, re.IGNORECASE
@@ -103,7 +105,7 @@ def read_common_css() -> str:
     （common-components/-layout/-page.css，按 link 顺序空串拼接即等价原
     文件逐字节）。断言面向"通用样式整体"，组合读取避免拆分后断言盯不
     住源码；仅纳入模板实际引用的 common 分块，孤儿文件不兜底。"""
-    html = Path("web/shell/shell.html").read_text(encoding="utf-8", errors="ignore")
+    html = read_shell_template()
     parts = []
     for href in re.findall(
         r'<link\b[^>]*\bhref=["\']([^"\']+)["\']', html, re.IGNORECASE

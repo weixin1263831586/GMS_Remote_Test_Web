@@ -1,0 +1,186 @@
+<div class="container page-content" id="page-test" data-default-page="true">
+            <!-- 参数设置区 -->
+            <div class="input-container">
+                <!-- 使用表格布局确保对齐 -->
+                <table class="input-table">
+                    <tr>
+                        <!-- 左部分：测试类型、测试模块、测试用例 -->
+                        <td class="input-cell">
+                            <div class="left-frame">
+                                <div class="form-row">
+                                    <label>测试类型:</label>
+                                    <select id="test-type" class="combo-box" data-test-config-control>
+                                        <option value="" disabled selected></option>
+                                        <option value="CTS">CTS</option>
+                                        <option value="GSI">GSI</option>
+                                        <option value="GTS">GTS</option>
+                                        <option value="GTS-ROOT">GTS-ROOT</option>
+                                        <option value="STS">STS</option>
+                                        <option value="VTS">VTS</option>
+                                        <option value="APTS">APTS</option>
+                                    </select>
+                                </div>
+                                <div class="form-row">
+                                    <label>测试模块:</label>
+                                    <input type="text" id="test-module" class="entry-field" spellcheck="false" autocomplete="off" data-test-config-control />
+                                </div>
+                                <div class="form-row">
+                                    <label>测试用例:</label>
+                                    <input type="text" id="test-case" class="entry-field" spellcheck="false" autocomplete="off" data-test-config-control />
+                                </div>
+                            </div>
+                        </td>
+
+                        <!-- 中间部分：测试脚本、测试套件、测试报告 -->
+                        <td class="input-cell">
+                            <div class="middle-frame">
+                                <div class="form-row">
+                                    <label>测试脚本:</label>
+                                    <input type="text" id="script-path" class="entry-field readonly" value="{{ config.script_path }}" readonly />
+                                </div>
+                                <div class="form-row">
+                                    <label>测试套件:</label>
+                                    <select id="test-suite" class="combo-box" data-test-config-control>
+                                        <option value="" disabled selected></option>
+                                    </select>
+                                    <button id="refresh-suites-btn" class="btn-xxs ui-refresh-action" data-click="refreshTestSuites">↻ 刷新套件</button>
+                                </div>
+                                <div class="form-row">
+                                    <label>测试报告:</label>
+                                    <div class="input-with-btn">
+                                        <input type="text" id="retry-result" class="entry-field" data-test-config-control />
+                                        <button class="btn-small" data-click="browseRemoteFile" data-a0="retry" data-test-config-control>📁 选择报告</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+
+                        <!-- 右部分：测试主机、设备主机、本地主机 -->
+                        <td class="input-cell">
+                            <div class="right-frame">
+                                <div class="form-row">
+                                    <label>测试主机:</label>
+                                    <select id="cluster-worker" class="combo-box" data-change="switchTestWorker" disabled aria-busy="true">
+                                        <option value="">加载中...</option>
+                                    </select>
+                                </div>
+                                <div class="form-row">
+                                    <label>设备主机:</label>
+                                    <input type="text" id="device-host" class="entry-field" value="" placeholder="自动检测中..." readonly title="设备主机地址在 configs/local/config.json 中配置，页面内不可修改" />
+                                </div>
+                                <div class="form-row">
+                                    <label>本地主机:</label>
+                                    <input type="text" id="local-server" class="entry-field" value="{{ config.local_server }}" />
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+
+            <!-- ADB设备区 + 操作控制区 -->
+            <div class="middle-row">
+                <!-- ADB设备区 -->
+                <div class="adb-frame">
+                    <div class="page-title-row">
+                        <div class="section-title" style="margin: 0;">设备</div>
+                        <button class="btn-xxs" id="btn-follow-filter" data-click="toggleFollowFilter" title="只显示我在设备管理页&quot;关注&quot;的分组设备">⭐ 只看关注</button>
+                    </div>
+                    <div class="device-list-container">
+                        <div class="device-canvas device-canvas-empty" id="device-canvas">
+                            <div class="device-column device-grid" id="device-list-left">
+                                <div class="empty-message">点击刷新按钮获取设备列表...</div>
+                            </div>
+                            <div class="device-column" id="device-list-right">
+                            </div>
+                        </div>
+                    </div>
+                    <!-- ADB 控制按钮 -->
+                    <div class="adb-button-frame" data-operation-log-tab="system">
+                        <button id="refresh-devices-btn" class="btn-xxs ui-refresh-action" data-click="refreshDevices">↻ 刷新设备</button>
+                        <button class="btn-xxs" data-click="selectAllDevices">✅ 全选设备</button>
+                        <button class="btn-xxs" data-click="rebootDevices">⏻ 重启设备</button>
+                        <button id="btn-remount-devices" class="btn-xxs" data-click="remountDevices">⏻ Remount</button>
+                        <button class="btn-xxs" data-click="connectWifi">🛜 连接Wifi</button>
+                        <button id="btn-lock-device" class="btn-xxs" data-click="lockSelectedDevices" data-a0="lock">🔒 锁定设备</button>
+                        <button id="btn-unlock-device" class="btn-xxs" data-click="lockSelectedDevices" data-a0="unlock">🔓 解锁设备</button>
+                        <button id="btn-check-lock-status" class="btn-xxs" data-click="checkDeviceLockStatus">🔐 锁定状态</button>
+                        <button id="btn-device-info" class="btn-xxs" data-click="collectDeviceInfo">📋 设备信息</button>
+                    </div>
+                    <!-- VNC 控制按钮 -->
+                    <div class="vnc-button-frame" data-operation-log-tab="system">
+                        <button id="btn-burn-firmware" class="btn-xxs" data-click="burnFirmware">🔥 烧写固件</button>
+                        <button id="btn-burn-gsi" class="btn-xxs" data-click="burnGsiImage">🔥 烧写GSI</button>
+                        <button class="btn-xxs" disabled title="该功能尚未开放">🔥 烧写SN</button>
+                        <button class="btn-xxs" id="start-vnc-btn" data-click="initAndStartVnc">🚀 启动VNC</button>
+                        <button class="btn-xxs" data-click="initAndStartVnc" data-a0="true" title="重启主机 VNC；会短暂断开当前 noVNC 连接">🔄 重启VNC</button>
+                        <button class="btn-xxs" data-click="showDeviceScreen">📺 设备投屏</button>
+                        <button class="btn-xxs" id="adb-forward-btn" data-click="setupAdbPortForward">🔌 ADB接入</button>
+                        <button class="btn-xxs" id="usbip-btn" data-click="setupUsbipForward">📱 本地设备</button>
+                    </div>
+                </div>
+
+                <!-- 操作控制区 -->
+                <div class="control-frame">
+                    <div class="section-title">操作控制</div>
+                    <!-- VPN 控制按钮 -->
+                    <div class="vpn-btn-frame" data-operation-log-tab="system">
+                        <button class="btn-xxs" data-click="copyDeployCommand">📦 签名发布包部署</button>
+                        <button class="btn-xxs" data-click="showTailscaleInfoModal">🌐 Tailscale组网</button>
+                        <button class="btn-xxs" id="check-sshd-btn" data-click="checkSshd">📡 检查SSHD</button>
+                        <button class="btn-xxs" id="check-routing-btn" data-click="checkRouting">📡 检查路由</button>
+                        <button class="btn-xxs" id="vpn-connect-btn" data-click="connectVpn">🔌 连接VPN</button>
+                        <span id="vpn-status-label" class="vpn-status-label">状态: 未知</span>
+
+                    </div>
+                    <!-- 文件上传区：对所有用户可见；上传动作在 file-browser.js
+                         handleUploadFile 中先弹管理员提权确认，拒绝即取消。
+                         不再用 data-admin-only 整块隐藏，避免普通用户
+                         "两眼一抹黑"看不到入口。 -->
+                    <div class="upload-frame" data-operation-log-tab="system">
+                        <div class="form-row">
+                            <label>📁 本地文件:</label>
+                            <div id="drop-zone" class="drop-zone">
+                                <input type="file" id="local-file" class="file-input" style="display: none;" />
+                                <div class="drop-zone-text" id="drop-zone-text">
+                                    点击选择文件 或 拖拽文件到此处
+                                </div>
+                                <div class="drop-zone-filename" id="drop-zone-filename"></div>
+                            </div>
+                            <button class="btn-xs" id="upload-test-host-btn" data-click="handleUploadFile">📤 上传到测试主机</button>
+                        </div>
+                        <!-- 上传进度 -->
+                        <div class="progress-container">
+                            <div class="progress-bar" id="upload-progress">
+                                <div class="progress-fill" id="upload-progress-fill"></div>
+                                <div class="progress-info" id="progress-info"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 测试按钮 -->
+                    <div class="test-btn-frame">
+                        <button class="btn-primary btn-lg" id="test-toggle-btn" data-click="toggleTest">▶ 开始测试</button>
+                        <button class="btn-xxs" data-click="downloadTestLog">📥 保存日志</button>
+                        <button class="btn-xxs" data-click="cleanTest">🧹 清除日志</button>
+                        <button class="btn-xxs" data-click="showConfig">⚙️ 配置</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 日志区域 -->
+            <div class="log-frame">
+                <div class="log-frame-header">
+                    <div class="section-title">日志</div>
+                    <div class="log-tabs" role="tablist" aria-label="日志类型">
+                        <button class="log-tab-btn active" data-log-tab="system" role="tab" aria-selected="true" aria-controls="log-tab-system" data-click="switchLogTab" data-a0="system">系统日志</button>
+                        <button class="log-tab-btn" data-log-tab="module" role="tab" aria-selected="false" aria-controls="log-tab-module" data-click="switchLogTab" data-a0="module">测试日志</button>
+                    </div>
+                </div>
+                <div class="log-tab-content active" id="log-tab-system" role="tabpanel">
+                    <div class="log-text" id="system-log-output"></div>
+                </div>
+                <div class="log-tab-content" id="log-tab-module" role="tabpanel">
+                    <div class="log-text" id="module-log-output"></div>
+                </div>
+            </div>
+        </div>

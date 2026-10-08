@@ -1,0 +1,31 @@
+<div id="extract-suite-modal" class="modal" style="display: none;" data-keydown="handleExtractSuiteKeydown" data-r0="event">
+        <div class="modal-content modal-m">
+            <div class="modal-header">
+                <span class="modal-title">📦 解压测试套件</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeExtractSuiteModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="extract-suite-form" data-submit="submitExtractSuite" data-prevent autocomplete="off">
+                    <div class="modal-form-row">
+                        <label>压缩包:</label>
+                        <select id="extract-suite-archive-select" class="host-input" data-change="handleExtractArchiveSelectChange"></select>
+                    </div>
+                    <div class="modal-form-row">
+                        <label>压缩包路径:</label>
+                        <input type="text" id="extract-suite-archive-path" class="host-input" placeholder="~/GMS-Suite/android-suite.zip" autocomplete="off" />
+                    </div>
+                    <div class="modal-form-row">
+                        <label>文件夹名称:</label>
+                        <input type="text" id="extract-suite-folder-name" class="host-input" placeholder="android-cts-verifier-16.1_r3" autocomplete="off" />
+                    </div>
+                </form>
+                <div class="modal-info-text" style="margin-top: 10px;">
+                    💡 将压缩包解压到 GMS-Suite 下指定文件夹，完成后自动刷新左侧套件列表
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" data-click="closeExtractSuiteModal">取消</button>
+                    <button id="btn-submit-extract-suite" class="btn-xxs btn-primary" data-click="submitExtractSuite">开始解压</button>
+                </div>
+            </div>
+        </div>
+    </div>

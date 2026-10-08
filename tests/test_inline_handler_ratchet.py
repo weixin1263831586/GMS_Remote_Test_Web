@@ -87,7 +87,7 @@ class InlineHandlerRatchetTests(unittest.TestCase):
         self.assertEqual(_scan(paths, EMBEDDED_BASELINE), [])
 
     def test_shell_html_inline_handlers_within_baseline(self):
-        paths = [(ROOT / "web/shell/shell.html", "web/shell/shell.html")]
+        paths = [(path, str(path.relative_to(ROOT))) for path in sorted((ROOT / "web/shell").rglob("*.html"))]
         self.assertEqual(_scan(paths, SHELL_BASELINE), [])
 
     def test_baseline_entries_still_exist(self):

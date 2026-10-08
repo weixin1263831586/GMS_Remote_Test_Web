@@ -9,6 +9,86 @@ from tests.runtime_ui.harness import PlaywrightError, RuntimeUiHarness, expect
 
 
 class RuntimeClusterTests(RuntimeUiHarness):
+    def test_job_submission_is_single_flight_and_uses_assigned_worker(self):
+        page = self.new_page()
+        errors, requests, held_routes = [], [], []
+        page.on("pageerror", lambda exc: errors.append(str(exc)))
+        workers = [{
+            "id": wid, "name": wid, "status": "online", "agent_version": "1",
+            "running_jobs": 0, "max_jobs": 1, "admission_blocked": False,
+        } for wid in ("job-cts-worker", "job-gts-worker")]
+        job = {
+            "id": "job-single", "assigned_worker_id": workers[1]["id"],
+            "current_attempt_id": "attempt-single", "suite_key": "GTS:17_r1",
+            "status": "assigned", "leases": [{"device_id": "job-gts-worker:GTS"}],
+        }
+        payloads = {
+            "/api/cluster/status": {"enabled": True, "remote_dispatch_enabled": True, "local_worker_id": "local"},
+            "/api/cluster/workers": {"workers": workers},
+            "/api/cluster/suites": {"suites": [{
+                "worker_id": worker["id"], "suite_key": f"{suite}:17_r1",
+                "suite_type": suite, "suite_version": "17_r1", "available": True,
+            } for worker, suite in zip(workers, ("CTS", "GTS"))]},
+            "/api/cluster/devices": {"devices": []},
+            "/api/cluster/jobs": {"jobs": []},
+            "/api/cluster/jobs/job-single": {"job": job},
+        }
+
+        def respond(route):
+            path = urlparse(route.request.url).path
+            if path == "/api/cluster/jobs" and route.request.method == "POST":
+                requests.append((route.request.post_data_json, route.request.headers["idempotency-key"]))
+                held_routes.append(route)
+                return
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({
+                "success": True, **payloads.get(path, {}),
+            }))
+
+        try:
+            page.route("**/api/cluster/**", respond)
+            page.goto(f"{self.base_url}/cluster?tab=management", wait_until="domcontentloaded")
+            expect(page.locator("#job-suite option")).to_have_count(2)
+            page.evaluate("""() => {
+                window.jobWorkspacePatches = [];
+                const original = window.GmsEmbeddedWorkspace;
+                window.GmsEmbeddedWorkspace = {...original, update: patch => {
+                    jobWorkspacePatches.push(patch); return original.update(patch);
+                }};
+            }""")
+            page.locator("#job-worker").select_option(workers[0]["id"], force=True)
+            page.locator("#job-worker").select_option("auto", force=True)
+            page.locator("#job-suite").select_option("GTS:17_r1", force=True)
+            page.evaluate("refresh()")
+            expect(page.locator("#job-worker")).to_have_value("auto")
+            expect(page.locator("#job-suite")).to_have_value("GTS:17_r1")
+            page.evaluate("window.jobSubmission = createJob(); createJob();")
+            expect(page.locator("#create-job")).to_be_disabled()
+            page.wait_for_timeout(100)
+            self.assertEqual(len(requests), 1)
+            self.assertEqual(requests[0][0]["worker_id"], "auto")
+            self.assertTrue(requests[0][1])
+            held_routes.pop().abort("failed")
+            page.evaluate("window.jobSubmission")
+            expect(page.locator("#create-job")).to_be_enabled()
+            page.evaluate("window.jobSubmission = createJob(); createJob();")
+            expect(page.locator("#create-job")).to_be_disabled()
+            page.wait_for_timeout(100)
+            self.assertEqual(len(requests), 2)
+            self.assertEqual(requests[0], requests[1])
+            # A Worker can become full between submission and its response.
+            workers[1].update(admission_blocked=True, admission_reasons=["max_jobs"])
+            held_routes.pop().fulfill(status=200, content_type="application/json", body=json.dumps({
+                "success": True, "job": job,
+            }))
+            page.evaluate("window.jobSubmission")
+            patches = page.evaluate("window.jobWorkspacePatches")
+            self.assertEqual(patches[-1]["worker_id"], workers[1]["id"])
+            self.assertEqual(patches[-1]["device_ids"], ["job-gts-worker:GTS"])
+            self.assertEqual(page.evaluate("clusterWorkspace.worker_id"), workers[1]["id"])
+            self.assert_no_page_errors(errors)
+        finally:
+            page.close()
+
     def test_job_form_tracks_worker_admission_and_preserves_selected_target(self):
         page = self.new_page()
         errors = []

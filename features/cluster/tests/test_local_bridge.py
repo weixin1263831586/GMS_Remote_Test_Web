@@ -38,6 +38,17 @@ class LocalBridgeTests(unittest.TestCase):
         self.assertEqual(worker["connection_generation"], bridge.connection_generation)
         self.assertTrue(worker["session_id"].startswith("controller-bridge-session-"))
 
+    def test_bridge_normalizes_environment_capacity(self):
+        from features.cluster.local_bridge import LocalWorkerBridge
+
+        bridge = LocalWorkerBridge(self.repo, ClusterConfig(enabled=False))
+        for value, expected in [("-1", 1), ("0", 1), ("32", 32), ("33", 32)]:
+            with self.subTest(value=value), patch.dict(
+                "os.environ", {"GMS_LOCAL_WORKER_MAX_JOBS": value}
+            ):
+                bridge._register()
+                self.assertEqual(self.repo.get_worker(bridge.config.local_worker_id)["max_jobs"], expected)
+
     def test_bridge_reports_tradefed_capabilities_from_local_suites(self):
         """本地 bridge 与真实 Worker 同规：按本机套件启动器如实上报
         cts/gts/vts/sts，不再恒为 True。"""

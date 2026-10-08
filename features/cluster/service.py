@@ -41,7 +41,7 @@ class ClusterService:
 
         def monitor() -> None:
             interval = max(5.0, min(15.0, self.offline_seconds / 3))
-            last_error_log = 0.0
+            last_error_log: float | None = None
             while not self._watchdog_stop.wait(interval):
                 try:
                     self.list_workers()
@@ -55,7 +55,8 @@ class ClusterService:
                     # diagnostics instead of only surfacing as drifting Worker
                     # states.
                     now = time.monotonic()
-                    if now - last_error_log >= WATCHDOG_ERROR_LOG_INTERVAL_SECONDS:
+                    if (last_error_log is None
+                            or now - last_error_log >= WATCHDOG_ERROR_LOG_INTERVAL_SECONDS):
                         last_error_log = now
                         logger.exception(
                             "cluster watchdog pass failed; will retry next interval"

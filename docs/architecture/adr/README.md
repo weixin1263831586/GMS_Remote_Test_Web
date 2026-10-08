@@ -21,3 +21,4 @@
 | 0013 | Daily Brief batch analysis matches single-issue diagnosis | Accepted | 0008 | — |
 | 0014 | External knowledge federation (android-internals-wiki, background only) | Accepted（triage 限制部分被 0013 取代，见文内注记） | — | — |
 | 0015 | Allowlisted UI assets and domain modules | Accepted | — | — |
+| 0016 | [Account-scoped Cluster job submission receipts](0016-cluster-job-submission-receipts.md) | Accepted | — | — |
