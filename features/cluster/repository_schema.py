@@ -20,6 +20,7 @@ REQUIRED_TABLES = frozenset({
     "cluster_command_events",
     "cluster_job_events",
     "cluster_jobs",
+    "cluster_job_requests",
     "cluster_timeline_events",
     "cluster_job_attempts",
     "device_leases",
@@ -212,6 +213,11 @@ def apply_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_cluster_jobs_status
             ON cluster_jobs(status, priority, created_at);
+        CREATE TABLE IF NOT EXISTS cluster_job_requests (
+            owner_id TEXT NOT NULL, request_key TEXT NOT NULL,
+            request_hash TEXT NOT NULL, job_id TEXT NOT NULL,
+            PRIMARY KEY(owner_id, request_key)
+        );
         CREATE TABLE IF NOT EXISTS cluster_timeline_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_id TEXT NOT NULL DEFAULT '', attempt_id TEXT NOT NULL DEFAULT '',

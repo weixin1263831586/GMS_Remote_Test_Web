@@ -149,9 +149,30 @@ class AdmissionConsistencyTests(ClusterRepositoryTests):
                 })
             self.assertIn("low_disk", str(ctx.exception))
 
+    def test_legacy_zero_capacity_agrees_in_directory_and_job_creation(self):
+        self._heartbeat_worker({"disk_free_gb": 500, "memory_available_gb": 64})
+        with self.repo.connect() as conn:
+            conn.execute("UPDATE cluster_workers SET max_jobs=0 WHERE id='worker-246'")
+        service = ClusterService(self.repo)
+        self.assertFalse(service.list_workers()[0]["admission_blocked"])
+        job = self.repo.create_job_with_leases({
+            "worker_id": "worker-246", "owner_id": "tester",
+            "devices": ["worker-246:ABC"], "suite_key": "CTS:17_r1",
+        })
+        self.assertEqual(job["assigned_worker_id"], "worker-246")
+
 
 class WatchdogObservabilityTests(unittest.TestCase):
     def test_watchdog_failures_are_logged_rate_limited(self):
+        records = self._watchdog_failures([1.0, 2.0])
+        self.assertEqual(len(records), 1)
+        self.assertIn("watchdog pass failed", records[0].getMessage())
+
+    def test_watchdog_logs_again_at_the_rate_limit_boundary(self):
+        records = self._watchdog_failures([0.0, 3599.0, 3600.0])
+        self.assertEqual(len(records), 2)
+
+    def _watchdog_failures(self, clock_ticks):
         repo = mock.Mock(spec=ClusterRepository)
         repo.list_workers.side_effect = RuntimeError("sqlite is locked")
         service = ClusterService(repo, offline_seconds=45)
@@ -169,19 +190,18 @@ class WatchdogObservabilityTests(unittest.TestCase):
             def join(self, timeout=None):
                 return None
 
-        # Two failing passes inside one log window must produce exactly one
-        # ERROR record (rate limited), never a silent continue.
+        # A fresh watchdog must log immediately, regardless of clock uptime.
         with mock.patch("features.cluster.service.threading.Thread", InlineThread), \
                 mock.patch(
                     "features.cluster.service.WATCHDOG_ERROR_LOG_INTERVAL_SECONDS",
                     3600.0,
                 ), \
+                mock.patch("features.cluster.service.time.monotonic", side_effect=clock_ticks), \
                 self.assertLogs("features.cluster.service", level="ERROR") as captured:
-            service._watchdog_stop.wait = mock.Mock(side_effect=[False, False, True])
+            service._watchdog_stop.wait = mock.Mock(side_effect=[False] * len(clock_ticks) + [True])
             service.start_watchdog()
 
-        self.assertEqual(len(captured.records), 1)
-        self.assertIn("watchdog pass failed", captured.records[0].getMessage())
+        return captured.records
 
 
 if __name__ == "__main__":

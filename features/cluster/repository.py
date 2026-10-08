@@ -12,6 +12,8 @@ from foundation.device_claims import DeviceClaimRegistry
 
 from . import repository_schema
 from .admission import worker_admission_state
+from .config import normalize_max_jobs
+from .job_requests import ClusterJobRequestRepositoryMixin
 from .repository_claims import ClusterClaimRepositoryMixin
 from .repository_commands import ClusterCommandRepositoryMixin
 from .repository_inventory import ClusterInventoryRepositoryMixin
@@ -26,6 +28,7 @@ def utc_now() -> str:
 
 
 class ClusterRepository(
+    ClusterJobRequestRepositoryMixin,
     ClusterReconciliationRepositoryMixin,
     ClusterObservabilityRepositoryMixin,
     ClusterClaimRepositoryMixin,
@@ -368,7 +371,7 @@ class ClusterRepository(
             active_rows = conn.execute("""SELECT request_json FROM cluster_jobs
                 WHERE assigned_worker_id=? AND status IN ('assigned','dispatching','running','stopping')""",
                 (worker_id,)).fetchall()
-            if len(active_rows) >= int(worker["max_jobs"]):
+            if len(active_rows) >= normalize_max_jobs(worker["max_jobs"]):
                 raise ValueError("worker already has the maximum number of active jobs")
             existing_exclusive = any(
                 bool(json.loads(row["request_json"] or "{}").get("exclusive_host"))
@@ -411,6 +414,12 @@ class ClusterRepository(
                  worker_id, worker_id, data.get("suite_key", ""), data.get("suite_path", ""),
                  json.dumps(request_data, separators=(",", ":")), "assigned",
                  data.get("priority", 100), attempt_id, trace_id, now, now, now, now))
+            if data.get("_idempotency_key"):
+                # The receipt and job commit together, including after a crash.
+                conn.execute(
+                    "INSERT INTO cluster_job_requests(owner_id,request_key,request_hash,job_id) VALUES(?,?,?,?)",
+                    (data["owner_id"], data["_idempotency_key"], data["_request_hash"], job_id),
+                )
             dispatch_token = uuid.uuid4().hex
             conn.execute("""INSERT INTO cluster_job_attempts
                 (id,job_id,attempt_number,worker_id,worker_job_id,dispatch_token,

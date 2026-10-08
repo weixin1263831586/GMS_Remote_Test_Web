@@ -80,10 +80,14 @@ class ReportSourceApiTests(unittest.IsolatedAsyncioTestCase):
                 return False
 
         class FakeSession:
+            def __init__(self, connector):
+                self.connector = connector
+
             async def __aenter__(self):
                 return self
 
             async def __aexit__(self, exc_type, exc, tb):
+                await self.connector.close()
                 return False
 
             def get(self, *_args, **_kwargs):
@@ -98,7 +102,7 @@ class ReportSourceApiTests(unittest.IsolatedAsyncioTestCase):
         source_api.REDMINE_ISSUE_ID_CACHE["1588042"] = "1588042"
         try:
             source_api.RedmineClient = FakeRedmineClient
-            source_api.aiohttp.ClientSession = lambda *args, **kwargs: FakeSession()
+            source_api.aiohttp.ClientSession = lambda *args, **kwargs: FakeSession(kwargs["connector"])
             async def fake_load_creds(_request):
                 return {}
 
@@ -114,7 +118,9 @@ class ReportSourceApiTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(
                 source_api, "_redmine_config_manager_for_request",
                 return_value=FakeConfig(),
-            ):
+            ), patch("foundation.outbound.socket.getaddrinfo", return_value=[
+                (2, 1, 6, "", ("93.184.216.34", 443)),
+            ]):
                 response = await source_api.analyze_report_from_url(FakeRequest())
             payload = json.loads(response.body.decode("utf-8"))
         finally:

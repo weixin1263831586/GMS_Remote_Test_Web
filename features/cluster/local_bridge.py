@@ -19,7 +19,7 @@ from worker_agent.process_inventory import discover_tradefed_processes
 from worker_agent.suite_actions import tradefed_launcher_families
 from worker_agent.suite_detection import suite_details
 
-from .config import ClusterConfig
+from .config import ClusterConfig, normalize_max_jobs
 from .repository import ClusterRepository
 
 
@@ -149,7 +149,7 @@ class LocalWorkerBridge:
             "address": ubuntu_host,
             "agent_version": AGENT_VERSION,
             "session_id": self.session_id,
-            "max_jobs": int(os.getenv("GMS_LOCAL_WORKER_MAX_JOBS", str(ClusterConfig.load().default_max_jobs))),
+            "max_jobs": normalize_max_jobs(os.getenv("GMS_LOCAL_WORKER_MAX_JOBS", str(self.config.default_max_jobs))),
             "capabilities": {
                 "adb": True, "fastboot": True,
                 "tradefed": bool(families),

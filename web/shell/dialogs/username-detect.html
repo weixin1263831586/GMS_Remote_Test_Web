@@ -1,0 +1,31 @@
+<div id="username-detect-modal" class="modal">
+        <div class="modal-content modal-s">
+            <div class="modal-header">
+                <span class="modal-title">👤 客户端用户名识别</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeUsernameDetectModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="username-detect-form" data-submit="submitUsernameDetect" data-prevent autocomplete="off">
+                <div class="modal-form-row">
+                    <label>客户端IP:</label>
+                    <input type="text" id="username-detect-ip" readonly />
+                </div>
+                <div class="modal-form-row">
+                    <label>用户名:</label>
+                    <input type="text" id="username-detect-username" placeholder="请输入客户端用户名" data-keypress="handleUsernameDetectKeyPress" data-r0="event" autocomplete="username" />
+                </div>
+                <div class="modal-form-row">
+                    <label>SSH密码:</label>
+                    <input type="password" id="username-detect-password" placeholder="可选，用于SSH验证" data-keypress="handleUsernameDetectKeyPress" data-r0="event" autocomplete="current-password" />
+                </div>
+                </form>
+                <div class="modal-ssh-info">
+                    <small>SSH可达时会验证用户名；通过 Tailscale 等远程访问时可留空密码直接保存。</small>
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" data-click="closeUsernameDetectModal">取消</button>
+                    <button class="btn-xxs btn-primary" data-click="submitUsernameDetect">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>

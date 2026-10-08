@@ -1,0 +1,18 @@
+<div id="mainline-sync-modal" class="modal">
+        <div class="modal-content modal-s">
+            <div class="modal-header">
+                <span class="modal-title">选择扫描方式</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="ut_closeMainlineSyncModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-info-text" style="margin-bottom: 14px;">
+                    增量扫描只检查未记录的新页面；全量扫描会重新解析左侧导航栏所有页面并刷新数据库。
+                </div>
+                <div class="modal-buttons" style="margin-top: 18px;">
+                    <button class="btn-xxs" data-click="ut_closeMainlineSyncModal">取消</button>
+                    <button class="btn-xxs btn-primary" data-click="ut_confirmMainlineKnownIssuesSync" data-a0="incremental">增量扫描</button>
+                    <button class="btn-xxs btn-primary" data-click="ut_confirmMainlineKnownIssuesSync" data-a0="full">全量扫描</button>
+                </div>
+            </div>
+        </div>
+    </div>

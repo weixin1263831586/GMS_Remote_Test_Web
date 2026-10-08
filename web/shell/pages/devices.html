@@ -1,0 +1,89 @@
+<div class="container page-content" id="page-devices">
+            <div style="position: relative; margin-bottom: 6px;">
+                <div class="section-title" style="margin: 0;">📱 设备管理</div>
+                <div class="device-group-toolbar" style="position: absolute; top: -4px; right: 0;">
+                    <button class="btn-xxs" data-click="openCreateGroupModal" title="新建分组">➕ 新建分组</button>
+                    <select class="btn-xxs" data-change="autoGroupAndReset" data-r0="value" title="按属性自动分组">
+                        <option value="">⊞ 自动分组…</option>
+                        <option value="worker" data-cluster-mode-only>按主机分组</option>
+                        <option value="model">按设备型号</option>
+                        <option value="android_version">按Android版本</option>
+                        <option value="soc">按SOC系列</option>
+                    </select>
+                    <select class="btn-xxs" id="device-group-filter" data-change="onGroupFilterChange" title="按组筛选" style="width:150px;max-width:160px;box-sizing:border-box;">
+                        <option value="">全部设备</option>
+                    </select>
+                </div>
+            </div>
+            <div id="devices-scope-hint" style="color:var(--text-secondary);font-size:12px;"></div>
+
+            <!-- 设备统计卡片 -->
+            <div style="display: flex; gap: 15px; margin-bottom: 10px;">
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-devices-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">总设备数</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="local-devices-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Controller 本机设备</div>
+                </div>
+                <div data-cluster-mode-only style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: #42a5f5;" id="cluster-devices-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">集群 Worker 设备</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="usbip-devices-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">USB/IP设备</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: #42a5f5;" id="fastboot-devices-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Fastboot设备</div>
+                </div>
+            </div>
+
+
+            <!-- 设备列表 -->
+            <div class="devices-table-wrap" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
+                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+                    <thead>
+                        <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 140px;" data-click="sortDevices" data-a0="serial_no">
+                                设备序列号 <span id="sort-serial_no">↕</span>
+                            </th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 150px;" data-click="sortDevices" data-a0="source_host">
+                                设备来源 <span id="sort-source_host">↕</span>
+                            </th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 110px;" data-click="sortDevices" data-a0="source_type">
+                                来源类型 <span id="sort-source_type">↕</span>
+                            </th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 120px;" data-click="sortDevices" data-a0="model">
+                                设备型号 <span id="sort-model">↕</span>
+                            </th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 100px;" data-click="sortDevices" data-a0="soc_model">
+                                SOC <span id="sort-soc_model">↕</span>
+                            </th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 130px;" data-click="sortDevices" data-a0="android_version">
+                                Android版本 <span id="sort-android_version">↕</span>
+                            </th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 90px;" data-click="sortDevices" data-a0="battery_level">
+                                电池电量 <span id="sort-battery_level">↕</span>
+                            </th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 90px;" data-click="sortDevices" data-a0="status">
+                                状态 <span id="sort-status">↕</span>
+                            </th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; width: 130px;" data-click="sortDevices" data-a0="locked_by">
+                                占用用户 <span id="sort-locked_by">↕</span>
+                            </th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 300px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="devices-table-body">
+                        <tr>
+                            <td colspan="10" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                                加载中...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>

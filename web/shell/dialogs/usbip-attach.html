@@ -1,0 +1,52 @@
+<div id="usbip-attach-modal" class="modal">
+        <div class="modal-content device-routing-modal-content adb-proxy-modal-content">
+            <div class="modal-header">
+                <span class="modal-title">📱 USB/IP设备接入</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeUsbipAttachModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="usbip-attach-form" data-submit="submitUsbipAttach" data-prevent autocomplete="off">
+                    <div class="adb-proxy-section-head">
+                        <div class="adb-proxy-section-title">新建接入</div>
+                        <button class="btn-xxs" type="button" style="min-width: 0; padding: 4px 8px;" data-click="refreshUsbipSourceDevices">🔄 刷新</button>
+                    </div>
+                    <div class="device-routing-fields">
+                        <div class="modal-form-row">
+                            <label for="usbip-source-host">设备来源</label>
+                            <select id="usbip-source-host" data-change="refreshUsbipSourceLists"></select>
+                        </div>
+                        <div class="modal-form-row">
+                            <label for="usbip-target-worker">接入主机</label>
+                            <select id="usbip-target-worker"></select>
+                        </div>
+                    </div>
+                    <div class="modal-form-row device-routing-device-row">
+                        <label for="usbip-source-device">USB设备</label>
+                        <select id="usbip-source-device" class="usbip-device-select" multiple size="4">
+                            <option value="">请选择设备来源以加载USB设备</option>
+                        </select>
+                    </div>
+                </form>
+                <div class="adb-proxy-section-head">
+                    <div class="adb-proxy-section-title">当前接入</div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label class="btn-xxs" for="usbip-show-all-assignments" style="min-width: 0; padding: 4px 8px; user-select: none;">
+                            <input type="checkbox" id="usbip-show-all-assignments" data-change="loadUsbipAssignments" style="margin: 0 4px 0 0; vertical-align: middle;">
+                            显示全部
+                        </label>
+                        <button class="btn-xxs" type="button" style="min-width: 0; padding: 4px 8px;" data-click="refreshUsbipAssignments">🔄 刷新</button>
+                    </div>
+                </div>
+                <div id="usbip-assignments" class="adb-proxy-assignments">
+                    正在读取接入状态...
+                </div>
+                <div id="usbip-attach-message" class="modal-info-text">
+                    可多选USB设备；同一设备同一时间只能接入一台主机。来源支持 Windows（usbipd-win）或 Ubuntu/Linux（用户态 usbipd）+ SSH，目标需 Linux USB/IP；网络中断可使分配进入待确认/待清理。
+                </div>
+            </div>
+            <div class="modal-buttons device-routing-modal-buttons">
+                <button class="btn-xxs" type="button" data-click="closeUsbipAttachModal">关闭</button>
+                <button class="btn-xxs btn-primary" id="usbip-attach-submit" type="button" data-click="submitUsbipAttach">接入</button>
+            </div>
+        </div>
+    </div>

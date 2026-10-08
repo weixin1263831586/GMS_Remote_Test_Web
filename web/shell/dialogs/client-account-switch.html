@@ -1,0 +1,20 @@
+<div id="client-account-switch-modal" class="modal" aria-labelledby="client-account-switch-title">
+            <div class="modal-content modal-s">
+                <div class="modal-header">
+                    <span id="client-account-switch-title" class="modal-title">切换网页登录账号</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeClientAccountSwitchModal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p class="modal-info-text">客户端保持不变：<strong id="client-account-switch-identity">检测中...</strong></p>
+                    <p id="client-account-switch-status" class="modal-info-text">仅可切换以下账号；切换后需要输入目标账号密码。</p>
+                    <div class="client-account-switch-options">
+                        <button id="client-account-switch-admin-option" type="button" class="client-account-switch-option" data-click="selectClientAccountSwitch" data-a0="admin">
+                            <span>★ 管理员账号</span><small>管理平台与用户</small>
+                        </button>
+                        <button id="client-account-switch-client-option" type="button" class="client-account-switch-option" data-click="selectClientAccountSwitch" data-a0="client">
+                            <span id="client-account-switch-client-label">当前客户端账号</span><small>可运行每日晨报</small>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>

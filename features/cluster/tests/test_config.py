@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from features.cluster.config import ClusterConfig
+
+
+@pytest.mark.parametrize("value,expected", [(-1, 1), (0, 1), (1, 1), (32, 32), (33, 32)])
+def test_cluster_max_jobs_is_normalized(monkeypatch, tmp_path, value, expected):
+    path = tmp_path / "cluster.json"
+    path.write_text(json.dumps({"default_max_jobs": value}), encoding="utf-8")
+    monkeypatch.setenv("GMS_CLUSTER_CONFIG", str(path))
+    assert ClusterConfig.load().default_max_jobs == expected
 
 
 def test_cluster_defaults_disabled_when_config_is_absent(monkeypatch, tmp_path):

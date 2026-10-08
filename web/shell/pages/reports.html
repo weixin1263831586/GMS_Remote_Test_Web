@@ -1,0 +1,43 @@
+<div class="container page-content" id="page-reports">
+            <div style="position: relative; margin-bottom: 6px;">
+                <div class="section-title" style="margin: 0;">📊 报告管理</div>
+                <div style="position: absolute; top: 0; right: 0; display:flex;align-items:center;gap:10px;">
+                <label class="reports-host-filter" style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-primary);">主机
+                    <select id="reports-worker-filter" data-change="switchReportsWorker" style="width:130px;padding:3px 6px;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:11px;box-sizing:border-box;"><option value="">全部 Worker</option></select>
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-primary); cursor: pointer;">
+                    <input type="checkbox" id="filter-user-checkbox" data-change="toggleUserReports" style="cursor: pointer;">
+                    查看本用户报告
+                </label>
+                </div>
+            </div>
+
+            <!-- 报告列表 -->
+            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); flex: 1; min-height: 0; overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+                    <thead style="position: sticky; top: 0; z-index: 10;">
+                        <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 150px;">客户端</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 80px;">测试类型</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 140px;">测试套件</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 160px;">测试主机</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 240px;">报告名称</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">通过</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">失败</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">总计</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary); width: 100px;">通过率</th>
+                            <th style="padding: 5px 6px; text-align: center; font-size: 13px; color: var(--text-secondary);">操作</th>
+
+                        </tr>
+                    </thead>
+                    <tbody id="reports-table-body" aria-live="polite" aria-busy="true">
+                        <tr>
+                            <td colspan="10" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                                加载中...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div id="reports-load-more-wrapper" style="padding: 12px; text-align: center;"></div>
+            </div>
+        </div>

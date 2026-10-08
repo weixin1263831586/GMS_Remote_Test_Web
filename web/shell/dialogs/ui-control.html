@@ -1,0 +1,32 @@
+<div id="ui-control-modal" class="modal">
+        <div class="modal-content" style="max-width: min(1100px, 95vw); width: 95vw;">
+            <div class="modal-header">
+                <span class="modal-title">🎯 智能 UI 操控 <span id="ui-control-serial" style="font-size: 12px; color: var(--text-secondary); font-weight: normal;"></span></span>
+                <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+                    <button class="btn-xxs" data-click="refreshUiControl">🔄 刷新</button>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeUiControl">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body" style="display: flex; flex-direction: column; gap: 8px;">
+                <div id="ui-control-status" class="modal-info-text">加载中...</div>
+                <div style="display: flex; gap: 12px; align-items: flex-start; min-height: 400px;">
+                    <!-- 左：设备截图 -->
+                    <div style="flex: 0 0 auto; max-width: 45%;">
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">设备屏幕</div>
+                        <img id="ui-control-screenshot" alt="device screen" style="max-width: 100%; max-height: 60vh; border: 1px solid var(--border-color); border-radius: 8px; display: block;" />
+                    </div>
+                    <!-- 右：可点按元素列表 -->
+                    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">UI 元素（点击行即点按对应坐标，随后自动刷新）</div>
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+                            <input id="ui-control-search" type="search" placeholder="搜索文本、资源 ID 或控件类型" data-input="renderUiControlElements" style="flex:1;min-width:0;" />
+                            <label style="font-size:12px;white-space:nowrap;"><input id="ui-control-actionable-only" type="checkbox" checked data-change="renderUiControlElements" /> 仅可操作</label>
+                        </div>
+                        <div id="ui-control-elements" style="flex: 1; overflow: auto; border: 1px solid var(--border-color); border-radius: 8px; max-height: 60vh;">
+                            <div style="padding: 20px; color: var(--text-secondary); text-align: center;">暂无元素</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>

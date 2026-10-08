@@ -1,0 +1,68 @@
+<div id="adb-proxy-modal" class="modal">
+        <div class="modal-content device-routing-modal-content adb-proxy-modal-content">
+            <div class="modal-header">
+                <span class="modal-title">🔌 ADB设备接入</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeAdbProxyModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="adb-proxy-form" data-submit="submitAdbProxyConnect" data-prevent autocomplete="off">
+                    <div class="adb-proxy-section-head">
+                        <div class="adb-proxy-section-title">新建接入</div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <button class="btn-xxs" id="adb-proxy-add-ubuntu-toggle" type="button" data-click="toggleAdbProxyUbuntuSource">＋ 添加Ubuntu设备来源</button>
+                            <button class="btn-xxs" type="button" style="min-width: 0; padding: 4px 8px;" data-click="refreshAdbProxyAssignments">🔄 刷新</button>
+                        </div>
+                    </div>
+                    <div id="adb-proxy-ubuntu-source-panel" class="adb-proxy-ubuntu-source-panel" hidden>
+                        <div class="adb-proxy-host-grid">
+                            <div class="modal-form-row">
+                                <label for="adb-proxy-ubuntu-host">SSH主机</label>
+                                <input id="adb-proxy-ubuntu-host" type="text" placeholder="用户名@IP 或 用户名@[IPv6]:端口" autocomplete="off">
+                            </div>
+                            <div class="modal-form-row">
+                                <label for="adb-proxy-ubuntu-password">SSH密码</label>
+                                <input id="adb-proxy-ubuntu-password" type="password" placeholder="仅用于本次安装" autocomplete="new-password">
+                            </div>
+                        </div>
+                        <div class="adb-proxy-inline-actions">
+                            <span>将校验SSH指纹并离线安装adbproxy-rs，不保存密码。</span>
+                            <button class="btn-xxs btn-primary" id="adb-proxy-ubuntu-deploy" type="button" data-click="deployAdbProxyUbuntuSource">安装并添加</button>
+                        </div>
+                    </div>
+                    <div class="device-routing-fields">
+                        <div class="modal-form-row">
+                            <label for="adb-proxy-source-host">设备来源</label>
+                            <select id="adb-proxy-source-host" data-change="renderAdbProxySourceDevices"></select>
+                        </div>
+                        <div class="modal-form-row">
+                            <label for="adb-proxy-target-host">接入主机</label>
+                            <select id="adb-proxy-target-host"></select>
+                        </div>
+                    </div>
+                    <div class="modal-form-row device-routing-device-row">
+                        <label for="adb-proxy-source-devices">ADB设备</label>
+                        <select id="adb-proxy-source-devices" class="usbip-device-select" multiple size="3">
+                            <option value="">请选择设备来源</option>
+                        </select>
+                    </div>
+                </form>
+                <div class="adb-proxy-section-head">
+                    <div class="adb-proxy-section-title">当前接入</div>
+                    <button class="btn-xxs" type="button" style="min-width: 0; padding: 4px 8px;" data-click="refreshAdbProxyAssignments">🔄 刷新</button>
+                </div>
+                <div id="adb-proxy-assignments" class="adb-proxy-assignments">
+                    正在读取接入状态...
+                </div>
+                <div id="adb-proxy-message" class="modal-info-text">
+                    ADB通过adbproxy-rs接入后会显示在目标主机；可执行ADB和测试操作，Fastboot、锁定及烧写操作将被禁用。来源与目标需版本兼容且内网/VPN可直达。
+                </div>
+                <div class="modal-info-text" style="margin-top:6px;">
+                    single-user 仅表示每台 Worker 共用一个 Linux 运行账号，不限制平台多用户并发。
+                </div>
+            </div>
+            <div class="modal-buttons device-routing-modal-buttons">
+                <button class="btn-xxs" type="button" data-click="closeAdbProxyModal">关闭</button>
+                <button class="btn-xxs btn-primary" id="adb-proxy-connect-submit" type="button" data-click="submitAdbProxyConnect">接入</button>
+            </div>
+        </div>
+    </div>

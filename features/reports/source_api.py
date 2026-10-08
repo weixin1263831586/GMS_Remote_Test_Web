@@ -1,11 +1,13 @@
+import asyncio
 from contextlib import suppress
 
 from features.auth import require_authenticated_user
 from foundation.outbound import (
+    PinnedOutboundResolver,
     UnsafeOutboundURL,
+    resolve_outbound_target,
     same_http_origin,
     url_hostname,
-    validate_outbound_url,
 )
 from foundation.redaction import redact_sensitive_text
 
@@ -231,10 +233,12 @@ async def analyze_report_from_url(request: Request):
                     400,
                 )
             try:
-                url = validate_outbound_url(
+                target = await asyncio.to_thread(
+                    resolve_outbound_target,
                     url,
                     allowed_private_hosts=allowed_private_hosts,
                 )
+                url = target.url
             except UnsafeOutboundURL as exc:
                 return error_response(str(exc), 400)
 
@@ -259,7 +263,9 @@ async def analyze_report_from_url(request: Request):
                         )
 
             async with (
-                aiohttp.ClientSession() as session,
+                aiohttp.ClientSession(connector=aiohttp.TCPConnector(
+                    resolver=PinnedOutboundResolver(target), use_dns_cache=False,
+                )) as session,
                 session.get(
                     url,
                     timeout=aiohttp.ClientTimeout(total=120),

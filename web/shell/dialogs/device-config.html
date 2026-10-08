@@ -1,0 +1,104 @@
+<div id="device-config-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header dcfg-header">
+                <div class="dcfg-tabs" id="dcfg-tabs">
+                    <button class="dcfg-tabbtn" data-click="dcfgSwitchTab" data-a0="configs" data-tab="configs">⚙️ configs</button>
+                    <button class="dcfg-tabbtn" data-click="dcfgSwitchTab" data-a0="packages" data-tab="packages">📦 packages</button>
+                    <button class="dcfg-tabbtn" data-click="dcfgSwitchTab" data-a0="features" data-tab="features">✨ features</button>
+                    <button class="dcfg-tabbtn" data-click="dcfgSwitchTab" data-a0="props" data-tab="props">🔧 property</button>
+                    <button class="dcfg-tabbtn" data-click="dcfgSwitchTab" data-a0="overrides" data-tab="overrides">⚡ override</button>
+                </div>
+                <div class="dcfg-header-right">
+                    <span id="device-config-serial" class="dcfg-serial"></span>
+                    <button type="button" class="btn-xxs" data-click="minimizeDeviceConfigExplorer">缩小</button>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeDeviceConfigExplorer">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body dcfg-body">
+                <!-- ===== Tab: configs ===== -->
+                <div class="dcfg-tab active" id="dcfg-tab-configs">
+                    <div class="dcfg-toolbar">
+                        <span class="dcfg-label">应用包名</span>
+                        <input type="text" id="dcfg-package" list="dcfg-package-list" value="android" placeholder="包名（可下拉选或直接输入，如 android）" data-change="runDeviceConfigQuery">
+                        <datalist id="dcfg-package-list"></datalist>
+                        <input type="text" id="dcfg-name" placeholder="资源名过滤（如 config_supports）" data-keydown="runDeviceConfigQuery" data-key="Enter">
+                        <select id="dcfg-type" data-change="runDeviceConfigQuery">
+                            <option value="">全部类型</option>
+                            <option value="bool">bool</option>
+                            <option value="integer">integer</option>
+                            <option value="string">string</option>
+                            <option value="dimen">dimen</option>
+                            <option value="array">array</option>
+                        </select>
+                        <label class="dcfg-label" title="计算 overlay 生效值：每个资源调用一次 adb，后端并发执行（8路）。全量查询约1-2分钟，请耐心等待">
+                            <input type="checkbox" id="dcfg-effective"> 对比 overlay 生效值
+                        </label>
+                        <button id="dcfg-query" class="btn-xxs btn-primary" data-click="runDeviceConfigQuery">查询</button>
+                    </div>
+                    <div id="dcfg-stat" class="dcfg-stat"></div>
+                    <div id="dcfg-results" class="dcfg-empty">点击「查询」开始</div>
+                </div>
+                <!-- ===== Tab: packages ===== -->
+                <div class="dcfg-tab" id="dcfg-tab-packages">
+                    <div class="dcfg-toolbar">
+                        <input type="text" id="dcfg-pkg-filter" placeholder="过滤包名或路径…" data-input="dcfgScheduleFilterPkg">
+                        <button id="dcfg-pkg-refresh" class="btn-xxs dcfg-refresh-action" data-click="loadDevicePackagesF">↻ 刷新</button>
+                        <span id="dcfg-pkg-stat"></span>
+                    </div>
+                    <div id="dcfg-pkg-results" class="dcfg-empty">点击「刷新」加载</div>
+                </div>
+                <!-- ===== Tab: features ===== -->
+                <div class="dcfg-tab" id="dcfg-tab-features">
+                    <div class="dcfg-toolbar">
+                        <input type="text" id="dcfg-feat-filter" placeholder="过滤特性名…" data-input="dcfgScheduleFilterFeat">
+                        <button id="dcfg-feat-refresh" class="btn-xxs dcfg-refresh-action" data-click="loadDeviceFeatures">↻ 刷新</button>
+                        <span id="dcfg-feat-stat"></span>
+                    </div>
+                    <div id="dcfg-feat-results" class="dcfg-empty">点击「刷新」加载</div>
+                </div>
+                <!-- ===== Tab: props (getprop) ===== -->
+                <div class="dcfg-tab" id="dcfg-tab-props">
+                    <div class="dcfg-toolbar">
+                        <input type="text" id="dcfg-prop-filter" placeholder="过滤属性名或值…" data-input="dcfgScheduleFilterProp" class="dcfg-filter-input">
+                        <button id="dcfg-prop-refresh" class="btn-xxs dcfg-refresh-action" data-click="loadDeviceProps">↻ 刷新</button>
+                        <span id="dcfg-prop-stat"></span>
+                    </div>
+                    <div id="dcfg-prop-results" class="dcfg-empty">点击「刷新」加载</div>
+                </div>
+                <!-- ===== Tab: overrides (RRO config override) ===== -->
+                <div class="dcfg-tab" id="dcfg-tab-overrides">
+                    <div class="dcfg-toolbar dcfg-ovr-toolbar">
+                        <button id="dcfg-ovr-refresh" class="btn-xxs dcfg-refresh-action" data-click="loadDeviceOverrides">↻ 刷新</button>
+                        <button class="btn-xxs btn-primary" data-click="dcfgApplyOverrides">⚡ 应用(编译+推送+重启)</button>
+                        <button class="btn-xxs" data-click="dcfgRevertAll">↩ 全部撤销(删除+重启)</button>
+                        <button class="btn-xxs" id="dcfg-ovr-disable-verity" data-click="dcfgToggleVerity" data-a0="disable" title="关闭 dm-verity（apply 前的一次性步骤，需重启）">🔓 关闭verity</button>
+                        <button class="btn-xxs" id="dcfg-ovr-enable-verity" data-click="dcfgToggleVerity" data-a0="enable" title="恢复 dm-verity（验证启动，需重启）">🔒 恢复verity</button>
+                        <span id="dcfg-ovr-status-summary" class="dcfg-stat"></span>
+                    </div>
+                    <div id="dcfg-ovr-status" class="dcfg-ovr-status"></div>
+                    <div class="dcfg-ovr-add">
+                        <input type="text" id="dcfg-ovr-name" list="dcfg-ovr-name-list" placeholder="资源名（如 config_defaultBrowser）" title="从 configs 查询结果选，或直接输入">
+                        <datalist id="dcfg-ovr-name-list"></datalist>
+                        <select id="dcfg-ovr-type" data-change="dcfgOvrTypeChanged">
+                            <option value="string">string</option>
+                            <option value="bool">bool</option>
+                            <option value="integer">integer</option>
+                            <option value="dimen">dimen</option>
+                            <option value="fraction">fraction</option>
+                            <option value="integer-array">integer-array</option>
+                            <option value="string-array">string-array</option>
+                            <option value="array">array</option>
+                        </select>
+                        <input type="text" id="dcfg-ovr-value" placeholder="值（如 com.android.chrome）">
+                        <textarea id="dcfg-ovr-value-arr" placeholder="每行一个值（数组类型用）" style="display:none;min-height:60px;"></textarea>
+                        <button class="btn-xxs btn-primary" data-click="dcfgAddOverride">添加覆盖</button>
+                    </div>
+                    <div id="dcfg-ovr-results" class="dcfg-empty">点击「刷新」加载当前覆盖项</div>
+                    <details class="dcfg-ovr-preview" open>
+                        <summary>预览将要生成的 XML</summary>
+                        <pre id="dcfg-ovr-preview-xml" class="dcfg-ovr-pre">（未加载）</pre>
+                    </details>
+                </div>
+            </div>
+        </div>
+    </div>

@@ -1,0 +1,24 @@
+<div id="add-local-suite-modal" class="modal" style="display: none;" data-keydown="handleAddLocalSuiteKeydown" data-r0="event">
+        <div class="modal-content modal-s">
+            <div class="modal-header">
+                <span class="modal-title">➕ 添加本地测试套件路径</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeAddLocalSuiteModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="add-local-suite-form" data-submit="submitAddLocalSuite" data-prevent autocomplete="off">
+                <div class="modal-form-row">
+                    <label>套件路径:</label>
+                    <input type="text" id="local-suite-path-input" class="host-input" placeholder="~/GMS-Suite/android-cts-verifier-16.1_r2/" data-keydown="handleAddLocalSuiteKeydown" data-r0="event" autocomplete="off" />
+                    <button class="btn-xxs" data-click="browseLocalSuitePath" style="white-space: nowrap; padding: 6px 10px; flex-shrink: 0;">浏览</button>
+                </div>
+                </form>
+                <div class="modal-info-text" style="margin-top: 10px;">
+                    💡 路径必须是已解压的测试套件目录
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" data-click="closeAddLocalSuiteModal">取消</button>
+                    <button class="btn-xxs btn-primary" data-click="submitAddLocalSuite">添加</button>
+                </div>
+            </div>
+        </div>
+    </div>

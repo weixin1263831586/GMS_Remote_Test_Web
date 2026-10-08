@@ -1,0 +1,51 @@
+<div id="report-copy-modal" class="modal" style="z-index: 10100;">
+        <div class="modal-content report-copy-modal-content">
+            <div class="modal-header">
+                <span class="modal-title">🔁 跨主机拷贝测试报告</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeReportCopyModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-info-text" style="margin-bottom: 12px;">
+                    选择来源 Worker 的一个 Tradefed results 报告，并复制到目标 Worker 所选套件的 results 目录。目标中已存在同名报告时不会覆盖。
+                </div>
+                <div style="display:grid;grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr);gap:12px;align-items:start;">
+                    <div style="min-width:0;">
+                        <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">报告来源</div>
+                        <div class="modal-form-row" style="display:block;">
+                            <label for="report-copy-source-worker" style="display:block;margin-bottom:4px;">来源主机</label>
+                            <select id="report-copy-source-worker" class="combo-box" data-change="onReportCopySourceWorkerChange" style="width:100%;"></select>
+                        </div>
+                        <div class="modal-form-row" style="display:block;">
+                            <label for="report-copy-source-suite" style="display:block;margin-bottom:4px;">来源套件</label>
+                            <select id="report-copy-source-suite" class="combo-box" data-change="onReportCopySourceSuiteChange" style="width:100%;"></select>
+                        </div>
+                        <div class="modal-form-row" style="display:block;">
+                            <label for="report-copy-source-report" style="display:block;margin-bottom:4px;">来源报告</label>
+                            <select id="report-copy-source-report" class="combo-box" style="width:100%;"></select>
+                        </div>
+                    </div>
+                    <div aria-hidden="true" style="padding-top:96px;text-align:center;color:var(--primary-color);font-size:22px;">→</div>
+                    <div style="min-width:0;">
+                        <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">拷贝目标</div>
+                        <div class="modal-form-row" style="display:block;">
+                            <label for="report-copy-target-worker" style="display:block;margin-bottom:4px;">目标主机</label>
+                            <select id="report-copy-target-worker" class="combo-box" data-change="onReportCopyTargetWorkerChange" style="width:100%;"></select>
+                        </div>
+                        <div class="modal-form-row" style="display:block;">
+                            <label for="report-copy-target-suite" style="display:block;margin-bottom:4px;">目标套件</label>
+                            <select id="report-copy-target-suite" class="combo-box" data-change="updateReportCopyTargetPath" style="width:100%;"></select>
+                        </div>
+                        <div class="modal-form-row" style="display:block;">
+                            <label for="report-copy-target-path" style="display:block;margin-bottom:4px;">目标目录</label>
+                            <input id="report-copy-target-path" type="text" readonly style="width:100%;box-sizing:border-box;" />
+                        </div>
+                    </div>
+                </div>
+                <div id="report-copy-status" class="modal-info-text" style="display:none;margin-top:12px;white-space:pre-wrap;"></div>
+                <div class="modal-buttons">
+                    <button type="button" class="btn-xxs" data-click="closeReportCopyModal">关闭</button>
+                    <button type="button" id="report-copy-submit" class="btn-xxs btn-primary" data-click="submitReportCopy">开始拷贝</button>
+                </div>
+            </div>
+        </div>
+    </div>

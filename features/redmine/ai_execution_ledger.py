@@ -20,17 +20,17 @@ Daily Brief 已有 per-attempt 的执行轨迹审计
        └──► completed / failed（请求从未发出时，异常走 fail_early）
 
 - ``logical_key`` = sha256(owner, **purpose, provider**, issue, input_hash,
-  prompt_version, analyzer_version, model)（全局审查问题 3：purpose/
-  provider 不进 key 时，未来第二个调用方共享 Ledger 会错误 dedupe）。
-- ``input_hash`` 落库前做 canonical sha256（问题 4）：调用方传原文材料
+  prompt_version, analyzer_version, model)。purpose/provider 区分不同调用方，
+  防止共享 Ledger 时把不同 AI 操作误判为同一次调用。
+- ``input_hash`` 落库前做 canonical sha256：调用方传原文材料
   （含较长的 analysis_hint 自由文本），begin() 只落 digest——字段名叫
   hash，存储也必须是 hash。
-- ``analyzer_version``：调用方必须传 analyzer 实现版本（全局审查问题
-  2），实现升级而 prompt/model 不变时逻辑键也必须变化。
+- ``analyzer_version``：调用方必须传 analyzer 实现版本；
+  实现升级而 prompt/model 不变时逻辑键也必须变化。
 - ``fail_early``：AI 请求**发出前**的确定性失败（证据预采集崩溃、
   prompt 构造失败）走 pending → failed。``unknown`` 只表示「请求可能
-  已被 provider 接收/执行但结果未知」；提交前异常不是 unknown（问题 1：
-  receipt 建得太早时 catch 一律 mark_unknown 在语义上不准）。
+  已被 provider 接收/执行但结果未知」；提交前异常应标记为确定失败，
+  避免把从未发出的请求记录为结果未知。
 - pending/received 的 receipt 通过 ``touch`` 每分钟续租（静默分析也续租）；
   连续 ``RECEIPT_LEASE_SECONDS`` 无续租时置为 unknown 并允许新建 receipt，避免僵尸
   pending 永久阻塞重试。
@@ -116,7 +116,7 @@ def logical_key(
 ) -> str:
     """稳定派生逻辑调用键；任何输入变化都会产生新键。
 
-    ``purpose`` / ``provider`` 显式入 key（全局审查问题 3）：多个调用方
+    ``purpose`` / ``provider`` 显式入 key，防止多个调用方
     （daily_brief_issue / report_diagnosis / reply_draft / ...）共享
     Ledger 时不得互相 dedupe。保持关键字签名强制调用方写全参数，
     防止位置参数串位。
@@ -132,7 +132,7 @@ def logical_key(
 
 
 def input_digest(material: Any) -> str:
-    """canonical JSON → sha256 digest（全局审查问题 4）。
+    """canonical JSON → sha256 digest；不持久化原始输入材料。
 
     调用方把原始输入材料（快照 hash、设备 serial、analysis_hint 自由
     文本）交给 begin() 前，先用本函数折成 digest：``input_hash`` 字段
@@ -321,7 +321,7 @@ class AIExecutionLedger:
     def fail_early(self, receipt_id: str, *, error: str) -> None:
         """AI 请求发出前的确定性失败（pending → failed）。
 
-        语义边界（全局审查问题 1）：``unknown`` 只属于「请求可能已被
+        ``unknown`` 只属于「请求可能已被
         provider 执行但结果未知」；证据预采集崩溃、prompt 构造失败这类
         提交前异常是确定的 failed——AI 请求根本没发出去。请求一旦提交
         （``mark_received`` 之后），异常路径必须走 ``mark_unknown``。

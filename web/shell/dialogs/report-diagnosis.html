@@ -1,0 +1,19 @@
+<div id="report-diagnosis-modal" class="modal">
+        <div class="modal-content report-diagnosis-shell">
+            <div class="modal-header report-diagnosis-header">
+                <span class="modal-title">🤖 报错诊断</span>
+                <div class="report-diagnosis-actions">
+                    <button type="button" class="btn-xxs btn-primary" data-click="rerunReportDiagnosis">重新诊断</button>
+                    <button type="button" class="btn-xxs" data-click="copyReportDiagnosis">📋 复制结果</button>
+                    <button type="button" class="btn-xxs" data-click="minimizeReportDiagnosisWorkbench">缩小</button>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeReportDiagnosisWorkbench">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body report-diagnosis-body">
+                <div id="report-diagnostic-summary" class="report-diagnosis-summary">
+                    <div class="suite-empty" style="margin: 0;">点击失败用例上的“🤖 报错诊断”开始诊断</div>
+                </div>
+                <div id="report-diagnostic-result" class="report-diagnosis-result"></div>
+            </div>
+        </div>
+    </div>

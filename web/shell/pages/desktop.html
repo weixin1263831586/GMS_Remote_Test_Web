@@ -1,0 +1,19 @@
+<div class="container page-content" id="page-desktop">
+            <div class="host-workspace-title-row">
+                <div class="section-title" style="margin:0;">🖥️ 主机桌面</div>
+                <div class="host-workspace-layouts page-title-actions" role="group" aria-label="桌面布局">
+                    <button class="btn-xs" data-workspace-layout="single" data-click="setHostWorkspaceLayout" data-a0="single">单屏</button>
+                    <button class="btn-xs" data-workspace-layout="horizontal" data-click="setHostWorkspaceLayout" data-a0="horizontal">左右</button>
+                    <button class="btn-xs" data-workspace-layout="vertical" data-click="setHostWorkspaceLayout" data-a0="vertical">上下</button>
+                    <button class="btn-xs" data-workspace-layout="quad" data-click="setHostWorkspaceLayout" data-a0="quad">四屏</button>
+                </div>
+                <div class="host-workspace-single-bar host-workspace-title-state page-title-actions">
+                    <span class="host-workspace-pane-status" id="host-workspace-status-single">准备中</span>
+                    <button class="btn-xs host-workspace-refresh-btn" data-click="refreshHostWorkspacePane" data-a0="0" title="重新连接" aria-label="刷新主机桌面">🔄</button>
+                </div>
+                <div class="host-workspace-mode-pending host-workspace-title-state page-title-actions">
+                    <span class="host-workspace-pane-status">正在准备工作区…</span>
+                </div>
+            </div>
+            <div id="host-workspace-grid" class="host-workspace-grid layout-single"></div>
+        </div>

@@ -1,0 +1,57 @@
+<div class="container page-content" id="page-report-analysis">
+            <div class="section-title">📈 报告分析</div>
+
+            <!-- 拖拽上传区域 -->
+            <div class="analysis-upload-frame">
+                <div id="report-upload-zone" class="report-upload-zone">
+                    <input type="file" id="report-file-input" accept=".xml,.zip,.rar,.tar,.tar.gz" style="display: none;" />
+                    <input type="file" id="report-folder-input" webkitdirectory directory style="display: none;" />
+                    <div class="report-upload-content">
+                        <div>📁</div>
+                        <div class="analysis-upload-copy">
+                            <div class="analysis-upload-title">拖拽测试报告到此处</div>
+                            <div class="upload-instructions">
+                                支持 .zip、.rar、.xml、.tar.gz 等文件格式<br><br>
+                                1. 点击按钮"📤 上传报告"选择测试报告<br>
+                                2. 直接拖拽测试报告上传<br>
+                                3. 直接拖拽 Redmine 附件上传
+                            </div>
+                        </div>
+                        <button class="btn-xs" data-click="_actClickById" data-a0="report-file-input">
+                            📤 上传报告
+                        </button>
+                    </div>
+                    <div class="report-upload-progress" id="report-upload-progress">
+                        <div class="report-upload-progress-bar" id="report-progress-fill" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 分析结果区域 -->
+            <div id="report-analysis-result" style="display: none;">
+                <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; margin-bottom: 10px;">
+                    <button class="btn-xs" data-click="sendReportAnalysisEmail" style="float: right; margin-right: 6px;" title="将本报告分析结果作为 HTML 邮件发送">📧 发送邮件</button>
+                    <button class="btn-xs" data-click="resetReportAnalysis" style="float: right;">清除</button>
+
+                    <!-- 总体统计 -->
+                    <div id="report-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 20px;">
+                        <!-- 动态生成 -->
+                    </div>
+
+                    <!-- 详细信息 -->
+                    <div id="report-details" style="font-size: 12px; color: var(--text-primary);">
+                        <!-- 动态生成 -->
+                    </div>
+                </div>
+
+                <!-- 失败用例列表 -->
+                <div id="report-failures" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div id="report-failures-title" style="font-size: 12px; font-weight: 600;">❌ 失败用例</div>
+                    </div>
+                    <div id="report-failure-list" style="max-height: 580px; overflow-y: auto;">
+                        <!-- 动态生成 -->
+                    </div>
+                </div>
+            </div>
+        </div>

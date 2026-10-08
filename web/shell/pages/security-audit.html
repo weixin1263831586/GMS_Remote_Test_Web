@@ -1,0 +1,62 @@
+<div class="container page-content" id="page-security-audit">
+            <div class="section-title">🛡️ 安全审计</div>
+
+            <div class="audit-stats" style="display: flex; gap: 15px; margin-bottom: 10px;">
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="audit-total-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">审计记录</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="audit-web-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Web访问</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="audit-cli-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">CLI操作</div>
+                </div>
+                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 24px; font-weight: bold; color: var(--danger-color);" id="audit-error-count">-</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">异常请求</div>
+                </div>
+            </div>
+
+            <div class="audit-filter-bar" style="display: grid; grid-template-columns: 120px 140px minmax(180px, 1fr) auto auto; gap: 8px; align-items: center; margin-bottom: 10px;">
+                <select id="audit-source-filter" class="combo-box" data-change="loadSecurityAudit" data-a0="true">
+                    <option value="">全部来源</option>
+                    <option value="web">Web</option>
+                    <option value="cli">CLI</option>
+                </select>
+                <select id="audit-type-filter" class="combo-box" data-change="loadSecurityAudit" data-a0="true">
+                    <option value="">全部类型</option>
+                    <option value="page_view">页面访问</option>
+                    <option value="api">接口操作</option>
+                    <option value="page_visit">入口访问</option>
+                </select>
+                <input id="audit-search-input" class="entry-field" type="text" placeholder="搜索用户、IP、接口、页面" data-keydown="loadSecurityAudit" data-key="Enter" data-a0="true" />
+                <button class="btn-xs" data-click="loadSecurityAudit" data-a0="true">🔄 刷新</button>
+                <button class="btn-xs" data-click="exportSecurityAudit">📥 导出</button>
+            </div>
+
+            <div class="audit-table-wrap" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); flex: 1; min-height: 0; overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+                    <thead style="position: sticky; top: 0; z-index: 10;">
+                        <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
+                            <th style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 145px;">时间</th>
+                            <th style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 70px;">来源</th>
+                            <th style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 70px;">状态</th>
+                            <th style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 220px;">用户/IP</th>
+                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary);">操作</th>
+                            <th style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 80px;">耗时</th>
+                        </tr>
+                    </thead>
+                    <tbody id="security-audit-table-body">
+                        <tr>
+                            <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                                加载中...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div id="audit-load-more-wrapper" style="padding: 14px; text-align: center;"></div>
+            </div>
+        </div>

@@ -1,0 +1,24 @@
+<div id="sshd-install-guide-modal" class="modal">
+        <div class="modal-content modal-m">
+            <div class="modal-header">
+                <span class="modal-title">⚠️ SSHD 安装指南</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeSshdInstallGuide">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-info-text" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin-bottom: 15px; border-radius: 3px; color: #856404;">
+                    📋 未检测到 SSHD 服务，需要手动安装
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <div style="font-weight: 600; margin-bottom: 10px; color: var(--text-primary);">🔧 手动安装步骤：</div>
+                    <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 3px; padding: 10px; max-height: 400px; overflow-y: auto;">
+                        <pre id="sshd-guide-content" style="white-space: pre-wrap; word-wrap: break-word; font-family: 'Consolas', 'Monaco', monospace; font-size: 15px; line-height: 1.6; color: var(--text-secondary); margin: 0;"></pre>
+                    </div>
+                </div>
+
+                <div class="modal-buttons">
+                    <button class="btn-xxs" data-click="closeSshdInstallGuide">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>

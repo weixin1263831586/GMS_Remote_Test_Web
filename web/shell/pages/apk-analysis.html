@@ -1,0 +1,121 @@
+<div class="container page-content" id="page-apk-analysis">
+            <div class="apk-page-header">
+                <div class="section-title section-title-with-icon">
+                    <img src="/static/icons/jadx-icon.webp" alt="" class="section-title-icon" aria-hidden="true">
+                    <span>APK分析</span>
+                </div>
+                <div class="apk-task-history-controls">
+                    <label for="apk-task-history">最近任务</label>
+                    <select id="apk-task-history" class="entry-field" data-change="restoreApkTask" data-r0="value">
+                        <option value="">正在读取…</option>
+                    </select>
+                    <button id="apk-task-history-refresh" class="btn-xs ui-refresh-action" type="button" data-click="loadApkTaskHistory" data-a0="true">↻ 刷新</button>
+                </div>
+            </div>
+
+            <!-- 上传区域 -->
+            <div class="analysis-upload-frame">
+                <div id="apk-upload-zone" class="apk-upload-zone upload-empty">
+                    <input type="file" id="apk-file-input" accept=".apk,.jar" style="display: none;" />
+                    <div class="apk-upload-content">
+                        <div>📦</div>
+                        <div class="analysis-upload-copy">
+                            <div class="analysis-upload-title">拖拽 APK/JAR 文件到此处</div>
+                            <div class="upload-instructions">
+                                支持 .apk 和 .jar 文件格式<br><br>
+                                1. 点击按钮"📤 选择 APK/JAR 文件"上传<br>
+                                2. 直接拖拽 APK/JAR 文件上传<br>
+                            </div>
+                        </div>
+                        <button class="btn-xs" data-click="_actClickById" data-a0="apk-file-input">
+                            📤 选择 APK/JAR 文件
+                        </button>
+                    </div>
+                    <div class="apk-upload-progress" id="apk-upload-progress" style="display: none;">
+                        <div class="apk-upload-progress-bar" id="apk-progress-fill" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 分析状态 -->
+            <div id="apk-analysis-status" style="display: none;">
+                <div class="apk-status-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <div style="font-size: 14px; font-weight: 600;" id="apk-file-name">-</div>
+                            <div style="font-size: 12px; color: var(--success-color);" id="apk-analysis-state">准备分析...</div>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn-xs" id="apk-btn-analyze" data-click="startApkAnalysis" style="display: none;">🔬 开始分析</button>
+                            <button class="btn-xs" id="apk-btn-download" data-click="downloadApkSource" style="display: none;">📥 下载源码</button>
+                            <button class="btn-xs" data-click="resetApkAnalysis">关闭</button>
+                        </div>
+                    </div>
+                    <div id="apk-analysis-progress-container" style="display: none; margin-top: 12px;">
+                        <div style="height: 4px; background: var(--darker-bg); border-radius: 2px; overflow: hidden;">
+                            <div id="apk-analysis-progress-bar" style="height: 100%; background: var(--success-color); width: 0%; transition: width 0.3s ease;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 分析结果区域 -->
+            <div id="apk-analysis-result" style="display: none;">
+                <!-- 标签页导航 + 搜索框 -->
+                <div class="apk-tab-actions">
+                    <div style="display: flex; gap: 4px;">
+                        <button class="filter-btn active" data-apk-tab="manifest" data-click="switchApkTab" data-a0="manifest">📋 AndroidManifest</button>
+                        <button class="filter-btn" data-apk-tab="permissions" data-click="switchApkTab" data-a0="permissions">🔐 权限列表</button>
+                        <button class="filter-btn" data-apk-tab="source" data-click="switchApkTab" data-a0="source">💻 源码浏览</button>
+                    </div>
+                    <div class="apk-search-container">
+                        <input type="text" id="apk-file-search" class="apk-search-input" placeholder="🔍 搜索文件名..."
+                               data-input="debounceFilterApkFiles"
+                               data-keydown="jumpToApkFile" data-key="13">
+                        <button class="btn-xs" data-click="jumpToApkFile" title="打开文件">打开</button>
+                        <button class="btn-xs" data-click="clearApkSearch" title="清除搜索">清除</button>
+                    </div>
+                </div>
+
+                <!-- 搜索结果下拉 -->
+                <div id="apk-search-results" class="apk-search-results"></div>
+
+                <!-- Manifest信息 -->
+                <div id="apk-tab-manifest" class="apk-tab-panel">
+                    <div id="apk-manifest-info">
+                        <!-- 动态生成 -->
+                    </div>
+                    <details open>
+                        <summary style="cursor: pointer; font-size: 13px; font-weight: 600; margin-bottom: 10px;">AndroidManifest.xml</summary>
+                        <pre id="apk-raw-xml" style="background: var(--darker-bg); padding: 15px; border-radius: 6px; font-size: 11px;"></pre>
+                    </details>
+                </div>
+
+                <!-- 权限列表 -->
+                <div id="apk-tab-permissions" class="apk-tab-panel" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div style="font-size: 14px; font-weight: 600;">🔐 权限列表 (<span id="apk-perm-count">0</span>)</div>
+                    </div>
+                    <div id="apk-permissions-list" style="max-height: 600px; overflow-y: auto;">
+                        <!-- 动态生成 -->
+                    </div>
+                </div>
+
+                <!-- 源码浏览 -->
+                <div id="apk-tab-source" class="apk-tab-panel" style="display: none;">
+                    <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); height: calc(100vh - 280px); display: flex; flex-direction: column;">
+                        <div class="apk-source-layout" style="flex: 1; overflow: hidden;">
+                            <div id="apk-source-tree" class="apk-source-tree" style="height: 100%; overflow-y: auto;">
+                                <!-- 动态生成文件树 -->
+                            </div>
+                            <div id="apk-source-resizer" class="apk-source-resizer" title="拖拽调整源码树宽度"></div>
+                            <div id="apk-file-viewer" style="display: none; flex: 1; flex-direction: column; min-width: 0; overflow: hidden;">
+                                <div id="apk-file-tabs" class="apk-file-tabs" style="flex-shrink: 0;"></div>
+                                <div id="apk-file-path" class="apk-file-path" style="flex-shrink: 0;"></div>
+                                <pre id="apk-file-content" style="flex: 1; background: var(--darker-bg); padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 11px; overflow-y: auto; margin: 0;"></pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>

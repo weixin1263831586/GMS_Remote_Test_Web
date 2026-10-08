@@ -1,0 +1,312 @@
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/css/common.css?v=20260930-css-split">
+    <link rel="stylesheet" href="/static/css/common-components.css?v=20260930-css-split">
+    <link rel="stylesheet" href="/static/css/common-layout.css?v=20260930-css-split">
+    <link rel="stylesheet" href="/static/css/common-page.css?v=20260930-css-split">
+    <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
+    <link rel="stylesheet" href="/static/css/shell-extra.css?v=20260930-shell-extra">
+    <!-- 分块上传优化 -->
+    <script src="/static/js/chunk-upload.js?v=20260910-elev-recovery" defer></script>
+    <!-- 加载API常量定义 - 必须在app.js之前加载 -->
+    <script src="/static/js/api-constants.js?v=20260727-skill-install-action" defer></script>
+    <!-- 加载共享工具函数 - 必须在app.js之前加载 -->
+    <script src="/static/js/utils.js?v=20260828-password-toggle-icons" defer></script>
+    <!-- 加载全局状态 - 必须在通知中心和app.js之前加载 -->
+    <script src="/static/js/state.js?v=20260902-adbproxy-state" defer></script>
+    <!-- 用户级 Worker/设备/套件/任务上下文，供主页面与各 iframe 共用。 -->
+    <script src="/static/js/workspace-context.js?v=20260917-embedded-arrow-forward-v2" defer></script>
+    <!-- Shell 模块（navigation.js 第二轮拆分）：日志/轮询/通用 UI 反馈，
+         依赖 state.js 与 api.js，必须在 navigation.js 之前加载 -->
+    <!-- 运行时配置以 JSON 数据标签注入：type="application/json" 不被
+         执行，因此不受 CSP script-src 管制，也消除了 tojson 内容
+         逃逸出 JS 上下文的可能。shell-config.js 同步解析为
+         EXTERNAL_SERVICES / PRODUCT_BRANDING / __GMS_BOOTSTRAP__，
+         必须在引用它们的 shell 模块（icon-auto.js 等）之前加载。 -->
+    <script id="gms-runtime-config" type="application/json">{
+        "external_services": {{ config.get('external_services', {}) | tojson }},
+        "product_branding": {{ config.get('product_branding', {}) | tojson }},
+        "local_worker_id": {{ local_worker_id | tojson }}
+    }</script>
+    <script src="/static/js/shell/shell-config.js"></script>
+    <script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script>
+    <script src="/static/js/shell/logging.js?v=20260914-clear-visible" defer></script>
+    <script src="/static/js/shell/status-polling.js?v=20260826-shell-split" defer></script>
+    <script src="/static/js/shell/ui-feedback.js?v=20260826-shell-split" defer></script>
+    <!-- 加载通用弹框管理 - 必须在app.js之前加载 -->
+    <script src="/static/js/modal.js?v=20260723-modal-stack" defer></script>
+    <!-- 加载API调用工具 - 必须在通知中心和app.js之前加载 -->
+    <script src="/static/js/api.js?v=20260917-client-account-switch-v8" defer></script>
+    <script src="/static/js/shell/websocket-manager.js?v=20260916-firmware-download-progress" defer></script>
+    <script src="/static/js/shell/icon-auto.js?v=20260905-extract" defer></script>
+    <script src="/static/js/shell/websites.js?v=20260905-extract" defer></script>
+    <script src="/static/js/shell/server-sync.js?v=20260905-extract" defer></script>
+    <script src="/static/js/shell/dnd-sort.js?v=20260905-extract" defer></script>
+    <script src="/static/js/shell/utility-tools.js?v=20260921-ut-split" defer></script>
+    <script src="/static/js/shell/weekly-report.js?v=20260921-ut-split" defer></script>
+    <script src="/static/js/shell/arrow-nav.js?v=20260917-navigation-focus-anchor" defer></script>
+    <script src="/static/js/shell/shell-terminal.js?v=20260905-extract" defer></script>
+    <script src="/static/js/shell/sidebar-dnd.js?v=20260910-device-console-order" defer></script>
+    <script src="/static/js/shell/workspace-devices.js?v=20260902-diagnostics-scope" defer></script>
+    <!-- 加载通知中心 - 必须在app.js之前加载 -->
+    <script src="/static/js/notifications.js?v=20260903-toggle-ready" defer></script>
+    <!-- 加载页面模块 - 必须在 navigation.js 之前加载，由后者负责初始化 -->
+    <script src="/static/js/pages/test-suite-browser.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/test-suite-browser-download.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/test-suite-browser-extract.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/test-suite-browser-list.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/test-suite-browser-report-copy.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/test-suite-browser-results.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/test-suite-browser-files.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/test-suite-browser-devices.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/firmware-burn.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/firmware-burn-share.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/firmware-burn-gsi.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/firmware-burn-vnc.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/firmware-burn-adb-proxy.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/firmware-burn-usbip.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/auth-elevation.js?v=20260910-elevation-retry" defer></script>
+    <script src="/static/js/pages/vpn-control.js?v=20260902-vpn-per-worker" defer></script>
+    <script src="/static/js/pages/file-browser.js?v=20260904-gsi-worker-browse" defer></script>
+    <script src="/static/js/pages/test-control.js?v=20260827-usbip-vid-pids" defer></script>
+    <script src="/static/js/pages/test-reports.js?v=20260812-stable-surfaces" defer></script>
+    <script src="/static/js/pages/report-analysis.js?v=20260920-adr0014" defer></script>
+    <script src="/static/js/pages/report-analysis-diagnosis.js?v=20260920-adr0014" defer></script>
+    <script src="/static/js/pages/conversational-agent.js?v=20260813-ai-status" defer></script>
+    <script src="/static/js/pages/agent-access.js?v=20260912-agent-access-title" defer></script>
+    <script src="/static/js/pages/api-docs.js?v=20260812-stable-surfaces" defer></script>
+    <script src="/static/js/pages/apk-analysis.js?v=20260828-apk-scroll-containers" defer></script>
+    <script src="/static/js/pages/security-audit.js?v=20260917-elevation-gate" defer></script>
+    <!-- 加载 app.js - 使用 defer 异步加载，不阻塞页面渲染 -->
+    <script src="/static/js/navigation.js?v=20260902-adbproxy-state" defer crossorigin="anonymous"></script>
+    <!-- xterm.js 延迟加载（仅终端页面需要）-->
+<script src="/static/js/shell/shell-xterm-loader.js"></script>
+    <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
+<script src="/static/js/shell/shell-early-boot.js"></script>
+    <style>
+        .btn-xs { padding: 4px 10px; font-size: 11px; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 3px; color: var(--text-primary); cursor: pointer; transition: all 0.2s; font-weight: 500; }
+        .btn-xs:hover { background: var(--border-color); transform: translateY(-1px); }
+        .terminal-status.connected { background: rgba(76, 175, 80, 0.2); color: var(--success-color); }
+        .terminal-status.connecting { background: rgba(255, 193, 7, 0.2); color: var(--warning-color); }
+        .terminal-status.disconnected { background: rgba(244, 67, 54, 0.2); color: var(--danger-color); }
+        .sidebar-brand { cursor: pointer; user-select: none; }
+        .sidebar-brand:focus { outline: 2px solid var(--primary-color); outline-offset: 3px; border-radius: 4px; }
+        .cluster-mode-toggle { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 8px; padding: 6px 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+        .cluster-mode-toggle:hover { border-color: var(--primary-color); }
+        .cluster-mode-toggle .mode-label { font-size: 11px; color: var(--text-secondary); }
+        .cluster-mode-toggle .mode-switch { position: relative; width: 36px; height: 18px; background: var(--border-color); border-radius: 9px; transition: background 0.2s; flex-shrink: 0; }
+        .cluster-mode-toggle .mode-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; background: white; border-radius: 50%; transition: transform 0.2s; }
+        .cluster-mode-toggle.active .mode-switch { background: var(--primary-color); }
+        .cluster-mode-toggle.active .mode-switch::after { transform: translateX(18px); }
+        .cluster-mode-toggle .mode-text { font-size: 11px; font-weight: 600; }
+        #sidebar-visibility-modal .modal-content { width: 96vw; max-width: 1500px; height: 92vh; max-height: 92vh; }
+        #sidebar-visibility-modal .modal-body { overflow: hidden; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+        .sidebar-settings-tabs { display: flex; gap: 6px; padding: 4px; border-radius: 8px; background: var(--darker-bg); flex-shrink: 0; }
+        .sidebar-settings-tab { flex: 1; padding: 9px 14px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-secondary); font-weight: 600; cursor: pointer; }
+        .sidebar-settings-tab:hover { color: var(--text-primary); border-color: var(--border-color); }
+        .sidebar-settings-tab.active { color: white; background: var(--primary-color); }
+        .sidebar-settings-panel { min-height: 0; flex: 1; }
+        .sidebar-settings-panel[hidden] { display: none !important; }
+        #sidebar-settings-panel-visibility { display: flex; flex-direction: column; min-height: 0; }
+        .sidebar-visibility-list { display: grid; gap: 8px; min-height: 0; overflow-y: auto; padding-right: 4px; flex: 1; }
+        .sidebar-visibility-option { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); cursor: pointer; }
+        .sidebar-visibility-option input { margin: 0; }
+        .sidebar-visibility-option .sidebar-icon { width: 22px; display: inline-flex; justify-content: center; }
+        .sidebar-visibility-option .sidebar-text { flex: 0 0 106px; min-width: 0; white-space: nowrap; }
+        .sidebar-visibility-option .sidebar-description { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: 11px; line-height: 1.45; font-weight: 400; }
+        body.workspace-scope-single #page-desktop .host-workspace-layouts,
+        body.workspace-scope-single #page-terminal .host-workspace-layouts,
+        body.workspace-scope-single [data-multi-host-control],
+        body.workspace-scope-pending [data-multi-host-control],
+        body.workspace-scope-single #page-devices [data-cluster-mode-only] { display: none !important; }
+        body.workspace-scope-single #page-desktop .host-workspace-pane-header,
+        body.workspace-scope-single #page-terminal .host-workspace-pane-header { display: none !important; }
+        .host-workspace-single-bar { display: none; }
+        body.workspace-scope-single .host-workspace-single-bar { display: flex; align-items: center; gap: 6px; }
+        .host-workspace-mode-pending { display: none; }
+        /* 与其他页面标题保持相同的 6px 内容间距。标题行保留 24px 供右侧
+           按钮（page-title-actions）使用；左侧标题文字保持顶部对齐
+           （line-height 1.6，字形不进 24px 行盒垂直居中——那会整体下沉
+           约 2px），但盒子本身 align-self: stretch 撑满行高，使
+           "标题盒底 → 内容顶"的间距仍是 margin-bottom 的 6px
+           （runtime UI smoke 的 titleToContent 契约）。stretch 只改变
+           盒高，字形仍渲染在盒顶，与 69f91b0 的防下沉意图一致。 */
+        .host-workspace-title-row { position: relative; min-height: 24px; margin-bottom: 6px; display: flex; align-items: flex-start; }
+        .main-container > #page-desktop.page-content,
+        .main-container > #page-terminal.page-content { --page-body-frame-top: 45px; }
+        @media (max-width: 600px) {
+            .main-container > #page-desktop.page-content,
+            .main-container > #page-terminal.page-content { --page-body-frame-top: 38px; }
+        }
+        .host-workspace-title-row > .section-title { height: auto; min-height: 19px; line-height: 1.6; align-self: stretch; }
+        .host-workspace-title-state { height: 24px; align-items: center; }
+        .host-workspace-title-state > .host-workspace-pane-status {
+            flex: 0 0 150px;
+            width: 150px;
+            max-width: 150px;
+            height: 24px;
+            margin-left: 0;
+            line-height: 24px;
+            text-align: right;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .host-workspace-title-state > .btn-xs {
+            flex: 0 0 auto;
+            min-height: 24px;
+        }
+        .host-workspace-mode-pending.host-workspace-title-state::after {
+            content: "";
+            flex: 0 0 24px;
+            width: 24px;
+            height: 24px;
+        }
+        .host-workspace-refresh-btn.btn-xs {
+            width: 24px;
+            min-width: 24px;
+            height: 24px;
+            min-height: 24px;
+            padding: 0;
+            border: 0;
+            border-radius: 4px;
+            background: transparent;
+            box-shadow: none;
+            transform: none;
+        }
+        .host-workspace-refresh-btn.btn-xs:hover,
+        .host-workspace-refresh-btn.btn-xs:focus-visible {
+            border: 0;
+            background: var(--lighter-bg);
+            box-shadow: none;
+            transform: none;
+        }
+        /* 单机模式使用公共页面外框；集群卡片统一内缩，避免与公共外框叠线。 */
+        body.workspace-scope-single #page-desktop .host-workspace-pane,
+        body.workspace-scope-single #page-terminal .host-workspace-pane {
+            border: 0;
+        }
+        body.workspace-scope-cluster #page-desktop .host-workspace-grid,
+        body.workspace-scope-cluster #page-terminal .host-workspace-grid {
+            padding: 8px;
+        }
+        body.workspace-scope-cluster #page-desktop .host-workspace-pane-header,
+        body.workspace-scope-cluster #page-terminal .host-workspace-pane-header {
+            min-height: 28px;
+            padding: 2px 4px;
+            gap: 4px;
+        }
+        body.workspace-scope-cluster #page-desktop .host-workspace-pane-header select,
+        body.workspace-scope-cluster #page-terminal .host-workspace-pane-header select {
+            height: 24px;
+            padding: 1px 4px;
+        }
+        body.workspace-scope-cluster #page-desktop .host-workspace-pane-header .btn-xs,
+        body.workspace-scope-cluster #page-terminal .host-workspace-pane-header .btn-xs {
+            height: 24px;
+            min-height: 24px;
+            /* Single-glyph buttons (⛶ ▦ ×) measured 19.8–21.5px wide
+               with the old 1px 6px padding; enforce the 24×24 pointer-target
+               minimum the geometry tests require. */
+            min-width: 24px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+        body.workspace-scope-cluster #page-desktop .host-workspace-pane-header .host-workspace-refresh-btn,
+        body.workspace-scope-cluster #page-terminal .host-workspace-pane-header .host-workspace-refresh-btn {
+            width: 24px;
+            min-width: 24px;
+        }
+        body.workspace-scope-pending .host-workspace-mode-pending,
+        #page-desktop:not(.host-workspace-ready) .host-workspace-mode-pending,
+        #page-terminal:not(.host-workspace-ready) .host-workspace-mode-pending { display: flex; align-items: center; gap: 6px; }
+        body.workspace-scope-pending #page-desktop .host-workspace-layouts,
+        body.workspace-scope-pending #page-terminal .host-workspace-layouts,
+        body.workspace-scope-pending .host-workspace-single-bar,
+        #page-desktop:not(.host-workspace-ready) .host-workspace-layouts,
+        #page-terminal:not(.host-workspace-ready) .host-workspace-layouts,
+        #page-desktop:not(.host-workspace-ready) .host-workspace-single-bar,
+        #page-terminal:not(.host-workspace-ready) .host-workspace-single-bar { display: none !important; }
+        body.workspace-scope-pending #host-workspace-grid,
+        body.workspace-scope-pending #terminal-workspace-grid,
+        #page-desktop:not(.host-workspace-ready) #host-workspace-grid,
+        #page-terminal:not(.host-workspace-ready) #terminal-workspace-grid { visibility: hidden; }
+        .reports-host-filter { min-width: 190px; justify-content: flex-end; }
+        .project-guide { overflow-y: auto; padding: 0 4px 4px 0; color: var(--text-primary); }
+        .project-guide-hero { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 18px; border: 1px solid rgba(102,126,234,0.45); border-radius: 10px; background: linear-gradient(135deg, rgba(102,126,234,0.18), rgba(118,75,162,0.10)); }
+        .project-guide-hero h3 { margin: 0 0 5px; font-size: 18px; }
+        .project-guide-hero p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+        .project-guide-url { display: inline-flex; align-items: center; white-space: nowrap; padding: 8px 12px; border: 1px solid var(--primary-color); border-radius: 6px; color: var(--primary-color); text-decoration: none; font-family: monospace; font-size: 12px; }
+        .project-guide-url:hover { background: rgba(102,126,234,0.12); }
+        .project-guide-section { margin-top: 16px; }
+        .project-guide-section h4 { margin: 0 0 9px; font-size: 14px; }
+        .project-guide-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; counter-reset: guide-step; }
+        .project-guide-steps li { position: relative; min-height: 72px; padding: 10px 10px 10px 38px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg); font-size: 11px; line-height: 1.55; color: var(--text-secondary); counter-increment: guide-step; }
+        .project-guide-steps li::before { content: counter(guide-step); position: absolute; top: 10px; left: 10px; width: 20px; height: 20px; border-radius: 50%; background: var(--primary-color); color: #fff; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+        .project-guide-steps strong { display: block; color: var(--text-primary); font-size: 12px; margin-bottom: 2px; }
+        .project-guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .project-guide-card { padding: 12px 14px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg); }
+        .project-guide-card h5 { margin: 0 0 7px; font-size: 13px; }
+        .project-guide-card p { margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.7; }
+        .project-guide-flow { color: var(--text-primary); font-weight: 600; }
+        .project-guide-map { width: 100%; border-collapse: collapse; font-size: 11px; }
+        .project-guide-map th, .project-guide-map td { padding: 8px 10px; border: 1px solid var(--border-color); text-align: left; vertical-align: top; }
+        .project-guide-map th { width: 25%; color: var(--text-primary); background: var(--darker-bg); }
+        .project-guide-map td { color: var(--text-secondary); }
+        .project-guide-notice { margin-top: 10px; padding: 10px 12px; border-left: 3px solid #f59e0b; border-radius: 4px; background: rgba(245,158,11,0.10); color: var(--text-secondary); font-size: 11px; line-height: 1.65; }
+        .project-guide-gallery { display: grid; grid-template-columns: 1fr; gap: 12px; }
+        .project-guide-example { min-width: 0; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--darker-bg); display: flex; flex-direction: column; gap: 6px; }
+        .project-guide-example-header { order: 1; display: flex; align-items: baseline; gap: 8px; margin: 3px 2px 4px; min-width: 0; }
+        .project-guide-example h5 { margin: 0; font-size: 13px; flex-shrink: 0; }
+        .project-guide-example p { margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+        .project-guide-example .project-guide-image-button { order: 2; }        .project-guide-image-button { position: relative; width: 100%; padding: 0; overflow: hidden; border: 1px solid var(--border-color); border-radius: 6px; background: #050508; cursor: zoom-in; }
+        .project-guide-image-button:hover { border-color: var(--primary-color); }
+        .project-guide-image-button img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; object-position: top center; }
+        .project-guide-zoom-hint { position: absolute; right: 7px; bottom: 7px; padding: 4px 7px; border-radius: 4px; color: #fff; background: rgba(0,0,0,0.78); font-size: 10px; pointer-events: none; }
+        #guide-image-modal { z-index: 10050; }
+        #guide-image-modal .modal-content { width: min(1580px, 97vw); max-width: 1580px; height: 94vh; max-height: 94vh; }
+        #guide-image-modal .modal-header { gap: 12px; }
+        .guide-image-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+        #guide-image-modal .modal-body { display: flex; flex-direction: column; gap: 8px; padding: 12px; overflow: hidden; }
+        .guide-image-viewport { flex: 1; min-height: 0; overflow: auto; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-color); border-radius: 6px; background: #050508; }
+        .guide-image-viewport.actual-size { align-items: flex-start; justify-content: flex-start; }
+        #guide-image-preview { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; cursor: zoom-in; }
+        #guide-image-preview.actual-size { max-width: none; max-height: none; align-self: flex-start; cursor: zoom-out; }
+        #guide-image-caption { color: var(--text-secondary); font-size: 11px; line-height: 1.5; text-align: center; flex-shrink: 0; }
+        @media (max-width: 760px) {
+            #sidebar-visibility-modal .modal-content { width: calc(100vw - 20px); height: calc(100vh - 20px); max-height: none; }
+            .project-guide-hero { align-items: flex-start; flex-direction: column; }
+            .project-guide-url { white-space: normal; }
+            .project-guide-steps, .project-guide-grid, .project-guide-gallery { grid-template-columns: 1fr; }
+            .project-guide-example h5 { margin-top: 0; }
+            #guide-image-modal .modal-content { width: calc(100vw - 12px); height: calc(100vh - 12px); max-height: none; }
+            #guide-image-modal .modal-header { padding: 10px 12px; }
+        }
+        #terminal { width: 100%; height: 100%; }
+        .host-input-group { display: flex; gap: 8px; align-items: center; }
+        .host-input { flex: 1; padding: 10px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--darker-bg); color: var(--text-primary); font-size: 15px; font-family: monospace; }
+        .host-input:focus { outline: none; border-color: var(--primary-color); }
+        .host-input::placeholder { color: var(--text-secondary); }
+        .filter-btn { padding: 6px 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); color: var(--text-primary); font-size: 12px; cursor: pointer; transition: all 0.2s; }
+        .filter-btn:hover { background: var(--darker-bg); border-color: var(--primary-color); }
+        .filter-btn.active { background: var(--primary-color); color: white; border-color: var(--primary-color); }
+        /* 弹框居中样式 - 通用 */
+        .modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: var(--modal-z-index, 10000); padding: clamp(8px, 2.5vw, 20px); box-sizing: border-box; overflow: hidden; overscroll-behavior: contain; }
+        #usage-examples-modal .modal-content { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); width: min(760px, 96vw); max-width: min(760px, 96vw); height: min(560px, 72vh); overflow: hidden; display: flex; flex-direction: column; }
+        #usage-examples-modal .modal-header { background: linear-gradient(135deg, #667eea, #764ba2); border-bottom: 1px solid var(--border-color); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
+        #usage-examples-modal .modal-title { color: #fff; font-size: 16px; font-weight: 600; }
+        #usage-examples-modal .modal-close { color: #fff; font-size: 24px; cursor: pointer; line-height: 1; }
+        #usage-examples-modal .modal-close:hover { color: #ccc; }
+        #usage-examples-modal .modal-body { padding: 20px; overflow-y: auto; background: var(--card-bg); }
+        #usage-examples-modal.modal.show { display: flex !important; }
+        /* 系统配置：渐变标题栏与统一标准对齐 */
+        #config-modal .modal-header { background: linear-gradient(135deg, #667eea, #764ba2); border-bottom: 1px solid var(--border-color); }
+        #config-modal .modal-title, #config-modal .modal-close { color: #fff; }
+        #page-architecture .architecture-container { background: transparent; border-radius: 8px; border: 0; padding: 0; flex: 1; min-height: 0; overflow: hidden; }
+        #page-architecture .architecture-container iframe { width: 100%; height: 100%; display: block; border: none; border-radius: 7px; background: #020617; }
+    </style>
+</head>

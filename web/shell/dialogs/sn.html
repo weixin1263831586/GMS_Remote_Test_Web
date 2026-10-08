@@ -1,0 +1,21 @@
+<div id="sn-modal" class="modal">
+        <div class="modal-content modal-s">
+            <div class="modal-header">
+                <span class="modal-title">烧写SN码</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeSnModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-row">
+                    <label>SN 码:</label>
+                    <input type="text" id="sn-code" placeholder="请输入SN码" />
+                </div>
+                <div class="modal-info-text">
+                    ⚠️ 该功能需要在 loader 模式下烧写 SN 码到设备。
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" data-click="closeSnModal">取消</button>
+                    <button class="btn-xxs btn-primary" data-click="submitSnBurn">开始烧写</button>
+                </div>
+            </div>
+        </div>
+    </div>

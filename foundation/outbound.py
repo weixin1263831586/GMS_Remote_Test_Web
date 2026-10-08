@@ -7,6 +7,8 @@ import socket
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+from aiohttp.abc import AbstractResolver, ResolveResult
+
 
 class UnsafeOutboundURLError(ValueError):
     """Raised when an outbound URL could reach an untrusted network target."""
@@ -22,6 +24,30 @@ class ResolvedOutboundTarget:
     hostname: str
     port: int
     addresses: tuple[str, ...]
+
+
+class PinnedOutboundResolver(AbstractResolver):
+    """Connect only to validated addresses, retaining the URL's Host and TLS name."""
+
+    def __init__(self, target: ResolvedOutboundTarget):
+        self.target = target
+
+    async def resolve(self, host: str, port: int = 0, family: int = socket.AF_INET):
+        actual_host = normalized_hostname(host).encode("idna").decode("ascii")
+        expected_host = self.target.hostname.encode("idna").decode("ascii")
+        if actual_host != expected_host or port != self.target.port:
+            raise UnsafeOutboundURL("Outbound connection differs from the validated target")
+        return [
+            ResolveResult(
+                hostname=host, host=address, port=port,
+                family=socket.AF_INET6 if ":" in address else socket.AF_INET,
+                proto=socket.IPPROTO_TCP, flags=socket.AI_NUMERICHOST,
+            )
+            for address in self.target.addresses
+        ]
+
+    async def close(self) -> None:
+        return None
 
 
 def normalized_hostname(value: str) -> str:
@@ -99,9 +125,10 @@ def validate_outbound_url(
 ) -> str:
     """Allow HTTP(S) URLs whose resolved addresses are public or pre-authorized.
 
-    Private destinations are allowed only by exact hostname. The validation is
-    repeated immediately before each request and redirects are disabled by
-    callers, preventing a redirect from changing the trust boundary.
+    Private destinations are allowed only by exact hostname. This helper
+    validates a URL but does not pin a subsequent HTTP connection. Callers
+    must also disable redirects and use resolve_outbound_target with a pinned
+    resolver when the HTTP client would otherwise resolve the hostname again.
     """
 
     text = str(url or "").strip()

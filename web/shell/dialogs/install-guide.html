@@ -1,0 +1,39 @@
+<div id="install-guide-modal" class="modal">
+        <div class="modal-content modal-m">
+            <div class="modal-header">
+                <span class="modal-title">⚠️ usbipd 安装指南</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeInstallGuide">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-info-text" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin-bottom: 15px; border-radius: 3px; color: #856404;">
+                    📋 检测到 Windows 主机缺少必要组件，需要安装 usbipd
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <div style="font-weight: 600; margin-bottom: 10px; color: var(--text-primary);">🔧 手动安装步骤：</div>
+                    <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 3px; padding: 10px;">
+                        <ol style="margin: 0; padding-left: 20px; color: var(--text-secondary); line-height: 1.8;">
+                            <li>在 Windows 电脑上以<strong style="color: var(--danger-color);">【管理员身份】</strong>打开 PowerShell</li>
+                            <li>安装命令：<code style="background: var(--bg-color); padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', monospace; color: var(--primary-color);">winget install dorssel.usbipd-win --source winget</code></li>
+                            <li>查看版本：<code style="background: var(--bg-color); padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', monospace; color: var(--primary-color);">usbipd --version</code></li>
+
+                            <li>卸载命令：<code style="background: var(--bg-color); padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', monospace; color: var(--primary-color);">winget uninstall usbipd</code></li>
+                        </ol>
+                    </div>
+                </div>
+
+                <div id="install-progress" style="display: none; margin-bottom: 15px;">
+                    <div style="font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">⏳ 正在自动安装...</div>
+                    <div style="background: var(--border-color); border-radius: 3px; height: 6px; overflow: hidden;">
+                        <div id="install-progress-bar" style="background: var(--primary-color); height: 100%; width: 0%; transition: width 0.3s;"></div>
+                    </div>
+                    <div id="install-status" style="margin-top: 4px; font-size: 15px; color: var(--text-secondary);">准备安装...</div>
+                </div>
+
+                <div class="modal-buttons">
+                    <button class="btn-xxs" data-click="closeInstallGuide">关闭</button>
+                    <button class="btn-xxs btn-primary" data-click="autoInstallUsbipd">🚀 一键自动安装</button>
+                </div>
+            </div>
+        </div>
+    </div>

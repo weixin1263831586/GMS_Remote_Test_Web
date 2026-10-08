@@ -1,0 +1,41 @@
+<div id="tailscale-info-modal" class="modal">
+        <div class="modal-content modal-s">
+            <div class="modal-header">
+                <span class="modal-title">🌐 Tailscale 组网</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeTailscaleInfoModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-row" style="align-items:center">
+                    <label style="min-width:90px;white-space:nowrap;flex-shrink:0">公网访问地址:</label>
+                    <input type="text" id="tailscale-url-display" readonly placeholder="正在检查..." />
+                    <button class="btn-small" data-click="copyTailscaleAccessUrl">复制</button>
+                </div>
+                <div class="modal-form-row" style="align-items:center">
+                    <label style="min-width:90px;white-space:nowrap;flex-shrink:0">Ubuntu安装:</label>
+                    <input type="text" readonly value="curl -fsSL https://tailscale.com/install.sh | sh" />
+                    <button class="btn-small" data-click="copyTailscaleInstallCmd">复制</button>
+                </div>
+                <div class="modal-form-row" style="align-items:center">
+                    <label style="min-width:90px;white-space:nowrap;flex-shrink:0">Windows程序:</label>
+                    <input type="text" readonly value="https://tailscale.com/download/windows" />
+                    <button class="btn-small" data-click="_actOpenUrlBlank" data-a0="https://tailscale.com/download/windows">打开</button>
+                </div>
+                <div class="modal-form-row" style="align-items:center">
+                    <label style="min-width:90px;white-space:nowrap;flex-shrink:0">macOS程序:</label>
+                    <input type="text" readonly value="https://tailscale.com/download/mac" />
+                    <button class="btn-small" data-click="_actOpenUrlBlank" data-a0="https://tailscale.com/download/mac">打开</button>
+                </div>
+                <div class="modal-form-row" style="align-items:center">
+                    <label style="min-width:90px;white-space:nowrap;flex-shrink:0">Android应用:</label>
+                    <input type="text" readonly value="https://tailscale.com/download/android" />
+                    <button class="btn-small" data-click="_actOpenUrlBlank" data-a0="https://tailscale.com/download/android">打开</button>
+                </div>
+                <div class="modal-info-text">
+                    ℹ️ 点击打开弹框时自动检测并启动 Tailscale。Ubuntu/Windows/macOS/Android 需安装 Tailscale 并登录同一账号。
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" data-click="closeTailscaleInfoModal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>

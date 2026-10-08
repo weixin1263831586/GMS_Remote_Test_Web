@@ -1,0 +1,21 @@
+<div id="gms-assistant-config-modal" class="modal">
+        <div class="modal-content modal-s">
+            <div class="modal-header">
+                <span class="modal-title">GMS助手配置</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseModal" data-a0="gms-assistant-config-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-row" style="display:block;">
+                    <label for="gms-assistant-url" style="display:block;margin-bottom:6px;">助手服务地址:</label>
+                    <input type="url" id="gms-assistant-url" style="width:100%;box-sizing:border-box;" placeholder="例如：https://gms-assistant.example.com" autocomplete="off" />
+                </div>
+                <div class="modal-info-text">
+                    请输入助手服务的完整 http(s) 地址；留空表示暂不配置。保存后会重新加载助手页面。
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" type="button" data-click="_actCloseModal" data-a0="gms-assistant-config-modal">取消</button>
+                    <button class="btn-xxs btn-primary" type="button" data-click="saveGmsAssistantConfig">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>

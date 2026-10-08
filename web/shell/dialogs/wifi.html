@@ -1,0 +1,24 @@
+<div id="wifi-modal" class="modal">
+        <div class="modal-content modal-s">
+            <div class="modal-header">
+                <span class="modal-title">连接Wi-Fi</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeWifiModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="wifi-form" data-submit="submitWifiConfig" data-prevent autocomplete="off">
+                <div class="modal-form-row">
+                    <label>Wi-Fi 名称:</label>
+                    <input type="text" id="wifi-ssid" data-modal-initial-focus placeholder="留空使用 config.wifi.ssid" autocomplete="off" />
+                </div>
+                <div class="modal-form-row">
+                    <label>Wi-Fi 密码:</label>
+                    <input type="text" id="wifi-password" placeholder="请输入 Wi-Fi 密码" autocomplete="off" />
+                </div>
+                <div class="modal-buttons">
+                    <button type="button" class="btn-xxs" data-click="closeWifiModal">取消</button>
+                    <button type="submit" class="btn-xxs btn-primary">连接</button>
+                </div>
+                </form>
+            </div>
+        </div>
+    </div>

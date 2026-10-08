@@ -1,0 +1,25 @@
+<div id="firmware-modal" class="modal">
+        <div class="modal-content modal-s">
+            <div class="modal-header">
+                <span class="modal-title">烧写固件</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="closeFirmwareModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-row">
+                    <label>固件文件:</label>
+                    <div class="input-with-btn">
+                        <input type="text" id="firmware-path" placeholder="选择本机文件或输入服务器固件路径" />
+                        <button class="btn-small" data-click="browseLocalFileForFirmware">本机</button>
+                        <button class="btn-small" data-click="browseRemoteFileForFirmware">服务器</button>
+                    </div>
+                </div>
+                <div class="modal-info-text">
+                    ⚠️ 注意：烧写固件会重启设备并进入 fastboot 模式，请确保已选择正确的设备。
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" data-click="closeFirmwareModal">取消</button>
+                    <button class="btn-xxs btn-primary" data-click="submitFirmwareBurn">开始烧写</button>
+                </div>
+            </div>
+        </div>
+    </div>

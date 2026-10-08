@@ -5,11 +5,14 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from features.auth import (
     CurrentUser,
     authentication_required,
+    ensure_agent_device_allowed,
+    ensure_agent_worker_allowed,
     get_authenticated_user,
     require_authenticated_user,
     require_permission_when_auth_required,
 )
 from features.users import owner_id_from_request
+from foundation.error_model import ApiError
 from foundation.job_env import filter_job_env
 
 from .api import _authenticate, _require_cluster_enabled, service
@@ -18,6 +21,7 @@ from .execution_spec import (
     build_default_argv,
     canonicalize_execution_spec,
 )
+from .job_requests import request_fingerprint
 from .models import ClusterJobCreate, JobEventBatch
 
 
@@ -127,7 +131,41 @@ def create_job(
     _actor: CurrentUser | None = Depends(
         require_permission_when_auth_required("tests.execute")
     ),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
+    repository = service().repository
+    owner_id = _request_owner_id(request)
+    fingerprint = request_fingerprint(body.model_dump(exclude={"owner_id"}))
+    try:
+        with repository.job_request_guard(owner_id, idempotency_key):
+            if idempotency_key is not None:
+                existing = repository.find_job_request(owner_id, idempotency_key, fingerprint)
+                if existing is not None:
+                    return _replay_job_request(request, existing)
+            return _create_job(body, request, {
+                "_idempotency_key": idempotency_key, "_request_hash": fingerprint,
+            })
+    except ApiError as exc:
+        return exc.to_response()
+
+
+def _replay_job_request(request: Request, job: dict) -> dict:
+    ensure_agent_worker_allowed(request, job["assigned_worker_id"])
+    data = job.get("request") or {}
+    for device_id in data.get("devices") or []:
+        ensure_agent_device_allowed(request, device_id)
+        prefix = f"{job['assigned_worker_id']}:"
+        if device_id.startswith(prefix):
+            ensure_agent_device_allowed(request, device_id[len(prefix):])
+    repository = service().repository
+    command = repository.replay_job_command(job)
+    return {
+        "success": True, "job": _job_response(repository.get_job(job["id"]) or job),
+        "command": command,
+    }
+
+
+def _create_job(body: ClusterJobCreate, request: Request, receipt: dict):
     # argv 是服务端从 execution_spec 派生的数据，不是浏览器可提交的输入；
     # 接受 raw argv 会让 ExecutionSpec 校验（test_type/suite/设备绑定）被绕过。
     if body.argv:
@@ -144,7 +182,7 @@ def create_job(
         and not service().has_command_agent(local_worker_id)
     ):
         raise HTTPException(503, "local Worker Agent is offline")
-    data = body.model_dump()
+    data = {**body.model_dump(), **receipt}
     data["trace_id"] = str(getattr(request.state, "trace_id", "") or "")
     # job env 到达 Worker 后会进入 Bash 启动环境，未列入白名单的键
     # （BASH_ENV/ENV/SHELLOPTS/解释器搜索路径等）可扩大 Worker OS 执行能力，

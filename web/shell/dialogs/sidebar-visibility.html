@@ -1,0 +1,212 @@
+<div id="sidebar-visibility-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <span class="modal-title">导航设置与使用帮助</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeSidebarVisibilityModal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="sidebar-settings-tabs" role="tablist" aria-label="导航设置与项目帮助">
+                        <button type="button" class="sidebar-settings-tab active" data-sidebar-settings-tab="visibility" role="tab" aria-selected="true" aria-controls="sidebar-settings-panel-visibility" data-click="switchSidebarSettingsTab" data-a0="visibility">导航显示设置</button>
+                        <button type="button" class="sidebar-settings-tab" data-sidebar-settings-tab="guide" role="tab" aria-selected="false" aria-controls="sidebar-settings-panel-guide" data-click="switchSidebarSettingsTab" data-a0="guide">📘 项目操作指导</button>
+                    </div>
+                    <section id="sidebar-settings-panel-visibility" class="sidebar-settings-panel" data-sidebar-settings-panel="visibility" role="tabpanel">
+                        <div id="cluster-mode-toggle-row" class="cluster-mode-toggle" style="margin: 0 0 12px;" data-click="toggleClusterMode">
+                            <span id="cluster-mode-label" class="mode-label">单机模式</span>
+                            <span id="cluster-mode-btn" class="mode-switch"></span>
+                        </div>
+                        <div id="sidebar-visibility-list" class="sidebar-visibility-list"></div>
+                        <div class="modal-info-text" style="margin-top: 12px;">至少保留一个页面可见；左侧导航可拖拽调整顺序。</div>
+                        <div class="modal-buttons">
+                            <button type="button" class="btn-xxs" data-click="selectAllSidebarVisibility">全选</button>
+                            <button type="button" class="btn-xxs" data-click="closeSidebarVisibilityModal">取消</button>
+                            <button type="button" class="btn-xxs btn-primary" data-click="saveSidebarVisibilityFromModal">保存</button>
+                        </div>
+                    </section>
+                    <section id="sidebar-settings-panel-guide" class="sidebar-settings-panel project-guide" data-sidebar-settings-panel="guide" role="tabpanel" hidden>
+                        <div class="project-guide-hero">
+                            <div>
+                                <h3>GMS Remote Test 快速操作指南</h3>
+                                <p>先确定测试主机和设备，再执行测试或固件烧写；运行过程分别在测试日志和系统日志中查看。</p>
+                            </div>
+                            <a id="project-guide-url" class="project-guide-url" href="/" target="_blank" rel="noopener noreferrer">当前访问地址 ↗</a>
+                        </div>
+
+                        <div class="project-guide-section">
+                            <h4>5 步快速开始测试</h4>
+                            <ol class="project-guide-steps">
+                                <li><strong>登录并选工作区</strong>单机工作区选择本地 Worker；集群工作区选择远端 Worker。该选择仅属于当前用户，不会切换整个服务。</li>
+                                <li><strong>选择执行环境</strong>在“测试界面”先选 Worker、测试套件和可用设备。</li>
+                                <li><strong>设置测试范围</strong>按需选择测试模块、测试用例或retry报告等任务；留空则执行套件默认范围。</li>
+                                <li><strong>开始测试</strong>确认参数后点击“开始测试”，页面自动切到“测试日志”。</li>
+                                <li><strong>处理本次报告</strong>完成后进入“报告管理”，按 Worker、用户和时间戳确认报告，可分析、Retry、下载或查看 results/logs。</li>
+                            </ol>
+                        </div>
+
+                        <div class="project-guide-section">
+                            <h4>常用操作流程</h4>
+                            <div class="project-guide-grid">
+                                <article class="project-guide-card">
+                                    <h5>🤖 手动测试</h5>
+                                    <p><span class="project-guide-flow">测试类型 → 套件 → Worker → 可用设备 → 测试模块/测试用例 → 开始测试</span><br>设备显示“占用/锁定”时不可选择；结束后在报告页按 Worker、设备或套件筛选。</p>
+                                </article>
+                                <article class="project-guide-card">
+                                    <h5>📱 设备与烧写</h5>
+                                    <p><span class="project-guide-flow">选设备 → 设备信息 / 系统操作 / 烧写固件 / 烧写 GSI</span><br>设备操作开始后自动切到“系统日志”。烧写前必须复核设备和镜像路径，过程中不要断电或拔线。</p>
+                                </article>
+                                <article class="project-guide-card">
+                                    <h5>⚙️ GMS ATS 自动化</h5>
+                                    <p><span class="project-guide-flow">Profile → 构建参数 → Worker → 设备 → 套件 → 创建运行</span><br>启用构建时依次选择编译服务器、模板、源码目录；Lunch Target 只显示当前源码目录扫描结果。运行详情可追踪构建、烧写、测试和报告。</p>
+                                </article>
+                                <article class="project-guide-card">
+                                    <h5>🖥️ 远程主机与集群</h5>
+                                    <p><span class="project-guide-flow">主机集群 → 确认 Worker 在线 → 返回业务页选择 Worker</span><br>主机桌面、主机终端、设备与套件会跟随当前工作区 Worker；刷新期间保留已显示内容，只在新数据齐备后更新。</p>
+                                </article>
+                                <article class="project-guide-card">
+                                    <h5>🔌 ADB / USB/IP 接入</h5>
+                                    <p><span class="project-guide-flow">选择来源 → 选择目标 Worker → 选择设备/BUSID → 核对当前接入</span><br>ADB Proxy 适合 ADB/测试，不支持 Fastboot/烧写；USB/IP 提供物理 USB 通道。测试占用期间禁止断开，重复操作会被服务端拒绝。</p>
+                                </article>
+                                <article class="project-guide-card">
+                                    <h5>💬 对话 Agent</h5>
+                                    <p><span class="project-guide-flow">输入意图 → 查看计划 → 人工确认 → 跟踪步骤</span><br>Agent 是确定性工具编排器，不会无人值守接管项目或任意执行代码。本地/备用模型仅用于报告和知识分析，状态在步骤区单独显示。</p>
+                                </article>
+                                <article class="project-guide-card">
+                                    <h5>📦 上传与恢复</h5>
+                                    <p><span class="project-guide-flow">选择文件 → 分块暂存 → 校验 → 执行/分析</span><br>固件先完成可恢复的分块暂存，再进入不可中断烧写；APK 最近任务可恢复，报告页始终以最后一次选择为准。</p>
+                                </article>
+                            </div>
+                        </div>
+
+                        <div class="project-guide-section">
+                            <h4>功能入口速查</h4>
+                            <table class="project-guide-map">
+                                <tbody>
+                                    <tr><th>测试界面</th><td>配置并执行 CTS / GTS / VTS / STS；查看系统日志与测试日志。</td><th>设备管理</th><td>查看设备状态、占用关系和远端设备操作入口。</td></tr>
+                                    <tr><th>设备串口</th><td>查看 Controller 本机 USB 串口、实时控制台和开机早期日志。</td><th>主机桌面 / 终端</th><td>通过 noVNC 或终端操作当前 Worker 主机。</td></tr>
+                                    <tr><th>测试套件</th><td>下载、添加、解压并检查不同 Worker 上的套件。</td><th>报告管理 / 分析</th><td>检索、下载测试报告，并汇总失败项和趋势。</td></tr>
+                                    <tr><th>GMS ATS</th><td>编排构建、设备预留、烧写、测试与报告全流程。</td><th>主机集群</th><td>查看 Worker 在线状态、能力和任务分配；刷新时保留稳定内容。</td></tr>
+                                    <tr><th>ADB / USB/IP</th><td>在“本地设备/ADB接入”中管理来源、目标、设备与逐端口接入。</td><th>APK / Agent</th><td>恢复 APK 历史任务；以受控计划执行 Agent 支持的查询和操作。</td></tr>
+                                    <tr><th>其他工具</th><td>GMS 助手、Gerrit、Redmine和知识库用于分析与协作。</td><th></th><td></td></tr>
+                                </tbody>
+                            </table>
+                            <div class="project-guide-notice"><strong>安全与日志：</strong>“开始测试”进入测试日志；烧写固件、烧写 GSI、设备信息和其他设备操作进入系统日志。固件上传暂存阶段可重试，进入最终烧写后不可强制停止；异常时保留日志和任务编号。ADB Proxy/USB/IP 断开会核对设备占用，不能用来绕过租约。</div>
+                        </div>
+
+                        <div class="project-guide-section">
+                            <h4>图片操作实例 <span style="font-weight: normal; color: var(--text-secondary); font-size: 10px;">点击图片可放大，放大后可切换 1:1 原图</span></h4>
+                            <div class="project-guide-gallery">
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="测试实例：类型、套件、模块与用例" data-guide-caption="先确认测试主机并选择测试类型，系统会自动匹配该 Worker 最新同类套件；确认套件后再填写模块和用例。" data-click="openGuideImageLightbox" data-r0="el">
+                                        <img src="/static/images/guide/test-parameters.png" alt="测试实例标注：测试类型自动匹配套件、测试模块、测试用例、重试报告和测试主机" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>① 测试实例</h5>
+                                        <p>标注测试类型自动匹配套件，以及测试模块、测试用例、Retry 报告和执行 Worker 的填写规则。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="设备投屏：在主机桌面查看" data-guide-caption="选择 Available 设备并点击“设备投屏”；成功后页面自动进入主机桌面，scrcpy 窗口显示在远程桌面中。" data-click="openGuideImageLightbox" data-r0="el">
+                                        <img src="/static/images/guide/device-screen.png" alt="设备投屏标注：选择设备、设备投屏按钮、主机桌面入口和系统日志" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>② 设备投屏</h5>
+                                        <p>选择设备后启动 scrcpy，并说明投屏画面入口和 VNC/scrcpy 日志排查位置。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="本地设备：USB/IP 精确接入" data-guide-caption="选择 Windows/Ubuntu 来源、Controller 或远端 Worker 目标及 BUSID；当前接入按端口显示，可单独断开且不会清理同来源其他设备。" data-click="openGuideImageLightbox" data-r0="el">
+                                        <img src="/static/images/guide/usbip-local-device.png" alt="USB/IP 接入标注：Windows/Ubuntu 来源、目标 Worker、BUSID 多选、当前接入和服务端操作保护" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>③ 本地设备 USB/IP</h5>
+                                        <p>明确来源、目标 Worker 和 BUSID；逐端口查看/断开，并说明测试占用与重复操作保护。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="测试完成后：报告管理" data-guide-caption="测试完成后进入报告管理，先按 Worker、用户、类型、套件和时间戳确认本次报告，再选择分析、Retry、下载、删除、results 或 logs。" data-click="openGuideImageLightbox" data-r0="el">
+                                        <img src="/static/images/guide/report-management.png" alt="报告管理标注：报告筛选、分析、Retry、下载、删除、results 和 logs" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>④ 报告管理</h5>
+                                        <p>说明测试结束后的完整处理链路；删除不可恢复，results 与 logs 分别打开对应时间戳目录。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="报告分析：失败定位与复现" data-guide-caption="从报告管理点击“分析”自动加载报告；核对统计后查看失败用例，可回填单测或进入报错诊断。" data-click="openGuideImageLightbox" data-r0="el">
+                                        <img src="/static/images/guide/report-analysis.png" alt="报告分析标注：上传报告、统计、失败用例、单测用例、报错诊断和发送邮件" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>⑤ 报告分析</h5>
+                                        <p>从总体通过率定位到具体失败模块和用例，并继续单测复现、诊断或分享分析结果。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="APK 分析：任务恢复、Manifest、权限与源码" data-guide-caption="可从最近任务恢复刷新前的进度或历史结果；上传 APK/JAR 后核对 Manifest 与权限，再使用搜索和源码浏览定位实现。" data-click="openGuideImageLightbox" data-r0="el">
+                                        <img src="/static/images/guide/apk-analysis.png" alt="APK 分析标注：最近任务恢复、上传、源码下载、Manifest、权限和源码检索" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>⑥ APK 分析</h5>
+                                        <p>覆盖最近任务恢复、文件上传、反编译源码下载、Manifest/权限/源码视图切换和文件检索。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="测试套件：准备与结果目录" data-guide-caption="管理不同 Worker 上的测试套件；下载或添加套件后，可通过结果列表及 results/logs 目录核对运行产物。" data-click="openGuideImageLightbox" data-r0="el">
+                                        <img src="/static/images/guide/test-suites.png" alt="测试套件标注：Worker、下载解压、套件列表、测试结果、本地路径和 results logs" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>⑦ 测试套件</h5>
+                                        <p>明确 Worker、套件、测试任务必须一致，并说明结果列表以及 results/logs 目录关系。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="GMS ATS：创建自动化运行" data-guide-caption="按 Profile、源码目录、Lunch Target、Worker、设备和套件顺序确认参数，再创建运行并跟踪各阶段。" data-click="openGuideImageLightbox" data-r0="el">
+                                        <img src="/static/images/guide/ats-create-run.png" alt="GMS ATS 标注：Profile、源码目录、Lunch Target、Worker 设备和创建运行" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>⑧ GMS ATS</h5>
+                                        <p>重点标出源码目录与 Lunch Target 的绑定关系，以及运行创建后的监控入口。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="设备烧写：高风险操作检查" data-guide-caption="烧写前复核唯一目标设备和镜像路径；过程在系统日志中跟踪，不要断电、拔线或刷新页面。" data-click="openGuideImageLightbox" data-r0="el">
+                                        <img src="/static/images/guide/device-flashing.png" alt="设备烧写标注：目标设备、固件、GSI、系统日志和设备信息" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>⑨ 设备烧写</h5>
+                                        <p>高风险操作单独说明设备核对、固件/GSI 入口、设备信息和系统日志；固件先分块暂存校验，最终烧写阶段才锁定界面。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="对话 Agent：受控计划与模型边界" data-guide-caption="Agent 使用确定性规则将自然语言映射到受支持工具；写操作需要确认。本地/备用模型只用于报告和知识分析，不负责权限绕过或任意项目代码执行。" data-click="openGuideImageLightbox" data-r0="el">
+                                        <img src="/static/images/guide/agent-routing.png" alt="对话 Agent 标注：输入、执行确认、分析模型状态和执行步骤" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>⑩ 对话 Agent</h5>
+                                        <p>说明自然语言计划、人工确认、模型可用性和设备租约/Worker 能力检查之间的边界。</p>
+                                    </div>
+                                </article>
+                                <article class="project-guide-example">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="主机集群：无黑屏稳定刷新" data-guide-caption="刷新时保留当前主机、设备、任务和图表内容；按钮显示忙碌状态，新数据齐备后再原子替换，局部失败不会清空整页。" data-click="openGuideImageLightbox" data-r0="el">
+                                        <img src="/static/images/guide/cluster-refresh.png" alt="主机集群刷新标注：保留摘要、刷新忙碌状态、图表和运行任务" loading="lazy">
+                                        <span class="project-guide-zoom-hint">🔍 点击放大</span>
+                                    </button>
+                                    <div class="project-guide-example-header">
+                                        <h5>⑪ 主机集群刷新</h5>
+                                        <p>展示刷新期间保留稳定页面、阻止重复刷新以及局部接口失败不影响其他区域。</p>
+                                    </div>
+                                </article>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>

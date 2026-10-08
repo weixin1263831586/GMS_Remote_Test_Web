@@ -1,0 +1,17 @@
+<div id="kb-upload-modal" class="modal" style="z-index: 10091;">
+            <div class="modal-content modal-m">
+                <div class="modal-header">
+                    <span class="modal-title">上传文件到知识库</span>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="kbCloseUpload">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-info-text">支持 PDF / TXT / MD / 代码 / DOCX，上传后解析正文并作为当前目录文档。</div>
+                    <div id="kb-upload-drop-zone" role="button" tabindex="0" data-modal-initial-focus style="border:2px dashed var(--border-color);border-radius:8px;padding:24px;text-align:center;cursor:pointer;margin:10px 0;" data-click="_actClickById" data-keydown="_actClickById" data-key="13,32" data-prevent data-a0="kb-upload-input">
+                        <div style="font-size:28px;">📤</div>
+                        <div style="font-size: 13px; margin-top: 6px;">点击选择或拖拽文件到此处</div>
+                        <input type="file" id="kb-upload-input" style="display:none;" data-change="kbHandleFileSelect" data-r0="el" multiple />
+                    </div>
+                    <div id="kb-upload-status" class="modal-info-text" style="min-height:16px;"></div>
+                </div>
+            </div>
+        </div>

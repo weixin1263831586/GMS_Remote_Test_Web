@@ -1,0 +1,35 @@
+<div id="elevate-modal" class="modal">
+        <div class="modal-content modal-s">
+            <div class="modal-header">
+                <span class="modal-title">🔐 管理员验证</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-click="cancelElevate">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="elevate-form" data-submit="submitElevateForm" data-prevent autocomplete="off">
+                    <div class="modal-form-row">
+                        <label>操作:</label>
+                        <input type="text" id="elevate-action-label" readonly value="需要管理员权限" />
+                    </div>
+                    <div class="modal-form-row">
+                        <label>管理员账号:</label>
+                        <input type="text" id="elevate-username" placeholder="管理员账号" autocomplete="username" />
+                    </div>
+                    <div class="modal-form-row">
+                        <label>管理员密码:</label>
+                        <div class="password-input-wrap">
+                            <input type="password" id="elevate-password" placeholder="管理员密码" data-keypress="submitElevateForm" data-key="Enter" data-prevent autocomplete="current-password" />
+                            <button type="button" class="password-visibility-toggle" data-click="togglePasswordVisibility" data-r0="el" aria-label="显示密码" title="显示密码"></button>
+                        </div>
+                    </div>
+                </form>
+                <div class="modal-ssh-info">
+                    <small>该操作需要管理员权限。验证通过后在当前会话期间执行同类操作无需重复输入，会话过期后需重新验证。</small>
+                </div>
+                <div id="elevate-message" class="auth-message" style="color: var(--danger-color); min-height: 16px;"></div>
+                <div class="modal-buttons">
+                    <button class="btn-xxs" data-click="cancelElevate">取消</button>
+                    <button class="btn-xxs btn-primary" data-click="submitElevateForm">提权</button>
+                </div>
+            </div>
+        </div>
+    </div>
