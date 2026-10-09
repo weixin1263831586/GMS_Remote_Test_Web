@@ -20,6 +20,7 @@ class CommandResult:
     stdout: str = ""
     stderr: str = ""
     code: int = 0
+    timed_out: bool = False
 
     @property
     def output(self) -> str:

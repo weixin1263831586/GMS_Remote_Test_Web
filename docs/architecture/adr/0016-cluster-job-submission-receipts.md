@@ -39,6 +39,15 @@ repair legacy commands committed without this transition after checking fencing;
 they never rewind a running or terminal Job. Command delivery deduplicates by
 attempt ID. Terminal jobs are never restarted by replay.
 
+Dispatch failure compensation shares the command Poll write lock. It may cancel
+only starts that have never been delivered or acknowledged. A nonempty
+`delivered_at` remains delivery evidence after a command is requeued. Once
+delivery is possible, a lost Controller response leaves the Job awaiting Worker
+confirmation and retains both device leases and physical claims. The API returns
+`DEPENDENCY_UNAVAILABLE` with the original `job_id` and `dispatch_uncertain=true`;
+the caller inspects that Job or retries with the same key. Worker terminal state
+confirmation releases devices through the normal Job lifecycle.
+
 Every Cluster Job binds at least one device. Empty device lists mean automatic
 selection of `device_count` devices, even with an explicit Worker; explicit
 device lists determine the count. Worker admission, suite identity/path, explicit

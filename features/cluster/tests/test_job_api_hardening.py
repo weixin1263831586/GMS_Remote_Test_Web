@@ -126,6 +126,61 @@ class ClusterJobApiHardeningTests(unittest.TestCase):
             })
         return payload
 
+    def test_committed_start_polled_during_response_failure_keeps_device_claims(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        payload = self._idempotent_job_payload()
+        payload["worker_id"] = "worker-246"
+        observer = ClusterRepository(self.repo.db_path)
+        polled = []
+
+        def lose_query_response(_command_id):
+            # create_command has committed before its return-value query.
+            # Poll from a separate repository/connection in that exact gap.
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                polled.extend(pool.submit(observer.poll_commands, "worker-246").result(timeout=5))
+            raise RuntimeError("command query response lost after commit")
+
+        headers = {"Idempotency-Key": "polled-response-lost"}
+        with patch.object(self.repo, "get_command", side_effect=lose_query_response):
+            response = self.client.post("/api/cluster/jobs", json=payload, headers=headers)
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertTrue(response.json()["details"]["dispatch_uncertain"])
+        self.assertEqual(len(polled), 1)
+        job_id = response.json()["details"]["job_id"]
+        job = self.repo.get_job(job_id)
+        self.assertEqual(job["status"], "dispatching")
+        self.assertEqual(job["leases"][0]["status"], "active")
+        self.assertIsNotNone(self.repo.claims.active_claim("worker-246:ABC"))
+        self.assertEqual(self.repo.get_command(polled[0]["id"])["status"], "delivered")
+        replay = self.client.post("/api/cluster/jobs", json=payload, headers=headers)
+        self.assertEqual(replay.status_code, 200, replay.text)
+        self.assertEqual(replay.json()["command"]["id"], polled[0]["id"])
+        with self.repo.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM cluster_commands").fetchone()[0], 1)
+        running = observer.ack_command("worker-246", polled[0]["id"], {"status": "running"})
+        observer.sync_job_from_command(running)
+        self.assertEqual(self.repo.get_job(job_id)["status"], "running")
+        self.assertIsNotNone(self.repo.claims.active_claim("worker-246:ABC"))
+        completed = observer.ack_command("worker-246", polled[0]["id"], {"status": "completed"})
+        observer.sync_job_from_command(completed)
+        self.assertIsNone(self.repo.claims.active_claim("worker-246:ABC"))
+
+    def test_requeued_previously_delivered_start_cannot_be_compensated(self):
+        self._commit_job_without_dispatch()
+        job = self.repo.list_jobs(1)[0]
+        command = self.repo.replay_job_command(job)
+        self.repo.poll_commands("worker-246")
+        # Redelivery preserves delivered_at even while status is queued.
+        with self.repo.connect() as conn:
+            conn.execute("UPDATE cluster_commands SET status='queued' WHERE id=?", (command["id"],))
+        self.assertFalse(self.repo.compensate_failed_dispatch(
+            job["id"], RuntimeError("late response failure"), attempt_id=job["current_attempt_id"],
+        ))
+        self.assertEqual(self.repo.get_job(job["id"])["status"], "dispatching")
+        self.assertEqual(self.repo.get_command(command["id"])["status"], "queued")
+        self.assertIsNotNone(self.repo.claims.active_claim("worker-246:ABC"))
+
     def test_replay_resumes_dispatch_after_process_exit_at_commit_gap(self):
         payload = self._commit_job_without_dispatch()
         with self.repo.connect() as conn:

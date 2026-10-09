@@ -8,6 +8,36 @@ from tests.test_runtime_ui_smoke import RuntimeUiHarness, expect
 
 
 class DailyBriefReviewUiTests(RuntimeUiHarness):
+    def test_model_tool_protocol_failure_is_readable_after_repeated_navigation(self):
+        page = self.new_page()
+        latest = {
+            'run': {'run_id': 'brief-protocol', 'brief_date': '2026-10-09',
+                    'status': 'failed', 'error': '1 issue analyses failed'},
+            'issues': [{'issue_id': 644070, 'subject': 'CtsSecurityTestCases报错',
+                        'status': 'failed', 'error_type': 'model_tool_protocol_error',
+                        'error': '模型网关未返回原生工具调用，请更换模型路由后重试。'}],
+        }
+
+        def respond(route):
+            data = latest if route.request.url.endswith('/daily-brief/latest') else {}
+            route.fulfill(status=200, content_type='application/json',
+                          body=json.dumps({'success': True, 'data': data}))
+
+        page.route('**/api/redmine-agent/**', respond)
+        try:
+            page.goto(f'{self.base_url}/redmine-agent', wait_until='domcontentloaded')
+            for _ in range(2):
+                page.evaluate("switchTab('daily-brief')")
+                row = page.locator('#dailyBriefCard .daily-brief-row', has_text='#644070')
+                expect(row).to_contain_text('分析失败 · 模型工具调用协议异常')
+                expect(row.locator('.daily-brief-state.failed')).to_have_attribute(
+                    'title', latest['issues'][0]['error'],
+                )
+                expect(row.locator('[data-daily-brief-reanalyze="644070"]')).to_have_count(1)
+                page.evaluate("switchTab('stats')")
+        finally:
+            page.close()
+
     def test_admin_account_is_unavailable_instead_of_empty_brief(self):
         page = self.new_page()
 

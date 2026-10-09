@@ -336,12 +336,15 @@ def _create_job(body: ClusterJobCreate, request: Request, receipt: dict):
                 devices=data["devices"],
             )
         except Exception as dispatch_exc:
-            service().repository.compensate_failed_dispatch(
+            compensated = service().repository.compensate_failed_dispatch(
                 job["id"], dispatch_exc, attempt_id=job["current_attempt_id"]
             )
-            raise HTTPException(
-                503,
-                "任务已创建但派发命令写入失败，请稍后重试（任务已回滚为失败状态）",
+            raise ApiError.dependency_unavailable(
+                "任务派发失败，任务已置为失败" if compensated else
+                "任务已创建，派发结果待确认；设备锁已保留，请查看原任务状态",
+                details={"job_id": job["id"], "dispatch_uncertain": not compensated},
+                next_actions=[{"action": "查看原任务状态；重试提交时沿用原 Idempotency-Key",
+                               "path": f"/api/cluster/jobs/{job['id']}"}],
             ) from dispatch_exc
         return {
             "success": True,

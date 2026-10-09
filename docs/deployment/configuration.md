@@ -85,6 +85,31 @@ ${ENV_NAME:}
 
 ## 关键配置键
 
+### 远端测试结果目录下载
+
+目录 ZIP 由经审核的 SSH 执行边界在测试主机生成，压缩过程运行在线程池，
+不阻塞 Web 事件循环。以下环境变量控制远端打包，均须为正整数：
+
+| 环境变量 | 默认值 | 含义 |
+| --- | --- | --- |
+| `GMS_SUITE_ZIP_TIMEOUT_SECONDS` | 600 | SSH 总超时，最低 60 秒；远端进程提前 5 秒触发清理 |
+| `GMS_SUITE_ZIP_MAX_BYTES` | 8589934592（8 GiB） | 源文件总量与 ZIP 输出各自的字节上限 |
+| `GMS_SUITE_ZIP_MAX_FILES` | 100000 | ZIP 文件数量上限，扫描与写入时均检查 |
+| `GMS_SUITE_ZIP_MIN_FREE_BYTES` | 268435456（256 MiB） | 远端临时磁盘至少保留的空闲空间 |
+| `GMS_SUITE_ZIP_STALE_SECONDS` | 86400（24 小时） | 遗留临时文件的回收年龄 |
+
+每次下载使用独立的 `gms-suite-downloads-<uid>/<operation>/` 临时目录。
+SFTP 初始化失败、打开失败、流读取异常和客户端断开都会关闭资源、尝试删除
+ZIP 并归还 SSH。超时通过同一 SSH 边界取消该次打包；Linux pidfd 将信号绑定到
+原进程，避免 PID 重用。旧内核通过取消标记和远端定时器终止打包。
+
+SIGKILL 或主机中断留下的目录会在后续目录下载时按年龄回收，回收会跳过仍
+持有打包锁的进程，同时处理旧 `suite_dl_*.zip` 文件。文件/容量超限返回
+`INVALID_SEMANTICS`（422），磁盘不足返回 `DEPENDENCY_UNAVAILABLE`（503），
+超时返回 `DEPENDENCY_TIMEOUT`（504），SSH/SFTP 失败返回 `UPSTREAM_FAILURE`（502）。
+
+### 外部服务
+
 `external_services` 段保存外部服务地址。例如 AI 助手代理地址：
 
 ```text

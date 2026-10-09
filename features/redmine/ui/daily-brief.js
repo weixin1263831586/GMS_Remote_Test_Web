@@ -254,7 +254,7 @@ function renderDailyBriefInner(data) {
     if (issue.status === 'failed') {
       var etype = String(issue.error_type || '').trim();
       var err = String(issue.error || '').trim();
-      var errorLabel = ({ schema_mismatch: '返回格式不兼容', invalid_ai_output: 'AI 返回无法解析', evidence_gate_failed: '证据门禁未通过', kkagent_error: '分析服务异常', interrupted: '分析进程被中断', timeout: '分析超时', llm_timeout: '模型服务超时', provider_overloaded: '模型服务繁忙', kkagent_unavailable: '分析服务不可用', oversized_output: '输出超限被终止', repair_failed: '同会话自动修复失败', max_turns: '步数预算耗尽' })[etype] || etype;
+      var errorLabel = ({ schema_mismatch: '返回格式不兼容', invalid_ai_output: 'AI 返回无法解析', evidence_gate_failed: '证据门禁未通过', model_tool_protocol_error: '模型工具调用协议异常', mcp_evidence_unavailable: '取证工具未成功调用', mcp_unavailable: 'MCP 服务不可用', kkagent_error: '分析服务异常', interrupted: '分析进程被中断', timeout: '分析超时', llm_timeout: '模型服务超时', provider_overloaded: '模型服务繁忙', kkagent_unavailable: '分析服务不可用', oversized_output: '输出超限被终止', repair_failed: '同会话自动修复失败', max_turns: '步数预算耗尽' })[etype] || etype;
       return '<span class="daily-brief-state failed" title="' + esc(err) + '">❌ 分析失败'
         + (errorLabel ? ' · ' + esc(errorLabel) : '') + '</span>';
     }

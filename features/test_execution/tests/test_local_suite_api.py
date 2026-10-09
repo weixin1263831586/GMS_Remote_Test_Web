@@ -139,7 +139,7 @@ class LocalSuiteApiTests(unittest.IsolatedAsyncioTestCase):
                 suites_api.runtime.normalize_apk_filename,
                 suites_api.runtime.safe_join,
                 suites_api.runtime.create_apk_task,
-                suites_api.runtime.get_client_id_from_request,
+                suites_api.principal_owner_id,
             )
             suites_api.runtime.config_manager = manager
             suites_api.runtime.ssh_manager = FailingSshManager()
@@ -148,7 +148,10 @@ class LocalSuiteApiTests(unittest.IsolatedAsyncioTestCase):
             suites_api.runtime.normalize_apk_filename = os.path.basename
             suites_api.runtime.safe_join = lambda base, name: os.path.join(base, name)
             suites_api.runtime.create_apk_task = lambda *args: captured.setdefault("args", args)
-            suites_api.runtime.get_client_id_from_request = lambda _request: "client-local"
+            # ADR 0010: the task must be owned by the resource owner account,
+            # never the acting agent principal id, or the follow-up
+            # /api/apk/analyze lookup (owner-filtered) returns 404.
+            suites_api.principal_owner_id = lambda _request: "acct-local"
             try:
                 response = await suites_api.create_suite_apk_analysis_task(
                     SuiteApkAnalyzeRequest(
@@ -165,13 +168,13 @@ class LocalSuiteApiTests(unittest.IsolatedAsyncioTestCase):
                     suites_api.runtime.normalize_apk_filename,
                     suites_api.runtime.safe_join,
                     suites_api.runtime.create_apk_task,
-                    suites_api.runtime.get_client_id_from_request,
+                    suites_api.principal_owner_id,
                 ) = old_values
 
             payload = json.loads(response.body)
             self.assertTrue(payload["success"], payload)
             self.assertEqual(Path(captured["args"][1]).read_bytes(), b"apk-content")
-            self.assertEqual(captured["args"][3], "client-local")
+            self.assertEqual(captured["args"][3], "acct-local")
 
     async def test_list_results_runs_controller_tradefed_without_ssh(self):
         with TemporaryDirectory() as tmp:

@@ -52,6 +52,11 @@ dist 分发包（由 features/system/agent_package_builder.py 与该工具产出
   版本声明并重新 sync）；`tools/scripts/agent/audit_contract.py` 强制六方版本契约。
 - 分发包布局（canonical DISTRIBUTION layout）：`runtime/ → scripts/`、
   `skill/ → skills/gms-remote-test/`、`manifests/* → 插件根 manifest`。
+- `build_package.py` 的构建、发布和旧版本清理共用输出目录内的进程级文件锁。
+  所有客户端包先在临时目录生成，再逐个原子替换；`manifest.json` 最后发布。
+  清理仅接受清单中的版本、客户端、大小和 SHA-256 全部匹配的完整产物，
+  默认保留最新 3 个版本及本次构建版本，`--keep 0` 禁用清理。未完成、损坏、
+  符号链接及非版本目录均保留，不删除正在构建的版本。
 
 ## 部署拓扑与多 Controller
 

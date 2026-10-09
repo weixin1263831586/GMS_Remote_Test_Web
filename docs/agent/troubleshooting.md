@@ -98,6 +98,23 @@ export。不同 Controller 或不同 token 不会自动选择；人工 cookie �
 - 若 MCP Server 启动即退出（exit 2），通常是 profile/client 未声明——
   见上一节「Profile 歧义」。
 
+## 晨报模型工具调用协议异常
+
+**现象**：晨报返回 `model_tool_protocol_error`，会话中出现
+`mcp__gms__gms_rt_redmine_issue<arg_key>…</arg_key><arg_value>…` 等普通文本，
+却没有对应的原生 `tool_call` / `tool_result` 事件。旧版本可能将此情况
+误标为 `mcp_evidence_unavailable`。
+
+`gms-agent doctor --client kkagent --json` 检查部署状态；doctor 合格时，
+还需检查所选模型/provider 是否将调用返回在原生 `tool_calls` 字段中。
+在 Web 的晨报设置中选择已验证支持原生工具调用的模型路由，或修复当前
+模型网关的工具调用适配，然后点击「重试全部分析」。模型别名指向的
+provider 不同，工具调用行为也可能不同，需按实际路由验证。
+
+Controller 会拒绝将这些普通文本当作可执行调用或已验证证据，并停止
+该协议异常的同会话补证重试。晨报配置与重分析接口要求人工会话，Agent
+Service Token 只能读取状态和取证。
+
 ## 验收清单
 
 ```bash
