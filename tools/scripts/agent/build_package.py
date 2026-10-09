@@ -34,11 +34,15 @@ older rebuildable version directories are pruned automatically.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
+import os
 import re
 import shutil
 import sys
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -78,7 +82,44 @@ def _version_sort_key(name: str) -> tuple[int, ...]:
     return tuple(int(part) for part in name.split("."))
 
 
-def prune_old_versions(out_base: Path, current: str, keep: int) -> list[str]:
+@contextmanager
+def _build_lock(out_base: Path):
+    out_base.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(out_base / ".build.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "a+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _completed_version(directory: Path) -> bool:
+    """A completed manifest must match every published artifact."""
+    try:
+        manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+        artifacts = manifest["artifacts"]
+        clients = manifest["clients"]
+        if (manifest["name"] != "gms-remote-test" or manifest["version"] != directory.name
+                or not isinstance(artifacts, dict) or not artifacts
+                or set(clients) != set(artifacts) or not set(clients).issubset(CLIENT_MANIFESTS)):
+            return False
+        for client, artifact in artifacts.items():
+            archive = directory / client / f"gms-remote-test-{directory.name}-{client}.zip"
+            if archive.is_symlink() or archive.stat().st_size != artifact["size"]:
+                return False
+            digest = hashlib.sha256()
+            with archive.open("rb") as stream:
+                while chunk := stream.read(1024 * 1024):
+                    digest.update(chunk)
+            if digest.hexdigest() != artifact["sha256"]:
+                return False
+        return True
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def _prune_old_versions_locked(out_base: Path, current: str, keep: int) -> list[str]:
     """Delete stale version dirs, keeping the ``keep`` newest ones.
 
     The just-built version is always kept, even if fewer than ``keep``
@@ -88,7 +129,8 @@ def prune_old_versions(out_base: Path, current: str, keep: int) -> list[str]:
         return []
     versions = [
         entry.name for entry in out_base.iterdir()
-        if entry.is_dir() and VERSION_DIR_RE.fullmatch(entry.name)
+        if entry.is_dir() and not entry.is_symlink() and VERSION_DIR_RE.fullmatch(entry.name)
+        and _completed_version(entry)
     ]
     keep_versions = {current, *sorted(versions, key=_version_sort_key, reverse=True)[:keep]}
     pruned = []
@@ -98,6 +140,49 @@ def prune_old_versions(out_base: Path, current: str, keep: int) -> list[str]:
         shutil.rmtree(out_base / name)
         pruned.append(name)
     return pruned
+
+
+def prune_old_versions(out_base: Path, current: str, keep: int) -> list[str]:
+    if keep <= 0 or not out_base.is_dir():
+        return []
+    with _build_lock(out_base):
+        return _prune_old_versions_locked(out_base, current, keep)
+
+
+def build_packages(out_base: Path, version: str, keep: int) -> dict[str, object]:
+    if not VERSION_DIR_RE.fullmatch(version):
+        raise ValueError("Invalid package version")
+    out_base = out_base.resolve()
+    out_root = out_base / version
+    manifest: dict[str, object] = {
+        "name": "gms-remote-test", "version": version, "clients": sorted(CLIENT_MANIFESTS),
+    }
+    # All writers and pruning share one process-safe lock, including builds
+    # of an older version. Stage all archives before publishing any of them.
+    with _build_lock(out_base), tempfile.TemporaryDirectory(prefix=".building-", dir=out_base) as temporary:
+        stage = Path(temporary)
+        artifacts = {}
+        for client in sorted(CLIENT_MANIFESTS):
+            data = build_package_bytes(PLUGIN_DIR, version, client=client)
+            filename = f"gms-remote-test-{version}-{client}.zip"
+            (stage / client).mkdir()
+            (stage / client / filename).write_bytes(data)
+            artifacts[client] = {
+                "path": str(out_root / client / filename),
+                "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
+            }
+        manifest["artifacts"] = artifacts
+        (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        for client in artifacts:
+            (out_root / client).mkdir(parents=True, exist_ok=True)
+            filename = f"gms-remote-test-{version}-{client}.zip"
+            os.replace(stage / client / filename, out_root / client / filename)
+        # The completion marker is published last. An interrupted publication
+        # has mismatched hashes and cannot be treated as a completed version.
+        os.replace(stage / "manifest.json", out_root / "manifest.json")
+        for name in _prune_old_versions_locked(out_base, version, keep):
+            print(f"Pruned old version dir: {out_base / name}")
+    return manifest
 
 
 def main() -> int:
@@ -113,42 +198,19 @@ def main() -> int:
     args = parser.parse_args()
 
     version = read_version()
-    out_root = (REPO_ROOT / args.out / "gms-remote-test" / version).resolve()
-    manifest: dict[str, object] = {
-        "name": "gms-remote-test",
-        "version": version,
-        "clients": sorted(CLIENT_MANIFESTS),
-    }
-    artifacts = {}
-    for client in sorted(CLIENT_MANIFESTS):
-        try:
-            data = build_package_bytes(PLUGIN_DIR, version, client=client)
-        except FileNotFoundError as error:
-            print(f"Error: {error}", file=sys.stderr)
-            return 1
-        out_dir = out_root / client
-        out_dir.mkdir(parents=True, exist_ok=True)
-        zip_path = out_dir / f"gms-remote-test-{version}-{client}.zip"
-        zip_path.write_bytes(data)
-        artifacts[client] = {
-            "path": str(zip_path),
-            "sha256": hashlib.sha256(data).hexdigest(),
-            "size": len(data),
-        }
-    manifest["artifacts"] = artifacts
-
-    manifest_path = out_root / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-
-    for name in prune_old_versions(out_root.parent, version, args.keep):
-        print(f"Pruned old version dir: {out_root.parent / name}")
+    out_base = (REPO_ROOT / args.out / "gms-remote-test").resolve()
+    try:
+        manifest = build_packages(out_base, version, args.keep)
+    except (OSError, ValueError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
 
     if args.print_manifest:
         print(json.dumps(manifest, indent=2))
     else:
-        for client, artifact in artifacts.items():
+        for client, artifact in manifest["artifacts"].items():
             print(f"  {client}: {artifact['path']} (sha256 {artifact['sha256'][:16]}...)")
-        print(f"Manifest written: {manifest_path}")
+        print(f"Manifest written: {out_base / version / 'manifest.json'}")
     return 0
 
 

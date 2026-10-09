@@ -66,7 +66,8 @@ class SSHExecutor:
        ``recv_ready()/recv()`` 分离——历史实现两个读取任务争抢同一个
        stdout channel，stderr 日志错乱/丢失；
     3. 异常一律折叠为 ``CommandResult(stdout='', stderr=<msg>, code=-1)``，
-       调用方统一以 ``code == -1`` 判错（流式路径额外回调一条 error 日志）；
+       调用方统一以 ``code == -1`` 判错，超时保留 ``timed_out=True``
+       （流式路径额外回调一条 error 日志）；
     4. 执行结束（成功/超时/取消/异常）都在
        ``finally`` 中关闭 channel。注意这只释放本地 SSH channel 并向远端
        发送 EOF——脱离会话的远端进程（nohup/setsid）不会因此被终止；
@@ -220,7 +221,10 @@ class SSHExecutor:
         except Exception as e:
             logger.error(f"[SSH] Command execution error: {redact_sensitive_text(e)}")
             # 返回值与日志同纪律：异常原文可能内嵌凭据，出 SSH 边界前脱敏。
-            return CommandResult(stdout="", stderr=redact_sensitive_text(e), code=-1)
+            return CommandResult(
+                stdout="", stderr=redact_sensitive_text(e), code=-1,
+                timed_out=isinstance(e, TimeoutError),
+            )
         finally:
             # 无论成功、超时、取消还是异常，都释放本地 channel，
             # 不再让调用方认为已结束的命令继续占用 SSH 资源。
@@ -425,7 +429,10 @@ class SSHExecutor:
                 await log_callback(f"SSH 执行错误: {redact_sensitive_text(e)}", "error")
             # 同步版 run() 一致：返回值 stderr 也要脱敏，防止凭据
             # 经 features 层流入 API 响应。
-            return CommandResult(stdout="", stderr=redact_sensitive_text(e), code=-1)
+            return CommandResult(
+                stdout="", stderr=redact_sensitive_text(e), code=-1,
+                timed_out=isinstance(e, TimeoutError),
+            )
         finally:
             # 无论成功、超时、取消还是异常，都释放本地 channel。
             # 注意：这只是关闭 SSH channel（向远端送 EOF），不能保证

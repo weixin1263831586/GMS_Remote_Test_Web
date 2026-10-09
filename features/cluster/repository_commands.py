@@ -129,7 +129,7 @@ class ClusterCommandRepositoryMixin:
     def compensate_failed_dispatch(
         self, job_id: str, exc: Exception, *, attempt_id: str = "",
     ) -> bool:
-        """Fail only the awaiting attempt, releasing leases and queued starts.
+        """Fail only an attempt whose start has never reached a Worker.
 
         Recovery must not fail an attempt already advanced by a Worker or
         release its claims when the failure transition itself could not commit.
@@ -143,6 +143,25 @@ class ClusterCommandRepositoryMixin:
                 if (not job or job["status"] not in {"assigned", "dispatching"}
                         or (attempt_id and job["current_attempt_id"] != attempt_id)):
                     return False
+                delivered = conn.execute(
+                    """SELECT id FROM cluster_commands
+                       WHERE job_id=? AND attempt_id=? AND command_type='start_test'
+                         AND (status != 'queued' OR delivered_at != '' OR acknowledged_at != '')
+                       LIMIT 1""", (job_id, job["current_attempt_id"]),
+                ).fetchone()
+                if delivered:
+                    # Poll and compensation hold the same SQLite write lock.
+                    # delivered_at remains evidence even after redelivery has
+                    # requeued a command; only Worker lifecycle confirmation
+                    # may release resources once execution is possible.
+                    self._append_timeline_conn(
+                        conn, job_id=job_id, attempt_id=job["current_attempt_id"],
+                        trace_id=job["trace_id"], worker_id=job["assigned_worker_id"],
+                        event_type="command.dispatch_unconfirmed", source="controller",
+                        level="warning", message="派发响应异常，命令已交付；保留设备锁等待 Worker 确认",
+                        payload={"command_id": delivered["id"]},
+                    )
+                    return False
                 self._transition_job_conn(
                     conn, job_id, "failed", error=error, source="controller",
                     message="任务派发命令写入失败，任务已置为失败",
@@ -154,7 +173,7 @@ class ClusterCommandRepositoryMixin:
                 conn.execute(
                     """UPDATE cluster_commands SET status='cancelled',error=?,updated_at=?
                        WHERE job_id=? AND attempt_id=? AND command_type='start_test'
-                       AND status IN ('queued','delivered')""",
+                       AND status='queued' AND delivered_at='' AND acknowledged_at=''""",
                     (error, now, job_id, job["current_attempt_id"]),
                 )
                 leases = conn.execute(

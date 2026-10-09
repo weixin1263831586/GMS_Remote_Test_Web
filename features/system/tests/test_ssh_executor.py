@@ -85,6 +85,7 @@ def test_run_drains_stdout_and_stderr_without_sequential_stream_reads():
     assert result.stdout == "out-1\nout-2\n"
     assert result.stderr == "err-1\nerr-2\n"
     assert result.code == 17
+    assert not result.timed_out
 
 
 def test_run_stream_keeps_tail_data_that_arrives_after_exit_status():
@@ -186,6 +187,7 @@ def test_run_closes_channel_on_timeout_and_enforces_deadline_during_drain():
 
     assert result.code == -1
     assert "timed out" in result.stderr
+    assert result.timed_out
     assert channel.close_calls == 1
     # 持续高输出下 recv 分支不休眠；修复前 deadline 只在外层检查，
     # 理论上可以无限运行。这里给它 5 秒上限作为回归约束。
@@ -220,6 +222,7 @@ def test_run_honors_cooperative_cancel_and_closes_channel():
 
     assert result.code == -1
     assert "cancelled" in result.stderr
+    assert not result.timed_out
     assert channel.close_calls == 1
 
 
@@ -240,4 +243,5 @@ def test_run_stream_closes_channel_on_timeout():
 
     assert result.code == -1
     assert "timed out" in result.stderr
+    assert result.timed_out
     assert channel.close_calls == 1

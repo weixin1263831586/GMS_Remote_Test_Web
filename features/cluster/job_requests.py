@@ -125,7 +125,11 @@ class ClusterJobRequestRepositoryMixin:
                 env=data.get("env") or {}, devices=data.get("devices") or [],
             )
         except Exception as exc:
-            self.compensate_failed_dispatch(job["id"], exc, attempt_id=job["current_attempt_id"])
+            compensated = self.compensate_failed_dispatch(job["id"], exc, attempt_id=job["current_attempt_id"])
             raise ApiError.dependency_unavailable(
-                "Could not queue the original job", details={"job_id": job["id"]},
+                "Could not queue the original job" if compensated else
+                "Original job delivery is unconfirmed; device claims remain held",
+                details={"job_id": job["id"], "dispatch_uncertain": not compensated},
+                next_actions=[{"action": "Inspect the original job and reuse the same Idempotency-Key",
+                               "path": f"/api/cluster/jobs/{job['id']}"}],
             ) from exc

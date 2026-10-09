@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import signal
+from typing import Any
 
 
 # ANSI 转义序列（颜色/光标控制/回车）：kkagent 的 stderr 日志即使设了
@@ -12,6 +13,22 @@ ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\r")
 
 # stderr 摘要长度上限。
 STDERR_SUMMARY_LIMIT = 500
+
+_TEXTUAL_GMS_CALL_RE = re.compile(
+    r"\bgms_rt_[A-Za-z0-9_]+\s*<arg_key>[^<>]+</arg_key>\s*<arg_value>"
+    r"|\bmcp__[A-Za-z0-9_]+__gms_rt_[A-Za-z0-9_]+\s*"
+    r"<arg_key>[^<>]+</arg_key>\s*<arg_value>"
+)
+
+
+def has_textual_gms_tool_call(message: Any) -> bool:
+    """Recognize leaked tool syntax without executing it or trusting its arguments."""
+    if not isinstance(message, str):
+        return False
+    # Quoted examples in a diagnostic report are ordinary evidence text.
+    visible = re.sub(r"```.*?```|`[^`\n]*`", "", message, flags=re.DOTALL)
+    return bool(_TEXTUAL_GMS_CALL_RE.search(visible))
+
 
 # kkagent stderr 日志里的 RFC3339 时间戳(2026-09-13T10:31:49.070374Z)
 # 对 UI 展示不友好:入库前统一转成 "2026-09-13 10:31:49.070"。

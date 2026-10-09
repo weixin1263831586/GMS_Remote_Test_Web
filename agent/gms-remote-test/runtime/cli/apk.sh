@@ -149,8 +149,8 @@ gms-rt-apk-analyze() {
 
     if [ "$do_wait" != "1" ]; then
         if [ "$GMS_RT_OUTPUT" = "json" ]; then
-            jq -cn --arg task_id "$task_id" --arg module "$module_name" --arg file "$file_name" \
-                '{success: true, task_id: $task_id, module: $module, file: $file, status: "analyzing"}'
+            jq -cn --arg task_id "$task_id" --arg module_name "$module_name" --arg file "$file_name" \
+                '{success: true, task_id: $task_id, "module": $module_name, file: $file, status: "analyzing"}'
         else
             success "Decompilation started for $module_name (task $task_id)"
             echo "Poll with: gms-rt-apk-status $task_id"
@@ -177,8 +177,8 @@ gms-rt-apk-analyze() {
     done
 
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
-        jq -cn --arg task_id "$task_id" --arg module "$module_name" --arg file "$file_name" --arg status "$status" \
-            '{success: ($status == "completed"), task_id: $task_id, module: $module, file: $file, status: $status}'
+        jq -cn --arg task_id "$task_id" --arg module_name "$module_name" --arg file "$file_name" --arg status "$status" \
+            '{success: ($status == "completed"), task_id: $task_id, "module": $module_name, file: $file, status: $status}'
         [ "$status" = "completed" ] && return 0
         return "$GMS_RT_EXIT_OPERATION"
     fi

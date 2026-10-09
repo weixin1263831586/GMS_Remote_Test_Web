@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..daily_brief_prompt import issue_result_schema_json, prompt_template_for
-from .errors import classify_failure
+from .errors import classify_failure, has_textual_gms_tool_call
 from .evidence_gate import gate_and_errors
 from .mcp_health import probe_kkagent_mcp_health
 from .native_summary import native_evidence_repair_prompt, native_summary_result
@@ -112,6 +112,27 @@ class KkAgentAnalysisResult:
     session_id: str = ""
 
 
+def _tool_protocol_failure(trace: KkAgentTrace) -> bool:
+    """Fail closed when tool syntax arrived as prose without native GMS calls."""
+    if any(
+        "gms_rt_" in call.tool_name
+        and not call.tool_call_id.startswith("preflight:")
+        for call in trace.tool_calls
+    ):
+        return False
+    message = (trace.final_event or {}).get("message")
+    if not has_textual_gms_tool_call(message):
+        return False
+    trace.status = trace.error_type = "model_tool_protocol_error"
+    trace.error = (
+        "模型将 GMS 工具调用语法作为普通文本返回，未产生原生 tool_call "
+        "事件，取证没有执行（模型/provider 的工具调用协议异常）。"
+        "请在晨报设置中选择已验证支持原生工具调用的模型路由，"
+        "或修复当前模型网关的 tool_calls 适配后重试。"
+    )
+    return True
+
+
 def classify_gate_failure(
     trace: KkAgentTrace, gate_errors_list: list[str]
 ) -> tuple[str, str, str]:
@@ -129,6 +150,8 @@ def classify_gate_failure(
     全部成功，而 kkagent 会话内 gms MCP 缺失，若把 preflight 计入就会把
     "MCP 不可用" 误分类成普通 gate 失败，掩盖真实恢复路径。
     """
+    if _tool_protocol_failure(trace):
+        return trace.status, trace.error_type, trace.error
     findings = "; ".join(gate_errors_list)
     session_tool_names = [
         call.tool_name
@@ -470,6 +493,8 @@ class KkAgentRedmineAnalyzer:
             stderr_tail = raw.stderr_tail()
             self._classify_nonzero_exit(trace, raw.text(), stderr_tail)
             return self._failure(trace, raw)
+        if _tool_protocol_failure(trace):
+            return self._failure(trace, raw)
 
         if entry.get("analysis_mode") == "diagnostic":
             result = native_summary_result(trace, entry)
@@ -568,6 +593,8 @@ class KkAgentRedmineAnalyzer:
             if repair_trace.error_type:
                 findings = [repair_trace.error or repair_trace.error_type]
                 continue
+            if _tool_protocol_failure(merged):
+                return self._failure(merged, raw), merged
 
             if native_summary:
                 result = native_summary_result(merged, entry)

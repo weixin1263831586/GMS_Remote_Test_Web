@@ -9,16 +9,21 @@ import os
 import re
 import shlex
 import shutil
+import threading
 import time
 import urllib.parse
 import uuid
+from pathlib import PurePosixPath
 from typing import Any
 
+import anyio
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from features.auth import (
     CurrentUser,
+    principal_owner_id,
     require_authenticated_user_when_auth_required,
 )
 from features.devices import ssh_connection_failed_response
@@ -42,6 +47,7 @@ from .suite_local_files import (
 )
 from .suite_modules import search_latest_suite_modules
 from .suite_remote_scripts import (
+    SUITE_DIR_CLEANUP_SCRIPT,
     SUITE_DIR_ZIP_SCRIPT,
     SUITE_FILE_INFO_SCRIPT,
     SUITE_FILE_LIST_SCRIPT,
@@ -191,14 +197,21 @@ def _build_suite_remote_path(suite_path: str, path: str | None, config: dict[str
     return suite_root, rel_path, remote_path
 
 
-def _run_suite_file_script(ssh, script: str, suite_root: str, remote_path: str, timeout: int = 20) -> dict[str, Any]:
-    cmd = f"python3 -c {shlex.quote(script)} {shlex.quote(suite_root)} {shlex.quote(remote_path)}"
-    result = runtime.ssh_manager.execute_command(ssh, cmd, timeout=timeout)
+def _run_suite_file_script(
+    ssh, script: str, suite_root: str, remote_path: str, timeout: int = 20,
+    *, extra_args: tuple[str, ...] = (), ssh_manager=None,
+) -> dict[str, Any]:
+    cmd = shlex.join(["python3", "-c", script, suite_root, remote_path, *extra_args])
+    manager = runtime.ssh_manager if ssh_manager is None else ssh_manager
+    result = manager.execute_command(ssh, cmd, timeout=timeout)
     if not result.ok:
-        raise RuntimeError(
+        message = (
             result.stderr.strip() or result.stdout.strip()
             or "Remote file operation failed"
         )
+        if result.timed_out:
+            raise TimeoutError(message)
+        raise RuntimeError(message)
     try:
         return json.loads(result.stdout.strip())
     except json.JSONDecodeError as e:
@@ -217,6 +230,28 @@ def suite_dir_zip_timeout() -> int:
         return max(60, int(os.getenv("GMS_SUITE_ZIP_TIMEOUT_SECONDS", "600")))
     except ValueError:
         return 600
+
+
+def _zip_setting(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+class _SuiteStreamingResponse(StreamingResponse):
+    """Close remote resources even before iteration or after disconnect."""
+
+    def __init__(self, *args, cleanup, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cleanup = cleanup
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            with anyio.CancelScope(shield=True):
+                await run_in_threadpool(self.cleanup)
 
 
 
@@ -391,34 +426,106 @@ async def download_suite_directory(suite_path: str = Query(...), path: str = Que
     if not ssh:
         return ssh_connection_failed_response()
 
-    try:
+    manager = runtime.ssh_manager
+    operation = uuid.uuid4().hex
+    sftp = remote_file = None
+    info = {}
+    started = closed = False
+    cleanup_lock = threading.Lock()
+
+    def cleanup():
+        nonlocal closed
+        with cleanup_lock:
+            if closed:
+                return
+            closed = True
+        if remote_file is not None:
+            with contextlib.suppress(Exception):
+                remote_file.close()
+        if sftp is not None:
+            if info.get("zip_path"):
+                with contextlib.suppress(Exception):
+                    sftp.remove(info["zip_path"])
+            with contextlib.suppress(Exception):
+                sftp.close()
+        if started:
+            try:
+                result = _run_suite_file_script(
+                    ssh, SUITE_DIR_CLEANUP_SCRIPT, suite_root, remote_path,
+                    timeout=10, extra_args=(operation,), ssh_manager=manager,
+                )
+                if not result.get("success"):
+                    logger.warning("Remote archive cancellation is pending its timeout/stale cleanup")
+            except Exception:
+                logger.warning("Remote suite archive cleanup could not complete", exc_info=True)
+        manager.return_connection(ssh)
+
+    def prepare():
+        nonlocal info, sftp, remote_file, started
+        timeout = suite_dir_zip_timeout()
+        with cleanup_lock:
+            if closed:
+                raise TimeoutError("Archive download cancelled")
+            started = True
         info = _run_suite_file_script(
             ssh, SUITE_DIR_ZIP_SCRIPT, suite_root, remote_path,
-            timeout=suite_dir_zip_timeout(),
+            timeout=timeout, ssh_manager=manager,
+            extra_args=(operation,
+                        str(_zip_setting("GMS_SUITE_ZIP_MAX_BYTES", 8 * 1024 ** 3)),
+                        str(_zip_setting("GMS_SUITE_ZIP_MAX_FILES", 100000)),
+                        str(_zip_setting("GMS_SUITE_ZIP_MIN_FREE_BYTES", 256 * 1024 ** 2)),
+                        str(_zip_setting("GMS_SUITE_ZIP_STALE_SECONDS", 86400)),
+                        str(max(1, timeout - 5))),
         )
         if not info.get("success"):
-            runtime.ssh_manager.return_connection(ssh)
-            return ApiResponse.error(info.get("error", "Directory not found"), status_code=404)
+            started = False  # The script cleans failed builds before exiting.
+            errors = {
+                "DEPENDENCY_TIMEOUT": ApiError.dependency_timeout,
+                "DEPENDENCY_UNAVAILABLE": ApiError.dependency_unavailable,
+                "INVALID_SEMANTICS": ApiError.invalid_semantics,
+                "UPSTREAM_FAILURE": ApiError.upstream_failure,
+            }
+            raise errors.get(info.get("code"), ApiError.not_found)(
+                info.get("error", "Directory not found"),
+                next_actions=[{"action": "Retry with a smaller directory or check Worker temporary disk space"}],
+            )
 
-        sftp = ssh.open_sftp()
-        remote_file = sftp.open(info["zip_path"], "rb")
-    except (TimeoutError, RuntimeError) as exc:
-        # 远端 zip 打包是纯基础设施依赖：超时映射为 504 语义码。之前落到
-        # 通用 500 时，浏览器对失败的附件下载只会显示「无法下载 - 网络问题」。
-        runtime.ssh_manager.return_connection(ssh)
+        with cleanup_lock:
+            if closed:
+                raise TimeoutError("Archive download cancelled")
+            archive_path = info.get("zip_path")
+            if not isinstance(archive_path, str):
+                raise RuntimeError("Invalid remote archive path")
+            parts = PurePosixPath(archive_path).parts
+            if (len(parts) < 5 or parts[0] != "/" or ".." in parts
+                    or parts[-1] != "archive.zip" or parts[-2] != operation
+                    or not re.fullmatch(r"gms-suite-downloads-[0-9]+", parts[-3])):
+                raise RuntimeError("Remote archive does not belong to this download")
+            sftp = ssh.open_sftp()
+            sftp.get_channel().settimeout(30)
+            remote_file = sftp.open(info["zip_path"], "rb")
+
+    try:
+        await run_in_threadpool(prepare)
+    except asyncio.CancelledError:
+        with anyio.CancelScope(shield=True):
+            await run_in_threadpool(cleanup)
+        raise
+    except TimeoutError as exc:
+        await run_in_threadpool(cleanup)
         raise ApiError.dependency_timeout(
             "远端目录打包超时或失败，请重试或分批下载较小目录",
             next_actions=[{"action": "Retry the download"}],
         ) from exc
-    except Exception:
-        runtime.ssh_manager.return_connection(ssh)
+    except ApiError:
+        await run_in_threadpool(cleanup)
         raise
-
-    folder_name = info.get("name") or os.path.basename(remote_path) or "download"
-    filename = f"{folder_name}{run_folder_suffix(rel_path)}.zip"
-    ascii_filename = re.sub(r"[^A-Za-z0-9._-]+", "_", filename) or "download.zip"
-    quoted_filename = urllib.parse.quote(filename)
-    zip_path = info["zip_path"]
+    except Exception as exc:
+        await run_in_threadpool(cleanup)
+        raise ApiError.upstream_failure(
+            "远端目录打包或文件传输失败", service="ssh",
+            next_actions=[{"action": "Check Worker SSH/SFTP and retry the download"}],
+        ) from exc
 
     def iter_remote_dir():
         try:
@@ -428,25 +535,26 @@ async def download_suite_directory(suite_path: str = Query(...), path: str = Que
                     break
                 yield chunk
         finally:
-            try:
-                remote_file.close()
-            finally:
-                # 清理远程临时 zip，再归还连接。
-                with contextlib.suppress(Exception):
-                    sftp.remove(zip_path)
-                try:
-                    sftp.close()
-                finally:
-                    runtime.ssh_manager.return_connection(ssh)
+            cleanup()
 
-    return StreamingResponse(
-        iter_remote_dir(),
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{quoted_filename}',
-            "Content-Length": str(info.get("size", 0)),
-        },
-    )
+    try:
+        folder_name = info.get("name") or os.path.basename(remote_path) or "download"
+        filename = f"{folder_name}{run_folder_suffix(rel_path)}.zip"
+        ascii_filename = re.sub(r"[^A-Za-z0-9._-]+", "_", filename) or "download.zip"
+        quoted_filename = urllib.parse.quote(filename)
+        return _SuiteStreamingResponse(
+            iter_remote_dir(),
+            cleanup=cleanup,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{quoted_filename}',
+                "Content-Length": str(info.get("size", 0)),
+            },
+        )
+    except BaseException:
+        with anyio.CancelScope(shield=True):
+            await run_in_threadpool(cleanup)
+        raise
 
 
 @router.post("/api/test/suites/apk/analyze")
@@ -487,7 +595,7 @@ async def create_suite_apk_analysis_task(req: SuiteApkAnalyzeRequest, request: R
             task_id,
             apk_path,
             filename,
-            runtime.get_client_id_from_request(request),
+            principal_owner_id(request),
         )
         return ApiResponse.success({
             "task_id": task_id,
@@ -527,7 +635,7 @@ async def create_suite_apk_analysis_task(req: SuiteApkAnalyzeRequest, request: R
             task_id,
             apk_path,
             filename,
-            runtime.get_client_id_from_request(request),
+            principal_owner_id(request),
         )
         return ApiResponse.success({"task_id": task_id, "filename": filename, "size": os.path.getsize(apk_path), "source_path": req.path})
     except ValueError as e:
