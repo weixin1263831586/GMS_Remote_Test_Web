@@ -405,12 +405,11 @@ class WorkerRuntime:
         return result
 
     def _ensure_test_script(self, executable: Path) -> None:
-        """Copy run_GMS_Test_Auto.sh from the Worker install dir if missing.
+        """Keep the suite-root test launcher aligned with the Worker package.
 
         The script is installed to both ``INSTALL_ROOT/scripts/`` and the
-        suite root during deployment. If the suite-root copy is later removed
-        (manual cleanup, directory rebuild), restore it from the install dir
-        so test execution does not fail with "executable not found".
+        suite root during deployment. Refresh it before every launch when the
+        packaged source differs, so fixes do not depend on a manual recopy.
         """
         if executable.name != "run_GMS_Test_Auto.sh":
             return
@@ -418,12 +417,29 @@ class WorkerRuntime:
         install_script = Path(__file__).resolve().parent.parent / "scripts" / "run_GMS_Test_Auto.sh"
         if not install_script.is_file():
             return
+        temporary = executable.with_name(
+            f".{executable.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
         try:
             executable.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(install_script, executable)
-            executable.chmod(0o755)
-        except OSError:
-            pass
+            if (
+                executable.is_file()
+                and executable.read_bytes() == install_script.read_bytes()
+            ):
+                executable.chmod(0o755)
+                return
+            shutil.copy2(install_script, temporary)
+            temporary.chmod(0o755)
+            os.replace(temporary, executable)
+        except OSError as exc:
+            logger.warning(
+                "Unable to refresh test launcher %s from %s: %s",
+                executable,
+                install_script,
+                exc,
+            )
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def _validate_requested_module(self, argv: list[str]) -> None:
         """fail-fast：模块名不在套件 testcases/ 中时拒绝任务。
@@ -479,8 +495,7 @@ class WorkerRuntime:
                       for root in self.config.suite_roots)
         if not allowed:
             raise ValueError("test executable is outside configured suite roots")
-        if not executable.is_file():
-            self._ensure_test_script(executable)
+        self._ensure_test_script(executable)
         if not executable.is_file():
             configured = ", ".join(str(r) for r in self.config.suite_roots)
             raise ValueError(

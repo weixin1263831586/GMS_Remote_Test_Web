@@ -136,6 +136,12 @@ _NOVNC_CSP = (
     "font-src 'self' data:; connect-src 'self' https: ws: wss:; "
     "media-src 'self' blob:; worker-src 'self' blob:"
 )
+_SUITE_HTML_PREVIEW_CSP = (
+    "sandbox allow-scripts; default-src 'none'; base-uri 'none'; "
+    "object-src 'none'; form-action 'none'; frame-ancestors 'self'; "
+    "script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+    "img-src data:; connect-src 'none'; font-src data:"
+)
 
 
 def _is_novnc_proxied_path(path: str) -> bool:
@@ -144,6 +150,18 @@ def _is_novnc_proxied_path(path: str) -> bool:
         or path.startswith('/novnc/')
         or path.startswith('/cluster/novnc/')
     )
+
+
+def _is_suite_html_preview(request, response) -> bool:
+    if request.url.path not in {
+        '/api/test/suites/download',
+        '/api/cluster/suites/download',
+    }:
+        return False
+    if request.query_params.get('inline', '').lower() not in {'1', 'true'}:
+        return False
+    media_type = response.headers.get('content-type', '').partition(';')[0].lower()
+    return media_type in {'text/html', 'application/xhtml+xml'}
 
 
 def _is_service_authenticated_path(path: str, method: str) -> bool:
@@ -419,7 +437,10 @@ def create_app(services: AppServices | None = None) -> FastAPI:
         response.headers['X-Trace-ID'] = trace_id
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-        response.headers['Referrer-Policy'] = 'same-origin'
+        suite_html_preview = _is_suite_html_preview(request, response)
+        response.headers['Referrer-Policy'] = (
+            'no-referrer' if suite_html_preview else 'same-origin'
+        )
         response.headers['Permissions-Policy'] = (
             'camera=(), microphone=(), geolocation=(), payment=(), usb=(self)'
         )
@@ -428,12 +449,14 @@ def create_app(services: AppServices | None = None) -> FastAPI:
         # inline <script> 外置或转为 application/json 数据标签
         # （gms-runtime-config）。运行时 UI 诊断若需 eval 类断点，走
         # Playwright bypass_csp 的隔离上下文（tests/test_runtime_ui_smoke.py）。
-        # noVNC 上游代理页是唯一例外，使用放宽 script-src 的 _NOVNC_CSP。
-        response.headers['Content-Security-Policy'] = (
-            _NOVNC_CSP
-            if _is_novnc_proxied_path(path)
-            else _STRICT_CSP
-        )
+        # noVNC 上游代理页与套件 HTML 预览分别使用专用策略。
+        if _is_novnc_proxied_path(path):
+            response.headers['Content-Security-Policy'] = _NOVNC_CSP
+        elif suite_html_preview:
+            response.headers['Content-Security-Policy'] = _SUITE_HTML_PREVIEW_CSP
+            response.headers['Cache-Control'] = 'no-store'
+        else:
+            response.headers['Content-Security-Policy'] = _STRICT_CSP
         if request.url.scheme == 'https':
             response.headers['Strict-Transport-Security'] = (
                 'max-age=31536000; includeSubDomains'

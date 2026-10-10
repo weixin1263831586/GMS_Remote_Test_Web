@@ -257,5 +257,112 @@ class DownloadSshManager:
         return SimpleNamespace(ok=True, stdout=json.dumps(result), stderr="")
 
 
+class DownloadFileSshManager:
+    def __init__(self, *, entered=None, release=None):
+        self.returned = 0
+        self.entered, self.release = entered, release
+        self.prepared = threading.Event()
+        self.file = mock.Mock()
+        self.file.read.side_effect = [b"report", b""]
+        self.sftp = mock.Mock()
+        self.sftp.open.return_value = self.file
+        self.ssh = mock.Mock()
+        self.ssh.open_sftp.return_value = self.sftp
+
+    def get_connection(self, _config):
+        return self.ssh
+
+    def return_connection(self, _ssh):
+        self.returned += 1
+
+    def execute_command(self, _ssh, _command, timeout=30, get_pty=False):
+        if self.entered is not None:
+            self.entered.set()
+            if not self.release.wait(3):
+                raise TimeoutError("blocked preparation")
+        self.prepared.set()
+        payload = {
+            "success": True,
+            "real_path": "/srv/GMS-Suite/results/report.html",
+            "name": "report.html",
+            "size": 6,
+        }
+        return SimpleNamespace(ok=True, stdout=json.dumps(payload), stderr="")
+
+
+class RemoteFileDownloadLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def _download(self, manager):
+        old_config = suites_api.runtime.config_manager
+        old_ssh = suites_api.runtime.ssh_manager
+        suites_api.runtime.config_manager = RemoteConfigManager()
+        suites_api.runtime.ssh_manager = manager
+        try:
+            return await suites_api.download_suite_file(
+                suite_path="/srv/GMS-Suite/android-cts/tools",
+                path="results/report.html",
+                inline=True,
+            )
+        finally:
+            suites_api.runtime.config_manager = old_config
+            suites_api.runtime.ssh_manager = old_ssh
+
+    async def test_preparation_does_not_block_the_event_loop(self):
+        entered, release = threading.Event(), threading.Event()
+        manager = DownloadFileSshManager(entered=entered, release=release)
+        task = asyncio.create_task(self._download(manager))
+        try:
+            self.assertTrue(await asyncio.to_thread(entered.wait, 3))
+            await asyncio.wait_for(asyncio.sleep(0), timeout=0.2)
+        finally:
+            release.set()
+        response = await task
+        self.assertEqual(
+            [chunk async for chunk in response.body_iterator],
+            [b"report"],
+        )
+        self.assertEqual(manager.returned, 1)
+
+    async def test_cancelled_preparation_cannot_open_sftp_after_return(self):
+        entered, release = threading.Event(), threading.Event()
+        manager = DownloadFileSshManager(entered=entered, release=release)
+        task = asyncio.create_task(self._download(manager))
+        try:
+            self.assertTrue(await asyncio.to_thread(entered.wait, 3))
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=1)
+            self.assertEqual(manager.returned, 0)
+        finally:
+            release.set()
+        self.assertTrue(await asyncio.to_thread(manager.prepared.wait, 3))
+        for _ in range(50):
+            if manager.returned:
+                break
+            await asyncio.sleep(0.02)
+        manager.ssh.open_sftp.assert_not_called()
+        self.assertEqual(manager.returned, 1)
+
+    async def test_disconnect_before_iteration_closes_resources_once(self):
+        manager = DownloadFileSshManager()
+        response = await self._download(manager)
+
+        async def receive():
+            return {"type": "http.disconnect"}
+
+        async def send(_message):
+            raise OSError("client disconnected")
+
+        with self.assertRaises(ClientDisconnect):
+            await response(
+                {"type": "http", "method": "GET", "asgi": {"spec_version": "2.4"}},
+                receive,
+                send,
+            )
+        manager.file.read.assert_not_called()
+        manager.file.close.assert_called_once()
+        manager.sftp.close.assert_called_once()
+        self.assertEqual(manager.returned, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -275,7 +275,7 @@ def test_partial_disconnect_error_preserves_sibling_source_state():
 
 
 def test_unconfirmed_remote_detach_leaves_assignment_retryable():
-    import features.devices.integrations_api as integrations
+    import features.devices.usbip_assignments as usbip_assignments
 
     device_host = "user@10.0.0.1"
     runtime_config = {
@@ -298,8 +298,8 @@ def test_unconfirmed_remote_detach_leaves_assignment_retryable():
             runtime_config.update(updates)
             return True
 
-    with patch.object(integrations.runtime, "config_manager", ConfigManager()):
-        integrations._mark_usbip_detach_unknown(
+    with patch.object(usbip_assignments.runtime, "config_manager", ConfigManager()):
+        usbip_assignments.mark_usbip_detach_unknown(
             device_host, ["1-1"], "worker-1", 7
         )
 

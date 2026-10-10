@@ -282,7 +282,11 @@ async def list_suite_files(suite_path: str = Query(...), path: str = Query("")):
         if not ssh:
             return ssh_connection_failed_response()
 
-        payload = _run_suite_file_script(ssh, SUITE_FILE_LIST_SCRIPT, suite_root, remote_path)
+        # 同步 SSH 脚本（默认 20s 超时）必须在 worker 线程执行，
+        # 否则慢主机会阻塞事件循环、拖垮同进程其他请求。
+        payload = await run_in_threadpool(
+            _run_suite_file_script, ssh, SUITE_FILE_LIST_SCRIPT, suite_root, remote_path
+        )
         if not payload.get("success"):
             return ApiResponse.error(payload.get("error", "Directory read failed"), status_code=400)
         return ApiResponse.success({"suite_path": suite_path, "suite_root": suite_root, "path": payload.get("path", rel_path), "items": payload.get("items", [])})
@@ -353,21 +357,108 @@ async def download_suite_file(suite_path: str = Query(...), path: str = Query(..
             status = 400 if isinstance(exc, ValueError) else 404
             return ApiResponse.error(str(exc), status_code=status)
 
-    ssh = runtime.ssh_manager.get_connection(config)
-    if not ssh:
-        return ssh_connection_failed_response()
+    # 远程分支：连接获取、info 脚本（同步 SSH，默认 20s 超时）和 SFTP 打开
+    # 全部放入 worker 线程执行——慢主机会阻塞事件循环，拖垮同进程其他请求。
+    # 下载流改用 _SuiteStreamingResponse：客户端中途断开/迭代异常时由
+    # shield 清理路径归还连接，与目录下载（download_suite_directory）同一套
+    # 资源保护机制。
+    manager = runtime.ssh_manager
+    ssh = None
+    sftp = remote_file = None
+    info: dict[str, Any] = {}
+    closed = False
+    preparing = False
+    cleanup_lock = threading.Lock()
+
+    def cleanup():
+        nonlocal closed
+        with cleanup_lock:
+            if closed:
+                return
+            closed = True
+            if preparing:
+                return
+        if remote_file is not None:
+            with contextlib.suppress(Exception):
+                remote_file.close()
+        if sftp is not None:
+            with contextlib.suppress(Exception):
+                sftp.close()
+        if ssh is not None:
+            manager.return_connection(ssh)
+
+    def prepare():
+        nonlocal ssh, sftp, remote_file, info, preparing
+        acquired_ssh = manager.get_connection(config)
+        if not acquired_ssh:
+            raise RuntimeError("SSH connection failed")
+        with cleanup_lock:
+            if closed:
+                manager.return_connection(acquired_ssh)
+                raise TimeoutError("File download cancelled")
+            ssh = acquired_ssh
+            preparing = True
+        try:
+            info = _run_suite_file_script(
+                ssh, SUITE_FILE_INFO_SCRIPT, suite_root, remote_path,
+                ssh_manager=manager,
+            )
+        except BaseException:
+            with cleanup_lock:
+                preparing = False
+                cancelled = closed
+            if cancelled:
+                manager.return_connection(ssh)
+            raise
+        if not info.get("success"):
+            with cleanup_lock:
+                preparing = False
+            raise FileNotFoundError(info.get("error", "File not found"))
+        # Cancellation may return the SSH connection while the synchronous
+        # info command is still unwinding. Publish SFTP resources under the
+        # same lock as cleanup so they can never be opened after that return.
+        with cleanup_lock:
+            preparing = False
+            if closed:
+                cancelled = True
+            else:
+                cancelled = False
+                sftp = ssh.open_sftp()
+                remote_file = sftp.open(info["real_path"], "rb")
+        if cancelled:
+            manager.return_connection(ssh)
+            raise TimeoutError("File download cancelled")
 
     try:
-        info = _run_suite_file_script(ssh, SUITE_FILE_INFO_SCRIPT, suite_root, remote_path)
-        if not info.get("success"):
-            runtime.ssh_manager.return_connection(ssh)
-            return ApiResponse.error(info.get("error", "File not found"), status_code=404)
-
-        sftp = ssh.open_sftp()
-        remote_file = sftp.open(info["real_path"], "rb")
-    except Exception:
-        runtime.ssh_manager.return_connection(ssh)
+        await run_in_threadpool(prepare)
+    except asyncio.CancelledError:
+        with anyio.CancelScope(shield=True):
+            await run_in_threadpool(cleanup)
         raise
+    except TimeoutError as exc:
+        await run_in_threadpool(cleanup)
+        raise ApiError.dependency_timeout(
+            "远程文件信息获取超时，请重试",
+            next_actions=[{"action": "Retry the download"}],
+        ) from exc
+    except FileNotFoundError as exc:
+        await run_in_threadpool(cleanup)
+        raise ApiError.not_found(str(exc)) from exc
+    except Exception as exc:
+        await run_in_threadpool(cleanup)
+        if "SSH connection failed" in str(exc):
+            raise ApiError.upstream_failure(
+                "SSH connection failed",
+                service="ssh",
+                next_actions=[
+                    {"action": "verify host sshd", "command": "ping <host>"},
+                    {"action": "retry after fixing SSH access"},
+                ],
+            ) from exc
+        raise ApiError.upstream_failure(
+            "远程文件下载准备失败", service="ssh",
+            next_actions=[{"action": "Check Worker SSH/SFTP and retry the download"}],
+        ) from exc
 
     filename = info.get("name") or os.path.basename(remote_path) or "download"
     ascii_filename = re.sub(r"[^A-Za-z0-9._-]+", "_", filename) or "download"
@@ -382,27 +473,27 @@ async def download_suite_file(suite_path: str = Query(...), path: str = Query(..
                     break
                 yield chunk
         finally:
-            try:
-                remote_file.close()
-            finally:
-                try:
-                    sftp.close()
-                finally:
-                    runtime.ssh_manager.return_connection(ssh)
+            cleanup()
 
     if inline:
         disposition = "inline"
     else:
         disposition = f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{quoted_filename}'
 
-    return StreamingResponse(
-        iter_remote_file(),
-        media_type=media_type,
-        headers={
-            "Content-Disposition": disposition,
-            "Content-Length": str(info.get("size", 0)),
-        },
-    )
+    try:
+        return _SuiteStreamingResponse(
+            iter_remote_file(),
+            cleanup=cleanup,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": disposition,
+                "Content-Length": str(info.get("size", 0)),
+            },
+        )
+    except BaseException:
+        with anyio.CancelScope(shield=True):
+            await run_in_threadpool(cleanup)
+        raise
 
 
 @router.get("/api/test/suites/download-dir")

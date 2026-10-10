@@ -793,7 +793,7 @@ class UsbipSerialMigrationTests(unittest.TestCase):
 
 class UsbipAssignmentPruningTests(unittest.TestCase):
     def test_stale_unknown_busid_is_pruned_after_windows_reenumeration(self):
-        import features.devices.integrations_api as integrations
+        import features.devices.usbip_assignments as usbip_assignments
 
         runtime_config = {
             "usbip_cluster_assignments": {
@@ -821,9 +821,9 @@ class UsbipAssignmentPruningTests(unittest.TestCase):
                 return True
 
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            usbip_assignments.runtime, "config_manager", FakeConfigManager()
         ):
-            removed = integrations._prune_stale_unknown_usbip_assignments(
+            removed = usbip_assignments.prune_stale_unknown_usbip_assignments(
                 "hcq@172.16.14.66",
                 {"1-1", "1-9"},
             )
@@ -835,9 +835,9 @@ class UsbipAssignmentPruningTests(unittest.TestCase):
         )
 
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            usbip_assignments.runtime, "config_manager", FakeConfigManager()
         ):
-            integrations._prune_stale_unknown_usbip_assignments(
+            usbip_assignments.prune_stale_unknown_usbip_assignments(
                 "hcq@172.16.14.66",
                 set(),
             )

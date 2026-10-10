@@ -595,9 +595,10 @@ class FrontendIntegrityTests(unittest.TestCase):
             navigation,
         )
         self.assertIn(
-            "window.open(`${endpoint}?${buildReadablePathQuery(params)}`, '_blank')",
+            "'noopener,noreferrer'",
             navigation,
         )
+        self.assertIn("preview.opener = null", navigation)
         self.assertIn(
             "link.href = `${endpoint}?${buildReadablePathQuery(params)}`",
             navigation,

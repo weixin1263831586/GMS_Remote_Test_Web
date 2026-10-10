@@ -5,7 +5,6 @@
 
 gms-rt-cluster-workers() {
     check_jq || return 1
-    _refresh_tls_args
     api_call "/cluster/workers" | jq '.'
 }
 
@@ -222,13 +221,11 @@ _post_firmware_burn_path() {
     local device_list
     device_list=$(echo "$devices" | tr ' ' ',')
 
-    _refresh_tls_args
-    _ensure_auth_cookie_jar || return 1
     local approval_query=""
     if [ -n "${GMS_RT_BURN_APPROVAL_TOKEN:-}" ]; then
         approval_query="?approval_token=$(_urlencode "$GMS_RT_BURN_APPROVAL_TOKEN")"
     fi
-    curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS -w "\nHTTP_STATUS:%{http_code}" \
+    _gms_curl_authenticated -sS -w "\nHTTP_STATUS:%{http_code}" \
         --max-time "$CURL_BURN_TIMEOUT" \
         -X POST "${API_BASE}/burn/firmware${approval_query}" \
         -F "firmware_path=${remote_path}" \
@@ -249,9 +246,7 @@ _post_firmware_burn_upload() {
         approval_query="&approval_token=$(_urlencode "$GMS_RT_BURN_APPROVAL_TOKEN")"
     fi
 
-    _refresh_tls_args
-    _ensure_auth_cookie_jar || return 1
-    curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -# -o /dev/stdout -w "\nHTTP_STATUS:%{http_code}" \
+    _gms_curl_authenticated -# -o /dev/stdout -w "\nHTTP_STATUS:%{http_code}" \
         --max-time "$CURL_BURN_TIMEOUT" \
         -X POST "${API_BASE}/burn/firmware?devices=${device_query}${approval_query}" \
         -F "firmware_file=@${firmware_path}" \

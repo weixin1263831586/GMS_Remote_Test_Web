@@ -109,3 +109,39 @@ def test_tradefed_arguments_are_not_evaluated_as_shell_code(tmp_path):
     assert f"CtsSecurityTestCases; touch {marker_path}".encode() in argv
     assert b"SecurityTest#testArgumentBoundary" in argv
     assert b"SAFE-SERIAL" in argv
+
+
+def test_parameterized_case_is_logged_without_shell_escape_backslashes(tmp_path):
+    suite_path = tmp_path / "tools"
+    suite_path.mkdir()
+    tradefed = suite_path / "cts-tradefed"
+    tradefed.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+    tradefed.chmod(0o755)
+    case = "android.server.wm.window.CrossAppDragAndDropTests#testGrantReadRequestNone[CrossDisplay]"
+    assignments = {
+        "LOG_FILE": str(tmp_path / "tradefed.log"),
+        "SUITE_PATH": str(suite_path),
+        "SUITE_PREFIX": "cts",
+        "TEST_COMMAND": "cts",
+        "Test_Type": "cts",
+        "Test_Module": "CtsWindowManagerDeviceWindow",
+        "Test_Case": case,
+        "DEVICE_ARGS": "-s rk3572testrkp",
+        "PROCESS_GROUP_ID": "",
+    }
+    shell = [f"source {shlex.quote(str(SCRIPT))}"]
+    shell.extend(f"{name}={shlex.quote(value)}" for name, value in assignments.items())
+    shell.append("run_tradefed run")
+
+    completed = subprocess.run(
+        ["bash", "-c", "\n".join(shell)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    command_line = next(
+        line for line in completed.stdout.splitlines() if "📋 测试命令:" in line
+    )
+    assert case in command_line
+    assert r"\[CrossDisplay\]" not in command_line

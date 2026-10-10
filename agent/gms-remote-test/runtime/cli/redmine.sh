@@ -221,13 +221,16 @@ gms-rt-redmine-attachment-download() {
     local curl_status status_file tmp_output
     status_file=$(mktemp "${TMPDIR:-/tmp}/gms-rt-dl-status.XXXXXX") || return "$GMS_RT_EXIT_OPERATION"
     tmp_output=$(mktemp "${TMPDIR:-/tmp}/gms-rt-dl-body.XXXXXX") || { rm -f -- "$status_file"; return "$GMS_RT_EXIT_OPERATION"; }
-    _refresh_tls_args
-    _ensure_auth_cookie_jar || { rm -f -- "$status_file" "$tmp_output"; return "$GMS_RT_EXIT_OPERATION"; }
     # 先落临时文件：非 200 时响应体是 JSON 错误（如 scope_required），
     # 不能写进目标输出再整文件删除（否则错误详情会丢失）。
-    curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
+    _gms_curl_authenticated -sS \
         -o "$tmp_output" -w '%{http_code}' --max-time "$CURL_TIMEOUT" \
         "${API_BASE}/redmine-agent/artifacts/$artifact_id/download" > "$status_file"
+    local request_status=$?
+    if [ "${_gms_authenticated_request_auth_failed:-0}" = "1" ]; then
+        rm -f -- "$status_file" "$tmp_output"
+        return "$GMS_RT_EXIT_AUTH"
+    fi
     curl_status=$(cat "$status_file" 2>/dev/null)
     rm -f -- "$status_file"
     case "$curl_status" in
