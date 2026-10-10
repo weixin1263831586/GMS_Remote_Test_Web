@@ -16,7 +16,7 @@ from features.auth import (
 )
 from foundation.error_model import ApiError, record_internal_error
 from foundation.errors import handle_api_errors
-from foundation.responses import error_response, success_response
+from foundation.responses import ApiResponse, error_response
 from foundation.security import sanitize_device_ids
 from foundation.security_audit import security_audit_logger
 
@@ -44,22 +44,6 @@ from .usbip import wait_for_adb_serial_ready
 logger = logging.getLogger(__name__)
 router = APIRouter()
 router.include_router(management_router)
-
-
-def _device_results(results, operation_name):
-    success_count = sum(result.get("success", False) for result in results)
-    failed_count = len(results) - success_count
-    return success_response(
-        data={
-            "results": results,
-            "summary": {
-                "total": len(results),
-                "success": success_count,
-                "failed": failed_count,
-            },
-        },
-        message=f"{operation_name}完成: 成功 {success_count} 台, 失败 {failed_count} 台",
-    )
 
 
 @router.get("/api/devices/user-locked")
@@ -190,7 +174,7 @@ async def reboot_devices(req: DeviceActionRequest, request: Request):
                 reason="USB/IP device reboot requested",
                 expected_devices=device_ids,
             )
-    return _device_results(results, "Device reboot")
+    return ApiResponse.device_results(results, "Device reboot")
 
 
 @router.post("/api/devices/remount")
@@ -244,7 +228,7 @@ async def remount_devices(req: DeviceActionRequest, request: Request):
         results = []
         for device_id in devices:
             results.append(await remount_single_device(device_id))
-        return _device_results(results, "Device Remount")
+        return ApiResponse.device_results(results, "Device Remount")
 
 
 @router.post("/api/devices/wifi")
@@ -317,6 +301,7 @@ async def open_device_shell(req: DeviceShellRequest, request: Request):
         conflict = device_claim_conflict_response(
             [req.serial_no],
             device_fencing_owner_id(request),
+            allow_owner=True,
         )
         if conflict:
             return conflict

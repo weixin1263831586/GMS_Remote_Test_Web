@@ -62,9 +62,6 @@ class IssueResult(ResultObject):
 
 ISSUE_RESULT_SCHEMA = IssueResult.model_json_schema()
 ISSUE_RESULT_REQUIRED_FIELDS = tuple(ISSUE_RESULT_SCHEMA["required"])
-ROOT_CAUSE_TYPES = tuple(ISSUE_RESULT_SCHEMA["properties"]["root_cause_type"]["enum"])
-RISK_LEVELS = tuple(ISSUE_RESULT_SCHEMA["properties"]["risk"]["enum"])
-SIMILARITY_LEVELS = tuple(ISSUE_RESULT_SCHEMA["$defs"]["SimilarIssue"]["properties"]["similarity"]["enum"])
 
 
 RESULT_SCHEMA_VERSION = 2
@@ -105,18 +102,11 @@ def confidence_below_review_threshold(result: dict[str, Any]) -> bool:
     )
 
 
-MAX_SIMILAR_ISSUES = 4
-
-
 BRIEF_MODES = ("nightly", "delta", "manual")
-RUN_STATUSES = (
-    "pending", "snapshotting", "analyzing", "completed", "partial", "failed", "cancelled",
-)
 ISSUE_STATUSES = ("pending", "running", "completed", "failed", "cancelled", "stale")
 # Data freshness and execution status are independent dimensions:
 # execution_status（completed/partial/failed/cancelled）描述 AI 分析本身；
 # data_quality 描述输入数据可信程度——"晨报完成"不等于"数据是新的"。
-DATA_QUALITY_STATUSES = ("fresh", "stale", "sync_failed", "unknown")
 # 快照年龄超过该值（秒）即使 sync 成功也标记 stale。
 DATA_FRESH_LIMIT_SECONDS = 24 * 3600
 
@@ -155,8 +145,6 @@ PRIORITY_SCORE_BASE = {
 }
 PRIORITY_SCORE_URGENT = 50
 PRIORITY_SCORE_HIGH = 30
-
-PRIORITY_LABELS = ("P1", "P2", "P3")
 
 
 def priority_from_score(score: int) -> str:

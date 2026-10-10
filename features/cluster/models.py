@@ -5,8 +5,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from foundation.device_action_spec import DeviceAction
+
 from .config import ClusterConfig
-from .device_action_spec import DeviceAction
 
 
 # Worker 上报的事件 payload 上限（字节，序列化后）。正常事件 payload 为空或

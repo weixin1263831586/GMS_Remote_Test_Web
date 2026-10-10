@@ -99,60 +99,63 @@ def auto_assign_new_devices(
     device_props: dict[str, dict[str, str]],
 ) -> list[dict[str, Any]]:
     """Append devices and host/property values to persisted automatic groups."""
-    groups = load_device_groups(username)
-    if not device_props:
-        return groups
+    # 串行执行完整读改写事务：与 mutate 路径并发时，锁外重放 stale 分组
+    # 会覆盖用户手动保存的分组。
+    with _storage_lock:
+        groups = load_device_groups(username)
+        if not device_props:
+            return groups
 
-    auto_rules: dict[tuple[str, str], dict[str, Any]] = {}
-    active_dimensions: set[str] = set()
-    for group in groups:
-        if not str(group.get('id', '')).startswith('auto_'):
-            continue
-        dimension, separator, value = str(group.get('name', '')).partition(': ')
-        if separator and dimension in _AUTO_DIM_TO_PROP:
-            auto_rules[(dimension, value)] = group
-            active_dimensions.add(dimension)
-    if not auto_rules:
-        return groups
-
-    changed = False
-    known_ids = {str(group.get('id') or '') for group in groups}
-    for device_id, properties in device_props.items():
-        for dimension in active_dimensions:
-            raw = str(properties.get(_AUTO_DIM_TO_PROP[dimension]) or '').strip()
-            if not raw:
+        auto_rules: dict[tuple[str, str], dict[str, Any]] = {}
+        active_dimensions: set[str] = set()
+        for group in groups:
+            if not str(group.get('id', '')).startswith('auto_'):
                 continue
-            current = soc_series(raw) if dimension == 'soc' else raw
-            rule_key = (dimension, current)
-            group = auto_rules.get(rule_key)
-            if group is None:
-                group_id = _automatic_group_id(dimension, current)
-                if group_id in known_ids:
-                    digest = hashlib.sha256(
-                        f'{dimension}:{current}'.encode()
-                    ).hexdigest()[:8]
-                    group_id = f'{group_id}_{digest}'
-                group = {
-                    'id': group_id,
-                    'name': f'{dimension}: {current}',
-                    'color': _default_group_color(len(groups)),
-                    'device_ids': [],
-                    'followed': False,
-                }
-                groups.append(group)
-                known_ids.add(group_id)
-                auto_rules[rule_key] = group
-                changed = True
-            device_ids = group.get('device_ids') or []
-            if device_id not in device_ids:
-                device_ids.append(device_id)
-                group['device_ids'] = device_ids
-                changed = True
+            dimension, separator, value = str(group.get('name', '')).partition(': ')
+            if separator and dimension in _AUTO_DIM_TO_PROP:
+                auto_rules[(dimension, value)] = group
+                active_dimensions.add(dimension)
+        if not auto_rules:
+            return groups
 
-    if changed:
-        groups = normalize_device_groups(groups)
-        save_device_groups(username, groups)
-    return groups
+        changed = False
+        known_ids = {str(group.get('id') or '') for group in groups}
+        for device_id, properties in device_props.items():
+            for dimension in active_dimensions:
+                raw = str(properties.get(_AUTO_DIM_TO_PROP[dimension]) or '').strip()
+                if not raw:
+                    continue
+                current = soc_series(raw) if dimension == 'soc' else raw
+                rule_key = (dimension, current)
+                group = auto_rules.get(rule_key)
+                if group is None:
+                    group_id = _automatic_group_id(dimension, current)
+                    if group_id in known_ids:
+                        digest = hashlib.sha256(
+                            f'{dimension}:{current}'.encode()
+                        ).hexdigest()[:8]
+                        group_id = f'{group_id}_{digest}'
+                    group = {
+                        'id': group_id,
+                        'name': f'{dimension}: {current}',
+                        'color': _default_group_color(len(groups)),
+                        'device_ids': [],
+                        'followed': False,
+                    }
+                    groups.append(group)
+                    known_ids.add(group_id)
+                    auto_rules[rule_key] = group
+                    changed = True
+                device_ids = group.get('device_ids') or []
+                if device_id not in device_ids:
+                    device_ids.append(device_id)
+                    group['device_ids'] = device_ids
+                    changed = True
+
+        if changed:
+            groups = normalize_device_groups(groups)
+            save_device_groups(username, groups)
+        return groups
 
 
 def cluster_device_properties(service: Any = None) -> dict[str, dict[str, str]]:

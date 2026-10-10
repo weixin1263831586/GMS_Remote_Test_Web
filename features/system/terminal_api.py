@@ -122,7 +122,9 @@ async def upload_file(
         config = config_manager.load_config()
         try:
             resolved_worker, resolved_host, resolved_user, password, _serial = (
-                resolve_authorized_terminal_target(worker_id, mode="ssh")
+                await asyncio.to_thread(
+                    resolve_authorized_terminal_target, worker_id, mode="ssh"
+                )
             )
         except ValueError as exc:
             return error_response(str(exc), 400)
@@ -283,7 +285,9 @@ async def _upload_file_chunk(
             logger.info(f"[ChunkUpload] All chunks received for {upload_id}, merging...")
 
             merged_file = safe_upload_target_path(session_dir, file_name, allow_nested=False)
-            merge_files_to_path(chunk_paths, merged_file)
+            # 合并是纯磁盘 I/O，大文件分块场景会阻塞事件循环——与下方
+            # SFTP 上传一样移出事件循环执行。
+            await asyncio.to_thread(merge_files_to_path, chunk_paths, merged_file)
 
             merge_time = time.time() - merge_start
             logger.info(f"[ChunkUpload] Merged {total_chunks} chunks in {merge_time:.2f}s")
@@ -314,9 +318,14 @@ async def _upload_file_chunk(
                     )
                     upload_start = time.time()
 
-                    with ssh.open_sftp() as sftp:
-                        ssh_manager.optimize_sftp_performance(sftp)
-                        sftp.put(merged_file, remote_path, confirm=True)
+                    def _sftp_upload_merged() -> None:
+                        # sftp.put 是阻塞传输（分块上传的本意就是 GB 级大文件），
+                        # 必须移出事件循环，同单文件路径的 _sftp_upload。
+                        with ssh.open_sftp() as sftp:
+                            ssh_manager.optimize_sftp_performance(sftp)
+                            sftp.put(merged_file, remote_path, confirm=True)
+
+                    await asyncio.to_thread(_sftp_upload_merged)
 
                     upload_time = time.time() - upload_start
                     file_size_mb = os.path.getsize(merged_file) / (1024 * 1024)

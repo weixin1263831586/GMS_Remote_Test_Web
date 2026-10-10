@@ -216,7 +216,6 @@ def _create_job(body: ClusterJobCreate, request: Request, receipt: dict):
     # job env 到达 Worker 后会进入 Bash 启动环境，未列入白名单的键
     # （BASH_ENV/ENV/SHELLOPTS/解释器搜索路径等）可扩大 Worker OS 执行能力，
     # 必须在入队前拒绝，而不是等到 Worker 端静默丢弃。
-    # 参见 docs/architecture/adr/0001-controller-worker-boundary.md。
     allowed_env, rejected_env_keys = filter_job_env(data.get("env"))
     if rejected_env_keys:
         raise HTTPException(

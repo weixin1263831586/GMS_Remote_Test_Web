@@ -374,12 +374,33 @@ class KnowledgeStore(KnowledgeVersionMixin):
             conn.commit()
         return self.get_doc(user_id, doc_id)
     def move_node(self, user_id: str, node_id: str, parent_id: str = "", sort_order: int | None = None) -> bool:
+        parent_id = parent_id or ""
         with self._connect() as conn:
+            # 防环检查和父节点更新必须串行化；否则两个并发移动都可能在
+            # 对方提交前通过检查，最终形成 A -> B -> A。
+            conn.execute("BEGIN IMMEDIATE")
+            if parent_id:
+                # 新父节点不得是自身或自身子树，否则会形成 parent 环，
+                # delete_node 的递归 CTE 将无限递归。
+                subtree = conn.execute(
+                    """WITH RECURSIVE descendants(node_id) AS (
+                           SELECT node_id FROM knowledge_nodes
+                           WHERE user_id=? AND node_id=?
+                           UNION
+                           SELECT child.node_id FROM knowledge_nodes child
+                           JOIN descendants parent ON child.parent_id=parent.node_id
+                           WHERE child.user_id=?
+                       )
+                       SELECT node_id FROM descendants""",
+                    (user_id, node_id, user_id),
+                ).fetchall()
+                if any(row["node_id"] == parent_id for row in subtree):
+                    raise ValueError("不能把节点移动到它自身或其子节点下")
             cur = conn.execute(
                 """UPDATE knowledge_nodes
                    SET parent_id=?, sort_order=COALESCE(?, sort_order), updated_at=?
                    WHERE user_id=? AND node_id=?""",
-                (parent_id or "", sort_order, _now(), user_id, node_id),
+                (parent_id, sort_order, _now(), user_id, node_id),
             )
             conn.commit()
             return cur.rowcount > 0

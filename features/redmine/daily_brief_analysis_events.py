@@ -416,9 +416,7 @@ def start_analysis_progress(
     repository: Any, run: Any, issue_id: int, record: Any = None,
 ) -> AnalysisProgressRecorder | None:
     """为一次分析创建进度记录器；失败时返回 None（进度永不阻断分析）。"""
-    store = getattr(repository, "events", None)
-    if store is None:
-        store = event_store_for_repository(repository)
+    store = event_store_for_repository(repository)
     try:
         return AnalysisProgressRecorder(
             store, str(getattr(run, "run_id", "") or ""), int(issue_id),

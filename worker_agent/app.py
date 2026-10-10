@@ -158,6 +158,7 @@ class WorkerAgent:
         self.last_suite_scan = 0.0
         self.next_usbip_recovery_at = 0.0
         self.usbip_operation_lock = threading.Lock()
+        self.usbip_recovery_in_flight = threading.Event()
 
     def registration(self):
         try:
@@ -227,24 +228,11 @@ class WorkerAgent:
                 "; ".join(proxy_recovery["errors"]),
             )
         if time.monotonic() >= self.next_usbip_recovery_at:
-            usbip_recovery = self.recover_usbip_assignments()
-            if usbip_recovery["recovered"]:
-                logger.info(
-                    "recovered USB/IP assignments: %s",
-                    ", ".join(usbip_recovery["recovered"]),
-                )
-            if usbip_recovery["errors"]:
-                logger.warning(
-                    "USB/IP recovery pending: %s",
-                    "; ".join(usbip_recovery["errors"]),
-                )
-                self.next_usbip_recovery_at = time.monotonic() + 30
-            else:
-                self.next_usbip_recovery_at = (
-                    time.monotonic() + 60
-                    if self.runtime.usbip_assignments()
-                    else float("inf")
-                )
+            # attach 恢复最长 180s（device_actions.py 的 SSH attach 超时），
+            # 内联执行会让心跳缺口超过 Controller 的
+            # worker_offline_seconds（默认 45s），运行中的任务被误判
+            # worker_lost。后台线程执行，in-flight 标记防止重入叠跑。
+            self._start_usbip_recovery_background()
         now = time.monotonic()
         include_suites = not self.suites or now - self.last_suite_scan >= self.config.suite_scan_interval
         if include_suites:
@@ -334,34 +322,20 @@ class WorkerAgent:
                 ).start()
                 return
             elif kind == "adb_proxy":
-                payload = command.get("payload", {})
-                action = str(payload.get("action") or "")
-                pair_code = ""
-                if action == "source_start":
-                    pair_code = pair_code_from_grant(
-                        self.config.token,
-                        str(payload.get("access_token") or ""),
-                    )
-                elif action == "target_connect":
-                    pair_code = self.client.adb_proxy_pair_code(
-                        str(payload.get("source_worker_id") or ""),
-                        str(payload.get("access_token") or ""),
-                    )
-                result = execute_adb_proxy_action(
-                    action,
-                    payload,
-                    pair_code=pair_code,
-                )
-                if action in {"target_connect", "target_disconnect"}:
-                    try:
-                        # Publish the changed adb-hub inventory before the
-                        # command ACK, so the Controller/UI can refresh at once.
-                        self.heartbeat()
-                    except Exception:
-                        logger.warning(
-                            "failed to publish ADB Proxy inventory immediately",
-                            exc_info=True,
-                        )
+                # target_connect 最长 120s（adb_proxy.py 按 action 定传输
+                # 超时），pair_code 还要先与 Controller 交互：同步执行会让
+                # 心跳缺口超过 worker_offline_seconds（默认 45s），运行中
+                # 的任务被误判 worker_lost（device_action 同款处理，
+                # 见 run_slow_command）。
+                self.runtime.save_command(command["id"], "running", {})
+                self._ack_command(command["id"], "running", {})
+                threading.Thread(
+                    target=self.run_adb_proxy_command,
+                    args=(command,),
+                    name=f"ADBProxy-{command['id']}",
+                    daemon=True,
+                ).start()
+                return
             elif kind in {"usbip_attach", "usbip_detach"}:
                 self.runtime.save_command(command["id"], "running", {})
                 self._ack_command(command["id"], "running", {})
@@ -536,6 +510,48 @@ class WorkerAgent:
             self.runtime.save_command(command["id"], "failed", error=str(exc))
             if release_after:
                 self.runtime.release_fencing(command)
+            self._ack_command(command["id"], "failed", error=str(exc))
+
+    def run_adb_proxy_command(self, command: dict):
+        """后台执行 adb_proxy 命令（target_connect 最长 120s）。
+
+        完成语义与 handle() 历史同步路径一致：执行动作 →（target 侧变更
+        先发心跳公布 adb-hub 库存）→ save 终态 → ack 终态。
+        """
+        try:
+            payload = command.get("payload", {})
+            action = str(payload.get("action") or "")
+            pair_code = ""
+            if action == "source_start":
+                pair_code = pair_code_from_grant(
+                    self.config.token,
+                    str(payload.get("access_token") or ""),
+                )
+            elif action == "target_connect":
+                pair_code = self.client.adb_proxy_pair_code(
+                    str(payload.get("source_worker_id") or ""),
+                    str(payload.get("access_token") or ""),
+                )
+            result = execute_adb_proxy_action(
+                action,
+                payload,
+                pair_code=pair_code,
+            )
+            if action in {"target_connect", "target_disconnect"}:
+                try:
+                    # Publish the changed adb-hub inventory before the
+                    # command ACK, so the Controller/UI can refresh at once.
+                    self.heartbeat()
+                except Exception:
+                    logger.warning(
+                        "failed to publish ADB Proxy inventory immediately",
+                        exc_info=True,
+                    )
+            self.runtime.save_command(command["id"], "completed", result)
+            self._ack_command(command["id"], "completed", result)
+        except Exception as exc:
+            logger.exception("adb_proxy command %s failed", command.get("id"))
+            self.runtime.save_command(command["id"], "failed", error=str(exc))
             self._ack_command(command["id"], "failed", error=str(exc))
 
     @staticmethod
@@ -795,6 +811,37 @@ class WorkerAgent:
             )
         finally:
             self.runtime.release_fencing(command)
+
+    def _start_usbip_recovery_background(self):
+        """在后台线程执行 USB/IP 恢复，心跳线程立即返回。"""
+        if self.usbip_recovery_in_flight.is_set():
+            return
+        self.usbip_recovery_in_flight.set()
+
+        def _recover():
+            try:
+                usbip_recovery = self.recover_usbip_assignments()
+                if usbip_recovery["recovered"]:
+                    logger.info(
+                        "recovered USB/IP assignments: %s",
+                        ", ".join(usbip_recovery["recovered"]),
+                    )
+                if usbip_recovery["errors"]:
+                    logger.warning(
+                        "USB/IP recovery pending: %s",
+                        "; ".join(usbip_recovery["errors"]),
+                    )
+                    self.next_usbip_recovery_at = time.monotonic() + 30
+                else:
+                    self.next_usbip_recovery_at = (
+                        time.monotonic() + 60
+                        if self.runtime.usbip_assignments()
+                        else float("inf")
+                    )
+            finally:
+                self.usbip_recovery_in_flight.clear()
+
+        threading.Thread(target=_recover, name="UsbipRecovery", daemon=True).start()
 
     def recover_usbip_assignments(self) -> dict[str, list[str]]:
         recovered: list[str] = []

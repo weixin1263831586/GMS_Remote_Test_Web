@@ -54,10 +54,6 @@ class ClusterObservabilityRepositoryMixin:
             ),
         )
 
-    def append_timeline(self, **event: Any) -> None:
-        with self.connect() as conn:
-            self._append_timeline_conn(conn, **event)
-
     def list_timeline(
         self,
         *,

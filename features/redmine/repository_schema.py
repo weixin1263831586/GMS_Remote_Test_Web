@@ -41,8 +41,18 @@ class RepositorySchemaMixin:
     def connect(self, initialize_if_missing: bool = True) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.docs_dir.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
+        # 与 knowledge_schema/daily_brief_repository 同规（仓库硬规则：Web/
+        # Worker/CLI 多进程并发同一库）：WAL 允许读写并行，busy_timeout 把写锁
+        # 竞争从立即 "database is locked" 变成等待重试。PRAGMA 失败只吞并发
+        # 建库窗口里的 locked/busy，磁盘/权限等真实故障照常上抛。
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=30000")
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
+                raise
         if initialize_if_missing:
             existing_tables = {
                 str(row[0])

@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import re
-import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -128,7 +127,6 @@ class HttpAutomationExecutor:
         session: Any = None,
         jenkins_config: dict[str, Any] | None = None,
         build_password_provider: Any = None,
-        device_selector: Any = None,
         device_manager: Any = None,
         authority_provider: Any = None,
     ):
@@ -137,7 +135,6 @@ class HttpAutomationExecutor:
         self.session = session or requests.Session()
         self.jenkins_config = jenkins_config or {}
         self.build_password_provider = build_password_provider
-        self.device_selector = device_selector
         self.device_manager = device_manager
         # ADR 0012: callable(run) -> machine principal for this run. Loopback
         # Feature API calls authenticate with its short-TTL signed capability
@@ -831,35 +828,6 @@ class HttpAutomationExecutor:
             "fingerprint": fingerprint,
             "identities": identities,
         }
-
-    def _verify_post_flash(self, devices: list[str], verify: dict[str, Any]) -> dict[str, Any]:
-        """Verify ro.product/fingerprint after flash; retry while the device reboots."""
-        expected_product = str(verify.get("product") or "").strip()
-        fingerprint_contains = str(verify.get("fingerprint_contains") or "").strip()
-        attempts = int(verify.get("retries") or 30)
-        delay = int(verify.get("retry_delay") or 10)
-        last_error = ""
-        for _ in range(max(1, attempts)):
-            for serial in devices:
-                try:
-                    info = self.device_manager.get_device_info(serial) or {}
-                except Exception as exc:
-                    last_error = f"get_device_info failed for {serial}: {exc}"
-                    info = {}
-                product_identity = " ".join(
-                    str(info.get(key) or "") for key in ("product", "device", "board", "model")
-                )
-                fingerprint = str(info.get("fingerprint") or "")
-                if expected_product and expected_product.lower() not in product_identity.lower():
-                    last_error = f"product mismatch on {serial}: expected '{expected_product}', got '{product_identity.strip()}'"
-                    break
-                if fingerprint_contains and fingerprint_contains.lower() not in fingerprint.lower():
-                    last_error = f"fingerprint mismatch on {serial}: '{fingerprint}' missing '{fingerprint_contains}'"
-                    break
-            else:
-                return {"success": True, "verified": True}
-            time.sleep(delay)
-        return {"success": False, "error": f"post-flash verification failed: {last_error}"}
 
     def start_test(self, run: dict[str, Any]) -> dict[str, Any]:
         plan = _run_test_plan(run)

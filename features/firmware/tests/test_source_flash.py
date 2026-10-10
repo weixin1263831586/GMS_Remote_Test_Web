@@ -140,6 +140,21 @@ class EnqueueTaskTests(unittest.TestCase):
             r"C:\Users\wlq\gms-flash-queue",
         )
 
+    def test_queue_dir_rejects_username_with_cmd_metacharacters(self) -> None:
+        # username 与 device 同级校验：它被插值进 wait_result 的
+        # `type "...result.json"` cmd.exe 命令，引号/& 等元字符即注入。
+        with self.assertRaises(SourceFlashError) as ctx:
+            source_flash.windows_queue_dir('bad"user@10.0.0.5')
+        self.assertEqual(ctx.exception.status_code, 422)
+        with self.assertRaises(SourceFlashError) as ctx:
+            source_flash.windows_queue_dir("a&b@10.0.0.5")
+        self.assertEqual(ctx.exception.status_code, 422)
+        # 常规域账号字符（点/连字符/下划线）不受影响。
+        self.assertEqual(
+            source_flash.windows_queue_dir("first.last-win_01@10.0.0.5"),
+            r"C:\Users\first.last-win_01\gms-flash-queue",
+        )
+
 
 class WaitResultTests(unittest.TestCase):
     def test_returns_parsed_result(self) -> None:

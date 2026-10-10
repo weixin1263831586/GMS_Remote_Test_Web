@@ -1,4 +1,4 @@
-"""Firmware/GSI staging routes (split from transfers_api, 2026-09 review).
+"""Firmware/GSI staging HTTP routes for the cluster transfer feature.
 
 上传/下载 staging 镜像、GSI stage-from-source/transfer、固件清理。
 共享 helper（_transfer_root/_online_worker 等）经函数内延迟 import

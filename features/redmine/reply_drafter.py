@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from typing import Any
 
 from .case_extractor import (
-    _SIG_KNOWLEDGE,
     RedmineCaseExtractor,
     decode_json_list,
     decode_json_obj,
@@ -16,16 +16,66 @@ from .case_search import RedmineCaseSearch
 from .knowledge_repository import RedmineKnowledgeDB
 
 
-# 匹配文档中的黄超群回复块，正则在模块加载时编译。
-_OWNER_REPLY_RE = re.compile(r"^###\s+[^\n]*黄\s*超群[^\n]*\n(?P<body>.*?)(?=^###\s+|^##\s+|\Z)", re.M | re.S)
+# 回复锚点默认名单（历史行为）：匹配历史文档中 “### <姓名>” 回复块。
+# 部署可通过配置节 redmine_agent.owner_reply_names 注入自己的专家名单。
+DEFAULT_OWNER_REPLY_NAMES = ("黄超群",)
+
+
+def _name_pattern(name: str) -> str:
+    """姓名转正则：字符间容忍空白（“黄 超 群”与“黄超群”等价）。"""
+    return r"\s*".join(
+        re.escape(ch) for ch in str(name or "") if not ch.isspace())
+
+
+@lru_cache(maxsize=8)
+def _owner_reply_regex(names: tuple[str, ...]) -> re.Pattern[str]:
+    alternatives = [p for p in (_name_pattern(n) for n in names) if p]
+    if not alternatives:
+        # 空名单：不匹配任何内容（提取不到时自然走其他候选文本）。
+        return re.compile(r"(?!x)x")
+    return re.compile(
+        r"^###\s+[^\n]*(?:" + "|".join(alternatives) + r")[^\n]*\n"
+        r"(?P<body>.*?)(?=^###\s+|^##\s+|\Z)",
+        re.M | re.S,
+    )
+
+
+def load_owner_reply_names() -> tuple[str, ...]:
+    """读取配置节 ``redmine_agent.owner_reply_names``（owner 回复锚点名单）。
+
+    配置缺失/非法回落默认名单；配置系统自身异常不阻断草稿生成。
+    """
+    try:
+        from .config import config_manager
+
+        raw = (config_manager.load_config().get("redmine_agent") or {}).get(
+            "owner_reply_names")
+    except Exception:
+        return DEFAULT_OWNER_REPLY_NAMES
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return DEFAULT_OWNER_REPLY_NAMES
+    names = tuple(str(item).strip() for item in raw if str(item).strip())
+    return names or DEFAULT_OWNER_REPLY_NAMES
 
 
 class ReplyDrafter:
     """Compose a customer-facing reply draft for a Redmine issue."""
 
-    def __init__(self, knowledge_db: RedmineKnowledgeDB, *, show_internal_refs: bool = False):
+    def __init__(
+        self,
+        knowledge_db: RedmineKnowledgeDB,
+        *,
+        show_internal_refs: bool = False,
+        owner_reply_names: list[str] | tuple[str, ...] | None = None,
+    ):
         self.db = knowledge_db
         self.show_internal_refs = show_internal_refs
+        self.owner_reply_names = (
+            tuple(str(n).strip() for n in owner_reply_names if str(n).strip())
+            if owner_reply_names is not None else load_owner_reply_names()
+        )
         self.search = RedmineCaseSearch(knowledge_db)
 
     def draft_reply(
@@ -146,10 +196,8 @@ class ReplyDrafter:
         root_cause = case.get("root_cause") or ""
         solution = decode_json_obj(case.get("solution_json"))
         overview = solution.get("overview") or case.get("reply_template") or ""
-        # Verification: prefer the signature knowledge base (most accurate
-        # validation guidance), then fall back to the case's rules.
-        sig_kb = _SIG_KNOWLEDGE.get(signature, {})
-        verification = sig_kb.get("verification", "") or self._case_verification(case)
+        # 验证方式只来自案例自身的规则/事实，不再注入签名罐头文案。
+        verification = self._case_verification(case)
         source_ids = decode_json_list(case.get("source_issue_ids_json"))
 
         lines = [
@@ -220,27 +268,25 @@ class ReplyDrafter:
     def _meaningful_text(value: Any) -> str:
         return meaningful_text(value)
 
-    @classmethod
-    def _candidate_solution_text(cls, item: dict[str, Any]) -> str:
+    def _candidate_solution_text(self, item: dict[str, Any]) -> str:
         excerpt = str(item.get("doc_excerpt") or "")
-        owner_reply = cls._extract_owner_reply(excerpt)
+        owner_reply = self._extract_owner_reply(excerpt)
         if owner_reply:
             return owner_reply
         for key in ("solution", "reply_template"):
-            text = cls._meaningful_text(item.get(key))
+            text = self._meaningful_text(item.get(key))
             if text:
                 return text
         return ""
 
-    @classmethod
-    def _extract_owner_reply(cls, excerpt: str) -> str:
+    def _extract_owner_reply(self, excerpt: str) -> str:
         text = str(excerpt or "").strip()
         if not text:
             return ""
-        # 优先提取文档中的黄超群回复块。
-        pattern = _OWNER_REPLY_RE
+        # 优先提取文档中 owner（专家名单）的回复块。
+        pattern = _owner_reply_regex(self.owner_reply_names)
         matches = [m.group("body").strip() for m in pattern.finditer(text)]
-        candidates = [cls._redmine_pre_to_markdown(m) for m in matches if cls._meaningful_text(m)]
+        candidates = [self._redmine_pre_to_markdown(m) for m in matches if self._meaningful_text(m)]
         if candidates:
             # Prefer a reply that carries an actual patch/diff.
             candidates.sort(key=lambda s: (0 if "diff --git" in s or "```diff" in s else 1, -len(s)))

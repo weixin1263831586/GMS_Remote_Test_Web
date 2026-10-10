@@ -91,8 +91,10 @@ FORBIDDEN_PATTERNS = [
 
 # 第三方本地 clone（gitignore，如 tools/android-internals-wiki）不属于
 # 本仓库生产源码，不参与评审标记扫描。
+# docs/audits/ 是正式审计报告的指定存放处：报告自身按定义就是可追溯的
+# 出处（引用单号/残留文件名是审计内容，不是幽灵引用），不参与扫描。
 _EXCLUDED_DIR_NAMES = {"__pycache__", ".venv", "node_modules", "dist",
-                       "android-internals-wiki"}
+                       "android-internals-wiki", "audits"}
 
 
 def _candidate_files() -> list[Path]:

@@ -24,7 +24,6 @@ from foundation.responses import error_response, success_response
 from foundation.uploads import (
     extract_report_name_from_upload,
     safe_upload_target_path,
-    save_upload_to_path,
 )
 from workflows.report_to_redmine import (
     COMPILED_REDMINE_ATTACHMENT_PATTERN,
@@ -98,8 +97,8 @@ __all__ = [
     "logger",
     "os",
     "re",
+    "resolve_redmine_knowledge_service",
     "safe_upload_target_path",
-    "save_upload_to_path",
     "shutil",
     "strip_redmine_report_prefix",
     "success_response",
@@ -616,7 +615,3 @@ def _ensure_uploaded_report_extension(file_path: str, filename: str, content_typ
         os.replace(file_path, new_path)
         logger.info("[Report Analysis] Detected uploaded file type: %s -> %s", filename, new_filename)
     return new_path, new_filename
-
-
-
-__all__ = [name for name in globals() if not name.startswith("__")]

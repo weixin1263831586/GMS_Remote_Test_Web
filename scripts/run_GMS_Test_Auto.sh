@@ -256,7 +256,8 @@ run_tradefed() {
     command+=("${device_args[@]}" --disable-reboot)
 
     local command_display=""
-    printf -v command_display '%q ' "${command[@]}"
+    # 日志展示原始参数（如参数化用例的 [CrossDisplay]），执行仍使用数组。
+    printf -v command_display '%s ' "${command[@]}"
     log "📋 测试命令: ${command_display% }"
     log "⏱️ 开始时间: $(date)"
     RUN_STARTED_EPOCH=$(date +%s)

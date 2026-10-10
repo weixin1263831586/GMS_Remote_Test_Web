@@ -220,7 +220,16 @@ gms-rt-test-logs-stream() {
     echo "📡 Streaming test logs (Ctrl+C to stop)..."
     _refresh_tls_args
     _ensure_auth_cookie_jar || return 1
-    curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -N "${API_BASE}/test/logs/stream"
+    # 流式响应必须保持裸 curl（api_call 会缓冲整个响应体）。cookie 模式
+    # 下只读会话文件（-b 不带 -c）：长流期间既不持 cookie 写锁，也不回写
+    # jar；网络失败由 curl 退出码原样透传，不误报权限错误。
+    if [ "${#CURL_BEARER_ARGS[@]}" -gt 0 ]; then
+        curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" -N \
+            "${API_BASE}/test/logs/stream"
+    else
+        curl "${CURL_TLS_ARGS[@]}" -b "$GMS_AUTH_COOKIE_JAR" -N \
+            "${API_BASE}/test/logs/stream"
+    fi
 }
 
 # Start a test - delegates to /api/test/parse-args for intelligent parameter parsing

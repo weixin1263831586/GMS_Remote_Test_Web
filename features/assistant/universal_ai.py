@@ -473,37 +473,37 @@ class UniversalAIAnalyzer:
 {source_code[:3000]}
 ```
 """
-        prompt += """
+        prompt += f"""
 请分析上述信息并按以下JSON格式返回。
 
 **最关键要求（必须严格遵守）**：
 1. 你的回复必须且只能是一个纯JSON对象，不要包含任何其他内容
 2. 不要以"🎯 根本原因"或其他标题开头
 3. 不要包含"📊 详细分析"等解释性文字
-4. 直接以 { 开始，以 } 结束，中间就是JSON内容
+4. 直接以 {{ 开始，以 }} 结束，中间就是JSON内容
 5. 确保JSON格式完全正确，可以被标准JSON解析器解析
 6. 绝对不要使用markdown代码块标记（```json 或 ```）
 7. **禁止输出推理过程或思考步骤** - 不要输出 "Thinking Process"、"分析步骤" 等内容
 8. **直接给出最终结果** - 不要解释你的分析过程，直接返回JSON格式的分析结果
 返回格式：
-{
+{{
   "root_cause": "基于现有证据的结论或待验证假设（不超过80字）",
   "root_cause_status": "hypothesis",
   "confidence": "low",
   "evidence": ["直接支持该判断的日志或源码证据；没有则返回空数组"],
-  "analysis": EMOJI_CHART + " 详细分析：\\n1. 错误类型：xxx\\n2. 触发条件：xxx\\n3. 影响范围：xxx\\n4. 相关代码逻辑：xxx",
+  "analysis": "{EMOJI_CHART} 详细分析：\\n1. 错误类型：xxx\\n2. 触发条件：xxx\\n3. 影响范围：xxx\\n4. 相关代码逻辑：xxx",
   "suggestions": [
-    EMOJI_CHECK + "建议一：具体的修改步骤",
-    EMOJI_CHECK + "建议二：验证方法",
-    EMOJI_CHECK + "建议三：预防措施"
+    "{EMOJI_CHECK} 建议一：具体的修改步骤",
+    "{EMOJI_CHECK} 建议二：验证方法",
+    "{EMOJI_CHECK} 建议三：预防措施"
   ],
-  "solution": {
+  "solution": {{
     "problem_description": "详细问题描述",
     "error_type": "错误类型分类",
     "fix_strategy": "修复策略说明",
     "code_example": "代码示例（Java格式）"
-  }
-}
+  }}
+}}
 分析要求（适用于所有类型报错）：
 1. **严格区分失败现象与根因**：异常文本、超时、断言失败只属于现象，不能直接称为根因。
    - 没有直接日志或源码证据时，root_cause必须写成待验证假设
@@ -970,9 +970,6 @@ def get_universal_analyzer() -> UniversalAIAnalyzer:
     # 每次都重新创建实例以确保使用最新配置
     _universal_analyzer = UniversalAIAnalyzer(ai_config)
     return _universal_analyzer
-
-
-# ---- merged from provider_routing.py ----
 
 
 def first_local_provider(

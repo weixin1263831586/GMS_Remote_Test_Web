@@ -79,7 +79,9 @@ async def run_suite_download_task(task_id: str, url: str, archive_path: str):
             retryable=False,
         )
         return
-    cmd = ["curl", "--proto", "=http,https", "--max-redirs", "0", *_curl_resolve_arguments(target), "-C", "-", "--max-filesize", str(MAX_SUITE_ARCHIVE_BYTES), "--connect-timeout", "30", "--max-time", "7200", "--retry", "3", "--retry-delay", "5", "-o", part_path, target.url]
+    # --fail：HTTP 4xx/5xx 时 curl 以 22 退出而不是把错误页 body 存成
+    # “下载完成”的归档；--max-redirs 0 防止 Location 绕过 SSRF 校验。
+    cmd = ["curl", "--proto", "=http,https", "--fail", "--max-redirs", "0", *_curl_resolve_arguments(target), "-C", "-", "--max-filesize", str(MAX_SUITE_ARCHIVE_BYTES), "--connect-timeout", "30", "--max-time", "7200", "--retry", "3", "--retry-delay", "5", "-o", part_path, target.url]
     update_suite_download_task(task_id, status="downloading", progress=0, message=f"Downloading: {filename}")
 
     process = None

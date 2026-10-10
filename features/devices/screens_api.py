@@ -148,8 +148,8 @@ async def show_device_screens(req: DeviceActionRequest, request: Request):
 
                 existing_devices = []
                 for device_id in devices:
-                    is_healthy, pid_or_error = DeviceUtils.check_scrcpy_healthy(
-                        ssh, device_id
+                    is_healthy, pid_or_error = await asyncio.to_thread(
+                        DeviceUtils.check_scrcpy_healthy, ssh, device_id
                     )
 
                     if is_healthy and pid_or_error:
@@ -158,7 +158,11 @@ async def show_device_screens(req: DeviceActionRequest, request: Request):
                             f"Detected already mirrored device: {device_id} (PID: {pid_or_error})"
                         )
                     else:
-                        DeviceUtils.kill_process(ssh, DeviceUtils.scrcpy_process_pattern(device_id))
+                        await asyncio.to_thread(
+                            DeviceUtils.kill_process,
+                            ssh,
+                            DeviceUtils.scrcpy_process_pattern(device_id),
+                        )
 
                 new_devices = [d for d in devices if d not in existing_devices]
 

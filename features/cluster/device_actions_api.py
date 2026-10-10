@@ -12,14 +12,14 @@ from features.auth import (
     require_elevated_admin_when_auth_required,
 )
 from foundation.config import config_manager
-
-from .api import _require_cluster_enabled, service
-from .device_action_spec import (
+from foundation.device_action_spec import (
     adb_proxy_forbidden_device_actions,
     device_action_wait_steps,
     elevated_device_actions,
     read_only_device_actions,
 )
+
+from .api import _require_cluster_enabled, service
 from .models import ClusterDeviceAction
 from .operation_claims import device_action_claim_payload
 

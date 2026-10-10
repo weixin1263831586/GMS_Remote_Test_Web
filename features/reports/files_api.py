@@ -500,7 +500,7 @@ async def report_failure_summary(
                 "test_result.xml not found in the report result directory", 404
             )
 
-        def _parse() -> list[dict]:
+        def _parse() -> dict[str, object]:
             from .xml_parser import XMLReportParser
 
             failures = XMLReportParser().parse_file(xml_path).failures
@@ -520,19 +520,25 @@ async def report_failure_summary(
                         "stack_head": stack_head,
                     }
                 )
-            return cases
+            # failed 是失败总数；truncated 只在确有截断时为真
+            # （历史实现用 len(cases) 判断，恰好等于 max_cases 时误报）。
+            return {
+                "failed_total": len(failures),
+                "cases": cases,
+                "truncated": len(failures) > max_cases,
+            }
 
         import asyncio as _asyncio
 
-        cases = await _asyncio.to_thread(_parse)
+        parsed = await _asyncio.to_thread(_parse)
         return JSONResponse(
             content={
                 "success": True,
                 "report_timestamp": report.get("timestamp"),
                 "report_name": report.get("report_name"),
-                "failed": len(cases),
-                "truncated": len(cases) >= max_cases,
-                "cases": cases,
+                "failed": parsed["failed_total"],
+                "truncated": parsed["truncated"],
+                "cases": parsed["cases"],
             }
         )
     except Exception as e:

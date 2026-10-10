@@ -28,21 +28,6 @@ class XMLReportParser:
             logger.error(f"XML解析失败: {e}")
             return None
 
-    def parse_stream(self, xml_stream) -> TestReport | None:
-        """从文件流解析XML，避免为压缩包先解压落盘。"""
-        try:
-            if USE_LXML:
-                tree = etree.parse(xml_stream, _LXML_PARSER)
-                root = tree.getroot()
-            else:
-                tree = ET.parse(xml_stream)
-                root = tree.getroot()
-
-            return self._parse_root(root)
-        except Exception as e:
-            logger.error(f"XML流解析失败: {e}")
-            return None
-
     def parse_content(self, xml_content: str) -> TestReport | None:
         """解析XML内容字符串"""
         try:

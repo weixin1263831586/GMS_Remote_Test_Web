@@ -149,7 +149,6 @@ class USBIPManager:
     def __init__(self, ssh_manager=None, config_manager=None):
         self.ssh_manager = ssh_manager
         self.config_manager = config_manager
-        self.active_connections: dict[str, Any] = {}  # {client_id: connection_info}
         self.device_sources: dict[str, dict[str, Any]] = {}  # {device_id: source_info}
 
     # ============ Source-side delegates (impl in usbip_source_sessions) ============
@@ -601,36 +600,6 @@ class USBIPManager:
             logger.error(f"Error in start_usbip: {e}")
             return {'success': False, 'error': str(e)}
 
-    def stop_usbip(self, client_id: str | None = None) -> dict[str, Any]:
-        """Stop USB/IP forwarding for client_id, keeping device-source records for re-attach."""
-        try:
-            if client_id and client_id in self.active_connections:
-                del self.active_connections[client_id]
-
-            return {
-                'success': True,
-                'message': '✅ USB/IP连接已断开（设备来源保留）'
-            }
-
-        except Exception as e:
-            logger.error(f"Error in stop_usbip: {e}")
-            return {'success': True, 'message': '✅ USB/IP连接已断开'}
-
-    def get_usbip_status(self, client_id: str | None = None) -> dict[str, Any]:
-        """Return {connected, device_count}; connected if client_id is active OR any device-source record exists."""
-        connected = False
-
-        if client_id and client_id in self.active_connections:
-            connected = True
-
-        if not connected and self.device_sources:
-            connected = True
-
-        return {
-            'connected': connected,
-            'device_count': len(self.device_sources)
-        }
-
     # ============ Helpers (target-side attach machinery) ============
 
     def _find_android_devices_linux(
@@ -939,8 +908,6 @@ class USBIPManager:
 usbip_manager = USBIPManager()
 
 
-# ---- merged from usbip_readiness.py ----
-
 def wait_for_adb_serial_ready(
     ssh, serial_no: str, timeout: int = 30,
 ) -> dict[str, Any]:
@@ -950,22 +917,22 @@ def wait_for_adb_serial_ready(
     execute = usbip_manager.ssh_manager.execute_command
     execute(ssh, "adb start-server", timeout=10)
     while time.time() < deadline:
-        state_out, state_err, state_code = execute(
+        state_result = execute(
             ssh, f"adb -s {quoted_serial} get-state", timeout=8
         )
-        state_text = (state_out or state_err or "").strip()
-        last_output, last_error = state_out or "", state_err or ""
-        if state_code == 0 and state_text == "device":
-            shell_out, shell_err, shell_code = execute(
+        state_text = (state_result.stdout or state_result.stderr or "").strip()
+        last_output, last_error = state_result.stdout or "", state_result.stderr or ""
+        if state_result.code == 0 and state_text == "device":
+            shell_result = execute(
                 ssh, f"adb -s {quoted_serial} shell echo ready", timeout=10
             )
-            last_output, last_error = shell_out or "", shell_err or ""
-            if shell_code == 0 and "ready" in shell_out:
+            last_output, last_error = shell_result.stdout or "", shell_result.stderr or ""
+            if shell_result.code == 0 and "ready" in shell_result.stdout:
                 return {"ready": True}
         time.sleep(2)
-    devices_out, devices_err, _ = execute(ssh, "adb devices", timeout=8)
+    devices_result = execute(ssh, "adb devices", timeout=8)
     return {
         "ready": False,
         "state": (last_output or last_error).strip(),
-        "devices": (devices_out or devices_err or "").strip(),
+        "devices": (devices_result.stdout or devices_result.stderr or "").strip(),
     }

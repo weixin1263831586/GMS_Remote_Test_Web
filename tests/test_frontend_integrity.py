@@ -773,15 +773,37 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("body.classList.add(enabled ? 'workspace-scope-cluster' : 'workspace-scope-single')", navigation_text)
 
     def test_terminal_page_switch_avoids_hidden_or_duplicate_resize(self):
-        main_text = (
-            read_shell_bundle()
-            + read_text("web/static/js/shell/shell-terminal.js")
-        )
+        page_switching = read_text("web/static/js/shell/shell-page-switching.js")
+        main_text = read_shell_bundle() + read_text("web/static/js/shell/shell-terminal.js")
 
         self.assertIn("!page.classList.contains('active')", main_text)
         self.assertIn("cols === instance.lastResizeCols", main_text)
         self.assertIn("rows === instance.lastResizeRows", main_text)
-        self.assertIn("applyTerminalHost(select.value, false, false)", main_text)
+        self.assertIn("applyTerminalHost(previous, false, false)", main_text)
+        self.assertNotIn("else if (!terminalInitialized)", page_switching)
+        self.assertNotIn("pendingCommand && terminalInitialized", page_switching)
+
+    def test_terminal_defaults_come_from_runtime_config_not_jinja(self):
+        terminal = read_text("web/static/js/shell/shell-terminal.js")
+        shell_config = read_text("web/static/js/shell/shell-config.js")
+        host_management = read_text("web/static/js/shell/shell-host-management.js")
+        head = read_text("web/shell/components/head.html")
+
+        # 外置静态脚本不经 Jinja：默认 SSH 端点只能来自
+        # gms-runtime-config 数据标签（root 路由注入的单一真值）。
+        self.assertNotIn("{{ config.ubuntu_host }}", terminal)
+        self.assertNotIn("{{ config.ubuntu_user }}", terminal)
+        self.assertIn("__GMS_BOOTSTRAP__.ubuntu_host", terminal)
+        self.assertIn('__GMS_BOOTSTRAP__.ubuntu_user', terminal)
+        self.assertIn("ubuntu_host: config.ubuntu_host || ''", shell_config)
+        self.assertIn("ubuntu_user: config.ubuntu_user || ''", shell_config)
+        self.assertIn("bootstrap.ubuntu_user, bootstrap.ubuntu_host", host_management)
+        self.assertIn('"ubuntu_host": {{ (ubuntu_host | default(\'\')) | tojson }}', head)
+        # 终端页隐藏块中的死控件（主机下拉/状态条/连接标签）已随
+        # workspace pane 迁移一并移除，模板不再残留这些 id。
+        terminal_page = read_text("web/shell/pages/terminal.html")
+        for stale_id in ("terminal-host-select", "terminal-status", "terminal-connection-label"):
+            self.assertNotIn(stale_id, terminal_page)
 
     def test_terminal_input_gate_uses_backend_ready_signal(self):
         terminal = read_text("web/static/js/shell/shell-terminal.js")

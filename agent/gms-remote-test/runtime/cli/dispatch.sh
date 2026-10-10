@@ -43,7 +43,6 @@ _gms_rt_command_usage() {
         gms-rt-devices-ui-dump) printf '%s' 'gms-rt-devices-ui-dump <device_id>' ;;
         gms-rt-devices-snapshot) printf '%s' 'gms-rt-devices-snapshot <device_id>' ;;
         gms-rt-devices-wifi) printf '%s' 'gms-rt-devices-wifi <devices> <ssid> [password]' ;;
-        gms-rt-files-progress) printf '%s' 'gms-rt-files-progress [upload_id]' ;;
         gms-rt-jobs-follow) printf '%s' 'gms-rt-jobs-follow <job_id> [--after SEQUENCE] [--limit N]' ;;
         gms-rt-devices-logcat) printf '%s' 'gms-rt-devices-logcat <device_id> [-c] [logcat args]' ;;
         gms-rt-devices-push) printf '%s' 'gms-rt-devices-push <device_id> <local_file> <remote_path>' ;;
@@ -182,7 +181,6 @@ _gms_rt_command_summary() {
         gms-rt-devices-screencap) printf '%s' 'Capture one device screenshot as a base64 PNG payload' ;;
         gms-rt-devices-ui-dump) printf '%s' 'Read one device UI hierarchy as structured elements' ;;
         gms-rt-devices-snapshot) printf '%s' 'Collect a fixed read-only device diagnostic snapshot (build, activity, lock and owners)' ;;
-        gms-rt-files-progress) printf '%s' 'Read upload progress, optionally for one upload id' ;;
         gms-rt-reports-list) printf '%s' 'List test reports visible to the current principal' ;;
         gms-rt-reports-analyze) printf '%s' 'Analyze a local report file or a uniquely resolved saved report' ;;
         gms-rt-reports-download) printf '%s' 'Download a saved report tree into a local output directory' ;;
@@ -492,9 +490,6 @@ ${YELLOW}Device Management:${NC}
   gms-rt-devices-ui-dump            - Dump UI layout tree as JSON elements
   gms-rt-devices-snapshot           - One-shot device state snapshot (fp/activity/lock/owners)
   gms-rt-devices-scrcpy             - Start interactive screen mirroring
-
-${YELLOW}File Management:${NC}
-  gms-rt-files-progress          - Get upload progress
 
 ${YELLOW}Reports:${NC}
   gms-rt-reports-list            - List all test reports

@@ -105,12 +105,13 @@ class OrgChartTests(unittest.TestCase):
         flat = {m["id"]: m.get("department_id") for m in effective_user_map("alice")}
         self.assertEqual(list(flat.values()), ["sys1"])
 
-    def test_corrupt_org_file_falls_back_to_empty(self):
+    def test_corrupt_org_file_raises_instead_of_empty(self):
         path = org_chart.org_chart_path(self.root)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{broken", encoding="utf-8")
-        self.assertEqual(load_org_payload(self.root), {"departments": []})
-        self.assertEqual(effective_user_map("alice"), [])
+        # 解析失败必须显式失败：静默空结构会被写路径用来整体覆写花名册。
+        with self.assertRaises(ValueError):
+            load_org_payload(self.root)
 
 
 if __name__ == "__main__":

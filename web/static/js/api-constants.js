@@ -604,16 +604,6 @@ const API_DETAILS_MAP = {
         response: '{ "success": true, "message": "VPN已断开" }',
         usage: '断开当前VPN连接'
     },
-    '/api/files/progress': {
-        title: '获取上传进度',
-        description: '获取当前文件上传进度',
-        method: 'GET',
-        params: [
-            { name: 'upload_id', type: 'string', required: false, desc: '上传任务ID' }
-        ],
-        response: '{ "uploading": false, "progress": 0 }',
-        usage: '查看文件上传进度'
-    },
     '/api/burn/firmware': {
         title: '烧写固件',
         description: '烧写固件',

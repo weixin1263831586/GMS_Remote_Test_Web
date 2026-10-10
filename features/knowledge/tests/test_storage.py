@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import shutil
+import sqlite3
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -169,6 +171,95 @@ class KnowledgeStoreTests(unittest.TestCase):
         self.assertIn("gts-tradefed", analyzer.prompt)
         self.assertIn("GTS 测试", result["contexts"][0]["snippet"])
         self.assertEqual(result["contexts"][0]["title"], "Android_GMS_Developer_Guide_CN")
+
+    def test_move_node_rejects_cycles(self):
+        root = self.store.create_folder("u1", "gms", "root")
+        child = self.store.create_folder("u1", "gms", "child", parent_id=root["node_id"])
+        leaf = self.store.create_folder("u1", "gms", "leaf", parent_id=child["node_id"])
+
+        with self.assertRaises(ValueError):
+            self.store.move_node("u1", root["node_id"], parent_id=root["node_id"])
+        with self.assertRaises(ValueError):
+            self.store.move_node("u1", root["node_id"], parent_id=child["node_id"])
+        with self.assertRaises(ValueError):
+            self.store.move_node("u1", root["node_id"], parent_id=leaf["node_id"])
+
+        # 合法移动（移到根、移到其他叶子）不受影响，且环拒绝后不落库。
+        self.assertTrue(self.store.move_node("u1", leaf["node_id"], parent_id=""))
+        other = self.store.create_folder("u1", "gms", "other")
+        self.assertTrue(self.store.move_node("u1", child["node_id"], parent_id=other["node_id"]))
+        with self.assertRaises(ValueError):
+            self.store.move_node("u1", other["node_id"], parent_id=child["node_id"])
+        # 环拒绝后 delete 仍可在有限时间内完成（回归：历史环会卡死递归 CTE）。
+        self.assertTrue(self.store.delete_node("u1", root["node_id"]))
+
+    def test_concurrent_moves_cannot_create_cycle(self):
+        first = self.store.create_folder("u1", "gms", "first")
+        second = self.store.create_folder("u1", "gms", "second")
+        select_barrier = threading.Barrier(2)
+        start_barrier = threading.Barrier(2)
+
+        class CoordinatedCursor(sqlite3.Cursor):
+            def execute(self, sql, parameters=()):
+                self._coordinate_cycle_read = (
+                    "WITH RECURSIVE descendants" in sql
+                    and not self.connection.in_transaction
+                )
+                return super().execute(sql, parameters)
+
+            def fetchall(self):
+                rows = super().fetchall()
+                if getattr(self, "_coordinate_cycle_read", False):
+                    select_barrier.wait(timeout=2)
+                return rows
+
+        class CoordinatedConnection(sqlite3.Connection):
+            def execute(self, sql, parameters=()):
+                return self.cursor(factory=CoordinatedCursor).execute(sql, parameters)
+
+        def open_connection():
+            conn = sqlite3.connect(
+                self.store.db_path,
+                timeout=5,
+                factory=CoordinatedConnection,
+            )
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        successes = []
+        errors = []
+
+        def move(node_id, parent_id):
+            start_barrier.wait(timeout=2)
+            try:
+                successes.append(
+                    self.store.move_node("u1", node_id, parent_id=parent_id)
+                )
+            except Exception as exc:
+                errors.append(exc)
+
+        with patch.object(self.store, "_open_connection", side_effect=open_connection):
+            threads = [
+                threading.Thread(
+                    target=move,
+                    args=(first["node_id"], second["node_id"]),
+                    daemon=True,
+                ),
+                threading.Thread(
+                    target=move,
+                    args=(second["node_id"], first["node_id"]),
+                    daemon=True,
+                ),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=7)
+
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(successes, [True])
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], ValueError)
 
 
 if __name__ == "__main__":

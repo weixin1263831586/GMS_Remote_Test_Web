@@ -108,7 +108,25 @@ class AgentBearerAuthTests(unittest.TestCase):
             headers=headers,
             json={"tool": "gms_rt_shell_exec", "device": "D1", "command": "reboot"},
         )
-        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.status_code, 403)
+
+    def test_machine_capability_token_cannot_mint_approvals(self):
+        # ADR 0012 machine capability Bearer (automation worker) must hit the
+        # same human-only gate as agent tokens: no service identity may mint
+        # an approval it could then consume for arbitrary shell commands.
+        from features.auth.authority import automation_authority, mint_capability_token
+
+        principal = automation_authority(
+            "ats_run.1", "admin",
+            ["firmware.stage", "tests.execute", "jobs.read"],
+        )
+        token = mint_capability_token(principal)
+        resp = self.client.post(
+            "/api/auth/approval-tokens",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"tool": "gms_rt_shell_exec", "device": "D1", "command": "reboot"},
+        )
+        self.assertEqual(resp.status_code, 403)
 
     def test_human_session_can_create_and_consume_approval(self):
         resp = self.client.post(

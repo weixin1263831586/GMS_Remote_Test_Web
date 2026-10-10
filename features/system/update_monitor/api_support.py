@@ -65,9 +65,9 @@ def _connect_db() -> sqlite3.Connection:
     return conn
 
 
-def _get_db():
+def _get_db() -> sqlite3.Connection:
     """Return an initialized database connection."""
-    return _connect_db(), None
+    return _connect_db()
 
 
 def _rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict]:

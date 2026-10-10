@@ -174,32 +174,6 @@ def bind_usbip_busid_via_ssh(
     return {"success": result.ok, "code": result.code, "detail": detail}
 
 
-def usbipd_list_via_ssh(ssh) -> tuple[str, str]:
-    """Capture the usbipd device table for post-mortem diagnosis."""
-    result = usbip_manager.ssh_manager.execute_command(
-        ssh, "usbipd list", timeout=15,
-    )
-    if not result.ok:
-        return "", (
-            result.stderr or result.stdout
-            or f"usbipd list exited with code {result.code}"
-        ).strip()
-    return (result.stdout or "").strip(), ""
-
-
-def usbipd_policy_list_via_ssh(ssh) -> str:
-    """Capture `usbipd policy list` for post-mortem AutoBind diagnosis."""
-    result = usbip_manager.ssh_manager.execute_command(
-        ssh, "usbipd policy list", timeout=15,
-    )
-    if not result.ok:
-        return (
-            result.stderr or result.stdout
-            or f"usbipd policy list exited with code {result.code}"
-        ).strip()
-    return (result.stdout or "").strip(), ""
-
-
 def usbipd_policy_line_covers_busid(output: str, busid: str) -> bool:
     """Return True when a policy line already allows AutoBind for the exact busid.
 

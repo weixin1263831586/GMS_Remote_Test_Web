@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 from typing import Any
 
@@ -66,10 +67,6 @@ _USER_REDMINE_SERVICE_LOCK = threading.Lock()
 def configure_redmine_service(service: RedmineService) -> None:
     global redmine_service
     redmine_service = service
-    try:
-        _statistics_api.redmine_service = service
-    except NameError:
-        pass
 
 
 _REPORT_ANALYZER_FACTORY = None
@@ -312,7 +309,12 @@ async def get_run(run_id: str, request: Request):
     return {"success": True, "data": {"run": run, "issues": service.repository.list_run_issues(run_id)}}
 
 
-def _enrich_issue_for_display(service: RedmineService, issue: dict[str, Any], facts_by_id: dict[int, dict[str, Any]] | None = None) -> dict[str, Any]:
+def _enrich_issue_for_display(
+    service: RedmineService,
+    issue: dict[str, Any],
+    facts_by_id: dict[int, dict[str, Any]] | None = None,
+    base_url: str = "",
+) -> dict[str, Any]:
     """Merge read-time evidence fallbacks with approved internal knowledge.
 
     Raw Redmine rows remain untouched. Display fields prefer existing analyzed
@@ -321,6 +323,9 @@ def _enrich_issue_for_display(service: RedmineService, issue: dict[str, Any], fa
     When *facts_by_id* is supplied (a pre-fetched ``issue_id -> fact`` map, e.g.
     from a single batched ``get_case_facts_for_issue_ids`` call), the per-row
     knowledge-DB lookup is skipped — use this on list endpoints to avoid N+1.
+
+    *base_url* must be the owner-level Redmine base URL（来自请求对应的配置
+    manager），多 owner 部署下不能用全局配置拼附件链接。
     """
     ai = issue.get("ai_json") or {}
     enriched = RedmineAgent.enrich_issue_display_fields({
@@ -357,13 +362,13 @@ def _enrich_issue_for_display(service: RedmineService, issue: dict[str, Any], fa
             "confidence": fact.get("confidence") or 0,
             "source_quality": fact.get("source_quality") or "",
         }
-    enriched["attachment_links"] = _attachment_links_for_issue(enriched)
+    enriched["attachment_links"] = _attachment_links_for_issue(enriched, base_url)
     if not str(enriched.get("doc_content") or "").strip():
         enriched["doc_content"] = _build_display_document(enriched)
     return enriched
 
 
-def _attachment_links_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
+def _attachment_links_for_issue(issue: dict[str, Any], base_url: str = "") -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     issue_id = int(issue.get("issue_id") or 0)
     for att in issue.get("attachments_json") or []:
@@ -374,7 +379,6 @@ def _attachment_links_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         attachment_id = str(att.get("attachment_id") or att.get("id") or "").strip()
         url = str(att.get("content_url") or "").strip()
-        base_url = config_manager.get_redmine_base_url()
         if not url and attachment_id:
             url = f"{base_url}/attachments/download/{attachment_id}/"
         if not url and issue_id:
@@ -387,30 +391,7 @@ def _attachment_links_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
             "status": att.get("status") or "metadata",
             "url": url,
         })
-    if items:
-        return items
-    # 为缺少附件元数据的指定工单补充只读链接。
-    if issue_id == 598972:
-        base = config_manager.get_redmine_base_url()
-        return [
-            {
-                "attachment_id": "",
-                "filename": "VtsHalPowerTargetTest.zip",
-                "content_type": "application/zip",
-                "filesize": 1394606,
-                "status": "redmine-link",
-                "url": f"{base}/issues/{issue_id}#attachments",
-            },
-            {
-                "attachment_id": "",
-                "filename": "0da1ee9.diff",
-                "content_type": "text/x-diff",
-                "filesize": 1024,
-                "status": "redmine-link",
-                "url": f"{base}/issues/{issue_id}#attachments",
-            },
-        ]
-    return []
+    return items
 
 
 def _build_display_document(issue: dict[str, Any]) -> str:
@@ -440,7 +421,7 @@ async def get_issue(issue_id: int, request: Request):
     issue = service.repository.get_issue(issue_id)
     if not issue:
         return JSONResponse(status_code=404, content={"success": False, "error": "issue not found"})
-    enriched = _enrich_issue_for_display(service, issue)
+    enriched = _enrich_issue_for_display(service, issue, base_url=_get_redmine_base_url(request))
     return {"success": True, "data": enriched}
 
 
@@ -450,7 +431,7 @@ async def get_issue_document(issue_id: int, request: Request):
     issue = service.repository.get_issue(issue_id)
     if not issue:
         return JSONResponse({"success": False, "error": "issue not found"}, status_code=404)
-    enriched = _enrich_issue_for_display(service, issue)
+    enriched = _enrich_issue_for_display(service, issue, base_url=_get_redmine_base_url(request))
     return {"success": True, "doc_content": enriched.get("doc_content") or ""}
 
 
@@ -486,6 +467,11 @@ async def download_issue_attachment(issue_id: int, attachment_id: int, request: 
         message = record_internal_error(
             logger, "下载 Redmine 附件", "download_attachment failed"
         )
+        # 下载失败即清理临时文件，否则 delete=False 的落盘文件会永久泄漏。
+        try:
+            os.remove(tmp_name)
+        except OSError:
+            pass
         return JSONResponse(status_code=502, content={"success": False, "error": message})
     finally:
         await client.close()
@@ -535,7 +521,8 @@ async def list_issues(
     facts_by_id = service.knowledge.get_case_facts_for_issue_ids(
         [int(i.get("issue_id") or 0) for i in raw_issues]
     ) if raw_issues else {}
-    issues = [_enrich_issue_for_display(service, issue, facts_by_id) for issue in raw_issues]
+    base_url = _get_redmine_base_url(request)
+    issues = [_enrich_issue_for_display(service, issue, facts_by_id, base_url=base_url) for issue in raw_issues]
     total = service.repository.count_issues(status=status, priority=priority, category=category, search=search, assignee_names=owner_names)
     return {"success": True, "data": {"items": issues, "total": total, "limit": limit, "offset": offset}}
 
@@ -899,14 +886,7 @@ from . import knowledge_api as _knowledge_api  # noqa: E402
 
 
 router.include_router(_knowledge_api.router)
-get_workload_statistics = _statistics_api.get_workload_statistics
-get_resolved_issues_by_date = _statistics_api.get_resolved_issues_by_date
 get_department_overdue_statistics = _statistics_api.get_department_overdue_statistics
-get_project_statistics = _statistics_api.get_project_statistics
-_department_user_overdue = _statistics_api._department_user_overdue
-
-
-# ---- merged from reminder_email.py ----
 
 
 def _send_reminder_email(to_addr: str, subject: str, body: str, manager=None) -> dict[str, Any]:

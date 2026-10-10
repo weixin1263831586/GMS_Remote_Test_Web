@@ -297,29 +297,8 @@ class AutomationStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def list_active_runs(self, limit: int = 100) -> list[dict[str, Any]]:
-        """Return runnable work in least-recently-advanced order.
-
-        Scheduling from ``list_runs`` is subtly unfair because that method is
-        intentionally newest-first for the UI. A long-polling newest run can
-        otherwise monopolize every worker tick and starve all older work.
-        """
-        limit = max(1, min(int(limit or 100), 500))
-        terminal = sorted(TERMINAL_STATUSES)
-        placeholders = ", ".join("?" for _ in terminal)
-        with self._connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT * FROM automation_runs
-                WHERE status NOT IN ({placeholders})
-                ORDER BY updated_at ASC, created_at ASC, id ASC
-                LIMIT ?
-                """,
-                [*terminal, limit],
-            ).fetchall()
-        return [dict(row) for row in rows]
-
     def update_run(self, run_id: str, **updates: Any) -> dict[str, Any]:
+        # test seam: exercised only by tests (production path is update_run_if_status).
         allowed = set(RUN_COLUMNS) - {
             "id", "created_at", "state_version", "recovery_count", "last_recovered_at"
         }

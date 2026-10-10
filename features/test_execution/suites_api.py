@@ -94,7 +94,9 @@ async def list_suites(base_path: str = None, force_refresh: bool = Query(False))
         return JSONResponse(content={**cached, "cached": True})
 
     try:
-        suites = get_available_test_suites(config, base_path)
+        # SSH find / 本地深度遍历是同步阻塞（timeout=30），与
+        # diagnose_suite_target 一致移出事件循环。
+        suites = await asyncio.to_thread(get_available_test_suites, config, base_path)
     except RuntimeError as exc:
         if "SSH connection failed" in str(exc):
             logger.warning("[TestSuites] SSH unavailable while listing suites: %s", exc)

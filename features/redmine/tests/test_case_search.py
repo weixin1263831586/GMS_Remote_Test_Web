@@ -18,6 +18,8 @@ def _seed_vbmeta(db: RedmineKnowledgeDB, issue_id: int, subject: str, status: st
         "description": "The partition 'system' is signed with a publicly known VBMeta test key",
         "status_name": status,
         "fixed_version": "RK3576_ANDROID16",
+        "error_analysis": "认证版本未切换 production AVB key",
+        "solution": "用 production key 重新签名相关分区",
     }
     fact = RedmineCaseExtractor.extract(issue)
     db.upsert_case_fact(fact)

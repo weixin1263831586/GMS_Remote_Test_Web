@@ -135,7 +135,10 @@ _ERROR_SIGNATURES = [
     ),
 ]
 
-# Root-cause / solution templates keyed by canonical error signature.
+# 两条特定问题的罐头根因/方案/验证文案。仅供成熟案例构建器
+# (mature_cases.MatureCaseBuilder) 在源工单缺少结构化信息时兜底，
+# 通用提取器 (RedmineCaseExtractor) 不得消费——命中正则不等于结论
+# 成立，提取器只提取不编造。待迁移进知识库表后整体删除。
 _SIG_KNOWLEDGE: dict[str, dict[str, str]] = {
     "VBMeta test key": {
         "root_cause": "认证版本使用公开的 AVB/VBMeta 测试 key（test key），未切换为客户量产 production AVB key。",
@@ -245,12 +248,11 @@ class RedmineCaseExtractor:
                 certification_type = cert_detected["certification_type"]
         region = cls._detect_region(full_text)
 
-        sig_knowledge = _SIG_KNOWLEDGE.get(error_signature, {})
-        # Prefer the issue's AI/rule analysis, but fall back to the signature
-        # knowledge base when that text is a placeholder ("暂无分析结果" etc.).
-        root_cause = cls._meaningful_or(error_analysis, sig_knowledge.get("root_cause", "")).strip()
-        solution = cls._meaningful_or(solution_text, sig_knowledge.get("solution", "")).strip()
-        verification = (sig_knowledge.get("verification") or "").strip()
+        # 只提取不编造：根因/方案来自工单自身的分析字段，verification
+        # 没有可提取的来源时保持为空（禁止签名→罐头结论的注入）。
+        root_cause = error_analysis.strip()
+        solution = solution_text.strip()
+        verification = ""
 
         problem_summary = cls._build_problem_summary(subject, description, summary, failures)
         symptoms = cls._build_symptoms(failures, error_info, description, full_text)
@@ -525,19 +527,6 @@ class RedmineCaseExtractor:
         if solution:
             score += 15
         return min(score, 100.0)
-
-    _PLACEHOLDERS = MEANINGLESS_PLACEHOLDERS
-
-    @classmethod
-    def _meaningful_or(cls, primary: str, fallback: str) -> str:
-        """Return primary if it is meaningful, else fallback (also checked)."""
-        primary = str(primary or "").strip()
-        if primary and not any(ph in primary for ph in cls._PLACEHOLDERS):
-            return primary
-        fallback = str(fallback or "").strip()
-        if fallback and not any(ph in fallback for ph in cls._PLACEHOLDERS):
-            return fallback
-        return primary or fallback
 
     @staticmethod
     def _classify_quality(issue: dict, solution: str) -> str:

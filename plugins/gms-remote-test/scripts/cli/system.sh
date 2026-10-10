@@ -161,29 +161,24 @@ gms-rt-system-doctor() {
 # Download skills ZIP
 gms-rt-system-skills() {
     local skill_name="${1:-gms-remote-test}"
-    local encoded_skill target temporary http_status curl_status exit_code
+    local encoded_skill target temporary exit_code
     encoded_skill=$(_urlencode "$skill_name")
     target="${skill_name}-skills.zip"
     temporary="${target}.tmp.$$"
     echo "📁 Downloading skills directory as ZIP..."
     echo "URL: ${API_BASE}/system/skills?skill_name=${encoded_skill}"
     echo "Saving to: ${target}"
-    _refresh_tls_args
-    _ensure_auth_cookie_jar || return 1
-    http_status=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS \
-        -o "$temporary" -w '%{http_code}' --max-time "$CURL_TIMEOUT" \
-        "${API_BASE}/system/skills?skill_name=${encoded_skill}")
-    curl_status=$?
-    exit_code=$(_http_exit_code "$http_status")
-    if [ "$curl_status" -eq 0 ] && [ "$exit_code" -eq 0 ]; then
+    # 走 api_call：Bearer 模式下 CURL_AUTH_ARGS 被清空，裸 curl 只传
+    # AUTH 参数必 401；api_call 同时给出 000→网络错误码与 cookie 锁。
+    api_call "/system/skills?skill_name=${encoded_skill}" GET "" \
+        -o "$temporary" >/dev/null
+    exit_code=$?
+    if [ "$exit_code" -eq 0 ]; then
         mv -f -- "$temporary" "$target"
-        _record_api_exit_code 0
         success "Skills ZIP downloaded successfully"
         ls -lh "$target"
     else
         rm -f -- "$temporary"
-        [ "$curl_status" -eq 0 ] || exit_code="$GMS_RT_EXIT_NETWORK"
-        _record_api_exit_code "$exit_code"
         error "Failed to download skills ZIP"
         return "$exit_code"
     fi
@@ -273,16 +268,17 @@ gms-rt-terminal-open() {
         if [ -z "$host" ]; then
             echo "📡 Fetching SSH connection info from API..."
 
-            local api_response=$(api_call "/terminal/open" 2>/dev/null)
-
-            if [ $? -ne 0 ] || [ -z "$api_response" ]; then
+            local api_response
+            api_response=$(api_call "/terminal/open" 2>/dev/null)
+            local api_status=$?
+            if [ "$api_status" -ne 0 ] || [ -z "$api_response" ]; then
                 error "Failed to connect to API server at ${SERVER_URL}"
                 echo ""
                 echo "💡 Troubleshooting:"
                 echo "   1. Check if the API server is running: systemctl status gms-web-app"
                 echo "   2. Verify server URL: echo \$GMS_REMOTE_TEST_SERVER"
                 echo "   3. Test connection with the configured CA/TLS settings: gms-rt-terminal-open"
-                return 1
+                return "$api_status"
             fi
 
             # 检查API响应是否成功并一次性提取所有字段（优化jq性能）
@@ -661,20 +657,6 @@ gms-rt-users-set-username() {
     data=$(jq -cn --arg username "$username" '{username: $username}')
     local response=$(api_call "/users/set-username" "POST" "$data")
     echo "$response" | jq '.'
-}
-
-# ==============================================================================
-# File Commands
-# ==============================================================================
-
-# Get upload progress
-gms-rt-files-progress() {
-    local upload_id="${1:-}"
-    check_jq
-    echo "📊 Getting upload progress..."
-    local endpoint="/files/progress"
-    [ -n "$upload_id" ] && endpoint="${endpoint}?upload_id=$(_urlencode "$upload_id")"
-    api_call "$endpoint" | jq '.'
 }
 
 # ==============================================================================

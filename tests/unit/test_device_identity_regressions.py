@@ -135,7 +135,7 @@ class UseLeasedBorrowTests(unittest.TestCase):
 
 class DeviceActionSpecCoverageTests(unittest.TestCase):
     def test_device_action_specs_cover_model_action_enum(self):
-        from features.cluster.device_action_spec import DEVICE_ACTION_SPECS
+        from foundation.device_action_spec import DEVICE_ACTION_SPECS
 
         model_actions = {
             member.value

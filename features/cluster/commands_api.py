@@ -13,9 +13,9 @@ from features.auth import (
     is_elevated,
     require_authenticated_user,
 )
+from foundation.device_action_spec import notified_device_actions
 
 from .api import _authenticate, service
-from .device_action_spec import notified_device_actions
 from .models import CommandAck, CommandEventBatch
 
 
@@ -114,7 +114,7 @@ def synchronize_command(command: dict[str, Any]) -> None:
         command_id = str(command.get("id") or "")
         if command_id and service().repository.claim_terminal_notification(command_id):
             _notify_start_test_result(command)
-    from .transfers_api import cleanup_staged_firmware
+    from .transfers_staging import cleanup_staged_firmware
 
     cleanup_staged_firmware(command)
     if command.get("command_type") in {"suite_export", "device_export"} \

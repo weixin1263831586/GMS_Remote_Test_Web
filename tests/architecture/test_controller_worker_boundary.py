@@ -10,8 +10,9 @@ still fails here until the set is extended deliberately in review.  Shrinking
 (sinking shared logic into ``foundation/``) is the intended direction.
 
 The reverse direction is also exact: ``worker_agent`` must not import
-``features/`` except for the shared device-action spec contract, which is a
-pure specification module without feature-internal dependencies.
+``features/`` at all.  The shared device-action spec contract lives in
+``foundation/device_action_spec.py`` precisely so it ships with the Worker
+bundle (``features/`` is not part of the remote Worker deployment).
 """
 
 import ast
@@ -75,13 +76,10 @@ ALLOWED_FEATURE_WORKER_IMPORTS: dict[str, set[str]] = {
     },
 }
 
-# worker_agent file -> exact features/ modules it may import.  Only the
-# shared device-action spec contract (a pure spec module) is exempt today.
-ALLOWED_WORKER_FEATURE_IMPORTS: dict[str, set[str]] = {
-    "worker_agent/device_actions.py": {
-        "features.cluster.device_action_spec",
-    },
-}
+# worker_agent file -> exact features/ modules it may import.  Empty by
+# design: shared contracts (e.g. the device-action spec) live in foundation/,
+# which is part of the remote Worker bundle, features/ is not.
+ALLOWED_WORKER_FEATURE_IMPORTS: dict[str, set[str]] = {}
 
 
 def imported_modules(path: Path) -> set[str]:
@@ -160,9 +158,8 @@ class ControllerWorkerBoundaryTests(unittest.TestCase):
         self.assertEqual(
             offenders,
             [],
-            "worker_agent/ must import only its exact allowlisted features "
-            "modules; the only sanctioned dependency today is the shared "
-            "device-action spec contract.",
+            "worker_agent/ must not import features/; shared contracts "
+            "belong in foundation/ (which ships with the Worker bundle).",
         )
 
     def test_allowlist_entries_point_at_real_dependencies(self):

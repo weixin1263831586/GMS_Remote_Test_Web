@@ -201,7 +201,6 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/usbip/connect": "features.devices.integrations_api:start_usbip",
     "/api/usbip/disconnect": "features.devices.integrations_api:stop_usbip",
     "/api/usbip/install": "features.devices.integrations_api:install_usbipd",
-    "/api/files/progress": "features.system.assets:get_upload_progress",
     "/api/files/list": "features.system.assets:list_files",
     "/api/opengrok/search": "features.system.assets:search_opengrok",
     "/api/burn/upload-progress": "features.firmware.firmware_api:get_firmware_upload_progress",
@@ -344,14 +343,14 @@ class ToolRegistry:
             response_type = _RESPONSE_TYPE_MAP.get(path, "detail")
 
             executor_ref = _EXECUTOR_REF_OVERRIDES.get(path, "")
-            if path not in _AGENT_UNSUPPORTED_DIRECT_PATHS and not executor_ref:
-                if category == "report":
-                    executor_ref = f"features.reports.api:{name}"
-                else:
-                    # 旧 routers.* 兼容通道已删除：executor_ref 只允许指向
-                    # features.* 公共模块（tests/architecture/
-                    # test_assistant_dynamic_imports.py 强制）。
-                    executor_ref = ""
+            if (
+                not executor_ref
+                and path not in _AGENT_UNSUPPORTED_DIRECT_PATHS
+                and category == "report"
+            ):
+                # executor_ref 只允许指向 features.* 公共模块
+                # （tests/architecture/test_assistant_dynamic_imports.py 强制）。
+                executor_ref = f"features.reports.api:{name}"
 
             tool = AgentTool(
                 name=name,
@@ -458,7 +457,6 @@ class ToolRegistry:
         return f"ToolRegistry({len(self._tools)} tools, {len(self._category_index)} categories)"
 
 
-# ---- merged from knowledge_tools.py ----
 # Knowledge 类 Agent 工具归属 assistant 侧（工具注册是 assistant 的职责）；
 # ADR 0014 的 ``android_internals_search`` 只读工具在这里登记，描述明确标注
 # 它是 Android 系统机制**背景知识**（非内部案例、非根因证据）。
@@ -1000,8 +998,6 @@ def _register_extra_tools(registry: ToolRegistry) -> None:
             registry.register(tool)
     register_knowledge_agent_tools(registry)
 
-
-# ---- merged from android_ui_tools.py ----
 
 def register_android_ui_tools(registry: ToolRegistry) -> None:
     definitions = (

@@ -1,15 +1,21 @@
 // Shell 模块：终端功能（从 shell.html 内联脚本尾部提取）。
 // ==================== 终端功能 ====================
+// 外置静态脚本不经 Jinja 渲染：默认 SSH 端点从 gms-runtime-config 数据
+// 标签读取（root 路由注入的单一真值），由 workspace context / Cluster
+// 目录回填，不做任何硬编码比较。
 const terminalConfig = {
-    // 由 workspace context / Cluster Status 回填（单一真值，不做硬编码比较）。
     worker_id: '',
-    ssh_host: '{{ config.ubuntu_host }}',
-    ssh_user: '{{ config.ubuntu_user }}'
+    ssh_host: (window.__GMS_BOOTSTRAP__ && window.__GMS_BOOTSTRAP__.ubuntu_host) || '',
+    ssh_user: (window.__GMS_BOOTSTRAP__ && window.__GMS_BOOTSTRAP__.ubuntu_user) || ''
 };
 
+function terminalDefaultHostLabel() {
+    const user = terminalConfig.ssh_user || '';
+    const host = terminalConfig.ssh_host || '';
+    return (user || host) ? `${user}@${host}`.replace(/^@/, '') : '';
+}
+
 async function loadTerminalClusterHosts() {
-    const select = document.getElementById('terminal-host-select');
-    if (!select) return;
     const localWorkerId = workspaceLocalWorkerId();
     terminalConfig.worker_id = localWorkerId;
     const fallback = {
@@ -28,23 +34,22 @@ async function loadTerminalClusterHosts() {
         console.debug('Cluster host directory unavailable; using local host', error);
     }
     window.terminalClusterHosts = hosts;
-    const previous = sessionStorage.getItem('pending_adb_worker') ||
-        window.GmsWorkspace?.get?.().worker_id ||
+    const previous = window.GmsWorkspace?.get?.().worker_id ||
         localStorage.getItem('gms_terminal_worker') || terminalConfig.worker_id;
-    select.innerHTML = hosts.map(host => {
-        const disabled = host.status === 'offline' ? ' disabled' : '';
-        const suffix = host.status === 'offline' ? '（离线）' : '';
-        return `<option value="${escapeHtml(host.worker_id)}"${disabled}>${escapeHtml(host.worker_id)}${suffix}</option>`;
-    }).join('');
-    if (hosts.some(host => host.worker_id === previous && host.status !== 'offline')) select.value = previous;
-    // Refreshing the host directory is not a user host switch. Keep
-    // the current workspace and its terminal/noVNC sessions intact.
-    applyTerminalHost(select.value, false, false);
+    if (hosts.some(host => host.worker_id === previous && host.status !== 'offline')) {
+        applyTerminalHost(previous, false, false);
+    }
 }
 
 function applyTerminalHost(workerId, reconnect = true, syncWorkspace = true) {
     const hosts = window.terminalClusterHosts || [];
-    const host = hosts.find(item => item.worker_id === workerId);
+    const host = hosts.find(item => item.worker_id === workerId) ||
+        // 目录尚未就绪/无匹配时退回 bootstrap 注入的默认主机。
+        (workerId === workspaceLocalWorkerId() && {
+            worker_id: workerId,
+            address: terminalConfig.ssh_host,
+            ssh_user: terminalConfig.ssh_user
+        });
     if (!host || !host.address || !host.ssh_user) return;
     terminalConfig.worker_id = host.worker_id;
     terminalConfig.ssh_host = host.address;
@@ -56,14 +61,7 @@ function applyTerminalHost(workerId, reconnect = true, syncWorkspace = true) {
             origin_page: 'terminal'
         }, {source: 'terminal-host'});
     }
-    const label = document.getElementById('terminal-connection-label');
-    if (label) label.textContent = `${host.ssh_user}@${host.address}`;
     if (reconnect && terminalInitialized) reconnectTerminal();
-}
-
-function switchTerminalHost() {
-    const select = document.getElementById('terminal-host-select');
-    if (select) applyTerminalHost(select.value, true);
 }
 
 // 终端静默模式处理（统一管理ADB和路由命令）
@@ -105,21 +103,11 @@ function updateSilentMode(active, type = null, command = null) {
 
 function updateTerminalStatus(connected) {
     isTerminalConnected = connected;
-    const statusElement = document.getElementById('terminal-status');
-    if (statusElement) {
-        statusElement.textContent = connected ? '已连接' : '未连接';
-        statusElement.className = 'terminal-status ' + (connected ? 'connected' : 'disconnected');
-    }
 }
 
-// 传输层已打开但后端会话尚未就绪：提示用户仍在握手，而不是“已连接”。
+// 传输层已打开但后端会话尚未就绪：等待 terminal_connected 消息再放行输入。
 function updateTerminalTransportStatus() {
     isTerminalConnected = false;
-    const statusElement = document.getElementById('terminal-status');
-    if (statusElement) {
-        statusElement.textContent = '连接中…';
-        statusElement.className = 'terminal-status connecting';
-    }
 }
 
 function connectTerminalSocket() {
@@ -157,28 +145,14 @@ function connectTerminalSocket() {
             return;
         }
 
-        // 检查是否为ADB shell模式
-        if (pendingAdbDevice) {
-            debugLog('Opening ADB shell for device:', pendingAdbDevice);
-            const adbDevice = pendingAdbDevice;
-            updateSilentMode(true, 'adb');
-            socket.send(JSON.stringify({
-                type: 'terminal_connect',
-                mode: 'adb',
-                serial_no: adbDevice,
-                worker_id: sessionStorage.getItem('pending_adb_worker') || terminalConfig.worker_id
-            }));
-            pendingAdbDevice = null;
-            sessionStorage.removeItem('pending_adb_device');
-            sessionStorage.removeItem('pending_adb_worker');
-        } else {
-            // 请求SSH连接
-            socket.send(JSON.stringify({
-                type: 'terminal_connect',
-                mode: 'ssh',
-                worker_id: terminalConfig.worker_id
-            }));
-        }
+        // 请求SSH连接。设备 ADB shell 由 workspace pane 的
+        // pendingAdbTarget 路径承载（shell-terminal-workspace.js），
+        // 这里只剩主机 SSH 终端。
+        socket.send(JSON.stringify({
+            type: 'terminal_connect',
+            mode: 'ssh',
+            worker_id: terminalConfig.worker_id
+        }));
     };
 
     socket.onclose = () => {
@@ -371,12 +345,10 @@ function initTerminal() {
         terminal.open(container);
     }
 
-    // 设备提示符出现后再显示 ADB 启动输出。
-    // 路由命令模式同样保持画布空白：silentMode 检测到 shell 提示符后会
+    // 路由命令模式保持画布空白：silentMode 检测到 shell 提示符后会
     // terminal.clear() 再写入路由横幅，提前打印"正在连接"会造成清屏闪烁。
-    const isAdbLaunch = Boolean(pendingAdbDevice);
     const isRouteLaunch = silentMode.type === 'route' && Boolean(silentMode.pendingCommand);
-    if (!isAdbLaunch && !isRouteLaunch) {
+    if (!isRouteLaunch) {
         terminal.writeln('\x1b[33m⏳ 正在连接到 Ubuntu 主机...\x1b[0m');
         terminal.writeln(`\x1b[90m主机: ${terminalConfig.ssh_user}@${terminalConfig.ssh_host}\x1b[0m\r\n`);
     } else {
@@ -650,13 +622,8 @@ function formatFileSize(bytes) {
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
 }
 
-// 终端控制函数
-function clearTerminal() {
-    if (terminal) {
-        terminal.clear();
-    }
-}
-
+// 重新连接由 workspace pane 的刷新按钮承载（refreshTerminalWorkspacePane）；
+// 这里只保留供 applyTerminalHost 复用的会话重建入口。
 async function reconnectTerminal() {
     if (!await ensureTerminalElevation()) return;
     isReconnecting = true;
@@ -677,6 +644,6 @@ document.addEventListener('keydown', (e) => {
 
     if (e.ctrlKey && e.key === 'l') {
         e.preventDefault();
-        clearTerminal();
+        if (terminal) terminal.clear();
     }
 });

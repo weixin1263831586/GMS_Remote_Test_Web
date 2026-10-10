@@ -192,13 +192,15 @@ async def download_test_suite_from_url(
         )
     except ValueError as exc:
         return error_response(str(exc), 400)
-    os.makedirs(save_dir, exist_ok=True)
 
     filename = sanitize_suite_filename_from_url(download_url)
     archive_path = os.path.join(save_dir, filename)
     owner_id = runtime.get_client_id_from_request(request)
 
     if is_config_host_local(config):
+        # 本地主机才落盘：远端套件目录不该在 Controller 本机被创建
+        # （历史行为曾把远端模式下的 save_dir 提前 mkdir 到本机）。
+        os.makedirs(save_dir, exist_ok=True)
         existing_task = runtime.suite_task_store.find_active_download(archive_path)
         if existing_task:
             if existing_task.get("owner_id") != owner_id:
@@ -234,11 +236,18 @@ async def download_test_suite_from_url(
                 "curl",
                 "--proto",
                 "=http,https",
+                # --fail：HTTP 4xx/5xx 以退出码 22 结束，错误页 body 不会
+                # 被当成成功下载的归档；超时与本地任务保持一致。
+                "--fail",
                 "--max-redirs",
                 "0",
                 *_curl_resolve_arguments(resolved_target),
                 "--max-filesize",
                 str(MAX_SUITE_ARCHIVE_BYTES),
+                "--connect-timeout",
+                "30",
+                "--max-time",
+                "7200",
                 "-o",
                 archive_path,
                 download_url,
@@ -258,7 +267,10 @@ async def download_test_suite_from_url(
                     download_result.stdout or download_result.stderr or ""
                 ).strip()
                 return error_response(f"Download failed: {detail}", 500)
-            size_cmd = f"stat -c%s '{archive_path}' 2>/dev/null || stat -f%z '{archive_path}' 2>/dev/null || echo 0"
+            size_cmd = (
+                f"{shlex.join(['stat', '-c%s', archive_path])} 2>/dev/null || "
+                f"{shlex.join(['stat', '-f%z', archive_path])} 2>/dev/null || echo 0"
+            )
             size_result = await asyncio.to_thread(
                 runtime.ssh_manager.execute_command, ssh, size_cmd, timeout=10,
             )

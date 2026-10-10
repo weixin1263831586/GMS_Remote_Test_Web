@@ -405,10 +405,3 @@ router.include_router(transfer_ingest_router)
 
 
 router.include_router(transfers_staging_router)
-
-
-def cleanup_staged_firmware(command: dict) -> None:
-    """Re-exported for commands_api compatibility (moved to transfers_staging)."""
-    from .transfers_staging import cleanup_staged_firmware as _cleanup
-
-    _cleanup(command)

@@ -85,11 +85,12 @@ class ClusterRepository(
     def _init_schema(self) -> None:
         with self._lock, self._open_connection() as conn:
             repository_schema.apply_schema(conn)
-            # Process-safe migration (ADR 0011): hold the SQLite write lock
+            # Process-safe schema migration: hold the SQLite write lock
             # across the schema read + ALTER TABLE steps so Web/Worker/CLI
-            # startup passes cannot interleave migrations. BEGIN IMMEDIATE
-            # must follow apply_schema(), whose executescript() commits any
-            # pending transaction.
+            # startup passes cannot interleave migrations (see the SQLite
+            # migration rule in AGENTS.md). BEGIN IMMEDIATE must follow
+            # apply_schema(), whose executescript() commits any pending
+            # transaction.
             conn.execute("BEGIN IMMEDIATE")
             self._migrate_worker_metrics(conn)
             repository_schema.migrate_transfers(conn)

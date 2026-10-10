@@ -27,8 +27,6 @@ class ClusterClaimRepositoryMixin:
         row; claiming through either route must contend for the same
         physical hardware. Returns the requested key itself plus every
         alias key found in the current inventory.
-
-        See docs/architecture/adr/0001-controller-worker-boundary.md.
         """
         alias_keys = [device_key]
         with self.connect() as conn:

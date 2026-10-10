@@ -64,7 +64,6 @@
 | `gms-rt-devices-user-locked` | List devices currently locked by a platform user |  |
 | `gms-rt-devices-wait` | Wait for selected devices to become visible in the requested state | gms-rt-devices-wait <devices> [--state online\|fastboot\|any] [--interval SECONDS] [--max-wait SECONDS] |
 | `gms-rt-devices-wifi` | Connect one or more devices to a Wi-Fi network | gms-rt-devices-wifi <devices> <ssid> [password] |
-| `gms-rt-files-progress` | Read upload progress, optionally for one upload id | gms-rt-files-progress [upload_id] |
 | `gms-rt-jobs-cancel` | Request cancellation of a durable test job | gms-rt-jobs-cancel <job_id> |
 | `gms-rt-jobs-events` | Read incremental durable test job events | gms-rt-jobs-events <job_id> [after_sequence] [limit] |
 | `gms-rt-jobs-follow` | Return job status, incremental events and a terminal failure summary in one call | gms-rt-jobs-follow <job_id> [--after SEQUENCE] [--limit N] |

@@ -24,7 +24,6 @@ from .daily_brief_jobs import DailyBriefJobStore
 from .daily_brief_models import (
     DailyBriefIssue,
     DailyBriefRun,
-    derive_data_quality,  # noqa: F401 - re-exported for service/report use
 )
 from .users import _now, owner_redmine_root
 
@@ -692,9 +691,6 @@ class DailyBriefRepository:
     ) -> bool:
         return self.jobs.requeue_job(job_id, worker_id, lease_token, reason=reason)
 
-    def reconcile_orphan_runs(self, started_after_iso: str) -> int:
-        return self.jobs.reconcile_orphan_runs(started_after_iso)
-
     def create_run_and_enqueue_job(self, run: DailyBriefRun, *, issue: DailyBriefIssue | None = None) -> tuple[bool, dict[str, Any], bool]:
         """Create/reuse a run, optional single issue and job in one write transaction."""
         run.owner_id = canonical_owner_id(run.owner_id)
@@ -766,24 +762,6 @@ class DailyBriefRepository:
                     now,
                 ),
             )
-
-    def list_ai_executions(self, run_id: str, issue_id: int) -> list[dict[str, Any]]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT payload_json, created_at FROM redmine_daily_brief_ai_executions "
-                "WHERE run_id=? AND issue_id=? ORDER BY created_at, rowid",
-                (run_id, int(issue_id)),
-            ).fetchall()
-            executions: list[dict[str, Any]] = []
-            for row in rows:
-                try:
-                    payload = json.loads(row["payload_json"] or "{}")
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(payload, dict):
-                    payload["recorded_at"] = row["created_at"]
-                    executions.append(payload)
-            return executions
 
     def list_ai_executions_for_run(self, run_id: str) -> list[dict[str, Any]]:
         """Return sanitized attempt payloads for a run-level aggregate."""

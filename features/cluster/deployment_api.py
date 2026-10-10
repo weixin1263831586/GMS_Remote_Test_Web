@@ -761,9 +761,6 @@ async def deploy_worker(
         raise HTTPException(502, record_internal_error(logger, "Worker 自动部署", "deploy failed")) from exc
 
 
-# ---- merged from worker_token_transfer.py ----
-
-
 def write_remote_token_file(sftp, remote_path: str, token: str) -> None:
     """Create remote_path as a 0600 file containing token + newline."""
     with sftp.open(remote_path, "w") as token_file:

@@ -102,9 +102,11 @@ def _filter_recent_mainline(
         return entry[0] * 12 + (entry[1] - 1) >= cutoff_total
 
     filtered = [entry for entry in entries if keep(entry)]
-    # Newest first by (year, month), stable on preload slug.
+    # Newest first by (year, month), stable on preload slug. The month window
+    # above is the only limit: one month can hold several builds, so slicing
+    # to ``depth`` entries would drop the oldest in-window records.
     filtered.sort(key=lambda e: (e[0], e[1], e[2]), reverse=True)
-    return filtered[:depth]
+    return filtered
 
 
 def _partner_zip_build_id(doc: html.HtmlElement) -> tuple[str, str]:
@@ -404,6 +406,9 @@ def parse_gms_downloads(fetched: FetchedDocument, session=None) -> ParsedSource:
                 missing_cells = len(headers) - len(values)
                 if missing_cells > 0:
                     android_version = last_android_version
+                    # The row's values belong to the trailing headers, so
+                    # rebuild by_header right-aligned before any get() below.
+                    by_header = dict(zip(headers[missing_cells:], values))
                     file_idx = max(0, file_idx - missing_cells)
                     release_notes_idx = release_notes_idx - missing_cells if release_notes_idx >= 0 else -1
                     tag_idx = tag_idx - missing_cells if tag_idx >= 0 else -1

@@ -40,7 +40,6 @@ class ADBForwardManager:
         """初始化ADB转发管理器"""
         self.ssh_manager = ssh_manager
         self.config_manager = config_manager
-        self.active_tunnels: dict[str, Any] = {}  # {client_id: tunnel_info}
 
     def start_forward(
         self,
@@ -129,12 +128,9 @@ class ADBForwardManager:
             logger.error(f"Error in start_forward: {e}")
             return {'success': False, 'error': str(e)}
 
-    def stop_forward(self, client_id: str | None = None) -> dict[str, Any]:
+    def stop_forward(self) -> dict[str, Any]:
         """
         停止ADB端口转发
-
-        Args:
-            client_id: 客户端ID（可选）
 
         Returns:
             结果字典
@@ -148,10 +144,6 @@ class ADBForwardManager:
             try:
                 self.ssh_manager.execute_command(ssh, _adb_tunnel_kill_command())
                 self.ssh_manager.execute_command(ssh, "adb disconnect")
-
-                # 清除活动隧道记录
-                if client_id and client_id in self.active_tunnels:
-                    del self.active_tunnels[client_id]
 
                 return {'success': True, 'message': '✅ ADB端口转发已停止'}
 

@@ -185,21 +185,13 @@ def configure_config_sections() -> None:
     )
 
 
-def _build_device_components():
-    """Return ``(device_selector, device_manager)`` from device globals.
-
-    Both may be None if the device singletons are unavailable, in which case
-    the executor falls back to manual device selection and skips post-flash
-    property verification.
-    """
+def _resolve_device_manager():
     try:
-        from features.automation.device_selector import DeviceSelector
-        from features.devices import device_lock_manager
         from features.devices.manager import device_manager
 
-        return DeviceSelector(device_manager, device_lock_manager), device_manager
+        return device_manager
     except Exception:
-        return None, None
+        return None
 
 
 def include_routes(app: FastAPI, templates, services=None) -> None:
@@ -311,7 +303,6 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             )
             return result.get('items') or result.get('changes') or []
 
-        device_selector, device_manager = _build_device_components()
         configure_automation_service(
             AutomationService(
                 store=AutomationStore(
@@ -320,8 +311,7 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
                 ),
                 profiles_path=profiles_path,
                 gerrit_query=query_gerrit,
-                device_selector=device_selector,
-                device_manager=device_manager,
+                device_manager=_resolve_device_manager(),
                 cluster_provider=get_cluster_service,
             )
         )

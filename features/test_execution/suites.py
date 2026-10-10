@@ -27,7 +27,9 @@ SPECIAL_TEST_TYPES = {
     'gts-root-tradefed': 'gts-root',
 }
 
-TRADEFED_BINARY_REVERSE_MAP = {v: k for k, v in TRADEFED_BINARY_MAP.items()}
+# 'cts-tradefed' launches both CTS and GSI runs; the binary name alone cannot
+# recover 'gsi', so reverse-lookups resolve the shared launcher to 'cts'.
+TRADEFED_BINARY_REVERSE_MAP = {v: k for k, v in TRADEFED_BINARY_MAP.items() if k != 'gsi'}
 # Path markers ordered from the most specific to the most generic.  A single
 # ``/android-([a-z]+)`` regex cannot represent nested CTS Verifier layouts
 # (android-cts-verifier*/android-cts-verifier/android-cts-v-host/tools): the

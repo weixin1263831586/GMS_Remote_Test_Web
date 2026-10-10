@@ -1359,12 +1359,6 @@
     "methods": [
       "GET"
     ],
-    "path": "/api/files/progress"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
     "path": "/api/firmware-shares"
   },
   {

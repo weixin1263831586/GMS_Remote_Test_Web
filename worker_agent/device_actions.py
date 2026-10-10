@@ -310,10 +310,10 @@ def execute_usbip_action(
 
 def execute_device_action(action: str, device_ids: list[str], options: dict[str, Any] | None = None) -> dict[str, Any]:
     """Execute one strictly allow-listed Android device operation."""
-    from features.cluster.device_action_spec import (
+    from foundation.device_action_spec import (
         adb_proxy_forbidden_device_actions as _proxy_forbidden_builder,
     )
-    from features.cluster.device_action_spec import (
+    from foundation.device_action_spec import (
         inspection_device_actions as _inspection_builder,
     )
     _proxy_forbidden = _proxy_forbidden_builder()

@@ -35,6 +35,20 @@ MAX_UPLOAD_SIZE = 100 * 1024 * 1024
 LIST_PREVIEW_CHARS = 500
 
 
+async def _json_object_body(request: Request) -> dict | None:
+    """解析 JSON 对象请求体；非法 JSON/非对象返回 None（调用方回 422）。
+
+    裸 ``await request.json()`` 在畸形 body 时抛 JSONDecodeError，落进
+    ``handle_api_errors`` 兜底变 500——500 只留给编程错误，请求侧问题
+    必须是 4xx。
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 @contextlib.asynccontextmanager
 async def _stage_upload(file: UploadFile, user_id: str):
     """把上传文件落到一个临时路径，用完即删；供附件/文档入库两个端点复用。"""
@@ -122,7 +136,9 @@ async def list_spaces(request: Request):
 @router.post("/spaces")
 @handle_api_errors
 async def create_space(request: Request):
-    data = await request.json()
+    data = await _json_object_body(request)
+    if data is None:
+        return error_response("请求体必须是合法 JSON 对象", 422)
     name = str(data.get("name") or "").strip()
     if not name:
         return error_response("知识库名称不能为空", 400)
@@ -139,7 +155,9 @@ async def get_tree(request: Request, space_id: str = Query("gms")):
 @router.post("/folders")
 @handle_api_errors
 async def create_folder(request: Request):
-    data = await request.json()
+    data = await _json_object_body(request)
+    if data is None:
+        return error_response("请求体必须是合法 JSON 对象", 422)
     title = str(data.get("title") or "").strip()
     if not title:
         return error_response("目录名称不能为空", 400)
@@ -156,7 +174,9 @@ async def create_folder(request: Request):
 @router.post("/docs")
 @handle_api_errors
 async def create_doc(request: Request):
-    data = await request.json()
+    data = await _json_object_body(request)
+    if data is None:
+        return error_response("请求体必须是合法 JSON 对象", 422)
     user_id = _user(request)
     content = str(data.get("content_md") or data.get("content") or "")
     try:
@@ -212,9 +232,9 @@ async def get_doc(request: Request, doc_id: str):
 @router.put("/docs/{doc_id}")
 @handle_api_errors
 async def update_doc(request: Request, doc_id: str):
-    data = await request.json()
-    if not isinstance(data, dict):
-        return error_response("请求体必须是 JSON 对象", 422)
+    data = await _json_object_body(request)
+    if data is None:
+        return error_response("请求体必须是合法 JSON 对象", 422)
     allowed = {
         k: v
         for k, v in data.items()
@@ -267,7 +287,7 @@ async def restore_doc_version(request: Request, doc_id: str, version_id: str):
 @router.delete("/nodes/{node_id}")
 @handle_api_errors
 async def delete_node(request: Request, node_id: str):
-    if not _service.store.delete_node(_user(request), node_id):
+    if not await asyncio.to_thread(_service.store.delete_node, _user(request), node_id):
         return error_response("节点不存在", 404)
     return success_response(message="已删除")
 
@@ -275,13 +295,25 @@ async def delete_node(request: Request, node_id: str):
 @router.post("/nodes/{node_id}/move")
 @handle_api_errors
 async def move_node(request: Request, node_id: str):
-    data = await request.json()
-    ok = _service.store.move_node(
-        _user(request),
-        node_id,
-        str(data.get("parent_id") or ""),
-        int(data["sort_order"]) if data.get("sort_order") is not None else None,
-    )
+    data = await _json_object_body(request)
+    if data is None:
+        return error_response("请求体必须是合法 JSON 对象", 422)
+    try:
+        sort_order = (
+            int(data["sort_order"]) if data.get("sort_order") is not None else None
+        )
+    except (TypeError, ValueError):
+        return error_response("sort_order 必须是整数", 422)
+    try:
+        ok = await asyncio.to_thread(
+            _service.store.move_node,
+            _user(request),
+            node_id,
+            str(data.get("parent_id") or ""),
+            sort_order,
+        )
+    except ValueError as exc:
+        return error_response(str(exc), 400)
     if not ok:
         return error_response("节点不存在", 404)
     return success_response(message="已移动")
@@ -379,12 +411,18 @@ async def upload_doc_file(
 @router.post("/ask")
 @handle_api_errors
 async def ask_knowledge(request: Request):
-    data = await request.json()
+    data = await _json_object_body(request)
+    if data is None:
+        return error_response("请求体必须是合法 JSON 对象", 422)
+    try:
+        limit = int(data.get("limit") or 8)
+    except (TypeError, ValueError):
+        return error_response("limit 必须是整数", 422)
     result = await asyncio.to_thread(
         _service.ask,
         _user(request),
         str(data.get("question") or ""),
         space_id=str(data.get("space_id") or ""),
-        limit=int(data.get("limit") or 8),
+        limit=limit,
     )
     return success_response(data=result)

@@ -168,7 +168,7 @@ class TerminalSecurityTests(unittest.TestCase):
         ), patch(
             "features.system.terminal_service.create_local_terminal_channel",
             side_effect=channels,
-        ), patch("features.system.terminal_output.threading.Thread.start"):
+        ), patch("features.system.terminal_service.start_terminal_output_pump"):
             asyncio.run(handle_terminal_connect("same-client", websocket, {"mode": "ssh"}))
             first = websocket.messages[-1]["connection_id"]
             asyncio.run(handle_terminal_connect("same-client", websocket, {"mode": "ssh"}))
@@ -224,7 +224,7 @@ class TerminalSecurityTests(unittest.TestCase):
         ), patch(
             "features.system.terminal_service.create_local_terminal_channel",
             return_value=channel,
-        ), patch("features.system.terminal_output.threading.Thread.start"):
+        ), patch("features.system.terminal_service.start_terminal_output_pump"):
             asyncio.run(handle_terminal_connect(
                 "admin-user-id", websocket, {"mode": "adb", "serial_no": "SERIAL-1"}
             ))
@@ -269,7 +269,7 @@ class TerminalSecurityTests(unittest.TestCase):
             "features.system.terminal_service._wait_for_shell_prompt",
             new_callable=AsyncMock,
         ) as wait_for_prompt, patch(
-            "features.system.terminal_output.threading.Thread.start"
+            "features.system.terminal_service.start_terminal_output_pump"
         ):
             asyncio.run(handle_terminal_connect(
                 "admin-user-id", websocket, {"mode": "adb", "serial_no": "SERIAL-1"}
@@ -297,7 +297,7 @@ class TerminalSecurityTests(unittest.TestCase):
         ), patch(
             "features.system.terminal_service.create_local_terminal_channel",
             return_value=channel,
-        ), patch("features.system.terminal_output.threading.Thread.start"):
+        ), patch("features.system.terminal_service.start_terminal_output_pump"):
             asyncio.run(handle_terminal_connect(
                 "admin-user-id", websocket, {"mode": "adb", "serial_no": "SERIAL-1"}
             ))

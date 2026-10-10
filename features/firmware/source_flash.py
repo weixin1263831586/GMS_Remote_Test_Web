@@ -43,8 +43,9 @@ logger = logging.getLogger(__name__)
 WINDOWS_FIRMWARE_DIR = r"C:\gms-flash"
 RESULT_POLL_INTERVAL_SECONDS = 10.0
 RESULT_TIMEOUT_SECONDS = 5400
-# device 串号会拼进 task_id 并被 wait_result 的 `type "..."` cmd.exe
-# 命令插值：只放行无 cmd 元字符的字符集，杜绝引号/>& 逃逸。
+# device 串号会拼进 task_id、SSH 用户名会拼进队列目录，两者都会被
+# wait_result 的 `type "..."` cmd.exe 命令插值：只放行无 cmd 元字符的
+# 字符集，杜绝引号/>& 逃逸。
 _SOURCE_DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 
 
@@ -62,6 +63,13 @@ def windows_queue_dir(device_host: str) -> str:
             "Windows 源主机地址必须为 user@host 格式以定位烧写队列目录"
             f"（当前: {device_host!r}）",
             status_code=409, stage="SSH",
+        )
+    # username 与 device 走同一字符集白名单：它会拼进 result_path 并被
+    # wait_result 的 `type "..."` cmd.exe 命令插值，元字符即命令注入。
+    if not _SOURCE_DEVICE_ID_RE.fullmatch(username):
+        raise SourceFlashError(
+            f"invalid source host username: {username!r}",
+            status_code=422, stage="SSH",
         )
     return rf"C:\Users\{username}\gms-flash-queue"
 

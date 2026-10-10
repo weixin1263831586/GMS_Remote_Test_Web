@@ -290,7 +290,7 @@ async def get_tailscale_status(request: Request):
         url = _build_tailscale_url(status['ip'], request)
         return JSONResponse(content={'success': True, 'public_url': url, 'connected': status.get('connected', False)})
 
-    return error_response('Tailscale 未连接或未安装', status_code=404)
+    return error_response('Tailscale 未连接或未安装', status_code=503)
 
 
 @router.post("/api/tailscale/ensure")

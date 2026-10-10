@@ -2,9 +2,7 @@
 报告管理 - 核心业务逻辑
 
 特性:
-- 报告列表查询
-- 报告文件浏览
-- 报告分析
+- 报告内容分析
 - 失败用例提取
 """
 
@@ -14,7 +12,7 @@ import re
 from typing import Any
 
 from .analysis_agent import ReportAnalysisAgent
-from .analyzer import HostLogParser, ReportAnalyzer
+from .analyzer import HostLogParser
 from .display import report_display_name, tradefed_result_folder_name
 from .repository import test_report_db
 
@@ -27,8 +25,6 @@ class TestReportManager:
     测试报告管理器
 
     特性:
-    - 报告列表管理
-    - 报告文件浏览
     - 报告内容分析
     - 失败用例提取
     """
@@ -36,98 +32,7 @@ class TestReportManager:
     def __init__(self):
         """初始化报告管理器"""
         self.test_report_db = test_report_db
-        self.report_analyzer = ReportAnalyzer()
         self.host_log_parser = HostLogParser()
-
-    def list_reports(
-        self,
-        client_id: str,
-        limit: int = 100
-    ) -> list[dict[str, Any]]:
-        """返回当前用户的报告列表。"""
-        try:
-            return self.test_report_db.get_reports(
-                limit=limit,
-                owner_id=client_id,
-            )
-        except Exception as e:
-            logger.error(f"Error listing reports: {e}")
-            return []
-
-    def get_report_files(
-        self,
-        report_timestamp: str,
-        *,
-        owner_id: str,
-    ) -> list[dict[str, Any]]:
-        """获取报告文件列表"""
-        try:
-            report = self.test_report_db.get_report_by_timestamp(
-                report_timestamp,
-                owner_id=owner_id,
-            )
-            if not report:
-                logger.warning(f"Report not found: {report_timestamp}")
-                return []
-
-            result_dir = report.get('result_dir')
-            if not result_dir or not os.path.exists(result_dir):
-                logger.warning(f"Report directory not found: {result_dir}")
-                return []
-
-            files = []
-            for root, _dirs, filenames in os.walk(result_dir):
-                for filename in filenames:
-                    file_path = os.path.join(root, filename)
-                    rel_path = os.path.relpath(file_path, result_dir)
-                    try:
-                        file_size = os.path.getsize(file_path)
-                    except Exception:
-                        file_size = 0
-
-                    files.append({
-                        'name': filename,
-                        'path': file_path,
-                        'relative_path': rel_path,
-                        'size': file_size
-                    })
-                    if len(files) >= 50:
-                        break
-                if len(files) >= 50:
-                    break
-
-            return files
-        except Exception as e:
-            logger.error(f"Error listing report files: {e}")
-            return []
-
-    def view_report_file(self, file_path: str) -> dict[str, Any] | None:
-        """查看报告文件内容"""
-        try:
-            if not os.path.exists(file_path):
-                return None
-
-            with open(file_path, encoding='utf-8') as f:
-                content = f.read()
-
-            file_ext = os.path.splitext(file_path)[1].lower()
-            content_type = {
-                '.xml': 'text/html',
-                '.html': 'text/html',
-                '.json': 'application/json',
-                '.log': 'text/plain',
-                '.txt': 'text/plain'
-            }.get(file_ext, 'text/plain')
-
-            return {
-                'content': content,
-                'content_type': content_type,
-                'file_name': os.path.basename(file_path),
-                'file_size': len(content)
-            }
-        except Exception as e:
-            logger.error(f"Error viewing report file: {e}")
-            return None
 
     def analyze_report(
         self,
@@ -375,73 +280,6 @@ class TestReportManager:
         except Exception as e:
             logger.error(f"Error extracting log errors: {e}")
             return {'errors': [], 'total_errors': 0}
-
-    def save_test_report(
-        self,
-        client_id: str,
-        config: dict[str, Any],
-        test_params: dict[str, Any],
-        user_logs: list[str]
-    ) -> str | None:
-        """保存测试报告到数据库"""
-        try:
-            result_dir = None
-            for log in reversed(user_logs):
-                log_str = str(log)
-                if 'RESULT DIRECTORY' in log_str:
-                    match = re.search(r'RESULT DIRECTORY\s*:\s*(/[^\s]+)', log_str)
-                    if match:
-                        result_dir = match.group(1).strip()
-                        logger.info(f"Found RESULT DIRECTORY: {result_dir}")
-                        break
-
-            if not result_dir or not os.path.exists(result_dir):
-                logger.warning(f"RESULT DIRECTORY not found or doesn't exist: {result_dir}")
-                return None
-
-            timestamp = os.path.basename(result_dir)
-            existing = self.test_report_db.get_report_by_timestamp(
-                timestamp,
-                owner_id=client_id,
-            )
-            if existing:
-                logger.info(f"Report already exists: {timestamp}")
-                return timestamp
-
-            report_info = {
-                'timestamp': timestamp,
-                'test_type': test_params.get('test_type', 'UNKNOWN').upper(),
-                'owner_id': client_id,
-                'devices': test_params.get('devices', []),
-                'result_dir': result_dir,
-                'suite_path': test_params.get('test_suite', ''),
-                'status': 'completed'
-            }
-
-            xml_path = os.path.join(result_dir, 'test_result.xml')
-            if os.path.exists(xml_path):
-                try:
-                    result = self.report_analyzer.analyze_file(xml_path)
-                    if result:
-                        report_info.update({
-                            'pass': result['summary']['pass'],
-                            'fail': result['summary']['fail'],
-                            'total': result['summary']['total'],
-                            'pass_rate': result['summary']['pass_rate'],
-                            'device': result['details']['device'],
-                            'start_time': result['details']['start_time']
-                        })
-                except Exception as e:
-                    logger.error(f"Error parsing XML: {e}")
-
-            if self.test_report_db.add_report(report_info):
-                logger.info(f"Report saved: {timestamp}")
-                return timestamp
-
-            return None
-        except Exception as e:
-            logger.error(f"Error saving test report: {e}")
-            return None
 
 
 test_report_manager = TestReportManager()

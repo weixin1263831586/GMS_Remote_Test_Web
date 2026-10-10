@@ -64,22 +64,6 @@ def _api_error(message, status_code=500, **extra_fields):
     return error_response(message, status_code=status_code, **extra_fields)
 
 
-def _device_results(results, operation_name):
-    success_count = sum(result.get("success", False) for result in results)
-    failed_count = len(results) - success_count
-    return _api_success(
-        {
-            "results": results,
-            "summary": {
-                "total": len(results),
-                "success": success_count,
-                "failed": failed_count,
-            },
-        },
-        f"{operation_name}完成: 成功 {success_count} 台, 失败 {failed_count} 台",
-    )
-
-
 @router.get("/api/devices/list")
 @handle_api_errors
 async def get_connected_devices(
@@ -217,7 +201,7 @@ async def get_connected_devices(
         for item in inventory
         if item.get("protocol") == "adb" and item.get("status") == "online"
     ]
-    reconnect.reconcile_observed_usbip_devices(adb_devices)
+    await asyncio.to_thread(reconnect.reconcile_observed_usbip_devices, adb_devices)
     visible_ids = reconnect.filter_suppressed_usbip_devices(
         item["device_id"] for item in inventory
     )
@@ -238,7 +222,8 @@ async def get_connected_devices(
         load_device_groups(current_username_for_request(request))
     )
 
-    usbip_sources = _prune_inactive_usbip_sources(
+    usbip_sources = await asyncio.to_thread(
+        _prune_inactive_usbip_sources,
         devices,
         known_usbip_sources(),
         runtime.config_manager.load_config()
@@ -369,10 +354,7 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
             value_to_devices.setdefault(source_host, []).append(device_id)
         # 将 worker_id 映射为友好名称
         worker_names: dict[str, str] = {}
-        # get_cluster_service was not imported here — the NameError was
-        # swallowed by this bare except and the friendly-name backfill
-        # silently degraded.  Import explicitly and narrow the guard to the
-        # cluster-unavailable case only.
+        # Worker 友好名称来自集群服务，不可用时退回 worker ID。
         from foundation.cluster_port import get_cluster_service
 
         try:
@@ -390,7 +372,7 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
         if not value_to_devices:
             return _api_success({"groups": []}, "当前无在线设备")
     else:
-        # 当前在线设备（用缓存即可，避免重复 SSH 扫描）
+        # 当前在线设备（实时查询设备管理器，非缓存）
         raw_devices = await asyncio.to_thread(device_manager.get_connected_devices)
         # 收集每台设备的属性值
         value_to_devices = {}

@@ -4259,7 +4259,7 @@
     },
     "/api/auth/approval-tokens": {
       "post": {
-        "description": "Issue a one-shot approval token for a destructive agent action.\n\nMust be called by a human session (cookie) — an Agent Service Token can\nnever mint approvals for itself. Firmware burn additionally requires a\nlive admin elevation on the approving session.",
+        "description": "Issue a one-shot approval token for a destructive agent action.\n\nHuman-only by whitelist: only an explicit session-cookie principal may\nmint approvals. Every service identity — Agent Service Token (ADR 0006),\nmachine capability token (ADR 0012), or any future principal kind —\nfails closed, so no machine principal can mint an approval for itself\nand then consume it. Firmware burn additionally requires a live admin\nelevation on the approving session.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -12339,50 +12339,6 @@
           }
         },
         "summary": "List Files"
-      }
-    },
-    "/api/files/progress": {
-      "get": {
-        "description": "Return the current upload progress for an upload_id (always completed).",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "upload_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Upload Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Upload Progress"
       }
     },
     "/api/firmware-shares": {
