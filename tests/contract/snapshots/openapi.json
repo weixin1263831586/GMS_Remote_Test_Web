@@ -3328,7 +3328,7 @@
     },
     "/api/agent/install.sh": {
       "get": {
-        "description": "一行安装器: curl -fsSL .../api/agent/install.sh | bash -s -- [配对码]",
+        "description": "Agent 安装器：配对码通过终端提示或受保护文件读取。",
         "responses": {
           "200": {
             "content": {
@@ -19733,7 +19733,7 @@
     },
     "/api/system/docs": {
       "get": {
-        "description": "获取所有API文档",
+        "description": "Return the complete OpenAPI route inventory with curated metadata.",
         "responses": {
           "200": {
             "content": {

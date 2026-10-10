@@ -1,0 +1,27 @@
+flowchart TB
+    Browser["Web Browser"]
+    Agent["Codex / Kimi / kkagent"]
+    Controller["FastAPI Controller"]
+    DB[("Controller SQLite / State")]
+    WorkerA["Linux Worker A"]
+    WorkerB["Linux Worker B"]
+    Source["Windows / Linux USB Source"]
+    Devices["Android Devices"]
+    Suite["CTS / GTS / VTS / STS"]
+    Build["Build Server"]
+    External["Redmine / Gerrit / AI / OpenGrok"]
+
+    Browser -->|"HTTPS / WebSocket"| Controller
+    Agent -->|"HTTPS + Service Token"| Controller
+    Controller --> DB
+    WorkerA -->|"Heartbeat / Poll / ACK"| Controller
+    WorkerB -->|"Heartbeat / Poll / ACK"| Controller
+    Controller -.->|"Command in poll response"| WorkerA
+    Controller -.->|"Command in poll response"| WorkerB
+    Source -->|"USB/IP"| WorkerA
+    WorkerA -->|"ADB / Fastboot"| Devices
+    WorkerB -->|"ADB / Fastboot"| Devices
+    WorkerA --> Suite
+    WorkerB --> Suite
+    Controller -->|"SSH"| Build
+    Controller --> External

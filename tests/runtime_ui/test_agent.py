@@ -564,8 +564,9 @@ class RuntimeAgentTests(RuntimeUiHarness):
             )
 
             expected = (
-                f'curl -k -fsSL "{self.base_url}/api/agent/install.sh" | '
-                "bash -s -- --paircode <配对码>"
+                'export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt; '
+                f'curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL "{self.base_url}/api/agent/install.sh" | '
+                "bash -s -- --paircode-prompt"
             )
             self.assertEqual(result["install"], expected)
             self.assertEqual(result["installApi"]["full"], expected)

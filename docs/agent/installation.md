@@ -45,34 +45,35 @@ GET /api/agent/install.sh
 ```
 
 它渲染一份绑定当前 Controller 地址的 bash 脚本，将 install + 配对码 enroll
-一步完成。自签名部署无需预置 CA（安装器自动 TOFU 引导）：
-
-```bash
-curl -k -fsSL https://CONTROLLER:5001/api/agent/install.sh | \
-  bash -s -- --paircode <ENROLLMENT_CODE> --client auto
-```
-
-`-k` 只用于获取脚本这一次（信任尚未建立的第一接触，限可信局域网）：
-脚本随后从 `GET /api/agent/ca.crt` 获取 Controller CA，落盘到
-`~/.local/state/gms-remote-test/controller-ca.pem` 并传导为
-`GMS_INSTALL_CA_CERT`；之后的 bootstrap / manifest / 包下载全部为严格
-TLS 校验，包完整性另由 SHA-256 + Ed25519 签名锚定。
-
-带外分发过 CA 时可用全程严格校验的路径（第一个字节起无 TOFU；CA 可从
-`/api/agent/ca.crt` 下载，或取 Controller 侧
-`configs/secrets/certs/gms-local-ca.crt`）：
+一步完成。生产环境应先通过带外渠道取得 Controller CA，再从第一个字节开始
+严格校验服务器身份。安装器从控制终端静默读取配对码，配对码不会进入命令
+参数或 Shell History：
 
 ```bash
 export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt
 curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL \
-  https://CONTROLLER:5001/api/agent/install.sh | bash -s -- --paircode <ENROLLMENT_CODE>
+  https://CONTROLLER:5001/api/agent/install.sh | \
+  bash -s -- --paircode-prompt --client auto
 ```
 
-配对码推荐用显式的 `--paircode`（`--pairing-code` / `--enroll-code`
-等价；旧的位置参数写法仍兼容）。它由 install.sh 经
-`GMS_AGENT_ENROLL_CODE` 环境变量传给 `gms-agent install`（不会出现在
-`ps`、shell history 或审计命令行中）；`gms-agent install --enroll-code`
-仍兼容，但环境变量优先。
+CA 可由管理员从 Controller 的
+`configs/secrets/certs/gms-local-ca.crt` 带外分发；不要通过尚未建立信任的
+同一 HTTPS 连接取得生产 CA。
+
+仅在可信实验局域网、暂时无法预置 CA 时，才使用 TOFU 引导：
+
+```bash
+curl -k -fsSL https://CONTROLLER:5001/api/agent/install.sh | \
+  bash -s -- --paircode-prompt --client auto
+```
+
+`-k` 只影响首次获取安装器。安装器随后从 `GET /api/agent/ca.crt` 获取并固定
+Controller CA，后续 bootstrap、manifest 与包下载恢复严格 TLS；首次响应
+仍可能被中间人替换，所以该路径不适用于公网或不可信网络。
+
+自动化不能使用终端提示时，把配对码写入当前用户持有的 `0600` 文件，并传
+`--paircode-file /path/to/file`。安装器拒绝 `--paircode <明文>`、
+`--enroll-code <明文>` 和位置参数形式，避免凭据进入进程参数或历史记录。
 
 说明：
 
@@ -107,8 +108,8 @@ gms-agent install --client auto --server https://CONTROLLER:5001
 gms-agent enroll <CODE>
 ```
 
-分步安装时也可用环境变量传码（避免 argv 暴露）：
-`GMS_AGENT_ENROLL_CODE=<CODE> gms-agent install ...`。
+分步安装的自动化可从受保护文件读入环境变量；不要把明文直接写进历史：
+`read -r GMS_AGENT_ENROLL_CODE < /path/to/0600-file; export GMS_AGENT_ENROLL_CODE`。
 
 默认 profile 名包含 Controller 身份（`<client>-<host>-<sha256(server)[:8]>`），
 同一台主机为多个 Controller 安装时各占一个 profile、互不覆盖；需要可读

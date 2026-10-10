@@ -10,21 +10,22 @@ Controller 暴露安装入口：
 /api/agent/install.sh
 ```
 
-先由已登录用户在 Web 端生成一次性 Enrollment Code（配对码），再在 Agent 主机执行安装。自签名部署无需预置 CA（安装器自动 TOFU 引导），例如：
+先由已登录用户在 Web 端生成一次性 Enrollment Code（配对码），再由管理员
+带外分发 Controller CA。生产安装从第一个字节开始严格校验 TLS：
+
+```bash
+export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt
+curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL \
+  https://CONTROLLER:5001/api/agent/install.sh | \
+  bash -s -- --paircode-prompt --client auto
+```
+
+`--paircode-prompt` 从控制终端静默读取配对码。自动化可改用指向 `0600`
+文件的 `--paircode-file`。可信实验局域网可使用 TOFU 回退：
 
 ```bash
 curl -k -fsSL https://CONTROLLER:5001/api/agent/install.sh | \
-  bash -s -- --paircode <ENROLLMENT_CODE> --client auto
-```
-
-`-k` 只用于获取脚本这一次（TOFU 第一接触，限可信局域网）；安装器随后从
-`/api/agent/ca.crt` 获取 Controller CA 并严格校验后续全部下载。需全程严格
-（无 TOFU）时：
-
-```bash
-export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt   # 可从 /api/agent/ca.crt 获取
-curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL \
-  https://CONTROLLER:5001/api/agent/install.sh | bash -s -- --paircode <ENROLLMENT_CODE>
+  bash -s -- --paircode-prompt --client auto
 ```
 
 受控实验环境若使用自签名证书，可以按部署策略使用 installer 支持的 insecure bootstrap；不要在公网或不可信网络中关闭 TLS 校验。

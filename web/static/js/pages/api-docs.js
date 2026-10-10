@@ -1024,13 +1024,9 @@ function closeUsageExamplesModal() {
     ModalManager.close('usage-examples-modal');
 }
 
-/**
- * 生成与当前 Controller 地址绑定的一键安装命令。
- * 自签名部署: -k 仅用于获取安装脚本这一次(TOFU 第一接触);安装器随后
- * 从 /api/agent/ca.crt 自动获取 CA 并严格校验后续全部下载。
- */
+// 生成与当前 Controller 地址绑定的严格 TLS 安装命令。
 function buildSkillInstallCommand() {
-    return `curl -k -fsSL "${window.location.origin}/api/agent/install.sh" | bash -s -- --paircode <配对码>`;
+    return `export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt; curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL "${window.location.origin}/api/agent/install.sh" | bash -s -- --paircode-prompt`;
 }
 
 /**

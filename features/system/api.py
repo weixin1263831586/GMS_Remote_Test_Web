@@ -19,7 +19,7 @@ from fastapi.responses import (
 
 from features.auth import AUTH_COOKIE_NAME, auth_service
 from features.system import agent_package_registry, gms_assistant_proxy, jq_binary
-from features.system.api_docs_list import API_DOCS_LIST
+from features.system.api_docs_list import API_DOCS_LIST, build_openapi_api_docs
 from features.system.api_help import generate_per_api_help_text
 from features.system.skill_archive_signing import (
     sign_skill_archive,
@@ -266,7 +266,7 @@ async def agent_install_bootstrap(request: Request):
 
 @router.get("/api/agent/install.sh")
 async def agent_install_sh_endpoint(request: Request):
-    """一行安装器: curl -fsSL .../api/agent/install.sh | bash -s -- [配对码]"""
+    """Agent 安装器：配对码通过终端提示或受保护文件读取。"""
     return await agent_package_registry.agent_install_sh(request)
 
 
@@ -305,15 +305,17 @@ async def get_architecture():
 
 # ==================== API Docs ====================
 @router.get("/api/system/docs")
-async def get_api_docs():
-    """获取所有API文档"""
+async def get_api_docs(request: Request):
+    """Return the complete OpenAPI route inventory with curated metadata."""
     try:
-        # 直接返回预定义的API列表，避免每次请求重新构建
+        api_docs = build_openapi_api_docs(request.app.openapi())
         return JSONResponse(
             content={
                 "success": True,
-                "apis": API_DOCS_LIST,
-                "total": len(API_DOCS_LIST)
+                "apis": api_docs,
+                "total": len(api_docs),
+                "documented": sum(bool(item["documented"]) for item in api_docs),
+                "source": "openapi",
             },
             headers={
                 "Cache-Control": "no-cache, no-store, must-revalidate",

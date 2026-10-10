@@ -5,36 +5,36 @@ GMS Remote Test Web 是面向 Android GMS 认证测试场景的远程测试与�
 ## 总体拓扑
 
 ```mermaid
-flowchart LR
-    Browser[Web Browser]
-    Agent[Codex / Kimi / kkagent]
-    Controller[FastAPI Controller]
-    DB[(Controller Data / SQLite)]
-    Worker1[Worker Agent A]
-    Worker2[Worker Agent B]
-    Source[Windows USB Source]
-    Device[Android Device]
-    Suite[GMS Suites]
-    Build[Android Build Server]
-    Services[Gerrit / Redmine / AI / OpenGrok]
+flowchart TB
+    Browser["Web Browser"]
+    Agent["Codex / Kimi / kkagent"]
+    Controller["FastAPI Controller"]
+    DB[("Controller SQLite / State")]
+    WorkerA["Linux Worker A"]
+    WorkerB["Linux Worker B"]
+    Source["Windows / Linux USB Source"]
+    Devices["Android Devices"]
+    Suite["CTS / GTS / VTS / STS"]
+    Build["Build Server"]
+    External["Redmine / Gerrit / AI / OpenGrok"]
 
-    Browser -->|HTTPS / WebSocket| Controller
-    Agent -->|MCP / gms-rt + Service Token| Controller
+    Browser -->|"HTTPS / WebSocket"| Controller
+    Agent -->|"HTTPS + Service Token"| Controller
     Controller --> DB
-
-    Controller -->|Authenticated Commands| Worker1
-    Controller -->|Authenticated Commands| Worker2
-
-    Worker1 -->|ADB / Fastboot / Tradefed| Device
-    Worker1 --> Suite
-    Worker2 --> Suite
-
-    Source -->|USB| Device
-    Worker1 -->|USB/IP TCP 3240| Source
-
-    Controller -->|SSH Build Backend| Build
-    Controller --> Services
+    WorkerA -->|"Heartbeat / Poll / ACK"| Controller
+    WorkerB -->|"Heartbeat / Poll / ACK"| Controller
+    Controller -.->|"Command in poll response"| WorkerA
+    Controller -.->|"Command in poll response"| WorkerB
+    Source -->|"USB/IP"| WorkerA
+    WorkerA -->|"ADB / Fastboot"| Devices
+    WorkerB -->|"ADB / Fastboot"| Devices
+    WorkerA --> Suite
+    WorkerB --> Suite
+    Controller -->|"SSH"| Build
+    Controller --> External
 ```
+
+本图的规范源为 [`platform-topology.mmd`](platform-topology.mmd)，README 与 Web 架构页由契约测试约束为同一组角色和消息方向。
 
 ## 四个主要角色
 

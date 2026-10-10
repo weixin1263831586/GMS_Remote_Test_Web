@@ -558,22 +558,40 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("📦 离线包", shell)
         self.assertIn("function buildSkillInstallCommand()", navigation)
         self.assertIn("function copySkillInstallCommand()", navigation)
-        # 自签名部署采用受控 TOFU：-k 只取首次脚本，脚本随后获取并固定
-        # Controller CA；三处用户入口必须展示同一条 paircode 命令。
+        # 默认展示预置 CA 的严格 TLS 路径，配对码由安装器从终端读取。
         self.assertIn(
-            'return `curl -k -fsSL "${window.location.origin}/api/agent/install.sh" | bash -s -- --paircode <配对码>`',
+            'export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt; curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL "${window.location.origin}/api/agent/install.sh" | bash -s -- --paircode-prompt',
             navigation,
         )
         self.assertIn(
-            'curl -k -fsSL "https://server:5001/api/agent/install.sh" | bash -s -- --paircode <配对码>',
+            'export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt; curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL "https://server:5001/api/agent/install.sh" | bash -s -- --paircode-prompt',
             api_constants,
         )
-        self.assertIn('curl -k -fsSL "{{ request.url.scheme }}://', shell)
-        self.assertIn('bash -s -- --paircode &lt;配对码&gt;', shell)
+        self.assertIn('export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt; curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL "{{ request.url.scheme }}://', shell)
+        self.assertIn('bash -s -- --paircode-prompt', shell)
         self.assertIn('安装器随后固定 CA 并严格校验下载', shell)
         self.assertIn("apiPath === '/api/agent/install.sh'", navigation)
         self.assertIn("apiPath === '/api/system/skills'", navigation)
         self.assertIn("全部独立gms-rt-*命令", api_constants)
+        self.assertIn("获取已脱敏的系统配置", api_constants)
+        self.assertNotIn("包含所有字段和敏感信息", api_constants)
+
+    def test_architecture_page_matches_controller_worker_control_plane(self):
+        architecture = read_text("web/templates/architecture.html")
+
+        for label in (
+            "FastAPI Controller",
+            "Agent Runtime",
+            "Linux Worker A",
+            "Linux Worker B",
+            "Heartbeat / Poll / ACK",
+            "Windows USB Source",
+            "Linux USB Source",
+        ):
+            self.assertIn(label, architecture)
+        self.assertIn("命令随 Poll 响应返回", architecture)
+        self.assertIn("生产入口为 HTTPS", architecture)
+        self.assertNotIn("http://&lt;test_host&gt;:5001", architecture)
 
     def test_suite_share_links_keep_slashes_readable(self):
         navigation = read_all_frontend_js()

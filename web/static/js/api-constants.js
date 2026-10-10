@@ -219,7 +219,7 @@ const API_DETAILS_MAP = {
         params: [],
         response: 'Shell安装脚本',
         usage: '在其他主机或编译服务器一键安装',
-        curl_example: 'curl -k -fsSL "https://server:5001/api/agent/install.sh" | bash -s -- --paircode <配对码>'
+        curl_example: 'export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt; curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL "https://server:5001/api/agent/install.sh" | bash -s -- --paircode-prompt'
     },
     '/api/system/docs': {
         title: '获取API文档',
@@ -236,16 +236,16 @@ const API_DETAILS_MAP = {
         params: [
             { name: 'api_path', type: 'Optional[str]', description: 'API路径（如 "api/test/start"），不提供则返回所有API列表', required: false }
         ],
-        response: 'GMS Auto Test API List\n\nTotal: 68 APIs...',
+        response: 'GMS Auto Test API List\n\nTotal: <count> APIs...',
         usage: '查看API列表和单个API详细帮助'
     },
     '/api/config/read': {
         title: '获取配置',
-        description: '获取完整系统配置（包含所有字段和敏感信息）',
+        description: '获取已脱敏的系统配置；Wi-Fi 密码仅向已提权管理员会话返回',
         method: 'GET',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
-        response: '{ "ubuntu_user": "gms", "ubuntu_host": "192.168.1.10", "ubuntu_pswd": "..."}',
-        usage: '查看完整配置信息'
+        response: '{ "ubuntu_user": "gms", "ubuntu_host": "192.168.1.10", "wifi": { "password": "", "has_password": true } }',
+        usage: '查看按当前会话权限脱敏后的配置'
     },
     '/api/config/update': {
         title: '更新配置',

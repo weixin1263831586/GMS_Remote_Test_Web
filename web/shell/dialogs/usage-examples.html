@@ -12,7 +12,7 @@
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📦 步骤1: 一键安装Skill和CLI（可在任意Linux主机执行）</div>
                         <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
-                            <code id="cmd-1" class="usage-cmd">curl -k -fsSL "{{ request.url.scheme }}://{{ request.url.netloc }}/api/agent/install.sh" | bash -s -- --paircode &lt;配对码&gt;</code>
+                            <code id="cmd-1" class="usage-cmd">export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt; curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL "{{ request.url.scheme }}://{{ request.url.netloc }}/api/agent/install.sh" | bash -s -- --paircode-prompt</code>
                             <span class="copy-chip usage-chip" data-click="copyCommand" data-a0="cmd-1">📋 复制</span>
                         </div>
                     </div>

@@ -18,34 +18,38 @@
 ## 系统架构
 
 ```mermaid
-flowchart LR
-    Browser[Web Browser]
-    Agent[Codex / Kimi / kkagent]
-    Controller[FastAPI Controller]
-    DB[(Controller Data / SQLite)]
-    Worker1[Worker Agent A]
-    Worker2[Worker Agent B]
-    Source[Windows USB Source]
-    Device[Android Device]
-    Suite[GMS Suites]
-    Build[Android Build Server]
-    Services[Gerrit / Redmine / AI / OpenGrok]
+flowchart TB
+    Browser["Web Browser"]
+    Agent["Codex / Kimi / kkagent"]
+    Controller["FastAPI Controller"]
+    DB[("Controller SQLite / State")]
+    WorkerA["Linux Worker A"]
+    WorkerB["Linux Worker B"]
+    Source["Windows / Linux USB Source"]
+    Devices["Android Devices"]
+    Suite["CTS / GTS / VTS / STS"]
+    Build["Build Server"]
+    External["Redmine / Gerrit / AI / OpenGrok"]
 
-    Browser -->|HTTPS / WebSocket| Controller
-    Agent -->|MCP / gms-rt + Service Token| Controller
+    Browser -->|"HTTPS / WebSocket"| Controller
+    Agent -->|"HTTPS + Service Token"| Controller
     Controller --> DB
-    Controller -->|Authenticated Commands| Worker1
-    Controller -->|Authenticated Commands| Worker2
-    Worker1 -->|ADB / Fastboot / Tradefed| Device
-    Worker1 --> Suite
-    Worker2 --> Suite
-    Source -->|USB| Device
-    Worker1 -->|USB/IP TCP 3240| Source
-    Controller -->|SSH Build Backend| Build
-    Controller --> Services
+    WorkerA -->|"Heartbeat / Poll / ACK"| Controller
+    WorkerB -->|"Heartbeat / Poll / ACK"| Controller
+    Controller -.->|"Command in poll response"| WorkerA
+    Controller -.->|"Command in poll response"| WorkerB
+    Source -->|"USB/IP"| WorkerA
+    WorkerA -->|"ADB / Fastboot"| Devices
+    WorkerB -->|"ADB / Fastboot"| Devices
+    WorkerA --> Suite
+    WorkerB --> Suite
+    Controller -->|"SSH"| Build
+    Controller --> External
 ```
 
-四个角色：**Controller**（Web UI、认证、调度、配置、报告、集成）；**Worker Agent**（执行测试的 Linux 主机上的 ADB / Fastboot / Tradefed / USB/IP / 烧录）；**Device Source**（设备 USB 所在主机，直接 USB/IP 来源当前支持 Windows + `usbipd-win`）；**Agent Runtime**（Agent 主机上的 `gms-rt` CLI / MCP Adapter，不持有用户密码，不绕过权限与审批边界）。Worker 与 Agent 均通过带 Token 的 HTTPS API 访问 Controller。
+图的规范源为 [`docs/architecture/platform-topology.mmd`](docs/architecture/platform-topology.mmd)，契约测试确保此处与架构总览保持同步。
+
+四个角色：**Controller**（Web UI、认证、调度、配置、报告、集成）；**Worker Agent**（执行测试的 Linux 主机上的 ADB / Fastboot / Tradefed / USB/IP / 烧录）；**Device Source**（设备 USB 所在主机，支持 Windows 与 Linux USB/IP 来源，具体烧写能力见支持矩阵）；**Agent Runtime**（Agent 主机上的 `gms-rt` CLI / MCP Adapter，不持有用户密码，不绕过权限与审批边界）。Worker 主动通过带 Token 的 HTTPS 轮询 Controller，命令放在轮询响应中返回；Agent 使用独立 Service Token。
 
 架构决策与边界详见 [docs/architecture/](docs/architecture/overview.md)。
 
@@ -74,15 +78,17 @@ GMS_ENV=development python app.py   # 默认端口 5001
 
 ```bash
 # <CONTROLLER_HOST> 换成 Controller 的真实 IP/主机名（不要照抄占位符）。
-curl -k -fsSL https://<CONTROLLER_HOST>:5001/api/agent/install.sh | \
-  bash -s -- --paircode <ENROLLMENT_CODE> --client auto
+export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt
+curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL \
+  https://<CONTROLLER_HOST>:5001/api/agent/install.sh | \
+  bash -s -- --paircode-prompt --client auto
 gms-rt-system-selfcheck --json   # 验收：auth / health / devices / suites
 ```
 
-`-k` 只用于获取安装脚本这一次（自签名部署的 TOFU 第一接触，限可信局域网）；
-安装器随后自动从 `/api/agent/ca.crt` 获取 Controller CA 并严格校验后续全部
-下载（包完整性由 SHA-256 + Ed25519 签名锚定）。已带外分发 CA 时改用
-`export GMS_INSTALL_CA_CERT=...` + `curl --cacert` 的全程严格路径。
+生产环境先带外分发 Controller CA，并使用 `--cacert` 全程严格校验。
+`--paircode-prompt` 从终端静默读取配对码，不写入 argv 或 Shell History。
+可信实验局域网可用 `curl -k` 完成 TOFU 首次引导，但首次响应本身不具备
+MITM 防护；安装器只会对后续下载固定 CA 并校验包签名。
 
 Agent Package 自包含 `gms-rt` CLI、MCP Server、SDK、Skill 与各 Client Manifest，无需 clone 本仓库；Service Token 落盘为 `0600` 文件，Agent 不接触 Web 登录密码。
 
