@@ -6,7 +6,7 @@ set -o pipefail
 # propagated here (GMS_RT_VERSION) by tools/scripts/agent/release.py.
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.41"
+GMS_RT_VERSION="0.22.42"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -192,12 +192,12 @@ GMS_AUTH_TOKEN_FILE="${GMS_AUTH_TOKEN_FILE:-}"
 # still apply, so a looser or foreign file is rejected as before.
 if [ -z "$GMS_AUTH_TOKEN_FILE" ]; then
     _gms_default_token="${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${GMS_RT_PROFILE}.token"
-    if [ -r "$_gms_default_token" ]; then
-        _gms_default_mode="$(stat -c '%04a' "$_gms_default_token" 2>/dev/null || printf '0600')"
-        if [ "$((_gms_default_mode & 077))" = "0" ]; then
-            GMS_AUTH_TOKEN_FILE="$_gms_default_token"
-        fi
-        unset _gms_default_mode
+    # Presence selects service-token mode even when the candidate is unsafe.
+    # The normal validator below then fails closed instead of silently using a
+    # human cookie because a discovered token has loose permissions, the wrong
+    # owner, or is a broken symlink.
+    if [ -e "$_gms_default_token" ] || [ -L "$_gms_default_token" ]; then
+        GMS_AUTH_TOKEN_FILE="$_gms_default_token"
     fi
     unset _gms_default_token
 fi

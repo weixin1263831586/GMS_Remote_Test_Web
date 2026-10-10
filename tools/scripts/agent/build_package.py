@@ -181,7 +181,8 @@ def build_packages(out_base: Path, version: str, keep: int) -> dict[str, object]
         # has mismatched hashes and cannot be treated as a completed version.
         os.replace(stage / "manifest.json", out_root / "manifest.json")
         for name in _prune_old_versions_locked(out_base, version, keep):
-            print(f"Pruned old version dir: {out_base / name}")
+            # Keep --print-manifest stdout machine-readable JSON.
+            print(f"Pruned old version dir: {out_base / name}", file=sys.stderr)
     return manifest
 
 

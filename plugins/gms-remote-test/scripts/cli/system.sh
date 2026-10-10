@@ -161,10 +161,20 @@ gms-rt-system-doctor() {
 # Download skills ZIP
 gms-rt-system-skills() {
     local skill_name="${1:-gms-remote-test}"
-    local encoded_skill target temporary exit_code
+    local encoded_skill target temporary temp_dir exit_code archive_magic
+    if [[ ! "$skill_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] \
+            || [ "$skill_name" = "." ] || [ "$skill_name" = ".." ]; then
+        error "Invalid skill name: use 1-128 letters, digits, dot, underscore, or hyphen"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
     encoded_skill=$(_urlencode "$skill_name")
     target="${skill_name}-skills.zip"
-    temporary="${target}.tmp.$$"
+    temp_dir=$(mktemp -d "./.gms-skills.XXXXXX") || {
+        error "Failed to create private download directory"
+        return "$GMS_RT_EXIT_OPERATION"
+    }
+    chmod 700 "$temp_dir"
+    temporary="$temp_dir/archive.zip"
     echo "📁 Downloading skills directory as ZIP..."
     echo "URL: ${API_BASE}/system/skills?skill_name=${encoded_skill}"
     echo "Saving to: ${target}"
@@ -174,11 +184,22 @@ gms-rt-system-skills() {
         -o "$temporary" >/dev/null
     exit_code=$?
     if [ "$exit_code" -eq 0 ]; then
-        mv -f -- "$temporary" "$target"
+        archive_magic=$(LC_ALL=C od -An -N2 -tx1 "$temporary" 2>/dev/null | tr -d '[:space:]')
+        if [ ! -s "$temporary" ] || [ "$archive_magic" != "504b" ]; then
+            rm -rf -- "$temp_dir"
+            error "Downloaded skills payload is not a ZIP archive"
+            return "$GMS_RT_EXIT_OPERATION"
+        fi
+        if ! mv -f -- "$temporary" "$target"; then
+            rm -rf -- "$temp_dir"
+            error "Failed to atomically replace $target"
+            return "$GMS_RT_EXIT_OPERATION"
+        fi
+        rmdir -- "$temp_dir"
         success "Skills ZIP downloaded successfully"
         ls -lh "$target"
     else
-        rm -f -- "$temporary"
+        rm -rf -- "$temp_dir"
         error "Failed to download skills ZIP"
         return "$exit_code"
     fi

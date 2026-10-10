@@ -110,35 +110,36 @@ context.
 
 Install from the Controller while logged in to the build server:
 
-Self-signed deployment (TOFU) — one command for install + enrollment:
+Production path (CA distributed out-of-band; strict from the first byte):
 
 ```bash
 # <CONTROLLER_HOST> 换成 Controller 的真实 IP/主机名（不要照抄占位符）。
-curl -k -fsSL "https://<CONTROLLER_HOST>:5001/api/agent/install.sh" | \
-  bash -s -- --paircode <CODE> --client auto
+export GMS_INSTALL_CA_CERT=/etc/gms/controller-ca.pem
+curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL \
+  "https://<CONTROLLER_HOST>:5001/api/agent/install.sh" | \
+  bash -s -- --paircode-prompt --client auto
 export PATH="$HOME/.local/bin:$PATH"
 gms-rt-system-health --json --non-interactive
 gms-rt-auth-status --json --non-interactive
 ```
 
-Strict CA path (CA distributed out-of-band; strict from the first byte):
+Trusted-lab TOFU fallback:
 
 ```bash
-export GMS_INSTALL_CA_CERT=/etc/gms/controller-ca.pem
-curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL \
-  "https://<CONTROLLER_HOST>:5001/api/agent/install.sh" | bash -s -- --paircode <CODE> --client auto
+curl -k -fsSL "https://<CONTROLLER_HOST>:5001/api/agent/install.sh" | \
+  bash -s -- --paircode-prompt --client auto
 ```
 
-`--paircode` exchanges the Web-UI one-shot enrollment code for a 0600 Agent
-Service Token in the same run (`gms-agent enroll <CODE>` still works
-afterwards). `-k` is acceptable only for fetching the installer script
+`--paircode-prompt` reads the Web-UI one-shot enrollment code from `/dev/tty`
+and exchanges it for a 0600 Agent Service Token in the same run. Automation
+may use `--paircode-file` with a protected file. `-k` is acceptable only for fetching the installer script
 itself — trust-on-first-use on a trusted LAN: the installer immediately
 re-establishes strict TLS via `GET /api/agent/ca.crt`, and the package is
 integrity-pinned by SHA-256 + Ed25519 manifest signature. Never use `-k`
 for anything beyond this first fetch; against an active first-contact MITM,
 use the strict CA path instead.
 
-When no supported client is installed, `--client auto --paircode ...` fails
+When no supported client is installed, `--client auto --paircode-prompt` fails
 before changing the runtime so the pairing code is not silently ignored.
 Specify the intended owner with `--client codex`, `--client kimi`, or
 `--client kkagent`; omit the paircode only for a CLI-only installation.

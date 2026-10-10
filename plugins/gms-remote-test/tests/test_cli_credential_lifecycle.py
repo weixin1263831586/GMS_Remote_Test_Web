@@ -154,6 +154,88 @@ class CredentialLifecycleTests(unittest.TestCase):
         self.assertEqual(lines["auth_args"], "4")
         self.assertEqual(lines["bearer_args"], "0")
 
+    def test_unsafe_discovered_profile_token_fails_closed(self):
+        self.env.pop("GMS_AUTH_TOKEN_FILE")
+        self.env.pop("GMS_RT_PROFILE", None)
+        # An explicit Controller URL resolves to the synthetic ``direct``
+        # profile, so its canonical auto-discovery candidate is direct.token.
+        discovered_token = self.state_root / "gms-remote-test" / "direct.token"
+        discovered_token.parent.mkdir()
+        discovered_token.write_text("unsafe-discovered-token")
+        discovered_token.chmod(0o644)
+        call_log = self.root / "default-token-curl.log"
+        stub_dir = self.root / "default-token-bin"
+        stub_dir.mkdir()
+        _write_curl_stub(stub_dir, call_log)
+        result = self.run_snippet(
+            'api_call /system/health GET >/dev/null 2>&1; echo "api_rc=$?"; '
+            'echo "calls=$(wc -l < "$CURL_CALL_LOG" 2>/dev/null || echo 0)"; '
+            'echo "token_file=$GMS_AUTH_TOKEN_FILE"',
+            extra_env={
+                "PATH": f"{stub_dir}{os.pathsep}{self.env.get('PATH', os.defpath)}",
+                "CURL_CALL_LOG": str(call_log),
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"token_file={discovered_token}", result.stdout)
+        self.assertIn(f"api_rc={GMS_RT_EXIT_AUTH}", result.stdout)
+        self.assertIn("calls=0", result.stdout)
+
+    def test_skills_download_rejects_unsafe_name_before_request(self):
+        result = self.run_snippet(
+            'api_call() { echo called >> "$TMPDIR/calls"; }\n'
+            'gms-rt-system-skills "../escape" >/dev/null 2>&1\n'
+            'echo "request_rc=$?"\n'
+            'test -f "$TMPDIR/calls" && echo called=yes || echo called=no'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("request_rc=2", result.stdout)
+        self.assertIn("called=no", result.stdout)
+
+    def test_skills_download_uses_private_random_directory_and_cleans_it(self):
+        download_dir = self.root / "downloads"
+        download_dir.mkdir()
+        result = self.run_snippet(
+            f'cd {download_dir.as_posix()}\n'
+            'api_call() {\n'
+            '  local previous="" argument\n'
+            '  for argument in "$@"; do\n'
+                '    if [ "$previous" = "-o" ]; then printf "PKzip" > "$argument"; fi\n'
+            '    previous="$argument"\n'
+            '  done\n'
+            '}\n'
+            'gms-rt-system-skills safe-skill >/dev/null\n'
+            'echo "request_rc=$?"\n'
+            'echo "content=$(cat safe-skill-skills.zip)"\n'
+            'echo "temps=$(find . -maxdepth 1 -name ".gms-skills.*" | wc -l)"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("request_rc=0", result.stdout)
+        self.assertIn("content=PKzip", result.stdout)
+        self.assertIn("temps=0", result.stdout)
+
+    def test_skills_download_rejects_non_zip_payload(self):
+        download_dir = self.root / "invalid-download"
+        download_dir.mkdir()
+        result = self.run_snippet(
+            f'cd {download_dir.as_posix()}\n'
+            'api_call() {\n'
+            '  local previous="" argument\n'
+            '  for argument in "$@"; do\n'
+            '    if [ "$previous" = "-o" ]; then printf "not-a-zip" > "$argument"; fi\n'
+            '    previous="$argument"\n'
+            '  done\n'
+            '}\n'
+            'gms-rt-system-skills safe-skill >/dev/null 2>&1\n'
+            'echo "request_rc=$?"\n'
+            'test -e safe-skill-skills.zip && echo target=yes || echo target=no\n'
+            'echo "temps=$(find . -maxdepth 1 -name ".gms-skills.*" | wc -l)"'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("request_rc=7", result.stdout)
+        self.assertIn("target=no", result.stdout)
+        self.assertIn("temps=0", result.stdout)
+
     # ------------------------------------------------------------------
     # Bearer header temp file lifecycle
     # ------------------------------------------------------------------

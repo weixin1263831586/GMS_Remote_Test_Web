@@ -263,11 +263,11 @@ _INSTALL_SH_TEMPLATE = r'''#!/usr/bin/env bash
 # GMS Remote Test agent runtime — one-line installer.
 #
 # Usage:
-#   curl -k -fsSL __SERVER_URL__/api/agent/install.sh | bash -s -- --paircode <配对码> [options...]
+#   curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL __SERVER_URL__/api/agent/install.sh | \
+#     bash -s -- --paircode-prompt [options...]
 #
-#   --paircode <配对码>   Controller Web UI 铸的一次性配对码（推荐写法;
-#                         --pairing-code / --enroll-code 等价; 兼容旧的
-#                         第一个位置参数写法,但命名形式更明确）。
+#   --paircode-prompt     从控制终端静默读取一次性配对码（推荐）。
+#   --paircode-file PATH  从仅当前用户可读的文件读取配对码，适合自动化。
 #
 #   自签名部署的"第一接触": 拉取本脚本这一次无法做服务器校验(还没有 CA),
 #   用 -k 获取脚本本身(可先人工核对脚本内容); 脚本随后从
@@ -293,6 +293,8 @@ SERVER='__SERVER_URL__'
 
 PASS_ARGS=()
 CODE=""
+CODE_FILE=""
+PROMPT_FOR_CODE=0
 while (( $# )); do
   case "$1" in
     # 选项与其值一起透传（值不能被误认成配对码）。
@@ -304,30 +306,66 @@ while (( $# )); do
       PASS_ARGS+=("$1" "$2")
       shift 2
       ;;
-    # 配对码的显式命名形式（推荐）；--enroll-code 为既有别名。
-    --enroll-code|--paircode|--pairing-code)
+    --paircode-prompt)
+      PROMPT_FOR_CODE=1
+      shift
+      ;;
+    --paircode-file)
       if (( $# < 2 )); then
         echo "Error: $1 需要一个参数" >&2
         exit 2
       fi
-      CODE="$2"
+      CODE_FILE="$2"
       shift 2
+      ;;
+    --enroll-code|--paircode|--pairing-code)
+      echo "Error: 为避免配对码进入 shell history/进程参数，请改用 --paircode-prompt 或 --paircode-file" >&2
+      exit 2
       ;;
     --*)
       PASS_ARGS+=("$1")
       shift
       ;;
     *)
-      # 第一个裸位置参数 = 配对码（可选）。
-      if [[ -z "$CODE" ]]; then
-        CODE="$1"
-      else
-        PASS_ARGS+=("$1")
-      fi
-      shift
+      echo "Error: 不接受位置参数配对码；请使用 --paircode-prompt 或 --paircode-file" >&2
+      exit 2
       ;;
   esac
 done
+if (( PROMPT_FOR_CODE )) && [[ -n "$CODE_FILE" ]]; then
+  echo "Error: --paircode-prompt 与 --paircode-file 不能同时使用" >&2
+  exit 2
+fi
+if (( PROMPT_FOR_CODE )); then
+  if [[ ! -r /dev/tty ]]; then
+    echo "Error: 无可用控制终端；自动化请使用 --paircode-file PATH" >&2
+    exit 2
+  fi
+  if ! IFS= read -r -s -p "Enrollment code: " CODE </dev/tty; then
+    echo "Error: 无法从控制终端读取配对码" >&2
+    exit 2
+  fi
+  printf '\n' >/dev/tty
+elif [[ -n "$CODE_FILE" ]]; then
+  if [[ ! -f "$CODE_FILE" || ! -r "$CODE_FILE" || -L "$CODE_FILE" ]]; then
+    echo "Error: 配对码文件不可读: $CODE_FILE" >&2
+    exit 2
+  fi
+  CODE_FILE_OWNER="$(stat -c '%u' -- "$CODE_FILE" 2>/dev/null || true)"
+  CODE_FILE_MODE="$(stat -c '%a' -- "$CODE_FILE" 2>/dev/null || true)"
+  if [[ "$CODE_FILE_OWNER" != "$(id -u)" || ! "$CODE_FILE_MODE" =~ ^[0-7]+$ ]] || \
+     (( (8#$CODE_FILE_MODE & 077) != 0 )); then
+    echo "Error: 配对码文件必须归当前用户所有，且组/其他用户不可读写执行（建议 chmod 600）" >&2
+    exit 2
+  fi
+  CODE="$(tr -d '[:space:]' < "$CODE_FILE")"
+fi
+if (( PROMPT_FOR_CODE )) || [[ -n "$CODE_FILE" ]]; then
+  if [[ -z "$CODE" ]]; then
+    echo "Error: 配对码不能为空" >&2
+    exit 2
+  fi
+fi
 # 配对码只经环境变量传给 gms-agent(不进 argv/ps/shell history)。
 # gms-agent 端 GMS_AGENT_ENROLL_CODE 优先于 --enroll-code。
 unset GMS_AGENT_ENROLL_CODE
@@ -443,10 +481,10 @@ async def agent_install_sh(request: Request):
     enrollment code (when given) is exchanged in the same run, so install +
     token provisioning happen in a single command:
 
-        curl -k -fsSL https://CONTROLLER:5001/api/agent/install.sh | bash -s -- --paircode <CODE>
+        curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL https://CONTROLLER:5001/api/agent/install.sh | bash -s -- --paircode-prompt
 
-    (--paircode / --pairing-code / --enroll-code are equivalent; a bare
-    first positional argument is still accepted for compatibility.)
+    The installer reads the code from /dev/tty. Automation can use a protected
+    file with --paircode-file; plaintext code arguments are rejected.
 
     TLS is fail-closed: the rendered script verifies certificates by default
     (system trust store, or GMS_INSTALL_CA_CERT). On a fresh host without a

@@ -1,9 +1,9 @@
 """
-API_DOCS_LIST - API文档列表定义
+API_DOCS_LIST - 精选业务 API 说明
 
 此文件包含所有API端点的文档信息，用于：
-1. 生成 /api/system/docs 接口的响应
-2. 提供API帮助文本
+1. 为 OpenAPI 自动生成的完整技术清单补充业务说明
+2. 提供精选 API 帮助文本
 3. 技能命令参考
 
 与前端 static/js/api-constants.js 中的 API_DETAILS_MAP 保持对应关系。
@@ -33,7 +33,7 @@ API_DOCS_LIST = [
     {
         "method": "GET",
         "path": "/api/config/read",
-        "description": "获取完整系统配置（包含所有字段和敏感信息）",
+        "description": "获取已脱敏的系统配置；敏感字段会被过滤，Wi-Fi 密码按提权状态处理",
         "params": [],
         "category": "config",
         "skill": "gms-rt-config-read"
@@ -637,7 +637,7 @@ API_DOCS_LIST = [
         "category": "system",
         "skill": "gms-rt-system-skills"
     },
-    dict(method="GET", path="/api/agent/install.sh", description="一行安装器：渲染绑定当前 Controller 地址的 bash 脚本，install + 配对码 enroll 一步完成（curl -k -fsSL .../api/agent/install.sh | bash -s -- --paircode <配对码>）；自签名部署无需预置 CA——系统校验失败时自动从 /api/agent/ca.crt TOFU 获取并严格重试", params=[], category="system"),
+    dict(method="GET", path="/api/agent/install.sh", description="Agent 安装器：生产环境使用预置 CA 严格校验；配对码由 --paircode-prompt 从终端读取，自动化可使用受保护的 --paircode-file", params=[], category="system"),
 dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA 证书（公开物，不含私钥）；install.sh 的 TOFU 信任源，也可手动用作 GMS_INSTALL_CA_CERT / GMS_CURL_CA_CERT", params=[], category="system"),
 
     # ==================== API文档 ====================
@@ -811,7 +811,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "skill": "gms-rt-test-logs-get"
     },
     {
-        "method": "POST",
+        "method": "GET",
         "path": "/api/test/suites/files",
         "description": "列出测试套件目录下的文件",
         "params": [{"name": "path", "type": "string", "required": False, "desc": "套件路径"}],
@@ -970,3 +970,52 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "skill": "gms-rt-vpn-connections"
     }
 ]
+
+
+_OPENAPI_HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head"}
+
+
+def build_openapi_api_docs(openapi_schema: dict) -> list[dict]:
+    """Merge complete OpenAPI operations with curated business metadata."""
+    curated = {
+        (str(item["method"]).upper(), str(item["path"])): item
+        for item in API_DOCS_LIST
+    }
+    result: list[dict] = []
+    for path, path_item in sorted(openapi_schema.get("paths", {}).items()):
+        if not str(path).startswith("/api/") or not isinstance(path_item, dict):
+            continue
+        for method, operation in sorted(path_item.items()):
+            if method.lower() not in _OPENAPI_HTTP_METHODS or not isinstance(operation, dict):
+                continue
+            key = (method.upper(), path)
+            business = curated.get(key, {})
+            parameters = business.get("params")
+            if parameters is None:
+                parameters = [
+                    {
+                        "name": item.get("name", ""),
+                        "type": item.get("schema", {}).get("type", "object"),
+                        "required": bool(item.get("required")),
+                        "in": item.get("in", ""),
+                    }
+                    for item in operation.get("parameters", [])
+                ]
+            entry = {
+                "method": key[0],
+                "path": path,
+                "description": business.get("description")
+                or operation.get("summary")
+                or operation.get("description")
+                or operation.get("operationId", ""),
+                "params": parameters,
+                "category": business.get("category")
+                or ((operation.get("tags") or ["other"])[0]),
+                "operation_id": operation.get("operationId", ""),
+                "documented": bool(business),
+                "source": "openapi",
+            }
+            if business.get("skill"):
+                entry["skill"] = business["skill"]
+            result.append(entry)
+    return result

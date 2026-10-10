@@ -237,17 +237,21 @@ class InstallerTlsPolicyTests(unittest.TestCase):
         self.assertLess(explicit_ca_index, guard_index)
         self.assertLess(guard_index, tofu_index)
 
-    def test_template_passes_enroll_code_via_env_not_argv(self):
+    def test_template_reads_enroll_code_without_plaintext_argv(self):
         """配对码不得进 argv/ps/shell history。
 
-        install.sh 把位置参数/--enroll-code 转为 GMS_AGENT_ENROLL_CODE
-        环境变量;gms-agent 端环境变量优先于 --enroll-code。
+        install.sh 从终端或受保护文件读取后转为 GMS_AGENT_ENROLL_CODE；
+        明文参数形式必须被拒绝。
         """
         template = self._template()
         self.assertIn('export GMS_AGENT_ENROLL_CODE="$CODE"', template)
         self.assertNotIn("--enroll-code \"$CODE\"", template)
-        # 配对码必须支持显式命名形式（--paircode, 及等价别名）。
-        self.assertIn("--enroll-code|--paircode|--pairing-code", template)
+        self.assertIn("--paircode-prompt", template)
+        self.assertIn("--paircode-file", template)
+        self.assertIn("CODE_FILE_OWNER", template)
+        self.assertIn("(8#$CODE_FILE_MODE & 077)", template)
+        self.assertIn("不接受位置参数配对码", template)
+        self.assertIn("请改用 --paircode-prompt", template)
         # 消费后脚本内不再保留明文。
         self.assertIn('CODE=""', template)
         # gms-agent 端:环境变量优先。
@@ -259,6 +263,93 @@ class InstallerTlsPolicyTests(unittest.TestCase):
             'os.environ.get("GMS_AGENT_ENROLL_CODE", "").strip()',
             pm_source,
         )
+
+    def test_installer_and_bootstrap_argv_omit_enrollment_code(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from features.system.api import router
+
+        app = FastAPI()
+        app.include_router(router)
+        client = TestClient(app, base_url="https://controller:5001")
+        rendered = client.get("/api/agent/install.sh")
+        self.assertEqual(rendered.status_code, 200)
+
+        secret = "ONE-SHOT-SECRET-CODE"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            paircode = root / "paircode"
+            paircode.write_text(secret, encoding="utf-8")
+            paircode.chmod(0o600)
+            argv_log = root / "bootstrap-argv"
+            stub_dir = root / "bin"
+            stub_dir.mkdir()
+            (stub_dir / "curl").write_text(
+                "#!/bin/bash\n"
+                "output=''\nprevious=''\n"
+                "for argument in \"$@\"; do\n"
+                "  if [ \"$previous\" = -o ]; then output=\"$argument\"; fi\n"
+                "  previous=\"$argument\"\n"
+                "done\n"
+                "cat > \"$output\" <<'PY'\n"
+                "import os, pathlib, sys\n"
+                "pathlib.Path(os.environ['ARGV_LOG']).write_text('\\0'.join(sys.argv))\n"
+                "raise SystemExit(0)\n"
+                "PY\n",
+                encoding="utf-8",
+            )
+            (stub_dir / "curl").chmod(0o755)
+            script = root / "install.sh"
+            script.write_text(rendered.text, encoding="utf-8")
+            result = subprocess.run(
+                ["bash", str(script), "--paircode-file", str(paircode), "--client", "none"],
+                env={
+                    "PATH": f"{stub_dir}:/usr/bin:/bin",
+                    "HOME": temporary,
+                    "ARGV_LOG": str(argv_log),
+                    "GMS_INSTALL_ALLOW_INSECURE": "0",
+                },
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            child_argv = argv_log.read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(secret, " ".join(result.args))
+        self.assertNotIn(secret, child_argv)
+
+    def test_installer_rejects_loose_paircode_file_permissions(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from features.system.api import router
+
+        app = FastAPI()
+        app.include_router(router)
+        rendered = TestClient(app, base_url="https://controller:5001").get(
+            "/api/agent/install.sh"
+        )
+        self.assertEqual(rendered.status_code, 200)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            paircode = root / "paircode"
+            paircode.write_text("SECRET", encoding="utf-8")
+            paircode.chmod(0o644)
+            script = root / "install.sh"
+            script.write_text(rendered.text, encoding="utf-8")
+            result = subprocess.run(
+                ["bash", str(script), "--paircode-file", str(paircode)],
+                env={"PATH": "/usr/bin:/bin", "HOME": temporary},
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("chmod 600", result.stderr)
 
     def test_rendered_installer_is_tls_fail_closed_by_default(self):
         from fastapi import FastAPI

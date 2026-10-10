@@ -20,8 +20,9 @@
 
 - 由管理员铸造（直接创建，或经一次性 enrollment code 兑换），默认有效期
   90 天，可随时吊销（按 token / 按 profile 粒度）。
-- 客户端只保存 token 的 SHA-256 哈希对应的记录；原始 token 仅在创建/兑换
-  时返回一次。
+- 服务端只保存 token 的 SHA-256 哈希及授权元数据，用于后续认证校验；原始
+  token 仅在创建/兑换时返回一次。Agent 客户端必须保存这份原始 token，
+  因为每次 Bearer 认证都需要它。
 - 落盘：`~/.local/state/gms-remote-test/<profile>.token`，权限 `0600`，
   属主必须是运行 Agent 的用户；profile 与 token 一一对应
   （`<profile>.toml` 的 `[auth] token_file` 指向它），通过
@@ -48,6 +49,25 @@ Agent token 携带 `allowed_workers` 与 `allowed_devices` 两个字段：
 `*` 表示不限制，否则为逗号分隔的显式白名单。服务端在执行设备/worker 相关
 操作时按 ACL 过滤，即使 scopes 允许，越界的 worker/设备也不可达。
 吊销/轮换按 token（即按 profile）粒度进行。
+
+## Token 生命周期
+
+```mermaid
+sequenceDiagram
+    participant Admin as 管理员会话
+    participant Controller
+    participant Agent
+    Admin->>Controller: 创建一次性 Enrollment Code
+    Controller-->>Admin: Code（5 分钟、单次使用）
+    Agent->>Controller: 兑换 Code
+    Controller->>Controller: 保存 Token SHA-256 + scopes/ACL
+    Controller-->>Agent: 原始 Service Token（仅返回一次）
+    Agent->>Agent: 写入 profile 对应的 0600 token 文件
+    Agent->>Controller: Authorization: Bearer 原始 Token
+    Controller->>Controller: 哈希后比对、检查有效期/scopes/ACL
+    Admin->>Controller: 吊销或轮换 Token
+    Controller-->>Agent: 后续请求返回 401
+```
 
 ## Approval Token（一次性审批令牌）
 

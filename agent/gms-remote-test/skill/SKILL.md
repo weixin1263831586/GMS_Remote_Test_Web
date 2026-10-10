@@ -34,32 +34,30 @@ only as the read-only escape hatch. CLI automation must use `--json
 
 ## Install and diagnose
 
-One-line installer — self-signed deployments bootstrap trust via TOFU:
-`-k` is only for fetching the script itself; the installer immediately
-fetches `GET /api/agent/ca.crt`, persists it, and every later download is
-strictly TLS-verified plus SHA-256/Ed25519 signature-pinned:
+Production installation uses a Controller CA distributed out-of-band and
+prompts for the one-shot code without placing it in argv or shell history:
 
 ```bash
 # <CONTROLLER_HOST> 换成 Controller 的真实 IP/主机名（不要照抄占位符）。
-curl -k -fsSL "https://<CONTROLLER_HOST>:5001/api/agent/install.sh" | \
-  bash -s -- --paircode <CODE> --client auto
+export GMS_INSTALL_CA_CERT=/etc/gms/controller-ca.pem
+curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL \
+  "https://<CONTROLLER_HOST>:5001/api/agent/install.sh" | \
+  bash -s -- --paircode-prompt --client auto
 gms-agent doctor --client codex --json
 ```
 
 `--client auto` requires at least one detected Codex, Kimi, or kkagent when
-`--paircode` is supplied. On a CLI-only host, either name the client that will
+enrollment is requested. On a CLI-only host, either name the client that will
 own the profile explicitly or omit the paircode to install only the runtime.
 When multiple clients are configured, direct `gms-rt-*` calls must set the
 exact profile, for example `GMS_RT_PROFILE=codex-host-uid
 gms-rt-system-selfcheck --json`; the installer prints every valid choice.
 
-If the threat model includes an active first-contact MITM, distribute the
-Controller CA out-of-band and stay strict from the first byte instead:
+TOFU is restricted to trusted lab networks where a CA cannot be provisioned:
 
 ```bash
-export GMS_INSTALL_CA_CERT=/etc/gms/controller-ca.pem
-curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL \
-  "https://<CONTROLLER_HOST>:5001/api/agent/install.sh" | bash -s -- --paircode <CODE>
+curl -k -fsSL "https://<CONTROLLER_HOST>:5001/api/agent/install.sh" | \
+  bash -s -- --paircode-prompt --client auto
 ```
 
 The package verifies registry SHA-256 and any pinned Ed25519 signature,
