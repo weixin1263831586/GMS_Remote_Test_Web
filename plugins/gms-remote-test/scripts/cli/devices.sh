@@ -698,7 +698,6 @@ gms-rt-devices-shell() {
         return "$GMS_RT_EXIT_USAGE"
     fi
     if [ -n "$approval_token" ]; then
-        _refresh_tls_args
         local consume_data consume_response
         consume_data=$(jq -cn \
             --arg token "$approval_token" \

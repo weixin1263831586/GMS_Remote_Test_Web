@@ -384,7 +384,12 @@ function openSuiteFileInline(path) {
     if (suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)) params.set('worker_id', suite.worker_id);
     const endpoint = suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
         ? '/api/cluster/suites/download' : '/api/test/suites/download';
-    window.open(`${endpoint}?${buildReadablePathQuery(params)}`, '_blank');
+    const preview = window.open(
+        `${endpoint}?${buildReadablePathQuery(params)}`,
+        '_blank',
+        'noopener,noreferrer'
+    );
+    if (preview) preview.opener = null;
 }
 
 async function startRemoteSuiteExport(path, directory = false) {

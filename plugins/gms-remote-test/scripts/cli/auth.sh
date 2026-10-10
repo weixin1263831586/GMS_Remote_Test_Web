@@ -330,7 +330,7 @@ gms-rt-agent-enroll() {
         return "$GMS_RT_EXIT_USAGE"
     }
     check_jq || return 1
-    _refresh_tls_args
+    _gms_resolve_tls
     local data response
     data=$(jq -cn --arg code "$code" '{code: $code}')
     # Enrollment is a cookie-free, token-free call by design. The one-shot
@@ -517,7 +517,6 @@ gms-rt-approval-create() {
         return "$GMS_RT_EXIT_USAGE"
     }
     check_jq || return 1
-    _refresh_tls_args
     local data response
     data=$(jq -cn \
         --arg tool "$tool" --arg device "$device" --arg command "$command" \
@@ -590,7 +589,6 @@ gms-rt-agent-enroll-code() {
         return "$GMS_RT_EXIT_USAGE"
     }
     check_jq || return 1
-    _refresh_tls_args
     local data response
     data=$(jq -cn --arg name "$name" --arg scopes "$scopes" \
         --arg workers "$workers" --arg devices "$devices" --argjson days "$expires_days" \

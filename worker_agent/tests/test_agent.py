@@ -978,7 +978,7 @@ def test_start_process_rebuilds_argv_from_execution_spec_not_payload(tmp_path):
     suite_root = config.suite_roots[0] / "GMS-Suite" / "android-cts" / "tools"
     suite_root.mkdir(parents=True)
     script = config.suite_roots[0] / "GMS-Suite" / "run_GMS_Test_Auto.sh"
-    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    script.write_text("#!/bin/sh\necho stale-launcher\n", encoding="utf-8")
     script.chmod(0o755)
     runtime = WorkerRuntime(config)
     process = MagicMock(pid=1234)
@@ -1004,6 +1004,9 @@ def test_start_process_rebuilds_argv_from_execution_spec_not_payload(tmp_path):
     launched = popen.call_args.args[0]
     assert "CtsSecurityTestCases" in launched
     assert "CtsEvilTestCases" not in launched
+    packaged_script = Path(__file__).resolve().parents[2] / "scripts" / "run_GMS_Test_Auto.sh"
+    assert script.read_bytes() == packaged_script.read_bytes()
+    assert script.stat().st_mode & 0o111
 
 
 def test_start_process_rejects_invalid_execution_spec(tmp_path):

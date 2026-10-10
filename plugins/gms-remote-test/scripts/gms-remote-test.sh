@@ -2,10 +2,11 @@
 set -o pipefail
 # ==============================================================================
 # GMS Remote Test API Helper Script (FastAPI Port 5001)
-# Version: 2026.08.25-1
+# Version is declared once in agent/gms-remote-test/package.yaml and
+# propagated here (GMS_RT_VERSION) by tools/scripts/agent/release.py.
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.40"
+GMS_RT_VERSION="0.22.41"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -211,6 +212,14 @@ _gms_cleanup_bearer_header_file() {
     rm -f -- "$_gms_bearer_header_file"
     _gms_bearer_header_file=""
 }
+# 请求级清理：把 Bearer header 临时文件的生命周期收缩到单次 HTTP 调用
+# 内。source（函数）模式无法安装 EXIT trap（会覆盖调用方自己的 trap），
+# 因此每次请求结束立即清理；直接执行模式另有文件尾 EXIT trap 兜底
+# （覆盖 curl 执行中被信号打断的窗口）。
+_gms_end_bearer_request() {
+    _gms_cleanup_bearer_header_file
+    CURL_BEARER_ARGS=()
+}
 # Service-token mode gate: when the CLI runs under an Agent
 # Service Token (Bearer), arbitrary device shell MUST carry a one-shot
 # approval token — otherwise an agent with plain terminal access could
@@ -221,6 +230,7 @@ _gms_is_service_token_mode() {
 _gms_refresh_bearer_token() {
     if [ -n "${GMS_AUTH_TOKEN_FILE:-}" ]; then
         if [ ! -r "$GMS_AUTH_TOKEN_FILE" ]; then
+            error "Agent token file $GMS_AUTH_TOKEN_FILE is missing or unreadable; refusing to fall back to cookie auth (fail closed)"
             _gms_bearer_token=""
             return 1
         fi
@@ -232,26 +242,100 @@ _gms_refresh_bearer_token() {
         _owner=$(stat -c '%u' "$GMS_AUTH_TOKEN_FILE" 2>/dev/null || printf "$(id -u)")
         if [ "$((_mode & 077))" != "0" ] || [ "$_owner" != "$(id -u)" ]; then
             error "Agent token file $GMS_AUTH_TOKEN_FILE must be 0600 and owned by the current user (got mode $_mode owner $_owner)"
-            GMS_RT_ERROR_SEEN=1
             _gms_bearer_token=""
             return 1
         fi
         _gms_bearer_token=$(tr -d '[:space:]' < "$GMS_AUTH_TOKEN_FILE" 2>/dev/null)
+        if [ -z "$_gms_bearer_token" ]; then
+            error "Agent token file $GMS_AUTH_TOKEN_FILE is empty; refusing to fall back to cookie auth (fail closed)"
+            return 1
+        fi
     else
         _gms_bearer_token=""
     fi
     return 0
 }
-# Recomputed before every curl call (function mode may toggle the token file
-# at runtime). Bearer mode ⇒ cookie args emptied entirely; cookie mode ⇒
-# standard -b/-c jar args.
-CURL_AUTH_ARGS=(-b "$GMS_AUTH_COOKIE_JAR" -c "$GMS_AUTH_COOKIE_JAR")
-_gms_apply_credential_mode() {
-    if [ -n "$_gms_bearer_token" ]; then
-        CURL_AUTH_ARGS=()
-    else
-        CURL_AUTH_ARGS=(-b "$GMS_AUTH_COOKIE_JAR" -c "$GMS_AUTH_COOKIE_JAR")
+# Local deployments commonly use a self-signed HTTPS certificate. Fail
+# closed by default; provide GMS_CURL_CA_CERT for a trusted CA bundle.
+# GMS_CURL_INSECURE=1 is reserved for throwaway environments.
+# Recomputed before every curl call: when this script is sourced (function
+# mode), GMS_CURL_* may be exported after the source line, and a value
+# frozen at source time would silently drop --cacert/-k.
+# 轻量传输解析：只决定 TLS 参数与认证模式（Bearer 生效时清空 cookie
+# 参数），不创建/删除 Bearer header 临时文件。凭据临时文件推迟到真实
+# HTTP 调用前才物化（见 _refresh_tls_args），避免 source 模式下加载即
+# 落盘且没有退出清理。Returns 0 when auth args are usable and 1 when a
+# configured token is invalid (callers MUST abort the request instead of
+# proceeding unauthenticated).
+_gms_resolve_tls() {
+    CURL_TLS_ARGS=()
+    if [[ "$SERVER_URL" == https://* ]]; then
+        if [ -n "${GMS_CURL_CA_CERT:-}" ]; then
+            CURL_TLS_ARGS=(--cacert "$GMS_CURL_CA_CERT")
+        elif [ "${GMS_CURL_INSECURE:-0}" = "1" ]; then
+            CURL_TLS_ARGS=(-k)
+        fi
     fi
+}
+
+_gms_resolve_transport() {
+    _gms_resolve_tls
+    # Agent token: pick up the file fresh on every call (callers may export
+    # GMS_AUTH_TOKEN_FILE after sourcing this script in function mode).
+    CURL_BEARER_ARGS=()
+    CURL_AUTH_ARGS=(-b "$GMS_AUTH_COOKIE_JAR" -c "$GMS_AUTH_COOKIE_JAR")
+    if [ -z "${GMS_AUTH_TOKEN_FILE:-}" ]; then
+        return 0
+    fi
+    if ! _gms_refresh_bearer_token || [ -z "$_gms_bearer_token" ]; then
+        # Configured-but-invalid token: send nothing. Proceeding with the
+        # cookie jar would silently switch identity; proceeding empty yields
+        # a server-side 401 instead.
+        CURL_AUTH_ARGS=()
+        CURL_BEARER_ARGS=()
+        return 1
+    fi
+    # Bearer-only mode: never also send the cookie jar.
+    CURL_AUTH_ARGS=()
+    return 0
+}
+# 每次 HTTP 调用前的完整刷新：在轻量解析之上物化 0600 Bearer header
+# 临时文件。token 绝不出现在 curl 的 argv 里（/proc/<pid>/cmdline 对同
+# Unix 用户可见），而是写入临时文件后用 curl -H @file 读取。
+# Credential-mode policy, fail closed:
+#   GMS_AUTH_TOKEN_FILE unset          → cookie session mode (human login);
+#   set and valid non-empty token      → Bearer mode (Agent Service Token),
+#                                        cookie args emptied entirely;
+#   set but invalid (unreadable /
+#   loose perms / foreign owner /
+#   empty)                             → FAIL: both auth arg sets emptied,
+#                                        no silent cookie fallback. A valid
+#                                        human cookie left under the same
+#                                        Unix user must never authenticate
+#                                        a request that was expected to
+#                                        carry the Agent identity.
+_refresh_tls_args() {
+    if ! _gms_resolve_transport; then
+        # Also drop any stale header file from a previous Bearer-mode call
+        # so credentials never outlive their mode.
+        if [ -n "$_gms_bearer_header_file" ]; then
+            rm -f -- "$_gms_bearer_header_file"
+            _gms_bearer_header_file=""
+        fi
+        return 1
+    fi
+    if [ -z "$_gms_bearer_token" ]; then
+        return 0
+    fi
+    if [ -z "$_gms_bearer_header_file" ] || [ ! -f "$_gms_bearer_header_file" ]; then
+        _gms_bearer_header_file=$(mktemp "${TMPDIR:-/tmp}/gms-bearer-header.XXXXXX") \
+            || { error "无法创建 Bearer header 临时文件"; CURL_AUTH_ARGS=(); return 1; }
+        chmod 600 "$_gms_bearer_header_file"
+    fi
+    printf 'Authorization: Bearer %s\n' "$_gms_bearer_token" \
+        > "$_gms_bearer_header_file"
+    CURL_BEARER_ARGS=(-H "@${_gms_bearer_header_file}")
+    return 0
 }
 # Serialises cookie-jar writes across concurrent CLI processes.
 GMS_COOKIE_LOCK_FILE="${GMS_AUTH_COOKIE_JAR}.lock"
@@ -277,55 +361,14 @@ _gms_with_cookie_lock() {
     fi
 }
 
-# Local deployments commonly use a self-signed HTTPS certificate. Fail
-# closed by default; provide GMS_CURL_CA_CERT for a trusted CA bundle.
-# GMS_CURL_INSECURE=1 is reserved for throwaway environments.
-# Recomputed before every curl call: when this script is sourced (function
-# mode), GMS_CURL_* may be exported after the source line, and a value
-# frozen at source time would silently drop --cacert/-k.
-_refresh_tls_args() {
-    CURL_TLS_ARGS=()
-    if [[ "$SERVER_URL" == https://* ]]; then
-        if [ -n "${GMS_CURL_CA_CERT:-}" ]; then
-            CURL_TLS_ARGS=(--cacert "$GMS_CURL_CA_CERT")
-        elif [ "${GMS_CURL_INSECURE:-0}" = "1" ]; then
-            CURL_TLS_ARGS=(-k)
-        fi
-    fi
-    # Agent token: pick up the file fresh on every call (callers may export
-    # GMS_AUTH_TOKEN_FILE after sourcing this script in function mode).
-    # The token must never appear in curl's argv (visible via
-    # /proc/<pid>/cmdline to same-user processes on shared build servers).
-    # Instead of -H "Authorization: Bearer <token>" we write the header to a
-    # 0600 temp file and let curl read it with -H @file.
-    CURL_BEARER_ARGS=()
-    if _gms_refresh_bearer_token && [ -n "$_gms_bearer_token" ]; then
-        if [ -z "$_gms_bearer_header_file" ] || [ ! -f "$_gms_bearer_header_file" ]; then
-            _gms_bearer_header_file=$(mktemp "${TMPDIR:-/tmp}/gms-bearer-header.XXXXXX") \
-                || { error "无法创建 Bearer header 临时文件"; GMS_RT_ERROR_SEEN=1; return; }
-            chmod 600 "$_gms_bearer_header_file"
-        fi
-        printf 'Authorization: Bearer %s\n' "$_gms_bearer_token" \
-            > "$_gms_bearer_header_file"
-        CURL_BEARER_ARGS=(-H "@${_gms_bearer_header_file}")
-        # Bearer-only mode: never also send the cookie jar.
-        CURL_AUTH_ARGS=()
-    else
-        CURL_BEARER_ARGS=()
-        CURL_AUTH_ARGS=(-b "$GMS_AUTH_COOKIE_JAR" -c "$GMS_AUTH_COOKIE_JAR")
-        # Credential mode flipped back to cookie: drop any stale header file.
-        if [ -n "$_gms_bearer_header_file" ]; then
-            rm -f "$_gms_bearer_header_file"
-            _gms_bearer_header_file=""
-        fi
-    fi
-}
-_refresh_tls_args
+# Source/exec-time transport bootstrap: light mode resolution only — the
+# credential temp file is materialized per HTTP call in _refresh_tls_args.
+_gms_resolve_transport >/dev/null 2>&1
 
 _refresh_transport_config() {
     SERVER_URL="${SERVER_URL%/}"
     API_BASE="${SERVER_URL}/api"
-    _refresh_tls_args
+    _gms_resolve_transport >/dev/null 2>&1
 }
 
 _validate_server_url() {
@@ -426,6 +469,47 @@ _ensure_auth_cookie_jar() {
     fi
 }
 
+# Run a curl request with the active authentication mode and always destroy
+# the request-scoped Bearer header before returning, including source mode and
+# command substitutions where the top-level EXIT trap does not own the file.
+_gms_curl_authenticated() {
+    _gms_authenticated_request_auth_failed=0
+    if ! _refresh_tls_args; then
+        _gms_authenticated_request_auth_failed=1
+        return "$GMS_RT_EXIT_AUTH"
+    fi
+    if [ "${#CURL_AUTH_ARGS[@]}" -gt 0 ] && ! _ensure_auth_cookie_jar; then
+        _gms_end_bearer_request
+        return "$GMS_RT_EXIT_OPERATION"
+    fi
+    _gms_with_cookie_lock curl \
+        "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" "$@"
+    local curl_status=$?
+    _gms_end_bearer_request
+    return "$curl_status"
+}
+
+# Streaming requests must not hold the cookie write lock or rewrite the jar.
+_gms_curl_authenticated_readonly() {
+    _gms_authenticated_request_auth_failed=0
+    if ! _refresh_tls_args; then
+        _gms_authenticated_request_auth_failed=1
+        return "$GMS_RT_EXIT_AUTH"
+    fi
+    if [ "${#CURL_AUTH_ARGS[@]}" -gt 0 ] && ! _ensure_auth_cookie_jar; then
+        _gms_end_bearer_request
+        return "$GMS_RT_EXIT_OPERATION"
+    fi
+    if [ "${#CURL_BEARER_ARGS[@]}" -gt 0 ]; then
+        curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "$@"
+    else
+        curl "${CURL_TLS_ARGS[@]}" -b "$GMS_AUTH_COOKIE_JAR" "$@"
+    fi
+    local curl_status=$?
+    _gms_end_bearer_request
+    return "$curl_status"
+}
+
 _server_host_from_url() {
     # Extract host from URL: strip scheme, then path, then port — single pass
     local url="${1#*://}"  # strip scheme
@@ -463,11 +547,20 @@ api_call() {
         /auth/login|/auth/logout|/auth/elevate|/auth/status|/auth/setup) is_auth_endpoint=1 ;;
     esac
 
-    _refresh_tls_args
-    _ensure_auth_cookie_jar || {
+    if ! _refresh_tls_args; then
+        # GMS_AUTH_TOKEN_FILE 已配置但无效（不可读/权限过松/非本人/为空）。
+        # _refresh_tls_args 已清空认证参数并报错；这里禁止发出任何请求，
+        # 以 AUTH 退出码失败（修复 Agent Token 失效后静默降级为 Cookie
+        # 认证的身份混淆风险）。
+        error "Agent 认证不可用: GMS_AUTH_TOKEN_FILE 配置无效，已拒绝发送请求（禁止回退 Cookie）。请重新执行 gms-rt-agent-enroll <CODE> 或修复 token 文件权限" >&2
+        _record_api_exit_code "$GMS_RT_EXIT_AUTH"
+        return "$GMS_RT_EXIT_AUTH"
+    fi
+    if [ "${#CURL_AUTH_ARGS[@]}" -gt 0 ] && ! _ensure_auth_cookie_jar; then
+        _gms_end_bearer_request
         _record_api_exit_code "$GMS_RT_EXIT_OPERATION"
         return "$GMS_RT_EXIT_OPERATION"
-    }
+    fi
     # Serialise requests that may write the shared cookie jar so
     # concurrent CLI processes cannot clobber each other's session file.
     if [ "${#extra_args[@]}" -gt 0 ]; then
@@ -487,6 +580,11 @@ api_call() {
     fi
 
     curl_exit_code=$?
+    # Request-scoped credential teardown: the Bearer header temp file only
+    # lives for this HTTP call. This closes the source(function)-mode leak
+    # where the file (containing the token) outlived the request with no
+    # EXIT trap to clean it.
+    _gms_end_bearer_request
     body=$(_body_from_http_response "$response")
     http_status=$(_status_from_http_response "$response")
     if [ "$curl_exit_code" -ne 0 ]; then
@@ -585,6 +683,36 @@ _is_sourced() {
 
 
 if ! _is_sourced; then
-    trap '_gms_cleanup_bearer_header_file' EXIT HUP INT TERM
-    _gms_rt_dispatch "$@"
+    _gms_terminate_process_tree() {
+        local parent_pid="$1" child_pid
+        case "$parent_pid" in ''|*[!0-9]*) return 0 ;; esac
+        for child_pid in $(ps -o pid= --ppid "$parent_pid" 2>/dev/null); do
+            _gms_terminate_process_tree "$child_pid"
+        done
+        kill -TERM "$parent_pid" 2>/dev/null || true
+    }
+    _gms_handle_dispatch_signal() {
+        local exit_code="$1" dispatch_pid="${_gms_dispatch_pid:-}"
+        trap - HUP INT TERM
+        [ -z "$dispatch_pid" ] || _gms_terminate_process_tree "$dispatch_pid"
+        [ -z "$dispatch_pid" ] || wait "$dispatch_pid" 2>/dev/null || true
+        exit "$exit_code"
+    }
+
+    trap '_gms_cleanup_bearer_header_file' EXIT
+    (
+        trap '_gms_cleanup_bearer_header_file' EXIT
+        trap 'exit 129' HUP
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        _gms_rt_dispatch "$@"
+    ) <&0 &
+    _gms_dispatch_pid=$!
+    trap '_gms_handle_dispatch_signal 129' HUP
+    trap '_gms_handle_dispatch_signal 130' INT
+    trap '_gms_handle_dispatch_signal 143' TERM
+    wait "$_gms_dispatch_pid"
+    _gms_dispatch_status=$?
+    _gms_dispatch_pid=""
+    exit "$_gms_dispatch_status"
 fi
