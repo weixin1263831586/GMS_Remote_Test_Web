@@ -326,7 +326,13 @@ def prepare_suite_export(config: WorkerConfig, payload: dict[str, Any]) -> tuple
         return target, False
     export_root = config.data_root / "exports"
     export_root.mkdir(parents=True, exist_ok=True)
-    archive_base = export_root / f"{payload.get('transfer_id')}-{target.name}"
+    # Controller 只铸造 transfer-<32hex>（repository_transfers.create_transfer）；
+    # transfer_id 直接拼进本地归档路径，半可信 Controller 的 "../" 会被
+    # 写到 export_root 之外，必须先按同一字符集校验（同 app.py report-copy）。
+    transfer_id = str(payload.get("transfer_id") or "")
+    if not re.fullmatch(r"transfer-[a-f0-9]{32}", transfer_id):
+        raise ValueError("invalid suite export transfer")
+    archive_base = export_root / f"{transfer_id}-{target.name}"
     archive = Path(shutil.make_archive(str(archive_base), "zip", target.parent, target.name))
     return archive, True
 

@@ -33,6 +33,8 @@ def _seed_power(db, issue_id=598972):
         ),
         "status_name": "Closed",
         "fixed_version": "RK3576_ANDROID16",
+        "error_analysis": "Power HAL 未对 Mode::FIXED_PERFORMANCE 声明支持",
+        "solution": "修改 isModeSupported 使 Mode::FIXED_PERFORMANCE 返回 true 后单编替换 power 服务",
     })
     db.upsert_case_fact(fact)
 

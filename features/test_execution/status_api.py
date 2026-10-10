@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import re
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from features.devices import get_or_create_user_state, get_usb_monitor, iter_websocket_targets
+from features.devices import get_or_create_user_state, get_usb_monitor
 from foundation.responses import error_response
 
 from . import runtime
@@ -101,27 +100,10 @@ async def get_status(
     if resp:
         return resp
 
+    # USB 事件广播由 bootstrap/lifecycle._dispatch_usb_events 常驻协程统一
+    # 消费（队列单消费者），状态轮询只读，不在这里 drain。
+
     try:
-        # Handle USB event queue if available
-        try:
-            import queue as _queue
-            if hasattr(request.app.state, "usb_event_queue"):
-                try:
-                    while True:
-                        event = request.app.state.usb_event_queue.get_nowait()
-
-                        async def _send_usb_event(cid, ws, usb_event=event):
-                            with contextlib.suppress(Exception):
-                                await ws.send_json(usb_event)
-
-                        # Values are sets of sockets since the multi-tab
-                        # migration; iterate flattened (client, socket) pairs.
-                        await asyncio.gather(*[_send_usb_event(cid, ws) for cid, ws in iter_websocket_targets()])
-                except _queue.Empty:
-                    pass
-        except Exception:
-            pass
-
         client_id = runtime.get_client_id_from_request(request)
         user_state = get_or_create_user_state(client_id)
         active_jobs = _active_durable_jobs(client_id)

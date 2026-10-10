@@ -39,14 +39,12 @@ class AutomationService:
         store: AutomationStore,
         profiles_path: Path,
         gerrit_query: GerritQuery | None = None,
-        device_selector: Any = None,
         device_manager: Any = None,
         cluster_provider: Callable[[], Any] | None = None,
     ):
         self.store = store
         self.profiles_path = profiles_path
         self.gerrit_query = gerrit_query
-        self._device_selector = device_selector
         self._device_manager = device_manager
         self._cluster_provider = cluster_provider
 
@@ -58,7 +56,6 @@ class AutomationService:
         executor = (
             HttpAutomationExecutor(
                 build_password_provider=self.get_build_password,
-                device_selector=self._device_selector,
                 device_manager=self._device_manager,
                 authority_provider=self.run_authority,
             )
@@ -762,9 +759,6 @@ class AutomationService:
             'existing': existing,
             'rejected': rejected,
         }
-
-
-# ---- merged from profile_dry_run.py ----
 
 
 def dry_run_profile(

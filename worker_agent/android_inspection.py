@@ -235,6 +235,25 @@ def explore_resources(serial: str, options: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_MOUNT_OPTION_GROUP_RE = re.compile(r"[([]([^)\]]*)[)\]]\s*$")
+
+
+def _product_mount_is_rw(mount_output: str) -> bool:
+    """``/product`` 是否以 rw 挂载。
+
+    mount 输出形如 ``... on /product type ext4 (rw,seclabel,...)``，选项
+    整体在行尾括号内，必须剥掉括号后按逗号分项精确匹配（``"(rw" != "rw"``，
+    也不能让 ``"ro"`` 前缀误配）。
+    """
+    for line in mount_output.splitlines():
+        if " /product " not in line:
+            continue
+        match = _MOUNT_OPTION_GROUP_RE.search(line)
+        if match and "rw" in {part.strip() for part in match.group(1).split(",")}:
+            return True
+    return False
+
+
 def _getprop(serial: str, name: str) -> str:
     return _adb(serial, "shell", "getprop", name, timeout=15).strip()
 
@@ -251,14 +270,13 @@ def override_status(serial: str, entry_count: int = 0) -> dict[str, Any]:
         ["adb", "-s", serial, "shell", "ls", overlay_path],
         capture_output=True, text=True, timeout=15, check=False,
     )
-    product_lines = [line for line in mounts.splitlines() if " /product " in line]
     return {
         "reachable": True,
         "build_type": build_type,
         "is_userdebug": build_type in {"userdebug", "eng"},
         "verity_disabled": _getprop(serial, "ro.boot.veritymode") == "disabled",
         "rooted": "uid=0(" in identity or identity.startswith("uid=0"),
-        "product_remountable": any("rw" in line.split()[-1].split(",") for line in product_lines),
+        "product_remountable": _product_mount_is_rw(mounts),
         "overlay_installed": probe.returncode == 0,
         "overlay_apk_path": overlay_path if probe.returncode == 0 else "",
         "applied_entry_count": entry_count,

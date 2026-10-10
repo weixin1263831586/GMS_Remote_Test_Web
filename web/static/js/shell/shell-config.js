@@ -25,5 +25,7 @@
     window.PRODUCT_BRANDING = config.product_branding || {};
     window.__GMS_BOOTSTRAP__ = {
         localWorkerId: config.local_worker_id || '',
+        ubuntu_host: config.ubuntu_host || '',
+        ubuntu_user: config.ubuntu_user || '',
     };
 })();

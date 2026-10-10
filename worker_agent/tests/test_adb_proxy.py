@@ -526,7 +526,7 @@ def test_worker_source_command_derives_code_without_returning_it(tmp_path):
     with patch(
         "worker_agent.app.execute_adb_proxy_action", return_value=result
     ) as execute:
-        agent.handle(command)
+        agent.run_adb_proxy_command(command)
 
     assert execute.call_args.kwargs["pair_code"] == pair_code_from_grant(
         "worker-secret",
@@ -548,11 +548,13 @@ def test_worker_target_command_fetches_code_with_short_lived_grant(tmp_path):
         "devices": ["SERIAL"],
         "access_token": "signed-grant",
     }
+    acks: list[tuple] = []
+    agent.client.ack.side_effect = lambda *a, **k: acks.append((a, k))
     with patch(
         "worker_agent.app.execute_adb_proxy_action",
         return_value={"connected": True},
     ) as execute:
-        agent.handle({
+        agent.run_adb_proxy_command({
             "id": "adb-proxy-target",
             "command_type": "adb_proxy",
             "payload": payload,
@@ -561,8 +563,58 @@ def test_worker_target_command_fetches_code_with_short_lived_grant(tmp_path):
     agent.client.adb_proxy_pair_code.assert_called_once_with(
         "worker-origin", "signed-grant"
     )
-    agent.heartbeat.assert_called_once_with()
     assert execute.call_args.kwargs["pair_code"] == "ZXCV2345"
+    # ACK 之前先 heartbeat 公布 adb-hub 库存（handle 同步路径的历史语义）。
+    agent.heartbeat.assert_called_once_with()
+    assert agent.runtime.previous_command("adb-proxy-target")["status"] == "completed"
+
+
+def test_adb_proxy_command_runs_in_background_so_heartbeats_are_not_blocked(tmp_path):
+    """target_connect 传输超时 120s，内联执行会饿死主循环心跳（Controller
+    默认 45s 判 worker_lost），必须与 device_action/usbip 一样后台化。"""
+    agent = WorkerAgent(_config(tmp_path))
+    agent.client = MagicMock()
+    thread = MagicMock()
+    command = {
+        "id": "adb-proxy-bg",
+        "command_type": "adb_proxy",
+        "payload": {"action": "target_connect", "devices": ["SERIAL"]},
+    }
+
+    with patch("worker_agent.app.threading.Thread", return_value=thread) as thread_cls, \
+            patch("worker_agent.app.execute_adb_proxy_action") as execute:
+        agent.handle(command)
+
+    execute.assert_not_called()
+    thread_cls.assert_called_once_with(
+        target=agent.run_adb_proxy_command,
+        args=(command,),
+        name="ADBProxy-adb-proxy-bg",
+        daemon=True,
+    )
+    thread.start.assert_called_once_with()
+    assert agent.runtime.previous_command("adb-proxy-bg")["status"] == "running"
+    agent.client.ack.assert_called_once_with("adb-proxy-bg", "running", {}, "")
+
+
+def test_adb_proxy_background_command_reports_failure(tmp_path):
+    agent = WorkerAgent(_config(tmp_path))
+    agent.client = MagicMock()
+    command = {
+        "id": "adb-proxy-fail",
+        "command_type": "adb_proxy",
+        "payload": {"action": "target_connect"},
+    }
+
+    with patch(
+        "worker_agent.app.execute_adb_proxy_action",
+        side_effect=RuntimeError("pairing failed"),
+    ):
+        agent.run_adb_proxy_command(command)
+
+    saved = agent.runtime.previous_command("adb-proxy-fail")
+    assert saved["status"] == "failed"
+    assert "pairing failed" in saved["error"]
 
 
 def test_target_disconnect_waits_for_removed_serials_before_return(tmp_path):

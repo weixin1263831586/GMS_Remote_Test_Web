@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from features.assistant.executor import ToolResult
+from features.assistant.execution_result import ToolResult
 
 
 PAGE_DISPLAY_NAMES: dict[str, str] = {

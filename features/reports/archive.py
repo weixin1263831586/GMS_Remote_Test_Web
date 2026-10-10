@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import glob
 import logging
 import os
 import re
@@ -169,11 +168,6 @@ class ReportFileHandler:
                     return os.path.join(root, file)
         return None
 
-    def find_host_log(self) -> str | None:
-        """查找host_log文件"""
-        host_logs = glob.glob(os.path.join(self.temp_dir, '**/host_log_*.txt'), recursive=True)
-        return host_logs[0] if host_logs else None
-
 
 class ReportAnalyzer:
     """报告分析器主类 - 对外统一接口"""
@@ -215,12 +209,6 @@ class ReportAnalyzer:
 
     def analyze_log_dir(self, log_dir: str) -> dict | None:
         report = self.host_log_parser.parse_log_dir(log_dir)
-        if report:
-            return self._report_to_dict(report)
-        return None
-
-    def analyze_content(self, xml_content: str) -> dict | None:
-        report = self.parser.parse_content(xml_content)
         if report:
             return self._report_to_dict(report)
         return None
@@ -417,6 +405,3 @@ class ReportAnalyzer:
                 for f in report.failures
             ]
         }
-
-
-analyzer = ReportAnalyzer()

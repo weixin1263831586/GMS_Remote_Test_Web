@@ -635,12 +635,13 @@
                 }
                 const pendingCommand = sessionStorage.getItem('pending_terminal_command');
                 const commandSource = sessionStorage.getItem('command_source');
-                pendingAdbDevice = pendingAdbDevice || sessionStorage.getItem('pending_adb_device');
 
-                if (!pendingAdbDevice && !pendingCommand) {
+                // 设备 ADB shell 走 workspace pane 的 pendingAdbTarget 路径，
+                // 这里只剩 SSH 终端与路由命令两种入口。
+                if (!pendingCommand) {
                     await ensureTerminalWorkspaceInitialized();
-                } else if (!terminalInitialized || pendingAdbDevice || pendingCommand) {
-                    if ((pendingAdbDevice || pendingCommand) && terminalInitialized) {
+                } else {
+                    if (terminalInitialized) {
                         debugLog('Forcing terminal re-initialization');
                         isReconnecting = true;
                         if (terminalSocket) {
@@ -657,7 +658,7 @@
                         }, 100);
                     }
 
-                    if (pendingCommand && commandSource === 'route_check') {
+                    if (commandSource === 'route_check') {
                         updateSilentMode(false, 'route', pendingCommand);
                         sessionStorage.removeItem('pending_terminal_command');
                         sessionStorage.removeItem('command_source');
@@ -706,7 +707,7 @@
                     }
                 }, 50);
             }
-            if (pageName === 'terminal' && terminalInitialized && terminal && (pendingAdbDevice || sessionStorage.getItem('pending_terminal_command'))) {
+            if (pageName === 'terminal' && terminalInitialized && terminal && sessionStorage.getItem('pending_terminal_command')) {
                 setTimeout(() => {
                     terminal.focus();
                 }, 100);

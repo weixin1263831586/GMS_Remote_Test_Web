@@ -45,21 +45,6 @@ def is_windows_host(ssh_manager, ssh) -> bool:
         return False
 
 
-def detect_source_os(ssh_manager, ssh) -> str:
-    """Classify a source host: 'windows', 'linux' or '' (unsupported)."""
-    if is_windows_host(ssh_manager, ssh):
-        return "windows"
-    try:
-        result = ssh_manager.execute_command(
-            ssh, "uname -s", timeout=8,
-        )
-    except Exception:
-        return ""
-    if result.ok and "linux" in (result.stdout or "").strip().lower():
-        return "linux"
-    return ""
-
-
 def create_source_ssh(hostname: str, username: str, password: str, port: int = 22):
     """Open an SSH connection to a source host with strict host-key policy."""
     try:
@@ -544,7 +529,6 @@ __all__ = [
     "bind_usbipd_devices",
     "create_source_ssh",
     "detach_source_sessions",
-    "detect_source_os",
     "ensure_source_export_ready",
     "is_windows_host",
     "probe_source_os",

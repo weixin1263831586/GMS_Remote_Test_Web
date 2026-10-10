@@ -362,7 +362,9 @@ async def get_vpn_connections():
     ssh = None
     try:
         if not config_manager.is_config_host_local(config):
-            ssh = ssh_manager.get_connection(config)
+            # 阻塞建连移出事件循环（对齐 get_vpn_status 的
+            # async_optional_connection 语义，此处保留手工归还结构）。
+            ssh = await asyncio.to_thread(ssh_manager.get_connection, config)
         if not config_manager.is_config_host_local(config) and not ssh:
             return ApiError.upstream_failure(
                 "VPN 主机 SSH 连接失败",
@@ -431,10 +433,11 @@ async def get_vpn_status():
         # 可达性补充：ping 目标是否可达（仅作信息，不单独决定 connected）。
         ping_reachable = False
         try:
-            ping_result = ssh_manager.execute_command(
+            ping_result = await asyncio.to_thread(
+                ssh_manager.execute_command,
                 ssh,
                 f"ping -c 1 -W 1 {vpn_target} 2>&1",
-                timeout=3
+                timeout=3,
             )
             ping_reachable = (
                 '1 packets transmitted, 1 received' in ping_result.stdout
@@ -465,7 +468,7 @@ async def connect_vpn(
         ssh = None
         is_local = config_manager.is_config_host_local(config)
         if not is_local:
-            ssh = ssh_manager.get_connection(config)
+            ssh = await asyncio.to_thread(ssh_manager.get_connection, config)
 
         if not is_local and not ssh:
             return ApiError.upstream_failure(
@@ -571,7 +574,7 @@ async def disconnect_vpn():
         ssh = None
         is_local = config_manager.is_config_host_local(config)
         if not is_local:
-            ssh = ssh_manager.get_connection(config)
+            ssh = await asyncio.to_thread(ssh_manager.get_connection, config)
 
         if not is_local and not ssh:
             return ApiError.upstream_failure(

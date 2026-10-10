@@ -141,10 +141,13 @@
             desktopHosts = [];
 
             // 确保默认主机（测试主机）始终存在且在列表首位
-            // 外置脚本不经 Jinja 渲染：从模板已渲染的连接标签读取默认
-            // 主机，缺失时退回 bootstrap 链的 localWorkerId（单一真值）。
-            const defaultHost = (document.getElementById('terminal-connection-label') || {}).textContent
-                || window.__GMS_BOOTSTRAP__?.localWorkerId
+            // 外置脚本不经 Jinja 渲染：从 gms-runtime-config 数据标签读取
+            // 默认 SSH 端点（root 路由注入的单一真值），缺失时退回
+            // localWorkerId。
+            const bootstrap = window.__GMS_BOOTSTRAP__ || {};
+            const defaultHost = [bootstrap.ubuntu_user, bootstrap.ubuntu_host]
+                .filter(Boolean).join('@')
+                || bootstrap.localWorkerId
                 || '';
             const defaultIndex = desktopHosts.findIndex(h => h.id === 'default');
 

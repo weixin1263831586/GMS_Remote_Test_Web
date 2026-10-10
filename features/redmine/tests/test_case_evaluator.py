@@ -20,6 +20,8 @@ class CaseEvaluatorTests(unittest.TestCase):
             "description": "system signed with VBMeta test key",
             "status_name": "Confirmed",
             "fixed_version": "RK3576_ANDROID16",
+            "error_analysis": "认证版本未切换production AVB key",
+            "solution": "用production key重新签名",
         })
         self.db.upsert_case_fact(fact)
         self.evaluator = CaseEvaluator(self.db)

@@ -185,18 +185,23 @@ _APPROVAL_TOOLS = {
 async def auth_create_approval_token(request: Request, req: dict):
     """Issue a one-shot approval token for a destructive agent action.
 
-    Must be called by a human session (cookie) — an Agent Service Token can
-    never mint approvals for itself. Firmware burn additionally requires a
-    live admin elevation on the approving session.
+    Human-only by whitelist: only an explicit session-cookie principal may
+    mint approvals. Every service identity — Agent Service Token (ADR 0006),
+    machine capability token (ADR 0012), or any future principal kind —
+    fails closed, so no machine principal can mint an approval for itself
+    and then consume it. Firmware burn additionally requires a live admin
+    elevation on the approving session.
     """
     caller = get_authenticated_user(request)
     if caller is None:
         return error_response("请先登录后再创建审批令牌", status_code=401)
-    # Agent principals must never be able to mint approvals for themselves;
-    # only a human session (cookie) can approve destructive actions.
-    if getattr(request.state, "auth_method", None) == "agent_token":
+    # Whitelist semantics: "session" is the only auth_method that denotes a
+    # human behind a browser session. Anything else (agent_token,
+    # machine_authority, ...) is a service identity and must never be able
+    # to approve destructive actions such as arbitrary shell commands.
+    if getattr(request.state, "auth_method", None) != "session":
         return error_response(
-            "审批令牌必须由用户本人会话创建，Agent token 不能自批", status_code=401
+            "审批令牌必须由用户本人会话创建，服务身份不能自批", status_code=403
         )
     tool = str(req.get("tool") or "").strip()
     device = str(req.get("device") or "").strip()

@@ -74,19 +74,6 @@ def _list_local_files(path: str) -> list[dict]:
     return files
 
 
-@router.get("/api/files/progress")
-async def get_upload_progress(upload_id: str | None = None):
-    """Return the current upload progress for an upload_id (always completed)."""
-    return JSONResponse(content={
-        "success": True,
-        "data": {
-            "upload_id": upload_id,
-            "progress": 100,
-            "status": "completed"
-        }
-    })
-
-
 @router.post("/api/files/list")
 async def list_files(
     req: dict,

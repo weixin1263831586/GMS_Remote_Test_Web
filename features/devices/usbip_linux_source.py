@@ -266,10 +266,12 @@ def _stop_linux_usbipd(
     ssh,
     signal_flag: str = "",
     known_pids: list[str] | tuple[str, ...] = (),
-) -> bool:
-    """Stop the owned usbipd process by verified PID ownership only.
+) -> None:
+    """Best-effort signal to the owned usbipd process by verified PID only.
 
-    返回 True 表示目标进程已不存在（从未运行或已停止）。
+    不返回进程是否已消失：``kill ... ; true`` 的 stdout 恒空，历史实现
+    据此返回的布尔值恒为 True（kill 失败也判成功）。调用方一律在信号
+    之后用 ``query_ubuntu_running_usbipd`` 复查真实状态。
     停止动作按已验证的 PID 执行，不用 ``pkill -f``：它按 substring
     匹配整条命令行，会误杀恰好包含 ``usbipd bind`` 的无关进程。
     ``known_pids`` 是调用方查询阶段已经通过 /proc argv 校验的 PID，
@@ -284,12 +286,11 @@ def _stop_linux_usbipd(
         if candidate not in pids:
             pids.append(candidate)
     if not pids:
-        return True
+        return
     pid_list = " ".join(pids)
-    kill_result = ssh_manager.execute_command(
+    ssh_manager.execute_command(
         ssh, f"kill {signal_flag} {pid_list} 2>/dev/null; true", timeout=10,
     )
-    return not (kill_result.stdout or "").strip()
 
 
 def _device_matches_android(
@@ -532,8 +533,11 @@ def resolve_worker_egress_ips(
             )
             match = re.search(r"\bsrc\s+(\S+)", route_result.stdout or "")
         finally:
+            # 工厂给出的是连接池连接（get_connection），契约是
+            # return_connection 归还；直接 close 会销毁池条目造成反复
+            # TCP+auth 握手抖动。
             try:
-                worker_ssh.close()
+                ssh_manager.return_connection(worker_ssh)
             except Exception:
                 pass
         if route_result.ok and match:

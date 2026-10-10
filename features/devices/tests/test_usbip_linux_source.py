@@ -844,7 +844,7 @@ class WorkerEgressResolutionTests(unittest.TestCase):
         )
         self.assertEqual(resolved, [])
 
-    def test_resolve_closes_worker_connection(self):
+    def test_resolve_returns_worker_connection_to_pool(self):
         ssh_manager = _fake_ssh_manager({
             "echo $SSH_CONNECTION": ("10.0.0.9 54321 10.0.0.5 22\n", "", 0),
             "ip route get": ("10.0.0.5 dev eth0 src 172.16.10.20\n", "", 0),
@@ -854,7 +854,9 @@ class WorkerEgressResolutionTests(unittest.TestCase):
             ssh_manager, MagicMock(), ["wlq@172.16.10.20"],
             worker_ssh_factory=lambda host: worker_ssh,
         )
-        worker_ssh.close.assert_called_once()
+        # 工厂返回的是连接池连接：必须 return_connection 归还，而不是 close。
+        ssh_manager.return_connection.assert_called_once_with(worker_ssh)
+        worker_ssh.close.assert_not_called()
 
 
 class AutoBindUbuntuTests(unittest.TestCase):

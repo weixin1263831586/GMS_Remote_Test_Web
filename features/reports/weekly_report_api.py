@@ -248,8 +248,9 @@ def _task_completed_last_week(row: dict[str, Any], start: date, end: date) -> bo
     return False
 
 
-async def _collect_android17(start: date, end: date, owner: str = "黄超群") -> dict[str, Any]:
+async def _collect_android17(start: date, end: date, owner: str | None = None) -> dict[str, Any]:
     """抓取腾讯文档 Android17 移植计划，返回指定负责人的上周已完成任务。"""
+    owner = owner or android17_default_owner()
     try:
         async with (
             aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session,
@@ -818,7 +819,7 @@ async def get_weekly_report_department(
         want_rm=want_rm, want_gr=want_gr, want_a17=want_a17, want_gms=want_gms,
         redmine_name=member_name,
         gerrit_owner=owner,
-        android17_owner=member_name or "黄超群",
+        android17_owner=member_name or android17_default_owner(),
     )
     redmine, gerrit, android17, gms_test = (
         sources["redmine"], sources["gerrit"], sources["android17"], sources["gms_test"],
@@ -1124,6 +1125,7 @@ async def get_weekly_report_ai_summary(
 
 
 DEFAULT_ANDROID17_SHEET_URL = "https://docs.qq.com/sheet/DQnVLa3NVeHdISXpy?tab=BB08J2"
+DEFAULT_ANDROID17_OWNER = "黄超群"
 
 
 def android17_sheet_url() -> str:
@@ -1132,6 +1134,14 @@ def android17_sheet_url() -> str:
     if not configured:
         configured = (config_manager.load_config().get("weekly_report") or {}).get("android17_sheet_url")
     return str(os.getenv("GMS_ANDROID17_SHEET_URL") or configured or DEFAULT_ANDROID17_SHEET_URL).strip()
+
+
+def android17_default_owner() -> str:
+    runtime = config_manager.get_runtime_config()
+    configured = (runtime.get("weekly_report") or {}).get("android17_default_owner")
+    if not configured:
+        configured = (config_manager.load_config().get("weekly_report") or {}).get("android17_default_owner")
+    return str(os.getenv("GMS_ANDROID17_DEFAULT_OWNER") or configured or DEFAULT_ANDROID17_OWNER).strip()
 
 
 # ---- merged from foundation/time.py ----

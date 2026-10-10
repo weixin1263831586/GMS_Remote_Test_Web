@@ -57,7 +57,7 @@ human user in their own shell.
 | Connectivity | `gms-rt-ssh-ping`, `gms-rt-ssh-route`, `gms-rt-ssh-sshd`, `gms-rt-vpn-connect`, `gms-rt-vpn-disconnect`, `gms-rt-vpn-status`, `gms-rt-usbip-install`, `gms-rt-usbip-connect`, `gms-rt-usbip-disconnect`, `gms-rt-usbip-status`, `gms-rt-adb-forward-status`, `gms-rt-adb-forward-start`, `gms-rt-adb-forward-stop` |
 | Users | `gms-rt-users-current`, `gms-rt-users-detect`, `gms-rt-users-list`, `gms-rt-users-set-username` |
 | Durable jobs | `gms-rt-jobs-list`, `gms-rt-jobs-status`, `gms-rt-jobs-events`, `gms-rt-jobs-follow`, `gms-rt-jobs-wait`, `gms-rt-jobs-cancel` |
-| Config and files | `gms-rt-config-read`, `gms-rt-config-update`, `gms-rt-files-progress` |
+| Config and files | `gms-rt-config-read`, `gms-rt-config-update` |
 | System | `gms-rt-system-capabilities`, `gms-rt-system-command-describe`, `gms-rt-system-commands`, `gms-rt-system-docs`, `gms-rt-system-doctor`, `gms-rt-system-health`, `gms-rt-system-help`, `gms-rt-system-selfcheck`, `gms-rt-system-skills`, `gms-rt-system-update`, `gms-rt-system-version` |
 | Redmine evidence | `gms-rt-redmine-credentials-status`, `gms-rt-redmine-triage`, `gms-rt-redmine-issue-fetch`, `gms-rt-redmine-issue-show`, `gms-rt-redmine-journals`, `gms-rt-redmine-attachments`, `gms-rt-redmine-attachment-download`, `gms-rt-redmine-artifact-image`, `gms-rt-redmine-history-search`, `gms-rt-artifact-read`, `gms-rt-artifact-search` |
 | SDK sources | `gms-rt-sdk-sources`, `gms-rt-sdk-search`, `gms-rt-sdk-read` |

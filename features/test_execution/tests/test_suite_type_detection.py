@@ -1,8 +1,11 @@
 import unittest
 
 from features.test_execution.suites import (
+    TRADEFED_BINARY_MAP,
+    TRADEFED_BINARY_REVERSE_MAP,
     build_suite_info,
     detect_test_type_from_suite_path,
+    get_test_type_from_binary,
 )
 
 
@@ -69,6 +72,26 @@ class SuitePathTypeDetectionTests(unittest.TestCase):
         order = [suite_type for _, suite_type in markers]
         self.assertLess(order.index("cts-v"), order.index("cts"))
         self.assertLess(order.index("gts-root"), order.index("gts"))
+
+    def test_reverse_binary_map_has_no_conflicting_entries(self):
+        # 'cts-tradefed' is shared by cts and gsi; the reverse map must resolve
+        # it to exactly one type instead of silently keeping the last write.
+        self.assertEqual(
+            len(TRADEFED_BINARY_REVERSE_MAP),
+            len(set(TRADEFED_BINARY_MAP.values())),
+        )
+        for binary, suite_type in TRADEFED_BINARY_REVERSE_MAP.items():
+            owners = [t for t, b in TRADEFED_BINARY_MAP.items() if b == binary]
+            self.assertEqual(
+                suite_type,
+                owners[0],
+                f"{binary} must reverse to its first owner, not a later overwrite",
+            )
+
+    def test_shared_cts_launcher_is_cts_even_without_android_dir(self):
+        self.assertEqual(get_test_type_from_binary("cts-tradefed"), "cts")
+        info = build_suite_info("/opt/suites/tools/cts-tradefed")
+        self.assertEqual(info["test_type"], "cts")
 
 
 if __name__ == "__main__":

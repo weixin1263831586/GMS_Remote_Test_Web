@@ -21,6 +21,7 @@ from features.auth import require_elevated_admin_when_auth_required
 from features.test_execution import get_default_suites_path
 from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response
+from foundation.ssh_executor import ssh_executor
 
 from . import runtime
 from .api_helpers import (
@@ -129,16 +130,18 @@ async def burn_gsi(
             if lock_err:
                 return lock_err
 
-            # USB/IP 设备在 ADB→Fastboot→Fastbootd 切换时会重新枚举 USB 身份；
-            # 与固件路径一致先做 AutoBind 预检，保证物理 BUSID 可被自动共享。
-            _usbip_flash_routes, usbip_route_error = (
-                await _prepare_usbip_firmware_routes(online_devices)
-            )
-            if usbip_route_error:
-                await runtime.release_firmware_devices(client_id, locked_devices)
-                return error_response(usbip_route_error, status_code=409)
-
+            # 锁获取之后的每一步（含 USB/IP 路由预检）都必须在内层 try 内：
+            # 异常路径经 except 分支释放设备锁，不能把设备占用到锁 TTL。
             try:
+                # USB/IP 设备在 ADB→Fastboot→Fastbootd 切换时会重新枚举 USB 身份；
+                # 与固件路径一致先做 AutoBind 预检，保证物理 BUSID 可被自动共享。
+                _usbip_flash_routes, usbip_route_error = (
+                    await _prepare_usbip_firmware_routes(online_devices)
+                )
+                if usbip_route_error:
+                    await runtime.release_firmware_devices(client_id, locked_devices)
+                    return error_response(usbip_route_error, status_code=409)
+
                 gms_suite_dir = get_default_suites_path(config)
                 remote_script, resolved_misc, asset_error = await asyncio.to_thread(
                     upload_gsi_assets,
@@ -214,46 +217,30 @@ async def burn_gsi(
                                 await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Device {device} GSI burn failed: {error_msg}", "log_type": "error"})
                         continue
 
-                    _stdin, stdout, stderr = await asyncio.to_thread(
-                        ssh.exec_command,
-                        burn_cmd,
-                        get_pty=True,
-                        timeout=600,
+                    async def _forward_burn_log(line: str, _level: str) -> None:
+                        clean_line = strip_ansi_codes(line)
+                        # 过滤 fastboot 冗余输出
+                        if (clean_line.startswith("OKAY") or
+                                clean_line.startswith("Writing '") or
+                                clean_line.startswith("Finished.") or
+                                clean_line.startswith("< waiting for")):
+                            return
+                        if client_id in runtime.global_state.websocket_connections:
+                            with contextlib.suppress(Exception):
+                                # 保留操作名，去掉尾部的 OKAY [x.xxxs]
+                                await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": _FASTBOOT_OKAY_RE.sub("", clean_line), "log_type": "info"})
+
+                    # 统一 SSH 执行层：run_stream 自带整体 deadline（远端
+                    # fastboot 卡在 `< waiting for device>` 时按超时返回
+                    # code=-1/timed_out，请求不会永挂）与 stdout/stderr
+                    # 并发 drain，业务代码不再裸调 ssh.exec_command。
+                    burn_result = await ssh_executor.run_stream(
+                        ssh, burn_cmd, _forward_burn_log,
+                        timeout=600, get_pty=True,
                     )
-                    output_buffer = []
-
-                    while not stdout.channel.exit_status_ready():
-                        if stdout.channel.recv_ready():
-                            chunk = (await asyncio.to_thread(stdout.channel.recv, 1024)).decode("utf-8", errors="ignore")
-                            output_buffer.append(chunk)
-                            clean_chunk = strip_ansi_codes(chunk)
-
-                            if client_id in runtime.global_state.websocket_connections:
-                                try:
-                                    for line in clean_chunk.split("\n"):
-                                        line = line.strip()
-                                        if not line:
-                                            continue
-                                        # 过滤 fastboot 冗余输出
-                                        if (line.startswith("OKAY") or
-                                            line.startswith("Writing '") or
-                                            line.startswith("Finished.") or
-                                            line.startswith("< waiting for")):
-                                            continue
-                                        # 保留操作名，去掉尾部的 OKAY [x.xxxs]
-                                        cleaned = _FASTBOOT_OKAY_RE.sub("", line)
-                                        await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": cleaned, "log_type": "info"})
-                                except Exception:
-                                    pass
-                        else:
-                            await asyncio.sleep(0.5)
-
-                    while stdout.channel.recv_ready():
-                        chunk = await asyncio.to_thread(stdout.channel.recv, 1024)
-                        output_buffer.append(chunk.decode("utf-8", errors="ignore"))
-                    final_output = "".join(output_buffer)
-                    exit_status = stdout.channel.recv_exit_status()
-                    error_output = (await asyncio.to_thread(stderr.read)).decode("utf-8", errors="ignore")
+                    final_output = burn_result.stdout
+                    error_output = burn_result.stderr
+                    exit_status = burn_result.code
 
                     if exit_status == 0:
                         reboot_result = await asyncio.to_thread(
@@ -332,6 +319,14 @@ async def burn_gsi(
                         status_code=502,
                     )
 
+            except ApiError as api_error:
+                # 语义化基础设施错误（如 Worker ADB/Fastboot 探测失败 502）
+                # 按全局错误码表返回信封，不落回通用 500。
+                try:
+                    await runtime.release_firmware_devices(client_id, locked_devices)
+                except Exception as release_error:
+                    logger.warning("[GSI Burn] Failed to release device locks after error: %s", release_error)
+                return api_error.to_response()
             except Exception:
                 message = record_internal_error(
                     logger, "GSI 烧写", "GSI burn error"
@@ -346,6 +341,10 @@ async def burn_gsi(
                     logger.warning("[GSI Burn] Failed to release device locks after error: %s", release_error)
                 return ApiError.internal(message).to_response()
 
+    except ApiError as api_error:
+        # 锁获取前的探测步骤（partition_devices_by_flash_state 在远端
+        # adb/fastboot 探测失败时抛 502）同样按错误码表原样返回。
+        return api_error.to_response()
     except Exception:
         message = record_internal_error(
             logger, "GSI 烧写", "Error in burn_gsi"

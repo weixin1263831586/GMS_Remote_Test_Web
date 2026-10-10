@@ -10,8 +10,6 @@ ACTIVE_CLUSTER_JOB_STATUSES = frozenset({
     "stopping", "collecting", "worker_lost",
 })
 
-TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled"}
-
 _ALLOWED_TRANSITIONS = {
     "assigned": {"dispatching", "stopping", "completed", "failed", "cancelled", "worker_lost"},
     "dispatching": {"running", "stopping", "completed", "failed", "cancelled", "worker_lost"},

@@ -173,23 +173,6 @@ class HttpAutomationExecutorTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertIn("ADB Proxy devices cannot be used", result["error"])
 
-    def test_post_flash_verification_accepts_product_device_or_board_identity(self):
-        from features.automation.executors import HttpAutomationExecutor
-
-        class DeviceManager:
-            @staticmethod
-            def get_device_info(serial):
-                return {"board": "rk3576", "model": "Android", "fingerprint": "vendor/release-keys"}
-
-        executor = HttpAutomationExecutor(device_manager=DeviceManager())
-
-        result = executor._verify_post_flash(
-            ["ABC123"],
-            {"product": "rk3576", "fingerprint_contains": "release-keys", "retries": 1},
-        )
-
-        self.assertEqual(result, {"success": True, "verified": True})
-
     def test_jenkins_flash_stages_artifact_url_instead_of_using_relative_path(self):
         from features.automation.executors import HttpAutomationExecutor
 

@@ -411,7 +411,19 @@ class RedmineClient(RedmineAttachmentMixin):
             async with semaphore:
                 return await _one(issue)
 
-        return [item for item in await asyncio.gather(*[_guarded(issue) for issue in candidates]) if item.get("issue_id")]
+        results = await asyncio.gather(
+            *[_guarded(issue) for issue in candidates],
+            return_exceptions=True,
+        )
+        snapshots: list[dict[str, Any]] = []
+        for item in results:
+            # 单条 issue 的 403/网络错只应丢掉该条快照，不能拖垮整批。
+            if isinstance(item, BaseException):
+                logger.warning("assignee 快照抓取单条失败，已跳过: %s", item)
+                continue
+            if item.get("issue_id"):
+                snapshots.append(item)
+        return snapshots
 
     async def count_issues_by_assignee(self, assignee_id: int) -> dict[str, int]:
         """Count all/open/closed issues assigned to a Redmine user id."""

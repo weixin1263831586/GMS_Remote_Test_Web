@@ -528,25 +528,21 @@ gms-rt-approval-create() {
           firmware_sha256: $sha, wipe_data: $wipe, burn_mode: $mode}')
     # 审批令牌由人工会话铸造（服务端拒匿名与 agent token），
     # 这里必须携带当前凭据（cookie 或 Bearer），否则永远 401。
-    response=$(curl "${CURL_TLS_ARGS[@]}" ${CURL_BEARER_ARGS:+"${CURL_BEARER_ARGS[@]}"} \
-        "${CURL_AUTH_ARGS[@]}" -sS -X POST "${API_BASE}/auth/approval-tokens" \
-        -H "Content-Type: application/json" -d "$data" \
-        -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT")
-    local http_status body
-    body=$(_body_from_http_response "$response")
-    http_status=$(_status_from_http_response "$response")
-    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]] || ! echo "$body" | jq -e '.success == true' >/dev/null 2>&1; then
+    # 走 api_call：网络失败(000)映射网络错误码而非权限错误，cookie
+    # 写入也拿到 flock 保护（历史裸 curl 两者都缺）。
+    response=$(api_call "/auth/approval-tokens" POST "$data")
+    local api_status=$?
+    if [ "$api_status" -ne 0 ] || ! echo "$response" | jq -e '.success == true' >/dev/null 2>&1; then
         local _agent_forbidden
-        _agent_forbidden=$(printf '%s' "$body" | jq -r '.detail.agent_forbidden // .agent_forbidden // empty' 2>/dev/null || true)
-        error "Approval creation failed: $(extract_api_error "$body")"
+        _agent_forbidden=$(printf '%s' "$response" | jq -r '.detail.agent_forbidden // .agent_forbidden // empty' 2>/dev/null || true)
+        error "Approval creation failed: $(extract_api_error "$response")"
         if [ -n "$_agent_forbidden" ] && [ "$_agent_forbidden" != "false" ]; then
             diagnostic "审批令牌仅限人工会话铸造。多 profile 主机请先: GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login <用户名>, 再在同一 shell 重试。"
-        elif [ "$http_status" = "401" ]; then
-            diagnostic "未登录或会话已过期: GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login <用户名> 后重试。"
         fi
+        [ "$api_status" -eq 0 ] || return "$api_status"
         return "$GMS_RT_EXIT_PERMISSION"
     fi
-    echo "$body" | jq '.approval // .'
+    echo "$response" | jq '.approval // .'
     [ "$GMS_RT_OUTPUT" = "json" ] || info "approval token: 5 分钟 TTL、单次有效, 仅绑定该 tool+device+command。"
 }
 
@@ -554,19 +550,15 @@ gms-rt-approval-create() {
 # never stored server-side, so listings only show metadata.
 gms-rt-agent-tokens() {
     check_jq || return 1
-    _refresh_tls_args
-    local response
-    response=$(curl "${CURL_TLS_ARGS[@]}" ${CURL_BEARER_ARGS:+"${CURL_BEARER_ARGS[@]}"} \
-        "${CURL_AUTH_ARGS[@]}" -sS -X GET "${API_BASE}/auth/agent-tokens" \
-        -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT")
-    local http_status body
-    body=$(_body_from_http_response "$response")
-    http_status=$(_status_from_http_response "$response")
-    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]] || ! echo "$body" | jq -e '.success == true' >/dev/null 2>&1; then
-        error "Failed to list agent tokens: $(extract_api_error "$body")"
+    local response api_status
+    response=$(api_call "/auth/agent-tokens" GET)
+    api_status=$?
+    if [ "$api_status" -ne 0 ] || ! echo "$response" | jq -e '.success == true' >/dev/null 2>&1; then
+        error "Failed to list agent tokens: $(extract_api_error "$response")"
+        [ "$api_status" -eq 0 ] || return "$api_status"
         return "$GMS_RT_EXIT_PERMISSION"
     fi
-    echo "$body" | jq '.tokens // []'
+    echo "$response" | jq '.tokens // []'
 }
 
 # Mint a one-shot enrollment code (admin + elevation required). Admins run
@@ -606,24 +598,20 @@ gms-rt-agent-enroll-code() {
         '{name: $name, scopes: ($scopes | split(",") | map(select(length > 0))),
           allowed_workers: $workers, allowed_devices: $devices, expires_days: $days,
           ttl_minutes: $ttl}')
-    response=$(curl "${CURL_TLS_ARGS[@]}" ${CURL_BEARER_ARGS:+"${CURL_BEARER_ARGS[@]}"} \
-        "${CURL_AUTH_ARGS[@]}" -sS -X POST "${API_BASE}/auth/agent-enrollment-codes" \
-        -H "Content-Type: application/json" -d "$data" \
-        -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT")
-    local http_status body
-    body=$(_body_from_http_response "$response")
-    http_status=$(_status_from_http_response "$response")
-    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]] || ! echo "$body" | jq -e '.success == true' >/dev/null 2>&1; then
-        error "Enrollment code creation failed: $(extract_api_error "$body")"
+    response=$(api_call "/auth/agent-enrollment-codes" POST "$data")
+    local api_status=$?
+    if [ "$api_status" -ne 0 ] || ! echo "$response" | jq -e '.success == true' >/dev/null 2>&1; then
+        error "Enrollment code creation failed: $(extract_api_error "$response")"
+        [ "$api_status" -eq 0 ] || return "$api_status"
         return "$GMS_RT_EXIT_PERMISSION"
     fi
     # The one-shot code is secret material: print once, never log it twice.
-    echo "$body" | jq '.enrollment'
+    echo "$response" | jq '.enrollment'
     # 人话补充：绝对过期时刻让"还剩多久"可见。
     local expires_iso
-    expires_iso=$(echo "$body" | jq -r '.enrollment.expires_at // empty')
+    expires_iso=$(echo "$response" | jq -r '.enrollment.expires_at // empty')
     [ -n "$expires_iso" ] && [ "$GMS_RT_OUTPUT" != "json" ] && {
-        info "配对码有效至 $(iso_to_local_time "$expires_iso")（TTL $(echo "$body" | jq -r '.enrollment.ttl_minutes // 5') 分钟，一次性使用）"
+        info "配对码有效至 $(iso_to_local_time "$expires_iso")（TTL $(echo "$response" | jq -r '.enrollment.ttl_minutes // 5') 分钟，一次性使用）"
     }
     return 0
 }
@@ -636,17 +624,13 @@ gms-rt-agent-token-revoke() {
         return "$GMS_RT_EXIT_USAGE"
     }
     check_jq || return 1
-    _refresh_tls_args
-    local response
-    response=$(curl "${CURL_TLS_ARGS[@]}" ${CURL_BEARER_ARGS:+"${CURL_BEARER_ARGS[@]}"} \
-        "${CURL_AUTH_ARGS[@]}" -sS -X DELETE "${API_BASE}/auth/agent-tokens/$(_urlencode "$token_id")" \
-        -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT")
-    local http_status body
-    body=$(_body_from_http_response "$response")
-    http_status=$(_status_from_http_response "$response")
-    if [[ ! "$http_status" =~ ^2[0-9]{2}$ ]] || ! echo "$body" | jq -e '.success == true' >/dev/null 2>&1; then
-        error "Revoke failed: $(extract_api_error "$body")"
+    local response api_status
+    response=$(api_call "/auth/agent-tokens/$(_urlencode "$token_id")" DELETE)
+    api_status=$?
+    if [ "$api_status" -ne 0 ] || ! echo "$response" | jq -e '.success == true' >/dev/null 2>&1; then
+        error "Revoke failed: $(extract_api_error "$response")"
+        [ "$api_status" -eq 0 ] || return "$api_status"
         return "$GMS_RT_EXIT_PERMISSION"
     fi
-    echo "$body" | jq '{ok: true, revoked: .revoked}'
+    echo "$response" | jq '{ok: true, revoked: .revoked}'
 }

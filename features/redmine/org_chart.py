@@ -20,6 +20,7 @@ daily-brief 等消费方拿到的仍是扁平成员列表（含 overlay 别名�
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -69,24 +70,58 @@ def _empty_payload() -> dict[str, Any]:
 
 
 def load_org_payload(project_root: Path | str | None = None) -> dict[str, Any]:
+    """读取全局组织架构；文件存在但损坏时抛错，绝不静默返回空结构。
+
+    空结构会被写路径（``upsert_org_member``/``save_org_payload``）当作
+    当前花名册整体覆写，等于清空组织数据，因此解析失败必须显式失败。
+    """
     path = org_chart_path(project_root)
     if not path.exists():
         return _empty_payload()
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return _empty_payload()
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"组织架构文件损坏，拒绝以空数据继续: {path} ({exc})") from exc
     if not isinstance(payload, dict):
-        return _empty_payload()
+        raise ValueError(f"组织架构文件内容不是 JSON 对象: {path}")
     payload.setdefault("departments", [])
     return payload
 
 
+def _existing_member_count(path: Path) -> int:
+    """统计现有文件中的成员数；缺失/损坏（可被合法覆写修复）按 0 计。"""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(payload, dict):
+        return 0
+    return sum(
+        len(dept.get("members") or [])
+        for dept in payload.get("departments") or []
+        if isinstance(dept, dict)
+    )
+
+
 def save_org_payload(payload: dict[str, Any], project_root: Path | str | None = None) -> None:
+    """整体写入全局组织架构（临时文件 + rename 原子替换）。
+
+    防线：拒绝用空/残缺 payload（非 dict 或 departments 为空）覆写已有
+    非空花名册——上游读取失败后的“空结构”不允许清库；确实要清空时请
+    人工删除组织架构文件。
+    """
+    if not isinstance(payload, dict) or not isinstance(payload.get("departments", []), list):
+        raise ValueError("组织架构 payload 必须是含 departments 列表的对象")
     path = org_chart_path(project_root)
+    if not payload.get("departments") and _existing_member_count(path) > 0:
+        raise ValueError(
+            f"拒绝用空 departments 覆写现有非空组织花名册: {path}"
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    tmp_path = path.with_name(path.name + ".tmp")
+    tmp_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp_path, path)
 
 
 def load_user_overlay(owner_id: str) -> dict[str, Any]:

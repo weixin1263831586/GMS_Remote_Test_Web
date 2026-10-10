@@ -56,8 +56,6 @@ _LAZY_API_EXPORTS = {
     'rockusb_loader_serials': '.rockusb',
     'rockusb_loader_vid_pids': '.rockusb',
     'ROCKUSB_SYSFS_PROBE_COMMAND': '.rockusb',
-    'usbipd_list_via_ssh': '.usbip_flash',
-    'usbipd_policy_list_via_ssh': '.usbip_flash',
     'query_usbipd_busid_instance_ids': '.usbip_identity',
     'query_usbipd_device_states': '.usbip_identity',
     'USBIP_PORT_COMMAND': '.usbip_transaction',
@@ -136,7 +134,5 @@ __all__ = [
     "test_transport_requirement",
     "update_user_state_field",
     "usbip_manager",
-    "usbipd_list_via_ssh",
-    "usbipd_policy_list_via_ssh",
     "validate_pair_grant",
 ]

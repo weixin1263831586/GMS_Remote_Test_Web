@@ -1,4 +1,4 @@
-"""Tests for the background automation worker and device selector.
+"""Tests for the background automation worker.
 
 The worker functions accept injected automation/build services so tests do not
 touch the module-level singletons.
@@ -14,26 +14,6 @@ from unittest.mock import MagicMock, patch
 
 def _iso(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-class _FakeLockManager:
-    def __init__(self, locked: set[str] | None = None):
-        self._locked = locked or set()
-
-    def get_all_locks(self):
-        return {serial: {} for serial in self._locked}
-
-
-class _FakeDeviceManager:
-    def __init__(self, serials, info=None):
-        self._serials = serials
-        self._info = info or {}
-
-    def get_connected_devices(self):
-        return list(self._serials)
-
-    def get_device_info(self, serial):
-        return self._info.get(serial, {})
 
 
 class _FakeBuildService:
@@ -274,59 +254,6 @@ class ActiveStageTimeoutTests(unittest.TestCase):
             self.assertEqual(store.get_run("r_test_old")["status"], RUN_STATUS_CANCELLED)
             self.assertEqual(store.get_run("r_report_old")["status"], RUN_STATUS_CANCELLED)
             self.assertEqual(store.get_run("r_test_new")["status"], RUN_STATUS_TEST_RUNNING)
-
-
-class DeviceSelectorTests(unittest.TestCase):
-    def _run(self, devices=None, selector=None):
-        import json
-        plan = {"test_type": "CTS"}
-        if selector is not None:
-            plan["device_selector"] = selector
-        return {
-            "id": "r1",
-            "devices_json": json.dumps(devices or []),
-            "test_plan_json": json.dumps(plan),
-        }
-
-    def test_manual_devices_override(self):
-        from features.automation.device_selector import DeviceSelector
-
-        selector = DeviceSelector(_FakeDeviceManager([]), _FakeLockManager())
-        result = selector.select(self._run(devices=[{"serial": "MANUAL1"}]))
-        self.assertTrue(result["success"])
-        self.assertEqual([d["serial"] for d in result["devices"]], ["MANUAL1"])
-
-    def test_picks_idle_devices_up_to_min_count(self):
-        from features.automation.device_selector import DeviceSelector
-
-        dm = _FakeDeviceManager(["S1", "S2", "S3"])
-        lm = _FakeLockManager({"S2"})  # S2 is busy
-        selector = DeviceSelector(dm, lm)
-        result = selector.select(self._run(selector={"min_count": 2}))
-        self.assertTrue(result["success"])
-        serials = [d["serial"] for d in result["devices"]]
-        self.assertIn("S1", serials)
-        self.assertIn("S3", serials)
-        self.assertNotIn("S2", serials)
-        self.assertEqual(len(serials), 2)
-
-    def test_returns_retry_when_insufficient(self):
-        from features.automation.device_selector import DeviceSelector
-
-        dm = _FakeDeviceManager(["S1"])
-        selector = DeviceSelector(dm, _FakeLockManager())
-        result = selector.select(self._run(selector={"min_count": 2}))
-        self.assertFalse(result["success"])
-        self.assertTrue(result["retry"])
-
-    def test_serial_prefix_filter(self):
-        from features.automation.device_selector import DeviceSelector
-
-        dm = _FakeDeviceManager(["RK001", "QW002", "RK003"])
-        selector = DeviceSelector(dm, _FakeLockManager())
-        result = selector.select(self._run(selector={"min_count": 1, "serial_prefix": "RK"}))
-        self.assertTrue(result["success"])
-        self.assertEqual(result["devices"][0]["serial"], "RK001")
 
 
 class RunTickSyncTests(unittest.TestCase):

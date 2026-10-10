@@ -299,7 +299,17 @@ async def handle_adb_shell_connect(
             channel = create_local_terminal_channel()
             backend_mode = 'local_adb'
         else:
-            ssh = ssh_manager.get_connection(config)
+            # get_connection/invoke_shell 是阻塞建连（最长 10s），与 SSH
+            # 终端路径的 _open_terminal_channel 一样移出事件循环。
+            def _open_adb_channel():
+                conn = ssh_manager.get_connection(config)
+                if not conn:
+                    return None, None
+                ch = conn.invoke_shell(term='xterm-256color')
+                ch.setblocking(0)
+                return conn, ch
+
+            ssh, channel = await asyncio.to_thread(_open_adb_channel)
             if not ssh:
                 await websocket.send_json({
                     'type': 'terminal_error',
@@ -307,8 +317,6 @@ async def handle_adb_shell_connect(
                 })
                 return
 
-            channel = ssh.invoke_shell(term='xterm-256color')
-            channel.setblocking(0)
             backend_mode = 'adb'
 
         channel.resize_pty(width=80, height=24)
@@ -420,7 +428,10 @@ async def handle_terminal_connect(client_id: str, websocket: WebSocket, data: di
         serial_no = str(data.get('serial_no') or '').strip()
         worker_id = str(data.get('worker_id') or '').strip()
         try:
-            worker_id, host, user, password, serial_no = resolve_authorized_terminal_target(
+            # 目标解析含实时设备探测（本地 adb subprocess 8s / Worker SSH
+            # 建连 10s），同步执行会卡住事件循环上所有并发会话。
+            worker_id, host, user, password, serial_no = await asyncio.to_thread(
+                resolve_authorized_terminal_target,
                 worker_id,
                 mode=mode,
                 serial_no=serial_no,

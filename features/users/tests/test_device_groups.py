@@ -220,6 +220,68 @@ class DeviceGroupPersistenceTests(unittest.TestCase):
         lab_b = next(group for group in updated if group['name'] == 'worker: Lab B')
         self.assertEqual(lab_b['device_ids'], ['worker-b:XYZ'])
 
+    def test_auto_assign_concurrent_with_manual_create_keeps_both(self):
+        groups = [{
+            'id': 'auto_model_rk',
+            'name': 'model: rk',
+            'color': '#000000',
+            'device_ids': [],
+            'followed': False,
+        }]
+        self.assertTrue(device_groups.save_device_groups('alice', groups))
+        barrier = threading.Barrier(2)
+
+        def auto_assign():
+            barrier.wait()
+            device_groups.auto_assign_new_devices(
+                'alice',
+                {f'worker-a:DEV{index}': {'model': 'rk'} for index in range(20)},
+            )
+
+        def manual_create():
+            barrier.wait()
+            device_groups._mutate_device_groups('alice', {'name': 'Manual'}, 'create')
+
+        threads = [
+            threading.Thread(target=auto_assign),
+            threading.Thread(target=manual_create),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        groups = device_groups.load_device_groups('alice')
+        auto_group = next(g for g in groups if g['id'] == 'auto_model_rk')
+        self.assertEqual(len(auto_group['device_ids']), 20)
+        self.assertIn('Manual', {g['name'] for g in groups})
+
+    def test_auto_assign_waits_while_mutation_lock_is_held(self):
+        groups = [{
+            'id': 'auto_model_rk',
+            'name': 'model: rk',
+            'color': '#000000',
+            'device_ids': [],
+            'followed': False,
+        }]
+        self.assertTrue(device_groups.save_device_groups('alice', groups))
+
+        # The whole read-modify-write must sit inside _storage_lock: while
+        # another mutation holds it, auto-assign cannot proceed and overwrite.
+        with device_groups._storage_lock:
+            thread = threading.Thread(
+                target=lambda: device_groups.auto_assign_new_devices(
+                    'alice', {'worker-a:ABC': {'model': 'rk'}}
+                )
+            )
+            thread.start()
+            self.assertTrue(thread.is_alive())
+        thread.join(timeout=5)
+        self.assertFalse(thread.is_alive())
+
+        groups = device_groups.load_device_groups('alice')
+        self.assertEqual(groups[0]['device_ids'], ['worker-a:ABC'])
+
 
 if __name__ == '__main__':
     unittest.main()

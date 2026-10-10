@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime
 from typing import Any
@@ -26,6 +27,10 @@ class RedmineService:
         self.repository = repository
         self.agent = agent or RedmineAgent(repository)
         self.task = SingleFlightTask()
+        # check-then-act 与 task.start 的内部守卫分属两段：并发 start/cancel
+        # 交错时，后到者可能拿到 success=True 却报出从未启动的 run_id（幽灵
+        # run）。检查、登记 active_run_id、启动必须在同一临界区内完成。
+        self._start_lock = asyncio.Lock()
         self.active_run_id: str | None = None
         self._stale_runs_marked = False
         # 知识库使用独立数据库；无持久化路径时使用临时数据库。
@@ -55,15 +60,16 @@ class RedmineService:
 
     async def _start(self, *, run_id: str, message: str, operation) -> dict:
         self._mark_stale_runs_once()
-        if self.task.running:
-            return {
-                "success": False,
-                "error": "RedmineAgent already running",
-                "run_id": self.active_run_id,
-            }
-        self.active_run_id = run_id
-        await self.task.start(operation)
-        return {"success": True, "message": message, "run_id": run_id}
+        async with self._start_lock:
+            if self.task.running:
+                return {
+                    "success": False,
+                    "error": "RedmineAgent already running",
+                    "run_id": self.active_run_id,
+                }
+            self.active_run_id = run_id
+            await self.task.start(operation)
+            return {"success": True, "message": message, "run_id": run_id}
 
     async def start_run(
         self,

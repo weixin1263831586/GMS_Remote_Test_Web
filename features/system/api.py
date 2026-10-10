@@ -118,10 +118,14 @@ async def root(request: Request):
     initial_title = SHELL_PAGE_TITLES.get(saved_page, SHELL_PAGE_TITLES["test"])
 
     # local_worker_id: 单一真值, 随页面注入前端 (shell.html bootstrap)。
+    # ubuntu_user/ubuntu_host: 同一真值通道，供静态终端脚本读取默认
+    # SSH 端点（外置 JS 不经 Jinja 渲染，历史占位符会原样显示）。
     response = _templates.TemplateResponse(
         request=request, name="shell.html",
         context={"config": config, "initial_title": initial_title,
-                 "local_worker_id": _get_local_worker_id()},
+                 "local_worker_id": _get_local_worker_id(),
+                 "ubuntu_user": config["ubuntu_user"],
+                 "ubuntu_host": config["ubuntu_host"]},
     )
     # 短暂复用导航外壳；must-revalidate 保证过期后确认新版本。
     response.headers["Cache-Control"] = "private, max-age=10, must-revalidate"

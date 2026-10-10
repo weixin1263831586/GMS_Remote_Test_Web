@@ -5,7 +5,7 @@ set -o pipefail
 # Version: 2026.08.25-1
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.39"
+GMS_RT_VERSION="0.22.40"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -202,6 +202,15 @@ if [ -z "$GMS_AUTH_TOKEN_FILE" ]; then
 fi
 _gms_bearer_token=""  # cached per process; reloaded by _refresh_tls_args
 _gms_bearer_header_file=""  # 0600 header file (token stays out of argv)
+# Bearer header 临时文件含有效 token：进程退出（含被信号打断）时必须
+# 清理，否则每次 token 模式调用都会向 /tmp 泄漏一个含凭据的文件。
+# trap 仅在被直接执行时安装（见文件尾 _is_sourced 守卫），避免劫持
+# source 本库的调用方自己的 EXIT trap。
+_gms_cleanup_bearer_header_file() {
+    [ -n "$_gms_bearer_header_file" ] || return 0
+    rm -f -- "$_gms_bearer_header_file"
+    _gms_bearer_header_file=""
+}
 # Service-token mode gate: when the CLI runs under an Agent
 # Service Token (Bearer), arbitrary device shell MUST carry a one-shot
 # approval token — otherwise an agent with plain terminal access could
@@ -576,5 +585,6 @@ _is_sourced() {
 
 
 if ! _is_sourced; then
+    trap '_gms_cleanup_bearer_header_file' EXIT HUP INT TERM
     _gms_rt_dispatch "$@"
 fi

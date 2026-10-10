@@ -56,12 +56,24 @@ class CaseExtractorTests(unittest.TestCase):
         self.assertIn("vbmeta", [k.lower() for k in fact["keywords"]])
         self.assertGreater(fact["confidence"], 50)
 
-    def test_vbmeta_gets_root_cause_and_solution_when_missing(self):
+    def test_vbmeta_does_not_fabricate_fields_when_missing(self):
         issue = {**VBMETA_ISSUE, "error_analysis": "", "solution": ""}
         fact = RedmineCaseExtractor.extract(issue)
+        # 提取器只提取不编造：自身无分析字段时不得注入签名罐头结论。
+        self.assertEqual(fact["root_cause"], "")
+        self.assertEqual(fact["solution"], "")
+        self.assertEqual(fact["verification"], "")
+
+    def test_vbmeta_uses_own_analysis_fields(self):
+        issue = {
+            **VBMETA_ISSUE,
+            "error_analysis": "量产未切换 production AVB key",
+            "solution": "重新签名相关分区",
+        }
+        fact = RedmineCaseExtractor.extract(issue)
         self.assertIn("production", fact["root_cause"])
-        self.assertIn("production", fact["solution"])
-        self.assertIn("BTS", fact["verification"])
+        self.assertIn("重新签名", fact["solution"])
+        self.assertEqual(fact["verification"], "")
 
     def test_power_hal_module_detected(self):
         issue = {
@@ -82,10 +94,10 @@ class CaseExtractorTests(unittest.TestCase):
         self.assertEqual(fact["error_signature"], "PowerAidl hasFixedPerformance unsupported")
         self.assertIn("Power/PowerAidl#hasFixedPerformance", "\n".join(fact["symptoms"]))
         self.assertIn("supported=false", "\n".join(fact["symptoms"]))
-        self.assertIn("Mode::FIXED_PERFORMANCE", fact["root_cause"])
-        self.assertIn("isModeSupported", fact["solution"])
-        self.assertIn("VtsHalPowerTargetTest", fact["verification"])
-        self.assertGreaterEqual(fact["confidence"], 85)
+        # 无自身分析 → 不编造根因/方案/验证（历史上这里被签名罐头填充）。
+        self.assertEqual(fact["root_cause"], "")
+        self.assertEqual(fact["solution"], "")
+        self.assertEqual(fact["verification"], "")
 
     def test_reply_template_includes_module_and_signature(self):
         fact = RedmineCaseExtractor.extract(VBMETA_ISSUE)

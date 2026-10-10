@@ -351,6 +351,7 @@ def run_tick_sync(
     build_service: Any | None = None,
 ) -> dict[str, Any]:
     """兼容/手动 tick，合并维护和推进。"""
+    # test seam: exercised only by tests (worker loop uses run_maintenance_sync/advance_runs_sync).
 
     maintenance = run_maintenance_sync(
         cfg,

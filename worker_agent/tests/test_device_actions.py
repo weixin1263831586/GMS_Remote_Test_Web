@@ -7,6 +7,8 @@ import urllib.request
 import zipfile
 from unittest.mock import Mock, patch
 
+import pytest
+
 from worker_agent.android_inspection import _aapt2_path
 from worker_agent.config import WorkerConfig
 from worker_agent.inventory import (
@@ -473,11 +475,33 @@ def test_prepare_suite_directory_export_creates_zip(tmp_path):
     (target / "test_result.xml").write_text("result", encoding="utf-8")
     config = WorkerConfig(worker_id="w", controller_url="https://controller", token="t",
                           suite_roots=[root], data_root=tmp_path / "data")
-    archive, temporary = prepare_suite_export(config, {"transfer_id": "t1",
+    archive, temporary = prepare_suite_export(config, {
+        "transfer_id": "transfer-" + "a" * 32,
         "suite_path": str(root / "android-cts/tools"), "path": "results/run-1", "directory": True})
     assert temporary is True
     with zipfile.ZipFile(archive) as bundle:
         assert bundle.read("run-1/test_result.xml") == b"result"
+
+
+def test_prepare_suite_export_rejects_unvalidated_transfer_id(tmp_path):
+    """transfer_id 直接拼归档路径，"../" 可把 zip 写到 exports 之外，必须拒绝。"""
+    root = tmp_path / "suites"
+    target = root / "android-cts/results/run-1"
+    target.mkdir(parents=True)
+    config = WorkerConfig(worker_id="w", controller_url="https://controller", token="t",
+                          suite_roots=[root], data_root=tmp_path / "data")
+    for bad in (
+        "../../escape",
+        "transfer-a/b",
+        "transfer-" + "g" * 32,
+        "transfer-abc",
+        "TRANSFER-" + "a" * 32,
+        "",
+    ):
+        with pytest.raises(ValueError):
+            prepare_suite_export(config, {"transfer_id": bad,
+                "suite_path": str(root / "android-cts/tools"), "path": "results/run-1",
+                "directory": True})
 
 
 class _TruncatedResponse(io.BytesIO):

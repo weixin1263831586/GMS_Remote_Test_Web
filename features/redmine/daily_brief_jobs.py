@@ -7,9 +7,7 @@ Worker 的迟到写入会被拒绝。
 修复落点：
 - ``has_active_job``：already_running 分支必须校验真的有活动 job；
 - ``create_run_and_enqueue_job``（repository 内，跨 runs+jobs 同一
-  BEGIN IMMEDIATE 事务）：消灭「run 已建 / job 未入队」的孤儿窗口；
-- ``reconcile_orphan_runs``：Worker 启动时给 active run 且无活动 job
-  的孤儿补一个 queued job。
+  BEGIN IMMEDIATE 事务）：消灭「run 已建 / job 未入队」的孤儿窗口。
 """
 
 from __future__ import annotations
@@ -330,30 +328,6 @@ class DailyBriefJobStore:
                         (row["run_id"], row["issue_id"]),
                     )
             return cursor.rowcount == 1
-
-    # ------------------------------------------------------- orphan repair
-
-    def reconcile_orphan_runs(self, started_after_iso: str) -> int:
-        """给「active run 但无任何活动 job」的孤儿补一个 queued run job。
-
-        典型成因：旧版本两步创建（start_run 与 enqueue_job 非同一事务）
-        在进程崩溃时留下的孤儿。started_after_iso 之前的更早孤儿由
-        reset_stale_running 统一标 failed，不在此复活。
-        """
-        with self.repo._lock, self.repo._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            orphans = conn.execute(
-                "SELECT r.run_id FROM redmine_daily_brief_runs r "
-                "WHERE r.status IN ('pending','snapshotting','analyzing') "
-                "AND r.started_at >= ? AND NOT EXISTS ("
-                "  SELECT 1 FROM redmine_daily_brief_jobs j "
-                "  WHERE j.run_id = r.run_id "
-                "  AND j.status IN ('queued','running'))",
-                (started_after_iso,),
-            ).fetchall()
-            for item in orphans:
-                self.insert_job(conn, str(item["run_id"]), kind="run", issue_id=0)
-            return len(orphans)
 
 
 # claim_next_job 的过期恢复需要终态集合；从 repository 常量会形成循环

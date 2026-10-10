@@ -47,7 +47,7 @@ class RepositorySearchTests(unittest.TestCase):
 
         self.assertEqual([row["issue_id"] for row in rows], [598972])
 
-    def test_display_enrichment_adds_legacy_attachment_links_and_document(self):
+    def test_display_enrichment_reports_no_attachments_without_metadata(self):
         repo = RedmineAgentDB(Path(tempfile.mktemp(suffix=".sqlite3")), Path(tempfile.mkdtemp()))
         repo.upsert_issue({
             "issue_id": 598972,
@@ -67,11 +67,12 @@ class RepositorySearchTests(unittest.TestCase):
             knowledge_db=RedmineKnowledgeDB(Path(tempfile.mktemp(suffix=".sqlite3"))),
         )
 
-        enriched = _enrich_issue_for_display(service, repo.get_issue(598972))
+        enriched = _enrich_issue_for_display(
+            service, repo.get_issue(598972), base_url="https://redmine.example"
+        )
 
-        filenames = [item["filename"] for item in enriched["attachment_links"]]
-        self.assertIn("VtsHalPowerTargetTest.zip", filenames)
-        self.assertIn("0da1ee9.diff", filenames)
+        # 无附件元数据时不得伪造硬编码的附件清单。
+        self.assertEqual(enriched["attachment_links"], [])
         self.assertIn("# Redmine #598972", enriched["doc_content"])
         self.assertIn("附件链接", enriched["doc_content"])
 

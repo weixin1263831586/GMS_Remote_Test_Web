@@ -27,10 +27,7 @@ def _owned_local_device_keys(owner_id: str, device_keys: list[str]) -> dict[str,
     long-lived claim.
     """
     owned: dict[str, dict] = {}
-    try:
-        active = device_lock_manager.registry.list_active(worker_id=None)
-    except TypeError:
-        active = device_lock_manager.registry.list_active()
+    active = device_lock_manager.registry.list_active(worker_id=None)
     wanted = set(device_keys)
     for claim in active:
         key = str(claim.get("device_key") or "")

@@ -265,11 +265,6 @@ class USBMonitor:
             time.sleep(delay)
             self._check_and_notify_devices()
 
-    def force_check(self):
-        """强制立即检查设备列表变化"""
-        if self._running:
-            self._check_until_stable(attempts=3, delay=0.6)
-
 
 # 全局USB监控器实例
 _usb_monitor: USBMonitor | None = None

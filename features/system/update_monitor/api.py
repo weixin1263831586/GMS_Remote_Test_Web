@@ -114,9 +114,7 @@ async def gms_update_monitor_sync_status(
 
 @router.get('/summary')
 async def gms_update_monitor_summary():
-    conn, missing = _get_db()
-    if missing:
-        return missing
+    conn = _get_db()
     with conn:
         last_run = conn.execute(
             """
@@ -188,9 +186,7 @@ async def list_gms_update_monitor_scan_runs(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    conn, missing = _get_db()
-    if missing:
-        return missing
+    conn = _get_db()
     with conn:
         total = conn.execute('SELECT COUNT(*) FROM gms_update_scan_runs').fetchone()[0]
         rows = conn.execute(
@@ -215,9 +211,7 @@ async def list_gms_update_monitor_changes(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    conn, missing = _get_db()
-    if missing:
-        return missing
+    conn = _get_db()
     where = []
     params: list[str | int] = []
     if run_id is not None:
@@ -269,9 +263,7 @@ async def list_gms_update_monitor_artifacts(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    conn, missing = _get_db()
-    if missing:
-        return missing
+    conn = _get_db()
     where = []
     params: list[str] = []
     if source_key:
@@ -316,9 +308,7 @@ async def list_new_gms_update_monitor_artifacts(
     source_key: list[str] = Query(default=[]),
     limit: int = Query(20, ge=1, le=100),
 ):
-    conn, missing = _get_db()
-    if missing:
-        return missing
+    conn = _get_db()
     with conn:
         target_run_id = run_id
         if target_run_id is None:
@@ -380,9 +370,7 @@ async def list_gms_update_monitor_packages(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    conn, missing = _get_db()
-    if missing:
-        return missing
+    conn = _get_db()
     where = []
     params: list[str] = []
     if android_version:
@@ -428,9 +416,7 @@ async def list_gms_update_monitor_mainline(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    conn, missing = _get_db()
-    if missing:
-        return missing
+    conn = _get_db()
     where = []
     params: list[str] = []
     if year:
@@ -467,9 +453,7 @@ async def list_gms_update_monitor_requirement_sections(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    conn, missing = _get_db()
-    if missing:
-        return missing
+    conn = _get_db()
     where = []
     params: list[str | int] = []
     if level is not None:
@@ -499,9 +483,7 @@ async def list_gms_update_monitor_requirement_sections(
 
 @router.get('/requirements/version-summary')
 async def gms_update_monitor_requirement_version_summary():
-    conn, missing = _get_db()
-    if missing:
-        return missing
+    conn = _get_db()
     with conn:
         rows = conn.execute(
             """
@@ -530,9 +512,7 @@ async def list_gms_update_monitor_requirement_version_tags(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    conn, missing = _get_db()
-    if missing:
-        return missing
+    conn = _get_db()
     where = []
     params: list[str] = []
     if android_version:
@@ -568,9 +548,7 @@ async def list_gms_update_monitor_requirement_table_rows(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    conn, missing = _get_db()
-    if missing:
-        return missing
+    conn = _get_db()
     where = []
     params: list[str] = []
     if section_key:

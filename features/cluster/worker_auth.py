@@ -73,6 +73,7 @@ def worker_tokens() -> dict[str, str]:
 
 
 def write_worker_tokens(tokens: dict[str, str]) -> None:
+    # test seam: exercised only by features/cluster/tests/test_worker_auth.py
     """Persist the worker→token map in the dedicated private file."""
     normalized = {
         str(key): str(value)

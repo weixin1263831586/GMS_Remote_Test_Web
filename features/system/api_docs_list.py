@@ -510,16 +510,6 @@ API_DOCS_LIST = [
 
     # ==================== 文件管理 ====================
     {
-        "method": "GET",
-        "path": "/api/files/progress",
-        "description": "获取当前文件上传进度",
-        "params": [
-            {"name": "upload_id", "type": "string", "required": False, "desc": "上传任务ID"}
-        ],
-        "category": "file",
-        "skill": "gms-rt-files-progress"
-    },
-    {
         "method": "POST",
         "path": "/api/files/list",
         "description": "列出设备指定目录的文件",

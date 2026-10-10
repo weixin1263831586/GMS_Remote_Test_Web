@@ -705,17 +705,13 @@ gms-rt-devices-shell() {
             --arg device "$device_id" \
             --arg command "${shell_args[*]}" \
             '{token: $token, tool: "gms_rt_shell_exec", device: $device, command: $command}')
-        consume_response=$(curl "${CURL_TLS_ARGS[@]}" "${CURL_BEARER_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" -sS -X POST \
-            "${API_BASE}/auth/approval-tokens/consume" \
-            -H "Content-Type: application/json" \
-            --data-binary "@-" -w $'\nHTTP_STATUS:%{http_code}' \
-            --max-time "$CURL_TIMEOUT" <<< "$consume_data")
+        consume_response=$(api_call "/auth/approval-tokens/consume" POST "$consume_data")
+        local consume_status=$?
         unset consume_data approval_token
-        local consume_status
-        consume_status=$(_status_from_http_response "$consume_response")
-        if [[ ! "$consume_status" =~ ^2[0-9]{2}$ ]] || \
+        if [ "$consume_status" -ne 0 ] || \
            ! echo "$consume_response" | jq -e '.success == true' >/dev/null 2>&1; then
-            error "审批令牌校验失败: $(extract_api_error "$(echo "$consume_response" | sed 's/\nHTTP_STATUS:.*//')")"
+            error "审批令牌校验失败: $(extract_api_error "$consume_response")"
+            [ "$consume_status" -eq 0 ] || return "$consume_status"
             return "$GMS_RT_EXIT_PERMISSION"
         fi
         # Approval consumed server-side → unlock the local

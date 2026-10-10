@@ -154,11 +154,3 @@ class AutomationRunCreateRequest(BaseModel):
             "lease_owner": "",
             "lease_expires_at": "",
         }
-
-
-class AutomationEventCreate(BaseModel):
-    run_id: str
-    stage: str
-    level: str = "info"
-    message: str
-    payload: dict[str, Any] | None = None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request
@@ -71,9 +72,7 @@ async def start_adb_forward(
             or config.get("local_server")
             or ""
         ).strip()
-        result = adb_forward_manager.start_forward(
-            device_host
-        )
+        result = await asyncio.to_thread(adb_forward_manager.start_forward, device_host)
         if result.get("success"):
             return JSONResponse(content=result)
         return error_response(
@@ -106,7 +105,7 @@ async def stop_adb_forward(
                 req.target_worker_id,
             )
             return JSONResponse(content=result)
-        result = adb_forward_manager.stop_forward("test_client")
+        result = await asyncio.to_thread(adb_forward_manager.stop_forward)
         if result.get("success"):
             return JSONResponse(content=result)
         return error_response(

@@ -6,18 +6,6 @@
                     <button class="btn-xs" data-terminal-layout="horizontal" data-click="setTerminalWorkspaceLayout" data-a0="horizontal">左右</button>
                     <button class="btn-xs" data-terminal-layout="vertical" data-click="setTerminalWorkspaceLayout" data-a0="vertical">上下</button>
                     <button class="btn-xs" data-terminal-layout="quad" data-click="setTerminalWorkspaceLayout" data-a0="quad">四屏</button>
-                    <span style="display:none">
-                    <span id="terminal-worker-control" style="display:contents">
-                        <label for="terminal-host-select" style="font-size:11px;color:var(--text-secondary);">主机</label>
-                        <select id="terminal-host-select" data-change="switchTerminalHost" style="padding:3px 6px;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:11px;">
-                            <option value="ats-worker-controller">{{ config.ubuntu_user }}@{{ config.ubuntu_host }}</option>
-                        </select>
-                    </span>
-                    <div style="font-size: 11px; color: var(--text-secondary);">连接: <span id="terminal-connection-label" style="color: var(--text-primary); font-weight: 500;">{{ config.ubuntu_user }}@{{ config.ubuntu_host }}</span></div>
-                    <div class="terminal-status" id="terminal-status" style="font-size: 10px; padding: 3px 6px; border-radius: 3px; background: var(--darker-bg); color: var(--text-secondary);">未连接</div>
-                    <button class="btn-xs" data-click="clearTerminal" style="padding: 2px 6px; font-size: 10px;">🧹</button>
-                    <button class="btn-xs" data-click="reconnectTerminal" style="padding: 2px 6px; font-size: 10px;">🔄</button>
-                    </span>
                 </div>
                 <div class="host-workspace-single-bar host-workspace-title-state page-title-actions">
                     <span class="host-workspace-pane-status" id="terminal-workspace-status-single">准备中</span>
