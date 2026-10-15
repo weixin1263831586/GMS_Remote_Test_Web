@@ -446,9 +446,19 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                 with self.subTest(page=page_name):
                     page.evaluate("name => window.switchPage(name)", page_name)
                     expect(page.locator(f'#page-{page_name}')).to_have_class(re.compile(r'active'))
+                    # switchPage 不返回初始化 Promise（交互式提权不能阻塞
+                    # 调用方），完成语义统一经 data-init-state 观察。
+                    page.wait_for_function(
+                        "name => document.getElementById('page-' + name)?.dataset.initState === 'ready'",
+                        arg=page_name,
+                    )
                     page.reload(wait_until='load')
                     self.wait_for_shell_scripts(page)
                     expect(page.locator(f'#page-{page_name}')).to_have_class(re.compile(r'active'))
+                    page.wait_for_function(
+                        "name => document.getElementById('page-' + name)?.dataset.initState === 'ready'",
+                        arg=page_name,
+                    )
                     self.assertEqual(
                         page.evaluate("location.hash.slice(1).split('?')[0]"),
                         page_name,
@@ -457,5 +467,173 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                     captured['page_errors'].clear()
                     captured['console_errors'].clear()
                     captured['http_errors'].clear()
+        finally:
+            page.close()
+
+    def test_navigation_cancels_pending_suite_initialization_without_errors(self):
+        page = self.new_page()
+        self.install_api_mocks(page, [])
+        captured = self.capture_errors(page)
+        try:
+            self.goto_shell(page)
+            self.wait_for_shell_scripts(page)
+            page.evaluate("""() => {
+                _browserSuitesCache = [];
+                const original = window.fetch;
+                window.__suiteCancelled = false;
+                window.fetch = (url, options = {}) => {
+                    if (String(url) !== '/api/test/suites') return original(url, options);
+                    window.__suitePending = true;
+                    return new Promise((resolve, reject) => {
+                        options.signal.addEventListener('abort', () => {
+                            window.__suiteCancelled = true;
+                            reject(new DOMException('Navigation cancelled', 'AbortError'));
+                        }, {once: true});
+                    });
+                };
+                window.__pendingNavigation = (switchPage('test-suites'), GmsPageLifecycle.ready);
+            }""")
+            page.wait_for_function("window.__suitePending === true")
+            page.evaluate("() => switchPage('api-docs')")
+            page.evaluate("() => window.__pendingNavigation")
+            self.assertTrue(page.evaluate("window.__suiteCancelled"))
+            self.assertEqual(page.evaluate("GmsPageLifecycle.status"), 'ready')
+            self.assert_clean_browser(page, captured)
+        finally:
+            page.close()
+
+    def test_suite_initialization_records_real_network_failure(self):
+        page = self.new_page()
+        self.install_api_mocks(page, [])
+        captured = self.capture_errors(page)
+        try:
+            self.goto_shell(page)
+            self.wait_for_shell_scripts(page)
+            page.evaluate("""async () => {
+                _browserSuitesCache = [];
+                const original = window.fetch;
+                window.__networkToasts = [];
+                const toast = window.showToast;
+                window.showToast = (...args) => { window.__networkToasts.push(args); toast(...args); };
+                window.fetch = (url, options) => String(url) === '/api/test/suites'
+                    ? Promise.reject(new TypeError('Failed to fetch (fixture)')) : original(url, options);
+                switchPage('test-suites');
+                await GmsPageLifecycle.ready;
+            }""")
+            self.assertEqual(page.evaluate("GmsPageLifecycle.status"), 'error')
+            self.assertTrue(any('Failed to fetch (fixture)' in entry['text'] for entry in captured['console_errors']))
+            self.assertTrue(any('Failed to fetch (fixture)' in args[0] for args in page.evaluate("window.__networkToasts")))
+            self.assertEqual(page.evaluate("window.__e2eUnhandledRejections"), [])
+        finally:
+            page.close()
+
+    def test_suite_directory_clicks_cancel_without_rejections_or_success_toasts(self):
+        actions = {
+            'root': "renderSuiteBreadcrumb(''); document.querySelector('#suite-browser-breadcrumb button').click();",
+            'sibling': """renderSuiteBreadcrumb('results/fixture');
+                Array.from(document.querySelectorAll('#suite-browser-breadcrumb button'))
+                    .find(button => button.textContent === '跳到 logs').click();""",
+            'suite': "renderTestSuiteBrowserList(); document.querySelector('.suite-suite-item').click();",
+        }
+        for name, action in actions.items():
+            with self.subTest(action=name):
+                page = self.new_page()
+                self.install_api_mocks(page, [])
+                captured = self.capture_errors(page)
+                try:
+                    self.goto_shell(page)
+                    self.wait_for_shell_scripts(page)
+                    page.evaluate("async () => { switchPage('test-suites'); await GmsPageLifecycle.ready; }")
+                    page.evaluate("""() => {
+                        const original = window.fetch;
+                        window.__directoryPending = false;
+                        window.__directoryCancelled = false;
+                        window.__actionToasts = [];
+                        const toast = window.showToast;
+                        window.showToast = (...args) => { window.__actionToasts.push(args); toast(...args); };
+                        window.fetch = (url, options = {}) => {
+                            if (!String(url).startsWith('/api/test/suites/files?')) return original(url, options);
+                            window.__directoryPending = true;
+                            return new Promise((resolve, reject) => {
+                                options.signal.addEventListener('abort', () => {
+                                    window.__directoryCancelled = true;
+                                    reject(new DOMException('Navigation cancelled', 'AbortError'));
+                                }, {once: true});
+                            });
+                        };
+                        state.suiteBrowser.selectedSuitePath = '/fixture/tools';
+                        _browserSuitesCache = [{tools_path: '/fixture/tools', test_type: 'cts'}];
+                    }""")
+                    page.evaluate("() => { " + action + " }")
+                    page.wait_for_function("window.__directoryPending === true")
+                    page.evaluate("async () => { switchPage('api-docs'); await GmsPageLifecycle.ready; }")
+                    # Let the browser dispatch any unhandledrejection event.
+                    page.evaluate("() => new Promise(resolve => setTimeout(resolve, 0))")
+                    self.assertTrue(page.evaluate("window.__directoryCancelled"))
+                    self.assertEqual(page.evaluate("window.__actionToasts"), [])
+                    self.assert_clean_browser(page, captured)
+                finally:
+                    page.close()
+
+    def test_cached_page_restore_resumes_interrupted_initialization_and_api_calls(self):
+        page = self.new_page()
+        self.install_api_mocks(page, [])
+        captured = self.capture_errors(page)
+        try:
+            self.goto_shell(page)
+            self.wait_for_shell_scripts(page)
+            page.evaluate("""() => {
+                const original = window.fetch;
+                window.fetch = (url, options = {}) => {
+                    if (String(url) !== '/api/test/suites' || !window.__pauseNextSuiteFetch) {
+                        return original(url, options);
+                    }
+                    window.__pauseNextSuiteFetch = false;
+                    window.__suitePending = true;
+                    return new Promise((resolve, reject) => {
+                        options.signal.addEventListener('abort', () => {
+                            reject(new DOMException('Page hidden', 'AbortError'));
+                        }, {once: true});
+                    });
+                };
+            }""")
+            for cycle in range(2):
+                with self.subTest(cycle=cycle):
+                    page.evaluate("""() => {
+                        _browserSuitesCache = [];
+                        window.__suitePending = false;
+                        window.__pauseNextSuiteFetch = true;
+                        window.__hiddenDocumentSignal = GmsDocumentAbort.signal;
+                        switchPage('test-suites');
+                        window.__hiddenPageSignal = GmsPageLifecycle.signalFor('test-suites');
+                        window.__hiddenInitialization = GmsPageLifecycle.ready;
+                    }""")
+                    page.wait_for_function("window.__suitePending === true")
+                    # Deterministically exercise the browser's cache lifecycle
+                    # even when WebSockets make this test page ineligible for it.
+                    page.evaluate("""() => {
+                        window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: true}));
+                        window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+                    }""")
+                    restored = page.evaluate("""async () => {
+                        await window.__hiddenInitialization;
+                        await GmsPageLifecycle.ready;
+                        const health = await apiCall('/api/system/health');
+                        return {
+                            oldDocumentAborted: window.__hiddenDocumentSignal.aborted,
+                            oldPageAborted: window.__hiddenPageSignal.aborted,
+                            newDocumentAborted: GmsDocumentAbort.signal.aborted,
+                            newPageAborted: GmsPageLifecycle.signalFor('test-suites').aborted,
+                            status: GmsPageLifecycle.status,
+                            state: document.getElementById('page-test-suites').dataset.initState,
+                            healthy: health.success,
+                        };
+                    }""")
+                    self.assertEqual(restored, {
+                        'oldDocumentAborted': True, 'oldPageAborted': True,
+                        'newDocumentAborted': False, 'newPageAborted': False,
+                        'status': 'ready', 'state': 'ready', 'healthy': True,
+                    })
+                    self.assert_clean_browser(page, captured)
         finally:
             page.close()

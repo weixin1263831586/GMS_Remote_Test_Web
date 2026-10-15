@@ -226,9 +226,11 @@ gms-rt-system-update() {
     fi
     # TLS 配置与当前会话保持一致：gms-agent 下载层读取
     # GMS_INSTALL_CA_CERT / GMS_INSTALL_INSECURE。
+    local profile_args=()
+    [ -z "${_gms_requested_profile:-}" ] || profile_args=(--profile "$_gms_requested_profile")
     GMS_INSTALL_CA_CERT="${GMS_INSTALL_CA_CERT:-${GMS_CURL_CA_CERT:-}}" \
     GMS_INSTALL_INSECURE="${GMS_CURL_INSECURE:-${GMS_INSTALL_INSECURE:-0}}" \
-        python3 "$gms_agent" update
+        python3 "$gms_agent" update "${profile_args[@]}"
 }
 
 
@@ -707,8 +709,12 @@ gms-rt-system-selfcheck() {
 
     # --- authentication / identity --------------------------------------------
     auth_ok=true
-    auth_json=$(api_call "/auth/status" 2>/dev/null)
+    auth_json=$(api_call "/auth/status" 2>/dev/null) || auth_ok=false
     _gms_rt_selfcheck_is_json "$auth_json" || { auth_ok=false; auth_json='{}'; }
+    if [ "$auth_ok" = true ] && ! jq -e '.authenticated == true or .auth_required == false' \
+        >/dev/null 2>&1 <<< "$auth_json"; then
+        auth_ok=false
+    fi
     local credential_mode
     credential_mode=$(gms-rt-auth-credential-mode 2>/dev/null) || credential_mode='{"mode":"unknown"}'
     _gms_rt_selfcheck_is_json "$credential_mode" || credential_mode='{"mode":"unknown"}'
@@ -725,7 +731,7 @@ gms-rt-system-selfcheck() {
 
     # --- server health ----------------------------------------------------------
     health_ok=true
-    health_json=$(api_call "/system/health" 2>/dev/null)
+    health_json=$(api_call "/system/health" 2>/dev/null) || health_ok=false
     _gms_rt_selfcheck_is_json "$health_json" || { health_ok=false; health_json='{}'; }
     if [ "$health_ok" != true ]; then
         hints+=("server ${SERVER_URL} unreachable or unhealthy: verify the web app is running and select its installed profile with GMS_RT_PROFILE=<PROFILE>; otherwise configure GMS_CURL_CA_CERT=/path/to/controller-ca.pem")
@@ -733,7 +739,7 @@ gms-rt-system-selfcheck() {
 
     # --- device inventory (optional scope) --------------------------------------
     devices_ok=true
-    devices_json=$(api_call "/devices/list" 2>/dev/null)
+    devices_json=$(api_call "/devices/list" 2>/dev/null) || devices_ok=false
     _gms_rt_selfcheck_is_json "$devices_json" || { devices_ok=false; devices_json='[]'; }
     if [ "$devices_ok" != true ]; then
         hints+=("device inventory unavailable: the current credential may lack the devices.read scope")
@@ -741,7 +747,7 @@ gms-rt-system-selfcheck() {
 
     # --- Controller-local serial evidence ---------------------------------------
     console_ok=true
-    console_json=$(api_call "/devices/console/ports" 2>/dev/null)
+    console_json=$(api_call "/devices/console/ports" 2>/dev/null) || console_ok=false
     _gms_rt_selfcheck_is_json "$console_json" || { console_ok=false; console_json='{}'; }
     if [ "$console_ok" != true ]; then
         hints+=("serial console inventory unavailable: verify devices.read scope and Controller pyudev/dialout readiness")
@@ -811,4 +817,10 @@ gms-rt-system-selfcheck() {
             local_suites: $suites,
             hints: $hints
         }'
+    local output_status=$?
+    [ "$output_status" -eq 0 ] || return "$GMS_RT_EXIT_OPERATION"
+    [ "$auth_ok" = true ] || return "$GMS_RT_EXIT_AUTH"
+    [ "$health_ok" = true ] || return "$GMS_RT_EXIT_NETWORK"
+    [ "$devices_ok" = true ] && [ "$console_ok" = true ] || return "$GMS_RT_EXIT_OPERATION"
+    return 0
 }

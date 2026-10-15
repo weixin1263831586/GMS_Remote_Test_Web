@@ -409,6 +409,13 @@ class EvidenceFetcher:
             derived_rel, derived_error = extract_zip_derived_text(
                 self.store, self._atomic_write, artifact_id, snapshot_rel, data
             )
+        elif kind == "archive":
+            from .evidence_archives import extract_system_archive_text
+
+            derived_rel, derived_error = await asyncio.to_thread(
+                extract_system_archive_text,
+                self.store, self._atomic_write, artifact_id, snapshot_rel, data,
+            )
 
         size_note = ""
         if declared and declared != len(data):

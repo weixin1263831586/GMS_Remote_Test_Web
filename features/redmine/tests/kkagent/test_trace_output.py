@@ -22,6 +22,20 @@ def _trace_with_events(events: list[dict]) -> KkAgentTrace:
 
 
 class TraceConsumeTests(unittest.TestCase):
+    def test_apk_source_read_counts_only_returned_source_content(self):
+        for lines, expected in [([{"line": 1, "text": "class Test {}"}], 1), ([], 0)]:
+            with self.subTest(lines=lines):
+                trace = _trace_with_events([
+                    {"type": "tool_call", "tool_call_id": "read", "tool_name": "mcp__gms__gms_rt_apk_source_read",
+                     "input": {"path": "Test.java", "task_id": "task"}},
+                    {"type": "tool_result", "tool_call_id": "read", "is_error": False,
+                     "output": {"ok": True, "data": {"success": True, "data": {
+                         "path": "Test.java", "total_lines": 100,
+                         "returned_lines": len(lines), "lines": lines,
+                     }}}},
+                ])
+                self.assertEqual(trace.source_evidence_tool_count, expected)
+
     def test_session_and_system_events_are_captured(self):
         trace = _trace_with_events([
             {"type": "system", "version": "0.4.3"},

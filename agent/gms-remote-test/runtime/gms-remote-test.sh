@@ -6,7 +6,7 @@ set -o pipefail
 # propagated here (GMS_RT_VERSION) by tools/scripts/agent/release.py.
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.42"
+GMS_RT_VERSION="0.22.53"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -35,14 +35,44 @@ GMS_WEB_APP_DIR="${GMS_WEB_APP_DIR:-${HOME}/GMS_Remote_Test/web_app}"
 GMS_PORT="${GMS_PORT:-5001}"
 SERVER_URL="${GMS_REMOTE_TEST_SERVER:-}"
 _gms_runtime_dir=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
-_gms_rt_local_catalog=0
-if [[ "${BASH_SOURCE[0]}" = "$0" ]] \
-    && [ "${1:-}" = "gms-rt-system-commands" ]; then
-    _gms_rt_local_catalog=1
+_gms_requested_profile="${GMS_RT_PROFILE:-}"
+_gms_direct_invocation=0
+if [[ "${BASH_SOURCE[0]}" = "$0" ]]; then
+    _gms_direct_invocation=1
+    _gms_startup_args=()
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --profile)
+                shift
+                [ "$#" -gt 0 ] && [ -n "$1" ] || { echo 'Error: --profile requires a name' >&2; exit 2; }
+                _gms_requested_profile="$1" ;;
+            --profile=*)
+                _gms_requested_profile="${1#*=}"
+                [ -n "$_gms_requested_profile" ] || { echo 'Error: --profile requires a name' >&2; exit 2; } ;;
+            --server)
+                _gms_startup_args+=("$1")
+                shift
+                [ "$#" -gt 0 ] || { echo 'Error: --server requires a URL' >&2; exit 2; }
+                SERVER_URL="$1"
+                _gms_startup_args+=("$1") ;;
+            --server=*)
+                SERVER_URL="${1#*=}"
+                _gms_startup_args+=("$1") ;;
+            *) _gms_startup_args+=("$1") ;;
+        esac
+        shift
+    done
+    set -- "${_gms_startup_args[@]}"
+    case "${1:-}" in
+        -h|--help) shift; set -- gms-rt-system-help "$@" ;;
+        --version) shift; set -- gms-rt-system-version "$@" ;;
+    esac
+    # Enrollment also uses this flag to choose the token destination.
+    if [ "${1:-}" = "gms-rt-agent-enroll" ] && [ -n "$_gms_requested_profile" ]; then
+        set -- "$@" --profile "$_gms_requested_profile"
+    fi
 fi
-if [ "$_gms_rt_local_catalog" = "1" ]; then
-    _gms_profile_context=(none "" "" "" "" "" "")
-elif [ -r "$_gms_runtime_dir/gms_agent/profile_store.py" ]; then
+if [ -r "$_gms_runtime_dir/gms_agent/profile_store.py" ]; then
     # Resolve via `python3 -c`, NOT a heredoc: heredocs need a writable
     # temp file for the script text, so a full or read-only /tmp used to
     # zero the context array and masquerade as "无法解析 Agent profile"。
@@ -51,13 +81,13 @@ elif [ -r "$_gms_runtime_dir/gms_agent/profile_store.py" ]; then
     mapfile -d '' -t _gms_profile_context < <(
         PYTHONPATH="$_gms_runtime_dir${PYTHONPATH:+:$PYTHONPATH}" python3 -c '
 import sys
-from gms_agent.profile_store import resolve_direct_cli_context
+from gms_agent.cli_context import resolve_cli_context
 
-context = resolve_direct_cli_context(sys.argv[1], sys.argv[2])
+context = resolve_cli_context(sys.argv[1], sys.argv[2], sys.argv[4:] if sys.argv[3] == "1" else None)
 for key in ("mode", "profile", "server", "ca_cert", "token_file", "insecure", "error"):
     sys.stdout.write(context[key])
     sys.stdout.write("\0")
-' "${GMS_RT_PROFILE:-}" "$SERVER_URL"
+' "$_gms_requested_profile" "$SERVER_URL" "$_gms_direct_invocation" "$@"
     )
     if [ "${#_gms_profile_context[@]}" -lt 7 ]; then
         echo "Error: Agent profile 解析器未产生完整输出 (${#_gms_profile_context[@]}/7 字段)。" >&2
@@ -67,7 +97,7 @@ for key in ("mode", "profile", "server", "ca_cert", "token_file", "insecure", "e
 else
     # A standalone copied helper has no profile store. This compatibility
     # path is valid only when no named profile was requested.
-    if [ -n "${GMS_RT_PROFILE:-}" ]; then
+    if [ -n "$_gms_requested_profile" ]; then
         echo "Error: 当前 gms-rt 副本缺少 Agent profile runtime。" >&2
         exit 2
     fi
@@ -87,7 +117,7 @@ if [ "$_gms_profile_mode" = "error" ]; then
     echo "  运行 gms-agent profile list 查看可用 profile。" >&2
     exit 2
 fi
-if [ "$_gms_profile_mode" != "none" ]; then
+if [ "$_gms_profile_mode" != "none" ] && [ "$_gms_profile_mode" != "local" ]; then
     GMS_RT_PROFILE="${_gms_profile_context[1]}"
     SERVER_URL="${_gms_profile_context[2]}"
     [ -n "${GMS_CURL_CA_CERT:-}" ] || GMS_CURL_CA_CERT="${_gms_profile_context[3]}"
@@ -97,13 +127,13 @@ if [ "$_gms_profile_mode" != "none" ]; then
         GMS_CURL_INSECURE=1
         # Sticky-insecure profile 是安装期一次性环境的遗留物；每次使用
         # 都必须让操作者看见 TLS 校验被关闭，防止长期静默裸奔。
-        echo "WARNING: profile '$(_gms_profile_context[1])' 以 insecure 模式安装（GMS_CURL_INSECURE=1），TLS 证书校验已关闭。" >&2
+        echo "WARNING: profile '${_gms_profile_context[1]}' 以 insecure 模式安装（GMS_CURL_INSECURE=1），TLS 证书校验已关闭。" >&2
         echo "  仅限一次性环境使用；正式环境请运行 gms-agent profile 配置 ca_cert 后重装。" >&2
     fi
     export GMS_RT_PROFILE GMS_CURL_CA_CERT GMS_AUTH_TOKEN_FILE GMS_CURL_INSECURE
 fi
 
-if [ "$_gms_rt_local_catalog" != "1" ] && [ -z "$SERVER_URL" ]; then
+if [ "$_gms_profile_mode" != "local" ] && [ -z "$SERVER_URL" ]; then
     # Check if we're running on the server machine (use dynamic IP detection)
     # Try to get local IP using the same method as get_local_ip() in Python
     LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
@@ -663,6 +693,8 @@ source "$_gms_runtime_dir/cli/redmine.sh" || { echo "Error: incomplete Agent CLI
 source "$_gms_runtime_dir/cli/reports.sh" || { echo "Error: incomplete Agent CLI runtime" >&2; return 7 2>/dev/null || exit 7; }
 source "$_gms_runtime_dir/cli/test-execution.sh" || { echo "Error: incomplete Agent CLI runtime" >&2; return 7 2>/dev/null || exit 7; }
 source "$_gms_runtime_dir/cli/apk.sh" || { echo "Error: incomplete Agent CLI runtime" >&2; return 7 2>/dev/null || exit 7; }
+source "$_gms_runtime_dir/cli/deployment.sh" || { echo "Error: incomplete Agent CLI runtime" >&2; return 7 2>/dev/null || exit 7; }
+source "$_gms_runtime_dir/cli/debug.sh" || { echo "Error: incomplete Agent CLI runtime" >&2; return 7 2>/dev/null || exit 7; }
 source "$_gms_runtime_dir/cli/system.sh" || { echo "Error: incomplete Agent CLI runtime" >&2; return 7 2>/dev/null || exit 7; }
 source "$_gms_runtime_dir/cli/dispatch.sh" || { echo "Error: incomplete Agent CLI runtime" >&2; return 7 2>/dev/null || exit 7; }
 

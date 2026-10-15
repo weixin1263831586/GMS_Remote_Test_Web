@@ -834,7 +834,7 @@ async function downloadTestSuite() {
             if (barEl) barEl.style.width = '100%';
             if (percentEl) percentEl.textContent = '100%';
             if (button) button.disabled = false;
-            if (typeof refreshTestSuiteBrowser === 'function') refreshTestSuiteBrowser();
+            if (typeof refreshTestSuiteBrowser === 'function') runSuiteBrowserAction(() => refreshTestSuiteBrowser());
         }
     } catch (error) {
         if (button) button.disabled = false;
@@ -861,7 +861,7 @@ async function pollTestSuiteDownload(taskId, button) {
         if (task.status === 'completed') {
             if (button) button.disabled = false;
             showToast('测试套件下载完成', 'success');
-            if (typeof refreshTestSuiteBrowser === 'function') refreshTestSuiteBrowser();
+            if (typeof refreshTestSuiteBrowser === 'function') runSuiteBrowserAction(() => refreshTestSuiteBrowser());
             return;
         }
         if (task.status === 'error') {

@@ -83,6 +83,8 @@
             recordSecurityPageView(targetPage);
         }
             });
-            runPageInitializers(targetPage);
+            // 刷新恢复与页面切换共用同一初始化入口：统一经过
+            // GmsPageLifecycle，设置 data-init-state 并提供取消语义。
+            initializePageSafely(targetPage);
 
         });

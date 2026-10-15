@@ -101,8 +101,23 @@ def _load_tool_schemas():
 mcp_tool_schemas = _load_tool_schemas()
 
 
+def _load_typed_tools(name):
+    spec = importlib.util.spec_from_file_location(
+        name, Path(__file__).with_name(name + ".py"),
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load typed tools: " + name)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+mcp_deployment_tools = _load_typed_tools("mcp_deployment_tools")
+mcp_debug_tools = _load_typed_tools("mcp_debug_tools")
+
+
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.42"
+SERVER_VERSION = "0.22.53"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -2091,6 +2106,13 @@ def tools() -> list[dict[str, Any]]:
 
 
 _TOOLSETS = {
+    "gms_rt_apk_deploy": {"admin"},
+    "gms_rt_apk_deployment_status": {"core", "admin"},
+    "gms_rt_debug_session_request": {"admin"},
+    "gms_rt_debug_session_status": {"core", "admin"},
+    "gms_rt_debug_session_revoke": {"admin"},
+    "gms_rt_debug_action": {"admin"},
+    "gms_rt_devices_db_query": {"device_evidence"},
     "gms_rt_test_start": {"test"},
     "gms_rt_jobs_list": {"test"},
     "gms_rt_jobs_status": {"test"},
@@ -2166,7 +2188,8 @@ def _decorate_tool(tool: dict[str, Any]) -> dict[str, Any]:
 
     result = dict(tool)
     name = str(result.get("name", ""))
-    cli_command = "gms-rt-" + name.removeprefix("gms_rt_").replace("_", "-")
+    suffix = name[len("gms_rt_"):] if name.startswith("gms_rt_") else name
+    cli_command = "gms-rt-" + suffix.replace("_", "-")
     descriptor = _command_safety(cli_command)
     mutating = name in {
         "gms_rt_test_start",
@@ -2179,6 +2202,10 @@ def _decorate_tool(tool: dict[str, Any]) -> dict[str, Any]:
         "gms_rt_auth_elevate",
         "gms_rt_apk_analyze",
         "gms_rt_apk_analyze_attachment",
+        "gms_rt_apk_deploy",
+        "gms_rt_debug_session_request",
+        "gms_rt_debug_session_revoke",
+        "gms_rt_debug_action",
     }
     destructive = name in {"gms_rt_burn_firmware", "gms_rt_shell_exec"}
     if descriptor is not None:
@@ -2206,7 +2233,7 @@ def _decorate_tool(tool: dict[str, Any]) -> dict[str, Any]:
 
 
 def _all_tools() -> list[dict[str, Any]]:
-    return [dict(tool) for tool in mcp_tool_schemas.ALL_TOOLS]
+    return [dict(tool) for tool in mcp_tool_schemas.ALL_TOOLS + mcp_deployment_tools.SCHEMAS + mcp_debug_tools.SCHEMAS]
 
 
 
@@ -2723,6 +2750,8 @@ def knowledge_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 
 
 _TOOL_HANDLERS = {
+    **mcp_deployment_tools.handlers(run_cli),
+    **mcp_debug_tools.handlers(run_cli),
     "gms_rt_context": context_tool,
     "gms_rt_run": run_tool,
     "gms_rt_commands": commands_tool,

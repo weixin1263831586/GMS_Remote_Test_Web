@@ -8,7 +8,7 @@ function renderSuiteBreadcrumb(path) {
     const rootBtn = document.createElement('button');
     rootBtn.className = 'btn-xs';
     rootBtn.textContent = '根目录';
-    rootBtn.addEventListener('click', () => loadSuiteBrowserDirectory(''));
+    rootBtn.addEventListener('click', () => runSuiteBrowserAction(() => loadSuiteBrowserDirectory('')));
     breadcrumb.appendChild(rootBtn);
 
     // 当前位于运行文件夹 results/<ts> 或 logs/<ts> 时，在面包屑右侧显示互跳按钮：
@@ -28,7 +28,8 @@ function renderSuiteBreadcrumb(path) {
         sibBtn.addEventListener('click', () => {
             const target = `${sibling}/${parts[1]}`;
             state.suiteBrowser.highlightPath = target;
-            loadSuiteBrowserDirectory(target).then(() => {
+            runSuiteBrowserAction(async () => {
+                await loadSuiteBrowserDirectory(target);
                 setSuiteBrowserHighlightedPath(target);
                 showToast(`已跳转到 ${target}`, 'success');
             });
@@ -71,7 +72,7 @@ function renderSuiteBreadcrumb(path) {
         btn.className = 'btn-xs';
         btn.textContent = part;
         const targetPath = current;
-        btn.addEventListener('click', () => loadSuiteBrowserDirectory(targetPath));
+        btn.addEventListener('click', () => runSuiteBrowserAction(() => loadSuiteBrowserDirectory(targetPath)));
         breadcrumb.append(separator, btn);
     });
 }
@@ -244,7 +245,7 @@ function createSuiteFileRow(item) {
                 if (!item.isParent) {
                     setSuiteBrowserHighlightedPath(item.path || '');
                 }
-                loadSuiteBrowserDirectory(item.path || '');
+                runSuiteBrowserAction(() => loadSuiteBrowserDirectory(item.path || ''));
             });
         }
         actions.appendChild(openBtn);
@@ -288,7 +289,7 @@ function createSuiteFileRow(item) {
             actions.appendChild(copyBtn);
         }
 
-        row.addEventListener('dblclick', () => loadSuiteBrowserDirectory(item.path || ''));
+        row.addEventListener('dblclick', () => runSuiteBrowserAction(() => loadSuiteBrowserDirectory(item.path || '')));
     } else {
         if (item.is_apk || item.is_jar) {
             const analyzeBtn = document.createElement('button');
@@ -510,7 +511,8 @@ function jumpSuiteSiblingFolder(itemPath, sibling) {
     const target = parts.join('/');
     closeTestResultsModal();
     state.suiteBrowser.highlightPath = target;
-    loadSuiteBrowserDirectory(target).then(() => {
+    runSuiteBrowserAction(async () => {
+        await loadSuiteBrowserDirectory(target);
         setSuiteBrowserHighlightedPath(target);
         showToast(`已跳转到 ${target}`, 'success');
     });

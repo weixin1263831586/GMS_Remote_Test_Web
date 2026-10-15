@@ -169,6 +169,27 @@ class AgentTokenServiceMixin:
             conn.commit()
             return cursor.rowcount > 0
 
+    def active_agent_metadata(self, actor_id: str) -> dict[str, Any] | None:
+        """Recheck a durable grant's identity without persisting its Bearer secret.
+
+        This is metadata for server-side grant validation (ADR 0018), not an
+        alternate credential authentication entry point.
+        """
+        if not actor_id.startswith("agent:"):
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT t.id,t.owner_user_id,t.scopes,t.allowed_workers,t.allowed_devices,"
+                "t.expires_at,t.revoked_at,u.disabled FROM platform_agent_tokens t "
+                "JOIN platform_users u ON u.id=t.owner_user_id WHERE t.id=?",
+                (actor_id[len("agent:"):],),
+            ).fetchone()
+        if row is None or row["disabled"] or row["revoked_at"]:
+            return None
+        if row["expires_at"] and _from_iso(row["expires_at"]) <= _utcnow():
+            return None
+        return dict(row)
+
     def get_agent_token_principal(
         self, token: str
     ) -> tuple[CurrentUser | None, dict[str, Any] | None]:

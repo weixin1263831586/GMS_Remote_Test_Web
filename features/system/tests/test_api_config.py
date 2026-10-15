@@ -1,7 +1,9 @@
 import asyncio
+import io
 import os
 import unittest
-from unittest.mock import mock_open, patch
+from pathlib import Path
+from unittest.mock import patch
 
 from features.system import api, gms_assistant_proxy
 
@@ -56,14 +58,24 @@ class SystemApiConfigTests(unittest.TestCase):
         self.assertIn("<body>chat</body>", rewritten)
 
     def test_architecture_replaces_configured_build_server_safely(self):
-        source = "<text>{{BUILD_SERVER_LABEL}} • 编译服务器</text>"
+        page = "<text>{{BUILD_SERVER_LABEL}} • 编译服务器</text>{{PLATFORM_TOPOLOGY}}"
+        topology = Path(
+            api.PROJECT_ROOT, "docs", "architecture", "platform-topology.mmd"
+        ).read_text(encoding="utf-8")
+        files = {"architecture.html": page, "platform-topology.mmd": topology}
+
+        def open_by_path(file, *args, **kwargs):
+            return io.StringIO(files[os.path.basename(str(file))])
+
         config = {"ui_defaults": {"architecture_build_server": "build<primary>"}}
         with patch.object(api.os.path, "exists", return_value=True), patch(
-            "builtins.open", mock_open(read_data=source)
+            "builtins.open", side_effect=open_by_path
         ), patch.object(api.config_manager, "load_config", return_value=config):
             response = asyncio.run(api.get_architecture())
 
-        self.assertIn("build&lt;primary&gt;", response.body.decode("utf-8"))
+        body = response.body.decode("utf-8")
+        self.assertIn("build&lt;primary&gt;", body)
+        self.assertIn("<svg", body)
 
     def test_shell_titles_cover_cluster_and_knowledge_pages(self):
         self.assertIn("cluster", api.SHELL_PAGE_TITLES)

@@ -212,10 +212,15 @@ class FrontendIntegrityTests(unittest.TestCase):
     def test_page_initialization_is_deduplicated_and_rejections_are_handled(self):
         shell = read_shell_bundle()
 
-        self.assertIn("const pendingAuthPageInitializers = new Set()", shell)
-        self.assertIn("if (pendingAuthPageInitializers.has(pageName)) return", shell)
-        self.assertIn("runPageInitializers(pageName).catch(error =>", shell)
+        # 页面初始化统一走 GmsPageLifecycle：新导航取消旧初始化（去重），
+        # 认证等待可被取消，异常按“取消 vs 真实失败”区分处理。
+        self.assertIn("const context = {page: pageName, controller: new AbortController(), status: 'loading'}", shell)
+        self.assertIn("window.GmsPageLifecycle.cancel();", shell)
+        self.assertIn("runPageInitializers(pageName, signal)", shell)
+        self.assertIn("if (isApiRequestCancelled(error, signal))", shell)
         self.assertIn("initializePageSafely(pageName)", shell)
+        # 刷新恢复（boot）与页面切换共用同一初始化入口。
+        self.assertIn("initializePageSafely(targetPage)", shell)
 
     def test_shell_stops_boot_when_navigation_bundle_is_unavailable(self):
         shell = read_shell_bundle()
@@ -570,8 +575,8 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn('export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt; curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL "{{ request.url.scheme }}://', shell)
         self.assertIn('bash -s -- --paircode-prompt', shell)
         self.assertIn('安装器随后固定 CA 并严格校验下载', shell)
-        self.assertIn("apiPath === '/api/agent/install.sh'", navigation)
-        self.assertIn("apiPath === '/api/system/skills'", navigation)
+        self.assertIn("path === '/api/agent/install.sh'", navigation)
+        self.assertIn("path === '/api/system/skills'", navigation)
         self.assertIn("全部独立gms-rt-*命令", api_constants)
         self.assertIn("获取已脱敏的系统配置", api_constants)
         self.assertNotIn("包含所有字段和敏感信息", api_constants)

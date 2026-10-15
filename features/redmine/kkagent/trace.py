@@ -113,7 +113,7 @@ def _is_source_evidence_tool(tool_name: str) -> bool:
     """
     normalized = tool_name.lower()
     return any(marker in normalized for marker in (
-        "sdk_search", "sdk_read", "apk_search", "apk_source_search",
+        "sdk_search", "sdk_read", "apk_search", "apk_source_search", "apk_source_read",
         "codesearch__search",
     ))
 
@@ -163,7 +163,8 @@ def _source_evidence_result(tool_name: str, value: Any) -> tuple[bool, int]:
     positive = max(counts or [0])
     if "search" in normalized:
         return positive > 0, positive
-    return nonempty_payload or positive > 0, positive
+    # A file's total line count is metadata; an empty read is not evidence.
+    return nonempty_payload, positive
 
 
 def _source_reproducible_flag(value: Any) -> bool | None:
@@ -223,6 +224,8 @@ class KkAgentTrace:
 
     input_tokens: int = 0
     output_tokens: int = 0
+    last_round_output_tokens: int = 0
+    last_round_visible_output: bool | None = None
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
 
@@ -373,6 +376,12 @@ class KkAgentTrace:
                 if value:
                     refs.update({f"#{value}", str(value)})
             refs.update(str(value) for value in call.snapshot_ids if value)
+            path = str(call.tool_input.get("path") or call.tool_input.get("file") or "")
+            task_id = str(call.tool_input.get("task_id") or "")
+            if is_source and path:
+                refs.add(f"src:{task_id}:{path}" if task_id else f"file:{path}")
+            if task_id and "apk_manifest" in call.tool_name:
+                refs.add(f"apk:{task_id}:manifest")
             ledger.append({
                 "evidence_id": f"EV-{index:03d}",
                 "kind": "source" if is_source else "tool",
@@ -394,6 +403,8 @@ class KkAgentTrace:
             "turns": self.turns,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "last_round_output_tokens": self.last_round_output_tokens,
+            "last_round_visible_output": self.last_round_visible_output,
             "cache_read_tokens": self.cache_read_tokens,
             "cache_creation_tokens": self.cache_creation_tokens,
             "llm_retries": self.llm_retries,
@@ -489,7 +500,7 @@ def _attachment_manifest(value: Any) -> tuple[bool, int, list[str], list[str]]:
     text_ids = {
         str(item.get("artifact_id") or "").strip()
         for item in rows
-        if str(item.get("kind") or "") in {"text", "log"}
+        if (str(item.get("kind") or "") in {"text", "log"} or item.get("text_available") is True)
         and str(item.get("status") or "") in {"ready", "partial"}
         and str(item.get("artifact_id") or "").strip()
     }
@@ -593,6 +604,13 @@ def consume_event(trace: KkAgentTrace, event: dict[str, Any]) -> None:
         trace.kkagent_version = str(event.get("version") or trace.kkagent_version)
     elif event_type == "session":
         trace.session_id = str(event.get("session_id") or trace.session_id)
+    elif event_type == "turn_start":
+        trace.last_round_output_tokens = 0
+        trace.last_round_visible_output = False
+    elif event_type == "message":
+        content = event.get("content")
+        if event.get("role") == "assistant" and isinstance(content, str) and content.strip():
+            trace.last_round_visible_output = True
     elif event_type == "tool_call":
         trace.tool_calls.append(ToolTrace(
             tool_call_id=str(event.get("tool_call_id") or ""),
@@ -602,7 +620,10 @@ def consume_event(trace: KkAgentTrace, event: dict[str, Any]) -> None:
     elif event_type == "tool_result":
         _record_tool_result(trace, event)
     elif event_type == "usage":
-        _apply_usage(trace, event.get("usage") or event, override=False)
+        usage = event.get("usage") or event
+        if isinstance(usage, dict):
+            trace.last_round_output_tokens = _as_int(usage.get("output_tokens"))
+        _apply_usage(trace, usage, override=False)
     elif event_type == "llm_retry":
         trace.llm_retries += 1
     elif event_type == "error":

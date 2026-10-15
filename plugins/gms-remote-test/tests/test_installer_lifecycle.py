@@ -509,6 +509,21 @@ class TestLauncherProfilePinning(EnvSandbox):
 
 
 class TestDoctorAndProfiles(EnvSandbox):
+    def test_doctor_honors_environment_profile_for_existing_update_timers(self):
+        for name in ("kimi-one", "kimi-two"):
+            pm.write_profile_toml(name, "kimi", "https://" + name + ".example:5001", "")
+        for explicit, expected in (("", "kimi-one"), ("kimi-two", "kimi-two")):
+            with self.subTest(explicit=explicit), mock.patch.dict(os.environ, {
+                "GMS_RT_PROFILE": "kimi-one", "KIMI_CODE_HOME": str(self.root / "kimi-home"),
+            }), mock.patch(
+                "sys.stdout", new_callable=io.StringIO,
+            ) as output:
+                args = type("Args", (), {"client": "auto", "profile": explicit, "json": True})()
+                pm.cmd_doctor(args)
+                report = json.loads(output.getvalue())
+                self.assertEqual(report["clients"][0]["profile"]["selected"], expected)
+                self.assertEqual(len(report["clients"]), 1)
+
     def test_doctor_reports_token_metadata_without_token_contents(self):
         profile = pm.profile_name("codex")
         pm.write_profile_toml(profile, "codex", "https://ctrl.example:5001", "")

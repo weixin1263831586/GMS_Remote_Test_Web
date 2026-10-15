@@ -400,10 +400,12 @@ import argparse  # noqa: E402
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="gms-agent", description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="gms-agent", description="GMS Agent：安装、更新和管理客户端接入。"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_install = sub.add_parser("install", help="install runtime + skill + MCP for detected clients")
+    p_install = sub.add_parser("install", help="安装 Agent 并接入客户端")
     p_install.add_argument(
         "--client",
         default="auto",
@@ -421,7 +423,14 @@ def main() -> int:
     )
     p_install.set_defaults(func=cmd_install)
 
-    p_update = sub.add_parser("update", help="update from the Controller Agent Package Registry")
+    p_auto_update = sub.add_parser("auto-update", help="开启、关闭或查看每小时自动更新")
+    p_auto_update.add_argument("action", choices=("enable", "disable", "status"))
+    p_auto_update.add_argument("--profile", default="")
+    from gms_agent.auto_update import command as auto_update_command
+
+    p_auto_update.set_defaults(func=auto_update_command)
+
+    p_update = sub.add_parser("update", help="从 Controller 更新 Agent 包")
     p_update.add_argument("--server", default="")
     p_update.add_argument(
         "--profile", default="",
@@ -430,13 +439,13 @@ def main() -> int:
     p_update.add_argument("--force", action="store_true")
     p_update.set_defaults(func=cmd_update)
 
-    p_rollback = sub.add_parser("rollback", help="switch `current` (and every client) back to an installed version")
+    p_rollback = sub.add_parser("rollback", help="将 Agent 和客户端接入回退到已安装版本")
     p_rollback.add_argument("version")
     p_rollback.add_argument("--server", default="")
     p_rollback.add_argument("--profile", default="")
     p_rollback.set_defaults(func=cmd_rollback)
 
-    p_enroll = sub.add_parser("enroll", help="exchange a one-shot enrollment code for a service token")
+    p_enroll = sub.add_parser("enroll", help="使用一次性配对码完成接入")
     p_enroll.add_argument("code")
     p_enroll.add_argument("--server", default="")
     p_enroll.add_argument(
@@ -445,12 +454,12 @@ def main() -> int:
     )
     p_enroll.set_defaults(func=cmd_enroll)
 
-    p_status = sub.add_parser("status", help="show installation state")
+    p_status = sub.add_parser("status", help="查看安装状态")
     p_status.add_argument("--json", action="store_true")
     p_status.set_defaults(func=cmd_status)
 
     p_doctor = sub.add_parser(
-        "doctor", help="validate runtime, profile, token, Skill and MCP registration"
+        "doctor", help="检查安装、身份和客户端接入状态"
     )
     p_doctor.add_argument(
         "--client", default="auto", choices=["auto", "codex", "kimi", "kkagent"]
@@ -460,7 +469,7 @@ def main() -> int:
     p_doctor.set_defaults(func=cmd_doctor)
 
     p_profile = sub.add_parser(
-        "profile", help="list, inspect or activate an exact client profile"
+        "profile", help="查看、选择或管理接入身份"
     )
     profile_sub = p_profile.add_subparsers(dest="profile_action", required=True)
     p_profile_list = profile_sub.add_parser("list")
@@ -476,6 +485,23 @@ def main() -> int:
     p_profile_use.add_argument("--client", choices=["codex", "kimi", "kkagent"])
     p_profile_use.set_defaults(func=cmd_profile)
 
+    from gms_agent.cli_context import command_profile_env
+
+    p_profile_env = profile_sub.add_parser("env", help="select a profile for the current terminal")
+    p_profile_env.add_argument("name", nargs="?", default="")
+    p_profile_env.set_defaults(func=command_profile_env)
+
+    if len(sys.argv) == 1:
+        print(f'GMS Agent {runtime_version()}\n\n'
+              '常用操作：\n'
+              '  gms-agent update                  更新 Agent 包\n'
+              '  gms-agent profile list            查看接入身份\n'
+              '  eval "$(gms-agent profile env)"    选择身份，当前终端复用\n'
+              '  gms-agent doctor --json           检查安装与接入状态\n\n'
+              '  gms-agent auto-update enable      按已选身份开启每小时自动更新\n'
+              '  gms-agent auto-update status      查看自动更新状态\n\n'
+              '更多帮助：gms-agent --help；子命令参数：gms-agent update --help')
+        return 0
     args = parser.parse_args()
     return args.func(args)
 

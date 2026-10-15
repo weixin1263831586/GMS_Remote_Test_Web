@@ -19,8 +19,7 @@ from fastapi.responses import (
 
 from features.auth import AUTH_COOKIE_NAME, auth_service
 from features.system import agent_package_registry, gms_assistant_proxy, jq_binary
-from features.system.api_docs_list import API_DOCS_LIST, build_openapi_api_docs
-from features.system.api_help import generate_per_api_help_text
+from features.system.api_catalog import build_api_catalog, format_catalog_help
 from features.system.skill_archive_signing import (
     sign_skill_archive,
 )
@@ -35,6 +34,7 @@ from features.system.terminal_service import (
     handle_terminal_input,
     handle_terminal_resize,
 )
+from features.system.topology_view import render_topology
 from features.system.websocket_security import (
     authorize_websocket_identity,
 )
@@ -43,7 +43,7 @@ from features.system.websocket_security import (
 )
 from features.users import runtime as users_runtime
 from foundation.cluster_port import get_local_worker_id as _get_local_worker_id
-from foundation.config import DEFAULT_SERVER_URL, PROJECT_ROOT, config_manager
+from foundation.config import PROJECT_ROOT, config_manager
 from foundation.error_model import ApiError, record_internal_error
 from foundation.files import FileUtils
 from foundation.responses import error_response
@@ -299,6 +299,9 @@ async def get_architecture():
         ui_defaults = config.get("ui_defaults") or {}
         build_server = str(ui_defaults.get("architecture_build_server") or "未配置")
         content = content.replace("{{BUILD_SERVER_LABEL}}", html.escape(build_server))
+        topology_file = os.path.join(PROJECT_ROOT, 'docs', 'architecture', 'platform-topology.mmd')
+        with open(topology_file, encoding='utf-8') as source:
+            content = content.replace("{{PLATFORM_TOPOLOGY}}", render_topology(source.read()))
         return HTMLResponse(content=content)
     return JSONResponse(status_code=404, content={"error": "Architecture diagram not found"})
 
@@ -308,7 +311,7 @@ async def get_architecture():
 async def get_api_docs(request: Request):
     """Return the complete OpenAPI route inventory with curated metadata."""
     try:
-        api_docs = build_openapi_api_docs(request.app.openapi())
+        api_docs = build_api_catalog(request.app.openapi())
         return JSONResponse(
             content={
                 "success": True,
@@ -330,60 +333,13 @@ async def get_api_docs(request: Request):
 # ==================== API Help ====================
 
 @router.get("/api/system/help")
-async def get_api_help(api_path: str | None = None):
+async def get_api_help(request: Request, api_path: str | None = None):
     """返回全部 API 列表或指定路径的详细帮助。"""
     try:
-        if api_path:
-            # 查找匹配的API
-            api_doc = None
-            for api in API_DOCS_LIST:
-                # 移除开头的斜杠进行匹配
-                if api['path'].lstrip('/') == api_path:
-                    api_doc = api
-                    break
-
-            if not api_doc:
-                return error_response(f"API not found: /{api_path}", status_code=404)
-
-            # 生成帮助文本
-            help_text = generate_per_api_help_text(api_doc['method'], api_doc['path'])
-
-            if not help_text:
-                return error_response(f"Help not available for: /{api_path}", status_code=404)
-
-            return PlainTextResponse(
-                content=help_text,
-                headers={
-                    "Content-Type": "text/plain; charset=utf-8",
-                    "Cache-Control": "public, max-age=300"
-                }
-            )
-
-        # 否则返回所有API列表
-        # 按方法类型和路径排序
-        sorted_apis = sorted(API_DOCS_LIST, key=lambda x: (x['method'], x['path']))
-
-        # 生成纯文本API列表
-        api_list = []
-        for api in sorted_apis:
-            # 格式：METHOD    PATH
-            api_list.append(f"{api['method']:<10} {api['path']}")
-
-        # 直接返回纯文本（每个API一行）
-        text_content = "GMS Auto Test API List\n"
-        text_content += "=" * 60 + "\n\n"
-        text_content += f"Total: {len(api_list)} APIs\n"
-        text_content += f"Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        text_content += "=" * 60 + "\n\n"
-        text_content += "\n".join(api_list) + "\n"  # 确保最后也有换行
-
-        # 添加使用示例
-        text_content += "\n" + "=" * 60 + "\n"
-        text_content += "Usage Examples:\n"
-        text_content += f'  curl -s "{DEFAULT_SERVER_URL}/api/system/help"                          \n'
-        text_content += f'  curl -s "{DEFAULT_SERVER_URL}/api/system/help?api_path=api/devices/list"\n'
-        text_content += f'  curl -s "{DEFAULT_SERVER_URL}/api/devices/list?help=1"                 \n'
-        text_content += f'  curl -s "{DEFAULT_SERVER_URL}/api/test/status?help=1"                   \n'
+        catalog = build_api_catalog(request.app.openapi())
+        text_content = format_catalog_help(catalog, str(request.base_url), api_path)
+        if text_content is None:
+            return ApiError.not_found(f"API not found: /{api_path.lstrip('/')}").to_response()
 
         return PlainTextResponse(
             content=text_content,

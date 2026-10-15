@@ -258,3 +258,41 @@ gms-rt-burn-gsi system.img RK3572 --wait-online=900
 
 `/api/test/parse-args` also resolves `android-*` short names server-side, so
 API callers get the same behavior without the CLI.
+
+## Reviewed APK deployment and database reads
+
+- `gms-rt-apk-deploy <worker_id> <device> <apk_file> [--no-replace] [--debug-session ID]`
+  uploads to `POST /api/devices/deployments` and returns an approval URL.
+  One human click approves SHA256 + Worker + device + replacement mode and
+  executes transfer and install; no approval-token copying is needed.
+  With `--debug-session ID`, a valid grant executes the same-package,
+  same-signer installation without another click; scope mismatch fails closed.
+- `gms-rt-apk-deployment-status <request_id>` reads
+  `GET /api/devices/deployments/{request_id}`; completion/failure is authoritative.
+- `gms-rt-devices-db-query <worker_id> <device> <package> <database> [table]
+  [--columns a,b] [--limit N] [--offset N]` uses
+  `POST /api/devices/db/query`. This is a read-only, bounded SELECT under
+  `run-as` and `sqlite3 -readonly`, with fallback to existing device-shell
+  permissions for user 0. It never runs `adb root`/`su`, or accepts raw SQL.
+
+## Finite app debugging
+
+- `gms-rt-debug-session-request <worker_id> <device> <package> <apk_file>
+  [--minutes N] [--operations install,launch,stop,tap,swipe,text,keyevent]`
+  uploads a signed baseline to `POST /api/devices/debug-sessions`. The
+  requesting Agent owns the grant; a human approves via its review URL.
+  Duration defaults to 60 minutes, is bounded to 15–120, and starts at
+  approval. Including install starts the baseline deployment after approval.
+- `gms-rt-debug-session-status <session_id>` reads
+  `GET /api/devices/debug-sessions/{session_id}`, including recent operations.
+- `gms-rt-debug-session-revoke <session_id>` posts
+  `/api/devices/debug-sessions/{session_id}/revoke`. No later operations are
+  allowed; an already-dispatched command may finish. Call when the debugging
+  task ends or the user requests revocation of that exact session.
+- `gms-rt-debug-action <session_id> <action> [--activity CLASS] [--x N]
+  [--y N] [--end-x N] [--end-y N] [--duration-ms N] [--text VALUE] [--key KEY]`
+  posts typed JSON to `/api/devices/debug-sessions/{session_id}/actions`.
+  launch/stop bind user 0 and the granted package. tap/swipe/text/keyevent
+  require that app's foreground window; coordinates are 0–10000, swipe
+  duration 1–2000 ms, text at most 200 ASCII characters. Allowed keys are
+  BACK/ENTER/DEL/TAB/DPAD_UP/DOWN/LEFT/RIGHT/CENTER. No shell or SQL arguments.

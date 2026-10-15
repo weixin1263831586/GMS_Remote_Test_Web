@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import stat
 import subprocess
 import tarfile
 import urllib.parse
 import zipfile
 from typing import BinaryIO
+
+from .processes import run_local_command
 
 
 ARCHIVE_EXTENSIONS = (
@@ -27,6 +30,30 @@ _SANITIZE_FILENAME_RE = re.compile(r'[^\w\-_.\[\]]')
 _SANITIZE_DIRNAME_RE = re.compile(r'[^A-Za-z0-9._-]+')
 MAX_ARCHIVE_FILES = 10_000
 MAX_ARCHIVE_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
+
+
+def extract_system_archive(archive_path: str, target_dir: str, *, timeout: int = 120) -> None:
+    """Extract RAR/7z with shared preflight and post-scan through audited argv."""
+    archive_path = os.path.abspath(archive_path)
+    target_dir = os.path.abspath(target_dir)
+    archive_format = sniff_archive_format(archive_path)
+    if archive_format not in {'rar', '7z'}:
+        raise ValueError('不支持的系统压缩格式')
+    # 7z's listing includes expanded member sizes, checked before extraction.
+    if not shutil.which('7z'):
+        raise ValueError('7z 解包工具不可用')
+    try:
+        preflight_system_archive(archive_path, target_dir, '7z', timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        raise ValueError('压缩附件预检失败') from None
+    # Some 7z distributions list RAR entries but lack the RAR decoder.
+    argv = (['rar', 'x', '-y', archive_path, target_dir + os.sep]
+            if archive_format == 'rar' and shutil.which('rar') else
+            ['7z', 'x', '-y', f'-o{target_dir}', archive_path])
+    result = run_local_command(argv, timeout=timeout)
+    if not result.ok:
+        raise ValueError('压缩附件解包失败')
+    enforce_post_extraction_safety(target_dir)
 
 
 def sanitize_suite_filename_from_url(url: str) -> str:
@@ -93,7 +120,7 @@ def sniff_archive_format(path: str) -> str:
         pass
     if magic.startswith(b'7z\xbc\xaf\x27\x1c'):
         return '7z'
-    if magic[:7] == b'Rar!\x1a\x07':
+    if magic.startswith(b'Rar!\x1a\x07'):
         return 'rar'
     return ''
 

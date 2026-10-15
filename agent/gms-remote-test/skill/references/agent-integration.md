@@ -147,6 +147,36 @@ After a multi-client install, direct CLI calls must select one of the printed
 profiles with `GMS_RT_PROFILE=<PROFILE>`. This explicit selection is required
 even when every profile currently points to the same Controller.
 
+For a human terminal, select once and reuse the exact identity until that
+terminal closes:
+
+```bash
+eval "$(gms-agent profile env)"
+gms-rt-devices-list
+gms-agent update
+```
+
+The numbered picker shows profile/client/Controller metadata. It emits only
+a quoted `export GMS_RT_PROFILE=...` on stdout, never a token, and does not
+rewrite shell startup files or client registrations. Pass a name to switch:
+`eval "$(gms-agent profile env NAME)"`. For a single call, use
+`gms-rt-devices-list --profile NAME`. Interactive ambiguous CLI calls may also
+ask for an explicit numbered choice for that invocation; JSON, MCP and
+`--non-interactive` calls never prompt or silently choose an identity.
+
+Bare `gms-rt` / `gms-agent`, help, versions and command catalogs are local
+discovery and do not require credentials. Bare entries show a short quickstart;
+`gms-rt --help` (or `gms-rt-system-help`) lists all commands, and
+`gms-agent --help` lists lifecycle commands. Append `--help` to a command for
+its parameters. Full CLI help prints document URLs only when a Controller URL
+is supplied; discovery never guesses a profile to populate those links.
+`gms-rt-system-update` delegates to
+`gms-agent update` without requiring a business API token; the package
+lifecycle still resolves the Controller and verifies TLS/package integrity.
+Profile selection cannot renew a revoked or expired token. If selfcheck
+reports `auth.ok=false`, follow its re-enrollment hint for that exact profile;
+an HTTP error containing valid JSON is still a failed check.
+
 `--client auto` additionally installs the self-contained Skill+MCP plugin
 for every detected agent (Codex/Kimi/kkagent), reconciles each client's MCP
 registration (update-in-place; corrupt client configs fail with a backup
@@ -247,3 +277,20 @@ The installer defaults to the Codex skill directory for backward
 compatibility. Set `GMS_SKILLS_DIR` to an agent-managed skills directory when
 the target agent supports the same Skill package. The standalone `gms-rt-*`
 commands are always the compatibility layer and do not require Skill loading.
+
+## Automatic package updates on Linux
+
+`gms-agent auto-update enable --profile <exact-profile>` installs and enables
+a systemd user timer that checks the selected Controller hourly (up to five
+minutes of random delay). It invokes `gms-agent update`, retaining TLS and
+SHA256/signature verification, profile selection, cross-process lifecycle
+locking and rollback. Every configured Codex/Kimi/kkagent is reactivated.
+The acceptance path runs `gms-agent doctor --client auto --json` followed by
+`gms-rt-system-selfcheck --json` using the selected profile.
+
+Inspect with `gms-agent auto-update status`; stop future checks with
+`gms-agent auto-update disable`. The user manager must be running. A host
+administrator can enable user lingering for checks while the user is logged
+out. Active clients are preserved; reconnect MCP or restart the client to
+load the updated runtime and schemas. This updates the GMS plugin, not the
+Kimi/Codex application itself.
