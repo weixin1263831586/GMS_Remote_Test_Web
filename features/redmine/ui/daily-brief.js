@@ -273,7 +273,7 @@ function renderDailyBriefInner(data) {
     if (qualityLabel) labels.push(qualityLabel);
     if (r.confidence != null) labels.push(
       (r.confidence_source === 'controller_evidence_gate' || r.result_format === 'kkagent_markdown'
-        ? '证据评分 ' : '模型自评 ') + esc(r.confidence));
+        ? '规则置信等级（非准确率） ' : '模型自评 ') + esc(r.confidence));
     if (r.needs_human_review) labels.push('⚠️ 取证未闭环 · 需人工确认');
     return '<span class="daily-brief-state">' + labels.join(' · ') + '</span>';
   };

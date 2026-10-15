@@ -6,7 +6,7 @@ set -o pipefail
 # propagated here (GMS_RT_VERSION) by tools/scripts/agent/release.py.
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.54"
+GMS_RT_VERSION="0.22.57"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -104,6 +104,10 @@ else
     _gms_profile_context=(none "" "" "" "" "" "")
 fi
 _gms_profile_mode="${_gms_profile_context[0]:-error}"
+_gms_human_session=0
+if [ "$_gms_profile_mode" = "human" ] && [[ "${_gms_profile_context[1]}" = human-* ]]; then
+    _gms_human_session=1
+fi
 if [ "$_gms_profile_mode" = "error" ]; then
     if [ -n "${_gms_profile_context[6]:-}" ]; then
         # profile_store produced a concrete diagnosis (missing or
@@ -121,7 +125,11 @@ if [ "$_gms_profile_mode" != "none" ] && [ "$_gms_profile_mode" != "local" ]; th
     GMS_RT_PROFILE="${_gms_profile_context[1]}"
     SERVER_URL="${_gms_profile_context[2]}"
     [ -n "${GMS_CURL_CA_CERT:-}" ] || GMS_CURL_CA_CERT="${_gms_profile_context[3]}"
-    [ -n "${GMS_AUTH_TOKEN_FILE:-}" ] || GMS_AUTH_TOKEN_FILE="${_gms_profile_context[4]}"
+    if [ "$_gms_human_session" = "1" ]; then
+        GMS_AUTH_TOKEN_FILE=""
+    else
+        [ -n "${GMS_AUTH_TOKEN_FILE:-}" ] || GMS_AUTH_TOKEN_FILE="${_gms_profile_context[4]}"
+    fi
     if [ -z "${GMS_CURL_CA_CERT:-}" ] \
         && [ "${_gms_profile_context[5]}" = "true" ]; then
         GMS_CURL_INSECURE=1
@@ -220,7 +228,7 @@ GMS_AUTH_TOKEN_FILE="${GMS_AUTH_TOKEN_FILE:-}"
 # up the enrolled token from the standard path unless the caller set an
 # explicit location; the 0600 + owner checks in _gms_refresh_bearer_token
 # still apply, so a looser or foreign file is rejected as before.
-if [ -z "$GMS_AUTH_TOKEN_FILE" ]; then
+if [ -z "$GMS_AUTH_TOKEN_FILE" ] && [ "$_gms_human_session" != "1" ]; then
     _gms_default_token="${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${GMS_RT_PROFILE}.token"
     # Presence selects service-token mode even when the candidate is unsafe.
     # The normal validator below then fails closed instead of silently using a

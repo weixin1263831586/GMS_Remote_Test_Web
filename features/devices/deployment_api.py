@@ -9,18 +9,16 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from foundation.cluster_port import get_cluster_service
-from foundation.error_model import ApiError
-
 from . import debug_service
 from . import deployment_service as service
-from .deployment_execution import query_database
+from .review_pages import LOGIN_ASSETS, LOGIN_PANEL
 
 
 router = APIRouter()
 
 
 class DatabaseQuery(BaseModel):
+    debug_session_id: str = Field(default="", pattern=r"^(?:[a-f0-9]{32})?$")
     worker_id: str = Field(min_length=1, max_length=128)
     device: str = Field(min_length=1, max_length=256)
     package: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$", max_length=255)
@@ -59,6 +57,8 @@ def deployment_status(request: Request, request_id: str):
     user = service.authorize(request, "devices.read", human_permission="devices.use_leased")
     payload = service.store().get(request_id, user.resource_owner_id)
     service.check_acl(request, payload["worker_id"], payload["serial"])
+    if payload["status"] == "interrupted" and user.has_permission("devices.use_leased"):
+        payload = service.reconcile_interrupted(request, payload)
     return {"success": True, "deployment": describe(request, payload)}
 
 
@@ -66,33 +66,26 @@ def deployment_status(request: Request, request_id: str):
 def approve_deployment(request: Request, request_id: str, background: BackgroundTasks):
     payload, source = service.approve(request, request_id)
     background.add_task(service.execute, payload, source)
-    return {"success": True, "deployment": {"id": payload["id"], "status": "running"}}
+    return {"success": True, "deployment": {"id": payload["id"], "status": "queued"}}
 
 
 @router.get("/api/devices/deployments/{request_id}/review", response_class=HTMLResponse)
 def review_deployment(request: Request, request_id: str):
-    deployment_status(request, request_id)
     # External assets comply with the application's CSP; names/results are
     # rendered as text by the browser, never interpolated into HTML.
     return HTMLResponse('''<!doctype html><html lang="zh-CN"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>APK 部署审批</title><link rel="stylesheet" href="/static/css/device-deployment-review.css">
+''' + LOGIN_ASSETS + '''
 <script src="/static/js/pages/device-deployment-review.js" defer></script></head>
-<body><main><h1>APK 部署审批</h1><p>核对制品和目标后，一次批准完成传输和安装。</p>
+<body><main><h1>APK 部署审批</h1><p>请登录发起申请的 Agent 所属平台账号。核对制品和目标后，一次批准完成传输和安装。</p>
+<button id="review-login-open" type="button">登录 / 切换管理员账号</button>
 <dl id="details"></dl><p id="status" role="status">正在读取部署请求…</p>
 <button id="approve" disabled>批准并安装</button><a href="/">返回平台</a>
-</main></body></html>''')
+</main>''' + LOGIN_PANEL + '''</body></html>''')
 
 
 @router.post("/api/devices/db/query")
 async def database_query(request: Request, body: DatabaseQuery):
-    user, serial, key = service.target(request, body.worker_id, body.device, "devices.read")
-    claim = get_cluster_service().repository.claims.active_claim(key)
-    if claim and claim.get("owner_id") != user.resource_owner_id:
-        raise ApiError.conflict("设备由其他用户占用")
-
-    def read():
-        with service.connection(body.worker_id) as ssh:
-            return query_database(ssh, serial, body)
-
-    return {"success": True, "data": await asyncio.to_thread(read)}
+    service.authorize(request, "devices.database.read")
+    return {"success": True, "data": await asyncio.to_thread(debug_service.database_query, request, body)}

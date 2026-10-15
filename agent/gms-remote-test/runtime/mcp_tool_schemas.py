@@ -49,9 +49,12 @@ ALL_TOOLS: list[dict[str, Any]] = [
                         ),
                     },
                     "args": {
+                        "type": "array",
+                        "items": {"type": "string"},
                         "description": (
-                            "Argument list or one shell-like string, e.g. "
-                            "\"RK3572 --state online --max-wait 300\"."
+                            'CLI arguments as a JSON array of strings, e.g. '
+                            '["RK3572", "--state", "online", "--max-wait", "300"]. '
+                            'Keep each argument separate; do not stringify the array.'
                         ),
                     },
                     "password_stdin": {
@@ -815,6 +818,10 @@ ALL_TOOLS: list[dict[str, Any]] = [
                         ),
                     },
                     "args": {
+                        "anyOf": [
+                            {"type": "array", "items": {"type": "string"}},
+                            {"type": "string"},
+                        ],
                         "description": (
                             "Optional logcat arguments as a list or one "
                             "string, e.g. \"-b crash -t 500\"."
@@ -910,8 +917,10 @@ ALL_TOOLS: list[dict[str, Any]] = [
         {
             "name": "gms_rt_reports_list",
             "description": (
-                "List finished test reports visible to the session (client, "
-                "type, pass/fail counts, timestamps)."
+                "List saved/cluster test reports visible to this account (client, "
+                "type, pass/fail counts, timestamps). This is not a complete "
+                "inventory of Tradefed results on Controller/Workers. "
+                "has_more=false only exhausts this saved-report collection."
             ),
             "inputSchema": {
                 "type": "object",

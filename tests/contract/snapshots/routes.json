@@ -1251,6 +1251,72 @@
     "methods": [
       "POST"
     ],
+    "path": "/api/devices/db/query"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/debug-sessions"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/devices/debug-sessions/{session_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/debug-sessions/{session_id}/actions"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/debug-sessions/{session_id}/approve"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/devices/debug-sessions/{session_id}/review"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/debug-sessions/{session_id}/revoke"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/deployments"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/devices/deployments/{request_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/deployments/{request_id}/approve"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/devices/deployments/{request_id}/review"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
     "path": "/api/devices/force-release"
   },
   {

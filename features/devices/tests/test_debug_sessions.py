@@ -27,7 +27,7 @@ from foundation.command_result import CommandResult
 from foundation.error_model import ApiError, register_api_error_handler
 
 
-IDENTITY = {"package": "com.example.app", "signers": ["a" * 64]}
+IDENTITY = {"package": "com.example.app", "signers": ["a" * 64], "version_code": "1", "version_name": ""}
 
 
 @pytest.fixture
@@ -54,6 +54,9 @@ def environment(tmp_path, monkeypatch):
     monkeypatch.setattr(deployment_service, "ensure_agent_worker_allowed", lambda *_args: None)
     monkeypatch.setattr(deployment_service, "ensure_agent_device_allowed", lambda *_args: None)
     monkeypatch.setattr(debug_service, "inspect_apk", lambda *_args: IDENTITY.copy())
+    monkeypatch.setattr(deployment_service, "inspect_apk", lambda *_args: IDENTITY.copy())
+    monkeypatch.setattr(deployment_service, "installed_identity", lambda *_args: None)
+    monkeypatch.setattr(debug_service, "require_installed", lambda *_args: IDENTITY.copy())
     app = FastAPI()
     register_api_error_handler(app)
 
@@ -98,6 +101,7 @@ def approve(client, session):
     assert response.status_code == 200, response.text
     active = response.json()["session"]
     if active["busy"]:
+        deployment_service.store().finish(active["baseline_deployment_id"], "completed", {"installed": True})
         debug_service.finish(active, active["busy"], "completed", {"installed": True})
     return debug_service.store().get(active["id"], active["owner_id"])
 
@@ -148,7 +152,7 @@ def test_repeated_installs_need_no_new_human_approval(environment):
             }, files={"apk_file": ("new.apk", baseline_bytes())})
         assert response.status_code == 200, response.text
         item = response.json()["deployment"]
-        assert item["status"] == "running" and "approval_url" not in item
+        assert item["status"] == "queued" and "approval_url" not in item
         assert "_ssh_config" not in item and "_debug_session" not in item
         execute.assert_called_once()
         work = execute.call_args.args[0]
@@ -220,9 +224,9 @@ def test_grants_fail_closed_before_device_execution(environment, change):
 def test_approval_cannot_borrow_other_owner_or_running_job(environment, source_type):
     client, repository, _, owner, *_ = environment
     held_owner = owner.id if source_type == "cluster-job" else "other"
+    session = request_session(client)
     repository.acquire_device_operation_claim("worker", ["worker:SERIAL"], owner_id=held_owner,
                                              source_type=source_type, source_id="held", ttl_seconds=3600)
-    session = request_session(client)
     with patch.object(debug_service, "execute_install") as execute:
         response = client.post("/api/devices/debug-sessions/" + session["id"] + "/approve",
                                headers={"x-test-principal": "session"})
@@ -404,3 +408,102 @@ def test_verified_apk_identity_and_invalid_signature(tmp_path):
     with patch.object(debug_identity, "binary", side_effect=lambda name: name), \
             patch.object(debug_identity, "run_local_command", return_value=CommandResult(code=1)), pytest.raises(ApiError):
         debug_identity.inspect_apk(artifact, sha)
+
+
+@pytest.mark.parametrize("phase", ["approval", "action"])
+def test_installed_signer_mismatch_blocks_debug(environment, phase):
+    client, repository, *_ = environment
+    session = request_session(client, operations="stop")
+    if phase == "action":
+        session = approve(client, session)
+    with patch.object(debug_service, "require_installed", debug_identity.require_installed), patch.object(
+        debug_identity, "installed_identity", return_value={**IDENTITY, "signers": ["b" * 64]},
+    ), patch.object(debug_execution, "perform") as perform:
+        if phase == "approval":
+            response = client.post("/api/devices/debug-sessions/" + session["id"] + "/approve",
+                                   headers={"x-test-principal": "session"})
+            assert repository.claims.active_claim("worker:SERIAL") is None
+            assert debug_service.store().get(session["id"], session["owner_id"])["status"] == "pending"
+        else:
+            response = client.post("/api/devices/debug-sessions/" + session["id"] + "/actions", json={"action": "stop"})
+        assert response.status_code == 403
+        perform.assert_not_called()
+
+
+def test_failed_baseline_revokes_grant_and_blocks_actions(environment):
+    client, repository, *_ = environment
+    session = request_session(client)
+    with patch.object(debug_service, "execute_install") as queued:
+        response = client.post("/api/devices/debug-sessions/" + session["id"] + "/approve",
+                               headers={"x-test-principal": "session"})
+    assert response.status_code == 200
+    with patch.object(debug_service.deployment_execution, "install", side_effect=ApiError.upstream_failure("failed", service="adb")):
+        debug_service.execute_install(queued.call_args.args[0])
+    assert debug_service.store().get(session["id"], session["owner_id"])["status"] == "revoked"
+    assert repository.claims.active_claim("worker:SERIAL") is None
+    with patch.object(debug_execution, "perform") as perform:
+        assert client.post("/api/devices/debug-sessions/" + session["id"] + "/actions", json={"action": "stop"}).status_code == 403
+        perform.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ["scope", "unapproved_operation", "package", "lease", "actor", "signer", "none"])
+def test_database_reads_are_app_scoped_leased_and_audited(environment, failure):
+    client, repository, *_ = environment
+    session = approve(client, request_session(client, operations="stop" if failure == "unapproved_operation" else "database_read"))
+    body = {"worker_id": "worker", "device": "SERIAL", "package": "com.example.app", "database": "app.db",
+            "table": "private_rows", "debug_session_id": session["id"]}
+    headers = {"x-test-scopes": "devices.read,devices.use_leased,devices.database.read"}
+    if failure == "scope":
+        headers["x-test-scopes"] = "devices.read,devices.use_leased"
+    elif failure == "package":
+        body["package"] = "com.other.app"
+    elif failure == "lease":
+        repository.claims.release(session["_claim_source"])
+    elif failure == "actor":
+        headers["x-test-actor"] = "agent:other"
+    with patch.object(debug_service.deployment_execution,
+                      "query_database", return_value={"rows": [["sensitive result"]]}) as query, patch.object(
+        debug_service, "require_installed", side_effect=ApiError.forbidden("signer") if failure == "signer" else None,
+    ):
+        response = client.post("/api/devices/db/query", json=body, headers=headers)
+    if failure == "none":
+        assert response.status_code == 200, response.text
+        query.assert_called_once()
+        history = debug_service.store().history(session["id"], session["owner_id"])
+        assert history[0]["details"] == {"actor_id": session["actor_id"], "package": body["package"],
+                                         "database": "app.db", "table": "private_rows"}
+        assert "sensitive result" not in str(history)
+    else:
+        assert response.status_code in {403, 409}, response.text
+        query.assert_not_called()
+
+
+def test_approval_does_not_allow_actions_before_baseline_completion(environment):
+    client, *_ = environment
+    session = request_session(client)
+    with patch.object(debug_service, "execute_install"):
+        assert client.post("/api/devices/debug-sessions/" + session["id"] + "/approve",
+                           headers={"x-test-principal": "session"}).status_code == 200
+    # Even if an operation slot becomes empty, the persisted baseline gates use.
+    current = debug_service.store().get(session["id"], session["owner_id"])
+    debug_service.finish(current, current["busy"], "interrupted", {})
+    with patch.object(debug_execution, "perform") as perform:
+        assert client.post("/api/devices/debug-sessions/" + session["id"] + "/actions",
+                           json={"action": "stop"}).status_code == 409
+        perform.assert_not_called()
+
+
+@pytest.mark.parametrize("existing", [True, False])
+def test_inaccessible_grant_renders_help_without_exposing_session(environment, existing):
+    client, *_ = environment
+    session = request_session(client)
+    sid = session["id"] if existing else "0" * 32
+    path = "/api/devices/debug-sessions/" + sid
+    headers = {"x-test-owner": "other", "x-test-principal": "session"}
+    page = client.get(path + "/review", headers=headers)
+    assert page.status_code == 200 and page.headers["content-type"].startswith("text/html")
+    assert "Agent 所属平台账号" in page.text
+    assert session["baseline_sha256"] not in page.text and session["package"] not in page.text
+    assert client.get(path, headers=headers).status_code == 404
+    assert client.post(path + "/approve", headers=headers).status_code == 404
+    assert client.get(path + "/review", headers={**headers, "x-test-role": "worker_service"}).status_code == 200

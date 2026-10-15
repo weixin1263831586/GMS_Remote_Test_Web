@@ -70,6 +70,10 @@ def test_doctor_warns_about_stale_mcp_without_failing_installation(monkeypatch):
     with patch.object(pm, "running_runtimes", return_value=processes):
         report = pm.doctor_report()
     assert report["ok"] is True
+    assert report["installation_healthy"] is True
+    assert report["registered_clients_healthy"] is True
+    assert report["all_mcp_sessions_current"] is False
+    assert report["reconnect_required"] is True
     assert report["mcp_processes"] == processes
     assert len(report["warnings"]) == 1
     assert "101" in report["warnings"][0] and "reconnect" in report["warnings"][0]

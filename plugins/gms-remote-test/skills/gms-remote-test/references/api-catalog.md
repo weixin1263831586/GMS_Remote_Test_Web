@@ -270,8 +270,11 @@ API callers get the same behavior without the CLI.
 - `gms-rt-apk-deployment-status <request_id>` reads
   `GET /api/devices/deployments/{request_id}`; completion/failure is authoritative.
 - `gms-rt-devices-db-query <worker_id> <device> <package> <database> [table]
-  [--columns a,b] [--limit N] [--offset N]` uses
-  `POST /api/devices/db/query`. This is a read-only, bounded SELECT under
+  --debug-session ID [--columns a,b] [--limit N] [--offset N]` uses
+  `POST /api/devices/db/query`. Requires `devices.database.read` and an active,
+  human-approved debug session explicitly granting `database_read` for the same
+  Agent, Worker, device and signed package. The device lease must remain valid;
+  accesses are audited without recording query results. This is a bounded SELECT under
   `run-as` and `sqlite3 -readonly`, with fallback to existing device-shell
   permissions for user 0. It never runs `adb root`/`su`, or accepts raw SQL.
 

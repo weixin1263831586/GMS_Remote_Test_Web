@@ -21,6 +21,7 @@ AGENT_ROLE = "agent_service"
 # ``has_permission`` composes, require_role never matches an agent principal.
 AGENT_SCOPES: dict[str, str] = {
     "devices.read": "read device inventory",
+    "devices.database.read": "read app databases within a human-approved app debug grant",
     "devices.lease": "lease/claim devices",
     "devices.use_leased": "operate on leased devices",
     "devices.inventory": "device inventory management (device_operator level)",

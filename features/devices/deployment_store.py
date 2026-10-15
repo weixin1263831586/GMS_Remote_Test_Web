@@ -33,7 +33,7 @@ class DeploymentStore:
             conn.execute("BEGIN IMMEDIATE")
             count = conn.execute(
                 "SELECT count(*) FROM deployments WHERE owner_id=? "
-                "AND status IN ('pending', 'running') AND expires_at>?",
+                "AND status IN ('pending', 'queued', 'running') AND expires_at>?",
                 (payload["owner_id"], time.time()),
             ).fetchone()[0]
             if count >= 5:
@@ -54,23 +54,26 @@ class DeploymentStore:
                   "result": json.loads(row["result"])}
         if result["status"] == "pending" and result["expires_at"] <= time.time():
             result["status"] = "expired"
-        if result["status"] == "running" and row["expires_at"] <= time.time():
+        if result["status"] in {"queued", "running"} and row["expires_at"] <= time.time():
             error = ApiError.dependency_timeout(
-                "部署执行已中断或超时，请核对设备安装状态后重新提交",
+                "部署执行租约已失效；请核实设备包名、签名及 APK SHA256，禁止盲目重放安装",
             ).envelope()
-            self.finish(request_id, "failed", error)
-            result["status"] = "failed"
-            result["result"].update(error)
+            with self.connect() as conn:
+                conn.execute("UPDATE deployments SET status='interrupted',result=? "
+                             "WHERE id=? AND status IN ('queued','running') AND expires_at<=?",
+                             (json.dumps({**result["result"], **error}), request_id, time.time()))
+            # A concurrent heartbeat or completion may have won the update.
+            return self.get(request_id, owner_id)
         return result
 
     def start(self, request_id: str, owner_id: str, approved_by: str):
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             changed = conn.execute(
-                "UPDATE deployments SET status='running', result=?, expires_at=? "
+                "UPDATE deployments SET status='queued', result=?, expires_at=? "
                 "WHERE id=? AND owner_id=? AND status='pending' AND expires_at>?",
                 (json.dumps({"approved_by": approved_by, "started_at": time.time()}),
-                 time.time() + 1200, request_id, owner_id, time.time()),
+                 time.time() + 120, request_id, owner_id, time.time()),
             ).rowcount
             if changed != 1:
                 raise ApiError.conflict("部署请求已审批、已过期或正在执行")
@@ -82,8 +85,37 @@ class DeploymentStore:
                                (request_id, owner_id)).fetchone()
             if row:
                 conn.execute("UPDATE deployments SET status='pending', result='{}', expires_at=? "
-                             "WHERE id=? AND owner_id=? AND status='running'",
+                             "WHERE id=? AND owner_id=? AND status='queued'",
                              (json.loads(row["payload"])["expires_at"], request_id, owner_id))
+
+    def begin_execution(self, request_id):
+        with self.connect() as conn:
+            changed = conn.execute("UPDATE deployments SET status='running',expires_at=? "
+                                   "WHERE id=? AND status='queued' AND expires_at>?",
+                                   (time.time() + 120, request_id, time.time())).rowcount
+        if changed != 1:
+            raise ApiError.conflict("部署已启动或执行租约失效，禁止重放安装")
+
+    def heartbeat(self, request_id):
+        with self.connect() as conn:
+            changed = conn.execute("UPDATE deployments SET expires_at=? "
+                                   "WHERE id=? AND status='running' AND expires_at>?",
+                                   (time.time() + 120, request_id, time.time())).rowcount
+        if changed != 1:
+            raise ApiError.conflict("部署执行租约失效，请核对设备状态")
+
+    def reconcile(self, request_id, owner_id, result, *, completed=False):
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT result FROM deployments WHERE id=? AND owner_id=? AND status='interrupted'",
+                               (request_id, owner_id)).fetchone()
+            if row:
+                previous = json.loads(row["result"])
+                if completed:
+                    previous.pop("error", None)
+                    previous.pop("code", None)
+                conn.execute("UPDATE deployments SET status=?,result=? WHERE id=? AND status='interrupted'",
+                             ("completed" if completed else "interrupted", json.dumps({**previous, **result}), request_id))
 
     def expire_pending(self):
         now = time.time()
@@ -104,6 +136,6 @@ class DeploymentStore:
         with self.connect() as conn:
             row = conn.execute("SELECT result FROM deployments WHERE id=?", (request_id,)).fetchone()
             prior = json.loads(row["result"]) if row else {}
-            conn.execute("UPDATE deployments SET status=?, result=? WHERE id=? AND status='running'", (
+            conn.execute("UPDATE deployments SET status=?, result=? WHERE id=? AND status IN ('queued','running')", (
                 status, json.dumps({**prior, **result}), request_id,
             ))

@@ -1014,10 +1014,9 @@ def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
         for item in processes if item["version"] != installed
     ]
     unique_actions = list(dict.fromkeys(actions))
-    ok = (
-        versions_consistent
-        and bool(host_env.get("tmpdir_writable"))
-        and all(
+    installation_healthy = versions_consistent and bool(host_env.get("tmpdir_writable"))
+    registered_clients_healthy = (
+        all(
             bool(item["skill_present"])
             and bool(item["profile"]["valid"])
             and bool(item["token"]["present"])
@@ -1029,7 +1028,11 @@ def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
         )
     )
     return {
-        "ok": ok,
+        "ok": installation_healthy and registered_clients_healthy,
+        "installation_healthy": installation_healthy,
+        "registered_clients_healthy": registered_clients_healthy,
+        "all_mcp_sessions_current": not warnings,
+        "reconnect_required": bool(warnings),
         "versions": {
             "running": running,
             "installed": installed or None,

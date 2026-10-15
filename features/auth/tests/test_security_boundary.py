@@ -147,6 +147,24 @@ class SecurityBoundaryTests(SecurityBoundaryFixtureTests):
         self.assertEqual(skill_archive.status_code, 200)
         self.assertEqual(skill_archive.headers["content-type"], "application/zip")
 
+    def test_device_review_login_shells_are_public_but_request_data_and_approval_are_protected(self):
+        for kind in ("deployments", "debug-sessions"):
+            with self.subTest(kind=kind):
+                path = "/api/devices/" + kind + "/" + "a" * 32
+                page = self.client.get(path + "/review")
+                self.assertEqual(page.status_code, 200)
+                self.assertIn('id="review-login-form"', page.text)
+                self.assertIn('value="gms"', page.text)
+                self.assertNotIn('"sha256":', page.text)
+                self.assertEqual(self.client.get(path).status_code, 401)
+                self.assertEqual(self.client.post(path + "/approve").status_code, 401)
+                self.assertEqual(self.client.post(path + "/review").status_code, 401)
+                self.assertEqual(self.client.get("/api/devices/" + kind + "/invalid/review").status_code, 401)
+        schema = self.client.app.openapi()
+        for route in ("/api/devices/deployments/{request_id}/review",
+                      "/api/devices/debug-sessions/{session_id}/review"):
+            self.assertEqual(schema["paths"][route]["get"]["security"], [])
+
     def test_anonymous_firmware_share_download_uses_bearer_link_boundary(self):
         with patch(
             "features.firmware.shares_api._find_record",

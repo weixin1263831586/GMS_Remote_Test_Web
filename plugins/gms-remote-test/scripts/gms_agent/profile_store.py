@@ -269,6 +269,7 @@ def _token_digest(path_value: str) -> str:
 
 def resolve_direct_cli_context(
     explicit_profile: str = "", explicit_server: str = "",
+    *, human_session: bool | None = None,
 ) -> DirectCliContext:
     """Resolve direct CLI routing without guessing across distinct identities.
 
@@ -280,6 +281,9 @@ def resolve_direct_cli_context(
     """
 
     requested_server = explicit_server.rstrip("/")
+    if human_session is None:
+        human_session = os.environ.get("GMS_RT_HUMAN_SESSION", "") == "1"
+    human_session = bool(human_session and os.environ.get("GMS_AGENT_PROCESS") != "1")
     if explicit_profile:
         if not validate_profile_name(explicit_profile):
             return _direct_cli_error(f"无效的 Agent profile 名: {explicit_profile}")
@@ -295,6 +299,8 @@ def resolve_direct_cli_context(
                 f"GMS_RT_PROFILE={explicit_profile} 绑定 {server}，"
                 f"拒绝向 {requested_server} 发送其凭据。"
             )
+        if human_session:
+            return human_cli_context(server, ca_cert(flat))
         return {
             "mode": "profile",
             "profile": explicit_profile,
@@ -317,16 +323,13 @@ def resolve_direct_cli_context(
             if controller_url(item[1]) == requested_server
         ]
         if not loaded:
-            return {
-                "mode": "human",
-                "profile": "direct",
-                "server": requested_server,
-                "ca_cert": "",
-                "token_file": "",
-                "insecure": "",
-                "error": "",
-            }
+            if human_session:
+                return human_cli_context(requested_server, "")
+            return {"mode": "human", "profile": "direct", "server": requested_server,
+                    "ca_cert": "", "token_file": "", "insecure": "", "error": ""}
     elif not loaded:
+        if human_session:
+            return _direct_cli_error("未配置 Controller，请指定 --server 或安装 profile。")
         return {
             "mode": "none",
             "profile": "",
@@ -337,7 +340,6 @@ def resolve_direct_cli_context(
             "error": "",
         }
 
-    human_session = os.environ.get("GMS_RT_HUMAN_SESSION", "") == "1"
     if len(loaded) == 1 and not requested_server and not human_session:
         name, flat = loaded[0]
         return {
@@ -362,15 +364,7 @@ def resolve_direct_cli_context(
 
     server, profile_ca, insecure = next(iter(transports))
     if human_session:
-        return {
-            "mode": "human",
-            "profile": "direct",
-            "server": requested_server or server,
-            "ca_cert": profile_ca,
-            "token_file": "",
-            "insecure": "",
-            "error": "",
-        }
+        return human_cli_context(requested_server or server, profile_ca)
     token_paths = [flat.get("token_file", "") for _name, flat in loaded]
     token_digests = {_token_digest(path) for path in token_paths}
     shared_token = token_paths[0] if token_digests and "" not in token_digests \
@@ -390,3 +384,9 @@ def resolve_direct_cli_context(
         "insecure": insecure if shared_token else "",
         "error": "",
     }
+
+
+def human_cli_context(server: str, ca: str) -> DirectCliContext:
+    """Separate human cookies by Controller, independently of client/token choice."""
+    return {"mode": "human", "profile": "human-" + hashlib.sha256(server.encode()).hexdigest()[:16],
+            "server": server, "ca_cert": ca, "token_file": "", "insecure": "", "error": ""}

@@ -35,6 +35,12 @@ Use `gms_rt_commands` / `gms_rt_describe` for discovery and `gms_rt_run`
 only as the read-only escape hatch. CLI automation must use `--json
 --non-interactive` and treat the JSON `ok` plus exit code as authoritative.
 
+Pass `gms_rt_run.args` as an actual string array, for example
+`{"command":"reports-analyze","args":["REPORT_TIMESTAMP"]}`. Never pass a
+shell command string. `gms_rt_reports_list` covers saved/cluster reports visible
+to the account; an exhausted list does not prove a Worker has no Tradefed
+results. See the report lookup guidance in `references/agent-workflows.md`.
+
 ## Install and diagnose
 
 Production installation uses a Controller CA distributed out-of-band and
@@ -93,6 +99,9 @@ Reconnect MCP after an update; the updater does not interrupt active sessions.
   `GMS_RT_PROFILE=NAME gms-rt-agent-enroll CODE`.
 - Never ask for, hold, transmit, print, log, or persist platform/admin
   passwords. Password login and elevation are human-shell operations only.
+- In a human terminal, `gms-rt-approval-create` automatically reuses the
+  Controller's human session or prompts for login. Agent/MCP and unattended
+  calls never inherit that cookie mode or automatically prompt for passwords.
 - `gms_rt_run` may execute only commands catalogued as
   `agent_safe_unattended`.
 - Interactive terminal/scrcpy/raw shell and destructive evidence clearing
@@ -109,7 +118,8 @@ Reconnect MCP after an update; the updater does not interrupt active sessions.
   `gms_rt_apk_deployment_status`; never ask the user to copy a token for
   this workflow. Upload only after the build finishes (approval TTL: 5 min).
 - For DB coordinates use `gms_rt_devices_db_query` (table/columns/pagination,
-  no raw SQL). It requires device sqlite3 and app/user-0 access through
+  no raw SQL). Supply `debug_session_id` from a human-approved session with
+  `database_read`, and an Agent token with `devices.database.read`. It requires device sqlite3 and app/user-0 access through
   run-as or the shell's existing permissions; it never enables root. Unsupported
   environments return actionable errors. Screenshots/UI trees stay read-only.
 - For repeated build/install/UI loops, request `gms_rt_debug_session_request`

@@ -14,7 +14,7 @@ _gms_rt_command_usage() {
         gms-rt-debug-session-status|gms-rt-debug-session-revoke) printf '%s' "$1 <session_id>" ;;
         gms-rt-debug-action) printf '%s' 'gms-rt-debug-action <session_id> <action> [--activity CLASS] [--x N] [--y N] [--end-x N] [--end-y N] [--duration-ms N] [--text VALUE] [--key KEY]' ;;
         gms-rt-apk-deployment-status) printf '%s' 'gms-rt-apk-deployment-status <request_id>' ;;
-        gms-rt-devices-db-query) printf '%s' 'gms-rt-devices-db-query <worker_id> <device> <package> <database> [table] [--columns a,b] [--limit N] [--offset N]' ;;
+        gms-rt-devices-db-query) printf '%s' 'gms-rt-devices-db-query <worker_id> <device> <package> <database> [table] --debug-session ID [--columns a,b] [--limit N] [--offset N]' ;;
         gms-rt-adb-forward-status|gms-rt-auth-credential-mode|gms-rt-auth-elevation-reset|gms-rt-auth-logout|gms-rt-auth-status|gms-rt-cluster-workers|gms-rt-config-read|gms-rt-desktop-vnc-status|gms-rt-desktop-vnc-stop|gms-rt-devices-list|gms-rt-devices-user-locked|gms-rt-reports-list|gms-rt-ssh-route|gms-rt-system-capabilities|gms-rt-system-commands|gms-rt-system-docs|gms-rt-system-health|gms-rt-system-help|gms-rt-system-selfcheck|gms-rt-system-version|gms-rt-test-clean|gms-rt-test-logs-stream|gms-rt-test-status|gms-rt-users-current|gms-rt-users-list|gms-rt-vpn-connect|gms-rt-vpn-disconnect|gms-rt-vpn-status)
             printf '%s' "$1"
             ;;
@@ -151,7 +151,7 @@ _gms_rt_command_summary() {
         gms-rt-agent-tokens) printf '%s' 'List Agent Service Tokens (admin; metadata only, raw tokens are never stored)' ;;
         gms-rt-agent-enroll-code) printf '%s' 'Mint a one-shot enrollment code for a build server agent (admin + elevation)' ;;
         gms-rt-agent-token-revoke) printf '%s' 'Revoke an Agent Service Token by id (admin + elevation)' ;;
-        gms-rt-approval-create) printf '%s' 'Create a one-shot approval token for a destructive agent action (human session only; multi-profile hosts: GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login <user> first)' ;;
+        gms-rt-approval-create) printf '%s' 'Create a one-shot approval token (human terminal: auto-login/session reuse; scripts: GMS_RT_HUMAN_SESSION=1)' ;;
         gms-rt-cluster-workers) printf '%s' 'List registered Cluster Workers and their current availability' ;;
         gms-rt-cluster-devices) printf '%s' 'List the authoritative cross-Worker device inventory, optionally filtered by Worker or serial' ;;
         gms-rt-cluster-resolve) printf '%s' 'Resolve an exact device serial to its owning Worker without guessing ambiguous matches' ;;
@@ -311,7 +311,9 @@ gms-rt-system-commands() {
             then {external_side_effects: true, resource_intensive: false, required_scope: "devices.use_leased"}
             elif test("^gms-rt-debug-session-status$")
             then {external_side_effects: false, resource_intensive: false, required_scope: "devices.read"}
-            elif test("^gms-rt-(apk-deployment-status|devices-db-query)$")
+            elif test("^gms-rt-devices-db-query$")
+            then {external_side_effects: false, resource_intensive: true, required_scope: "devices.database.read"}
+            elif test("^gms-rt-apk-deployment-status$")
             then {external_side_effects: false, resource_intensive: false, required_scope: "devices.read"}
             elif test("apk-analyze-attachment")
             then {external_side_effects: false, resource_intensive: true, required_scope: "apk.analyze_own"}
@@ -572,7 +574,7 @@ ${YELLOW}APK Analysis:${NC}
   gms-rt-debug-session-status    - Read debug grant and recent operation status
   gms-rt-debug-session-revoke    - Revoke this Agent's debug grant
   gms-rt-debug-action            - Run a typed operation inside a debug grant
-  gms-rt-devices-db-query        - Read bounded app SQLite rows without arbitrary shell approval
+  gms-rt-devices-db-query        - Read app SQLite rows within a human-approved debug session
   gms-rt-apk-resolve             - Resolve a suite module to its APK/JAR artifact
   gms-rt-apk-analyze             - Start JADX analysis for a resolved suite module
   gms-rt-apk-status              - Read one task status, or list all tasks

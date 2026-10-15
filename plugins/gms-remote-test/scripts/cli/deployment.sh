@@ -35,11 +35,12 @@ gms-rt-devices-db-query() {
     [ "$#" -ge 4 ] || return "$GMS_RT_EXIT_USAGE"
     local worker="$1" device="$2" package="$3" database="$4"
     shift 4
-    local table='' columns='' limit=100 offset=0
+    local table='' columns='' limit=100 offset=0 session=''
     if [ "$#" -gt 0 ] && [[ "$1" != --* ]]; then table="$1"; shift; fi
     while [ "$#" -gt 0 ]; do
         [ "$#" -ge 2 ] || return "$GMS_RT_EXIT_USAGE"
         case "$1" in
+            --debug-session) session="$2" ;;
             --columns) columns="$2" ;;
             --limit) limit="$2" ;;
             --offset) offset="$2" ;;
@@ -47,12 +48,13 @@ gms-rt-devices-db-query() {
         esac
         shift 2
     done
+    [[ "$session" =~ ^[a-f0-9]{32}$ ]] || return "$GMS_RT_EXIT_USAGE"
     [[ "$limit" =~ ^[0-9]+$ ]] && [[ "$offset" =~ ^[0-9]+$ ]] || return "$GMS_RT_EXIT_USAGE"
     local data
     data=$(jq -cn --arg worker "$worker" --arg device "$device" --arg package "$package" \
-        --arg database "$database" --arg table "$table" --arg columns "$columns" \
+        --arg session "$session" --arg database "$database" --arg table "$table" --arg columns "$columns" \
         --argjson limit "$limit" --argjson offset "$offset" \
-        '{worker_id:$worker,device:$device,package:$package,database:$database,table:$table,
+        '{debug_session_id:$session,worker_id:$worker,device:$device,package:$package,database:$database,table:$table,
           columns:($columns|split(",")|map(select(length>0))),limit:$limit,offset:$offset}') || return "$GMS_RT_EXIT_USAGE"
     api_call '/devices/db/query' POST "$data"
 }

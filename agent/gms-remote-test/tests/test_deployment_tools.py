@@ -26,11 +26,11 @@ def test_database_handler_uses_typed_columns_and_pagination():
     run = Mock(return_value=("{}", False))
     module.handlers(run)["gms_rt_devices_db_query"]({
         "worker_id": "worker", "device": "SERIAL", "package": "com.example.app", "database": "launcher.db",
-        "table": "favorites", "columns": ["cellX", "cellY"], "limit": 20, "offset": 40,
+        "debug_session_id": "a" * 32, "table": "favorites", "columns": ["cellX", "cellY"], "limit": 20, "offset": 40,
     })
     run.assert_called_once_with("gms-rt-devices-db-query", [
         "worker", "SERIAL", "com.example.app", "launcher.db", "favorites",
-        "--columns", "cellX,cellY", "--limit", "20", "--offset", "40",
+        "--debug-session", "a" * 32, "--columns", "cellX,cellY", "--limit", "20", "--offset", "40",
     ], timeout=90)
 
 

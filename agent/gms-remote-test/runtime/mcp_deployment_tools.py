@@ -27,14 +27,15 @@ SCHEMAS = [
     schema("gms_rt_devices_db_query", "Read user 0 app SQLite rows with -readonly, using run-as "
            "or the device shell's existing access (no adb root/su). "
            "Omit table to list tables; specify columns and pagination to check coordinates. "
-           "No raw SQL, shell, root, or approval token. Requires device sqlite3. "
+           "Requires devices.database.read plus an active debug session with database_read permission for this app. No raw SQL, shell, root, or approval token. Requires device sqlite3. "
            "CLI: gms-rt-devices-db-query <worker_id> <device> <package> <database> [table] "
-           "[--columns a,b] [--limit N] [--offset N].",
+           "--debug-session ID [--columns a,b] [--limit N] [--offset N].",
            {**TARGET, "package": {"type": "string"}, "database": {"type": "string"},
+            "debug_session_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
             "table": {"type": "string"}, "columns": {"type": "array", "items": {"type": "string"}, "maxItems": 32},
             "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
             "offset": {"type": "integer", "minimum": 0, "maximum": 1000000, "default": 0}},
-           ["worker_id", "device", "package", "database"]),
+           ["worker_id", "device", "package", "database", "debug_session_id"]),
 ]
 
 
@@ -56,8 +57,11 @@ def handlers(run_cli):
         argv = [str(args.get(key) or "") for key in ("worker_id", "device", "package", "database")]
         if not all(argv):
             return "worker_id, device, package and database are required", True
+        if not args.get("debug_session_id"):
+            return "debug_session_id is required", True
         if args.get("table"):
             argv.append(str(args["table"]))
+        argv.extend(["--debug-session", str(args["debug_session_id"])])
         if args.get("columns"):
             if not isinstance(args["columns"], list) or not all(isinstance(c, str) for c in args["columns"]):
                 return "columns must be a string array", True

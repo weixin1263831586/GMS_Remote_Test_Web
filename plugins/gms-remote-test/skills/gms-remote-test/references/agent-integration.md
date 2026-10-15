@@ -242,7 +242,7 @@ the user under their own session:
 ```bash
 # 1. User (human session) mints the approval — the agent only learns the token.
 #    On a host with agent profiles enter the human session first:
-#    GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login <username>   (see agent-workflows 5.3)
+#    gms-rt-approval-create prompts in a human terminal (see agent-workflows 5.3)
 gms-rt-approval-create --tool gms_rt_burn_firmware --device RK3572GMS1 \
   --command "burn_firmware:RK3572GMS1" --json --non-interactive
 # 2. Agent executes the burn with that approval token; without it the

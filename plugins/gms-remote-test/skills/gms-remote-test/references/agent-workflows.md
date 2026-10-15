@@ -70,6 +70,27 @@ Verified behaviors:
 - Event polling is incremental: pass the previous `next_after` to avoid
   re-reading history.
 
+### Report lookup boundaries
+
+`gms_rt_reports_list` lists saved and cluster reports visible to the account.
+`has_more=false` means that collection is exhausted, not that a timestamp is
+absent from the Controller/Worker's suite results. Do not infer that a run was
+manual or untracked from this list alone, or search the build client's home
+directory for paths that belong to the suite host.
+
+Use `gms_rt_test_suites_list` to discover configured suite names and host-side
+paths. Describe `gms-rt-test-suites-result` before attempting suite results;
+its current route requires human elevation. An Agent must report this access
+boundary and request that the human use the platform's test-results page to
+locate/export the result, rather than attempt password elevation or raw SSH.
+Once the result is available as an owned saved report or a local exported
+ZIP/XML, `gms-rt-reports-analyze` can analyze that artifact. A remote suite path
+is not a local file path on the build client.
+
+Generic MCP calls use actual arrays, e.g.
+`{"command":"reports-analyze","args":["2026.10.13_17.21.15.621_7814"]}`.
+Do not retry variations of a shell string when the tool requests an array.
+
 ## 4. Elevation matrix (human-gated)
 
 | State | Elevated read-only commands | Mutating commands |
@@ -193,21 +214,24 @@ When a task genuinely needs a state-changing device command (`am`, `pm`,
 forever (interactive/manual by catalog). The approval path:
 
 1. Tell the user the exact command and device, and get their approval.
-2. The user runs, in their own (human) session. On a host with agent
-   profiles, a plain `gms-rt-*` call resolves to an agent service token and
-   the server rejects the mint with `agent_forbidden` — enter the human
-   session first, in the same shell:
+2. The user runs the exact approval command in their own interactive terminal.
+   Human-only commands automatically use a separate human session for the
+   selected Controller. A valid session is reused; otherwise the CLI prompts
+   for login (username defaults to gms). Agent profiles provide Controller/TLS
+   settings without supplying their service tokens to this operation. Multiple
+   Controllers require an explicit choice or `--profile NAME` / `--server URL`.
 
 ```bash
-# 0. One-time per shell: switch this shell to a human session
-#    (env-prefix form; "VAR=x && cmd" does NOT export the variable):
-GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login <username>
-
-# 1. Mint the one-shot approval token:
 gms-rt-approval-create --tool gms_rt_shell_exec \
     --device RK3562GMS7 \
     --command 'am broadcast -a android.intent.action.BOOT_COMPLETED'
 ```
+
+   Human scripts can opt into cookie mode explicitly with
+   `export GMS_RT_HUMAN_SESSION=1` before login and approval. Prefixing only the
+   login command does not carry the mode into subsequent commands. JSON,
+   non-interactive and Agent invocations never automatically switch identity
+   or prompt for passwords. Agents must never perform the human login step.
 
 3. Pass the returned token within its 5-minute TTL:
 

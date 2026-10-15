@@ -3,6 +3,28 @@
 # Authentication Commands
 # ==============================================================================
 
+_gms_human_interactive() {
+    [ "${_gms_profile_mode:-}" = "human" ] && [ "${GMS_AGENT_PROCESS:-}" != "1" ] \
+        && [ -z "${GMS_AUTH_TOKEN_FILE:-}" ] \
+        && [ "$GMS_RT_NON_INTERACTIVE" != "1" ] && [ "$GMS_RT_OUTPUT" != "json" ] \
+        && [ -t 0 ] && [ -t 2 ]
+}
+
+_gms_ensure_human_login() {
+    # Only an explicitly human context in a terminal can prompt. Never retry
+    # an Agent credential as a cookie, and never prompt automated callers.
+    _gms_human_interactive || return 0
+    local response
+    response=$(api_call "/auth/status") || return $?
+    if printf '%s' "$response" | jq -e \
+        '.authenticated == true and .credential_mode == "session_cookie"' >/dev/null 2>&1; then
+        info "人工会话: $(printf '%s' "$response" | jq -r '.user.username // ""') ($SERVER_URL)" >&2
+        return 0
+    fi
+    info "此操作需要人工登录: $SERVER_URL" >&2
+    gms-rt-auth-login
+}
+
 gms-rt-auth-status() {
     check_jq || return 1
     local response
@@ -47,7 +69,8 @@ gms-rt-auth-login() {
         IFS= read -r password || true
     fi
     [ -z "$username" ] && [ "$GMS_RT_NON_INTERACTIVE" != "1" ] && {
-        read -r -p "Username: " username
+        read -r -p "Username [gms]: " username
+        username="${username:-gms}"
     }
     [ -z "$password" ] && [ "$GMS_RT_NON_INTERACTIVE" != "1" ] && {
         read -r -s -p "Password: " password
@@ -485,13 +508,14 @@ gms-rt-approval-create() {
                 printf 'tool + device + command. Requires a HUMAN session: the server rejects\n'
                 printf 'agent service tokens here (agent_forbidden).\n'
                 printf '\n'
-                printf 'On a host with agent profiles, a plain gms-rt-* call resolves to an\n'
-                printf 'agent token — enter the human session first, in the same shell:\n'
-                printf '\n'
-                printf '  GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login <username>\n'
-                printf '\n'
-                printf 'then re-run this command (env-prefix form, NOT "VAR=x && cmd":\n'
-                printf 'a bare && does not export the variable into the command).\n'
+                printf 'In an interactive human terminal this command selects a human\n'
+                printf 'session automatically, reuses it, or prompts for login if expired.\n'
+                printf 'A named profile chooses only Controller/TLS for human operations.\n'
+                printf 'Multiple Controllers still require an explicit choice.\n'
+                printf '\nFor non-interactive human use, opt in for EVERY command:\n'
+                printf '  export GMS_RT_HUMAN_SESSION=1\n'
+                printf '  gms-rt-auth-login <username>\n'
+                printf 'Agent processes never switch to human cookies or prompt for passwords.\n'
                 return 0
                 ;;
             --tool) shift; tool="${1:-}" ;;
@@ -518,6 +542,7 @@ gms-rt-approval-create() {
     }
     check_jq || return 1
     local data response
+    _gms_ensure_human_login || return $?
     data=$(jq -cn \
         --arg tool "$tool" --arg device "$device" --arg command "$command" \
         --arg sha "$firmware_sha256" \
@@ -536,7 +561,7 @@ gms-rt-approval-create() {
         _agent_forbidden=$(printf '%s' "$response" | jq -r '.detail.agent_forbidden // .agent_forbidden // empty' 2>/dev/null || true)
         error "Approval creation failed: $(extract_api_error "$response")"
         if [ -n "$_agent_forbidden" ] && [ "$_agent_forbidden" != "false" ]; then
-            diagnostic "审批令牌仅限人工会话铸造。多 profile 主机请先: GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login <用户名>, 再在同一 shell 重试。"
+            diagnostic "请在人工终端直接重试审批命令；将自动登录或复用人工会话。脚本须先 export GMS_RT_HUMAN_SESSION=1，再人工登录。"
         fi
         [ "$api_status" -eq 0 ] || return "$api_status"
         return "$GMS_RT_EXIT_PERMISSION"
