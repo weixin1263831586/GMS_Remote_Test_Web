@@ -56,7 +56,7 @@ async def prepare_deployment(
 
 @router.get("/api/devices/deployments/{request_id}")
 def deployment_status(request: Request, request_id: str):
-    user = service.authorize(request, "devices.read")
+    user = service.authorize(request, "devices.read", human_permission="devices.use_leased")
     payload = service.store().get(request_id, user.resource_owner_id)
     service.check_acl(request, payload["worker_id"], payload["serial"])
     return {"success": True, "deployment": describe(request, payload)}

@@ -36,10 +36,14 @@ def store():
     return DeploymentStore(get_cluster_service().repository.db_path.parent / "apk-deployments")
 
 
-def authorize(request, permission: str):
+def authorize(request, permission: str, *, human_permission: str | None = None):
     user = get_authenticated_user(request)
     if user is None:
         raise ApiError.unauthenticated()
+    # Human operators review their own requests using their existing device
+    # operation permission. Agent readers must retain the explicit read scope.
+    if human_permission and getattr(request.state, "auth_method", "") == "session":
+        permission = human_permission
     if not user.has_permission(permission):
         raise ApiError.forbidden("缺少权限：" + permission)
     if getattr(request.state, "auth_method", "") == "machine_authority":

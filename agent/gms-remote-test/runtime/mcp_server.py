@@ -117,7 +117,7 @@ mcp_debug_tools = _load_typed_tools("mcp_debug_tools")
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.53"
+SERVER_VERSION = "0.22.54"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -2884,12 +2884,21 @@ def handle(message: dict[str, Any]) -> None:
 
 def main() -> None:
     for line in sys.stdin:
+        message = None
         try:
             message = json.loads(line)
             if isinstance(message, dict):
                 handle(message)
         except Exception as error:
             print(f"gms-remote-test MCP protocol error: {error}", file=sys.stderr)
+            # Registry/schema/dispatch failures happen outside the tool's
+            # exception boundary too. Always answer requests with an id so
+            # clients receive the failure instead of waiting for a timeout.
+            if isinstance(message, dict) and message.get("id") is not None:
+                response(message["id"], error={
+                    "code": -32603,
+                    "message": "GMS MCP request failed; reconnect the GMS MCP server or run gms-agent doctor --json",
+                })
 
 
 if __name__ == "__main__":

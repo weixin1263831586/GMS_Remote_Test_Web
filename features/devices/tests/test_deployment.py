@@ -57,7 +57,8 @@ def environment(tmp_path, monkeypatch):
         scopes = frozenset(request.headers.get("x-test-scopes", "devices.read,devices.use_leased").split(","))
         request.state.current_user = CurrentUser(
             id="agent:one" if method != "session" else owner, username=owner,
-            role="agent_service", extra_permissions=scopes, resource_owner_id=owner,
+            role=request.headers.get("x-test-role", "user") if method == "session" else "agent_service",
+            extra_permissions=frozenset() if method == "session" else scopes, resource_owner_id=owner,
         )
         request.state.auth_method = method
         return await call_next(request)
@@ -90,6 +91,19 @@ def test_agent_cannot_self_approve_and_other_owner_cannot_read(environment):
     endpoint = "/api/devices/deployments/" + item["id"]
     assert client.post(endpoint + "/approve").status_code == 403
     assert client.get(endpoint, headers={"x-test-owner": "other"}).status_code == 404
+    repository.acquire_device_operation_claim.assert_not_called()
+
+
+def test_human_operator_can_read_own_review_without_agent_read_scope(environment):
+    client, repository, _auth = environment
+    item = upload(client)
+    endpoint = "/api/devices/deployments/" + item["id"]
+    human = {"x-test-principal": "session"}
+    assert client.get(endpoint, headers=human).status_code == 200
+    assert client.get(endpoint + "/review", headers=human).status_code == 200
+    assert client.get(endpoint, headers={**human, "x-test-owner": "other"}).status_code == 404
+    assert client.get(endpoint, headers={**human, "x-test-role": "worker_service"}).status_code == 403
+    assert client.get(endpoint, headers={"x-test-scopes": "devices.use_leased"}).status_code == 403
     repository.acquire_device_operation_claim.assert_not_called()
 
 
