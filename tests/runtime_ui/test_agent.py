@@ -1,7 +1,10 @@
 """Agent access, enrollment UI and platform quick actions."""
 
 import json
+import os
 import re
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from tests.runtime_ui.harness import RuntimeUiHarness, expect
 
@@ -78,7 +81,7 @@ class RuntimeAgentTests(RuntimeUiHarness):
             )
             self.assertEqual(
                 page.locator("#agent-access-panel thead th").all_text_contents()[:2],
-                ["Agent", "Token ID"],
+                ["Agent", "状态"],
             )
             scopes = page.evaluate(
                 "() => Array.from(document.querySelectorAll("
@@ -117,6 +120,152 @@ class RuntimeAgentTests(RuntimeUiHarness):
                 )
             )
             self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_enrollment_layout_preserves_selection_and_submits_once(self):
+        page = self.new_page()
+        errors, mutations = [], []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        now = datetime.now(timezone.utc)
+        tokens = [{"id": "agt_fixture", "name": '<img src=x onerror="window.injected=true">',
+                   "owner_user_id": "ui-admin", "scopes": ["devices.read", "tests.execute", "build.execute"],
+                   "allowed_workers": "*", "allowed_devices": "SERIAL-01", "created_at": now.isoformat(),
+                   "expires_at": (now + timedelta(days=90)).isoformat(), "last_used_at": now.isoformat()}]
+        page.route("**/api/auth/agent-tokens", lambda route: route.fulfill(
+            content_type="application/json", body=json.dumps({"success": True, "tokens": tokens})))
+
+        def create(route):
+            mutations.append(route.request.post_data_json)
+            route.fulfill(content_type="application/json", body=json.dumps({
+                "success": True, "enrollment": {"code": "AAAAAA-BBBBBB-CCCCCC",
+                                                "expires_at": (now + timedelta(minutes=5)).isoformat()},
+            }))
+
+        page.route("**/api/auth/agent-enrollment-codes", create)
+
+        def preview(name):
+            directory = os.environ.get("GMS_AGENT_UI_PREVIEW_DIR")
+            if directory:
+                Path(directory).mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=str(Path(directory) / (name + ".png")))
+
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('users')")
+            self.close_initial_modals(page)
+            page.locator("#agent-access-tab").click()
+            page.wait_for_function("document.querySelectorAll('#agent-access-scopes input').length === 16")
+            self.assertEqual(page.locator(".agent-access-table thead th").count(), 7)
+            self.assertEqual(page.locator("#agent-access-tokens img").count(), 0)
+            self.assertFalse(page.evaluate("Boolean(window.injected)"))
+            self.assertIn("agt_fixture", page.locator("#agent-access-tokens").inner_text())
+            self.assertTrue(page.locator("#agent-access-tokens tr").evaluate("""row =>
+                Array.from(row.children).every(cell => getComputedStyle(cell).whiteSpace === 'nowrap')
+            """))
+            page.locator(".agent-token-scope-link").click()
+            expect(page.locator("#agent-access-scopes-modal")).to_be_visible()
+            expect(page.locator("#agent-access-token-scope-list")).to_contain_text("build.execute")
+            page.keyboard.press("Escape")
+            expect(page.locator("#agent-access-scopes-modal")).not_to_be_visible()
+            preview("agent-access-list")
+            for _ in range(2):
+                page.locator("#agent-access-create-toggle").click()
+                expect(page.locator("#agent-access-enroll-form")).to_be_visible()
+                expect(page.locator("#agent-access-create-modal")).to_be_visible()
+                expect(page.locator(".agent-access-list-section")).to_be_visible()
+                page.wait_for_function("document.activeElement.id === 'agent-access-name'")
+                expect(page.locator("#agent-access-scopes")).to_be_visible()
+                self.assertTrue(page.locator(".agent-access-target-details").evaluate("el => el.open"))
+                self.assertEqual(page.locator("#agent-access-scopes input:checked").count(), 11)
+                page.locator(".agent-access-target-details summary").click()
+                page.keyboard.press("Escape")
+                expect(page.locator("#agent-access-create-modal")).not_to_be_visible()
+                expect(page.locator("#agent-access-create-toggle")).to_be_focused()
+            self.assertEqual(mutations, [])
+            page.locator("#agent-access-search").fill("agt_fixture")
+            self.assertEqual(page.locator("#agent-access-tokens tr").count(), 1)
+            page.locator("#agent-access-search").fill("absent")
+            expect(page.locator("#agent-access-tokens")).to_contain_text("没有匹配")
+            page.locator("#agent-access-search").fill("")
+            page.locator("#agent-access-create-toggle").click()
+            page.locator("#agent-access-name").fill("kimi-build03")
+            preview("agent-access-create")
+            page.locator("[data-click='agentAccessSetScopeSelection'][data-a0='none']").click()
+            page.evaluate("agentAccessReload()")
+            page.wait_for_function("!document.getElementById('agent-access-refresh').disabled")
+            self.assertEqual(page.locator("#agent-access-scopes input:checked").count(), 0)
+            page.locator("[data-click='agentAccessSetScopeSelection'][data-a0='default']").click()
+            page.locator("#agent-access-scopes input[value='build.execute']").check()
+            self.assertEqual(page.locator("#agent-access-scopes input:checked").count(), 12)
+            page.locator("#agent-access-workers").fill("worker-a,worker-b")
+            page.locator("#agent-access-devices").fill("SERIAL-01")
+            expect(page.locator("#agent-access-target-summary")).to_have_text("2 个 Worker · 1 个 设备")
+            page.locator("#agent-access-days").fill("7")
+            # The narrow layout must keep fields/buttons inside the page, even
+            # while the table uses its own horizontal scroll area.
+            page.set_viewport_size({"width": 430, "height": 900})
+            self.assertTrue(page.locator("#agent-access-enroll-form").evaluate(
+                "el => el.scrollWidth <= el.clientWidth + 1"))
+            self.assertTrue(page.locator("#agent-access-create-submit").evaluate(
+                "el => el.getBoundingClientRect().bottom <= window.innerHeight"))
+            preview("agent-access-create-mobile")
+            page.set_viewport_size({"width": 1440, "height": 960})
+            page.evaluate("""() => {
+                window.__agentOriginalElevation = window.requestElevatedAccess;
+                window.__elevationRequests = [];
+                window.requestElevatedAccess = async label => {
+                    window.__elevationRequests.push(label);
+                    await new Promise(resolve => setTimeout(resolve, 150));
+                    return true;
+                };
+            }""")
+            page.locator("#agent-access-create-submit").click()
+            page.evaluate("Promise.all([agentAccessCreateEnrollment(), agentAccessCreateEnrollment()])")
+            expect(page.locator("#agent-access-code-card")).to_be_visible()
+            self.assertEqual(len(mutations), 1)
+            self.assertEqual(mutations[0]["name"], "kimi-build03")
+            self.assertEqual(mutations[0]["allowed_workers"], "worker-a,worker-b")
+            self.assertEqual(mutations[0]["allowed_devices"], "SERIAL-01")
+            self.assertEqual(mutations[0]["expires_days"], 7)
+            self.assertEqual(len(mutations[0]["scopes"]), 12)
+            self.assertEqual(len(page.evaluate("window.__elevationRequests")), 1)
+            expect(page.locator("#agent-access-code-context")).to_contain_text("kimi-build03")
+            preview("agent-access-pairing-code")
+            page.locator("[data-click='agentAccessDismissCode']").click()
+            expect(page.locator("#agent-access-create-modal")).not_to_be_visible()
+            expect(page.locator("#agent-access-code-card")).not_to_be_visible()
+            expect(page.locator("#agent-access-code-result")).to_have_text("")
+            page.locator("#agent-access-create-toggle").click()
+            page.locator("#agent-access-name").fill("cancelled-debug-agent")
+            page.evaluate("""() => {
+                window.requestElevatedAccess = () => new Promise(resolve => { window.__lateGrant = resolve; });
+                void agentAccessCreateEnrollment();
+            }""")
+            page.keyboard.press("Escape")
+            page.evaluate("window.__lateGrant(true)")
+            page.wait_for_function("!document.getElementById('agent-access-create-submit').disabled")
+            self.assertEqual(len(mutations), 1)
+            expect(page.locator("#agent-access-create-modal")).not_to_be_visible()
+            # The real elevation dialog must stack above enrollment; cancelling
+            # it leaves the configuration open without submitting a pairing code.
+            page.locator("#agent-access-create-toggle").click()
+            page.evaluate("""() => {
+                window.requestElevatedAccess = window.__agentOriginalElevation;
+                state.elevated = false;
+                state.elevatedUntil = null;
+                void agentAccessCreateEnrollment();
+            }""")
+            expect(page.locator("#elevate-modal")).to_be_visible()
+            self.assertTrue(page.locator("#agent-access-create-modal").evaluate("el => el.inert"))
+            page.keyboard.press("Escape")
+            expect(page.locator("#elevate-modal")).not_to_be_visible()
+            expect(page.locator("#agent-access-create-modal")).to_be_visible()
+            page.wait_for_function("!document.getElementById('agent-access-create-submit').disabled")
+            self.assertEqual(len(mutations), 1)
+            page.keyboard.press("Escape")
+            expect(page.locator("#agent-access-create-modal")).not_to_be_visible()
+            self.assertEqual(errors, [])
         finally:
             page.close()
 

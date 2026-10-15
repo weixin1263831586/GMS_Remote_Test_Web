@@ -1,5 +1,7 @@
 """Static command discovery for installed monolithic and modular CLI payloads."""
 
+from __future__ import annotations
+
 import re
 from pathlib import Path
 

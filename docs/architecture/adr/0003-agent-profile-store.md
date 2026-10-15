@@ -30,6 +30,12 @@ Agent Runtime 部署在编译服务器等共享主机上时，同一台 Agent �
    这不代表按顺序选择某个 profile；任一 Controller、TLS 策略或 token 不同
    都必须 fail closed。`GMS_RT_HUMAN_SESSION=1` 可在唯一 Controller/TLS
    上显式改用独立的人类 cookie 会话。
+7. **交互终端显式选择**：人工 TTY 下允许展示编号菜单，由用户选择确切
+   profile，再交给同一个 profile_store 校验。`gms-agent profile env` 只输出
+   引用安全的 `export GMS_RT_PROFILE=...`，供当前终端显式复用，不写默认
+   profile、不修改 shell 启动文件或其他客户端注册。MCP、JSON 和非交互
+   执行仍不弹菜单、不猜选。帮助、版本、命令目录不解析业务凭据；更新
+   只走包生命周期的 Controller/TLS/完整性校验，不要求业务 Token。
 
 ## 理由
 

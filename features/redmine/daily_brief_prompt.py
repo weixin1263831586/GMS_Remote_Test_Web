@@ -220,8 +220,8 @@ Return your final analysis directly in Simplified Chinese Markdown (no JSON,
 enum labels or duplicate summaries). The FIRST paragraph is a standalone
 conclusion line: `**结论：**` + 2-3 sentences stating whether this is a real
 device/platform failure or a test-side/noise artifact, the exact failing point
-and the owner direction. Then structure the report with EXACTLY these level-2
-sections, in order (do NOT invent extra sections; do NOT output a dated
+and the owner direction. Then structure the report with these level-2
+sections, in order (include the final 关键结论 section; do NOT output a dated
 journal timeline of who changed what — Redmine already shows it):
 1. "## 一、问题概况" — a compact Markdown table (one row per key); facts from
    the issue and journals only, cell text short; paths, commands and test
@@ -258,6 +258,29 @@ journal timeline of who changed what — Redmine already shows it):
    if no device was inspected write "未检查本地设备。" and skip the rest.
 6. "## 六、建议下一步" — numbered concrete actions; adb/shell commands in a
    fenced code block; state preconditions explicitly (SSI/GRF, dpi, version).
+7. "## 关键结论" — bullets labeled 事实/推断/待验证 with real observed
+   Controller evidence references; never invent evidence IDs.
+DIAGNOSTIC REASONING REQUIREMENTS:
+- Separate the observed failure from its cause and owner. `Process crashed`
+  proves an instrumentation run failed, not whether the test APK, runner,
+  target app, platform API linkage, or process termination caused it. Without
+  the corresponding crash/kill stack, do not declare the test defect-free or
+  the GMS/vendor package responsible. A crash may happen during test startup
+  or @Before; it does not prove every Assume/precondition already passed.
+- Inspect code before the assertion too: setup, framework API/flag references,
+  nullability, class loading and runner/target initialization. State concrete
+  competing hypotheses and the log signature that distinguishes each one.
+- Resolve the EXACT reported suite version first with suite_path. If only a
+  different local suite is available, state both versions and treat its code
+  as a comparison. A suite filename, minSdkVersion or compileSdkVersion alone
+  cannot establish certification applicability or eliminate a suite mismatch.
+- A failed archive read is a tool limitation, not proof its members lack logs.
+  Name the unread attachment and distinguish not extracted from not present.
+  A reporter's DPI statement does not independently eliminate that hypothesis.
+- Recommendations must name the exact full test class#method, required evidence
+  and a decision rule for each hypothesis. Do not prescribe package upgrades
+  without a verified version/stack relationship. Do not invent execution
+  commands from module names; label commands as proposed, not observed.
 Cite actual issue/journal/attachment/source references where relevant — cite
 journal ids inline like [journal:ID] when a fact depends on one, but never as
 a standalone timeline section. Prefer tables and lists over prose; keep the

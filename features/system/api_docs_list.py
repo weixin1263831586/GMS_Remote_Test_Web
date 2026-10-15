@@ -972,50 +972,8 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
 ]
 
 
-_OPENAPI_HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head"}
-
-
 def build_openapi_api_docs(openapi_schema: dict) -> list[dict]:
-    """Merge complete OpenAPI operations with curated business metadata."""
-    curated = {
-        (str(item["method"]).upper(), str(item["path"])): item
-        for item in API_DOCS_LIST
-    }
-    result: list[dict] = []
-    for path, path_item in sorted(openapi_schema.get("paths", {}).items()):
-        if not str(path).startswith("/api/") or not isinstance(path_item, dict):
-            continue
-        for method, operation in sorted(path_item.items()):
-            if method.lower() not in _OPENAPI_HTTP_METHODS or not isinstance(operation, dict):
-                continue
-            key = (method.upper(), path)
-            business = curated.get(key, {})
-            parameters = business.get("params")
-            if parameters is None:
-                parameters = [
-                    {
-                        "name": item.get("name", ""),
-                        "type": item.get("schema", {}).get("type", "object"),
-                        "required": bool(item.get("required")),
-                        "in": item.get("in", ""),
-                    }
-                    for item in operation.get("parameters", [])
-                ]
-            entry = {
-                "method": key[0],
-                "path": path,
-                "description": business.get("description")
-                or operation.get("summary")
-                or operation.get("description")
-                or operation.get("operationId", ""),
-                "params": parameters,
-                "category": business.get("category")
-                or ((operation.get("tags") or ["other"])[0]),
-                "operation_id": operation.get("operationId", ""),
-                "documented": bool(business),
-                "source": "openapi",
-            }
-            if business.get("skill"):
-                entry["skill"] = business["skill"]
-            result.append(entry)
-    return result
+    """Compatibility import for callers; Catalog is the shared implementation."""
+    from features.system.api_catalog import build_api_catalog
+
+    return build_api_catalog(openapi_schema)

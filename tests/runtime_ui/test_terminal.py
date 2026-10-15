@@ -1138,12 +1138,28 @@ class RuntimeTerminalTests(RuntimeUiHarness):
             page.wait_for_function(
                 "() => terminalWorkspace.instances.get(0)?.serialNo === 'LOCAL-ADB-2'"
             )
-            second_connect_messages = page.evaluate(
-                """() => (window.__terminalFrames || [])
-                  .filter(frame => typeof frame === 'string' && frame.includes('\\"type\\":\\"terminal_connect\\"'))
-                  .map(frame => JSON.parse(frame))"""
+            # 实例创建与 WebSocket 发出 terminal_connect 之间存在异步间隙；
+            # 有界等待第二帧（与前半段的轮询一致），而不是立即采样。
+            second_deadline = time.time() + 10
+            second_connect_messages = []
+            while time.time() < second_deadline:
+                second_connect_messages = page.evaluate(
+                    """() => (window.__terminalFrames || [])
+                      .filter(frame => typeof frame === 'string' && frame.includes('\\"type\\":\\"terminal_connect\\"'))
+                      .map(frame => JSON.parse(frame))"""
+                )
+                if (second_connect_messages
+                        and second_connect_messages[-1]["serial_no"] == "LOCAL-ADB-2"):
+                    break
+                page.wait_for_timeout(100)
+            self.assertTrue(
+                second_connect_messages
+                and second_connect_messages[-1]["serial_no"] == "LOCAL-ADB-2",
+                page.evaluate(
+                    "() => ({frames: window.__terminalFrames || [],"
+                    " status: document.getElementById('terminal-workspace-status-0')?.textContent})"
+                ),
             )
-            self.assertEqual(second_connect_messages[-1]["serial_no"], "LOCAL-ADB-2")
             persisted = page.evaluate(
                 "JSON.parse(localStorage.getItem('gms_terminal_workspace'))"
             )

@@ -218,7 +218,7 @@ function renderTestResults(results, columns) {
         }).join('');
         tr.innerHTML = cells;
 
-        tr.addEventListener('click', () => jumpToResultDirectory(r));
+        tr.addEventListener('click', () => runSuiteBrowserAction(() => jumpToResultDirectory(r)));
         tbody.appendChild(tr);
     });
 }

@@ -337,7 +337,7 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v20")
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v22")
 
     def test_diagnostic_prompt_has_no_journal_timeline_section(self):
         """v19: 处理时间线只是 Redmine journal 流水的复述，读者点开工单就有；

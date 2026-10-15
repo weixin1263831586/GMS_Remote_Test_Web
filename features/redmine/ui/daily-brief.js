@@ -200,6 +200,10 @@ function renderDailyBriefInner(data) {
   var run = data.run || {};
   var issues = data.issues || [];
   var counts = (run.report_json && run.report_json.counts) || {};
+  var reviewCount = issues.filter(function (issue) {
+    return issue.status === 'failed'
+      || (issue.status === 'completed' && (issue.result || {}).needs_human_review);
+  }).length;
   var profileMissing = Boolean(dailyBriefConfigCache && !dailyBriefConfigCache.agent_profile);
   var profileRequiredError = profileMissing
     && /(?:未绑定.*agent[ _]profile|agent_profile)/i.test(String(run.error || ''));
@@ -233,8 +237,8 @@ function renderDailyBriefInner(data) {
     + '<div class="daily-brief-metric"><span>今日待处理</span><b>' + esc(counts.total != null ? counts.total : run.issue_count || 0) + '</b></div>'
     + '<div class="daily-brief-metric"><span>待回复</span><b>' + esc(run.waiting_my_reply_count || 0) + '</b></div>'
     + '<div class="daily-brief-metric"><span>超 3 天未回复</span><b>' + esc(run.no_reply_3_days_count || 0) + '</b></div>'
-    + '<div class="daily-brief-metric"><span>需人工确认</span><b>' + esc(counts.needs_human_review || 0) + '</b></div>'
-    + '<div class="daily-brief-metric"><span>证据已验证</span><b>' + esc(counts.evidence_verified || 0) + '</b></div>'
+    + '<div class="daily-brief-metric"><span>需人工确认</span><b>' + esc(reviewCount) + '</b></div>'
+    + '<div class="daily-brief-metric" title="资料证据通过门禁；实机取证状态单独显示"><span>证据已验证</span><b>' + esc(counts.evidence_verified || 0) + '</b></div>'
     + '<div class="daily-brief-metric"><span>证据部分闭环</span><b>' + esc(counts.evidence_partial || 0) + '</b></div>'
     + '</div></div>';
   if (run.status === 'failed' && run.error) {
@@ -254,7 +258,7 @@ function renderDailyBriefInner(data) {
     if (issue.status === 'failed') {
       var etype = String(issue.error_type || '').trim();
       var err = String(issue.error || '').trim();
-      var errorLabel = ({ schema_mismatch: '返回格式不兼容', invalid_ai_output: 'AI 返回无法解析', evidence_gate_failed: '证据门禁未通过', model_tool_protocol_error: '模型工具调用协议异常', mcp_evidence_unavailable: '取证工具未成功调用', mcp_unavailable: 'MCP 服务不可用', kkagent_error: '分析服务异常', interrupted: '分析进程被中断', timeout: '分析超时', llm_timeout: '模型服务超时', provider_overloaded: '模型服务繁忙', kkagent_unavailable: '分析服务不可用', oversized_output: '输出超限被终止', repair_failed: '同会话自动修复失败', max_turns: '步数预算耗尽' })[etype] || etype;
+      var errorLabel = ({ schema_mismatch: '返回格式不兼容', invalid_ai_output: 'AI 返回无法解析', incomplete_ai_output: 'AI 未生成最终报告', evidence_gate_failed: '证据门禁未通过', model_tool_protocol_error: '模型工具调用协议异常', mcp_evidence_unavailable: '取证工具未成功调用', mcp_unavailable: 'MCP 服务不可用', context_limit_exceeded: '模型上下文超限', kkagent_error: '分析服务异常', interrupted: '分析进程被中断', timeout: '分析超时', llm_timeout: '模型服务超时', provider_overloaded: '模型服务繁忙', kkagent_unavailable: '分析服务不可用', oversized_output: '输出超限被终止', repair_failed: '同会话自动修复失败', max_turns: '步数预算耗尽' })[etype] || etype;
       return '<span class="daily-brief-state failed" title="' + esc(err) + '">❌ 分析失败'
         + (errorLabel ? ' · ' + esc(errorLabel) : '') + '</span>';
     }
@@ -262,12 +266,14 @@ function renderDailyBriefInner(data) {
     // 单号分析列表一致的终态标签；stale 为预留状态，防御性标注。
     if (issue.status === 'cancelled') return '<span class="daily-brief-state">■ 已停止</span>';
     if (issue.status === 'stale') return '<span class="daily-brief-state">⚠ 旧批次结论，可能已被更新分析取代</span>';
-    // 模型自评与实际取证完成情况分别展示。
+    // 系统证据评分与历史模型自评按来源展示。
     var labels = [];
     var qualityLabel = ({ verified: '证据已验证', partial: '证据部分闭环', insufficient: '证据不足' })[r.evidence_quality];
     labels.push('执行已完成');
     if (qualityLabel) labels.push(qualityLabel);
-    if (r.confidence != null) labels.push('模型自评 ' + esc(r.confidence));
+    if (r.confidence != null) labels.push(
+      (r.confidence_source === 'controller_evidence_gate' || r.result_format === 'kkagent_markdown'
+        ? '证据评分 ' : '模型自评 ') + esc(r.confidence));
     if (r.needs_human_review) labels.push('⚠️ 取证未闭环 · 需人工确认');
     return '<span class="daily-brief-state">' + labels.join(' · ') + '</span>';
   };

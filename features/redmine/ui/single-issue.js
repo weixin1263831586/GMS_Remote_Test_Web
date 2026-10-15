@@ -210,6 +210,13 @@ function renderSingleIssueAnalysisHistory() {
         singleIssueStopRequested[String(run.run_id)] || run.cancel_requested
       );
       var displayStatus = singleIssueAnalysisEffectiveStatus(run, issue);
+      var result = issue.result || {};
+      var stateLabel = stopping ? '⏳ 停止中' : singleIssueAnalysisStatus(displayStatus);
+      if (!stopping && displayStatus === 'completed') {
+        if (result.evidence_quality === 'partial') stateLabel += ' · 证据部分闭环';
+        if (result.evidence_quality === 'insufficient') stateLabel += ' · 证据不足';
+        if (result.needs_human_review) stateLabel += ' · 需人工确认';
+      }
       if (subject === '#' + issue.issue_id) subject = '';
       return '<article class="single-issue-analysis-entry'
         + (String(issue.issue_id) === singleIssueIndexedHistoryId ? ' is-indexed' : '')
@@ -218,7 +225,7 @@ function renderSingleIssueAnalysisHistory() {
         + '<div class="daily-brief-row"><div class="daily-brief-main"><span class="daily-brief-priority" title="手动提交分析">🔴</span>'
         + '<span class="daily-brief-issue-title"><b>#' + esc(issue.issue_id) + '</b>'
         + (subject ? ' ' + esc(subject) : '') + '<span class="single-issue-analysis-meta">' + meta + '</span></span></div>'
-        + '<span class="daily-brief-state ' + (displayStatus === 'failed' ? 'failed' : '') + '">' + esc(stopping ? '⏳ 停止中' : singleIssueAnalysisStatus(displayStatus)) + '</span>'
+        + '<span class="daily-brief-state ' + (displayStatus === 'failed' ? 'failed' : '') + '">' + esc(stateLabel) + '</span>'
         + '<div class="daily-brief-row-actions">'
         + '<button class="ka-btn" data-single-issue-view="' + esc(run.run_id) + '">查看分析</button>'
         + '<button class="ka-btn" data-click="openRedmineIssue" data-a0="' + esc(issue.issue_id) + '">打开 Redmine</button>'

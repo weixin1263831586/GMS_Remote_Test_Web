@@ -326,6 +326,9 @@ class EvidenceStore:
     @staticmethod
     def _artifact_from_row(row: sqlite3.Row) -> dict[str, Any]:
         item = dict(row)
+        item["text_available"] = bool(item.get("derived_text_path")) or (
+            item.get("kind") in {"text", "log"} and item.get("status") in {"ready", "partial"}
+        )
         # Server-internal absolute paths never leave the Controller.
         item.pop("stored_path", None)
         item.pop("derived_text_path", None)

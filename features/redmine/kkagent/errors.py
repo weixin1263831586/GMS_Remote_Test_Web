@@ -164,6 +164,13 @@ def classify_failure(
     ——信封 subtype=max_turns 只是表象）。
     """
     summary = summarize_stderr(stderr_text)
+    context_limit = context_length_limit(stderr_text + "\n" + raw)
+    if context_limit is not None:
+        return "context_limit_exceeded", (
+            f"模型输入超过服务端上下文上限（{context_limit} tokens）。"
+            "需要按实际上限压缩会话后恢复；原样重试不会解决。\n"
+            + (summary or raw[:STDERR_SUMMARY_LIMIT])
+        )
     if provider_overloaded(stderr_text):
         return "provider_overloaded", (
             "模型服务队列已满（上游过载/限流）。将自动重试一次；"
@@ -203,9 +210,22 @@ def classify_failure(
     return "kkagent_error", summary or f"exit {exit_code}"
 
 
+def context_length_limit(text: str) -> int | None:
+    """Extract only a provider-declared context ceiling, never the input size."""
+    match = re.search(r"context length\s*\((\d+)\s*tokens\)", text, re.IGNORECASE)
+    if match is None:
+        match = re.search(
+            r"maximum context length (?:is|of)\s*(\d+)\s*tokens", text, re.IGNORECASE
+        )
+    if match is None:
+        match = re.search(r"服务端上下文上限（(\d+) tokens）", text)
+    return int(match[1]) if match and int(match[1]) > 0 else None
+
+
 __all__ = [
     "ANSI_ESCAPE_RE",
     "classify_failure",
+    "context_length_limit",
     "interrupted_exit",
     "llm_stream_timeout",
     "normalize_log_timestamps",

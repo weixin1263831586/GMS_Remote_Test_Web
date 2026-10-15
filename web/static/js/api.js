@@ -1,5 +1,17 @@
 // Shared API helpers.
 
+window.GmsDocumentAbort = new AbortController();
+window.addEventListener('pagehide', () => window.GmsDocumentAbort.abort());
+window.addEventListener('pageshow', event => {
+    if (event.persisted && window.GmsDocumentAbort.signal.aborted) {
+        window.GmsDocumentAbort = new AbortController();
+    }
+});
+
+function isApiRequestCancelled(error, signal) {
+    return signal?.aborted === true || error?.name === 'AbortError';
+}
+
 const AnalysisMode = {
     UPLOAD: 'upload',
     SAVED: 'saved',
@@ -59,13 +71,16 @@ function normalizeApiErrorMessage(message, status) {
 }
 
 async function apiCall(url, method = 'GET', data = null, opts = {}) {
-    return _apiCallOnce(url, method, data, { _elevationRetried: false, ...opts });
+    return _apiCallOnce(url, method, data, {
+        _elevationRetried: false, signal: window.GmsDocumentAbort.signal, ...opts
+    });
 }
 
 async function _apiCallOnce(url, method, data, opts) {
     try {
         const options = {
             method,
+            signal: opts.signal,
             headers: { ...getClientIdentityHeaders() }
         };
 
@@ -197,6 +212,7 @@ async function _apiCallOnce(url, method, data, opts) {
 
         return result;
     } catch (error) {
+        if (isApiRequestCancelled(error, opts.signal)) throw error;
         debugLog('API Error:', error);
         if (!error.suppressToast && !opts.silentToast) {
             showToast(error.message, 'error');

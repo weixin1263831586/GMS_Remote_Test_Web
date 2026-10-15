@@ -1688,7 +1688,7 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 
 def _cmd_update_locked(args: argparse.Namespace) -> int:
-    profile = (getattr(args, "profile", "") or "").strip()
+    profile = (getattr(args, "profile", "") or os.environ.get("GMS_RT_PROFILE", "")).strip()
     server, profile_ca = resolve_controller(args.server, profile)
     ca_cert = (
         profile_ca
@@ -2017,7 +2017,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     """Validate package/profile/MCP state without exposing credentials."""
 
     report = doctor_report(
-        getattr(args, "client", "auto"), getattr(args, "profile", "")
+        getattr(args, "client", "auto"),
+        getattr(args, "profile", "") or os.environ.get("GMS_RT_PROFILE", ""),
     )
     if getattr(args, "json", False):
         print(json.dumps(report, ensure_ascii=False, indent=2))

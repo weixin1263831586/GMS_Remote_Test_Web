@@ -28,6 +28,8 @@ from .bootloader_api import (
 from .bootloader_api import (
     unlock_bootloader as unlock_bootloader,
 )
+from .debug_api import router as debug_router
+from .deployment_api import router as deployment_router
 from .locks import device_lock_manager
 from .management_api import _prune_inactive_usbip_sources, known_usbip_sources
 from .manager import device_manager
@@ -299,6 +301,8 @@ async def get_connected_devices(
 router.include_router(bootloader_router)
 router.include_router(operations_router)
 router.include_router(ui_control_router)
+router.include_router(deployment_router)
+router.include_router(debug_router)
 
 
 # ==================== 设备分组：按属性自动分组 ====================

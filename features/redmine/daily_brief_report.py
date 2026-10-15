@@ -18,6 +18,16 @@ from .users import _now
 DEFAULT_MODEL_LABEL = "kkagent 默认模型（未记录具体名称）"
 
 
+def human_review_count(issues: list[DailyBriefIssue]) -> int:
+    """Failed analyses need attention even though they have no final result."""
+    return sum(
+        issue.status == "failed" or (
+            issue.status == "completed" and bool((issue.result or {}).get("needs_human_review"))
+        )
+        for issue in issues
+    )
+
+
 def summarize_daily_brief(
     repository: DailyBriefRepository,
     run: DailyBriefRun,
@@ -33,11 +43,7 @@ def summarize_daily_brief(
         "no_reply_3_days": run.no_reply_3_days_count,
         "completed": len(completed),
         "failed": len(failed),
-        "needs_human_review": sum(
-            1
-            for item in completed
-            if bool((item.result or {}).get("needs_human_review"))
-        ),
+        "needs_human_review": human_review_count(issues),
         # 执行完成不等于证据闭环；三个质量桶单独汇总，禁止 UI 用
         # completed 数量冒充“已验证”数量。
         "evidence_verified": sum(

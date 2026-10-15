@@ -166,6 +166,28 @@ both.
 
 ### 5.3 Approved one-shot shell (`gms_rt_shell_exec`, plugin >= 0.9.0)
 
+For repeated app debugging prefer a finite grant (ADR 0018):
+
+1. Request `gms_rt_debug_session_request(worker_id=..., device=...,
+   package=..., apk_file=...)` after the baseline build finishes. Default
+   duration is 60 minutes; request only the typed operations the task needs.
+2. Present the returned approval URL once. The human reviews the Agent,
+   Worker, serial, package, verified signers, operations and duration.
+3. Poll `gms_rt_debug_session_status(session_id=...)` until active and not
+   busy. Approval starts the first APK installation when install is allowed.
+4. Use `gms_rt_debug_action` for launch/stop/tap/swipe/text/keyevent, and
+   `gms_rt_apk_deploy(..., debug_session_id=...)` for subsequent builds. New
+   APK hashes are audited and real package/signers must still match.
+5. Read DB coordinates and UI evidence using existing read-only tools.
+   Revoke the exact session when debugging finishes. A busy operation after
+   a Controller crash is not automatically replayed: revoke, check actual
+   device state, and request a fresh grant after its device claim expires.
+
+This grant neither accepts arbitrary commands nor changes the single-use
+shell/firmware approval contract below. It expires without automatic renewal;
+only the requesting Agent can use it. Handling another app/system dialog,
+changing settings, clearing app data or flashing is outside its scope.
+
 When a task genuinely needs a state-changing device command (`am`, `pm`,
 `cmd`, `input`, `settings put`, ...), `gms_rt_run` denies `gms-rt-devices-shell`
 forever (interactive/manual by catalog). The approval path:

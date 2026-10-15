@@ -1,0 +1,165 @@
+/* Agent enrollment: overview, focused configuration, and connection records. */
+#agent-access-panel {
+    gap: 14px;
+    overflow: auto;
+}
+
+#agent-access-panel > * { flex-shrink: 0; }
+
+.agent-access-intro,
+.agent-access-toolbar,
+.agent-access-card-heading,
+.agent-access-form-actions,
+.agent-access-code-value,
+.agent-access-code-next,
+.agent-access-scope-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.agent-access-intro { padding: 4px 0; }
+.agent-access-intro > div { min-width: 0; }
+.agent-access-intro h2 { margin: 0; font-size: 17px; font-weight: 650; }
+.agent-access-intro p { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+#agent-access-create-toggle { flex-shrink: 0; white-space: nowrap; }
+
+.agent-access-stats { margin: 0; gap: 12px; }
+.agent-access-stat { display: flex; align-items: center; gap: 12px; padding: 12px 16px; appearance: none; }
+.agent-access-stat strong { font-size: 22px; }
+.agent-access-stat span { margin: 0; font-size: 12px; }
+
+.agent-access-create-card,
+.agent-access-code-card {
+    padding: 18px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--light-bg);
+}
+
+.agent-access-modal-content {
+    width: 95vw;
+    max-width: min(1100px, 95vw);
+    height: 80vh;
+    max-height: 80vh;
+}
+
+.agent-access-modal-content > .modal-header { padding: 8px 20px; }
+.agent-access-modal-body { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.agent-access-modal-body .agent-access-create-card,
+.agent-access-modal-body .agent-access-code-card { padding: 0; border: 0; background: transparent; }
+.agent-access-modal-content > .agent-access-form-actions { flex-shrink: 0; margin: 0; padding: 14px 20px; }
+.agent-access-modal-content [hidden] { display: none; }
+.agent-access-modal-body .agent-access-card-heading { margin-bottom: 16px; }
+.agent-access-modal-body .agent-access-card-heading p { margin-top: 0; }
+
+.agent-access-card-heading { align-items: flex-start; margin-bottom: 18px; }
+.agent-access-card-heading h3,
+.agent-access-list-label h3 { margin: 0; font-size: 14px; font-weight: 650; }
+.agent-access-card-heading p { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+
+.agent-access-form-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 20px; }
+.agent-access-field { display: flex; flex-direction: column; gap: 7px; min-width: 0; color: var(--text-primary); font-size: 12px; }
+.agent-access-field > span:first-child { font-weight: 600; }
+.agent-access-field em { margin-left: 4px; color: var(--warning-color); font-size: 10px; font-style: normal; font-weight: 400; }
+.agent-access-field small { color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+.agent-access-field input { box-sizing: border-box; width: 100%; min-width: 0; height: 34px; }
+.agent-access-input-suffix { display: flex; align-items: center; gap: 8px; }
+.agent-access-input-suffix b { font-weight: 400; color: var(--text-secondary); }
+.agent-access-days-field input { max-width: 120px; }
+
+.agent-access-scope-fieldset { min-width: 0; margin: 20px 0 12px; padding: 14px; border: 1px solid var(--border-color); border-radius: 8px; }
+.agent-access-scope-fieldset > legend { padding: 0 6px; font-size: 12px; font-weight: 600; }
+
+.agent-access-details > summary { width: fit-content; padding: 10px 0; color: var(--primary-light); cursor: pointer; font-size: 12px; }
+.agent-access-details > summary span { margin-left: 8px; color: var(--text-secondary); font-size: 11px; }
+.agent-access-details[open] > summary { margin-bottom: 5px; }
+.agent-access-target-details { padding: 0 14px; border: 1px solid var(--border-color); border-radius: 8px; }
+.agent-access-target-details > summary { width: auto; }
+.agent-access-target-details .agent-access-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-bottom: 14px; }
+.agent-access-scope-heading { justify-content: flex-end; padding: 0 0 12px; }
+.agent-access-scope-heading > div,
+.agent-access-form-actions > div { display: flex; flex-shrink: 0; gap: 8px; }
+
+.agent-access-scopes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.agent-access-scope-group { min-width: 0; }
+.agent-access-scope-group h4 { margin: 0 0 8px; font-size: 12px; font-weight: 600; }
+.agent-access-scope-options { display: grid; grid-auto-rows: minmax(56px, auto); gap: 5px; }
+.agent-access-scope-option { display: grid; grid-template-columns: 16px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; gap: 3px 8px; min-width: 0; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; }
+.agent-access-scope-option:has(input:checked) { border-color: color-mix(in srgb, var(--primary-color) 45%, var(--border-color)); background: color-mix(in srgb, var(--primary-color) 6%, transparent); }
+.agent-access-scope-option input { grid-column: 1; grid-row: 1 / 3; align-self: start; width: 14px; height: 14px; margin: 2px 0 0; accent-color: var(--primary-color); }
+.agent-access-scope-option strong { grid-column: 2; grid-row: 1; align-self: start; font-size: 11px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
+.agent-access-scope-option small { grid-column: 2; grid-row: 2; color: var(--text-secondary); font-family: monospace; font-size: 10px; overflow-wrap: anywhere; }
+.agent-access-form-actions { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-color); }
+.agent-access-form-hint { color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+#agent-access-create-submit { min-width: 96px; white-space: nowrap; }
+
+.agent-access-code-card { border-color: color-mix(in srgb, var(--success-color) 45%, var(--border-color)); }
+.agent-access-code-card[hidden] { display: none; }
+.agent-access-code-card h3 { color: var(--success-color); }
+.agent-access-code-value { justify-content: flex-start; flex-wrap: wrap; padding: 14px; border-radius: 7px; background: var(--darker-bg); }
+#agent-access-code-result { font-size: 22px; letter-spacing: 1.5px; user-select: all; overflow-wrap: anywhere; }
+#agent-access-code-expiry { margin: 10px 0 16px; color: var(--text-secondary); font-size: 11px; }
+.agent-access-code-next { padding-top: 14px; border-top: 1px solid var(--border-color); color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+.agent-access-code-next .btn-xs { flex-shrink: 0; }
+
+.agent-access-list-section { display: flex; flex-direction: column; min-height: 220px; flex: 1 0 auto; gap: 12px; }
+.agent-access-list-label { min-width: 0; }
+.agent-access-list-label > span { display: block; margin-top: 5px; color: var(--text-secondary); font-size: 11px; }
+.agent-access-list-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
+#agent-access-search { width: 210px; min-width: 0; }
+#agent-access-status-filter { width: 104px; }
+#agent-access-refresh { min-width: 76px; white-space: nowrap; }
+.agent-access-table-wrap { min-height: 150px; overflow: auto; border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg); }
+.agent-access-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto; }
+.agent-access-table th { position: sticky; top: 0; z-index: 1; padding: 11px 12px; border-bottom: 1px solid var(--border-color); color: var(--text-secondary); background: var(--darker-bg); font-size: 11px; font-weight: 600; text-align: left; }
+.agent-access-table td { padding: 10px 12px; border-bottom: 1px solid var(--border-color); color: var(--text-primary); font-size: 12px; line-height: 1.5; vertical-align: middle; white-space: nowrap; }
+.agent-access-table th { white-space: nowrap; }
+.agent-access-table tbody tr:last-child td { border-bottom: 0; }
+.agent-access-table tbody tr:hover { background: color-mix(in srgb, var(--primary-color) 4%, transparent); }
+.agent-token-cell-name strong { font-weight: 600; }
+.agent-token-id,
+.agent-token-secondary { display: inline; margin-left: 8px; color: var(--text-secondary); font-size: 11px; line-height: 1.5; white-space: nowrap; }
+.agent-token-cell-acl .agent-token-secondary { font-size: 11px; }
+.agent-token-status { display: inline-block; padding: 3px 8px; border-radius: 5px; color: var(--success-color); background: color-mix(in srgb, var(--success-color) 10%, transparent); font-size: 11px; white-space: nowrap; }
+.agent-token-status.expired { color: var(--warning-color); background: color-mix(in srgb, var(--warning-color) 10%, transparent); }
+.agent-token-status.revoked { color: var(--text-secondary); background: var(--darker-bg); }
+.agent-token-scope-link { border: 0; padding: 0; background: none; color: var(--primary-light); font-size: 12px; cursor: pointer; }
+.agent-token-scope-link:hover { text-decoration: underline; }
+.agent-access-token-scope-list { padding-left: 18px; font-size: 12px; }
+.agent-access-token-scope-list li { margin: 12px 0; }
+.agent-access-token-scope-list code { display: block; margin-top: 3px; color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
+.agent-access-empty { height: 120px; text-align: center; color: var(--text-secondary) !important; }
+
+@media (max-width: 1100px) {
+    .agent-access-toolbar { flex-wrap: wrap; }
+    .agent-access-list-actions { flex: 1; }
+    #agent-access-search { flex: 1; }
+}
+
+@media (max-width: 1000px) {
+    .agent-access-scopes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 600px) {
+    #agent-access-panel { gap: 12px; }
+    .agent-access-intro { align-items: flex-start; flex-wrap: wrap; }
+    .agent-access-stats { gap: 6px; }
+    .agent-access-stat { flex-direction: column; align-items: flex-start; gap: 5px; padding: 10px; }
+    .agent-access-stat strong { font-size: 20px; }
+    .agent-access-stat span { font-size: 10px; }
+    .agent-access-create-card,
+    .agent-access-code-card { padding: 14px; }
+    .agent-access-card-heading { flex-wrap: wrap; gap: 8px; }
+    .agent-access-form-grid,
+    .agent-access-target-details .agent-access-form-grid,
+    .agent-access-scopes { grid-template-columns: 1fr; gap: 14px; }
+    .agent-access-scope-heading,
+    .agent-access-form-actions,
+    .agent-access-code-next { align-items: flex-start; flex-direction: column; gap: 10px; }
+    .agent-access-form-actions > div { align-self: flex-end; }
+    .agent-access-list-actions { flex-wrap: wrap; }
+    #agent-access-search { flex: 1 1 100%; width: 100%; }
+    #agent-access-code-result { font-size: 18px; letter-spacing: 1px; }
+}

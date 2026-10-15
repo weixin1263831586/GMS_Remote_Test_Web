@@ -19,7 +19,10 @@ typed tools for common workflows:
 - inventory: `gms_rt_devices`, `gms_rt_cluster_devices`
 - retained serial logs: `gms_rt_device_console`
 - device diagnostics: `gms_rt_device_info`, `gms_rt_devices_snapshot`,
-  `gms_rt_shell`, `gms_rt_logcat`
+  `gms_rt_shell`, `gms_rt_logcat`, `gms_rt_devices_db_query`
+- APK deployment: `gms_rt_apk_deploy`, `gms_rt_apk_deployment_status`
+- Continuous debugging: `gms_rt_debug_session_request`, `gms_rt_debug_session_status`,
+  `gms_rt_debug_action`, `gms_rt_debug_session_revoke`
 - tests: `gms_rt_test_suites_list`, `gms_rt_test_start`,
   `gms_rt_jobs_follow`, `gms_rt_jobs_cancel`
 - evidence: `gms_rt_redmine_*`, `gms_rt_apk_*`, `gms_rt_sdk_*`
@@ -76,6 +79,12 @@ gms-agent profile use <profile-name> --client codex
 
 The launcher must never guess the first profile. Run `gms-agent update`,
 `rollback VERSION`, and `status --json` for later lifecycle operations.
+Human terminals can select once with `eval "$(gms-agent profile env)"`;
+automation uses an explicit `GMS_RT_PROFILE` or CLI `--profile NAME` and never prompts.
+For hourly verified updates on a Linux systemd host, run
+`gms-agent auto-update enable --profile NAME`; inspect with
+`gms-agent auto-update status`. It refreshes all configured clients together.
+Reconnect MCP after an update; the updater does not interrupt active sessions.
 
 ## Authentication and mutation boundary
 
@@ -94,6 +103,27 @@ The launcher must never guess the first profile. Run `gms-agent update`,
 - State-changing shell and firmware burn require server-issued, short-lived,
   single-use approval tokens bound to the exact tool and target. A client
   boolean such as `authorized=true` is never a security boundary.
+- For APK push + installation, use `gms_rt_apk_deploy` with an exact Worker
+  and device. Give the returned `approval_url` to the user; one click binds
+  the APK SHA256, target and install mode and executes both steps. Poll
+  `gms_rt_apk_deployment_status`; never ask the user to copy a token for
+  this workflow. Upload only after the build finishes (approval TTL: 5 min).
+- For DB coordinates use `gms_rt_devices_db_query` (table/columns/pagination,
+  no raw SQL). It requires device sqlite3 and app/user-0 access through
+  run-as or the shell's existing permissions; it never enables root. Unsupported
+  environments return actionable errors. Screenshots/UI trees stay read-only.
+- For repeated build/install/UI loops, request `gms_rt_debug_session_request`
+  with the exact Worker/device/package and a signed baseline APK. Give its
+  `approval_url` to the human once; never ask for a copied token. Approval
+  defaults to 60 minutes (15–120) and starts the baseline install if granted.
+  Poll `gms_rt_debug_session_status` until active and not busy. Use
+  `gms_rt_apk_deploy(debug_session_id=...)` for subsequent same-package,
+  same-signer installs and `gms_rt_debug_action` for typed launch/stop/UI input.
+  The grant belongs to this exact Agent identity, not every client profile.
+  UI input requires the approved app's foreground window in user 0; system
+  dialogs need human handling. Expiry/revocation requires a fresh human
+  approval. Never fall back to raw ADB/SSH or generic shell to bypass a failure.
+  Revoke the exact session when debugging is complete or the user requests it.
 - Call `gms_rt_jobs_cancel` only when the user explicitly requested
   cancellation of that exact job.
 

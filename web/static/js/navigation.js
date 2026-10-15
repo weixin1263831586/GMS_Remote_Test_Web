@@ -63,7 +63,6 @@ let currentCategoryFilter = 'all';
 let currentMethodFilter = 'all';
 const API_DOCS_CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存（生产环境）
 const FIRMWARE_UPLOAD_TIMEOUT = 24 * 60 * 60 * 1000; // 服务端分片保留24小时
-const apiDetailsCache = new Map();
 
 let activeUsbipSelection = null;
 let usbipSourceLoadPromise = null;

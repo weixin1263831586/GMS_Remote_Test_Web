@@ -563,33 +563,66 @@
             }
         }
 
-        const pendingAuthPageInitializers = new Set();
+        let pageInitialization = null;
+
+        window.GmsPageLifecycle = {
+            get ready() { return pageInitialization?.promise || Promise.resolve(); },
+            get status() { return pageInitialization?.status || 'idle'; },
+            signalFor(pageName) {
+                return pageInitialization?.page === pageName
+                    ? pageInitialization.controller.signal : window.GmsDocumentAbort?.signal;
+            },
+            cancel() { pageInitialization?.controller.abort(); }
+        };
+        window.addEventListener('pagehide', () => window.GmsPageLifecycle.cancel());
+        window.addEventListener('pageshow', event => {
+            if (event.persisted) initializePageSafely(currentPage);
+        });
 
         function initializePageSafely(pageName) {
-            runPageInitializers(pageName).catch(error => {
+            window.GmsPageLifecycle.cancel();
+            const context = {page: pageName, controller: new AbortController(), status: 'loading'};
+            const signal = context.controller.signal;
+            pageInitialization = context;
+            const element = document.getElementById(`page-${pageName}`);
+            if (element) element.dataset.initState = 'loading';
+            context.promise = runPageInitializers(pageName, signal).then(() => {
+                signal.throwIfAborted();
+                context.status = 'ready';
+            }).catch(error => {
+                if (isApiRequestCancelled(error, signal)) {
+                    context.status = 'cancelled';
+                    return;
+                }
+                context.status = 'error';
                 console.error(`[Navigation] Failed to initialize page ${pageName}:`, error);
                 if (currentPage === pageName) {
                     showToast(`页面初始化失败：${error?.message || '未知错误'}`, 'error');
                 }
+            }).finally(() => {
+                if (pageInitialization === context && element) {
+                    element.dataset.initState = context.status;
+                }
             });
+            return context.promise;
         }
 
-        async function runPageInitializers(pageName) {
+        async function runPageInitializers(pageName, signal) {
+            const backgroundTasks = [];
             if (!state.authReady) {
-                if (pendingAuthPageInitializers.has(pageName)) return;
-                pendingAuthPageInitializers.add(pageName);
-                window.addEventListener(
-                    'gms:auth-ready',
-                    () => {
-                        pendingAuthPageInitializers.delete(pageName);
-                        // Do not initialize a page that the user already left;
-                        // entering it later will invoke this initializer again.
-                        if (currentPage === pageName) initializePageSafely(pageName);
-                    },
-                    { once: true }
-                );
-                return;
+                await new Promise((resolve, reject) => {
+                    const cleanup = () => {
+                        window.removeEventListener('gms:auth-ready', ready);
+                        signal.removeEventListener('abort', cancelled);
+                    };
+                    const ready = () => { cleanup(); resolve(); };
+                    const cancelled = () => { cleanup(); reject(new DOMException('Navigation cancelled', 'AbortError')); };
+                    window.addEventListener('gms:auth-ready', ready, {once: true});
+                    signal.addEventListener('abort', cancelled, {once: true});
+                    if (signal.aborted) cancelled();
+                });
             }
+            signal.throwIfAborted();
             if ((pageName === 'desktop' || pageName === 'terminal')
                     && typeof initializeClusterMode === 'function') {
                 // Resolve infrastructure + persisted workspace scope before
@@ -599,16 +632,16 @@
             // 页面切换和刷新恢复使用相同初始化入口。
             if (pageName === 'test') {
                 if (typeof loadClusterWorkers === 'function') {
-                    loadClusterWorkers().catch(error => debugLog('[Cluster] Worker list unavailable:', error));
+                    backgroundTasks.push(loadClusterWorkers().catch(error => debugLog('[Cluster] Worker list unavailable:', error)));
                 }
                 // 等待 workspace 上下文就绪后再加载设备，避免先闪现本机设备。
                 if (typeof loadDevices === 'function') {
-                    (window.GmsWorkspace?.ready || Promise.resolve())
+                    backgroundTasks.push((window.GmsWorkspace?.ready || Promise.resolve())
                         .then(() => loadDevices(false))
-                        .catch(() => {});
+                        .catch(() => {}));
                 }
-                if (typeof loadTestSuites === 'function') loadTestSuites(false).catch(() => {});
-                if (typeof checkInitialTestStatus === 'function') checkInitialTestStatus().catch(() => {});
+                if (typeof loadTestSuites === 'function') backgroundTasks.push(loadTestSuites(false).catch(() => {}));
+                if (typeof checkInitialTestStatus === 'function') backgroundTasks.push(checkInitialTestStatus().catch(() => {}));
             }
             if (pageName === 'terminal') {
                 if (!await ensureTerminalElevation()) return;
@@ -674,6 +707,9 @@
                     stopUsersAutoRefresh();
                     agentAccessReload();
                 } else {
+                    // 未提权时 loadUsersList 会等待交互式提权弹框，
+                    // 不能阻塞页面初始化的完成语义：定时器立即启动，
+                    // 加载（含提权流程）在后台继续，tick 内部有守卫。
                     loadUsersList();
                     startUsersAutoRefresh();
                 }
@@ -682,30 +718,26 @@
             }
 
             if (pageName === 'security-audit') {
-                if (!securityAuditState.loaded) loadSecurityAudit(true);
+                if (!securityAuditState.loaded) await loadSecurityAudit(true);
             }
             if (pageName === 'devices') {
-                loadDevicesManagement();
+                await loadDevicesManagement();
             } else {
                 stopDevicesAutoRefresh();
             }
             if (pageName === 'reports') {
-                loadTestReports(typeof currentUserFilter !== 'undefined' ? currentUserFilter : false);
+                await loadTestReports(typeof currentUserFilter !== 'undefined' ? currentUserFilter : false);
             } else if (typeof cleanupReportsPolling === 'function') {
                 cleanupReportsPolling();
             }
             if (pageName === 'api-docs') {
-                loadApiDocs();
+                await loadApiDocs(false, signal);
             }
             if (pageName === 'test-suites') {
-                await initTestSuiteBrowserPage();
+                await initTestSuiteBrowserPage(signal);
             }
             if (pageName === 'apk-analysis') {
-                setTimeout(() => {
-                    if (typeof window.initApkAnalysisPage === 'function') {
-                        window.initApkAnalysisPage();
-                    }
-                }, 50);
+                if (typeof window.initApkAnalysisPage === 'function') await window.initApkAnalysisPage();
             }
             if (pageName === 'terminal' && terminalInitialized && terminal && sessionStorage.getItem('pending_terminal_command')) {
                 setTimeout(() => {
@@ -717,17 +749,18 @@
                 await ensureDesktopInitialized();
             }
             if (pageName === 'websites') {
-                loadToolsList();
+                await loadToolsList();
             }
             if (pageName === 'tools') {
-                ut_loadToolsList();
+                await ut_loadToolsList();
             }
             if (pageName === 'agent' && typeof initAgentPage === 'function') {
-                initAgentPage();
+                await initAgentPage();
             }
             if (pageName === 'notes' && typeof initNotesPage === 'function') {
-                initNotesPage();
+                await initNotesPage();
             }
+            await Promise.all(backgroundTasks);
         }
 
         function switchPage(pageName, event, options = {}) {
@@ -779,6 +812,10 @@
                 recordSecurityPageView(pageName);
             }
 
+            // 刻意不返回初始化 Promise：完成/取消语义统一经
+            // GmsPageLifecycle（ready/data-init-state）观察；部分页面的
+            // 初始化包含交互式提权弹框，返回 Promise 会让
+            // evaluate() 等调用方在用户完成提权前一直阻塞。
             initializePageSafely(pageName);
         }
 

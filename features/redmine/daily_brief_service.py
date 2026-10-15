@@ -29,6 +29,7 @@ from .daily_brief_owner_policy import (
     is_daily_brief_owner_eligible,
 )
 from .daily_brief_report import (
+    human_review_count,
     issue_payload,
     summarize_daily_brief,
     summarize_execution_statistics,
@@ -303,9 +304,15 @@ class DailyBriefService:
                 logger.debug("local Redmine title unavailable for #%s", issue.issue_id)
             return payload
 
+        report_json = dict(run.report_json or {})
+        report_json["counts"] = {
+            **(report_json.get("counts") or {}),
+            "needs_human_review": human_review_count(issues),
+        }
         return {
             "run": {
                 **run.to_row(),
+                "report_json": report_json,
                 "cancel_requested": self.repository.is_cancel_requested(run.run_id),
             },
             "issues": [display_issue(issue) for issue in issues],

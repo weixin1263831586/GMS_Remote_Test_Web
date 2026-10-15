@@ -1,3 +1,17 @@
+// UI event handlers own their promises; awaited initialization still propagates
+// cancellation to GmsPageLifecycle without running later UI updates.
+async function runSuiteBrowserAction(action) {
+    const signal = window.GmsPageLifecycle?.signalFor('test-suites');
+    try {
+        signal?.throwIfAborted();
+        await action();
+    } catch (error) {
+        if (isApiRequestCancelled(error, signal)) return;
+        console.error('[Suites] Browser action failed:', error);
+        showToast(`套件浏览操作失败: ${error.message}`, 'error');
+    }
+}
+
 function clearSuiteBrowserSelection(message) {
     state.suiteBrowser.selectedSuitePath = '';
     state.suiteBrowser.currentPath = '';
@@ -70,7 +84,7 @@ function renderTestSuiteBrowserList() {
         `;
 
         row.append(badge, main);
-        row.addEventListener('click', () => selectTestSuiteForBrowser(suite.tools_path));
+        row.addEventListener('click', () => runSuiteBrowserAction(() => selectTestSuiteForBrowser(suite.tools_path)));
         listEl.appendChild(row);
     });
 }
@@ -158,7 +172,7 @@ function renderSuiteSearchResults(items, query) {
                 <div class="suite-search-result-path">${escapeHtml([item.suite_label || '', item.path || ''].filter(Boolean).join(' · '))}</div>
             </div>
         `;
-        row.addEventListener('click', () => locateSuiteSearchResult(item));
+        row.addEventListener('click', () => runSuiteBrowserAction(() => locateSuiteSearchResult(item)));
         resultsEl.appendChild(row);
     });
     resultsEl.style.display = 'block';
@@ -243,6 +257,7 @@ async function searchSuiteFiles() {
 }
 
 async function loadSuiteBrowserDirectory(path = '') {
+    const signal = window.GmsPageLifecycle?.signalFor('test-suites');
     if (!state.suiteBrowser.selectedSuitePath) {
         renderSuiteFileEmpty('请先选择测试套件');
         return;
@@ -268,7 +283,8 @@ async function loadSuiteBrowserDirectory(path = '') {
         if (suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)) params.set('worker_id', suite.worker_id);
         const endpoint = suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)
             ? '/api/cluster/suites/files' : '/api/test/suites/files';
-        const result = await apiCall(`${endpoint}?${params.toString()}`);
+        const result = await apiCall(`${endpoint}?${params.toString()}`, 'GET', null, {signal});
+        signal?.throwIfAborted();
         if (requestGeneration !== suiteBrowserDirectoryRequestGeneration
                 || state.suiteBrowser.selectedSuitePath !== requestedSuitePath) return;
         const data = result.data || {};
@@ -278,6 +294,7 @@ async function loadSuiteBrowserDirectory(path = '') {
         renderSuiteBreadcrumb(state.suiteBrowser.currentPath);
         renderSuiteFiles(data.items || []);
     } catch (error) {
+        if (isApiRequestCancelled(error, signal)) throw error;
         if (requestGeneration !== suiteBrowserDirectoryRequestGeneration) return;
         if (hadRenderedDirectory) {
             showToast(`目录刷新失败: ${error.message}`, 'error');

@@ -516,7 +516,7 @@ function filterApiDocs() {
  * 加载API文档列表（带缓存优化）
  * @param {boolean} forceRefresh - 强制刷新，绕过缓存
  */
-async function loadApiDocs(forceRefresh = false) {
+async function loadApiDocs(forceRefresh = false, signal = window.GmsDocumentAbort?.signal) {
     debugLog('[API Docs] ===== loadApiDocs called =====');
     const tbody = $('api-docs-table-body');
     const hadRenderedDocs = Boolean(apiDocsCache && tbody?.children.length);
@@ -535,7 +535,7 @@ async function loadApiDocs(forceRefresh = false) {
             return;
         }
 
-        const resp = await fetch('/api/system/docs');
+        const resp = await fetch('/api/system/docs', {signal});
 
         if (!resp.ok) {
             throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
@@ -549,7 +549,7 @@ async function loadApiDocs(forceRefresh = false) {
             // 为每个API添加分类信息
             const apisWithCategory = filteredApis.map(api => ({
                 ...api,
-                category: getApiCategory(api.path || '')
+                category: api.category || getApiCategory(api.path || '')
             }));
 
             // 按分类排序
@@ -566,6 +566,7 @@ async function loadApiDocs(forceRefresh = false) {
             throw new Error('Invalid response format: missing or invalid apis field');
         }
     } catch (e) {
+        if (isApiRequestCancelled(e, signal)) throw e;
         showToast('加载API文档失败: ' + e.message, 'error');
 
         // 显示错误状态
@@ -645,161 +646,92 @@ function normalizeApiPath(apiPath) {
 }
 
 /**
- * Get API details with caching
+ * OpenAPI fields own the detail view; static metadata enriches legacy entries.
  */
-function getApiDetails(apiPath) {
-    // Single cache lookup (more efficient than has() + get())
-    const cached = apiDetailsCache.get(apiPath);
-    if (cached !== undefined) {
-        return cached;
+function getApiDetails(api, method = 'GET') {
+    if (typeof api === 'string') {
+        api = allApiDocs.find(item => item.path === api && item.method === method)
+            || {path: api, method};
     }
-
-    // Normalize path for path parameters
-    const detailPath = normalizeApiPath(apiPath);
-
-    // Get details or use default (frozen constant)
-    const details = API_DETAILS_MAP[detailPath] || DEFAULT_API_DETAILS;
-
-    // Cache the result
-    apiDetailsCache.set(apiPath, details);
-    return details;
+    const supplemental = API_DETAILS_MAP[normalizeApiPath(api.path || '')] || {};
+    const response = Object.entries(api.responses || {}).find(([status]) => /^2\d\d$/.test(status))?.[1];
+    const media = Object.values(response?.content || {})[0];
+    return {
+        ...DEFAULT_API_DETAILS,
+        ...supplemental,
+        ...api,
+        title: api.title || api.description || supplemental.title || api.path,
+        description: api.description || supplemental.description || '',
+        params: api.params || supplemental.params || [],
+        response: media ? JSON.stringify(media.example, null, 2) : (supplemental.response || response?.description || ''),
+        usage: supplemental.usage || ''
+    };
 }
 
-/**
- * Generate curl command for an API endpoint
- * Moved to module level to avoid recreating on every render
- */
+function curlShellQuote(value) {
+    return "'" + String(value).replace(/'/g, "'\"'\"'") + "'";
+}
+
+/** Generate method-aware examples from Catalog parameter locations and bodies. */
 function generateCurlCommand(api, details) {
-    const apiPath = api.path || '';
-    if (api.method === 'GET') {
-        if (apiPath === '/api/agent/install.sh') {
-            const command = buildSkillInstallCommand();
-            return {display: command, full: command};
-        }
-        // 特殊处理stream端点：使用 -N 而不是 -s
-        const isStreamEndpoint = apiPath.includes('/api/test/logs/stream');
-        // ZIP 离线包使用 -OJ；安装脚本在上方生成可直接执行的管道命令。
-        const isDownloadEndpoint = apiPath === '/api/system/skills';
-
-        let curlOptions = 'curl -s';
-        if (isStreamEndpoint) {
-            curlOptions = 'curl -N';
-        } else if (isDownloadEndpoint) {
-            curlOptions = 'curl -s -OJ';
-        }
-
-        let cmd = `${curlOptions} "${BASE_URL}${apiPath}"`;
-        // Add query parameter example
-        if (details.params && details.params.length > 0) {
-            const queryParams = details.params.filter(p =>
-                p.required && p.name !== 'force_refresh' || p.name === 'log_type' || p.name === 'report_timestamp'
-            );
-            if (queryParams.length > 0) {
-                cmd += ` \\\n  -G \\\n  -d "${queryParams[0].name}=VALUE"`;
-            }
-        }
-        // For GET requests, add continuation if there are params
-        const displayCmd = cmd.includes('\\') ? cmd.split('\n')[0] : cmd;
-        return { display: displayCmd, full: cmd };
-    } else if (api.method === 'POST') {
-        // 包含文件参数时使用 FormData。
-        const hasFileParam = details.params && details.params.some(p => p.type === PARAM_TYPES.FILE);
-
-        if (hasFileParam) {
-            // Generate FormData format for file uploads
-            let multiLineCmd = `curl -sX POST "${BASE_URL}${api.path || ''}"`;
-
-            if (details.params && details.params.length > 0) {
-                details.params.forEach(p => {
-                    const placeholder = CURL_PLACEHOLDERS[p.type] || CURL_PLACEHOLDERS[PARAM_TYPES.STRING];
-
-                    if (p.type === PARAM_TYPES.FILE) {
-                        // File parameter: -F "name=@path"
-                        multiLineCmd += ` \\\n  -F "${p.name}=@${placeholder}"`;
-                    } else if (p.type === PARAM_TYPES.BOOLEAN) {
-                        // Boolean parameter: -F "name=true"
-                        multiLineCmd += ` \\\n  -F "${p.name}=${placeholder}"`;
-                    } else {
-                        // Other parameters: -F "name=value"
-                        multiLineCmd += ` \\\n  -F "${p.name}=${placeholder}"`;
-                    }
-                });
-            }
-
-            const displayCmd = multiLineCmd.split('\n')[0];
-            return { display: displayCmd, full: multiLineCmd };
-        } else {
-            // Generate JSON format for non-file uploads
-            let multiLineCmd = `curl -sX POST "${BASE_URL}${api.path || ''}"`;
-
-            // Generate request body example
-            if (details.params && details.params.length > 0) {
-                multiLineCmd += ` \\\n  -H "Content-Type: application/json"`;
-                const bodyLines = ['{'];
-
-                // Include all parameters including FILE type for documentation
-                details.params.forEach((p, index) => {
-                    // Include all parameters (both required and optional)
-                    const placeholder = CURL_PLACEHOLDERS[p.type] || CURL_PLACEHOLDERS[PARAM_TYPES.STRING];
-
-                    // Format the value based on type
-                    let valueStr;
-                    if (p.type === PARAM_TYPES.STRING) {
-                        valueStr = `"${placeholder}"`;
-                    } else if (p.type === PARAM_TYPES.NUMBER) {
-                        valueStr = placeholder;
-                    } else if (p.type === PARAM_TYPES.BOOLEAN) {
-                        valueStr = placeholder;
-                    } else if (p.type === PARAM_TYPES.ARRAY) {
-                        valueStr = JSON.stringify(placeholder);
-                    } else if (p.type === PARAM_TYPES.FILE) {
-                        // For file type, still show in JSON format as placeholder
-                        valueStr = `"${placeholder}"`;
-                    } else {
-                        valueStr = placeholder;
-                    }
-
-                    // Add comma if not last item
-                    const comma = (index < details.params.length - 1) ? ',' : '';
-                    bodyLines.push(`    "${p.name}": ${valueStr}${comma}`);
-                });
-                bodyLines.push('  }');
-
-                if (bodyLines.length > 2) { // More than just '{' and '}'
-                    multiLineCmd += ' \\\n  -d \'' + bodyLines.join('\n') + '\'';
-                } else {
-                    multiLineCmd += ` \\\n  -d '{}'`;
-                }
-            } else {
-                // No parameters - don't add -d '{}' or Content-Type header
-                // Just return the basic curl command
-            }
-
-            // Display version: only first line with continuation
-            const displayCmd = multiLineCmd.split('\n')[0];
-
-            return { display: displayCmd, full: multiLineCmd };
-        }
-    } else if (api.method === 'DELETE') {
-        // Generate DELETE request
-        let cmd = `curl -X DELETE "${BASE_URL}${api.path || ''}"`;
-
-        // Add query parameters or request body
-        if (details.params && details.params.length > 0) {
-            const queryParams = details.params.filter(p => p.required || p.name === 'report_timestamp');
-            if (queryParams.length > 0) {
-                // Use query parameters for DELETE
-                cmd += ` \\\n  -G \\\n  -d "${queryParams[0].name}=VALUE"`;
-            }
-        }
-
-        const displayCmd = cmd.includes('\\') ? cmd.split('\n')[0] : cmd;
-        return { display: displayCmd, full: cmd };
-    } else if (api.method === 'WebSocket') {
-        const wsPath = apiPath.replace('{client_id}', 'YOUR_CLIENT_ID');
-        return { display: `wscat -c ${WS_BASE_URL}${wsPath}`, full: `wscat -c ${WS_BASE_URL}${wsPath}` };
+    const method = String(api.method || 'GET').toUpperCase();
+    let path = api.path || '';
+    if (method === 'GET' && path === '/api/agent/install.sh') {
+        const command = buildSkillInstallCommand();
+        return {display: command, full: command};
     }
-    return { display: `curl -s ${BASE_URL}${apiPath}`, full: `curl -s ${BASE_URL}${apiPath}` };
+    if (method === 'WEBSOCKET') {
+        const command = `wscat -c ${curlShellQuote(WS_BASE_URL + path.replace(/\{[^}]+\}/g, 'VALUE'))}`;
+        return {display: command, full: command};
+    }
+    const params = details.params || [];
+    const query = new URLSearchParams();
+    const headers = [];
+    for (const param of params) {
+        const value = param.example ?? CURL_PLACEHOLDERS[param.type] ?? 'VALUE';
+        const location = param.in || (['GET', 'HEAD', 'DELETE'].includes(method) ? 'query' : 'body');
+        if (location === 'path') {
+            path = path.replace('{' + param.name + '}', encodeURIComponent(String(value)));
+        } else if (location === 'query') {
+            (Array.isArray(value) ? value : [value]).forEach(item => query.append(param.name, String(item)));
+        } else if (location === 'header') {
+            headers.push(`-H ${curlShellQuote(param.name + ': ' + value)}`);
+        } else if (location === 'cookie') {
+            headers.push(`-b ${curlShellQuote(param.name + '=' + value)}`);
+        }
+    }
+    path = path.replace(/\{[^}]+\}/g, 'VALUE');
+    const url = BASE_URL + path + (query.size ? '?' + query.toString() : '');
+    const stream = path.includes('/api/test/logs/stream');
+    const download = path === '/api/system/skills';
+    const lines = [`curl ${stream ? '-N' : download ? '-s -OJ' : '-sS'} -X ${method} "${url}"`, ...headers];
+    const body = details.request_body;
+    const contentType = details.content_type || (params.some(param => param.type === 'file') ? 'multipart/form-data' : 'application/json');
+    const bodyParams = params.filter(param => ['body', 'form'].includes(param.in)
+        || (!param.in && !['GET', 'HEAD', 'DELETE'].includes(method)));
+    if (body || bodyParams.length) {
+        if (['multipart/form-data', 'application/x-www-form-urlencoded'].includes(contentType)) {
+            for (const param of bodyParams) {
+                const value = param.type === 'file' ? '@/path/to/file' : (param.example ?? 'VALUE');
+                const values = Array.isArray(value) ? value : [value];
+                values.forEach(item => lines.push(
+                    `${contentType === 'multipart/form-data' ? '-F' : '--data-urlencode'} ${curlShellQuote(param.name + '=' + item)}`
+                ));
+            }
+        } else {
+            const example = body?.content?.[contentType]?.example ?? Object.fromEntries(
+                bodyParams.map(param => [param.name, param.example ?? CURL_PLACEHOLDERS[param.type] ?? 'VALUE'])
+            );
+            lines.push(`-H ${curlShellQuote('Content-Type: ' + contentType)}`);
+            if (contentType === 'application/octet-stream') {
+                lines.push('--data-binary @/path/to/file');
+            } else {
+                const payload = contentType.includes('json') ? JSON.stringify(example, null, 2) : String(example);
+                lines.push(`--data-raw ${curlShellQuote(payload)}`);
+            }
+        }
+    }
+    return {display: lines[0], full: lines.join(' \\\n  ')};
 }
 
 /**
@@ -825,6 +757,7 @@ function generateParamsHtml(details) {
                 <span style="font-family: monospace; font-weight: 600; color: var(--primary-color);">${escapeHtml(param.name)}</span>
                 ${typeBadge} ${requiredBadge}
                 <span style="color: var(--text-secondary); margin-left: 4px;">${escapeHtml(param.desc)}</span>
+                <span style="color: var(--text-secondary);">${escapeHtml(param.in || '')}</span>
             </div>
         `);
     });
@@ -850,12 +783,12 @@ function displayApiDocs(apis) {
         const categoryBadge = getCategoryName(api.category);
 
         // 获取API详细信息
-        const details = getApiDetails(api.path || '');
+        const details = getApiDetails(api);
         const curlCmdObj = generateCurlCommand(api, details);
         const paramsHtml = generateParamsHtml(details);
 
         // 将curl命令存储到data属性中,避免在onclick中直接传递复杂字符串
-        const escapedCurlCmd = (curlCmdObj.full || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        const escapedCurlCmd = escapeHtml(curlCmdObj.full || '').replace(/'/g, '&#39;');
         const displayCurlCmd = curlCmdObj.display;
 
         htmlParts.push(`
@@ -923,14 +856,12 @@ function displayApiDocs(apis) {
                                 <!-- HTTP Method and Path -->
                                 <div style="font-family: monospace; font-size: 11px; color: var(--text-primary); background: var(--darker-bg); padding: 6px; border-radius: 4px; margin-bottom: 8px; font-weight: 600;">
 ${api.method} ${api.path || ''}
-${api.method === 'POST' ? 'Content-Type: application/json' : ''}
+${details.content_type ? 'Content-Type: ' + escapeHtml(details.content_type) : ''}
                                 </div>
 
                                 <!-- Parameters -->
-                                ${details.params && details.params.length > 0 ? `
                                 <div style="font-size: 11px; font-weight: 600; margin-bottom: 6px; color: var(--text-primary);">📋 请求参数说明:</div>
                                 ${paramsHtml}
-                                ` : ''}
 
                                 <!-- Response Example -->
                                 <div style="margin-top: 12px; font-size: 11px; font-weight: 600; margin-bottom: 4px; color: var(--text-secondary);">📤 响应示例:</div>

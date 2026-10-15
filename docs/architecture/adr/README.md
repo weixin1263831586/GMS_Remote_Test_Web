@@ -22,3 +22,5 @@
 | 0014 | External knowledge federation (android-internals-wiki, background only) | Accepted（triage 限制部分被 0013 取代，见文内注记） | — | — |
 | 0015 | Allowlisted UI assets and domain modules | Accepted | — | — |
 | 0016 | [Account-scoped Cluster job submission receipts](0016-cluster-job-submission-receipts.md) | Accepted | — | — |
+| 0017 | [One approval for APK transmission and installation](0017-reviewed-apk-deployment.md) | Accepted | — | — |
+| 0018 | [Finite app-scoped Agent debugging sessions](0018-scoped-debug-sessions.md) | Accepted | — | — |

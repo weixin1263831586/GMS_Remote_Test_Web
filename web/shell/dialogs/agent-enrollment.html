@@ -1,0 +1,88 @@
+<div id="agent-access-create-modal" class="modal" aria-labelledby="agent-access-create-title" aria-hidden="true">
+    <div class="modal-content agent-access-modal-content">
+        <div class="modal-header">
+            <span id="agent-access-create-title" class="modal-title">创建配对码</span>
+            <button type="button" class="modal-close" aria-label="关闭创建配对码" data-click="agentAccessToggleCreate" data-a0="false">&times;</button>
+        </div>
+        <div class="modal-body agent-access-modal-body">
+            <form id="agent-access-enroll-form" class="agent-access-create-card" data-submit="agentAccessCreateEnrollment" data-prevent>
+                <div class="agent-access-form-grid">
+                    <label class="agent-access-field">
+                        <span>Agent 标识名 <em>必填</em></span>
+                        <input id="agent-access-name" class="combo-box" maxlength="64" required placeholder="例如 codex-build03" autocomplete="off" autofocus>
+                        <small>使用客户端名称和主机名，方便识别。</small>
+                    </label>
+                    <label class="agent-access-field agent-access-days-field">
+                        <span>接入凭据有效期</span>
+                        <span class="agent-access-input-suffix"><input id="agent-access-days" class="combo-box" type="number" min="1" max="365" value="90"><b>天</b></span>
+                        <small>配对成功后开始计算，与配对码的 5 分钟有效期不同。</small>
+                    </label>
+                </div>
+                <fieldset class="agent-access-scope-fieldset">
+                    <legend>授权范围</legend>
+                    <div id="agent-access-scope-details">
+                        <div class="agent-access-scope-heading">
+                            <div>
+                                <button class="btn-xxs" type="button" data-click="agentAccessSetScopeSelection" data-a0="default">恢复推荐</button>
+                                <button class="btn-xxs" type="button" data-click="agentAccessSetScopeSelection" data-a0="all">全选</button>
+                                <button class="btn-xxs" type="button" data-click="agentAccessSetScopeSelection" data-a0="none">清空</button>
+                            </div>
+                        </div>
+                        <div id="agent-access-scopes" class="agent-access-scopes"></div>
+                    </div>
+                </fieldset>
+                <details class="agent-access-details agent-access-target-details" open>
+                    <summary>限制 Worker 和设备 <span id="agent-access-target-summary">全部 Worker · 全部设备</span></summary>
+                    <div class="agent-access-form-grid">
+                        <label class="agent-access-field">
+                            <span>允许的 Worker</span>
+                            <input id="agent-access-workers" class="combo-box mono" value="*" placeholder="* 或逗号分隔的 Worker ID" data-input="agentAccessUpdateTargetSummary">
+                            <small>* 表示全部；多个 Worker ID 用逗号分隔。</small>
+                        </label>
+                        <label class="agent-access-field">
+                            <span>允许的设备</span>
+                            <input id="agent-access-devices" class="combo-box mono" value="*" placeholder="* 或逗号分隔的设备序列号" data-input="agentAccessUpdateTargetSummary">
+                            <small>* 表示全部；多个设备序列号用逗号分隔。</small>
+                        </label>
+                    </div>
+                </details>
+            </form>
+            <div id="agent-access-code-card" class="agent-access-code-card" hidden>
+                <div class="agent-access-card-heading">
+                    <div><h3>完成服务器配对</h3><p id="agent-access-code-context"></p></div>
+                </div>
+                <div class="agent-access-code-value">
+                    <strong id="agent-access-code-result" class="mono"></strong>
+                    <button class="btn-xs btn-primary" id="agent-access-copy-code" type="button" data-click="agentAccessCopyEnrollmentCode">复制配对码</button>
+                </div>
+                <p id="agent-access-code-expiry">5 分钟内有效，只能使用一次。</p>
+                <div class="agent-access-code-next">
+                    <span>在目标服务器执行安装命令，按提示粘贴配对码；完成后刷新接入列表。</span>
+                    <button class="btn-xs" type="button" data-click="copySkillInstallCommand">复制安装命令</button>
+                </div>
+            </div>
+        </div>
+        <div id="agent-access-create-actions" class="agent-access-form-actions">
+            <span class="agent-access-form-hint">生成时验证管理员身份，Agent 仅获得所选权限。</span>
+            <div>
+                <button class="btn-xs" type="button" data-click="agentAccessToggleCreate" data-a0="false">取消</button>
+                <button id="agent-access-create-submit" class="btn-xs btn-primary" type="submit" form="agent-access-enroll-form">生成配对码</button>
+            </div>
+        </div>
+
+        <div id="agent-access-result-actions" class="agent-access-form-actions" hidden>
+            <span class="agent-access-form-hint">配对码只能使用一次，完成配对后可关闭此窗口。</span>
+            <button class="btn-xs" type="button" data-click="agentAccessDismissCode">关闭</button>
+        </div>
+    </div>
+</div>
+
+<div id="agent-access-scopes-modal" class="modal" aria-labelledby="agent-access-scopes-title" aria-hidden="true">
+    <div class="modal-content modal-m">
+        <div class="modal-header">
+            <span id="agent-access-scopes-title" class="modal-title">Agent 授权范围</span>
+            <button type="button" class="modal-close" aria-label="关闭授权范围" data-click="agentAccessCloseScopes">&times;</button>
+        </div>
+        <div id="agent-access-token-scope-list" class="modal-body"></div>
+    </div>
+</div>

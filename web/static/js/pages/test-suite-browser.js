@@ -148,11 +148,13 @@ function buildReadablePathQuery(params) {
 
 let suiteBrowserInitialized = false;
 let suiteBrowserInitPromise = null;
+let suiteBrowserInitSignal = null;
 let suiteBrowserDirectoryRequestGeneration = 0;
 
-async function initTestSuiteBrowserPage() {
-    if (suiteBrowserInitPromise) return suiteBrowserInitPromise;
-    const pending = initTestSuiteBrowserPageOnce();
+async function initTestSuiteBrowserPage(signal = window.GmsPageLifecycle?.signalFor('test-suites')) {
+    if (suiteBrowserInitPromise && !suiteBrowserInitSignal?.aborted) return suiteBrowserInitPromise;
+    suiteBrowserInitSignal = signal;
+    const pending = initTestSuiteBrowserPageOnce(signal);
     suiteBrowserInitPromise = pending;
     try {
         return await pending;
@@ -161,13 +163,14 @@ async function initTestSuiteBrowserPage() {
     }
 }
 
-async function initTestSuiteBrowserPageOnce() {
+async function initTestSuiteBrowserPageOnce(signal) {
     const listEl = $('suite-browser-list');
     if (listEl && !suiteBrowserInitialized) {
         listEl.innerHTML = '<div class="suite-empty">正在加载...</div>';
     }
 
-    await loadSuiteWorkerSelector();
+    await loadSuiteWorkerSelector(signal);
+    signal?.throwIfAborted();
     const routeParams = getSuiteBrowserRouteParams();
     // 在首次加载套件前先应用链接指定的 Worker，避免先按浏览器保存的
     // ats-worker-* 加载并短暂显示“测试套件不存在”。
@@ -182,7 +185,8 @@ async function initTestSuiteBrowserPageOnce() {
         }
     }
 
-    await loadSuitesForBrowserWorker(false);
+    await loadSuitesForBrowserWorker(false, signal);
+    signal?.throwIfAborted();
     renderTestSuiteBrowserList();
 
     // 普通页面回访保留已绘制的目录和滚动位置。套件列表仍会
@@ -222,16 +226,19 @@ async function initTestSuiteBrowserPageOnce() {
 }
 
 let _suiteWorkerSelectorPromise = null;
-async function loadSuiteWorkerSelector() {
+let _suiteWorkerSelectorSignal = null;
+async function loadSuiteWorkerSelector(signal = window.GmsPageLifecycle?.signalFor('test-suites')) {
     const select = $('suite-worker-select');
     if (!select || select.dataset.loaded === '1') return;
-    if (_suiteWorkerSelectorPromise) return _suiteWorkerSelectorPromise;
+    if (_suiteWorkerSelectorPromise && !_suiteWorkerSelectorSignal?.aborted) return _suiteWorkerSelectorPromise;
+    _suiteWorkerSelectorSignal = signal;
     select.disabled = true;
     _suiteWorkerSelectorPromise = (async () => { try {
-        const response = await fetch('/api/cluster/workers', {cache: 'no-store'});
+        const response = await fetch('/api/cluster/workers', {cache: 'no-store', signal});
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
         await (window.GmsWorkspace?.ready || Promise.resolve());
+        signal?.throwIfAborted();
         const workspace = window.GmsWorkspace?.get?.() || {};
         const localWorkerId = workspaceLocalWorkerId();
         const saved = workspace.worker_id || localWorkerId;
@@ -246,14 +253,16 @@ async function loadSuiteWorkerSelector() {
         select.dataset.loaded = '1';
         select.disabled = false;
     } catch (error) {
+        if (isApiRequestCancelled(error, signal)) throw error;
         debugLog('[Suites] Worker selector unavailable:', error);
         select.innerHTML = `<option value="${escapeHtml(workspaceLocalWorkerId())}">${escapeHtml(workspaceLocalWorkerId())}</option>`;
         select.disabled = false;
     } })();
+    const pending = _suiteWorkerSelectorPromise;
     try {
-        await _suiteWorkerSelectorPromise;
+        await pending;
     } finally {
-        _suiteWorkerSelectorPromise = null;
+        if (_suiteWorkerSelectorPromise === pending) _suiteWorkerSelectorPromise = null;
     }
 }
 
@@ -269,7 +278,7 @@ let _browserSuitesWorkerId = '';
 // already switched to worker B.
 let _browserSuitesRequestGeneration = 0;
 
-async function loadSuitesForBrowserWorker(force = false) {
+async function loadSuitesForBrowserWorker(force = false, signal = window.GmsPageLifecycle?.signalFor('test-suites')) {
     const workerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
     // Suite Browser 是浏览上下文：只维护 page-local 的选择器，
     // 不改全局 Test Workspace（worker_id），否则浏览 Worker B
@@ -285,7 +294,8 @@ async function loadSuitesForBrowserWorker(force = false) {
     if (isLocalWorkspaceWorker(workerId)) {
         const generation = ++_browserSuitesRequestGeneration;
         const url = force ? '/api/test/suites?force_refresh=1' : '/api/test/suites';
-        const response = await apiCall(url);
+        const response = await apiCall(url, 'GET', null, {signal});
+        signal?.throwIfAborted();
         if (generation !== _browserSuitesRequestGeneration) {
             // A newer request superseded this one; drop the stale result.
             return _browserSuitesCache;
@@ -305,15 +315,17 @@ async function loadSuitesForBrowserWorker(force = false) {
         try {
             await apiCall(
                 `/api/cluster/workers/${encodeURIComponent(workerId)}/refresh?inventory=suites`,
-                'POST');
+                'POST', null, {signal});
         } catch (refreshError) {
+            if (isApiRequestCancelled(refreshError, signal)) throw refreshError;
             debugLog(`[suite-browser] worker refresh failed: ${refreshError.message}`);
         }
     }
     const generation = ++_browserSuitesRequestGeneration;
-    const response = await fetch(`/api/cluster/suites?worker_id=${encodeURIComponent(workerId)}`, {cache: 'no-store'});
+    const response = await fetch(`/api/cluster/suites?worker_id=${encodeURIComponent(workerId)}`, {cache: 'no-store', signal});
     if (!response.ok) throw new Error('加载 Worker 套件失败');
     const payload = await response.json();
+    signal?.throwIfAborted();
     if (generation !== _browserSuitesRequestGeneration) {
         // Stale response for a previous worker target.
         return _browserSuitesCache;

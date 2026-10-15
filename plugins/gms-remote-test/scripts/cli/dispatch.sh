@@ -9,6 +9,12 @@ _gms_rt_command_names() {
 
 _gms_rt_command_usage() {
     case "$1" in
+        gms-rt-apk-deploy) printf '%s' 'gms-rt-apk-deploy <worker_id> <device> <apk_file> [--no-replace] [--debug-session ID]' ;;
+        gms-rt-debug-session-request) printf '%s' 'gms-rt-debug-session-request <worker_id> <device> <package> <apk_file> [--minutes N] [--operations install,launch,stop,tap,swipe,text,keyevent]' ;;
+        gms-rt-debug-session-status|gms-rt-debug-session-revoke) printf '%s' "$1 <session_id>" ;;
+        gms-rt-debug-action) printf '%s' 'gms-rt-debug-action <session_id> <action> [--activity CLASS] [--x N] [--y N] [--end-x N] [--end-y N] [--duration-ms N] [--text VALUE] [--key KEY]' ;;
+        gms-rt-apk-deployment-status) printf '%s' 'gms-rt-apk-deployment-status <request_id>' ;;
+        gms-rt-devices-db-query) printf '%s' 'gms-rt-devices-db-query <worker_id> <device> <package> <database> [table] [--columns a,b] [--limit N] [--offset N]' ;;
         gms-rt-adb-forward-status|gms-rt-auth-credential-mode|gms-rt-auth-elevation-reset|gms-rt-auth-logout|gms-rt-auth-status|gms-rt-cluster-workers|gms-rt-config-read|gms-rt-desktop-vnc-status|gms-rt-desktop-vnc-stop|gms-rt-devices-list|gms-rt-devices-user-locked|gms-rt-reports-list|gms-rt-ssh-route|gms-rt-system-capabilities|gms-rt-system-commands|gms-rt-system-docs|gms-rt-system-health|gms-rt-system-help|gms-rt-system-selfcheck|gms-rt-system-version|gms-rt-test-clean|gms-rt-test-logs-stream|gms-rt-test-status|gms-rt-users-current|gms-rt-users-list|gms-rt-vpn-connect|gms-rt-vpn-disconnect|gms-rt-vpn-status)
             printf '%s' "$1"
             ;;
@@ -124,6 +130,13 @@ if matches:
 
 _gms_rt_command_summary() {
     case "$1" in
+        gms-rt-apk-deploy) printf '%s' 'Upload one APK and return a human approval URL for transfer and installation' ;;
+        gms-rt-apk-deployment-status) printf '%s' 'Read one APK deployment approval and installation status' ;;
+        gms-rt-debug-session-request) printf '%s' 'Request a finite app-scoped debugging grant for one Agent and device' ;;
+        gms-rt-debug-session-status) printf '%s' 'Read one debugging grant and its recent operations' ;;
+        gms-rt-debug-session-revoke) printf '%s' 'Revoke this Agent debugging grant' ;;
+        gms-rt-debug-action) printf '%s' 'Run a typed app or UI operation within an approved debugging grant' ;;
+        gms-rt-devices-db-query) printf '%s' 'Read bounded app database rows with sqlite3 -readonly' ;;
         gms-rt-adb-forward-status) printf '%s' 'List ADB proxy Workers and active source-to-target assignments' ;;
         gms-rt-adb-forward-start) printf '%s' 'Forward selected device serials from one Worker to another through adbproxy-rs' ;;
         gms-rt-adb-forward-stop) printf '%s' 'Stop one ADB proxy source-to-target Worker assignment' ;;
@@ -280,7 +293,8 @@ gms-rt-system-commands() {
                 "burn-|config-update|bootloader-(lock|unlock)|devices-(reboot|remount|push|wifi)"
                 + "|reports-delete|apk-analyze|terminal-push|test-(start|stop|clean)|usbip-(install|connect|disconnect)"
                 + "|vpn-(connect|disconnect)|adb-forward-(start|stop)|desktop-vnc-(start|stop)|users-set-username"
-                + "|jobs-cancel|system-update"
+                + "|jobs-cancel|system-update|apk-deploy$"
+                + "|debug-(action|session-(request|revoke))$"
                 + "|agent-(enroll|enroll-code|token-revoke)|approval-create|auth-(logout|elevation-reset)"
             )
             then "mutating"
@@ -291,7 +305,15 @@ gms-rt-system-commands() {
         # unknown fields; server-side scope checks are never skipped because
         # of these hints.
         def risk:
-            if test("apk-analyze-attachment")
+            if test("^gms-rt-apk-deploy$")
+            then {external_side_effects: true, resource_intensive: true, required_scope: "devices.use_leased"}
+            elif test("^gms-rt-debug-(action|session-(request|revoke))$")
+            then {external_side_effects: true, resource_intensive: false, required_scope: "devices.use_leased"}
+            elif test("^gms-rt-debug-session-status$")
+            then {external_side_effects: false, resource_intensive: false, required_scope: "devices.read"}
+            elif test("^gms-rt-(apk-deployment-status|devices-db-query)$")
+            then {external_side_effects: false, resource_intensive: false, required_scope: "devices.read"}
+            elif test("apk-analyze-attachment")
             then {external_side_effects: false, resource_intensive: true, required_scope: "apk.analyze_own"}
             elif test("artifact-(read|search)|redmine-attachment-download|redmine-attachments")
             then {external_side_effects: false, resource_intensive: false, required_scope: "artifacts.read_own"}
@@ -399,6 +421,7 @@ gms-rt-system-capabilities() {
                 "--yes",
                 "--timeout SECONDS",
                 "--server URL",
+                "--profile NAME",
                 "--ca-cert PATH",
                 "--insecure"
             ],
@@ -424,10 +447,37 @@ gms-rt-system-capabilities() {
         }'
 }
 
+_gms_rt_quick_help() {
+    cat << EOF
+GMS Remote Test ${GMS_RT_VERSION}
+
+接入与维护：
+  gms-agent update                  更新 Agent 包
+  gms-agent profile list            查看接入身份
+  eval "\$(gms-agent profile env)"    选择身份，当前终端复用
+  gms-agent doctor --json           检查安装与接入状态
+
+常用操作：
+  gms-rt-devices-list               查看设备
+  gms-rt-reports-list               查看测试报告
+  gms-rt-system-selfcheck --json    检查认证与服务连接
+
+完整命令：gms-rt --help
+命令参数：gms-rt-devices-list --help
+临时指定身份：命令后加 --profile NAME
+EOF
+}
+
 gms-rt-system-help() {
     cat << EOF
 ${BLUE}GMS Remote Test API Helper (FastAPI Port 5001)${NC}
 ========================================
+
+${YELLOW}常用入口:${NC}
+  gms-agent update                        更新 Agent 包（无需业务 Token）
+  gms-agent profile list                  查看可用接入身份
+  eval "\$(gms-agent profile env)"          选择一次，当前终端复用
+  gms-rt-devices-list --profile NAME       仅为本次命令指定身份
 
 ${YELLOW}ADB Proxy:${NC}
   gms-rt-adb-forward-status      - List ADB Proxy hosts and assignments
@@ -516,6 +566,13 @@ ${YELLOW}System:${NC}
   gms-rt-system-version          - Print CLI version
 
 ${YELLOW}APK Analysis:${NC}
+  gms-rt-apk-deploy              - Upload APK and return one human approval URL for push + install
+  gms-rt-apk-deployment-status   - Read APK deployment approval/install status
+  gms-rt-debug-session-request   - Request one finite app/device debug grant
+  gms-rt-debug-session-status    - Read debug grant and recent operation status
+  gms-rt-debug-session-revoke    - Revoke this Agent's debug grant
+  gms-rt-debug-action            - Run a typed operation inside a debug grant
+  gms-rt-devices-db-query        - Read bounded app SQLite rows without arbitrary shell approval
   gms-rt-apk-resolve             - Resolve a suite module to its APK/JAR artifact
   gms-rt-apk-analyze             - Start JADX analysis for a resolved suite module
   gms-rt-apk-status              - Read one task status, or list all tasks
@@ -607,9 +664,14 @@ ${YELLOW}Terminal:${NC}
   gms-rt-terminal-open 192.168.1.100 $DEFAULT_SSH_USER
   gms-rt-terminal-push ./config.json
 
-Server: ${GREEN}$SERVER_URL${NC}
-Docs:   ${GREEN}${SERVER_URL}/docs${NC}
-Help:   ${GREEN}${SERVER_URL}/api/system/help${NC}
+EOF
+    if [ -n "$SERVER_URL" ]; then
+        printf 'Server: %s\nDocs:   %s/docs\nHelp:   %s/api/system/help\n' \
+            "$SERVER_URL" "${SERVER_URL%/}" "${SERVER_URL%/}"
+    else
+        printf '%s\n' 'Controller：尚未选择；使用 --server URL 查看对应的文档地址。'
+    fi
+    cat << EOF
 
 Global options:
   --json                 Emit exactly one JSON envelope on stdout
@@ -619,6 +681,7 @@ Global options:
   --yes                  Accept supported confirmations
   --timeout SECONDS      Override the API timeout for this invocation
   --server URL           Use another Controller for this invocation
+  --profile NAME         Explicitly select one Agent identity for this invocation
   --ca-cert PATH         Verify HTTPS with a trusted CA certificate
   --insecure             Skip TLS verification (throwaway environments only)
 
@@ -642,6 +705,8 @@ _gms_rt_dispatch_usage_error() {
 
 _gms_rt_dispatch() {
     local command="${1:-gms-rt-system-help}"
+    local handler="$command"
+    [ "$#" -ne 0 ] || handler="_gms_rt_quick_help"
     [ "$#" -eq 0 ] || shift
     local args=()
     local argument
@@ -779,10 +844,10 @@ _gms_rt_dispatch() {
     export GMS_RT_STATUS_FILE GMS_RT_OUTPUT GMS_RT_QUIET GMS_RT_NON_INTERACTIVE GMS_RT_ASSUME_YES
 
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
-        "$command" "${args[@]}" >"$stdout_file" 2>"$stderr_file"
+        "$handler" "${args[@]}" >"$stdout_file" 2>"$stderr_file"
         command_status=$?
     else
-        "$command" "${args[@]}"
+        "$handler" "${args[@]}"
         command_status=$?
     fi
 
