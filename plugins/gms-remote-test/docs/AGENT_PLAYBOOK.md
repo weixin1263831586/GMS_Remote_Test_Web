@@ -32,7 +32,7 @@ export GMS_CURL_CA_CERT=/path/to/controller-ca.pem
 | agent token 过期 / 401 | Web UI 管理员铸造一次性配对码(5 分钟 TTL)→ `gms-rt-agent-enroll <CODE>` |
 | token 文件 | 默认 `~/.local/state/gms-remote-test/<profile>.token`(0600),通过 `GMS_AUTH_TOKEN_FILE` 注入 |
 | 人工会话 | `gms-rt-auth-login <user> --password-stdin`;提权 `gms-rt-auth-elevate` |
-| 危险操作审批 | 人工会话下 `gms-rt-approval-create`;agent token 永远无法自审批(服务端强制) |
+| 危险操作审批 | 人工终端直接运行 `gms-rt-approval-create`，自动复用会话或提示登录；Agent Token 永远无法自审批（服务端强制） |
 
 退出码语义(全部命令统一):`0` 成功,`2` 用法错误,`3` 未认证,
 `4` 权限/需提权,`5` 冲突/设备忙,`6` 网络/超时,`7` 操作失败。

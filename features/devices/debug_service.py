@@ -16,12 +16,12 @@ from foundation.error_model import ApiError, record_internal_error
 
 from . import debug_execution, deployment_execution
 from . import deployment_service as deployment
-from .debug_identity import inspect_apk
+from .debug_identity import inspect_apk, require_installed
 from .debug_store import DebugStore
 
 
 logger = logging.getLogger(__name__)
-OPERATIONS = frozenset({"install", "launch", "stop", "tap", "swipe", "text", "keyevent"})
+OPERATIONS = frozenset({"install", "launch", "stop", "tap", "swipe", "text", "keyevent", "database_read"})
 
 
 def store():
@@ -99,6 +99,11 @@ def approve(request, session_id):
                 session["worker_id"], [key], owner_id=session["owner_id"], source_type="debug-session",
                 source_id=source, ttl_seconds=session["duration_minutes"] * 60, username=user.username,
             )
+        # Sessions without a baseline install must already target the approved
+        # signer. Install sessions remain busy until the installed APK is verified.
+        if "install" not in session["operations"]:
+            with deployment.connection(session["worker_id"], config) as ssh:
+                require_installed(ssh, session)
         session = grants.activate(session_id, session["owner_id"], {
             "approved_by": user.actor_id, "approved_at": time.time(),
             "expires_at": time.time() + session["duration_minutes"] * 60,
@@ -131,15 +136,24 @@ def check_apk(session, payload):
         raise ApiError.forbidden("APK 部署不属于已授权目标或覆盖安装模式")
     path = deployment.store().root / payload["id"] / "artifact.apk"
     identity = inspect_apk(path, payload["sha256"])
-    if identity != {"package": session["package"], "signers": session["signers"]}:
+    if any(identity[key] != session[key] for key in ("package", "signers")):
         raise ApiError.forbidden("APK 包名或签名证书超出调试授权范围，请单独提交部署审批")
 
 
-def check_live(session):
+def check_live(session, *, require_baseline=False):
     current = store().get(session["id"], session["owner_id"])
     if current["status"] != "active":
         raise ApiError.forbidden("调试会话未批准、已到期或已撤销",
                                  next_actions=({"action": "重新申请并由用户批准调试会话"},))
+    if "install" in current["operations"]:
+        baseline = deployment.store().get(current["baseline_deployment_id"], current["owner_id"])
+        if baseline["status"] in {"failed", "interrupted", "expired"}:
+            store().revoke(current["id"], current["owner_id"])
+            if current["busy"]:
+                finish(current, current["busy"], "interrupted", {"error": "基线安装失败或中断"})
+            raise ApiError.forbidden("基线安装失败或中断，调试授权已撤销")
+        if require_baseline and baseline["status"] != "completed":
+            raise ApiError.conflict("基线 APK 尚未完成安装和身份校验，请先查询部署状态")
     check_identity(current)
     repository = get_cluster_service().repository
     worker = repository.get_worker(session["worker_id"])
@@ -153,7 +167,7 @@ def check_live(session):
 
 
 def start_install(session, payload, config):
-    check_live(session)
+    check_live(session, require_baseline=payload["id"] != session["baseline_deployment_id"])
     check_apk(session, payload)
     operation = store().begin(session["id"], session["owner_id"], session["actor_id"], "install",
                               {"deployment_id": payload["id"], "sha256": payload["sha256"]})
@@ -173,7 +187,7 @@ async def prepare_install(request, session_id, worker_id, device, replace_existi
         raise ApiError.forbidden("请由申请该会话的 Agent 上传调试 APK")
     if (worker_id, serial) != (session["worker_id"], session["serial"]) or not replace_existing:
         raise ApiError.forbidden("部署目标或安装模式超出调试范围")
-    check_live(session)
+    check_live(session, require_baseline=True)
     payload = await deployment.prepare(request, worker_id, device, True, upload)
     try:
         config = deployment.ssh_config(worker_id)
@@ -195,14 +209,20 @@ def finish(session, operation, status, result):
 def execute_install(payload):
     session = payload["_debug_session"]
     repository = deployment.store()
+    repository.begin_execution(payload["id"])
     status = "failed"
     result = {"error": "安装中断"}
     try:
-        check_live(session)
-        check_apk(session, payload)
-        with deployment.connection(payload["worker_id"], payload["_ssh_config"]) as ssh:
-            result = deployment_execution.install(ssh, payload, repository.root / payload["id"] / "artifact.apk",
-                                                lambda: check_live(session))
+        def check():
+            repository.heartbeat(payload["id"])
+            check_live(session)
+
+        with deployment.execution_lease(repository, payload["id"]):
+            check()
+            check_apk(session, payload)
+            with deployment.connection(payload["worker_id"], payload["_ssh_config"]) as ssh:
+                result = deployment_execution.install(ssh, payload, repository.root / payload["id"] / "artifact.apk", check)
+                require_installed(ssh, session, check)
         status = "completed"
     except ApiError as exc:
         result = exc.envelope()
@@ -212,6 +232,8 @@ def execute_install(payload):
         result = ApiError.internal(record_internal_error(logger, "调试安装", "Debug installation failed")).envelope()
     finally:
         repository.finish(payload["id"], status, result)
+        if status != "completed":
+            store().revoke(session["id"], session["owner_id"])
         finish(session, payload["_debug_operation"], status, result)
         shutil.rmtree(repository.root / payload["id"], ignore_errors=True)
 
@@ -222,13 +244,14 @@ def action(request, session_id, body):
     if user.actor_id != session["actor_id"]:
         raise ApiError.forbidden("请由申请该会话的 Agent 执行调试操作")
     debug_execution.validate(body)
-    check_live(session)
+    check_live(session, require_baseline=True)
     details = body.model_dump(exclude_none=True)
     if "text" in details:
         details["text_sha256"] = hashlib.sha256(details.pop("text").encode()).hexdigest()
     operation = store().begin(session_id, session["owner_id"], user.actor_id, body.action, details)
     try:
         with deployment.connection(session["worker_id"]) as ssh:
+            require_installed(ssh, session, lambda: check_live(session))
             result = debug_execution.perform(ssh, session, body, lambda: check_live(session))
         finish(session, operation, "completed", result)
         return {"operation_id": operation, **result}
@@ -255,3 +278,30 @@ def revoke(request, session_id):
     if current.get("_claim_source") and not current["busy"]:
         get_cluster_service().repository.claims.release(current["_claim_source"])
     return current
+
+
+def database_query(request, body):
+    deployment.authorize(request, "devices.database.read")
+    if not body.debug_session_id:
+        raise ApiError.forbidden("数据库读取需要包含 database_read 的人工批准调试会话")
+    session = read(request, body.debug_session_id, "devices.use_leased")
+    user, serial, _ = deployment.target(request, body.worker_id, body.device, "devices.use_leased")
+    if user.actor_id != session["actor_id"] or (body.worker_id, serial, body.package) != (
+        session["worker_id"], session["serial"], session["package"],
+    ):
+        raise ApiError.forbidden("数据库读取超出获批 Agent、设备或应用范围")
+    check_live(session, require_baseline=True)
+    operation = store().begin(session["id"], session["owner_id"], user.actor_id, "database_read", {
+        "actor_id": user.actor_id, "package": body.package, "database": body.database, "table": body.table,
+    })
+    try:
+        with deployment.connection(body.worker_id) as ssh:
+            require_installed(ssh, session, lambda: check_live(session))
+            check_live(session)
+            result = deployment_execution.query_database(ssh, serial, body)
+        finish(session, operation, "completed", {"read": True})
+        return result
+    except Exception:
+        # Device output and database rows never enter the access audit.
+        finish(session, operation, "failed", {"error": "数据库读取失败"})
+        raise

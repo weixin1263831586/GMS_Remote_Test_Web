@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import json
 import logging
 import shutil
+import threading
 import time
 import uuid
 import zipfile
 from pathlib import Path
 
+import paramiko
 from fastapi import HTTPException
 
 from features.auth import (
@@ -26,6 +29,7 @@ from foundation.security import is_safe_device_id
 
 from . import deployment_execution as execution
 from . import runtime
+from .debug_identity import inspect_apk, installed_identity
 from .deployment_store import DeploymentStore
 
 
@@ -98,11 +102,16 @@ def ssh_config(worker_id: str):
 @contextlib.contextmanager
 def connection(worker_id: str, approved_config=None):
     config = ssh_config(worker_id) if approved_config is None else approved_config
-    ssh = runtime.ssh_manager.get_connection(config)
+    try:
+        ssh = runtime.ssh_manager.get_connection(config)
+    except (OSError, EOFError, paramiko.SSHException) as exc:
+        raise ApiError.upstream_failure("Worker SSH 连接失败", service="ssh") from exc
     if ssh is None:
         raise ApiError.upstream_failure("Worker SSH 连接失败", service="ssh")
     try:
         yield ssh
+    except (OSError, EOFError, paramiko.SSHException) as exc:
+        raise ApiError.upstream_failure("Worker SSH/ADB 连接中断", service="ssh/adb") from exc
     finally:
         runtime.ssh_manager.return_connection(ssh)
 
@@ -134,11 +143,23 @@ async def prepare(request, worker_id: str, device: str, replace_existing: bool, 
         except zipfile.BadZipFile as exc:
             raise ApiError.invalid_semantics("文件不是有效的 APK 制品") from exc
         path.chmod(0o400)
+        identity = await asyncio.to_thread(inspect_apk, path, digest.hexdigest())
+
+        def observe():
+            held = get_cluster_service().repository.claims.active_claim(_key)
+            if held and held["owner_id"] != user.resource_owner_id:
+                raise ApiError.conflict("设备由其他用户占用")
+            with connection(worker_id) as ssh:
+                return installed_identity(ssh, serial, identity["package"])
+
+        installed = await asyncio.to_thread(observe)
         return repository.create({
             "id": request_id, "owner_id": user.resource_owner_id,
             "actor_id": user.actor_id, "worker_id": worker_id, "serial": serial,
             "filename": Path(upload.filename or "artifact.apk").name[:200],
             "sha256": digest.hexdigest(), "size_bytes": size,
+            **identity, "installed_identity": installed,
+            "installed_signers_match": installed["signers"] == identity["signers"] if installed else None,
             "replace_existing": replace_existing, "expires_at": time.time() + 300,
         })
     except Exception:
@@ -240,21 +261,24 @@ def approve(request, request_id: str):
 
 def execute(payload: dict, source: str):
     repository = store()
+    repository.begin_execution(payload["id"])
 
     def check_claim():
+        repository.heartbeat(payload["id"])
         claims = get_cluster_service().repository.claims
         check_claim_tokens(payload.get("_lease_tokens"), payload["owner_id"])
         if source:
             claims.renew(source, 1200)
 
     try:
-        check_claim()
-        with connection(payload["worker_id"], payload["_ssh_config"]) as ssh:
-            result = execution.install(ssh, payload, repository.root / payload["id"] / "artifact.apk", check_claim)
+        with execution_lease(repository, payload["id"]):
+            check_claim()
+            with connection(payload["worker_id"], payload["_ssh_config"]) as ssh:
+                result = execution.install(ssh, payload, repository.root / payload["id"] / "artifact.apk", check_claim)
         repository.finish(payload["id"], "completed", result)
     except ApiError as exc:
         repository.finish(payload["id"], "failed", exc.envelope())
-    except (OSError, EOFError):
+    except (OSError, EOFError, paramiko.SSHException):
         repository.finish(payload["id"], "failed", ApiError.upstream_failure(
             "SSH/制品传输中断", service="sftp",
         ).envelope())
@@ -265,3 +289,43 @@ def execute(payload: dict, source: str):
         if source:
             get_cluster_service().repository.claims.release(source)
         shutil.rmtree(repository.root / payload["id"], ignore_errors=True)
+
+
+@contextlib.contextmanager
+def execution_lease(repository, request_id):
+    """One durable queued task wins execution; live work renews its own lease."""
+    stop = threading.Event()
+
+    def heartbeat():
+        while not stop.wait(20):
+            try:
+                repository.heartbeat(request_id)
+            except Exception:
+                return  # The next fenced step must fail closed.
+
+    thread = threading.Thread(target=heartbeat, daemon=True)
+    thread.start()
+    try:
+        yield
+        repository.heartbeat(request_id)
+    finally:
+        stop.set()
+        thread.join(timeout=2)
+
+
+def reconcile_interrupted(request, payload):
+    """Status reads reconcile observed installation; interrupted work is never replayed."""
+    target(request, payload["worker_id"], payload["serial"], "devices.use_leased")
+    if not payload.get("package") or not payload.get("signers"):
+        return payload  # Older approvals cannot establish an installed identity.
+    claim = get_cluster_service().repository.claims.active_claim(payload["worker_id"] + ":" + payload["serial"])
+    if claim and claim["owner_id"] != payload["owner_id"]:
+        raise ApiError.conflict("设备由其他用户占用，无法核实中断安装")
+    with connection(payload["worker_id"]) as ssh:
+        identity = installed_identity(ssh, payload["serial"], payload["package"])
+    matches = bool(identity and identity["sha256"] == payload["sha256"]
+                   and identity["signers"] == payload["signers"])
+    store().reconcile(payload["id"], payload["owner_id"], {
+        "reconciled_at": time.time(), "installed_identity": identity, "artifact_matches": matches,
+    }, completed=matches)
+    return store().get(payload["id"], payload["owner_id"])

@@ -36,6 +36,15 @@ Agent Runtime 部署在编译服务器等共享主机上时，同一台 Agent �
    profile、不修改 shell 启动文件或其他客户端注册。MCP、JSON 和非交互
    执行仍不弹菜单、不猜选。帮助、版本、命令目录不解析业务凭据；更新
    只走包生命周期的 Controller/TLS/完整性校验，不要求业务 Token。
+8. **人工命令按用途解析凭据**：交互终端中的登录、登出、提权和审批
+   命令直接解析 Controller/TLS，使用独立人工 Cookie，不先选择 Agent
+   身份。多个客户端配置指向相同 Controller/TLS 时，忽略服务 Token 的
+   差异；不同 Controller/TLS 仍须人工选择。显式 profile 只为这些人工
+   命令提供已绑定的传输配置，不允许发送到其他 Controller。人工 Cookie
+   使用 `human-<Controller URL SHA256 前16位>.cookies`，不覆盖 Agent Token。
+   审批命令复用有效人工会话，失效时交互登录后继续签发，不执行设备命令。
+   JSON、非交互和 MCP 不自动切换人工身份或提示密码；MCP 不继承父终端
+   的 `GMS_RT_HUMAN_SESSION`。人工脚本仍须显式选择人工模式。
 
 ## 理由
 

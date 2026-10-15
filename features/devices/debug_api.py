@@ -5,13 +5,15 @@ from __future__ import annotations
 import asyncio
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from features.auth import require_permission
 from foundation.error_model import ApiError
 
 from . import debug_service as service
+from .review_pages import LOGIN_ASSETS, LOGIN_PANEL
 
 
 router = APIRouter()
@@ -59,7 +61,7 @@ def session_status(request: Request, session_id: str):
     session["usable"] = False
     if session["status"] == "active":
         try:
-            service.check_live(session)
+            service.check_live(session, require_baseline=True)
             session["usable"] = not bool(session["busy"])
         except ApiError as exc:
             session["blocked_reason"] = exc.message
@@ -81,19 +83,21 @@ def revoke_session(request: Request, session_id: str):
 
 
 @router.post("/api/devices/debug-sessions/{session_id}/actions")
-async def debug_action(request: Request, session_id: str, body: DebugAction):
+async def debug_action(request: Request, session_id: str, body: DebugAction,
+                       _user=Depends(require_permission("devices.use_leased"))):
     return {"success": True, "data": await asyncio.to_thread(service.action, request, session_id, body)}
 
 
 @router.get("/api/devices/debug-sessions/{session_id}/review", response_class=HTMLResponse)
 def review_session(request: Request, session_id: str):
-    service.read(request, session_id)
     return HTMLResponse('''<!doctype html><html lang="zh-CN"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>调试会话授权</title><link rel="stylesheet" href="/static/css/device-deployment-review.css">
+''' + LOGIN_ASSETS + '''
 <script src="/static/js/pages/device-debug-review.js" defer></script></head>
-<body><main><h1>调试会话授权</h1><p>批准后，Agent 可在以下设备和应用范围内连续调试，直到到期或撤销。</p>
+<body><main><h1>调试会话授权</h1><p>请登录发起申请的 Agent 所属平台账号。批准后，Agent 可在以下设备和应用范围内连续调试，直到到期或撤销。</p>
+<button id="review-login-open" type="button">登录 / 切换管理员账号</button>
 <dl id="details"></dl><p id="status" role="status">正在读取调试请求…</p>
 <button id="approve" disabled>批准调试会话</button><button id="revoke" disabled>撤销授权</button>
 <a href="/">返回平台</a><h2>最近操作</h2><ol id="operations"></ol>
-</main></body></html>''')
+</main>''' + LOGIN_PANEL + '''</body></html>''')

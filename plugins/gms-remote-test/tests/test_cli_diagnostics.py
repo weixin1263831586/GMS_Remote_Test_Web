@@ -353,7 +353,8 @@ gms-rt-devices-snapshot DIAGDEV
         detailed = self.run_snippet("gms-rt-approval-create --help")
         self.assertEqual(detailed.returncode, 0, detailed.stderr)
         self.assertIn("Usage: gms-rt-approval-create", detailed.stdout)
-        self.assertIn("GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login", detailed.stdout)
+        self.assertIn("export GMS_RT_HUMAN_SESSION=1", detailed.stdout)
+        self.assertIn("prompts for login", detailed.stdout)
         catalog = self.run_cli("gms-rt-system-command-describe",
                                "gms-rt-approval-create")
         self.assertEqual(catalog.returncode, 0, catalog.stderr)

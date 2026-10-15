@@ -166,7 +166,8 @@ def render_daily_brief_markdown(
         if native_summary and confidence is None:
             lines.append("- 置信度：未提供（见详细分析）")
         else:
-            lines.append(f"- 置信度：{confidence}{review}")
+            label = "规则置信等级（非准确率）" if result.get("confidence_source") == "controller_evidence_gate" or native_summary else "置信度"
+            lines.append(f"- {label}：{confidence}{review}")
         lines.append("")
     if failed:
         lines.append("## 分析失败")

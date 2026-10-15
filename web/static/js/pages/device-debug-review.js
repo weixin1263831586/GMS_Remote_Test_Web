@@ -10,19 +10,42 @@
     const labels = {pending: '等待批准（申请后 5 分钟内有效）', approving: '正在批准…',
         active: '调试授权有效', expired: '调试授权已到期，请重新申请', revoked: '调试授权已撤销'};
     const actions = {install: '覆盖安装同包名、同签名 APK', launch: '启动应用', stop: '停止应用',
-        tap: '应用内点击', swipe: '应用内滑动', text: '应用内输入文本', keyevent: '应用内导航按键'};
+        tap: '应用内点击', swipe: '应用内滑动', text: '应用内输入文本', keyevent: '应用内导航按键', database_read: '读取此应用数据库（敏感数据）'};
     let busy = false;
     let timer;
+    let failures = 0;
+    let stopped = false;
+    let hidden = false;
 
     async function request(method, path) {
         const response = await fetch(path, {method, credentials: 'same-origin', headers: {'Accept': 'application/json'}});
+        if ([401, 403].includes(response.status)) {
+            stopped = true;
+            clearTimeout(timer);
+            details.replaceChildren();
+            history.replaceChildren();
+            const reason = '登录已失效或权限不足，请重新登录管理员 gms 账号。';
+            window.DeviceReviewLogin.open(reason);
+            throw new Error(reason);
+        }
+        if (response.status === 404) {
+            stopped = true;
+            clearTimeout(timer);
+            details.replaceChildren();
+            history.replaceChildren();
+            const reason = '请求不存在或不属于当前登录账号。请登录发起申请的 Agent 所属平台账号（管理员 gms）；仍不可用时请由原 Agent 重新申请。';
+            window.DeviceReviewLogin.open(reason);
+            throw new Error(reason);
+        }
         const body = await response.json();
-        if (!response.ok || body.success === false) throw new Error(body.error || '请求失败，请登录平台后重试');
+        if (!response.ok || body.success === false) throw new Error(body.error || '请求失败，稍后自动重试');
         return body;
     }
 
     async function refresh() {
         clearTimeout(timer);
+        if (stopped) return;
+        let poll = true;
         try {
             const {session: s, operations} = await request('GET', endpoint);
             details.replaceChildren();
@@ -50,11 +73,15 @@
                 if (operation.result?.error) item.textContent += '，' + operation.result.error;
                 history.append(item);
             }
-            if (['pending', 'approving', 'active'].includes(s.status)) timer = setTimeout(refresh, 3000);
+            failures = 0;
+            poll = ['pending', 'approving', 'active'].includes(s.status);
         } catch (error) {
             status.textContent = error.message;
             approve.disabled = true;
             revoke.disabled = true;
+            failures += 1;
+        } finally {
+            if (poll && !stopped) timer = setTimeout(refresh, Math.min(30000, 3000 * 2 ** failures));
         }
     }
 
@@ -70,6 +97,12 @@
             finally { busy = false; await refresh(); if (message) status.textContent = message; }
         });
     }
-    window.addEventListener('pagehide', () => clearTimeout(timer), {once: true});
+    window.addEventListener('device-review-authenticated', () => {
+        if (hidden) return;
+        stopped = false;
+        failures = 0;
+        refresh();
+    });
+    window.addEventListener('pagehide', () => { hidden = true; stopped = true; clearTimeout(timer); }, {once: true});
     refresh();
 })();

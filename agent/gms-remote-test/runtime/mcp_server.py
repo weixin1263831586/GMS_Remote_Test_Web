@@ -117,7 +117,7 @@ mcp_debug_tools = _load_typed_tools("mcp_debug_tools")
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.54"
+SERVER_VERSION = "0.22.57"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -1498,8 +1498,18 @@ def run_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     # these transport switches in the first place.
     if args is None:
         args = []
+    args_error = ('args must be an array of strings, e.g. '
+                  '{"command":"devices-info","args": ["DEVICE"]}; do not pass a shell string')
+    # Older clients saw an untyped schema and may stringify the entire array.
+    # Decode JSON once, then apply the same shape and transport checks. Never
+    # split a shell command or recursively decode strings into arguments.
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except (ValueError, RecursionError):
+            return args_error, True
     if not isinstance(args, list) or not all(isinstance(item, str) for item in args):
-        return "args must be an array of strings", True
+        return args_error, True
     transport_switches = (
         "--server", "--ca-cert", "--insecure", "--profile",
         "--token", "--password-stdin",

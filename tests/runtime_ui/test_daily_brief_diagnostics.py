@@ -43,7 +43,7 @@ class DailyBriefDiagnosticsTests(RuntimeUiHarness):
             verified = card.locator('.daily-brief-metric').filter(has_text='证据已验证')
             expect(verified.locator('b')).to_have_text('5')
             expect(verified).to_have_attribute('title', '资料证据通过门禁；实机取证状态单独显示')
-            self.assertEqual(card.inner_text().count('证据评分 0.7'), 5)
+            self.assertEqual(card.inner_text().count('规则置信等级（非准确率） 0.7'), 5)
             self.assertNotIn('模型自评', card.inner_text())
             self.assertEqual(card.inner_text().count('模型上下文超限'), 2)
             self.assertEqual(card.inner_text().count('AI 未生成最终报告'), 1)

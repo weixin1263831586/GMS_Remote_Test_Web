@@ -16,6 +16,8 @@
 | `gms-rt-agent-tokens` | List Agent Service Tokens (admin; metadata only, raw tokens are never stored) | gms-rt-agent-tokens |
 | `gms-rt-apk-analyze` | Resolve a module artifact, copy it from the suite, and start jadx decompilation | gms-rt-apk-analyze <module_query> [--types cts,cts-v,vts,gts,sts] [--prefer apk\|jar] [--suite-path PATH] [--wait] [--max-wait SECONDS] |
 | `gms-rt-apk-analyze-attachment` | Import a Redmine .apk artifact into the JADX analysis pipeline (owner-scoped) | gms-rt-apk-analyze-attachment <snapshot_id> <artifact_id> |
+| `gms-rt-apk-deploy` | Upload one APK and return a human approval URL for transfer and installation | gms-rt-apk-deploy <worker_id> <device> <apk_file> [--no-replace] [--debug-session ID] |
+| `gms-rt-apk-deployment-status` | Read one APK deployment approval and installation status | gms-rt-apk-deployment-status <request_id> |
 | `gms-rt-apk-download` | Download the decompiled source ZIP of an analysis task | gms-rt-apk-download <task_id> [output.zip] |
 | `gms-rt-apk-manifest` | Show the parsed AndroidManifest.xml, or its declared permissions with --permissions | gms-rt-apk-manifest <task_id> [--permissions] |
 | `gms-rt-apk-resolve` | Resolve a test module keyword to its APK/JAR artifact in the latest suites | gms-rt-apk-resolve <module_query> [--types cts,cts-v,vts,gts,sts] [--prefer apk\|jar] [--suite-path PATH] |
@@ -23,7 +25,7 @@
 | `gms-rt-apk-source` | Browse the decompiled source tree (read file windows with gms-rt-apk-source-read) | gms-rt-apk-source <task_id> [path] |
 | `gms-rt-apk-source-read` | Read a window of one decompiled source file by task-relative path | gms-rt-apk-source-read <task_id> <path> [--offset N] [--limit N] |
 | `gms-rt-apk-status` | Get one APK analysis task status, or list all tasks when no task id is given | gms-rt-apk-status [task_id] |
-| `gms-rt-approval-create` | Create a one-shot approval token for a destructive agent action (human session only; multi-profile hosts: GMS_RT_HUMAN_SESSION=1 gms-rt-auth-login <user> first) | gms-rt-approval-create --tool <tool> --device <serial>[,<serial>...] [--command <command>\|--firmware-sha256 <sha256> [--wipe-data true\|false] [--burn-mode auto\|uf]] |
+| `gms-rt-approval-create` | Create a one-shot approval token (human terminal: auto-login/session reuse; scripts: GMS_RT_HUMAN_SESSION=1) | gms-rt-approval-create --tool <tool> --device <serial>[,<serial>...] [--command <command>\|--firmware-sha256 <sha256> [--wipe-data true\|false] [--burn-mode auto\|uf]] |
 | `gms-rt-artifact-read` | Read a text/log artifact derived text by char window (--offset/--limit) | gms-rt-artifact-read <artifact_id> [--offset N] [--limit N] |
 | `gms-rt-artifact-search` | Search description, journals, and artifact text for a fixed query with evidence refs | gms-rt-artifact-search <snapshot_id> <query> [--limit N] |
 | `gms-rt-auth-credential-mode` | Show whether this CLI invocation uses an Agent Token file or a session cookie |  |
@@ -41,6 +43,10 @@
 | `gms-rt-cluster-workers` | List registered Cluster Workers and their current availability |  |
 | `gms-rt-config-read` | Read the Controller configuration visible to the current principal |  |
 | `gms-rt-config-update` | Update one Controller configuration key | gms-rt-config-update <key> <value> |
+| `gms-rt-debug-action` | Run a typed app or UI operation within an approved debugging grant | gms-rt-debug-action <session_id> <action> [--activity CLASS] [--x N] [--y N] [--end-x N] [--end-y N] [--duration-ms N] [--text VALUE] [--key KEY] |
+| `gms-rt-debug-session-request` | Request a finite app-scoped debugging grant for one Agent and device | gms-rt-debug-session-request <worker_id> <device> <package> <apk_file> [--minutes N] [--operations install,launch,stop,tap,swipe,text,keyevent] |
+| `gms-rt-debug-session-revoke` | Revoke this Agent debugging grant |  |
+| `gms-rt-debug-session-status` | Read one debugging grant and its recent operations |  |
 | `gms-rt-desktop-validate` | Validate SSH access to a desktop host | gms-rt-desktop-validate <user@ip> |
 | `gms-rt-desktop-vnc-start` | Start the configured VNC service on a desktop host | gms-rt-desktop-vnc-start [host] [password] [vnc_password] |
 | `gms-rt-desktop-vnc-status` | Read the configured desktop VNC service status |  |
@@ -49,6 +55,7 @@
 | `gms-rt-devices-bootloader-status` | Read bootloader lock status for one or more devices |  |
 | `gms-rt-devices-bootloader-unlock` | Unlock the bootloader on one or more devices |  |
 | `gms-rt-devices-console` | List Controller serial ports, assess a device binding, or read retained logs | gms-rt-devices-console [port_key] [--tail N] [--date YYYYMMDD] [--device SERIAL [--worker WORKER_ID]] |
+| `gms-rt-devices-db-query` | Read bounded app database rows with sqlite3 -readonly | gms-rt-devices-db-query <worker_id> <device> <package> <database> [table] --debug-session ID [--columns a,b] [--limit N] [--offset N] |
 | `gms-rt-devices-diag` | Run one read-only diagnostic device command (shared typed-readonly allowlist, locally audited) | gms-rt-devices-diag <device_id> <command> |
 | `gms-rt-devices-info` | Read detailed properties for one or more devices |  |
 | `gms-rt-devices-list` | List devices visible through the Controller device inventory |  |

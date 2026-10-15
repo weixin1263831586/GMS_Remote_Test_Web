@@ -57,3 +57,32 @@ class DeploymentReviewBrowserTests(RuntimeUiHarness):
             self.assertEqual(errors, [])
         finally:
             page.close()
+
+    def test_inaccessible_request_explains_account_and_stops_polling(self):
+        page = self.new_page()
+        page.clock.install()
+        path = "/api/devices/deployments/" + "a" * 32
+        state = {"reads": 0, "mutations": 0}
+        with patch("features.devices.deployment_api.deployment_status"):
+            html = review_deployment(None, "a" * 32).body.decode()
+
+        def handle(route):
+            if route.request.url.endswith("/review"):
+                route.fulfill(content_type="text/html", body=html)
+                return
+            if route.request.method != "GET":
+                state["mutations"] += 1
+            state["reads"] += 1
+            route.fulfill(status=404, content_type="application/json",
+                          body='{"success":false,"error":"APK 部署请求不存在","code":"NOT_FOUND"}')
+
+        page.route("**" + path + "**", handle)
+        try:
+            page.goto(self.base_url + path + "/review")
+            page.wait_for_function("document.getElementById('status').textContent.includes('所属平台账号')")
+            self.assertTrue(page.locator("#approve").is_disabled())
+            self.assertEqual(page.locator("#details").inner_text(), "")
+            page.clock.fast_forward(60000)
+            self.assertEqual(state, {"reads": 1, "mutations": 0})
+        finally:
+            page.close()

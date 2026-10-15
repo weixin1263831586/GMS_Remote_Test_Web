@@ -233,6 +233,18 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             return True
         if path.startswith('/static/'):
             return True
+        if method in {'GET', 'HEAD'} and any(
+            path == template or re.fullmatch(pattern, path)
+            for template, pattern in (
+                ('/api/devices/deployments/{request_id}/review',
+                 r'/api/devices/deployments/[a-f0-9]{32}/review'),
+                ('/api/devices/debug-sessions/{session_id}/review',
+                 r'/api/devices/debug-sessions/[a-f0-9]{32}/review'),
+            )
+        ):
+            # Public login shells contain no request metadata. Status reads
+            # and all approval/mutation endpoints remain authenticated.
+            return True
         if path in {
             '/api/auth/status',
             '/api/auth/setup',

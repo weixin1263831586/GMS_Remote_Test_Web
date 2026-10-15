@@ -22,6 +22,7 @@ class ScriptSources(HTMLParser):
         super().__init__()
         self.sources = []
         self.styles = []
+        self.bundled_styles = []
         self.feed(source)
 
     def handle_starttag(self, tag, attributes):
@@ -30,6 +31,8 @@ class ScriptSources(HTMLParser):
             self.sources.append(attributes["src"])
         if tag == "link" and attributes.get("rel") == "stylesheet":
             self.styles.append(attributes["href"])
+            if "data-shell-styles" in attributes:
+                self.bundled_styles.append(attributes["href"])
 
 
 def runtime_fixture(tmp_path, *, production=False, between=""):
@@ -68,7 +71,11 @@ def test_real_shell_replaces_only_consecutive_runtime_scripts():
     old_styles = ScriptSources(old_source).styles
     new_styles = ScriptSources(source).styles
     styles = templates.style_bundle.asset
-    assert new_styles == [f"/static/{STYLES_PATH}?v={styles.digest}", *old_styles[4:]]
+    bundled = ScriptSources(old_source).bundled_styles
+    start = old_styles.index(bundled[0])
+    assert old_styles[start:start + len(bundled)] == bundled
+    assert new_styles == [*old_styles[:start], f"/static/{STYLES_PATH}?v={styles.digest}",
+                          *old_styles[start + len(bundled):]]
     assert b"@import" not in styles.content
     assert {"common.css", "common-components.css", "common-layout.css", "common-page.css",
             "apk-analysis.css", "form-controls.css"} <= {path.name for path, *_ in styles.sources}

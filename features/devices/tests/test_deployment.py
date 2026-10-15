@@ -40,11 +40,15 @@ def environment(tmp_path, monkeypatch):
     repository.claims.active_claim.return_value = None
     cluster = SimpleNamespace(repository=repository, config=SimpleNamespace(local_worker_id="worker"))
     monkeypatch.setattr(service, "get_cluster_service", lambda: cluster)
-    monkeypatch.setattr(api, "get_cluster_service", lambda: cluster)
     auth = AuthService(tmp_path / "auth.sqlite3")
     auth.initialize()
     monkeypatch.setattr(service, "auth_service", auth)
     monkeypatch.setattr(service, "ssh_config", lambda _worker: {})
+    monkeypatch.setattr(service, "connection", lambda *_args: contextlib.nullcontext(object()))
+    monkeypatch.setattr(service, "inspect_apk", lambda *_args: {
+        "package": "com.example.app", "signers": ["a" * 64], "version_code": "1", "version_name": "1.0",
+    })
+    monkeypatch.setattr(service, "installed_identity", lambda *_args: None)
     monkeypatch.setattr(service, "ensure_agent_worker_allowed", lambda *_args: None)
     monkeypatch.setattr(service, "ensure_agent_device_allowed", lambda *_args: None)
     app = FastAPI()
@@ -189,7 +193,7 @@ def test_expired_request_cannot_be_started(tmp_path):
 def test_database_query_rejects_injection_and_unbounded_input(environment, field, value):
     client, _repository, _auth = environment
     body = {"worker_id": "worker", "device": "SERIAL", "package": "com.example.app", "database": "app.db", **{field: value}}
-    with patch.object(api, "query_database") as query:
+    with patch.object(api.debug_service, "database_query") as query:
         result = client.post("/api/devices/db/query", json=body)
         assert result.status_code in (400, 422)
         query.assert_not_called()
@@ -240,9 +244,9 @@ def test_deployment_never_borrows_a_test_or_another_owner_claim(environment, tmp
     real = ClusterRepository(tmp_path / "real-cluster.sqlite3")
     repository.claims = real.claims
     repository.acquire_device_operation_claim = real.acquire_device_operation_claim
+    item = upload(client)
     real.acquire_device_operation_claim("worker", ["worker:SERIAL"], owner_id=owner,
                                         source_type=source_type, source_id="held", ttl_seconds=3600)
-    item = upload(client)
     with patch.object(service, "execute") as execute:
         response = client.post("/api/devices/deployments/" + item["id"] + "/approve",
                                headers={"x-test-principal": "session"})
@@ -334,5 +338,70 @@ def test_interrupted_deployment_eventually_has_actionable_terminal_status(tmp_pa
     with store.connect() as conn:
         conn.execute("UPDATE deployments SET expires_at=?", (time.time() - 1,))
     result = store.get("a" * 32, "owner")
-    assert result["status"] == "failed"
+    assert result["status"] == "interrupted"
     assert result["result"]["code"] == "DEPENDENCY_TIMEOUT"
+
+
+def test_heartbeat_preserves_live_deployment_beyond_original_deadline(tmp_path):
+    repository = DeploymentStore(tmp_path)
+    start = time.time()
+    repository.create({"id": "a" * 32, "owner_id": "owner", "expires_at": start + 300})
+    repository.start("a" * 32, "owner", "human")
+    repository.begin_execution("a" * 32)
+    for elapsed in range(60, 1801, 60):
+        with patch("features.devices.deployment_store.time.time", return_value=start + elapsed):
+            repository.heartbeat("a" * 32)
+            assert DeploymentStore(tmp_path).get("a" * 32, "owner")["status"] == "running"
+    with pytest.raises(ApiError):
+        repository.begin_execution("a" * 32)
+    repository.finish("a" * 32, "completed", {"installed": True})
+    assert repository.get("a" * 32, "owner")["status"] == "completed"
+
+
+@pytest.mark.parametrize("match", [True, False])
+def test_restart_reconciles_installed_artifact_without_replaying(environment, match):
+    client, repository, *_ = environment
+    item = upload(client)
+    with patch.object(service, "execute"):
+        assert client.post("/api/devices/deployments/" + item["id"] + "/approve",
+                           headers={"x-test-principal": "session"}).status_code == 200
+    with service.store().connect() as conn:
+        conn.execute("UPDATE deployments SET expires_at=? WHERE id=?", (time.time() - 1, item["id"]))
+    repository.claims.active_claim.return_value = None
+    identity = {"package": item["package"], "signers": item["signers"],
+                "sha256": item["sha256"] if match else "0" * 64}
+    with patch.object(service, "installed_identity", return_value=identity), patch.object(execution, "install") as install:
+        response = client.get("/api/devices/deployments/" + item["id"])
+    assert response.status_code == 200, response.text
+    assert response.json()["deployment"]["status"] == ("completed" if match else "interrupted")
+    assert response.json()["deployment"]["result"]["artifact_matches"] is match
+    install.assert_not_called()
+    with pytest.raises(ApiError):
+        service.store().begin_execution(item["id"])
+
+
+def test_upload_reports_verified_identity_and_installed_signer_mismatch(environment):
+    client, *_ = environment
+    installed = {"package": "com.example.app", "signers": ["b" * 64], "sha256": "c" * 64}
+    with patch.object(service, "installed_identity", return_value=installed):
+        item = upload(client)
+    assert item["package"] == "com.example.app" and item["version_name"] == "1.0"
+    assert item["signers"] == ["a" * 64]
+    assert item["installed_identity"] == installed and item["installed_signers_match"] is False
+
+
+@pytest.mark.parametrize("existing", [True, False])
+def test_review_shell_explains_missing_or_other_owner_without_exposing_artifact(environment, existing):
+    client, *_ = environment
+    item = upload(client)
+    request_id = item["id"] if existing else "0" * 32
+    endpoint = "/api/devices/deployments/" + request_id
+    headers = {"x-test-owner": "other", "x-test-principal": "session"}
+    page = client.get(endpoint + "/review", headers=headers)
+    assert page.status_code == 200
+    assert page.headers["content-type"].startswith("text/html")
+    assert "Agent 所属平台账号" in page.text
+    assert item["sha256"] not in page.text and item["filename"] not in page.text
+    assert client.get(endpoint, headers=headers).status_code == 404
+    assert client.post(endpoint + "/approve", headers=headers).status_code == 404
+    assert client.get(endpoint + "/review", headers={**headers, "x-test-role": "worker_service"}).status_code == 200

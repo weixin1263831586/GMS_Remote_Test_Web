@@ -14,13 +14,13 @@ SCHEMAS = [
     schema("gms_rt_debug_session_request",
            "Request one human-approved, finite debug session bound to this Agent, exact Worker/device, "
            "APK package and verified signing certificates. Return approval_url to the human; never copy tokens. "
-           "Approval starts the first installation if install is requested. Duration defaults to 60 min, max 120. "
+           "Approval starts the first installation if install is requested. Request database_read explicitly for app database access. Duration defaults to 60 min, max 120. "
            "CLI: gms-rt-debug-session-request <worker_id> <device> <package> <apk_file> "
            "[--minutes N] [--operations install,launch,stop,tap,swipe,text,keyevent].",
            {"worker_id": {"type": "string"}, "device": {"type": "string"}, "package": {"type": "string"},
             "apk_file": {"type": "string"}, "duration_minutes": {"type": "integer", "minimum": 15, "maximum": 120, "default": 60},
             "operations": {"type": "array", "minItems": 1, "uniqueItems": True,
-                           "items": {"type": "string", "enum": ["install", "launch", "stop", "tap", "swipe", "text", "keyevent"]}}},
+                           "items": {"type": "string", "enum": ["install", "launch", "stop", "tap", "swipe", "text", "keyevent", "database_read"]}}},
            ["worker_id", "device", "package", "apk_file"]),
     schema("gms_rt_debug_session_status", "Read grant status and recent operations; poll until active and not busy. "
            "CLI: gms-rt-debug-session-status <session_id>.", SESSION, ["session_id"]),

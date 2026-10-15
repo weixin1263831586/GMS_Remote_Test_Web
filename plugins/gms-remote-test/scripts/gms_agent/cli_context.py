@@ -15,6 +15,10 @@ LOCAL_COMMANDS = {
 }
 GLOBAL_FLAGS = {"--json", "--quiet", "--no-color", "--non-interactive", "--yes", "--insecure"}
 GLOBAL_VALUES = {"--timeout", "--server", "--ca-cert"}
+HUMAN_COMMANDS = {
+    "gms-rt-auth-login", "gms-rt-auth-logout", "gms-rt-auth-elevate",
+    "gms-rt-auth-elevation-reset", "gms-rt-approval-create",
+}
 
 
 def local_invocation(argv):
@@ -34,19 +38,26 @@ def local_invocation(argv):
     return remaining in (["--help"], ["-h"])
 
 
-def choose_profile(server=""):
+def choose_profile(server="", *, human=False):
     """Ask for an exact choice; never default to the first client or identity."""
     candidates = []
+    transports = set()
     for name in profile_store.list_profiles():
         flat = profile_store.load_profile(name)
         url = profile_store.controller_url(flat)
         if url and (not server or url == server.rstrip("/")):
+            transport = (url, profile_store.ca_cert(flat), flat.get("insecure", ""))
+            if human and transport in transports:
+                continue
+            transports.add(transport)
             candidates.append((name, flat.get("client", ""), url))
     if not candidates:
         raise ValueError("没有匹配的 Agent profile，请先运行 gms-agent install。")
-    print("请选择本次使用的 Agent 身份：", file=sys.stderr)
+    print("请选择人工操作使用的 Controller/TLS 配置：" if human else "请选择本次使用的 Agent 身份：",
+          file=sys.stderr)
     for index, (name, client, url) in enumerate(candidates, 1):
-        print(f"  {index}. {name}  |  {client}  |  {url}", file=sys.stderr)
+        label = f"{url}  |  TLS 配置: {name}" if human else f"{name}  |  {client}  |  {url}"
+        print(f"  {index}. {label}", file=sys.stderr)
     print("选择编号（q 取消）：", end="", file=sys.stderr, flush=True)
     try:
         answer = sys.stdin.readline().strip()
@@ -69,21 +80,24 @@ def resolve_cli_context(profile, server, argv=None):
     if argv is not None and local_invocation(argv):
         return {"mode": "local", "profile": "", "server": "", "ca_cert": "",
                 "token_file": "", "insecure": "", "error": ""}
-    context = profile_store.resolve_direct_cli_context(profile, server)
     unattended = (
         argv is None or "--json" in argv or "--non-interactive" in argv
         or os.environ.get("GMS_RT_OUTPUT") == "json"
         or os.environ.get("GMS_RT_NON_INTERACTIVE") == "1"
     )
+    human = bool(not unattended and argv[0] in HUMAN_COMMANDS and interactive_allowed())
+    context = (profile_store.resolve_direct_cli_context(profile, server, human_session=True)
+               if human else profile_store.resolve_direct_cli_context(profile, server))
     if context["mode"] == "error" and not profile:
         if not unattended and interactive_allowed():
             try:
-                selected = choose_profile(server)
+                selected = choose_profile(server, human=True) if human else choose_profile(server)
             except ValueError as error:
                 context["error"] = str(error)
             else:
-                context = profile_store.resolve_direct_cli_context(selected, server)
-                if context["mode"] != "error":
+                context = (profile_store.resolve_direct_cli_context(selected, server, human_session=True)
+                           if human else profile_store.resolve_direct_cli_context(selected, server))
+                if context["mode"] != "error" and not human:
                     print(f"本次使用 {selected}；当前终端复用可执行：export GMS_RT_PROFILE={shlex.quote(selected)}",
                           file=sys.stderr)
         else:

@@ -5,3 +5,9 @@ dt{font-weight:600}dd{margin:0;overflow-wrap:anywhere}
 button{padding:12px 20px;border:0;border-radius:8px;background:#245ddd;color:white;font:inherit;cursor:pointer}
 button:disabled{opacity:.5;cursor:default}a{margin-left:20px;color:#245ddd}
 @media(max-width:600px){main{margin:16px;padding:20px}dl{grid-template-columns:1fr;gap:4px}dd{margin-bottom:12px}}
+.modal{display:none;position:fixed;inset:0;align-items:center;justify-content:center;padding:16px;background:rgba(15,23,42,.55)}
+.modal-content{box-sizing:border-box;width:min(100%,440px);max-height:90dvh;overflow:auto;background:white;border-radius:16px;padding:28px;box-shadow:0 16px 48px rgba(0,0,0,.2)}
+.modal-content h2{margin-top:0}.modal-content label{display:block;font-weight:600;margin-top:12px}
+.modal-content input{box-sizing:border-box;width:100%;font:inherit;padding:10px;border:1px solid #9aa8bc;border-radius:8px}
+#review-login-error{color:#ad2434;min-height:1.6em}#review-login-cancel{background:#e7ecf4;color:#182438}
+body.modal-open{overflow:hidden}#review-login-open{margin:12px 0;background:#e7ecf4;color:#182438}

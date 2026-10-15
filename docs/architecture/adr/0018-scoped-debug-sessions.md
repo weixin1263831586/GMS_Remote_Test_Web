@@ -31,10 +31,18 @@ Older grants lacking source bindings require a fresh human-approved grant. Grant
 possession alone cannot authenticate a caller or allow another Agent under
 the same account to execute.
 
-Only typed install/launch/stop/tap/swipe/text/keyevent actions are supported.
+Only typed install/launch/stop/tap/swipe/text/keyevent/database_read operations are supported.
 Every new APK is independently verified against the granted package and
 signers and its hash is retained in the audit. Android's replace installation
-also enforces installed-app signature compatibility. UI input requires the
+also enforces installed-app signature compatibility. Sessions without install
+must match the installed user-0 APK signer set before activation. Each action
+and database read verifies the installed base APK using apksigner over the
+audited SSH/SFTP path. A baseline install remains busy until post-install
+verification succeeds; any failed debug installation revokes the grant.
+Interrupted baseline execution also blocks and revokes subsequent actions.
+database_read is opt-in, additionally requires devices.database.read, and is
+limited to the grant's package and lease, with result-free access auditing.
+UI input requires the
 approved package's foreground window in user 0; system dialogs fail closed.
 App start/stop are user-0 and package-bound. Shell, raw SQL, firmware, app-data
 clearing, permission grants, root and system settings receive no new authority.
@@ -66,3 +74,11 @@ revocation during execution, claim fencing, package/signer mismatch, bounded
 input compilation, process-safe serialization, repeated tokenless installs,
 browser navigation and explicit approval/revocation. Agent deployment uses
 gms-agent doctor --json and gms-rt-system-selfcheck --json.
+
+These automated tests use isolated Worker/ADB doubles. Real-device acceptance
+must additionally record the Worker/serial, APK hashes and signer digests,
+grant/deployment ids and timestamps for same-name/different-signer rejection,
+baseline install failure, lease transfer during install, Controller restart,
+and temporary review-page network loss. Run these on authorized test devices
+on two Workers; record observed terminal states and confirm no duplicate
+installation. This document does not claim a completed hardware run.
