@@ -40,7 +40,9 @@ def check_identity(session):
 
 
 def read(request, session_id, permission="devices.read"):
-    user = deployment.authorize(request, permission)
+    user = deployment.authorize(
+        request, permission, human_permission="devices.use_leased" if permission == "devices.read" else None,
+    )
     session = store().get(session_id, user.resource_owner_id)
     if getattr(request.state, "auth_method", "") != "session" and user.actor_id != session["actor_id"]:
         raise ApiError.forbidden("调试会话绑定到另一个 Agent")

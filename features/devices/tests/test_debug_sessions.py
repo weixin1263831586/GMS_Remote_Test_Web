@@ -63,7 +63,9 @@ def environment(tmp_path, monkeypatch):
         scopes = frozenset(request.headers.get("x-test-scopes", "devices.read,devices.use_leased").split(","))
         request.state.current_user = CurrentUser(
             id=owner.id if method == "session" else request.headers.get("x-test-actor", agent.id),
-            username=owner.username, role="agent_service", extra_permissions=scopes,
+            username=owner.username,
+            role=request.headers.get("x-test-role", "user") if method == "session" else "agent_service",
+            extra_permissions=frozenset() if method == "session" else scopes,
             resource_owner_id=request.headers.get("x-test-owner", owner.id),
         )
         request.state.auth_method = method
@@ -107,6 +109,19 @@ def test_request_is_pending_has_no_device_effect_and_agent_cannot_self_approve(e
     assert "_lease_tokens" not in session
     assert client.get(session["approval_url"]).status_code == 200
     assert client.post("/api/devices/debug-sessions/" + session["id"] + "/approve").status_code == 403
+    assert repository.claims.active_claim("worker:SERIAL") is None
+
+
+def test_human_operator_can_review_own_debug_session_without_agent_read_scope(environment):
+    client, repository, *_ = environment
+    session = request_session(client)
+    endpoint = "/api/devices/debug-sessions/" + session["id"]
+    human = {"x-test-principal": "session"}
+    assert client.get(endpoint, headers=human).status_code == 200
+    assert client.get(endpoint + "/review", headers=human).status_code == 200
+    assert client.get(endpoint, headers={**human, "x-test-owner": "other"}).status_code == 404
+    assert client.get(endpoint, headers={**human, "x-test-role": "worker_service"}).status_code == 403
+    assert client.get(endpoint, headers={"x-test-scopes": "devices.use_leased"}).status_code == 403
     assert repository.claims.active_claim("worker:SERIAL") is None
 
 

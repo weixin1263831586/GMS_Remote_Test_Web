@@ -199,9 +199,14 @@ serves the runtime itself — `curl ... /api/agent/install -o gms-agent &&
 python3 gms-agent install --server https://CONTROLLER:5001`, then
 `gms-agent update` / `gms-agent rollback <version>` / `gms-agent status`
 for upgrades with instant rollback (`versions/<ver>/` + `current` symlink).
-After a successful update and client re-activation, the lifecycle keeps only
-the active runtime and its immediate predecessor; older versions are pruned
-automatically. Failed activation compensates first and never runs cleanup.
+After a successful update and client re-activation, the lifecycle keeps the
+current runtime, its immediate predecessor, and any older version still used
+by a live MCP process. Older inactive versions are pruned automatically.
+Failed activation compensates first and never runs cleanup. On Linux,
+`gms-agent doctor --json` includes `mcp_processes` and `warnings` for stale
+connections, even when a previous updater already removed their files.
+Reconnect the client's GMS MCP or restart/resume the client to load the new
+runtime; updating a package does not replace an already running process.
 
 Admins can drive the whole enrollment lifecycle from a terminal:
 `gms-rt-agent-enroll-code` mints a one-shot pairing code (admin + elevation),

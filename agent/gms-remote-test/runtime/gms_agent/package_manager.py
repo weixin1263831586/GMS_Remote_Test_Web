@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from gms_agent import profile_store
+from gms_agent.runtime_processes import running_runtimes
 
 
 # SCRIPT_DIR in the module context = the runtime/ directory (parent of the
@@ -1006,6 +1007,12 @@ def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
     versions_consistent = bool(installed and installed == current_cli == running)
     if not versions_consistent:
         actions.append("install/activate one complete package version")
+    processes = running_runtimes(VERSIONS_DIR)
+    warnings = [
+        f"MCP PID {item['pid']} still runs {item['version']}; reconnect the client's GMS MCP "
+        f"or restart/resume that client to load {installed}"
+        for item in processes if item["version"] != installed
+    ]
     unique_actions = list(dict.fromkeys(actions))
     ok = (
         versions_consistent
@@ -1033,6 +1040,8 @@ def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
         "host_environment": host_env,
         "clients": report_clients,
         "actions": unique_actions,
+        "mcp_processes": processes,
+        "warnings": warnings,
     }
 
 
@@ -1638,8 +1647,9 @@ def prune_old_versions(
 
     The active ``current`` target is always retained.  A successful update
     also pins its pre-update target, leaving exactly one immediate rollback
-    version.  Symlinks and non-directories are ignored so cleanup can never
-    follow an unexpected entry outside ``versions/``.
+    version. Versions used by live MCP processes are additionally retained
+    until those clients reconnect. Symlinks and non-directories are ignored
+    so cleanup can never follow an entry outside ``versions/``.
     """
 
     if retain < 1 or not VERSIONS_DIR.is_dir():
@@ -1661,6 +1671,8 @@ def prune_old_versions(
 
     remember(CURRENT_LINK.resolve() if CURRENT_LINK.exists() else None)
     remember(previous_target)
+    for process in running_runtimes(VERSIONS_DIR):
+        remember(VERSIONS_DIR / process["version"])
     for candidate in sorted(
         candidates,
         key=lambda path: (path.stat().st_mtime_ns, path.name),
@@ -2040,6 +2052,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             )
         for action in report["actions"]:
             print(f"Action: {action}")
+        for warning in report["warnings"]:
+            print(f"Warning: {warning}")
     return 0 if report["ok"] else 1
 
 

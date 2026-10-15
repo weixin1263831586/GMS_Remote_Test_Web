@@ -14,6 +14,11 @@ and atomically transitions the pending request to running. No raw token is
 returned to the browser, stored in the request, or copied through the Agent.
 Replays and concurrent approvals cannot execute a second installation.
 
+Reading an owned deployment or debug-grant review uses `devices.use_leased`
+for authenticated human sessions, matching their approval permission. Agent
+readers still require `devices.read`. This does not add global inventory
+permissions to human roles or relax owner, Worker or device checks.
+
 The Controller validates device inventory and scopes/ACLs, takes an exclusive
 claim (borrowing only the owner's reservation), and executes SFTP and ADB
 through the audited SSH boundary in ADR 0004. Host and device copies must
