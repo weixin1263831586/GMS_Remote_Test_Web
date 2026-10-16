@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import os
 import threading
@@ -42,6 +43,7 @@ from features.redmine.utils import attachment_content_disposition, sanitize_atta
 from features.users import owner_id_from_request
 from foundation.config import settings
 from foundation.error_model import record_internal_error
+from foundation.secrets import encrypt_secret
 
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,7 @@ redmine_service = RedmineService(
 _DEPARTMENT_OVERDUE_CACHE: dict[str, Any] = {}
 _WORKLOAD_STATS_CACHE: dict[str, Any] = {}
 _PROJECT_STATS_CACHE: dict[str, Any] = {}
+_STATS_CACHE_LOCK = threading.RLock()
 _USER_REDMINE_SERVICES: dict[str, RedmineService] = {}
 _USER_REDMINE_SERVICE_LOCK = threading.Lock()
 
@@ -155,6 +158,21 @@ def get_redmine_dashboard_config_for_request(request: Request) -> dict[str, Any]
     )
 
 
+def _public_dashboard_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    """读回表面遮蔽 SMTP 凭据：密文不外发，已配置以 "***" 表示。"""
+    email = cfg.get("email") if isinstance(cfg, dict) else None
+    if not isinstance(email, dict):
+        return cfg
+    public_email = {
+        key: value
+        for key, value in email.items()
+        if key not in {"password", "encrypted_password"}
+    }
+    if email.get("password") or email.get("encrypted_password"):
+        public_email["password"] = "***"
+    return {**cfg, "email": public_email}
+
+
 def _get_redmine_stats_config(request: Request | None = None) -> dict[str, Any]:
     """Read redmine_stats config (stale_days, window_days, cache_ttl) with defaults."""
     manager = get_redmine_config_for_request(request) if request is not None else config_manager
@@ -162,9 +180,10 @@ def _get_redmine_stats_config(request: Request | None = None) -> dict[str, Any]:
 
 
 def _clear_stats_caches() -> None:
-    _DEPARTMENT_OVERDUE_CACHE.clear()
-    _WORKLOAD_STATS_CACHE.clear()
-    _PROJECT_STATS_CACHE.clear()
+    with _STATS_CACHE_LOCK:
+        _DEPARTMENT_OVERDUE_CACHE.clear()
+        _WORKLOAD_STATS_CACHE.clear()
+        _PROJECT_STATS_CACHE.clear()
 
 
 def _clear_historical_trend_cache() -> None:
@@ -207,18 +226,38 @@ def _check_ttl_cache(cache_dict: dict, cache_key: str, ttl: int, now_ts: float, 
     """Check a TTL cache dict. Returns cached data on hit, None on miss."""
     if refresh:
         return None
-    cached = cache_dict.get(cache_key)
-    if cached and ttl > 0 and now_ts - cached.get("cached_at_ts", 0) < ttl:
-        return cached.get("data")
-    return None
+    with _STATS_CACHE_LOCK:
+        cached = cache_dict.get(cache_key)
+        if cached and ttl > 0 and now_ts < min(
+            cached["expires_at"], cached["cached_at_ts"] + ttl,
+        ):
+            return copy.deepcopy(cached["data"])
+        cache_dict.pop(cache_key, None)
+        return None
 
 
-def _update_ttl_cache(cache_dict: dict, cache_key: str, now_ts: float, data: Any) -> None:
-    """Store data in a TTL cache dict and evict stale keys."""
-    cache_dict[cache_key] = {"cached_at_ts": now_ts, "data": data}
-    stale_keys = [k for k in cache_dict if k != cache_key]
-    for k in stale_keys:
-        del cache_dict[k]
+# 同一缓存由多用户/多参数组合共享（键含 request user id 与查询参数）。
+# 上限只防御 TTL 窗口内的无界键增长（name 为自由文本），正常负载远达不到。
+_TTL_CACHE_MAX_ENTRIES = 256
+
+
+def _update_ttl_cache(cache_dict: dict, cache_key: str, now_ts: float, data: Any, ttl: int = 0) -> None:
+    """Expire each owner's entry using the TTL in force when it was stored."""
+    with _STATS_CACHE_LOCK:
+        stale_keys = [key for key, value in cache_dict.items() if now_ts >= value["expires_at"]]
+        for key in stale_keys:
+            del cache_dict[key]
+        if ttl <= 0:
+            cache_dict.pop(cache_key, None)
+            return
+        cache_dict[cache_key] = {
+            "cached_at_ts": now_ts, "expires_at": now_ts + ttl, "data": copy.deepcopy(data),
+        }
+        if len(cache_dict) > _TTL_CACHE_MAX_ENTRIES:
+            overflow = len(cache_dict) - _TTL_CACHE_MAX_ENTRIES
+            oldest = sorted(cache_dict, key=lambda key: cache_dict[key]["cached_at_ts"])
+            for key in oldest[:overflow]:
+                del cache_dict[key]
 
 
 async def start_redmine_agent_run(request: Request, hours: int = 24, max_issues: int = 20, mode: str = "manual") -> dict:
@@ -677,7 +716,10 @@ async def create_dashboard_profile(request: Request):
     if not manager.save_redmine_dashboard_config(denormalize_redmine_dashboard_config(dashboard_cfg)):
         return JSONResponse(status_code=500, content={"success": False, "error": "failed to save dashboard profile"})
     _clear_stats_caches()
-    return {"success": True, "data": {"dashboard": dashboard_cfg, "profile": dashboard_cfg["profiles"][-1]}}
+    return {"success": True, "data": {
+        "dashboard": _public_dashboard_config(dashboard_cfg),
+        "profile": dashboard_cfg["profiles"][-1],
+    }}
 
 
 @router.post("/dashboard/projects")
@@ -694,7 +736,10 @@ async def create_project_profile(request: Request):
     if not manager.save_redmine_dashboard_config(denormalize_redmine_dashboard_config(dashboard_cfg)):
         return JSONResponse(status_code=500, content={"success": False, "error": "failed to save project profile"})
     _clear_stats_caches()
-    return {"success": True, "data": {"dashboard": dashboard_cfg, "profile": dashboard_cfg["project_profiles"][-1]}}
+    return {"success": True, "data": {
+        "dashboard": _public_dashboard_config(dashboard_cfg),
+        "profile": dashboard_cfg["project_profiles"][-1],
+    }}
 
 
 @router.post("/reminders/email")
@@ -787,7 +832,7 @@ async def get_stats_config(request: Request):
     email_cfg = (config.get("redmine_dashboard") or {}).get("email") or {}
     return {"success": True, "data": {
         **stats_cfg,
-        "dashboard": dashboard_cfg,
+        "dashboard": _public_dashboard_config(dashboard_cfg),
         "gerrit_dashboard": gerrit_cfg,
         "redmine": {"base_url": manager.get_redmine_base_url(config)},
         "email_mode": "smtp" if email_cfg.get("smtp_host") else "smtp_unconfigured",
@@ -863,8 +908,14 @@ async def update_email_config(request: Request):
         email["username"] = str(body["username"] or "").strip()
     if "password" in body:
         new_pass = str(body["password"] or "").strip()
-        if new_pass:
-            email["password"] = new_pass
+        # "***" 哨兵表示 UI 未修改，不得覆盖已存凭据。
+        if new_pass and new_pass != "***":
+            email["encrypted_password"] = encrypt_secret(new_pass)
+    # Preserve legacy credentials when only non-secret settings change.
+    if email.get("password") and not email.get("encrypted_password"):
+        email["encrypted_password"] = encrypt_secret(str(email["password"]))
+    # 保存路径上永远不再落明文。
+    email.pop("password", None)
     if email.get("smtp_port") == 465:
         email["use_ssl"] = True
         email.pop("use_tls", None)
@@ -874,7 +925,15 @@ async def update_email_config(request: Request):
     dashboard["email"] = email
     if not manager.save_redmine_dashboard_config(dashboard):
         return JSONResponse(status_code=500, content={"success": False, "error": "failed to save email config"})
-    return {"success": True, "data": {"email": email, "email_mode": "smtp" if email.get("smtp_host") else "unconfigured"}}
+    public_email = {
+        key: value
+        for key, value in email.items()
+        if key != "encrypted_password"
+    }
+    public_email["password"] = (
+        "***" if email.get("encrypted_password") else ""
+    )
+    return {"success": True, "data": {"email": public_email, "email_mode": "smtp" if email.get("smtp_host") else "unconfigured"}}
 
 
 from . import statistics_api as _statistics_api  # noqa: E402

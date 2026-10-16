@@ -475,10 +475,15 @@ async def download_apk_source(task_id: str, request: Request):
         shutil.make_archive, safe_join(runtime.apk_upload_dir, task_id, filename), "zip", output_dir)
 
     def iterfile():
-        with open(zip_path, "rb") as f:
-            yield from f
-        with contextlib.suppress(Exception):
-            os.remove(zip_path)
+        # 客户端中断时 StreamingResponse 会关闭生成器（yield 处抛出
+        # GeneratorExit），原实现的 os.remove 在 with 之后永远执行不到；
+        # try/finally 保证临时 ZIP 在任何退出路径都被清理。
+        try:
+            with open(zip_path, "rb") as f:
+                yield from f
+        finally:
+            with contextlib.suppress(Exception):
+                os.remove(zip_path)
 
     return StreamingResponse(
         iterfile(),
@@ -540,7 +545,7 @@ async def apk_doctor(request: Request):
     if not result["java_version"]:
         result["ok"] = False
         result["error"] = (
-            "无法运行 java；请配置 jadx_java_home（config.json）或 GMS_JADX_JAVA_HOME "
+            "无法运行 java；请配置 jadx_java_home（configs/local/deployment.json）或 GMS_JADX_JAVA_HOME "
             "指向可用的 JDK（JADX 1.4.0 需要 JDK 11）"
         )
     elif not result["jadx_version"]:

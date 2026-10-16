@@ -32,6 +32,8 @@ from foundation.config_paths import automation_profiles_path
 from foundation.error_model import ApiError
 from foundation.responses import error_response
 
+from .profiles import mask_profile_secrets
+
 
 router = APIRouter(prefix='/api/automation')
 page_router = APIRouter()
@@ -135,9 +137,13 @@ async def list_automation_profiles(
     return {
         'success': True,
         'data': {
-            'items': automation_service.list_profiles(
-                enabled_only=enabled_only
-            )
+            # 读回表面一律遮蔽凭据；真实值只在服务端存储与执行路径。
+            'items': [
+                mask_profile_secrets(profile)
+                for profile in automation_service.list_profiles(
+                    enabled_only=enabled_only
+                )
+            ]
         },
     }
 
@@ -154,8 +160,11 @@ async def save_automation_profile(
     return {
         'success': True,
         'data': {
-            'profile': profile,
-            'items': automation_service.list_profiles(),
+            'profile': mask_profile_secrets(profile),
+            'items': [
+                mask_profile_secrets(item)
+                for item in automation_service.list_profiles()
+            ],
         },
     }
 

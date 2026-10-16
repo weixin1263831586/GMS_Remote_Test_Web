@@ -27,7 +27,6 @@ class DeviceClaimRegistry:
         self.db_path = Path(db_path) if db_path is not None else None
         self._lock = threading.RLock()
         self._memory_conn: sqlite3.Connection | None = None
-        self._initialized = False
 
     def _connect(self) -> sqlite3.Connection:
         if self.db_path is None:
@@ -46,8 +45,6 @@ class DeviceClaimRegistry:
         ).fetchone() is not None
         if not schema_exists:
             self._initialize(conn)
-        else:
-            self._initialized = True
         return conn
 
     def _initialize(self, conn: sqlite3.Connection) -> None:
@@ -78,7 +75,6 @@ class DeviceClaimRegistry:
             """
         )
         conn.commit()
-        self._initialized = True
 
     def _close(self, conn: sqlite3.Connection) -> None:
         if self.db_path is not None:

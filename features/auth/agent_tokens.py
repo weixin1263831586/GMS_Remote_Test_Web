@@ -104,6 +104,8 @@ class AgentTokenServiceMixin:
         token = secrets.token_urlsafe(32)
         token_id = f"agt_{secrets.token_hex(8)}"
         now = _utcnow()
+        if expires_days is not None and not 1 <= int(expires_days) <= 3650:
+            raise ValueError("expires_days 必须介于 1 和 3650 之间")
         expires_at = (
             _to_iso(now + timedelta(days=max(1, int(expires_days))))
             if expires_days is not None

@@ -5,7 +5,6 @@ import logging
 import re
 import time
 import uuid
-from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
@@ -15,6 +14,8 @@ from pydantic import BaseModel, Field
 
 from features.assistant.context import _parse_chinese_number, record_user_message, update_context
 from features.assistant.executor import _json_body, executor
+from features.assistant.payloads import jsonable as _jsonable
+from features.assistant.payloads import session_payload as _session_payload
 from features.assistant.response import (
     generate as gen_response,
 )
@@ -35,7 +36,7 @@ from features.test_execution import (
     detect_test_type_from_suite_path,
     get_default_suites_path,
 )
-from features.users import get_client_id_from_request
+from features.users import get_client_id_from_request, owner_id_from_request
 from foundation.config import config_manager
 from foundation.error_model import record_internal_error
 from foundation.responses import error_response, success_response
@@ -74,6 +75,7 @@ WEBAPP_PAGES = {
 
 _agent_sessions: dict[str, dict[str, Any]] = {}
 _agent_sessions_lock = asyncio.Lock()
+_last_session_cleanup = 0.0
 _agent_monitor_tasks: dict[str, asyncio.Task] = {}
 
 
@@ -166,25 +168,6 @@ def _new_message(role: str, content: str, kind: str = "text", data: dict[str, An
         "data": data or {},
         "created_at": _now_iso(),
     }
-
-
-def _jsonable(value: Any) -> Any:
-    """Return a JSON-serializable copy of Agent session data."""
-    if is_dataclass(value):
-        return _jsonable(asdict(value))
-    if isinstance(value, dict):
-        return {str(k): _jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [_jsonable(v) for v in value]
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    if hasattr(value, "model_dump"):
-        return _jsonable(value.model_dump())
-    return str(value)
-
-
-def _session_payload(session: dict[str, Any]) -> dict[str, Any]:
-    return _jsonable(session)
 
 
 def _expired_session_payload(session_id: str) -> dict[str, Any]:
@@ -572,7 +555,7 @@ async def _analyze_saved_report(session: dict[str, Any], report_timestamp: str) 
 
     _append_step(session, "报告分析", "running", f"正在分析报告 {report_timestamp}")
     try:
-        owner_id = str(session.get("client_id") or "")
+        owner_id = str(session.get("owner_id") or session.get("client_id") or "")
         if not owner_id:
             _append_step(session, "报告分析", "warning", "缺少当前用户身份")
             return None
@@ -942,7 +925,7 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
     if not plan:
         return
 
-    client_id = session.get("client_id")
+    client_id = session.get("owner_id") or session.get("client_id")
     policy = plan.get("policy", {})
     retries_left = int(policy.get("retry_count") or 0)
     attempt = 0
@@ -1115,7 +1098,7 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
     if not req.get("test_suite") and not req.get("retry_dir"):
         return {"success": False, "error": "没有匹配到测试套件"}
 
-    latest_existing_report = _latest_report_for_client(session.get("client_id", ""))
+    latest_existing_report = _latest_report_for_client(session.get("owner_id") or session.get("client_id", ""))
     session["status"] = "running"
     session["active_run"] = {
         "plan": plan,
@@ -1149,8 +1132,9 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
 @router.post("/api/agent/chat")
 async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     """Chat with the local GMS workflow Agent."""
-    # 按约 2% 概率清理会话，避免每次请求执行全量扫描。
-    if time.time() % 50 < 1:
+    global _last_session_cleanup
+    if time.monotonic() - _last_session_cleanup >= 50:
+        _last_session_cleanup = time.monotonic()
         await _cleanup_sessions()
     message = (req.message or "").strip()
     if not message:
@@ -1158,6 +1142,7 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
 
     client_id = get_client_id_from_request(request)
     session = await _get_or_create_session(req.session_id, client_id)
+    session["owner_id"] = owner_id_from_request(request)
     if req.workspace_context:
         supplied_workspace = _normalize_workspace_context(req.workspace_context)
         session["workspace_context"] = {

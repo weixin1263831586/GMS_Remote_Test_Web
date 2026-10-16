@@ -8,9 +8,12 @@ The Controller retains an immutable SHA256 and an owner-scoped request with
 a five-minute approval deadline. Uploading creates no device side effects.
 
 The Controller verifies package, version and signer certificates using aapt2
-and apksigner and reads the installed user-0 base APK over audited SSH for
-signature comparison. The human resource owner reviews this identity,
-filename, SHA256, Worker, serial and installation mode on the approval URL. The human-only POST issues
+and apksigner at upload. It defers the installed-app observation until human
+approval, then holds the exclusive device claim while reading and records that
+precheck result with the request. This avoids unleased device reads during
+upload and prevents a same-owner running task from being mistaken for an idle
+device. The human resource owner reviews the uploaded identity, filename,
+SHA256, Worker, serial and installation mode on the approval URL. The human-only POST issues
 and consumes an ADR 0006 approval in memory, bound to the complete request,
 and atomically transitions the pending request to queued. No raw token is
 returned to the browser, stored in the request, or copied through the Agent.
@@ -19,10 +22,12 @@ Replays and concurrent approvals cannot execute a second installation.
 Review URLs serve a public, metadata-free HTML login shell so a signed-out
 browser can reach the approval flow. The JSON status and approval endpoints
 retain authentication, scopes and owner checks. An anonymous, unauthorized
-or wrong-account response opens the shared ModalManager login dialog with
-the gms administrator account prefilled. Human-entered credentials go only
-to the existing same-origin /api/auth/login endpoint; login success resumes
-status reads at the original URL. Approval still requires a separate click.
+or wrong-account response opens the shared ModalManager login dialog for the
+Agent resource-owner account. Human-entered credentials go only to the
+existing same-origin /api/auth/login endpoint; any human role with
+`devices.use_leased` can approve its own resources. A successful login that
+still receives 404 is reported as an owner/request mismatch and does not
+reopen the password prompt. Approval still requires a separate click.
 
 Reading an owned deployment or debug-grant JSON status uses `devices.use_leased`
 for authenticated human sessions, matching their approval permission. Agent
@@ -40,10 +45,13 @@ to a test job preserve lease id/generation, but must block subsequent APK
 transmission or installation. Borrowed reservations are never released by
 deployment cleanup.
 
-An atomic queued→running transition selects one executor. A heartbeat renews
-the persisted execution lease every 20 seconds with a 120-second deadline;
+An atomic queued→running transition writes a per-invocation execution token
+and selects one executor. Heartbeats and terminal updates are fenced by that
+token. A heartbeat renews the persisted execution lease every 20 seconds with a 120-second deadline;
 status reads cannot expire work whose lease is still live. Lost queued or
-running work becomes interrupted. On the next authorized status read the
+running work becomes interrupted. A late queued task marks its request
+interrupted and releases its own claim/artifact; a duplicate executor cannot
+finish or clean up the winning executor's work. On the next authorized status read the
 Controller checks the installed package, signer set and base APK SHA256.
 Only an exact artifact match can resolve interruption to completed. All other
 outcomes remain interrupted and require explicit review and a new request.

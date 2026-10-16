@@ -126,18 +126,9 @@ async def set_client_username(
     if not username or username == 'unknown':
         return error_response("用户名不能为空或unknown", 400)
 
-    # 加载现有动态配置
-    existing_runtime = runtime.config_manager.get_runtime_config()
-    client_hosts = existing_runtime.get('client_hosts', {})
-    client_hosts[client_ip] = username
-
-    # 只保存客户端相关配置
-    runtime_config = runtime.config_manager.prepare_client_config({'client_hosts': client_hosts})
-
-    # 保存到配置文件
-    if runtime.config_manager.save_runtime_config(runtime_config):
+    if runtime.config_manager.save_client_host(client_ip, username):
         # 更新内存中的映射
-        client_manager.client_hosts = client_hosts
+        client_manager.client_hosts = runtime.config_manager.get_runtime_config().get('client_hosts', {})
 
         display_client_id = format_client_display_id(username, client_ip)
         client_id = get_client_id_from_request(request)

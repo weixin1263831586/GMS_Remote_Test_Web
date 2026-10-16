@@ -90,7 +90,7 @@ gms-rt-redmine-issue-fetch() {
     local waited=0 interval=3
     while true; do
         local status_resp status
-        status_resp=$(api_call "/redmine-agent/evidence/$snapshot_id" "GET")
+        status_resp=$(api_call "/redmine-agent/evidence/$(_urlencode "$snapshot_id")" "GET")
         status=$(echo "$status_resp" | jq -r '.data.status // empty')
         case "$status" in
             ready|partial|failed) break ;;
@@ -144,9 +144,9 @@ gms-rt-redmine-issue-show() {
         [ -z "$snapshot_id" ] && { error "Failed to resolve latest snapshot"; return "$GMS_RT_EXIT_OPERATION"; }
     fi
     local status_resp description_resp
-    status_resp=$(api_call "/redmine-agent/evidence/$snapshot_id" "GET")
+    status_resp=$(api_call "/redmine-agent/evidence/$(_urlencode "$snapshot_id")" "GET")
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
-        description_resp=$(api_call "/redmine-agent/evidence/$snapshot_id/issue" "GET")
+        description_resp=$(api_call "/redmine-agent/evidence/$(_urlencode "$snapshot_id")/issue" "GET")
         # Combine: status payload + description head
         echo "$status_resp" | jq --argjson desc "$(echo "$description_resp" | jq -c '.data // {}')" \
             '.data + {description: ($desc.description // {text: ""})}'
@@ -160,7 +160,7 @@ gms-rt-redmine-issue-show() {
             echo "errors:"
             echo "$status_resp" | jq -r '.data.errors[]? | "  [\(.stage // "issue")] \(.message // .)"'
         fi
-        description_resp=$(api_call "/redmine-agent/evidence/$snapshot_id/issue" "GET")
+        description_resp=$(api_call "/redmine-agent/evidence/$(_urlencode "$snapshot_id")/issue" "GET")
         echo "$description_resp" | jq -r '.data | "\nsubject: \(.subject)\nstatus: \(.status)  tracker: \(.tracker)\n\n--- description (first 2000 chars, use gms-rt-artifact-read for more) ---\n\(.description.text[:2000])"'
     else
         error "Snapshot not readable: $(extract_api_error "$status_resp")"
@@ -192,7 +192,7 @@ gms-rt-redmine-journals() {
     done
     [ -z "$snapshot_id" ] && { error "Snapshot ID required. Usage: gms-rt-redmine-journals <snapshot_id> [--limit N] [--cursor C]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
-    local url="/redmine-agent/evidence/$snapshot_id/journals?limit=$limit"
+    local url="/redmine-agent/evidence/$(_urlencode "$snapshot_id")/journals?limit=$limit"
     [ -n "$cursor" ] && url="$url&cursor=$(_urlencode "$cursor")"
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
         api_call "$url" "GET" | jq '.'
@@ -206,10 +206,10 @@ gms-rt-redmine-attachments() {
     [ -z "$snapshot_id" ] && { error "Snapshot ID required. Usage: gms-rt-redmine-attachments <snapshot_id>"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
-        api_call "/redmine-agent/evidence/$snapshot_id/artifacts" "GET" | jq '.'
+        api_call "/redmine-agent/evidence/$(_urlencode "$snapshot_id")/artifacts" "GET" | jq '.'
         return $?
     fi
-    api_call "/redmine-agent/evidence/$snapshot_id/artifacts" "GET" | jq -r '.data | "total: \(.total)", (.artifacts[] | "[\(.artifact_id)] attachment:\(.attachment_id) \(.original_filename) kind=\(.kind) status=\(.status) size=\(.size_bytes) sha256=\(.sha256[0:16])\(.error // "" | if . != "" then "  error: \(.)" else "" end)")'
+    api_call "/redmine-agent/evidence/$(_urlencode "$snapshot_id")/artifacts" "GET" | jq -r '.data | "total: \(.total)", (.artifacts[] | "[\(.artifact_id)] attachment:\(.attachment_id) \(.original_filename) kind=\(.kind) status=\(.status) size=\(.size_bytes) sha256=\(.sha256[0:16])\(.error // "" | if . != "" then "  error: \(.)" else "" end)")'
 }
 
 gms-rt-redmine-attachment-download() {
@@ -217,15 +217,19 @@ gms-rt-redmine-attachment-download() {
     local output="${2:-}"
     [ -z "$artifact_id" ] && { error "Artifact ID required. Usage: gms-rt-redmine-attachment-download <artifact_id> [output_path]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
-    [ -n "$output" ] || output="gms-evidence-$artifact_id.bin"
+    if [ -z "$output" ]; then
+        [[ "$artifact_id" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || { error "Invalid artifact ID for default filename"; return "$GMS_RT_EXIT_USAGE"; }
+        output="gms-evidence-$artifact_id.bin"
+    fi
+    [ ! -e "$output" ] && [ ! -L "$output" ] || { error "Output already exists: $output"; return "$GMS_RT_EXIT_CONFLICT"; }
     local curl_status status_file tmp_output
     status_file=$(mktemp "${TMPDIR:-/tmp}/gms-rt-dl-status.XXXXXX") || return "$GMS_RT_EXIT_OPERATION"
-    tmp_output=$(mktemp "${TMPDIR:-/tmp}/gms-rt-dl-body.XXXXXX") || { rm -f -- "$status_file"; return "$GMS_RT_EXIT_OPERATION"; }
+    tmp_output=$(mktemp "$(dirname -- "$output")/.gms-rt-dl-body.XXXXXX") || { rm -f -- "$status_file"; return "$GMS_RT_EXIT_OPERATION"; }
     # 先落临时文件：非 200 时响应体是 JSON 错误（如 scope_required），
     # 不能写进目标输出再整文件删除（否则错误详情会丢失）。
     _gms_curl_authenticated -sS \
         -o "$tmp_output" -w '%{http_code}' --max-time "$CURL_TIMEOUT" \
-        "${API_BASE}/redmine-agent/artifacts/$artifact_id/download" > "$status_file"
+        "${API_BASE}/redmine-agent/artifacts/$(_urlencode "$artifact_id")/download" > "$status_file"
     local request_status=$?
     if [ "${_gms_authenticated_request_auth_failed:-0}" = "1" ]; then
         rm -f -- "$status_file" "$tmp_output"
@@ -235,11 +239,12 @@ gms-rt-redmine-attachment-download() {
     rm -f -- "$status_file"
     case "$curl_status" in
         200)
-            mv -f -- "$tmp_output" "$output" || {
+            ln -- "$tmp_output" "$output" || {
                 rm -f -- "$tmp_output"
-                error "Failed to write $output"
+                error "Output could not be created without overwriting: $output"
                 return "$GMS_RT_EXIT_OPERATION"
             }
+            rm -f -- "$tmp_output"
             ;;
         000|'')
             rm -f -- "$tmp_output"
@@ -455,10 +460,10 @@ gms-rt-artifact-read() {
     [ -z "$artifact_id" ] && { error "Artifact ID required. Usage: gms-rt-artifact-read <artifact_id> [--offset N] [--limit N]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
-        api_call "/redmine-agent/artifacts/$artifact_id/text?offset=$offset&limit=$limit" "GET" | jq '.'
+        api_call "/redmine-agent/artifacts/$(_urlencode "$artifact_id")/text?offset=$offset&limit=$limit" "GET" | jq '.'
         return $?
     fi
-    api_call "/redmine-agent/artifacts/$artifact_id/text?offset=$offset&limit=$limit" "GET" | jq -r '.data | "chars \(.offset)+\(.returned_chars)/\(.total_chars)\(if .truncated then " (truncated; use --offset)" else "" end)\n\n\(.text)"'
+    api_call "/redmine-agent/artifacts/$(_urlencode "$artifact_id")/text?offset=$offset&limit=$limit" "GET" | jq -r '.data | "chars \(.offset)+\(.returned_chars)/\(.total_chars)\(if .truncated then " (truncated; use --offset)" else "" end)\n\n\(.text)"'
 }
 
 gms-rt-redmine-artifact-image() {
@@ -466,7 +471,7 @@ gms-rt-redmine-artifact-image() {
     [ -z "$artifact_id" ] && { error "Artifact ID required. Usage: gms-rt-redmine-artifact-image <artifact_id>"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
     # 供 MCP image tool 使用：返回 base64 + 元数据；人类终端请用 download 命令。
-    api_call "/redmine-agent/artifacts/$artifact_id/image" "GET" | jq '.'
+    api_call "/redmine-agent/artifacts/$(_urlencode "$artifact_id")/image" "GET" | jq '.'
 }
 
 gms-rt-artifact-search() {
@@ -499,7 +504,7 @@ gms-rt-artifact-search() {
     fi
     [ -z "$snapshot_id" ] || [ -z "$query" ] && { error "Usage: gms-rt-artifact-search <snapshot_id> <query|--query QUERY> [--limit N]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
-    local url="/redmine-agent/evidence/$snapshot_id/search?q=$(_urlencode "$query")&limit=$limit"
+    local url="/redmine-agent/evidence/$(_urlencode "$snapshot_id")/search?q=$(_urlencode "$query")&limit=$limit"
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
         api_call "$url" "GET" | jq '.'
         return $?
@@ -515,7 +520,7 @@ gms-rt-apk-analyze-attachment() {
     check_jq
     # artifact_id 已是全局唯一 opaque ID；snapshot_id 仅用于人工核对。
     local response
-    response=$(api_call "/redmine-agent/artifacts/$artifact_id/apk-analysis" "POST")
+    response=$(api_call "/redmine-agent/artifacts/$(_urlencode "$artifact_id")/apk-analysis" "POST")
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
         echo "$response" | jq '.'
         return $?
@@ -554,7 +559,7 @@ gms-rt-apk-source-read() {
     done
     [ -z "$task_id" ] || [ -z "$path" ] && { error "Usage: gms-rt-apk-source-read <task_id> <path> [--offset N] [--limit N]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
-    local url="/apk/source-read/$task_id?path=$(_urlencode "$path")&offset=$offset&limit=$limit"
+    local url="/apk/source-read/$(_urlencode "$task_id")?path=$(_urlencode "$path")&offset=$offset&limit=$limit"
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
         api_call "$url" "GET" | jq '.'
         return $?

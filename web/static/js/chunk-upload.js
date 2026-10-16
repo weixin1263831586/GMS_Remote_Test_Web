@@ -90,9 +90,6 @@ async function uploadFileInChunks(file, url, options = {}) {
     }
 
     function applyHeaders(xhr) {
-        if (typeof applyClientIdentityHeadersToXhr === 'function') {
-            applyClientIdentityHeadersToXhr(xhr);
-        }
         if (!headers) return;
         Object.entries(headers).forEach(([key, value]) => {
             if (value !== undefined && value !== null) {

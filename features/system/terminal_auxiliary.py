@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import WebSocket
@@ -9,7 +10,7 @@ from fastapi import WebSocket
 from features.system.ssh import ssh_manager
 from foundation.config import config_manager
 from foundation.device_locks import device_lock_manager
-from foundation.error_model import record_internal_error
+from foundation.error_model import ApiError, record_internal_error
 
 
 logger = logging.getLogger(__name__)
@@ -66,19 +67,22 @@ async def handle_tradefed_list_results(
     from features.test_execution import (
         execute_tradefed_command,
         parse_tradefed_list_results,
+        resolve_tradefed_target,
     )
 
     ssh = None
     try:
         config = config_manager.load_config()
-        ssh = ssh_manager.get_connection(config)
+        suite_path, tradefed_bin = await asyncio.to_thread(
+            resolve_tradefed_target, config, str(data.get("suite_path") or ""),
+            str(data.get("tradefed_bin") or ""),
+        )
+        ssh = await asyncio.to_thread(ssh_manager.get_connection, config)
         if not ssh:
             await websocket.send_json(
                 {"type": "tradefed_list_results_error", "error": "SSH 连接失败"}
             )
             return
-        suite_path = data.get("suite_path", "")
-        tradefed_bin = data.get("tradefed_bin", "")
         if not suite_path or not tradefed_bin:
             await websocket.send_json(
                 {
@@ -87,8 +91,8 @@ async def handle_tradefed_list_results(
                 }
             )
             return
-        output, error, code = execute_tradefed_command(
-            ssh, suite_path, tradefed_bin
+        output, error, code = await asyncio.to_thread(
+            execute_tradefed_command, ssh, suite_path, tradefed_bin
         )
         command = f"cd '{suite_path}' && {tradefed_bin} list results"
         if code == 0:
@@ -113,6 +117,10 @@ async def handle_tradefed_list_results(
                     "command": command,
                 }
             )
+    except ValueError as exc:
+        await websocket.send_json({"type": "tradefed_list_results_error", **ApiError.invalid_semantics(str(exc)).envelope()})
+    except RuntimeError:
+        await websocket.send_json({"type": "tradefed_list_results_error", **ApiError.upstream_failure("套件清单服务不可用").envelope()})
     except Exception:
         message = record_internal_error(
             logger,

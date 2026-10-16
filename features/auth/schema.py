@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from .rate_limit import initialize_auth_attempt_schema
@@ -9,7 +10,7 @@ from .rate_limit import initialize_auth_attempt_schema
 def initialize_auth_schema(db_path: Path) -> None:
     """Create and migrate authentication tables."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(db_path, timeout=30) as conn:
+    with closing(sqlite3.connect(db_path, timeout=30)) as conn, conn:
         conn.execute("PRAGMA busy_timeout=30000")
         try:
             conn.execute("PRAGMA journal_mode=WAL")

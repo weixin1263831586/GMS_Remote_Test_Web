@@ -77,13 +77,38 @@ class DailyBriefRepository:
 
     # ------------------------------------------------------------------ schema
 
-    def _connect(self) -> sqlite3.Connection:
+    # 连接时自检（契约同 knowledge_schema/repository_schema）：data/ 清空或
+    # 旧备份恢复后，缓存的仓库实例仍指向同名路径，重开连接必须能重建表，
+    # 而不是让后续查询以 "no such table" 失败。
+    _REQUIRED_TABLES = frozenset({
+        'redmine_daily_brief_runs',
+        'redmine_daily_brief_issues',
+        'redmine_daily_brief_snapshots',
+        'redmine_daily_brief_jobs',
+        'redmine_daily_brief_ai_executions',
+    })
+
+    def _open_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _connect(self) -> sqlite3.Connection:
+        conn = self._open_connection()
+        existing_tables = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if not self._REQUIRED_TABLES.issubset(existing_tables):
+            conn.close()
+            self._init_db()
+            conn = self._open_connection()
+        return conn
+
     def _init_db(self) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._open_connection() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             # 跨进程 schema 迁移必须持有 SQLite 写锁：Web/worker/systemd/CLI
             # 可能并发初始化同一库，进程内 _lock 覆盖不了 TOCTOU（并发

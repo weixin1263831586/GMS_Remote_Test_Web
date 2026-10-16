@@ -28,6 +28,9 @@ from .api_helpers import (
     adb_proxy_devices as _adb_proxy_devices,
 )
 from .api_helpers import (
+    normalize_firmware_devices as _normalize_firmware_devices,
+)
+from .api_helpers import (
     resolve_gsi_remote_image as _resolve_gsi_remote_image,
 )
 from .gsi_transport import prepare_gsi_command, upload_gsi_assets
@@ -91,13 +94,19 @@ async def burn_gsi(
     try:
         client_id = runtime.get_client_id_from_request(request)
         req_data = await request.json()
-        devices = req_data.get("devices", [])
+        # devices 进入远端 fastboot/脚本命令，先过与固件烧写一致的
+        # sanitize_device_ids 归一（拒绝即 400，绝不静默丢弃设备）。
+        devices, invalid_devices = _normalize_firmware_devices(
+            req_data.get("devices", [])
+        )
         script_path = req_data.get("script_path", "").strip()
         system_img = req_data.get("system_img", "").strip()
         vendor_img = req_data.get("vendor_img", "").strip()
 
+        if invalid_devices:
+            return ApiError.malformed_request("Invalid device serial").to_response()
         if not devices:
-            return error_response("No devices selected")
+            return ApiError.malformed_request("No devices selected").to_response()
         proxy_devices = _adb_proxy_devices(devices)
         if proxy_devices:
             return error_response(
@@ -106,14 +115,19 @@ async def burn_gsi(
                 status_code=409,
             )
         if not script_path:
-            return error_response("Script path is required")
+            return ApiError.malformed_request("Script path is required").to_response()
         if not system_img and not vendor_img:
-            return error_response("At least one of system image or vendor boot image is required")
+            return ApiError.malformed_request(
+                "At least one of system image or vendor boot image is required"
+            ).to_response()
 
         config = runtime.config_manager.load_config()
         async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
-                return error_response("SSH connection failed")
+                # SSH 建连失败属远端基础设施故障（502）。
+                return ApiError.upstream_failure(
+                    "SSH connection failed", service="ssh"
+                ).to_response()
 
             # 烧写前预检：允许设备从 ADB、bootloader Fastboot 或 Fastbootd
             # 开始；其他离线/未授权状态仍提前剔除。
@@ -121,9 +135,12 @@ async def burn_gsi(
                 _partition_devices_by_flash_state, ssh, devices
             )
             if not online_devices:
-                return error_response(
-                    f"没有可烧写的 ADB/Fastboot 设备，离线/状态异常: {', '.join(offline_devices)}"
-                )
+                # 设备状态不满足属客户端可修正的冲突（409），与同文件
+                # ADB Proxy / USB/IP 路由错误语义一致。
+                return ApiError.conflict(
+                    "没有可烧写的 ADB/Fastboot 设备，离线/状态异常: "
+                    + ", ".join(offline_devices)
+                ).to_response()
             await _notify_skip(client_id, offline_devices)
 
             locked_devices, lock_err = await _lock_devices(request, client_id, online_devices)
@@ -143,16 +160,16 @@ async def burn_gsi(
                     return error_response(usbip_route_error, status_code=409)
 
                 gms_suite_dir = get_default_suites_path(config)
-                remote_script, resolved_misc, asset_error = await asyncio.to_thread(
+                # upload_gsi_assets 失败直接抛 ApiError（本地资产缺失 503 /
+                # SCP、chmod 失败 502），由下方 except ApiError 统一释放
+                # 设备锁并按错误码表返回信封。
+                remote_script, resolved_misc = await asyncio.to_thread(
                     upload_gsi_assets,
                     ssh=ssh,
                     ssh_manager=runtime.ssh_manager,
                     project_root=str(runtime.project_root),
                     suite_dir=gms_suite_dir,
                 )
-                if asset_error:
-                    await runtime.release_firmware_devices(client_id, locked_devices)
-                    return error_response(asset_error)
 
                 resolved_system = ""
                 if system_img:
@@ -165,7 +182,7 @@ async def burn_gsi(
                     )
                     if system_error:
                         await runtime.release_firmware_devices(client_id, locked_devices)
-                        return error_response(system_error)
+                        return ApiError.not_found(system_error).to_response()
 
                 remote_vendor = ""
                 if vendor_img:
@@ -178,7 +195,7 @@ async def burn_gsi(
                     )
                     if vendor_error:
                         await runtime.release_firmware_devices(client_id, locked_devices)
-                        return error_response(vendor_error)
+                        return ApiError.not_found(vendor_error).to_response()
                     remote_vendor = resolved_vendor or ""
 
                 results = []
@@ -278,7 +295,8 @@ async def burn_gsi(
                             part for part in (final_output, error_output) if part
                         )
                         error_msg = diagnose_gsi_burn_failure(combined_output)
-                        results.append({"device": device, "success": False, "error": error_msg, "output": combined_output})
+                        results.append({"device": device, "success": False, "error": error_msg,
+                                        "output": combined_output, "timed_out": bool(burn_result.timed_out)})
                         if client_id in runtime.global_state.websocket_connections:
                             try:
                                 await runtime.safe_websocket_send(client_id, {"type": "log_update", "log": f"Device {device} GSI burn failed: {error_msg}", "log_type": "error"})
@@ -313,11 +331,11 @@ async def burn_gsi(
                         logger.warning("[GSI Burn] Failed to store failure notification: %s", notify_error)
                     # 烧写经 SSH 在远端主机执行，fastboot 失败属远端操作失败
                     # （错误模型 502），500 保留给未预期的编程错误。
-                    return error_response(
-                        f"部分设备烧写失败: {failure_summary}",
-                        results=results,
-                        status_code=502,
-                    )
+                    message = f"部分设备烧写失败: {failure_summary}"
+                    failure = (ApiError.dependency_timeout(message) if any(r.get("timed_out") for r in failed_results)
+                               else ApiError.upstream_failure(message))
+                    return JSONResponse(status_code=failure.status_code,
+                                        content={**failure.envelope(), "results": results})
 
             except ApiError as api_error:
                 # 语义化基础设施错误（如 Worker ADB/Fastboot 探测失败 502）
@@ -360,9 +378,12 @@ async def burn_sn(
 ):
     """SN burning - burn serial number to selected devices."""
     try:
-        devices = req.devices
+        # 与 burn_gsi 相同的设备归一：非法序列号拒绝而不是静默丢弃。
+        devices, invalid_devices = _normalize_firmware_devices(req.devices)
         sn_code = req.sn_code
 
+        if invalid_devices:
+            return error_response("Invalid device serial", 400)
         if not devices:
             return error_response("No devices selected", 400)
         if not sn_code:
@@ -371,7 +392,10 @@ async def burn_sn(
         config = runtime.config_manager.load_config()
         async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
-                return error_response("SSH connection failed", 500)
+                # SSH 建连失败属远端基础设施故障（502），500 仅编程错误。
+                return ApiError.upstream_failure(
+                    "SSH connection failed", service="ssh"
+                ).to_response()
 
             results = [
                 {

@@ -174,6 +174,39 @@ class CredentialsEndpointSecurityTests(unittest.TestCase):
         self.assertTrue(data["api_key_configured"])
         self.assertTrue(data["base_url_configured"])
 
+    def test_email_config_endpoint_stores_encrypted_and_masks_readback(self):
+        """SMTP 授权码加密落盘；读回表面（email/dashboard）只出现 "***"。"""
+        config_patch, cache_patch, _env_patch = self._patched()
+        with config_patch, cache_patch, _env_patch:
+            saved = self.client.post(
+                "/api/redmine-agent/config/email",
+                json={
+                    "smtp_host": "smtphz.qiye.163.com",
+                    "username": "u@example.com",
+                    "password": "smtp-auth-code",
+                },
+                headers={"x-test-owner": "owner-a"},
+            )
+            self.assertEqual(saved.status_code, 200)
+            self.assertEqual(saved.json()["data"]["email"]["password"], "***")
+            self.assertNotIn("smtp-auth-code", saved.text)
+
+            runtime_text = (
+                self.root / "owner-a" / "config_runtime.json"
+            ).read_text(encoding="utf-8")
+            self.assertNotIn("smtp-auth-code", runtime_text)
+            self.assertIn("encrypted_password", runtime_text)
+
+            stats = self.client.get(
+                "/api/redmine-agent/config/stats",
+                headers={"x-test-owner": "owner-a"},
+            )
+            self.assertEqual(stats.status_code, 200)
+            self.assertNotIn("smtp-auth-code", stats.text)
+            dashboard = stats.json()["data"]["dashboard"]
+            self.assertEqual(dashboard["email"]["password"], "***")
+            self.assertNotIn("encrypted_password", dashboard["email"])
+
     def test_empty_api_key_does_not_clear_an_existing_key(self):
         config_patch, cache_patch, _env_patch = self._patched()
         headers = {"x-test-owner": "owner-a"}

@@ -222,8 +222,15 @@ async def update_external_services_config(
     return success_response({"gms_assistant_url": url})
 
 @router.get("/api/config/read")
-async def get_config(request: Request):
+async def get_config(
+    request: Request,
+    _admin: CurrentUser | None = Depends(require_elevated_admin_when_auth_required),
+):
     """获取配置 - 隐藏敏感信息后返回配置对象"""
+    return JSONResponse(content=_config_view(request))
+
+
+def _config_view(request: Request) -> dict:
     # 跟踪用户访问
     client_id = get_client_id_from_request(request)
     runtime.get_or_create_user_state(client_id)
@@ -263,7 +270,22 @@ async def get_config(request: Request):
             or wifi.get("encrypted_password")
             or wifi.get("password")
         )
-    return JSONResponse(content=safe_config)
+    return safe_config
+
+
+@router.get("/api/config/client")
+async def get_client_config(
+    request: Request,
+    _user: CurrentUser | None = Depends(require_authenticated_user_when_auth_required),
+):
+    """Return shell defaults without deployment topology or stored passwords."""
+    config = _config_view(request)
+    public = {key: config.get(key, "") for key in (
+        "effective_ubuntu_user", "effective_suites_path", "local_server",
+    )}
+    wifi = config.get("wifi") or {}
+    public["wifi"] = {"ssid": wifi.get("ssid", ""), "password": "", "has_password": bool(wifi.get("has_password"))}
+    return JSONResponse(content=public)
 
 
 @router.get("/api/config/opengrok")

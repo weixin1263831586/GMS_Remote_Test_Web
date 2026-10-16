@@ -63,3 +63,35 @@ def test_lease_loss_during_installed_identity_prevents_pull():
     with patch.object(identity, "run") as run, pytest.raises(ApiError):
         identity.installed_identity(MagicMock(), "SERIAL", APP["package"], fence)
     run.assert_not_called()
+
+
+def test_verified_identity_cache_is_fenced_by_worker_install_fingerprint_and_ttl(monkeypatch):
+    identity._identity_cache.clear()
+    ssh = MagicMock()
+    session = {"serial": "SERIAL", "package": APP["package"], "signers": APP["signers"]}
+    with patch.object(identity, "installed_fingerprint", return_value=("/data/app/base.apk", "boot:stat:v1")) as probe, \
+            patch.object(identity, "installed_identity", return_value={**APP, "sha256": DIGEST}) as verify:
+        identity.require_installed(ssh, session, worker_id="worker-a")
+        identity.require_installed(ssh, session, worker_id="worker-a")
+        assert verify.call_count == 1
+        identity.require_installed(ssh, session, worker_id="worker-b")
+        assert verify.call_count == 2
+        probe.side_effect = [("/data/app/base.apk", "boot:stat:v2"), ("/data/app/base.apk", "boot:stat:v2")]
+        identity.require_installed(ssh, session, worker_id="worker-a")
+        assert verify.call_count == 3
+        assert probe.call_count == 7
+    identity.invalidate_installed_identity("worker-a", "SERIAL", APP["package"])
+    assert ("worker-a", "SERIAL", 0, APP["package"]) not in identity._identity_cache
+
+
+def test_verified_identity_cache_expires(monkeypatch):
+    identity._identity_cache.clear()
+    clock = [100.0]
+    monkeypatch.setattr(identity.time, "monotonic", lambda: clock[0])
+    session = {"serial": "SERIAL", "package": APP["package"], "signers": APP["signers"]}
+    with patch.object(identity, "installed_fingerprint", return_value=("/data/app/base.apk", "boot:stat")), \
+            patch.object(identity, "installed_identity", return_value={**APP, "sha256": DIGEST}) as verify:
+        identity.require_installed(MagicMock(), session, worker_id="worker")
+        clock[0] += identity._IDENTITY_TTL_SECONDS + 1
+        identity.require_installed(MagicMock(), session, worker_id="worker")
+    assert verify.call_count == 2

@@ -6,6 +6,7 @@ import posixpath
 import re
 import shlex
 import subprocess
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
@@ -304,6 +305,35 @@ class SshTmuxBuildBackend:
     def cancel(self, *, server: dict[str, Any], session: str) -> None:
         self._run(server, f"tmux send-keys -t {shlex.quote(session)} C-c 2>/dev/null || true; tmux kill-session -t {shlex.quote(session)} 2>/dev/null || true", timeout=10)
 
+    @contextmanager
+    def open_artifact(self, *, server: dict[str, Any], path: str):
+        """Stream one build artifact over SFTP as ``(binary stream, size)``."""
+        import paramiko
+
+        ssh = paramiko.SSHClient()
+        configure_strict_host_keys(ssh)
+        try:
+            ssh.connect(**self._connect_kwargs(server))
+            sftp = ssh.open_sftp()
+            try:
+                size = int(sftp.stat(path).st_size or 0)
+                if size <= 0:
+                    raise BuildExecutionError("构建产物文件为空")
+                with sftp.open(path, "rb") as stream:
+                    yield stream, size
+            finally:
+                sftp.close()
+        except BuildExecutionError:
+            raise
+        except paramiko.AuthenticationException as exc:
+            raise BuildExecutionError("连接构建服务器失败：SSH 用户名或密码错误") from exc
+        except paramiko.PasswordRequiredException as exc:
+            raise BuildExecutionError("连接构建服务器失败：SSH 私钥需要密码") from exc
+        except (paramiko.SSHException, OSError, TimeoutError) as exc:
+            raise BuildExecutionError(f"读取构建产物失败：{exc}") from exc
+        finally:
+            ssh.close()
+
     def discover_artifacts(self, *, server: dict[str, Any], workspace: str, patterns: list[str]) -> list[dict[str, Any]]:
         if not patterns:
             return []
@@ -348,3 +378,15 @@ class LocalBuildBackend(SshTmuxBuildBackend):
         # parameters are schema-validated before rendering.
         proc = subprocess.run(command, shell=True, text=True, capture_output=True, timeout=timeout)  # nosec B602
         return proc.returncode, proc.stdout, proc.stderr
+
+    @contextmanager
+    def open_artifact(self, *, server: dict[str, Any], path: str):
+        """Stream a Controller-local build artifact as ``(binary stream, size)``."""
+        try:
+            with open(path, "rb") as stream:
+                size = os.fstat(stream.fileno()).st_size
+                if size <= 0:
+                    raise BuildExecutionError("构建产物文件为空")
+                yield stream, size
+        except OSError as exc:
+            raise BuildExecutionError(f"读取构建产物失败：{exc}") from exc

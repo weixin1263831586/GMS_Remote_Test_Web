@@ -140,7 +140,7 @@ gms-rt-apk-analyze() {
     task_id=$(echo "$copy_resp" | jq -r '.data.task_id')
 
     # Step 3: start jadx decompilation
-    start_resp=$(api_call "/apk/analyze/$task_id" "POST")
+    start_resp=$(api_call "/apk/analyze/$(_urlencode "$task_id")" "POST")
     if ! echo "$start_resp" | jq -e '.success' > /dev/null; then
         error "Failed to start decompilation for task $task_id"
         echo "$start_resp" | jq '.'
@@ -161,7 +161,7 @@ gms-rt-apk-analyze() {
     # Step 4: poll until completed/error or --max-wait is exceeded
     local waited=0 interval=5 status="" status_resp
     while true; do
-        status_resp=$(api_call "/apk/status/$task_id" "GET")
+        status_resp=$(api_call "/apk/status/$(_urlencode "$task_id")" "GET")
         status=$(echo "$status_resp" | jq -r '.data.status // empty')
         if [ -z "$status" ]; then
             error "Failed to read analysis status for task $task_id"
@@ -226,10 +226,10 @@ gms-rt-apk-status() {
         return 0
     fi
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
-        api_call "/apk/status/$task_id" "GET" | jq '.'
+        api_call "/apk/status/$(_urlencode "$task_id")" "GET" | jq '.'
         return $?
     fi
-    response=$(api_call "/apk/status/$task_id" "GET")
+    response=$(api_call "/apk/status/$(_urlencode "$task_id")" "GET")
     if echo "$response" | jq -e '.success' > /dev/null; then
         echo "$response" | jq -r '.data | "task: \(.task_id)\nstatus: \(.status)\nprogress: \(.progress)\nfile: \(.filename)" + (if .error then "\nerror: \(.error)" else "" end)'
     else
@@ -259,10 +259,10 @@ gms-rt-apk-manifest() {
     [ -z "$task_id" ] && { error "Task ID required. Usage: gms-rt-apk-manifest <task_id> [--permissions]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
     if [ "$permissions" = "1" ]; then
-        api_call "/apk/permissions/$task_id" "GET" | jq '.'
+        api_call "/apk/permissions/$(_urlencode "$task_id")" "GET" | jq '.'
         return $?
     fi
-    api_call "/apk/manifest/$task_id" "GET" | jq '.'
+    api_call "/apk/manifest/$(_urlencode "$task_id")" "GET" | jq '.'
 }
 
 gms-rt-apk-source() {
@@ -288,7 +288,7 @@ gms-rt-apk-source() {
     [ -z "$task_id" ] && { error "Task ID required. Usage: gms-rt-apk-source <task_id> [path]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
 
-    local url="/apk/source/$task_id"
+    local url="/apk/source/$(_urlencode "$task_id")"
     [ -n "$path" ] && url="$url?path=$(_urlencode "$path")"
 
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
@@ -374,7 +374,7 @@ gms-rt-apk-search() {
             [ -z "$path_filter" ] || { error "--path applies to content/symbol modes only"; return "$GMS_RT_EXIT_USAGE"; }
             [ "$symbol_line" = "0" ] || { error "--line applies to symbol mode only"; return "$GMS_RT_EXIT_USAGE"; }
             limit="${limit:-20}"
-            url="/apk/search/$task_id?q=$(_urlencode "$query")&limit=$limit"
+            url="/apk/search/$(_urlencode "$task_id")?q=$(_urlencode "$query")&limit=$limit"
             if [ "$GMS_RT_OUTPUT" = "json" ]; then
                 api_call "$url" "GET" | jq '.'
                 return $?
@@ -391,7 +391,7 @@ gms-rt-apk-search() {
         content)
             [ "$symbol_line" = "0" ] || { error "--line applies to symbol mode only"; return "$GMS_RT_EXIT_USAGE"; }
             limit="${limit:-50}"
-            url="/apk/source-search/$task_id?q=$(_urlencode "$query")&limit=$limit"
+            url="/apk/source-search/$(_urlencode "$task_id")?q=$(_urlencode "$query")&limit=$limit"
             [ -n "$path_filter" ] && url="$url&path_filter=$(_urlencode "$path_filter")"
             if [ "$GMS_RT_OUTPUT" = "json" ]; then
                 api_call "$url" "GET" | jq '.'
@@ -401,7 +401,7 @@ gms-rt-apk-search() {
             ;;
         symbol)
             [ -z "$limit" ] || { error "--limit applies to name/content modes only"; return "$GMS_RT_EXIT_USAGE"; }
-            url="/apk/definition/$task_id?symbol=$(_urlencode "$query")&line=$symbol_line"
+            url="/apk/definition/$(_urlencode "$task_id")?symbol=$(_urlencode "$query")&line=$symbol_line"
             [ -n "$path_filter" ] && url="$url&path=$(_urlencode "$path_filter")"
             api_call "$url" "GET" | jq '.'
             ;;
@@ -412,18 +412,27 @@ gms-rt-apk-download() {
     local task_id="$1"
     local output="$2"
     [ -z "$task_id" ] && { error "Task ID required. Usage: gms-rt-apk-download <task_id> [output.zip]"; return "$GMS_RT_EXIT_USAGE"; }
-    [ -z "$output" ] && output="${task_id}_decompiled.zip"
+    if [ -z "$output" ]; then
+        [[ "$task_id" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || { error "Invalid task ID for default filename"; return "$GMS_RT_EXIT_USAGE"; }
+        output="${task_id}_decompiled.zip"
+    fi
+    [ ! -e "$output" ] && [ ! -L "$output" ] || { error "Output already exists: $output"; return "$GMS_RT_EXIT_CONFLICT"; }
+    local tmp_output call_status
+    tmp_output=$(mktemp "$(dirname -- "$output")/.gms-apk-download.XXXXXX") || return "$GMS_RT_EXIT_OPERATION"
     echo "⬇ Downloading decompiled source for $task_id -> $output"
-    # Binary payload: stream straight to the target file via curl extra args.
-    if ! api_call "/apk/download/$task_id" "GET" "" -o "$output" -sS; then
-        rm -f -- "$output"
-        error "Download failed (HTTP error); check the task id and that analysis completed"
+    api_call "/apk/download/$(_urlencode "$task_id")" "GET" "" -o "$tmp_output" -sS
+    call_status=$?
+    if [ "$call_status" -ne 0 ] || [ ! -s "$tmp_output" ]; then
+        rm -f -- "$tmp_output"
+        error "Download failed; check the task id and analysis status"
+        [ "$call_status" -eq 0 ] || return "$call_status"
         return "$GMS_RT_EXIT_OPERATION"
     fi
-    if [ ! -s "$output" ]; then
-        rm -f -- "$output"
-        error "Download failed: $output is empty"
-        return "$GMS_RT_EXIT_OPERATION"
+    if ! ln -- "$tmp_output" "$output"; then
+        rm -f -- "$tmp_output"
+        error "Output could not be created without overwriting an existing file"
+        return "$GMS_RT_EXIT_CONFLICT"
     fi
+    rm -f -- "$tmp_output"
     success "Saved: $output ($(du -h "$output" | cut -f1))"
 }

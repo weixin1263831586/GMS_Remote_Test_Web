@@ -11,7 +11,7 @@
     let busy = false;
 
     function open(reason) {
-        message.textContent = reason || '请登录管理员 gms 账号后查看和批准请求。';
+        message.textContent = reason || '请登录发起申请的 Agent 所属平台账号后查看和批准请求。';
         error.textContent = '';
         if (!ModalManager.isOpen(modalId)) ModalManager.open(modalId);
     }
@@ -26,8 +26,7 @@
         submit.disabled = true;
         error.textContent = '';
         try {
-            const body = JSON.stringify({username: username.value.trim(), password: password.value,
-                account_switch_target: 'admin'});
+            const body = JSON.stringify({username: username.value.trim(), password: password.value});
             password.value = '';
             const response = await fetch('/api/auth/login', {method: 'POST', credentials: 'same-origin',
                 headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body});
@@ -35,9 +34,10 @@
             if (!response.ok || result.success === false || !result.authenticated) {
                 throw new Error(result.error || result.detail || '登录失败，请重新输入密码');
             }
-            if (result.user?.role !== 'admin') throw new Error('请使用管理员 gms 账号登录');
             ModalManager.close(modalId);
-            window.dispatchEvent(new Event('device-review-authenticated'));
+            window.dispatchEvent(new CustomEvent('device-review-authenticated', {
+                detail: {username: result.user?.username || username.value.trim()},
+            }));
         } catch (failure) {
             error.textContent = failure.message;
             if (ModalManager.isOpen(modalId)) password.focus();

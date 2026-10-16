@@ -112,6 +112,27 @@ def _normalize_suite_match_text(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
 
 
+def resolve_tradefed_target(config: dict[str, Any], reference: str, binary: str) -> tuple[str, str]:
+    """Resolve an executable only from the configured suite inventory."""
+    reference = str(reference or "").strip()
+    if '/' in reference or '\\' in reference:
+        suites = get_available_test_suites(config)
+        matches = [suite for suite in suites if os.path.normpath(reference) in {
+            os.path.normpath(suite['tools_path']), os.path.dirname(suite['tools_path'].rstrip('/')),
+        }]
+        if len(matches) != 1:
+            raise ValueError("测试套件路径不在清单内或不唯一")
+        suite = matches[0]
+    else:
+        suite, message = resolve_suite_reference(config, reference)
+        if not suite:
+            raise ValueError(message or "测试套件不存在")
+    launcher = str(suite.get('full_path') or '')
+    if not launcher or binary not in {launcher, os.path.basename(launcher), './' + os.path.basename(launcher)}:
+        raise ValueError("Tradefed 可执行文件与套件清单不一致")
+    return suite['tools_path'], launcher
+
+
 def _normalize_suite_version_text(version: str) -> str:
     version = (version or "").strip().lower()
     if not version:

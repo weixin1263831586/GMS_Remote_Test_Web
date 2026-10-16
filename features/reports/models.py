@@ -4,7 +4,6 @@ GMS测试报告分析器 - 统一的报告解析模块
 """
 
 import logging
-import re
 from dataclasses import dataclass
 
 
@@ -19,25 +18,6 @@ except ImportError:
     import xml.etree.ElementTree as ET
     USE_LXML = False
     logger.warning("lxml不可用,使用ElementTree(标准库模式)")
-
-
-def get_opengrok_project_for_android_version(android_version: str, opengrok_config: dict) -> str:
-    """返回 Android 主版本对应的 OpenGrok 项目。"""
-    if not android_version or not opengrok_config:
-        return opengrok_config.get('default_project', 'Android16')
-
-    # 提取Android版本的主版本号
-    match = re.match(r'(\d+)', android_version)
-    if match:
-        major_version = match.group(1)
-        project_mapping = opengrok_config.get('project_mapping', {})
-
-        # 根据主版本号查找对应项目
-        if major_version in project_mapping:
-            return project_mapping[major_version]
-
-    # 如果无法匹配，返回默认项目
-    return opengrok_config.get('default_project', 'Android16')
 
 
 @dataclass

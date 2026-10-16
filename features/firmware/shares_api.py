@@ -379,7 +379,16 @@ def _remote_file_iterator(
 
 
 @router.get("/api/firmware-shares")
-async def list_firmware_shares():
+async def list_firmware_shares(
+    _admin=Depends(require_elevated_admin_when_auth_required),
+):
+    """List shared firmware records.
+
+    与同文件 create/validate/browse/delete/credentials 一致：列表暴露
+    内网 host/user/path，仅提权管理员可读（前端加载失败会降级为表格内
+    错误提示，不影响页面其余功能）。download/check 仍按分享链接语义
+    保持无认证。
+    """
     now = int(time.time())
     records = [
         record for record in _load_records()

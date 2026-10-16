@@ -323,6 +323,22 @@ def test_usbip_assignment_survives_runtime_restart_and_detach_clears_it(tmp_path
     ] == ["1-2"]
 
 
+def test_runtime_rebuilds_cleared_database_at_the_same_path(tmp_path):
+    """A long-lived Worker whose data/ is cleared or restored under it must
+    recreate the schema on the next connect() instead of failing every query
+    with "no such table" (same contract as features.devices stores)."""
+    config = worker_config(tmp_path)
+    runtime = WorkerRuntime(config)
+    runtime.save_command("cmd-1", "completed", {"count": 1})
+
+    # Same-inode truncation keeps the identity of the restored file.
+    runtime.db_path.write_bytes(b"")
+    assert runtime.usbip_assignments() == []
+
+    runtime.save_command("cmd-2", "completed", {})
+    assert [item["id"] for item in runtime.unsynced_commands()] == ["cmd-2"]
+
+
 def test_worker_recovers_persisted_usbip_with_proxy_side_adb(tmp_path):
     agent = WorkerAgent(worker_config(tmp_path))
     agent.runtime.remember_usbip_assignments(

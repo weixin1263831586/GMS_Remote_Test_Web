@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
+from features.auth import require_elevated_admin
 from features.gerrit.config import (
     add_gerrit_department_profile,
     add_gerrit_personal_profile,
@@ -36,6 +37,9 @@ from features.gerrit.settings import config_manager
 from features.redmine import load_redmine_user_map_for_owner
 from features.users import owner_id_from_request
 from foundation.error_model import ApiError
+from foundation.outbound import UnsafeOutboundURL
+
+from .outbound import resolve_gerrit_target
 
 
 router = APIRouter(prefix="/api/gerrit-dashboard")
@@ -130,6 +134,9 @@ async def update_gerrit_dashboard_config(request: Request):
     body = await request.json()
     manager = _config_for_request(request)
     current = manager.get_gerrit_dashboard_config()
+    for field in ("ssh_identity_file", "rest_ca_cert"):
+        if field in body and str(body.get(field) or "").strip() != str(current.get(field) or "").strip():
+            require_elevated_admin(request)
     updates: dict[str, Any] = {}
     for key in ("base_url", "rest_username", "ssh_host", "ssh_user", "default_owner", "rest_ca_cert"):
         if key in body:
@@ -342,6 +349,14 @@ async def check_gerrit_connectivity(request: Request):
     if not host:
         return {"success": True, "data": {"configured": False, "host": "", "message": "Gerrit 未配置有效的 ssh_host/base_url"}}
     ssh_port = int(cfg.get("ssh_port") or 29418)
+    try:
+        https_host = f"[{host}]" if ":" in host else host
+        target = await asyncio.to_thread(resolve_gerrit_target, f"https://{https_host}/")
+        # The nonstandard SSH port also requires an operator-authorized host.
+        await asyncio.to_thread(resolve_gerrit_target, f"https://{https_host}:{ssh_port}/")
+    except (UnsafeOutboundURL, ValueError):
+        return ApiError.forbidden("Gerrit 探测目标未获出站授权，请配置 GMS_GERRIT_ALLOWED_HOSTS").to_response()
+    address = target.addresses[0]
 
     async def _run(cmd: list[str], timeout: float = 8.0) -> tuple[int, str]:
         """Run a command on the web host, returning (exit_code, combined_output)."""
@@ -360,7 +375,7 @@ async def check_gerrit_connectivity(request: Request):
         return proc.returncode if proc.returncode is not None else 1, text
 
     ping_code, ping_text = await _run(
-        ["ping", "-c", "2", "-W", "2", "--", host]
+        ["ping", "-c", "2", "-W", "2", "--", address]
     )
     ping_ok = ping_code == 0
     latency = ""
@@ -368,23 +383,24 @@ async def check_gerrit_connectivity(request: Request):
     if m:
         latency = f"{m.group(1)}ms"
 
-    ssh_port_text = ""
     try:
         _reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, ssh_port), timeout=6
+            asyncio.open_connection(address, ssh_port), timeout=6
         )
         writer.close()
         await writer.wait_closed()
         ssh_port_ok = True
-    except (OSError, asyncio.TimeoutError) as exc:
+    except (OSError, asyncio.TimeoutError):
         ssh_port_ok = False
-        ssh_port_text = str(exc)
 
     https_host = f"[{host}]" if ":" in host else host
     https_code_raw, https_text = await _run(
         [
             "curl",
-            "-sk",
+            "-sS",
+            "--noproxy", "*",
+            "--resolve", f"{host}:443:{'[' + address + ']' if ':' in address else address}",
+            *(["--cacert", str(cfg["rest_ca_cert"])] if cfg.get("rest_ca_cert") else []),
             "-o",
             "/dev/null",
             "-w",
@@ -407,8 +423,8 @@ async def check_gerrit_connectivity(request: Request):
         "ssh_port_ok": ssh_port_ok,
         "https_ok": https_ok,
         "https_code": https_code,
-        "ping_raw": ping_text[:300],
-        "ssh_port_error": "" if ssh_port_ok else ssh_port_text[:200],
+        "ping_raw": "",
+        "ssh_port_error": "" if ssh_port_ok else "连接失败或超时",
     }
 
     if ping_ok and (ssh_port_ok or https_ok):
@@ -431,7 +447,7 @@ async def list_gerrit_changes(request: Request, profile_id: str = Query(""), que
             "success": True,
             "data": {
                 "configured": False,
-                "config": cfg,
+                "config": _public_config(cfg, manager=_config_for_request(request)),
                 "profile": profile,
                 "query": effective_query,
                 "items": [],

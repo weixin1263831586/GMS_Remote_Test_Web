@@ -6,7 +6,7 @@ from .models import (
     TestStartRequest,
     TradefedListResultsRequest,
 )
-from .suite_helpers import get_available_test_suites
+from .suite_helpers import get_available_test_suites, resolve_suite_reference, resolve_tradefed_target
 from .suite_modules import search_latest_suite_modules
 from .suites import detect_test_type_from_suite_path, get_default_suites_path
 from .tradefed import execute_tradefed_command, find_tradefed_binary, parse_tradefed_list_results
@@ -51,6 +51,8 @@ __all__ = [
     "get_available_test_suites",
     "get_default_suites_path",
     "parse_tradefed_list_results",
+    "resolve_suite_reference",
+    "resolve_tradefed_target",
     "runtime",
     "search_latest_suite_modules",
     "start_test",

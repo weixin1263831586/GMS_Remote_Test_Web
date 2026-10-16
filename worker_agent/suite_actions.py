@@ -22,6 +22,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from foundation.outbound import resolve_outbound_target
+from foundation.outbound_http import open_outbound
+
 from .config import WorkerConfig, _is_production
 from .suite_detection import suite_details
 
@@ -60,7 +63,8 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
         if target_root is None:
             raise ValueError("no configured suite root exists")
         destination = target_root / filename
-        temporary = target_root / f".{filename}.part"
+        # uuid 后缀：并发下载同一文件名时互不覆盖对方的 .part 临时文件。
+        temporary = target_root / f".{filename}.{uuid.uuid4().hex}.part"
         max_bytes = int(os.getenv("GMS_WORKER_SUITE_DOWNLOAD_MAX_BYTES", str(80 * 1024 ** 3)))
         downloaded = 0
         last_reported = 0
@@ -106,6 +110,13 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
                     )
             elif is_controller_callback:
                 controller_authorization = f"Bearer {config.token}"
+            allowed_hosts = {
+                host.strip() for host in os.getenv("GMS_WORKER_DOWNLOAD_ALLOWED_HOSTS", "").split(",")
+                if host.strip()
+            }
+            if is_controller_callback:
+                allowed_hosts.add(controller.hostname or "")
+            target = resolve_outbound_target(url, allowed_private_hosts=allowed_hosts)
             request = urllib.request.Request(url, headers=headers)
             if controller_authorization:
                 # urllib copies ordinary request headers across redirects.
@@ -114,7 +125,7 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
                 request.add_unredirected_header(
                     "Authorization", controller_authorization
                 )
-            with urllib.request.urlopen(request, timeout=60, context=ssl_context) as response, temporary.open("wb") as output:
+            with open_outbound(request, target, timeout=60, context=ssl_context) as response, temporary.open("wb") as output:
                 try:
                     expected_bytes = int((getattr(response, "headers", None) or {}).get("Content-Length") or 0)
                 except (AttributeError, TypeError, ValueError):

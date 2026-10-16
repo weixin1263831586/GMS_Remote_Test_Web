@@ -278,7 +278,6 @@ async function submitFirmwareBurn() {
                 });
 
                 xhr.open('POST', `/api/burn/firmware?devices=${encodeURIComponent(devices.join(','))}`);
-                applyClientIdentityHeadersToXhr(xhr);
                 // 烧写请求发出时立即提示已启动。
                 // 否则会被后端烧写完成的通知晚到，导致时序颠倒。
                 notifyOperationResult('固件烧写已启动', '烧写任务已开始', 'info', 'firmware-burn');

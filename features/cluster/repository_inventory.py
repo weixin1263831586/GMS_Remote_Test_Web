@@ -141,6 +141,8 @@ class ClusterInventoryRepositoryMixin:
             ).fetchone()
             if active:
                 return False
+            conn.execute("DELETE FROM cluster_command_events WHERE command_id IN "
+                         "(SELECT id FROM cluster_commands WHERE worker_id=?)", (worker_id,))
             conn.execute("DELETE FROM cluster_commands WHERE worker_id=?", (worker_id,))
             conn.execute("DELETE FROM cluster_worker_devices WHERE worker_id=?", (worker_id,))
             conn.execute("DELETE FROM cluster_worker_suites WHERE worker_id=?", (worker_id,))

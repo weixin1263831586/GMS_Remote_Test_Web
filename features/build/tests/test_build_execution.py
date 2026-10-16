@@ -7,8 +7,11 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
+from features.build.executor import BuildExecutionError
 from features.build.repository import BuildStore
-from features.build.service import BuildService
+from features.build.service import BuildNotFoundError, BuildService
 
 
 def test_local_build_job_completes_and_discovers_artifact(tmp_path: Path):
@@ -251,3 +254,98 @@ def test_runtime_password_persists_encrypted_with_ttl(tmp_path: Path):
 
     second.pop("job-1")
     assert RuntimePasswordStore(store_path).get("job-1") == ""
+
+
+def _completed_local_job(tmp_path: Path, **request_extra) -> tuple[BuildService, dict]:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+    config_path = tmp_path / "build_servers.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "servers": [
+                    {
+                        "id": "local",
+                        "backend": "local",
+                        "workspace_root": str(tmp_path),
+                    }
+                ],
+                "templates": [
+                    {
+                        "id": "demo",
+                        "server_id": "local",
+                        "workspace": str(workspace),
+                        "command": "mkdir -p out && echo firmware > out/update.img && echo done",
+                        "timeout_sec": 30,
+                        "artifact_patterns": ["out/*.img"],
+                        "parameters_schema": {},
+                        "enabled": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    service = BuildService(
+        store=BuildStore(tmp_path / "build.sqlite3"),
+        config_path=config_path,
+    )
+    job = service.create_job(
+        {"server_id": "local", "template_id": "demo", **request_extra}
+    )
+    for _ in range(20):
+        job = service.poll_job(job["id"])
+        if job["status"] not in ("running", "queued"):
+            break
+        time.sleep(0.2)
+    assert job["status"] == "completed"
+    assert job["artifacts"], "demo build must discover out/update.img"
+    return service, job
+
+
+def test_open_build_artifact_streams_completed_job_artifact(tmp_path: Path):
+    service, job = _completed_local_job(tmp_path)
+    artifact_path = job["artifacts"][0]["path"]
+
+    with service.open_build_artifact(job["id"], artifact_path) as (stream, size):
+        data = stream.read()
+
+    assert data == b"firmware\n"
+    assert size == len(data)
+
+
+def test_open_build_artifact_enforces_completion_ownership_and_allowlist(tmp_path: Path):
+    service, job = _completed_local_job(tmp_path, automation_run_id="ats_run_1")
+    artifact_path = job["artifacts"][0]["path"]
+
+    # Job owned by another automation run must not be readable.
+    with pytest.raises(BuildExecutionError, match="another automation run"), service.open_build_artifact(
+        job["id"], artifact_path, automation_run_id="ats_run_2"
+    ):
+        pass
+
+    # Paths the job never reported as artifacts stay unreadable even when
+    # the file exists on the build server.
+    with pytest.raises(BuildExecutionError, match="not part of the completed build job"), service.open_build_artifact(
+        job["id"], artifact_path + ".shadow", automation_run_id="ats_run_1"
+    ):
+        pass
+
+    # Owning run and listed path stream fine.
+    with service.open_build_artifact(
+        job["id"], artifact_path, automation_run_id="ats_run_1"
+    ) as (stream, size):
+        assert stream.read() == b"firmware\n"
+        assert size > 0
+
+    # Incomplete jobs expose nothing.
+    queued = service.create_job(
+        {"server_id": "local", "template_id": "demo"}, start=False
+    )
+    with pytest.raises(BuildExecutionError, match="not completed"), service.open_build_artifact(
+        queued["id"], artifact_path
+    ):
+        pass
+
+    with pytest.raises(BuildNotFoundError), service.open_build_artifact("build_missing", artifact_path):
+        pass

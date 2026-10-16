@@ -85,7 +85,7 @@ def create_basic_auth_header(username: str, password: str) -> dict[str, str]:
 
 def build_redmine_download_url(base_url: str, attachment_id: str) -> str:
     """Build the canonical Redmine attachment download URL."""
-    return f"{base_url}/attachments/download/{attachment_id}/"
+    return f"{base_url}/attachments/download/{urllib.parse.quote(str(attachment_id), safe='')}/"
 
 
 def extract_filename_from_content_disposition(content_disposition: str) -> str | None:

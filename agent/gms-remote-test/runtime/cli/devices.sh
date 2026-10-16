@@ -699,11 +699,10 @@ gms-rt-devices-shell() {
     fi
     if [ -n "$approval_token" ]; then
         local consume_data consume_response
-        consume_data=$(jq -cn \
-            --arg token "$approval_token" \
+        consume_data=$(GMS_RT_JSON_SECRET="$approval_token" jq -cn \
             --arg device "$device_id" \
             --arg command "${shell_args[*]}" \
-            '{token: $token, tool: "gms_rt_shell_exec", device: $device, command: $command}')
+            '{token: env.GMS_RT_JSON_SECRET, tool: "gms_rt_shell_exec", device: $device, command: $command}')
         consume_response=$(api_call "/auth/approval-tokens/consume" POST "$consume_data")
         local consume_status=$?
         unset consume_data approval_token
@@ -837,7 +836,7 @@ gms-rt-devices-shell() {
                     "pm list users"*|"pm list packages"*|"pm list permissions"*|\
                     "pm list permission-groups"*|"pm list features"*|\
                     "pm list libraries"*|"pm list instrumentation"*|"pm list jobs"*|\
-                    "pm path "*|"pm help"|\
+                    "pm path"|"pm path "*|"pm help"|\
                     "dpm list-owners"|\
                     "content query"*) ;;
                     *) error "只读子命令白名单之外的 '$_ro_first' 需一次性审批令牌"; return "$GMS_RT_EXIT_PERMISSION" ;;
@@ -907,7 +906,9 @@ gms-rt-devices-shell() {
     else
         echo ""; echo "💻 打开设备Shell: $device_id... (via $user@$host)"
         echo "🔌 使用 Ctrl+D 退出 shell"; echo ""
-        ssh -t -p "$port" "$user@$host" "adb -s $device_id shell"
+        local quoted_device
+        quoted_device=$(_shell_quote "$device_id")
+        ssh -t -p "$port" "$user@$host" "adb -s ${quoted_device} shell"
     fi
 }
 
@@ -1113,8 +1114,8 @@ gms-rt-devices-wifi() {
 
     local devices_json data
     devices_json=$(build_devices_json_data "$devices") || return "$GMS_RT_EXIT_USAGE"
-    data=$(echo "$devices_json" | jq -c --arg ssid "$ssid" --arg password "$password" \
-        '. + {ssid: $ssid, password: $password}')
+    data=$(echo "$devices_json" | GMS_RT_JSON_SECRET="$password" jq -c --arg ssid "$ssid" \
+        '. + {ssid: $ssid, password: env.GMS_RT_JSON_SECRET}')
     local response=$(api_call "/devices/wifi" "POST" "$data")
 
     if echo "$response" | jq -e '.success' > /dev/null 2>/dev/null; then

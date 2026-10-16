@@ -21,7 +21,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from features.system.api import _skill_directory, router
+from features.system.api import router
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -35,11 +35,6 @@ def _build_app() -> FastAPI:
 
 
 class SkillInstallerTests(unittest.TestCase):
-    def test_skill_directory_rejects_path_traversal(self):
-        self.assertIsNone(_skill_directory("../configs"))
-        self.assertIsNone(_skill_directory("/tmp"))
-        self.assertIsNone(_skill_directory("gms_remote_test"))
-
     def test_skills_zip_contains_skill_source_with_legacy_root(self):
         client = TestClient(_build_app(), base_url="https://testserver")
         response = client.get("/api/system/skills")

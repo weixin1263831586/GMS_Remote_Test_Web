@@ -7,7 +7,7 @@ from pathlib import Path
 from foundation.archives import safe_extract_member_path
 from foundation.database import connect_sqlite
 from foundation.files import create_zip_from_directory
-from foundation.networking import parse_host_address, sanitize_url
+from foundation.networking import parse_host_address
 from foundation.uploads import (
     copy_fileobj_to_path,
     remote_home_file_path,
@@ -102,6 +102,3 @@ class NetworkingTests(unittest.TestCase):
             parse_host_address('user@192.168.1.2'),
             ('user', '192.168.1.2'),
         )
-
-    def test_sanitize_url_adds_https(self):
-        self.assertEqual(sanitize_url('example.com'), 'https://example.com')

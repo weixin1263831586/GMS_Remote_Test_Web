@@ -259,6 +259,8 @@ async def update_doc(request: Request, doc_id: str):
         elif key == "links":
             if not isinstance(value, list):
                 return error_response("字段 links 必须是数组", 422)
+            if not all(isinstance(link, dict) for link in value):
+                return error_response("字段 links 数组元素必须是对象", 422)
     doc = _service.store.update_doc(_user(request), doc_id, allowed)
     if not doc:
         return error_response("文档不存在", 404)

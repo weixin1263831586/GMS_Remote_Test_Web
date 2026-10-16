@@ -23,6 +23,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from .http_transport import open_request
+
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -199,7 +201,7 @@ class GmsClient:
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout, context=self._ssl()) as response:
+            with open_request(request, timeout=self.timeout, context=self._ssl()) as response:
                 raw = response.read().decode("utf-8", "replace")
                 status = response.status
         except urllib.error.HTTPError as error:

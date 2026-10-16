@@ -3,6 +3,8 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import io
+import json
+import sqlite3
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -36,8 +38,16 @@ def environment(tmp_path, monkeypatch):
     repository.db_path = tmp_path / "cluster.sqlite3"
     repository.get_worker.return_value = {"id": "worker", "status": "online"}
     repository.list_devices.return_value = [{"id": "worker:SERIAL", "state": "available"}]
-    repository.claims.list_active.return_value = []
-    repository.claims.active_claim.return_value = None
+    claims_repository = ClusterRepository(repository.db_path)
+    repository.claims = MagicMock()
+    repository.claims.list_active.side_effect = claims_repository.claims.list_active
+    repository.claims.active_claim.side_effect = claims_repository.claims.active_claim
+    repository.claims.release.side_effect = claims_repository.claims.release
+    repository.claims.renew.side_effect = claims_repository.claims.renew
+    repository.acquire_device_operation_claim = MagicMock(
+        side_effect=claims_repository.acquire_device_operation_claim,
+    )
+    repository.claim_fencing_tokens = MagicMock(side_effect=claims_repository.claim_fencing_tokens)
     cluster = SimpleNamespace(repository=repository, config=SimpleNamespace(local_worker_id="worker"))
     monkeypatch.setattr(service, "get_cluster_service", lambda: cluster)
     auth = AuthService(tmp_path / "auth.sqlite3")
@@ -98,11 +108,12 @@ def test_agent_cannot_self_approve_and_other_owner_cannot_read(environment):
     repository.acquire_device_operation_claim.assert_not_called()
 
 
-def test_human_operator_can_read_own_review_without_agent_read_scope(environment):
+@pytest.mark.parametrize("role", ["user", "device_operator"])
+def test_human_operator_can_read_own_review_without_agent_read_scope(environment, role):
     client, repository, _auth = environment
     item = upload(client)
     endpoint = "/api/devices/deployments/" + item["id"]
-    human = {"x-test-principal": "session"}
+    human = {"x-test-principal": "session", "x-test-role": role}
     assert client.get(endpoint, headers=human).status_code == 200
     assert client.get(endpoint + "/review", headers=human).status_code == 200
     assert client.get(endpoint, headers={**human, "x-test-owner": "other"}).status_code == 404
@@ -111,19 +122,22 @@ def test_human_operator_can_read_own_review_without_agent_read_scope(environment
     repository.acquire_device_operation_claim.assert_not_called()
 
 
-def test_human_approval_runs_exact_artifact_once_and_returns_no_token(environment):
+@pytest.mark.parametrize("role", ["user", "device_operator"])
+def test_human_approval_runs_exact_artifact_once_and_returns_no_token(environment, role):
     client, repository, _auth = environment
     item = upload(client)
     endpoint = "/api/devices/deployments/" + item["id"]
     with patch.object(service, "execute") as execute:
-        result = client.post(endpoint + "/approve", headers={"x-test-principal": "session"})
+        result = client.post(endpoint + "/approve", headers={"x-test-principal": "session", "x-test-role": role})
         assert result.status_code == 200, result.text
         assert "token" not in result.text
         payload, source = execute.call_args.args
         assert payload["sha256"] == item["sha256"]
         assert (payload["worker_id"], payload["serial"], payload["replace_existing"]) == ("worker", "SERIAL", True)
         assert source == "operation:apk-deploy:" + item["id"]
-        assert client.post(endpoint + "/approve", headers={"x-test-principal": "session"}).status_code == 409
+        assert client.post(endpoint + "/approve", headers={
+            "x-test-principal": "session", "x-test-role": role,
+        }).status_code == 409
         assert execute.call_count == 1
     assert repository.acquire_device_operation_claim.call_args.kwargs["owner_id"] == "owner"
 
@@ -178,6 +192,26 @@ def test_approval_store_is_process_safe_and_single_use(tmp_path):
 
     with ThreadPoolExecutor(4) as pool:
         assert sum(pool.map(start, range(4))) == 1
+
+
+def test_execution_token_schema_migrates_legacy_store_idempotently(tmp_path):
+    db_path = tmp_path / "requests.sqlite3"
+    request_id = "f" * 32
+    payload = {"id": request_id, "owner_id": "owner", "expires_at": time.time() + 300}
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE deployments (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, status TEXT NOT NULL, "
+                     "expires_at REAL NOT NULL, payload TEXT NOT NULL, result TEXT NOT NULL DEFAULT '{}')")
+        conn.execute("INSERT INTO deployments VALUES (?,?,'queued',?,?, '{}')",
+                     (request_id, "owner", payload["expires_at"], json.dumps(payload)))
+
+    with ThreadPoolExecutor(4) as pool:
+        stores = list(pool.map(lambda _index: DeploymentStore(tmp_path), range(4)))
+    repository = stores[0]
+    with repository.connect() as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(deployments)")}
+        token = conn.execute("SELECT execution_token FROM deployments WHERE id=?", (request_id,)).fetchone()[0]
+    assert "execution_token" in columns and token == ""
+    assert repository.begin_execution(request_id, "runner") is True
 
 
 def test_expired_request_cannot_be_started(tmp_path):
@@ -358,6 +392,126 @@ def test_heartbeat_preserves_live_deployment_beyond_original_deadline(tmp_path):
     assert repository.get("a" * 32, "owner")["status"] == "completed"
 
 
+def test_expired_queued_task_is_marked_interrupted_by_its_start_attempt(tmp_path):
+    repository = DeploymentStore(tmp_path)
+    repository.create({"id": "b" * 32, "owner_id": "owner", "expires_at": time.time() + 300})
+    repository.start("b" * 32, "owner", "human")
+    with repository.connect() as conn:
+        conn.execute("UPDATE deployments SET expires_at=? WHERE id=?", (time.time() - 1, "b" * 32))
+    assert repository.begin_execution("b" * 32, "expired-runner") is False
+    assert repository.get("b" * 32, "owner")["status"] == "interrupted"
+
+
+def test_failed_start_cleanup_never_releases_another_runner_claim(environment, monkeypatch):
+    _client, cluster_repository, _auth = environment
+    repository = service.store()
+    repository.create({"id": "c" * 32, "owner_id": "owner", "expires_at": time.time() + 300})
+    repository.start("c" * 32, "owner", "human")
+    repository.begin_execution("c" * 32, "winning-runner")
+    payload = {"id": "c" * 32, "owner_id": "owner", "worker_id": "worker", "serial": "SERIAL",
+               "package": "com.example.app", "_ssh_config": {}}
+    with patch.object(service, "store", return_value=repository), \
+            patch.object(cluster_repository.claims, "release") as release, \
+            patch.object(service.execution, "install") as install, \
+            patch.object(service.shutil, "rmtree") as remove:
+        service.execute(payload, "operation:apk-deploy:" + payload["id"])
+    assert repository.get(payload["id"], "owner")["status"] == "running"
+    release.assert_not_called()
+    remove.assert_not_called()
+    install.assert_not_called()
+
+
+def test_begin_execution_exception_fails_task_and_releases_owned_resources(environment, monkeypatch):
+    _client, cluster_repository, _auth = environment
+    repository = service.store()
+    request_id = "d" * 32
+    repository.create({"id": request_id, "owner_id": "owner", "expires_at": time.time() + 300})
+    repository.start(request_id, "owner", "human")
+    artifact_directory = repository.root / request_id
+    artifact_directory.mkdir()
+    payload = {"id": request_id, "owner_id": "owner", "worker_id": "worker", "serial": "SERIAL",
+               "package": "com.example.app", "_ssh_config": {}}
+    with patch.object(service, "store", return_value=repository), \
+            patch.object(repository, "begin_execution", side_effect=RuntimeError("injected startup failure")), \
+            patch.object(service.execution, "install") as install:
+        service.execute(payload, "operation:apk-deploy:" + request_id)
+    assert repository.get(request_id, "owner")["status"] == "failed"
+    cluster_repository.claims.release.assert_called_once_with("operation:apk-deploy:" + request_id)
+    assert not artifact_directory.exists()
+    install.assert_not_called()
+
+
+def test_expired_queued_execution_releases_its_claim_without_replaying(environment):
+    _client, cluster_repository, _auth = environment
+    repository = service.store()
+    request_id = "e" * 32
+    repository.create({"id": request_id, "owner_id": "owner", "expires_at": time.time() + 300})
+    repository.start(request_id, "owner", "human")
+    with repository.connect() as conn:
+        conn.execute("UPDATE deployments SET expires_at=? WHERE id=?", (time.time() - 1, request_id))
+    payload = {"id": request_id, "owner_id": "owner", "worker_id": "worker", "serial": "SERIAL",
+               "package": "com.example.app", "_ssh_config": {}}
+    with patch.object(service, "store", return_value=repository), patch.object(service.execution, "install") as install:
+        service.execute(payload, "operation:apk-deploy:" + request_id)
+    assert repository.get(request_id, "owner")["status"] == "interrupted"
+    assert cluster_repository.claims.release.call_args.args[0] == "operation:apk-deploy:" + request_id
+    install.assert_not_called()
+
+
+def test_status_reaps_expired_queued_request_before_delayed_worker_can_start(environment):
+    client, cluster_repository, _auth = environment
+    item = upload(client)
+    with patch.object(service, "execute") as queued:
+        assert client.post("/api/devices/deployments/" + item["id"] + "/approve",
+                           headers={"x-test-principal": "session"}).status_code == 200
+    payload, source = queued.call_args.args
+    artifact_directory = service.store().root / item["id"]
+    with service.store().connect() as conn:
+        conn.execute("UPDATE deployments SET expires_at=? WHERE id=?", (time.time() - 1, item["id"]))
+
+    response = client.get("/api/devices/deployments/" + item["id"])
+    assert response.status_code == 200, response.text
+    assert response.json()["deployment"]["status"] == "interrupted"
+    assert response.json()["deployment"]["result"]["execution_phase"] == "queued"
+    assert not artifact_directory.exists()
+    assert cluster_repository.claims.active_claim("worker:SERIAL") is None
+
+    with patch.object(service.execution, "install") as install:
+        service.execute(payload, source)
+    install.assert_not_called()
+
+
+@pytest.mark.parametrize("fault,expected_code", [("worker_disconnect", "UPSTREAM_FAILURE"),
+                                                  ("install_timeout", "DEPENDENCY_TIMEOUT"),
+                                                  ("lease_expiry", "STATE_CONFLICT")])
+def test_background_install_faults_finish_once_and_never_replay(environment, fault, expected_code):
+    client, cluster_repository, _auth = environment
+    item = upload(client)
+    with patch.object(service, "execute") as queued:
+        response = client.post("/api/devices/deployments/" + item["id"] + "/approve",
+                               headers={"x-test-principal": "session"})
+    assert response.status_code == 200
+    payload, source = queued.call_args.args
+    if fault == "lease_expiry":
+        cluster_repository.claims.release(source)
+        failure = None
+    elif fault == "worker_disconnect":
+        failure = OSError("injected worker disconnect")
+    else:
+        failure = ApiError.dependency_timeout("injected installation timeout")
+    with patch.object(service.execution, "install", side_effect=failure) as install:
+        service.execute(payload, source)
+    result = service.store().get(item["id"], item["owner_id"])
+    assert "status" in result, result
+    assert result["status"] == "failed"
+    assert result["result"]["code"] == expected_code
+    assert result["status"] != "queued"
+    if fault == "lease_expiry":
+        install.assert_not_called()
+    else:
+        install.assert_called_once()
+
+
 @pytest.mark.parametrize("match", [True, False])
 def test_restart_reconciles_installed_artifact_without_replaying(environment, match):
     client, repository, *_ = environment
@@ -365,6 +519,7 @@ def test_restart_reconciles_installed_artifact_without_replaying(environment, ma
     with patch.object(service, "execute"):
         assert client.post("/api/devices/deployments/" + item["id"] + "/approve",
                            headers={"x-test-principal": "session"}).status_code == 200
+    service.store().begin_execution(item["id"], "crashed-controller-runner")
     with service.store().connect() as conn:
         conn.execute("UPDATE deployments SET expires_at=? WHERE id=?", (time.time() - 1, item["id"]))
     repository.claims.active_claim.return_value = None
@@ -382,12 +537,13 @@ def test_restart_reconciles_installed_artifact_without_replaying(environment, ma
 
 def test_upload_reports_verified_identity_and_installed_signer_mismatch(environment):
     client, *_ = environment
-    installed = {"package": "com.example.app", "signers": ["b" * 64], "sha256": "c" * 64}
-    with patch.object(service, "installed_identity", return_value=installed):
+    with patch.object(service, "installed_identity") as installed_identity:
         item = upload(client)
+    installed_identity.assert_not_called()
     assert item["package"] == "com.example.app" and item["version_name"] == "1.0"
     assert item["signers"] == ["a" * 64]
-    assert item["installed_identity"] == installed and item["installed_signers_match"] is False
+    assert item["installed_identity"] is None and item["installed_signers_match"] is None
+    assert item["installed_identity_precheck"] == "deferred_until_approval"
 
 
 @pytest.mark.parametrize("existing", [True, False])

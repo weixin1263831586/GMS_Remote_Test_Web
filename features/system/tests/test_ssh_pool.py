@@ -5,6 +5,21 @@ from features.system.ssh import SSHManager
 from features.system.ssh_async import SSHAsyncManager
 
 
+def test_failed_health_probe_closes_both_channel_and_client():
+    manager = SSHManager(pool_size=1)
+    pooled = MagicMock()
+    pooled._gms_pool_identity = ('host-a', '22', 'tester')
+    channel = MagicMock()
+    channel.exit_status_ready.return_value = True
+    channel.recv_exit_status.return_value = 1
+    stdout = MagicMock(channel=channel)
+    pooled.exec_command.return_value = (MagicMock(), stdout, MagicMock())
+    manager.return_connection(pooled)
+    with patch.object(manager, 'create_connection', return_value=None):
+        assert manager.get_connection({'host': 'host-a', 'username': 'tester'}) is None
+    channel.close.assert_called_once()
+    pooled.close.assert_called_once()
+
 def test_connection_pool_does_not_reuse_connection_for_another_host():
     manager = SSHManager(pool_size=2)
     pooled = MagicMock()

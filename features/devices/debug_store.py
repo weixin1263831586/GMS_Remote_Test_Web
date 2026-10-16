@@ -9,28 +9,38 @@ import uuid
 from pathlib import Path
 
 from foundation.error_model import ApiError
+from foundation.sqlite_schema import ensure_schema
 
 
 class DebugStore:
     def __init__(self, root: Path):
         root.mkdir(parents=True, exist_ok=True)
         self.db = root / "debug.sqlite3"
-        with self.connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute("""CREATE TABLE IF NOT EXISTS debug_sessions (
+        self.connect().close()
+
+    @staticmethod
+    def _initialize_schema(conn):
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("""CREATE TABLE IF NOT EXISTS debug_sessions (
                 id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, actor_id TEXT NOT NULL,
                 status TEXT NOT NULL, expires_at REAL NOT NULL, busy TEXT NOT NULL DEFAULT '',
                 payload TEXT NOT NULL
             )""")
-            conn.execute("""CREATE TABLE IF NOT EXISTS debug_operations (
+        conn.execute("""CREATE TABLE IF NOT EXISTS debug_operations (
                 id TEXT PRIMARY KEY, session_id TEXT NOT NULL, action TEXT NOT NULL,
                 started_at REAL NOT NULL, finished_at REAL, status TEXT NOT NULL,
                 details TEXT NOT NULL, result TEXT NOT NULL DEFAULT '{}'
             )""")
+        conn.execute('PRAGMA user_version = 1')
 
     def connect(self):
         conn = sqlite3.connect(self.db, timeout=10)
         conn.row_factory = sqlite3.Row
+        try:
+            ensure_schema(conn, self.db, self._initialize_schema)
+        except Exception:
+            conn.close()
+            raise
         return conn
 
     @staticmethod
@@ -79,6 +89,14 @@ class DebugStore:
             conn.execute("UPDATE debug_sessions SET status='active',expires_at=?,payload=? WHERE id=?",
                          (payload["expires_at"], json.dumps(payload), session_id))
         return self.get(session_id, owner_id)
+
+    def approval_heartbeat(self, session_id):
+        with self.connect() as conn:
+            changed = conn.execute("UPDATE debug_sessions SET expires_at=? "
+                                   "WHERE id=? AND status='approving' AND expires_at>?",
+                                   (time.time() + 120, session_id, time.time())).rowcount
+        if changed != 1:
+            raise ApiError.conflict("调试审批租约失效，请重新申请")
 
     def reset_approval(self, session_id, owner_id):
         with self.connect() as conn:

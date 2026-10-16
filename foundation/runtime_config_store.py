@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import fcntl
+import logging
 import os
 import threading
 from contextlib import contextmanager
@@ -17,6 +18,8 @@ from typing import Any
 from foundation.config_paths import runtime_data_root
 from foundation.private_config import read_json_object, write_private_json
 
+
+logger = logging.getLogger(__name__)
 
 DEPLOYMENT_KEYS = frozenset({
     "ubuntu_user", "ubuntu_host", "local_server", "use_key_auth", "private_key_path",
@@ -142,11 +145,18 @@ class RuntimeConfigStore:
         finally:
             os.close(descriptor)
 
-    def read(self) -> dict[str, Any]:
+    def read(self, *, tolerate_corruption: bool = False) -> dict[str, Any]:
         with self.locked():
             combined = {}
             for path in self.paths.values():
-                combined = overlay_sections(combined, read_json_object(path))
+                try:
+                    section = read_json_object(path)
+                except (OSError, ValueError):
+                    if not tolerate_corruption:
+                        raise
+                    logger.error("Runtime configuration partition unavailable: %s", path.name)
+                    continue
+                combined = overlay_sections(combined, section)
             return combined
 
     def write(self, payload: dict[str, Any]) -> None:

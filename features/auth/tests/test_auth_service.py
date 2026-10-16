@@ -1,6 +1,7 @@
 import sqlite3
 import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -8,8 +9,22 @@ from features.auth.service import DEFAULT_SESSION_ABSOLUTE_HOURS, AuthService
 
 
 class AuthServiceConcurrencyTests(unittest.TestCase):
-    def test_default_absolute_session_lifetime_does_not_interrupt_browser_use(self):
-        self.assertEqual(DEFAULT_SESSION_ABSOLUTE_HOURS, 100 * 365 * 24)
+    def test_default_absolute_session_lifetime_is_bounded(self):
+        self.assertEqual(DEFAULT_SESSION_ABSOLUTE_HOURS, 24)
+
+    def test_preexisting_long_lived_session_obeys_current_absolute_limit(self):
+        with TemporaryDirectory() as tmp:
+            service = AuthService(Path(tmp) / 'auth.sqlite3')
+            user = service.create_initial_admin('admin', 'strongpass1')
+            token = service.create_session(user.id)
+            now = datetime.now(timezone.utc)
+            with service._connect() as conn:
+                conn.execute('UPDATE platform_sessions SET created_at=?, expires_at=?, idle_expires_at=?', (
+                    (now - timedelta(days=2)).isoformat(),
+                    (now + timedelta(days=36500)).isoformat(),
+                    (now + timedelta(hours=12)).isoformat(),
+                ))
+            self.assertIsNone(service.get_user_for_token(token))
 
     def test_only_one_initial_admin_can_be_created_across_instances(self):
         with TemporaryDirectory() as tmp:

@@ -58,7 +58,11 @@ def deployment_status(request: Request, request_id: str):
     payload = service.store().get(request_id, user.resource_owner_id)
     service.check_acl(request, payload["worker_id"], payload["serial"])
     if payload["status"] == "interrupted" and user.has_permission("devices.use_leased"):
-        payload = service.reconcile_interrupted(request, payload)
+        if payload.get("result", {}).get("execution_phase") == "queued":
+            service.cleanup_expired_queue(payload)
+            payload = service.store().get(request_id, user.resource_owner_id)
+        else:
+            payload = service.reconcile_interrupted(request, payload)
     return {"success": True, "deployment": describe(request, payload)}
 
 
@@ -79,7 +83,7 @@ def review_deployment(request: Request, request_id: str):
 ''' + LOGIN_ASSETS + '''
 <script src="/static/js/pages/device-deployment-review.js" defer></script></head>
 <body><main><h1>APK 部署审批</h1><p>请登录发起申请的 Agent 所属平台账号。核对制品和目标后，一次批准完成传输和安装。</p>
-<button id="review-login-open" type="button">登录 / 切换管理员账号</button>
+<button id="review-login-open" type="button">登录 / 切换审批账号</button>
 <dl id="details"></dl><p id="status" role="status">正在读取部署请求…</p>
 <button id="approve" disabled>批准并安装</button><a href="/">返回平台</a>
 </main>''' + LOGIN_PANEL + '''</body></html>''')

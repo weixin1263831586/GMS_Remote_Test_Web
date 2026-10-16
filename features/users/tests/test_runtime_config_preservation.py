@@ -39,34 +39,25 @@ class RuntimeConfigPreservationTests(unittest.TestCase):
         self.assertEqual(fake.saved["redmine_auth"]["username"], "chaoqun.huang@rock-chips.com")
 
     def test_client_username_save_uses_preserving_runtime_merge(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
         from features.users.sessions import ClientManager
+        from foundation.config import ConfigManager
 
-        class FakeConfigManager:
-            def __init__(self):
-                self.prepare_updates = None
-                self.saved = None
-
-            def prepare_client_config(self, updates):
-                self.prepare_updates = updates
-                return {
-                    "gerrit_dashboard": {"ssh_host": "10.10.10.29"},
-                    **updates,
-                }
-
-            def save_runtime_config(self, data):
-                self.saved = data
-                return True
-
-        fake = FakeConfigManager()
-        manager = ClientManager()
-        manager.config_manager = fake
-        manager.client_hosts = {"172.16.14.66": "hcq"}
-        manager.ssh_credentials = [{"username": "hcq", "password": "secret"}]
-
-        self.assertTrue(manager._save_client_runtime())
-        self.assertEqual(fake.prepare_updates["client_hosts"]["172.16.14.66"], "hcq")
-        self.assertEqual(fake.saved["gerrit_dashboard"]["ssh_host"], "10.10.10.29")
-
-
-if __name__ == "__main__":
-    unittest.main()
+        with TemporaryDirectory() as tmp:
+            config = ConfigManager(project_root=Path(tmp))
+            config.update_runtime_config({
+                "gerrit_dashboard": {"ssh_host": "gerrit.example"},
+                "client_hosts": {"192.0.2.1": "old"},
+                "client_ssh_credentials": [{"username": "new", "encrypted_password": "saved"}],
+            })
+            manager = ClientManager()
+            manager.config_manager = config
+            manager.client_hosts = {"192.0.2.2": "alice"}
+            manager.ssh_credentials = [{"username": "stale", "password": "stale"}]
+            self.assertTrue(manager._save_client_runtime("192.0.2.2"))
+            saved = config.get_runtime_config()
+            self.assertEqual(saved["client_hosts"], {"192.0.2.1": "old", "192.0.2.2": "alice"})
+            self.assertEqual(saved["client_ssh_credentials"][0]["username"], "new")
+            self.assertEqual(saved["gerrit_dashboard"]["ssh_host"], "gerrit.example")

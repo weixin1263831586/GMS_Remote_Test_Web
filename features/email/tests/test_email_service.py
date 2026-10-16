@@ -31,6 +31,39 @@ QIYE_CFG = {
 }
 
 
+class EmailPasswordResolutionTests(unittest.TestCase):
+    """SMTP 密码读取：密文优先解密，遗留明文仅作兼容兜底。"""
+
+    def setUp(self):
+        from cryptography.fernet import Fernet
+
+        self._env = patch.dict(
+            "os.environ",
+            {"GMS_SECRET_KEY": Fernet.generate_key().decode("ascii")},
+        )
+        self._env.start()
+
+    def tearDown(self):
+        self._env.stop()
+
+    def test_encrypted_password_is_decrypted(self):
+        from features.email.service import _email_password
+        from foundation.secrets import encrypt_secret
+
+        cfg = {"encrypted_password": encrypt_secret("smtp-auth-code")}
+        self.assertEqual(_email_password(cfg), "smtp-auth-code")
+
+    def test_legacy_plaintext_is_still_read(self):
+        from features.email.service import _email_password
+
+        self.assertEqual(_email_password({"password": "legacy"}), "legacy")
+
+    def test_unreadable_ciphertext_fails_closed(self):
+        from features.email.service import _email_password
+
+        self.assertEqual(_email_password({"encrypted_password": "not-a-token"}), "")
+
+
 class SplitEmailsTests(unittest.TestCase):
     def test_empty(self):
         self.assertEqual(split_emails(""), [])

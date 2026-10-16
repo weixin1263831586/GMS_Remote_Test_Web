@@ -37,13 +37,9 @@ class ClientManager:
         self.ssh_credentials = config.get('client_ssh_credentials', [])
         return config
 
-    def _save_client_runtime(self) -> bool:
+    def _save_client_runtime(self, client_ip: str) -> bool:
         """保存客户端运行时配置"""
-        runtime_config = self.config_manager.prepare_client_config({
-            'client_hosts': self.client_hosts,
-            'client_ssh_credentials': self.ssh_credentials,
-        })
-        return self.config_manager.save_runtime_config(runtime_config)
+        return self.config_manager.save_client_host(client_ip, self.client_hosts[client_ip])
 
     def _ssh_whoami(self, client_ip: str, username: str, password: str) -> str:
         """Connect via SSH, run whoami, return username. Raises on failure."""
@@ -88,7 +84,7 @@ class ClientManager:
                 # 保存凭据
                 self.client_hosts[client_ip] = detected_username
 
-                self._save_client_runtime()
+                self._save_client_runtime(client_ip)
 
                 return True, detected_username, None
             except Exception as e:
@@ -135,7 +131,7 @@ class ClientManager:
 
                 self.client_hosts[client_ip] = detected_username
 
-                self._save_client_runtime()
+                self._save_client_runtime(client_ip)
 
                 return True, detected_username, None
             except Exception as exc:

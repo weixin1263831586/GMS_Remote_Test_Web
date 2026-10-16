@@ -68,15 +68,24 @@ class ControllerClient:
                 output.write(block)
 
     def heartbeat(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.request("POST", f"/api/cluster/workers/{self.config.worker_id}/heartbeat", payload)
+        return self.request(
+            "POST",
+            f"/api/cluster/workers/{quote(self.config.worker_id)}/heartbeat",
+            payload,
+        )
 
     def poll(self) -> list[dict[str, Any]]:
-        result = self.request("POST", f"/api/cluster/workers/{self.config.worker_id}/commands/poll", {})
+        result = self.request(
+            "POST",
+            f"/api/cluster/workers/{quote(self.config.worker_id)}/commands/poll",
+            {},
+        )
         return result.get("commands", [])
 
     def ack(self, command_id: str, status: str, result: dict | None = None, error: str = ""):
         return self.request(
-            "POST", f"/api/cluster/workers/{self.config.worker_id}/commands/{command_id}/ack",
+            "POST",
+            f"/api/cluster/workers/{quote(self.config.worker_id)}/commands/{quote(command_id)}/ack",
             {"status": status, "result": result or {}, "error": error},
         )
 

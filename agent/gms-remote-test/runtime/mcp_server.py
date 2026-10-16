@@ -117,7 +117,7 @@ mcp_debug_tools = _load_typed_tools("mcp_debug_tools")
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.57"
+SERVER_VERSION = "0.22.58"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -888,9 +888,9 @@ def device_wait_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         try:
             interval = int(arguments["interval"])
         except (TypeError, ValueError):
-            return "invalid interval: expected an integer from 1 to 300", True
-        if not 1 <= interval <= 300:
-            return "invalid interval: expected an integer from 1 to 300", True
+            return "invalid interval: expected an integer from 1 to 60", True
+        if not 1 <= interval <= 60:
+            return "invalid interval: expected an integer from 1 to 60", True
         args.extend(["--interval", str(interval)])
     if arguments.get("max_wait") is not None:
         try:
@@ -1799,6 +1799,8 @@ def _validate_shell_command(command: str) -> tuple[bool, str]:
 
 def shell_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     global _DEVICE_ID_PATTERN
+    if arguments.get("worker_id"):
+        return "worker_id is unsupported by this host-local shell command; no device command was run", True
     device = str(arguments.get("device") or "").strip()
     command = str(arguments.get("command") or "").strip()
     if not device:
@@ -1852,6 +1854,8 @@ def _is_clear_request(arguments: dict[str, Any]) -> bool:
 
 
 def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    if arguments.get("worker_id"):
+        return "worker_id is unsupported by this host-local logcat command; no device command was run", True
     global _DEVICE_ID_PATTERN
     device = str(arguments.get("device") or "").strip()
     if not device:
@@ -1965,7 +1969,7 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         if label == "since":
             since_text = text
         else:
-            until_text = text
+            until_text = (text + ".999") if "." not in text else text.ljust(18, "0")
     if since_text is not None:
         if "-t" in items or "-T" in items:
             return (
@@ -2010,7 +2014,7 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     for line in text.splitlines():
         stamp = line[0:18] if len(line) >= 18 else ""
         if len(stamp) == 18 and stamp[2] == "-" and stamp[5] == " ":
-            if stamp >= until_text:
+            if stamp > until_text:
                 dropped += 1
                 continue
         kept.append(line)
@@ -2037,6 +2041,8 @@ _SHELL_EXEC_MAX_COMMAND_CHARS = 2000
 
 def shell_exec_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     global _DEVICE_ID_PATTERN
+    if arguments.get("worker_id"):
+        return "worker_id is unsupported by this host-local shell command; no device command was run", True
     device = str(arguments.get("device") or "").strip()
     command = str(arguments.get("command") or "").strip()
     if not device:
@@ -2344,7 +2350,7 @@ def apk_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         args.extend(["--mode", mode])
     limit = arguments.get("limit")
     if limit:
-        args.extend(["--limit", str(max(1, min(int(limit), 50)))])
+        args.extend(["--limit", str(max(1, min(int(limit), 400)))])
     path_filter = str(arguments.get("path") or "").strip()
     if path_filter:
         args.extend(["--path", path_filter])

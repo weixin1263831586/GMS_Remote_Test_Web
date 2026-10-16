@@ -35,6 +35,24 @@ sys.path.insert(0, str(RUNTIME_DIR))
 import mcp_server  # noqa: E402
 
 
+class DiagnosticContractTests(unittest.TestCase):
+    def test_unsupported_worker_never_reaches_host_local_execution(self):
+        for handler in (mcp_server.shell_tool, mcp_server.logcat_tool, mcp_server.shell_exec_tool):
+            with self.subTest(handler=handler.__name__), patch.object(mcp_server, 'run_cli') as run:
+                text, error = handler({'device': 'D1', 'worker_id': 'remote', 'command': 'getprop',
+                                       'approval_token': 'fixture'})
+                self.assertTrue(error)
+                self.assertIn('worker_id', text)
+                run.assert_not_called()
+
+    def test_wait_interval_matches_cli_limit(self):
+        with patch.object(mcp_server, 'run_cli', return_value=('ok', False)) as run:
+            self.assertFalse(mcp_server.device_wait_tool({'devices': ['D1'], 'interval': 60})[1])
+            run.reset_mock()
+            self.assertTrue(mcp_server.device_wait_tool({'devices': ['D1'], 'interval': 61})[1])
+            run.assert_not_called()
+
+
 def _reset_catalog_cache() -> None:
     mcp_server._CATALOG_CACHE["loaded_at"] = 0.0
     mcp_server._CATALOG_CACHE["commands"] = None
@@ -1587,7 +1605,7 @@ class ApkToolTests(unittest.TestCase):
         self.assertIn("query", text)
         captured = self._capture_run()
         mcp_server.apk_search_tool({"task_id": "T1", "query": "Permission", "limit": 999})
-        self.assertEqual(captured["args"], ["T1", "Permission", "--limit", "50"])
+        self.assertEqual(captured["args"], ["T1", "Permission", "--limit", "400"])
         mcp_server.apk_search_tool({
             "task_id": "T1", "query": "onCreate", "mode": "symbol",
             "path": "com/example", "line": 42,

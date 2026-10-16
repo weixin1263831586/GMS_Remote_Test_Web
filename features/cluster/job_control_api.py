@@ -10,6 +10,7 @@ from features.auth import (
 )
 
 from .api import service
+from .state_machine import InvalidJobTransitionError
 
 
 router = APIRouter()
@@ -67,15 +68,25 @@ def cancel_job(job_id: str, request: Request):
             ],
         },
     })
-    service().repository.transition_job(
-        job_id,
-        "stopping",
-        source="api",
-        message="Cancellation requested",
-        operation_id=command.get("operation_id", command["id"]),
-        worker_id=job["assigned_worker_id"],
-        payload={"command_id": command["id"]},
-    )
+    # 与终态判定（上方 already_terminal 检查）存在竞态：Worker 可能恰在
+    # 此间隙把任务转入 completed/failed。transition_job 会按状态机拒绝
+    # 该过渡；此时返回刷新后的终态任务（幂等取消语义）而不是 500。
+    try:
+        service().repository.transition_job(
+            job_id,
+            "stopping",
+            source="api",
+            message="Cancellation requested",
+            operation_id=command.get("operation_id", command["id"]),
+            worker_id=job["assigned_worker_id"],
+            payload={"command_id": command["id"]},
+        )
+    except InvalidJobTransitionError:
+        refreshed = service().repository.get_job(job_id)
+        terminal = {"completed", "failed", "cancelled"}
+        if refreshed is None or refreshed["status"] not in terminal:
+            raise
+        return {"success": True, "job": refreshed, "already_terminal": True}
     return {
         "success": True,
         "job": service().repository.get_job(job_id),

@@ -9,6 +9,7 @@
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 from .analysis_agent import ReportAnalysisAgent
@@ -118,9 +119,15 @@ class TestReportManager:
             if summary_content:
                 log_dir_match = re.search(r'LOG DIRECTORY\s*:\s*(/[^\s]+)', summary_content)
                 if log_dir_match:
-                    log_dir = log_dir_match.group(1).strip()
-                    if os.path.exists(log_dir):
-                        inv_dirs = [d for d in os.listdir(log_dir) if d.startswith('inv_')]
+                    # Summary text is untrusted. Only sibling suite logs are evidence.
+                    result_path = Path(result_dir).resolve()
+                    suite_root = result_path.parent.parent if result_path.parent.name == 'results' else result_path
+                    candidate = Path(log_dir_match.group(1).strip()).resolve()
+                    if candidate.is_relative_to(suite_root) and candidate.is_dir():
+                        log_dir = str(candidate)
+                        inv_dirs = [d for d in os.listdir(log_dir) if d.startswith('inv_')
+                                    and (candidate / d).resolve().is_relative_to(suite_root)
+                                    and (candidate / d).is_dir()]
                         if inv_dirs:
                             inv_dir = os.path.join(log_dir, inv_dirs[0])
 
@@ -155,6 +162,8 @@ class TestReportManager:
                 host_log_path = None
                 device_log_path = None
                 for f in os.listdir(inv_dir):
+                    if not (Path(inv_dir) / f).resolve().is_relative_to(suite_root):
+                        continue
                     if f.startswith('host_log') and f.endswith('.txt'):
                         host_log_path = os.path.join(inv_dir, f)
                     elif f.startswith('device_logcat_test') and f.endswith('.txt'):

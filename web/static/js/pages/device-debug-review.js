@@ -16,6 +16,7 @@
     let failures = 0;
     let stopped = false;
     let hidden = false;
+    let reviewAccount = '';
 
     async function request(method, path) {
         const response = await fetch(path, {method, credentials: 'same-origin', headers: {'Accept': 'application/json'}});
@@ -24,7 +25,7 @@
             clearTimeout(timer);
             details.replaceChildren();
             history.replaceChildren();
-            const reason = '登录已失效或权限不足，请重新登录管理员 gms 账号。';
+            const reason = '登录已失效或权限不足，请重新登录发起申请的 Agent 所属平台账号。';
             window.DeviceReviewLogin.open(reason);
             throw new Error(reason);
         }
@@ -33,8 +34,10 @@
             clearTimeout(timer);
             details.replaceChildren();
             history.replaceChildren();
-            const reason = '请求不存在或不属于当前登录账号。请登录发起申请的 Agent 所属平台账号（管理员 gms）；仍不可用时请由原 Agent 重新申请。';
-            window.DeviceReviewLogin.open(reason);
+            const reason = reviewAccount
+                ? `账号 ${reviewAccount} 已登录成功，但无法读取此请求。请求不存在或属于其他账号，请切换为发起申请的 Agent 所属平台账号；仍不可用时请由原 Agent 重新申请。`
+                : '请求不存在或不属于当前登录账号。请登录发起申请的 Agent 所属平台账号；仍不可用时请由原 Agent 重新申请。';
+            if (!reviewAccount) window.DeviceReviewLogin.open(reason);
             throw new Error(reason);
         }
         const body = await response.json();
@@ -97,8 +100,9 @@
             finally { busy = false; await refresh(); if (message) status.textContent = message; }
         });
     }
-    window.addEventListener('device-review-authenticated', () => {
+    window.addEventListener('device-review-authenticated', event => {
         if (hidden) return;
+        reviewAccount = event.detail?.username || '当前账号';
         stopped = false;
         failures = 0;
         refresh();

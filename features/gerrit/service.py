@@ -12,6 +12,9 @@ from urllib.parse import quote, urlencode
 import aiohttp
 
 from features.gerrit.config import MAX_QUERY_PAGE_SIZE
+from foundation.outbound import PinnedOutboundResolver, UnsafeOutboundURL
+
+from .outbound import resolve_gerrit_target
 
 
 async def post_gerrit_review(
@@ -86,7 +89,11 @@ async def _post_gerrit_review_rest(
     if verified is not None:
         payload["labels"] = {"Verified": int(verified)}
     timeout = aiohttp.ClientTimeout(total=30)
-    connector = aiohttp.TCPConnector(ssl=_rest_ssl(cfg))
+    try:
+        target = await asyncio.to_thread(resolve_gerrit_target, url)
+    except UnsafeOutboundURL:
+        return {"sent": False, "source": "rest", "error": "Gerrit target is not authorized for outbound access"}
+    connector = aiohttp.TCPConnector(ssl=_rest_ssl(cfg), resolver=PinnedOutboundResolver(target))
     auth = aiohttp.BasicAuth(
         str(cfg.get("rest_username") or ""),
         str(cfg.get("rest_password") or ""),
@@ -94,13 +101,12 @@ async def _post_gerrit_review_rest(
     try:
         async with aiohttp.ClientSession(
             timeout=timeout, connector=connector, auth=auth
-        ) as session, session.post(url, json=payload) as response:
-            text = await response.text()
-            if response.status >= 400:
+        ) as session, session.post(url, json=payload, allow_redirects=False) as response:
+            if response.status >= 300:
                 return {
                     "sent": False,
                     "source": "rest",
-                    "error": f"REST {response.status}: {text[:300]}",
+                    "error": f"REST {response.status}",
                 }
         return {"sent": True, "source": "rest", "change_id": change_id}
     except Exception as exc:
@@ -298,7 +304,11 @@ async def _query_gerrit_via_rest(
     if api_prefix:
         auth = aiohttp.BasicAuth(str(cfg["rest_username"]), str(cfg["rest_password"]))
     timeout = aiohttp.ClientTimeout(total=60)
-    connector = aiohttp.TCPConnector(ssl=_rest_ssl(cfg))
+    try:
+        target = await asyncio.to_thread(resolve_gerrit_target, base_url)
+    except UnsafeOutboundURL:
+        return {"items": [], "stats": {}, "source": "rest", "error": "Gerrit target is not authorized for outbound access"}
+    connector = aiohttp.TCPConnector(ssl=_rest_ssl(cfg), resolver=PinnedOutboundResolver(target))
     headers = {"Accept": "application/json"}
     items: list[dict[str, Any]] = []
     start = 0
@@ -317,10 +327,10 @@ async def _query_gerrit_via_rest(
                     ("o", "SUBMITTABLE"),
                 ]
                 url = f"{base_url}{api_prefix}/changes/?{urlencode(params)}"
-                async with session.get(url, allow_redirects=True) as response:
+                async with session.get(url, allow_redirects=False) as response:
+                    if response.status >= 300:
+                        return {"items": [], "stats": {}, "error": f"REST {response.status}", "source": "rest"}
                     text = await response.text()
-                    if response.status >= 400:
-                        return {"items": [], "stats": {}, "error": f"REST {response.status}: {text[:300]}", "source": "rest"}
                     rows = _decode_gerrit_rest_json(text)
                 if not isinstance(rows, list):
                     return {"items": [], "stats": {}, "error": "REST response is not a list", "source": "rest"}

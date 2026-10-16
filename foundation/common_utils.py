@@ -3,7 +3,6 @@ import logging
 import re
 import socket
 from typing import Any
-from urllib.parse import urlparse
 
 
 logger = logging.getLogger(__name__)
@@ -38,30 +37,6 @@ class CommonUtils:
         except Exception as e:
             logger.warning(f"Failed to get local IP: {e}")
             return None
-
-    @classmethod
-    def sanitize_url(cls, url: str) -> str:
-        """清理浏览器前缀并补全 URL 协议。"""
-        if not url:
-            return url
-
-        # 移除浏览器前缀。
-        prefixes_to_remove = ['view-source:', 'view-source://', 'about:', 'about://']
-        for prefix in prefixes_to_remove:
-            if url.startswith(prefix):
-                url = url[len(prefix):]
-                break
-
-        try:
-            parsed = urlparse(url)
-            if not parsed.scheme:
-                url = f"https://{url}"
-            elif parsed.scheme not in ['http', 'https']:
-                logger.warning(f"Unexpected URL scheme: {parsed.scheme}")
-        except Exception as e:
-            logger.warning(f"Invalid URL format: {url}, error: {e}")
-
-        return url
 
     @classmethod
     def parse_host_address(cls, host: str) -> tuple[str | None, str]:

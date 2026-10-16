@@ -58,12 +58,8 @@ _UNKNOWN_USER_DUMMY_HASH = "$".join((
     "30313233343536373839616263646566",
     "0000000000000000000000000000000000000000000000000000000000000000",
 ))
-# The browser cookie is intentionally a session cookie and is discarded when
-# the browser closes. Keep the server-side absolute ceiling effectively
-# non-expiring so a long-running GMS test or terminal session is not interrupted
-# at an arbitrary wall-clock boundary; idle expiry, logout, password changes,
-# account disabling, and administrator revocation still invalidate the session.
-DEFAULT_SESSION_ABSOLUTE_HOURS = 100 * 365 * 24
+# Cookie expiry is also bounded on the server, even while polling keeps it active.
+DEFAULT_SESSION_ABSOLUTE_HOURS = 24
 SESSION_ABSOLUTE_HOURS = int(
     os.getenv("GMS_SESSION_ABSOLUTE_HOURS", str(DEFAULT_SESSION_ABSOLUTE_HOURS))
 )
@@ -602,8 +598,10 @@ class AuthService(
                   AND u.disabled = 0
                   AND s.expires_at > ?
                   AND s.idle_expires_at > ?
+                  AND s.created_at > ?
                 """,
-                (token_hash, _to_iso(now), _to_iso(now)),
+                (token_hash, _to_iso(now), _to_iso(now),
+                 _to_iso(now - timedelta(hours=SESSION_ABSOLUTE_HOURS))),
             ).fetchone()
             if not row:
                 return None

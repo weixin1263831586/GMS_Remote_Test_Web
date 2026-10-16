@@ -11,7 +11,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -106,7 +108,12 @@ def collect_failure_evidence(
     evidence_dir = work_dir / "failure-evidence"
     evidence_dir.mkdir(parents=True, exist_ok=True)
     for serial in serials:
-        device_dir = evidence_dir / serial.replace(":", "_")
+        # serial 来自设备清单（可能带 adb-hub 前缀 "backend:serial"等），
+        # 不得信任为路径段：把白名单之外的字符统一替换为 "_"，
+        # 防止 "../" 或绝对路径把取证文件写到 work_dir 之外。
+        label = re.sub(r"[^A-Za-z0-9_-]", "_", str(serial))[:80]
+        digest = hashlib.sha256(str(serial).encode()).hexdigest()[:12]
+        device_dir = evidence_dir / f"device-{label}-{digest}"
         device_dir.mkdir(parents=True, exist_ok=True)
         collected: list[Path] = []
         try:

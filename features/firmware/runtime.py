@@ -26,6 +26,7 @@ class FirmwareRuntime:
     apk_max_source_file_size: int = 0
     jadx_path: str = "jadx"
     jadx_timeout: int = 300
+    firmware_transfer_timeout: int = 3600
     gsi_progress_increment: int = 1
     gsi_progress_max: int = 95
     gsi_progress_poll_interval: float = 1

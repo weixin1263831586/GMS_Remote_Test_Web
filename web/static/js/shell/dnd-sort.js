@@ -150,6 +150,8 @@ function moveCategory(dataObj, fromIndex, toIndex, applyFn) {
 function initDragAndDrop() {
     // 分类拖拽
     document.querySelectorAll('.category-section').forEach(section => {
+        if (section.dataset.dndBound === 'true') return;
+        section.dataset.dndBound = 'true';
         section.addEventListener('dragstart', handleCategoryDragStart);
         section.addEventListener('dragend', handleCategoryDragEnd);
         section.addEventListener('dragover', handleCategoryDragOver);

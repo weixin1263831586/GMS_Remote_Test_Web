@@ -85,6 +85,27 @@ class SuiteExtractTests(unittest.TestCase):
                     str(archive), str(root / 'extract'), ''
                 )
 
+    def test_zip_extract_with_target_dir_rejects_symbolic_link_member(self):
+        # strip_common_archive_root 分支（指定 target_dir_name）同样必须在
+        # 解压前拒绝 zip 符号链接成员。
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / 'unsafe.zip'
+            link = zipfile.ZipInfo('top/link')
+            link.create_system = 3
+            link.external_attr = (stat.S_IFLNK | 0o777) << 16
+            normal = zipfile.ZipInfo('top/normal.txt')
+            normal.create_system = 3
+            with zipfile.ZipFile(archive, 'w') as zf:
+                zf.writestr(normal, 'ok')
+                zf.writestr(link, '../escape')
+
+            with self.assertRaises(ValueError):
+                _extract_archive_local_with_progress(
+                    str(archive), str(root / 'extract'), 'suite'
+                )
+            self.assertFalse((root / 'extract' / 'suite' / 'link').exists())
+
     def test_zip_extract_without_target_dir_rejects_parent_path(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

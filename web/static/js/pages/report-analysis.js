@@ -692,7 +692,6 @@ function postFormDataWithProgress(url, formData, onProgress) {
         xhr.addEventListener('abort', () => settle(reject, abortError()));
 
         xhr.open('POST', url);
-        applyClientIdentityHeadersToXhr(xhr);
         xhr.send(formData);
     });
 }

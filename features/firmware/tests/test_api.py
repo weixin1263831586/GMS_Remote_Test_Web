@@ -148,7 +148,7 @@ class FirmwareApiTests(unittest.TestCase):
 
         self.assertEqual(
             response.json(),
-            {"success": False, "error": "Firmware not found: /tmp/not-found.img"},
+            {"success": False, "error": "Firmware not found: /tmp/not-found.img", "code": "NOT_FOUND"},
         )
         self.assertFalse(any("reboot loader" in command for command, _ in fake_ssh.commands))
 

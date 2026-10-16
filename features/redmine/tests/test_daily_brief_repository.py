@@ -484,6 +484,21 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertEqual(self.repo.get_job(job["job_id"])["status"], "queued")
         self.assertEqual(self.repo.get_run(run.run_id).status, "pending")
 
+    def test_same_path_rebuild_recovers_after_clear(self):
+        """同路径清空后必须恢复可写，而不是让缓存的实例持续报 no such table。
+
+        覆盖同 inode 清空（write_bytes 不换 inode）——旧备份离线恢复后
+        数据库文件被整体替换，进程重启后同样从空库开始。
+        """
+        run = make_run()
+        self.repo.create_run(run)
+
+        self.repo.db_path.write_bytes(b"")
+        loaded = self.repo.get_run(run.run_id)
+        self.assertIsNone(loaded)
+        self.repo.create_run(make_run())
+        self.assertIsNotNone(self.repo.latest_run("u1"))
+
 
 def _concurrent_init_worker(tmp: str, barrier_port: int) -> None:
     """子进程:与多个进程同时初始化同一 SQLite 库的 repository。"""

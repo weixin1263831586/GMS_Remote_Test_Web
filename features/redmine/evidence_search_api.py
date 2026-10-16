@@ -30,6 +30,23 @@ from foundation.errors import handle_api_errors
 
 router = APIRouter(prefix="/api/redmine-agent")
 
+# 原文/派生文本兜底读取的字节上限：大日志或 zip 派生文本可能很大，
+# 检索只在前缀窗口内匹配，避免单次搜索把整个文件读进内存。
+_SEARCH_TEXT_MAX_BYTES = 1024 * 1024
+# 原文兜底（stored_path）只对文本类 kind 生效；binary/image/apk/pdf 的
+# 原文不可检索，读取只放大内存占用。
+_SEARCHABLE_RAW_KINDS = {"text", "log"}
+
+
+def _read_text_capped(path) -> str | None:
+    """Read up to _SEARCH_TEXT_MAX_BYTES as UTF-8 text; None on IO failure."""
+    try:
+        with path.open("rb") as fh:
+            raw = fh.read(_SEARCH_TEXT_MAX_BYTES + 1)
+    except OSError:
+        return None
+    return raw[:_SEARCH_TEXT_MAX_BYTES].decode("utf-8", errors="replace")
+
 
 @router.get("/evidence/{snapshot_id}/search")
 @handle_api_errors
@@ -81,7 +98,16 @@ async def search_evidence(
                 "SELECT derived_text_path, stored_path FROM redmine_evidence_artifacts WHERE artifact_id = ?",
                 (str(artifact.get("artifact_id")),),
             ).fetchone()
-        candidates = [str(row["derived_text_path"] or ""), str(row["stored_path"] or "")] if row else []
+        candidates: list[str] = []
+        if row:
+            derived_rel = str(row["derived_text_path"] or "")
+            if derived_rel:
+                candidates.append(derived_rel)
+            # 原文兜底仅限文本类 kind，且同样限字节读取。
+            if str(artifact.get("kind") or "") in _SEARCHABLE_RAW_KINDS:
+                stored_rel = str(row["stored_path"] or "")
+                if stored_rel:
+                    candidates.append(stored_rel)
         for rel in candidates:
             # 空候选（如无派生文本）只跳过本项；用 break 会让后面的
             # stored_path 永远不被扫描（真机 #648526 验收发现的缺陷）。
@@ -95,9 +121,8 @@ async def search_evidence(
                 continue
             if not path.is_file():
                 continue
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
+            text = _read_text_capped(path)
+            if text is None:
                 continue
             # zip 派生文本带成员标记：按成员给出
             # attachment:<file>.zip!/<member>:L<line> 引用，而不是把整个

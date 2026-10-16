@@ -7,6 +7,7 @@ import re
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from features.auth import get_authenticated_user
 from features.devices import get_or_create_user_state, get_usb_monitor
 from foundation.responses import error_response
 
@@ -59,6 +60,26 @@ def _active_durable_jobs(owner_id: str) -> list[dict]:
     ]
 
 
+def _durable_jobs_owner_id(request: Request) -> str:
+    """Resolve the owner id used for durable job lookups.
+
+    Durable jobs are owner-scoped account resources (ADR 0010, same rule as
+    logs_api._request_log_scope and /api/test/start): the lookup must follow
+    the ``resource_owner_id`` — the enrolling account for agent tokens —
+    never the synthetic ``agent:<token_id>`` actor id, which would hide every
+    job the agent started. Dev/anonymous deployments fall back to the stable
+    anonymous client id.
+    """
+    principal = None
+    try:
+        principal = get_authenticated_user(request)
+    except AttributeError:
+        principal = None  # stub request without state (unit tests)
+    if principal is not None:
+        return principal.resource_owner_id
+    return runtime.get_client_id_from_request(request)
+
+
 def _infer_log_source(message: str, source: object = None) -> str:
     if isinstance(source, str) and source in {"system", "module"}:
         return source
@@ -106,7 +127,9 @@ async def get_status(
     try:
         client_id = runtime.get_client_id_from_request(request)
         user_state = get_or_create_user_state(client_id)
-        active_jobs = _active_durable_jobs(client_id)
+        # 持久化任务按资源属主账户过滤（ADR 0010）：Agent 主体跟随
+        # resource_owner_id，本地日志 user_state 仍按浏览器 client_id 存储。
+        active_jobs = _active_durable_jobs(_durable_jobs_owner_id(request))
         # 本地日志按浏览器 client_id 存储（集群 job 日志由
         # /api/cluster/jobs/{id}/events 按 job 维度提供）；响应中声明
         # scope 供前端区分本地与远端 Worker 日志流。
@@ -173,7 +196,7 @@ _ACTIVE_JOB_STATUSES = {
 }
 
 
-def _active_durable_job_for_owner(client_id: str):
+def _active_durable_job_for_owner(owner_id: str):
     """Return the owner's active durable job, or None.
 
     The legacy log stream used to read only the in-process ``user_state``;
@@ -190,7 +213,7 @@ def _active_durable_job_for_owner(client_id: str):
     except (RuntimeError, AttributeError):
         return None
     try:
-        jobs = repository.list_jobs(limit=10, owner_id=client_id)
+        jobs = repository.list_jobs(limit=10, owner_id=owner_id)
     except Exception:
         return None
     for job in jobs:
@@ -199,13 +222,14 @@ def _active_durable_job_for_owner(client_id: str):
     return None
 
 
-def _resolve_stream_job(request: Request, client_id: str):
+def _resolve_stream_job(request: Request, owner_id: str):
     """Resolve the durable job this legacy stream should bridge to.
 
     Precedence: explicit ``job_id`` query parameter, then the owner's most
     recent active job. A recently finished explicit job is still streamed
     (drained) so CLI invocations started right before completion do not
-    fall back to the empty legacy user_state stream.
+    fall back to the empty legacy user_state stream. ``owner_id`` is the
+    resource-owner account (ADR 0010), matching how the job was created.
     """
     requested_job = str(request.query_params.get("job_id") or "").strip()
     try:
@@ -219,10 +243,10 @@ def _resolve_stream_job(request: Request, client_id: str):
             job = repository.get_job(requested_job)
         except Exception:
             return None
-        if job and str(job.get("owner_id") or "") == client_id:
+        if job and str(job.get("owner_id") or "") == owner_id:
             return job
         return None
-    return _active_durable_job_for_owner(client_id)
+    return _active_durable_job_for_owner(owner_id)
 
 
 @router.get("/api/test/logs/stream")
@@ -237,7 +261,7 @@ async def stream_test_logs(request: Request):
             # resolved (explicit job_id or the owner's active job); fall
             # back to the legacy in-process user_state stream for
             # process-local runs that predate durable jobs.
-            stream_job = _resolve_stream_job(request, client_id)
+            stream_job = _resolve_stream_job(request, _durable_jobs_owner_id(request))
             if stream_job is not None:
                 job_id = str(stream_job.get("id") or "")
                 event_sequence = -1

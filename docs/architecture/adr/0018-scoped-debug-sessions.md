@@ -33,11 +33,17 @@ the same account to execute.
 
 Only typed install/launch/stop/tap/swipe/text/keyevent/database_read operations are supported.
 Every new APK is independently verified against the granted package and
-signers and its hash is retained in the audit. Android's replace installation
+signers and its hash is retained in the audit. Installed identity checks read
+the user-0 package path, APK size/mtime/inode, package version/update time and
+device boot id on each action. A bounded five-minute cache keyed by Worker,
+device, user and package reuses the full apksigner result only while that
+fingerprint is unchanged. A changed fingerprint, cache expiry, install,
+revoke, expired grant or lost Agent authorization invalidates the entry.
+Android's replace installation
 also enforces installed-app signature compatibility. Sessions without install
 must match the installed user-0 APK signer set before activation. Each action
-and database read verifies the installed base APK using apksigner over the
-audited SSH/SFTP path. A baseline install remains busy until post-install
+and database read checks the installed fingerprint over audited SSH and runs
+apksigner over SSH/SFTP on a cache miss. A baseline install remains busy until post-install
 verification succeeds; any failed debug installation revokes the grant.
 Interrupted baseline execution also blocks and revokes subsequent actions.
 database_read is opt-in, additionally requires devices.database.read, and is
@@ -72,7 +78,12 @@ the execution service, never inferred from MCP annotations or a client flag.
 Tests cover cross-Agent/owner rejection, revoked credentials, expiry,
 revocation during execution, claim fencing, package/signer mismatch, bounded
 input compilation, process-safe serialization, repeated tokenless installs,
-browser navigation and explicit approval/revocation. Agent deployment uses
+browser navigation and explicit approval/revocation. Device-path fault tests
+inject queued-task expiry, startup failure, Worker disconnect, install timeout,
+lost lease and a simulated Controller restart; they verify terminal state,
+claim/artifact cleanup and no installation replay. These tests use isolated
+SQLite stores and Worker/ADB doubles; they do not claim real-device failure
+injection. Agent deployment uses
 gms-agent doctor --json and gms-rt-system-selfcheck --json.
 
 These automated tests use isolated Worker/ADB doubles. Real-device acceptance

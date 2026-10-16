@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from fastapi.responses import JSONResponse
 
-from features.devices.locks import device_lock_manager
-from features.devices.support import (
+# 跨 Feature 引用必须走 features.devices 公共面（__init__.py），
+# 不能深入 locks/support 内部模块。
+from features.devices import (
     broadcast_device_lock_update,
+    device_lock_manager,
     release_device_locks,
 )
 

@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from features.auth import CurrentUser, require_authenticated_user_when_auth_required, require_role_when_auth_required
 from foundation.config import settings
+from foundation.sqlite_schema import ensure_schema
 
 from .repository import escape_like, init_db
 
@@ -39,7 +40,11 @@ def _connect_db() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    init_db(conn)
+    try:
+        ensure_schema(conn, DB_PATH, init_db)
+    except Exception:
+        conn.close()
+        raise
     return conn
 
 

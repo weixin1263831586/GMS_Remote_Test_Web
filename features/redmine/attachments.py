@@ -4,9 +4,11 @@ import asyncio
 import logging
 import re
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import aiohttp
 
+from .evidence import ATTACHMENT_MAX_BYTES, MAX_REDIRECTS, _attachment_path_ok, _same_origin
 from .models import RedmineAttachment
 from .utils import (
     COMPILED_ISSUE_LINK_PATTERN,
@@ -75,22 +77,51 @@ class RedmineAttachmentMixin:
         return token
 
     async def download_attachment(self, attachment_id: str, destination: str, content_url: str = "") -> int:
-        """Download an attachment to destination using aiohttp."""
-        url = content_url or self.download_url(attachment_id)
+        """Download an attachment to destination using aiohttp.
+
+        content_url 来自远端 JSON，视作不可信输入：与 evidence_fetch 的
+        附件下载同一套守卫——同源、路径白名单（/attachments/...）、重定向
+        ≤MAX_REDIRECTS 且每一跳重新校验、流式大小上限。
+        """
+        raw_url = content_url or self.download_url(attachment_id)
+        if raw_url.startswith("/"):
+            raw_url = urljoin(self.base_url + "/", raw_url)
+        url = raw_url
         headers = self.auth_headers()
         headers.setdefault("User-Agent", "GMS Remote Test/1.0")
         total = 0
+        redirects = 0
         session = self._get_session()
-        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=180), allow_redirects=True) as response:
-            if response.status not in (200, 206):
-                body = await response.text(errors="ignore")
-                raise RuntimeError(f"Redmine attachment download failed: HTTP {response.status} - {body[:300]}")
-            with open(destination, "wb") as target:
-                async for chunk in response.content.iter_chunked(1024 * 1024):
-                    if not chunk:
-                        continue
-                    target.write(chunk)
-                    total += len(chunk)
+        while True:
+            parsed = urlparse(url)
+            if parsed.scheme not in {"http", "https"}:
+                raise RuntimeError("Redmine attachment URL protocol not allowed")
+            if not _same_origin(url, self.base_url):
+                raise RuntimeError("Redmine attachment URL escapes configured origin")
+            if not _attachment_path_ok(url):
+                raise RuntimeError("Redmine attachment URL path is not an attachment download")
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=180), allow_redirects=False) as response:
+                if response.status in (301, 302, 303, 307, 308):
+                    location = response.headers.get("Location") or ""
+                    if not location:
+                        raise RuntimeError("Redmine attachment redirect missing Location")
+                    url = urljoin(url, location)
+                    redirects += 1
+                    if redirects > MAX_REDIRECTS:
+                        raise RuntimeError("Redmine attachment redirect limit exceeded")
+                    continue
+                if response.status not in (200, 206):
+                    body = await response.text(errors="ignore")
+                    raise RuntimeError(f"Redmine attachment download failed: HTTP {response.status} - {body[:300]}")
+                with open(destination, "wb") as target:
+                    async for chunk in response.content.iter_chunked(1024 * 1024):
+                        if not chunk:
+                            continue
+                        total += len(chunk)
+                        if total > ATTACHMENT_MAX_BYTES:
+                            raise RuntimeError("Redmine attachment exceeds size limit")
+                        target.write(chunk)
+                break
         return total
 
     async def reply_issue(self, issue_id: str, notes: str, files: list[dict[str, Any]] | None = None) -> dict[str, Any]:

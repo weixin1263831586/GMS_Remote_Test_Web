@@ -179,6 +179,8 @@ class SSHManager:
                     )
                     with contextlib_suppress(Exception):
                         channel.close()
+                    with contextlib_suppress(Exception):
+                        ssh.close()
                 except Exception as e:
                     logger.debug(f"[SSH] Connection {attempt+1}/{max_attempts} is dead: {e}")
                     try:

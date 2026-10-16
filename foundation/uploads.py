@@ -146,7 +146,10 @@ def merge_files_to_path(
     chunk_size: int = 1024 * 1024,
 ) -> int:
     bytes_written = 0
-    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    # 目标为裸文件名时 dirname 为空串，os.makedirs('') 会抛 FileNotFoundError。
+    parent_dir = os.path.dirname(destination)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
     with open(destination, 'wb') as output:
         for source_path in source_paths:
             with open(source_path, 'rb') as source:

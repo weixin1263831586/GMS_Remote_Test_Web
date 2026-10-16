@@ -436,7 +436,7 @@ async def get_vpn_status():
             ping_result = await asyncio.to_thread(
                 ssh_manager.execute_command,
                 ssh,
-                f"ping -c 1 -W 1 {vpn_target} 2>&1",
+                f"ping -c 1 -W 1 -- {shlex.quote(vpn_target)} 2>&1",
                 timeout=3,
             )
             ping_reachable = (

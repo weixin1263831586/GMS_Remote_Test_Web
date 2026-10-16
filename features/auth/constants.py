@@ -29,6 +29,9 @@ AGENT_SCOPES: dict[str, str] = {
     "tests.cancel": "cancel own test jobs",
     "jobs.read": "read durable job status/events",
     "reports.read": "read finished test reports",
+    # Worker 套件库只读（目录浏览/搜索/文件下载）：默认不授予任何
+    # Agent；需要套件文件访问面的 Agent 由管理员显式授予。
+    "suites.read": "read test suite files on cluster workers",
     # Redmine evidence / APK analysis / SDK source scopes (ADR 0006).
     # Read-only analysis chain; Redmine stays GET-only this phase.
     "redmine.read": "read Redmine issues/attachments visible to the owner identity",

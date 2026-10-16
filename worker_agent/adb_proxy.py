@@ -13,6 +13,7 @@ import socket
 import subprocess
 import threading
 import time
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,15 @@ _SAFE_NAME = re.compile(r"[A-Za-z0-9._-]{1,128}")
 _PAIR_CONTEXT = b"gms-adbproxy-rs-v0.4.5-grant"
 _LOG_MONITORS: set[str] = set()
 _LOG_MONITOR_LOCK = threading.Lock()
+_STATE_LOCK = threading.RLock()
+
+
+def _serialize_state(action):
+    @wraps(action)
+    def serialized(*args, **kwargs):
+        with _STATE_LOCK:
+            return action(*args, **kwargs)
+    return serialized
 
 
 def pair_code_from_grant(secret: str | bytes, grant: str) -> str:
@@ -132,6 +142,7 @@ def sync_source_policy() -> None:
     _write_source_policy(root / "proxy.toml", sorted(selected))
 
 
+@_serialize_state
 def recover_managed_state(*, secret: str | bytes = "") -> dict[str, Any]:
     """Restore persisted adb-proxy/adb-hub processes after a host restart."""
     root = _state_root()
@@ -178,6 +189,7 @@ def recover_managed_state(*, secret: str | bytes = "") -> dict[str, Any]:
     return {"recovered": recovered, "errors": errors}
 
 
+@_serialize_state
 def execute_adb_proxy_action(
     action: str,
     payload: dict[str, Any] | None = None,

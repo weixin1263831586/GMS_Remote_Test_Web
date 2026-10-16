@@ -37,16 +37,6 @@ function createFormData(mode, params = {}, files = {}) {
     return formData;
 }
 
-function getClientIdentityHeaders() {
-    return {};
-}
-
-function applyClientIdentityHeadersToXhr(xhr) {
-    Object.entries(getClientIdentityHeaders()).forEach(([key, value]) => {
-        xhr.setRequestHeader(key, value);
-    });
-}
-
 function normalizeApiErrorMessage(message, status) {
     const text = String(message || '').trim();
     if (status !== 409) return text || 'Request failed';
@@ -81,7 +71,7 @@ async function _apiCallOnce(url, method, data, opts) {
         const options = {
             method,
             signal: opts.signal,
-            headers: { ...getClientIdentityHeaders() }
+            headers: {}
         };
 
         if (data && !['GET', 'HEAD'].includes(method.toUpperCase())) {
@@ -737,8 +727,6 @@ function isPlatformAdmin() {
 
 window.AnalysisMode = AnalysisMode;
 window.createFormData = createFormData;
-window.getClientIdentityHeaders = getClientIdentityHeaders;
-window.applyClientIdentityHeadersToXhr = applyClientIdentityHeadersToXhr;
 window.apiCall = apiCall;
 window.ensureAuthenticatedBeforeAppStart = ensureAuthenticatedBeforeAppStart;
 window.showAuthGate = showAuthGate;

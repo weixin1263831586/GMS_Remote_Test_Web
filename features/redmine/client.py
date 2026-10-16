@@ -8,8 +8,10 @@ timeouts, streaming-friendly APIs, and existing error handling.
 from __future__ import annotations
 
 import asyncio
+import copy
+import hashlib
+import json
 import logging
-import time
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -21,22 +23,17 @@ from features.redmine.models import (
     _ASSIGNEE_COUNT_CACHE,
     _ASSIGNEE_TREND_CACHE,
     _ASSIGNEE_TREND_HISTORICAL_CACHE,
-    _CACHE_TTL_SECONDS,
-    _HISTORICAL_TTL_SECONDS,
 )
 from features.redmine.users import RESOLVED_STATUS_NAMES, _parse_dt, _sorted_slice, _time_key
+from foundation.cache import TTLCache
 
 
 logger = logging.getLogger(__name__)
 
 
 def clear_historical_trend_cache() -> None:
-    """清除历史趋势长期缓存。
-
-    仅在 ``freshness_days`` 变化（近期/历史边界移动）或显式重置时调用，使历史
-    分桶在下一次请求时重建。缓存的所有权属于本模块（resolved_trends_by_assignee
-    读写它），故失效入口也集中在此，避免调用方 reach 进 models 的私有字典。
-    """
+    """Reset both sides of the trend boundary after configuration changes."""
+    _ASSIGNEE_TREND_CACHE.clear()
     _ASSIGNEE_TREND_HISTORICAL_CACHE.clear()
 
 
@@ -54,6 +51,12 @@ class RedmineClient(RedmineAttachmentMixin):
         self.username = username or ""
         self.password = password or ""
         self.api_key = api_key or ""
+        # assignee 缓存的 owner 维度：端点+凭据的不可逆摘要（摘要只作
+        # 分键，不落盘不外发），避免不同 owner 的客户端共享同 assignee_id
+        # 的计数/趋势缓存。
+        self._cache_owner_key = hashlib.sha256(
+            json.dumps((self.base_url, self.username, self.api_key, self.password)).encode("utf-8")
+        ).hexdigest()
         kwargs = {"key": self.api_key} if self.api_key else ({"username": self.username, "password": self.password} if self.username and self.password else {})
         # 显式超时：python-redmine 同步调用跑在 to_thread 里，无超时会在
         # Redmine 端卡死时永久占死 worker 线程。
@@ -427,10 +430,10 @@ class RedmineClient(RedmineAttachmentMixin):
 
     async def count_issues_by_assignee(self, assignee_id: int) -> dict[str, int]:
         """Count all/open/closed issues assigned to a Redmine user id."""
-        cache_key = int(assignee_id)
+        cache_key = (self._cache_owner_key, int(assignee_id))
         cached = _ASSIGNEE_COUNT_CACHE.get(cache_key)
-        if cached and time.time() - cached[0] < _CACHE_TTL_SECONDS:
-            return dict(cached[1])
+        if cached is not None:
+            return dict(cached)
 
         def _count(status_id: str) -> int:
             result = self._redmine.issue.filter(
@@ -441,13 +444,14 @@ class RedmineClient(RedmineAttachmentMixin):
             list(result)
             return int(getattr(result, "total_count", 0) or 0)
 
-        data = await asyncio.to_thread(lambda: {
-            "total_owned": (total := _count("*")),
-            "open_count": (open_count := _count("open")),
-            "closed_count": max(0, total - open_count),
-        })
-        _ASSIGNEE_COUNT_CACHE[cache_key] = (time.time(), dict(data))
-        return data
+        async def load():
+            return await asyncio.to_thread(lambda: {
+                "total_owned": (total := _count("*")),
+                "open_count": (open_count := _count("open")),
+                "closed_count": max(0, total - open_count),
+            })
+
+        return dict(await _ASSIGNEE_COUNT_CACHE.get_or_load_async(cache_key, load))
 
     async def resolved_trends_by_assignee(
         self,
@@ -468,11 +472,11 @@ class RedmineClient(RedmineAttachmentMixin):
         }
         label_keys = {"day": "date", "week": "week", "month": "month", "year": "year"}
 
-        cache_key = int(assignee_id)
         cutoff_date = (datetime.now() - timedelta(days=int(freshness_days))).date()
 
         # 近期和较早数据共用区间查询，并用谓词再次校验边界。
         cutoff_iso = cutoff_date.isoformat()
+        cache_key = (self._cache_owner_key, int(assignee_id), cutoff_iso, int(limit))
         recent_data = await self._fetch_trend_segment(
             cache_key,
             assignee_id=assignee_id,
@@ -480,7 +484,6 @@ class RedmineClient(RedmineAttachmentMixin):
             filters={"closed_on": f"><{cutoff_iso}|9999-12-31"},
             keep_predicate=lambda closed_at: closed_at.date() >= cutoff_date,
             cache=_ASSIGNEE_TREND_CACHE,
-            ttl=_CACHE_TTL_SECONDS,
             label="recent",
             granularity_fields=granularity_fields,
             label_keys=label_keys,
@@ -493,7 +496,6 @@ class RedmineClient(RedmineAttachmentMixin):
             filters={"closed_on": f"><1900-01-01|{cutoff_iso}"},
             keep_predicate=lambda closed_at: closed_at.date() < cutoff_date,
             cache=_ASSIGNEE_TREND_HISTORICAL_CACHE,
-            ttl=_HISTORICAL_TTL_SECONDS,
             label="historical",
             granularity_fields=granularity_fields,
             label_keys=label_keys,
@@ -504,14 +506,13 @@ class RedmineClient(RedmineAttachmentMixin):
 
     async def _fetch_trend_segment(
         self,
-        cache_key: int,
+        cache_key: tuple[str, int, str, int],
         *,
         assignee_id: int,
         limit: int,
         filters: dict[str, Any],
         keep_predicate,
-        cache: dict[int, tuple],
-        ttl: float,
+        cache: TTLCache,
         label: str,
         granularity_fields: dict[str, str],
         label_keys: dict[str, str],
@@ -524,12 +525,11 @@ class RedmineClient(RedmineAttachmentMixin):
         成一份长期空数据；返回的空段仍能让合并逻辑走另一段兜底的可用性语义。
         """
         cached = cache.get(cache_key)
-        if cached and time.time() - cached[0] < ttl:
-            return {key: list(value) for key, value in cached[1].items()}
+        if cached is not None:
+            return copy.deepcopy(cached)
 
-        buckets: dict[str, dict[str, int]] = {g: {} for g in granularity_fields}
-        data: dict[str, list[dict[str, Any]]] = {field: [] for field in granularity_fields.values()}
-        try:
+        async def load():
+            buckets: dict[str, dict[str, int]] = {g: {} for g in granularity_fields}
             issues = await self.fetch_issues_by_assignee(
                 assignee_id=int(assignee_id),
                 status_id="closed",
@@ -544,7 +544,10 @@ class RedmineClient(RedmineAttachmentMixin):
                 if not closed_at or not keep_predicate(closed_at):
                     continue
                 self._bump_trend(buckets, closed_at, granularity_fields.keys())
-            data = self._format_trend(buckets, granularity_fields, label_keys)
+            return self._format_trend(buckets, granularity_fields, label_keys)
+
+        try:
+            return copy.deepcopy(await cache.get_or_load_async(cache_key, load))
         except Exception as exc:
             # 拉取失败时不写缓存：服务端过滤语法错误、网络抖动、Redmine 5xx 等
             # 一旦把空段冻结进缓存（历史段 TTL 长达 7 天），后续请求会持续命中
@@ -553,9 +556,7 @@ class RedmineClient(RedmineAttachmentMixin):
             logger.warning(
                 "Redmine %s trend fetch failed for assignee %s: %s", label, assignee_id, exc, exc_info=True
             )
-            return data
-        cache[cache_key] = (time.time(), {key: list(value) for key, value in data.items()})
-        return data
+            return {field: [] for field in granularity_fields.values()}
 
     @staticmethod
     def _bump_trend(
@@ -744,6 +745,9 @@ class RedmineClient(RedmineAttachmentMixin):
         limit = max(1, min(int(limit or 10), 50))
 
         def _search():
+            def _name(obj: Any) -> str:
+                return str(getattr(obj, "name", "") or obj or "")
+
             issues = self._redmine.issue.filter(
                 project_id=project_id,
                 status_id=status_id,
@@ -754,10 +758,10 @@ class RedmineClient(RedmineAttachmentMixin):
             return [
                 {
                     "issue_id": int(issue.id),
-                    "subject": str(issue.subject or ""),
-                    "status_name": str(getattr(issue, "status", None).name or ""),
-                    "updated_on": str(issue.updated_on or ""),
-                    "project_name": str(getattr(issue, "project", None).name or ""),
+                    "subject": str(getattr(issue, "subject", "") or ""),
+                    "status_name": _name(getattr(issue, "status", None)),
+                    "updated_on": str(getattr(issue, "updated_on", "") or ""),
+                    "project_name": _name(getattr(issue, "project", None)),
                 }
                 for issue in issues
             ]

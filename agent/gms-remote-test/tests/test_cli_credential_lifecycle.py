@@ -54,6 +54,24 @@ def _write_curl_stub(stub_dir: Path, call_log: Path) -> None:
 
 
 class CredentialLifecycleTests(unittest.TestCase):
+    def test_download_never_overwrites_existing_output(self):
+        existing = self.root / 'keep.bin'
+        existing.write_bytes(b'keep')
+        for command in ('gms-rt-apk-download', 'gms-rt-redmine-attachment-download'):
+            result = self.run_snippet(f'{command} fixture "$EXISTING_OUTPUT"',
+                                      extra_env={'EXISTING_OUTPUT': str(existing)})
+            self.assertEqual(result.returncode, 5, result.stderr)
+            self.assertEqual(existing.read_bytes(), b'keep')
+
+    def test_enrollment_connection_failure_uses_network_exit_code(self):
+        result = self.run_snippet(
+            'curl() { return 7; }\n'
+            'gms-rt-agent-enroll fixture-code --out "$ENROLL_OUTPUT"',
+            extra_env={'ENROLL_OUTPUT': str(self.root / 'new.token')},
+        )
+        self.assertEqual(result.returncode, 6, result.stderr)
+        self.assertFalse((self.root / 'new.token').exists())
+
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
