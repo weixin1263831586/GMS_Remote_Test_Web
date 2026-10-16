@@ -215,6 +215,15 @@ class SerialConsoleServiceTests(unittest.TestCase):
     def test_capture_populates_backlog_log_and_accepts_console_input(self):
         handle = _FakeSerial([b"U-Boot 2024\n", b"Starting kernel\n"])
         service = self.make_service(serial_factory=lambda **_kwargs: handle)
+        kernel_recorded = threading.Event()
+        record_data = service._record_data
+
+        def record(port_key, runtime, data):
+            record_data(port_key, runtime, data)
+            if b'Starting kernel' in data:
+                kernel_recorded.set()
+
+        service._record_data = record
         service.update_binding(
             self.stable_name,
             {
@@ -225,12 +234,7 @@ class SerialConsoleServiceTests(unittest.TestCase):
             },
         )
         try:
-            self.assertTrue(handle.data_read.wait(timeout=1))
-            deadline = time.monotonic() + 1
-            while time.monotonic() < deadline:
-                if "Starting kernel" in service.read_log(self.stable_name)["content"]:
-                    break
-                time.sleep(0.01)
+            self.assertTrue(kernel_recorded.wait(timeout=5), 'capture did not persist the second chunk')
             log = service.read_log(self.stable_name)
             self.assertIn("U-Boot 2024", log["content"])
             self.assertIn("Starting kernel", log["content"])

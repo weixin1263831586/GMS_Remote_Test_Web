@@ -460,9 +460,9 @@ def test_installed_signer_mismatch_blocks_debug(environment, phase):
     if phase == "action":
         session = approve(client, session)
     with patch.object(debug_service, "require_installed", debug_identity.require_installed), patch.object(
-        debug_identity, "installed_fingerprint", return_value=("/data/app/base.apk", "boot:stat:v1"),
+        debug_identity, "installed_fingerprint", return_value=("/data/app/base.apk", "boot:stat:v1:" + "d" * 64),
     ), patch.object(
-        debug_identity, "installed_identity", return_value={**IDENTITY, "signers": ["b" * 64]},
+        debug_identity, "installed_identity", return_value={**IDENTITY, "signers": ["b" * 64], 'sha256': 'd' * 64},
     ), patch.object(debug_execution, "perform") as perform:
         if phase == "approval":
             response = client.post("/api/devices/debug-sessions/" + session["id"] + "/approve",

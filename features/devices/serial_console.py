@@ -471,7 +471,7 @@ class SerialConsoleService:
             if now - runtime.last_retention_check >= 60:
                 runtime.last_retention_check = now
                 try:
-                    self.cleanup_retention(port_key)
+                    self._cleanup_retention_unlocked(port_key)
                 except OSError:
                     # retention 失败不影响本块数据（已落盘）与采集。
                     logger.warning("serial log retention failed for %s",

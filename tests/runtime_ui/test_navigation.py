@@ -233,6 +233,12 @@ class RuntimeNavigationTests(RuntimeUiHarness):
                         "'.embedded-frame-shell').dataset.frameState === 'ready'",
                         arg=selector,
                     )
+                    # Surface-ready may precede the document's initial load
+                    # (for example while an async chart script is pending).
+                    page.wait_for_function(
+                        "selector => document.querySelector(selector).dataset.documentLoaded === 'true'",
+                        arg=selector,
+                    )
                     ready = page.evaluate(
                         """selector => {
                           const frame = document.querySelector(selector);

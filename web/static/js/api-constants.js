@@ -241,7 +241,7 @@ const API_DETAILS_MAP = {
     },
     '/api/config/read': {
         title: '获取配置',
-        description: '仅已提权管理员可读取系统配置；页面默认值使用 /api/config/client',
+        description: '仅已提权管理员可读取系统配置（已脱敏）；页面默认值使用 /api/config/client',
         method: 'GET',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "ubuntu_user": "gms", "ubuntu_host": "192.168.1.10", "wifi": { "password": "", "has_password": true } }',
@@ -502,7 +502,7 @@ const API_DETAILS_MAP = {
     },
     '/api/adb-forward/start': {
         title: '接入ADB Proxy设备',
-        description: '通过adbproxy-rs将来源Worker的指定ADB设备接入目标Worker',
+        description: '通过adbproxy-rs接入指定Worker设备，需设备租用权限和目标访问授权；旧版Controller隧道另需管理员提权',
         params: [
             { name: 'source_worker_id', type: 'string', required: true, desc: 'ADB设备来源Worker' },
             { name: 'target_worker_id', type: 'string', required: true, desc: 'ADB接入目标Worker' },
@@ -513,7 +513,7 @@ const API_DETAILS_MAP = {
     },
     '/api/adb-forward/stop': {
         title: '断开ADB Proxy设备',
-        description: '断开指定来源Worker到目标Worker的ADB Proxy接入',
+        description: '断开指定Worker间的ADB Proxy接入，需设备租用权限和目标访问授权；旧版Controller隧道另需管理员提权',
         params: [
             { name: 'source_worker_id', type: 'string', required: true, desc: 'ADB设备来源Worker' },
             { name: 'target_worker_id', type: 'string', required: true, desc: 'ADB接入目标Worker' }

@@ -3,6 +3,8 @@
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
+from foundation.redaction import redact_sensitive_data
+
 
 def jsonable(value: Any) -> Any:
     """Return a JSON-serializable copy of Agent session data."""
@@ -20,15 +22,20 @@ def jsonable(value: Any) -> Any:
 
 
 def session_payload(session: dict[str, Any]) -> dict[str, Any]:
-    def public(value):
-        if isinstance(value, dict):
-            return {key: ("***" if item else "") if key in {
-                "password", "wifi_password", "token", "api_token", "device_password",
-            } else public(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [public(item) for item in value]
-        return value
+    return redact_sensitive_data(jsonable(session))
 
-    return public(jsonable(session))
+
+def display_record(session: dict[str, Any], record: dict[str, Any], private_params=None) -> dict[str, Any]:
+    """Sanitize public history without replacing the internal execution plan."""
+    safe = session_payload({
+        'record': record, 'messages': session.get('messages', []), 'steps': session.get('steps', []),
+        'pending_plan': session.get('pending_plan'),
+        'context': session.get('context'), 'private_params': private_params,
+    })
+    session['messages'] = safe['messages']
+    session['steps'] = safe['steps']
+    if 'context' in session:
+        session['context'] = safe['context']
+    return safe['record']
 
 

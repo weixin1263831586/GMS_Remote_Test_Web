@@ -19,7 +19,7 @@ from typing import Any
 from uuid import uuid4
 
 from foundation.key_cache import cached_key, key_file_fingerprint
-from foundation.redaction import redact_sensitive_text
+from foundation.redaction import redact_sensitive_data, redact_sensitive_text
 from foundation.runtime_settings import is_production_environment
 
 
@@ -323,6 +323,7 @@ class SecurityAuditLogger:
     def sanitize_mapping(self, mapping: dict[str, Any] | None) -> dict[str, Any]:
         if not mapping:
             return {}
+        mapping = redact_sensitive_data(mapping, mask='***REDACTED***')
         return {
             str(key): self.sanitize_value(str(key), value)
             for key, value in mapping.items()

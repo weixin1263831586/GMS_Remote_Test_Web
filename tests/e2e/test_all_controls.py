@@ -233,7 +233,16 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
         page.route(re.compile(r'.*/api(?:/.*)?(?:\?.*)?$'), handle_api)
 
     def capture_errors(self, page):
-        captured = {'page_errors': [], 'console_errors': [], 'http_errors': []}
+        captured = {'page_errors': [], 'console_errors': [], 'http_errors': [], 'resource_failures': []}
+
+        def resource_failed(request):
+            if request.resource_type not in {'script', 'stylesheet'}:
+                return
+            if captured.get('reloading') and request.failure == 'net::ERR_ABORTED':
+                return  # Reload intentionally disposes of the previous embedded document.
+            captured['resource_failures'].append({'url': request.url, 'error': request.failure})
+
+        page.on('requestfailed', resource_failed)
         page.on('pageerror', lambda exc: captured['page_errors'].append(str(exc)))
         page.on(
             'console',
@@ -261,14 +270,16 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
         self.assertEqual(captured['page_errors'], [])
         self.assertEqual(captured['console_errors'], [])
         self.assertEqual(captured['http_errors'], [])
+        self.assertEqual(captured['resource_failures'], [])
         self.assertEqual(unhandled, [])
 
     def wait_for_shell_scripts(self, page):
         page.wait_for_function(
             """
             () => typeof window.apiCall === 'function'
-              && typeof window.getClientIdentityHeaders === 'function'
               && typeof window.switchPage === 'function'
+              && document.readyState === 'complete'
+              && document.querySelector('.sidebar') !== null
             """
         )
 
@@ -323,6 +334,27 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                 )
             results.append({**button, 'status': 'clicked' if clicked.get('clicked') else clicked.get('reason', 'not_clicked')})
         return results
+
+    def test_resource_monitor_detects_script_network_failures(self):
+        page = self.new_page()
+        captured = self.capture_errors(page)
+        try:
+            self.install_api_mocks(page, [])
+            self.goto_shell(page)
+            self.wait_for_shell_scripts(page)
+            page.route('**/e2e-required-script.js', lambda route: route.abort('failed'))
+            page.evaluate("""() => {
+                window.__resourceMonitorChecked = false;
+                const script = document.createElement('script');
+                script.src = '/e2e-required-script.js';
+                script.onerror = () => { window.__resourceMonitorChecked = true; };
+                document.head.appendChild(script);
+            }""")
+            page.wait_for_function('window.__resourceMonitorChecked === true')
+            self.assertTrue(any('/e2e-required-script.js' in failure['url']
+                                for failure in captured['resource_failures']))
+        finally:
+            page.close()
 
     def test_machine_readable_control_inventory_covers_shell_and_embedded_pages(self):
         page = self.new_page()
@@ -452,7 +484,11 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                         "name => document.getElementById('page-' + name)?.dataset.initState === 'ready'",
                         arg=page_name,
                     )
-                    page.reload(wait_until='load')
+                    captured['reloading'] = True
+                    try:
+                        page.reload(wait_until='load')
+                    finally:
+                        captured['reloading'] = False
                     self.wait_for_shell_scripts(page)
                     expect(page.locator(f'#page-{page_name}')).to_have_class(re.compile(r'active'))
                     page.wait_for_function(

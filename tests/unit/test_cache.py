@@ -119,3 +119,53 @@ def test_disabled_cache_does_not_retain_values():
     cache = TTLCache(0)
     cache.set('key', 'value')
     assert not cache._items
+
+
+def test_invalidating_another_key_keeps_sync_load_cacheable():
+    cache = TTLCache(10)
+    started, release = Event(), Event()
+
+    def load():
+        started.set()
+        assert release.wait(timeout=5)
+        return 'B-value'
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(cache.get_or_load, 'B', load)
+        try:
+            assert started.wait(timeout=5)
+            cache.invalidate('A')
+        finally:
+            release.set()
+        assert future.result(timeout=5) == 'B-value'
+    assert cache.get('B') == 'B-value'
+    assert not cache._key_versions
+
+
+def test_async_invalidation_affects_only_its_key():
+    async def scenario():
+        cache = TTLCache(10)
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def load():
+            started.set()
+            await release.wait()
+            return 'value'
+
+        task = asyncio.create_task(cache.get_or_load_async('B', load))
+        await started.wait()
+        cache.invalidate('A')
+        release.set()
+        assert await task == 'value'
+        assert cache.get('B') == 'value'
+        started.clear()
+        release.clear()
+        task = asyncio.create_task(cache.get_or_load_async('C', load))
+        await started.wait()
+        cache.invalidate('C')
+        release.set()
+        assert await task == 'value'
+        assert cache.get('C') is None
+        assert not cache._key_versions
+
+    asyncio.run(scenario())

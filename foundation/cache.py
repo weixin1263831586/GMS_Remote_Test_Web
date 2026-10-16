@@ -6,11 +6,17 @@ import time
 import weakref
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Generic, TypeVar
 
 
 KeyT = TypeVar('KeyT')
 ValueT = TypeVar('ValueT')
+
+
+@dataclass
+class _KeyVersion:
+    users: int = 0
 
 
 class TTLCache(Generic[KeyT, ValueT]):
@@ -29,6 +35,24 @@ class TTLCache(Generic[KeyT, ValueT]):
         self._load_locks = tuple(threading.Lock() for _ in range(16))
         self._pending: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self._generation = 0
+        self._key_versions: dict[KeyT, _KeyVersion] = {}
+
+    def _begin_load(self, key):
+        with self._lock:
+            version = self._key_versions.setdefault(key, _KeyVersion())
+            version.users += 1
+            return self._generation, version
+
+    def _end_load(self, key, version):
+        with self._lock:
+            version.users -= 1
+            if version.users == 0 and self._key_versions.get(key) is version:
+                self._key_versions.pop(key)
+
+    def _store_loaded(self, key, value, generation, version):
+        with self._lock:
+            if generation == self._generation and self._key_versions.get(key) is version:
+                self.set(key, value)
 
     def get(self, key: KeyT, default: ValueT | None = None) -> ValueT | None:
         with self._lock:
@@ -66,13 +90,13 @@ class TTLCache(Generic[KeyT, ValueT]):
             cached = self.get(key)
             if cached is not None:
                 return cached
-            with self._lock:
-                generation = self._generation
-            value = load()
-            with self._lock:
-                if generation == self._generation:
-                    self.set(key, value)
-            return value
+            generation, version = self._begin_load(key)
+            try:
+                value = load()
+                self._store_loaded(key, value, generation, version)
+                return value
+            finally:
+                self._end_load(key, version)
 
     async def get_or_load_async(self, key: KeyT, load: Callable[[], Awaitable[ValueT]]) -> ValueT:
         """Share a load in the calling event loop; cancellation affects only its waiter."""
@@ -84,19 +108,18 @@ class TTLCache(Generic[KeyT, ValueT]):
             pending = self._pending.setdefault(loop, {})
             task = pending.get(key)
             if task is None:
-                generation = self._generation
+                generation, version = self._begin_load(key)
 
                 async def fill():
                     value = await load()
-                    with self._lock:
-                        if generation == self._generation:
-                            self.set(key, value)
+                    self._store_loaded(key, value, generation, version)
                     return value
 
                 task = loop.create_task(fill())
                 pending[key] = task
 
                 def finished(done):
+                    self._end_load(key, version)
                     with self._lock:
                         if pending.get(key) is done:
                             pending.pop(key)
@@ -110,7 +133,7 @@ class TTLCache(Generic[KeyT, ValueT]):
     def invalidate(self, key: KeyT) -> None:
         with self._lock:
             self._items.pop(key, None)
-            self._generation += 1
+            self._key_versions.pop(key, None)
             for pending in self._pending.values():
                 pending.pop(key, None)
 
@@ -118,4 +141,5 @@ class TTLCache(Generic[KeyT, ValueT]):
         with self._lock:
             self._items.clear()
             self._generation += 1
+            self._key_versions.clear()
             self._pending.clear()

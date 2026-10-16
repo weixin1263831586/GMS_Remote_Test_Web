@@ -10,10 +10,12 @@ import sqlite3
 import subprocess
 import threading
 import time
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
 from foundation.job_env import filter_job_env as _filter_job_env
+from foundation.sqlite_schema import ensure_schema
 
 from .config import WorkerConfig
 
@@ -44,12 +46,7 @@ class WorkerRuntime:
         self._lock = threading.RLock()
         self._initialize_schema()
 
-    # Connect-time self-check: a long-lived Worker that survives a data/
-    # clear-out or restore must rebuild the database at the same path instead
-    # of failing every later query with "no such table".
-    _REQUIRED_TABLES = frozenset(
-        {'commands', 'jobs', 'device_fences', 'usbip_assignments'}
-    )
+    _SCHEMA_VERSION = 1
 
     def _open_connection(self):
         conn = sqlite3.connect(self.db_path, timeout=30)
@@ -60,68 +57,65 @@ class WorkerRuntime:
         return conn
 
     def _initialize_schema(self):
-        # The schema snapshot and ALTERs must be one process-safe unit.
-        # A per-runtime Python lock is insufficient when the service,
-        # CLI and a restarted worker open the same database together.
-        with self._lock, self._open_connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute("""CREATE TABLE IF NOT EXISTS commands (
-                id TEXT PRIMARY KEY, status TEXT NOT NULL, result_json TEXT NOT NULL,
-                error TEXT NOT NULL, controller_synced INTEGER NOT NULL DEFAULT 0,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
-            conn.execute("""CREATE TABLE IF NOT EXISTS jobs (
-                worker_job_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
-                pid INTEGER, pgid INTEGER, status TEXT NOT NULL, devices_json TEXT NOT NULL,
-                work_dir TEXT NOT NULL, exit_code INTEGER, error TEXT NOT NULL,
-                command_id TEXT NOT NULL DEFAULT '', trace_id TEXT NOT NULL DEFAULT '',
-                operation_id TEXT NOT NULL DEFAULT '')""")
-            columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
-            if "command_id" not in columns:
-                conn.execute("ALTER TABLE jobs ADD COLUMN command_id TEXT NOT NULL DEFAULT ''")
-            if "trace_id" not in columns:
-                conn.execute("ALTER TABLE jobs ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''")
-            if "operation_id" not in columns:
-                conn.execute("ALTER TABLE jobs ADD COLUMN operation_id TEXT NOT NULL DEFAULT ''")
-            command_columns = {
-                row[1] for row in conn.execute("PRAGMA table_info(commands)").fetchall()
-            }
-            if "controller_synced" not in command_columns:
-                conn.execute(
-                    "ALTER TABLE commands ADD COLUMN controller_synced INTEGER NOT NULL DEFAULT 0"
-                )
-            conn.execute("""CREATE TABLE IF NOT EXISTS device_fences (
-                device_id TEXT PRIMARY KEY, generation INTEGER NOT NULL,
-                lease_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
-            conn.execute("""CREATE TABLE IF NOT EXISTS usbip_assignments (
-                source_host TEXT NOT NULL, busid TEXT NOT NULL,
-                adb_server_socket TEXT NOT NULL DEFAULT '',
-                generation INTEGER NOT NULL DEFAULT 0,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY(source_host,busid))""")
-            usbip_columns = {
-                row[1] for row in conn.execute(
-                    "PRAGMA table_info(usbip_assignments)"
-                ).fetchall()
-            }
-            if "generation" not in usbip_columns:
-                conn.execute(
-                    "ALTER TABLE usbip_assignments "
-                    "ADD COLUMN generation INTEGER NOT NULL DEFAULT 0"
-                )
+        with self._lock, closing(self._open_connection()) as conn:
+            ensure_schema(conn, self.db_path, self._migrate_schema)
+
+    @staticmethod
+    def _migrate_schema(conn):
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("""CREATE TABLE IF NOT EXISTS commands (
+            id TEXT PRIMARY KEY, status TEXT NOT NULL, result_json TEXT NOT NULL,
+            error TEXT NOT NULL, controller_synced INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS jobs (
+            worker_job_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+            pid INTEGER, pgid INTEGER, status TEXT NOT NULL, devices_json TEXT NOT NULL,
+            work_dir TEXT NOT NULL, exit_code INTEGER, error TEXT NOT NULL,
+            command_id TEXT NOT NULL DEFAULT '', trace_id TEXT NOT NULL DEFAULT '',
+            operation_id TEXT NOT NULL DEFAULT '')""")
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        if "command_id" not in columns:
+            conn.execute("ALTER TABLE jobs ADD COLUMN command_id TEXT NOT NULL DEFAULT ''")
+        if "trace_id" not in columns:
+            conn.execute("ALTER TABLE jobs ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''")
+        if "operation_id" not in columns:
+            conn.execute("ALTER TABLE jobs ADD COLUMN operation_id TEXT NOT NULL DEFAULT ''")
+        command_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(commands)").fetchall()
+        }
+        if "controller_synced" not in command_columns:
+            conn.execute(
+                "ALTER TABLE commands ADD COLUMN controller_synced INTEGER NOT NULL DEFAULT 0"
+            )
+        conn.execute("""CREATE TABLE IF NOT EXISTS device_fences (
+            device_id TEXT PRIMARY KEY, generation INTEGER NOT NULL,
+            lease_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS usbip_assignments (
+            source_host TEXT NOT NULL, busid TEXT NOT NULL,
+            adb_server_socket TEXT NOT NULL DEFAULT '',
+            generation INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(source_host,busid))""")
+        usbip_columns = {
+            row[1] for row in conn.execute(
+                "PRAGMA table_info(usbip_assignments)"
+            ).fetchall()
+        }
+        if "generation" not in usbip_columns:
+            conn.execute(
+                "ALTER TABLE usbip_assignments "
+                "ADD COLUMN generation INTEGER NOT NULL DEFAULT 0"
+            )
+        conn.execute(f"PRAGMA user_version = {WorkerRuntime._SCHEMA_VERSION}")
 
     def connect(self):
         conn = self._open_connection()
-        existing_tables = {
-            str(row[0])
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            ).fetchall()
-        }
-        if not self._REQUIRED_TABLES.issubset(existing_tables):
+        try:
+            ensure_schema(conn, self.db_path, self._migrate_schema)
+        except Exception:
             conn.close()
-            self._initialize_schema()
-            conn = self._open_connection()
+            raise
         return conn
 
     def remember_usbip_assignments(
