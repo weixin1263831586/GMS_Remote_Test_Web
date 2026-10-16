@@ -202,6 +202,20 @@ class BurnGsiLockAndDeadlineTests(unittest.TestCase):
         # 单设备失败后锁仍按正常路径释放。
         self.assertEqual(self.locks.released, [("codex@127.0.0.1", ["D1"])])
 
+    def test_remote_fastboot_failure_returns_502_envelope(self):
+        async def failed_run_stream(*_args, **_kwargs):
+            return CommandResult(stdout='', stderr='remote fastboot failed', code=1)
+
+        with contextlib.ExitStack() as stack:
+            self._patch_common(stack)
+            stack.enter_context(patch.object(gsi_sn_burn, 'prepare_gsi_command', return_value='/remote/run.sh'))
+            stack.enter_context(patch.object(gsi_sn_burn, 'ssh_executor',
+                                            new=SimpleNamespace(run_stream=failed_run_stream)))
+            response = self._post_burn()
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()['code'], 'UPSTREAM_FAILURE')
+        self.assertIn('部分设备烧写失败', response.json()['error'])
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

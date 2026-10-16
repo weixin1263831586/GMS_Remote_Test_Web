@@ -66,7 +66,7 @@ def inspect_apk(path: Path, sha256: str):
 
 
 def installed_fingerprint(ssh, serial, package, check=lambda: None):
-    """Read lightweight install metadata; APK bytes are transferred only on a cache miss."""
+    """Bind metadata to actual APK bytes; only misses transfer and verify the APK."""
     def shell(args):
         check()
         return run(ssh, ["adb", "-s", serial, "shell", shlex.join(args)])
@@ -94,7 +94,10 @@ def installed_fingerprint(ssh, serial, package, check=lambda: None):
     details = shell(["dumpsys", "package", package])
     version = re.search(r"(?m)^\s*versionCode=(\d+)", details)
     updated = re.search(r"(?m)^\s*lastUpdateTime=([^\r\n]+)", details)
-    return path, f"{boot}:{stat}:{version[1] if version else ''}:{updated[1].strip() if updated else ''}"
+    digest = shell(['sha256sum', path]).split()
+    if not digest or not re.fullmatch(r'[a-f0-9]{64}', digest[0]):
+        raise ApiError.upstream_failure('已安装 APK 未返回有效 SHA256', service='adb')
+    return path, f"{boot}:{stat}:{version[1] if version else ''}:{updated[1].strip() if updated else ''}:{digest[0]}"
 
 
 def invalidate_installed_identity(worker_id, serial, package, user=0):
@@ -187,8 +190,8 @@ def require_installed(ssh, session, check=lambda: None, *, worker_id=""):
     if identity is None:
         identity = installed_identity(ssh, serial, package, check)
         current = installed_fingerprint(ssh, serial, package, check)
-        if (not current or current != observed or identity["package"] != package
-                or path != current[0]):
+        if (not identity or not current or current != observed or identity["package"] != package
+                or path != current[0] or identity['sha256'] != fingerprint.rsplit(':', 1)[-1]):
             invalidate_installed_identity(worker_id, serial, package)
             raise ApiError.conflict("身份校验期间已安装应用发生变化")
         _remember_identity(key, fingerprint, identity)

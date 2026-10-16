@@ -561,8 +561,6 @@ class HttpAutomationExecutorTests(unittest.TestCase):
             self.assertEqual(staged.parent.name, "run_ssh")
 
     def test_stage_ssh_build_artifact_maps_public_api_errors(self):
-        from contextlib import contextmanager
-
         from features.automation.executors import HttpAutomationExecutor
         from features.build import BuildExecutionError
 
@@ -574,12 +572,9 @@ class HttpAutomationExecutorTests(unittest.TestCase):
         self.assertFalse(missing["success"])
         self.assertIn("job id is missing", missing["error"])
 
-        @contextmanager
-        def refuse(_job_id, _path, *, automation_run_id=None):
-            raise BuildExecutionError("Build job belongs to another automation run")
-            yield  # pragma: no cover
-
-        with patch("features.build.open_build_artifact", refuse):
+        with patch("features.build.open_build_artifact", side_effect=BuildExecutionError(
+            "Build job belongs to another automation run",
+        )):
             denied = executor._stage_ssh_build_artifact(
                 {"id": "run_ssh", "jenkins_build_number": "12"}, "out/update.img"
             )

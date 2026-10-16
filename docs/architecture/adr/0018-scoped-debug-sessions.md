@@ -34,8 +34,10 @@ the same account to execute.
 Only typed install/launch/stop/tap/swipe/text/keyevent/database_read operations are supported.
 Every new APK is independently verified against the granted package and
 signers and its hash is retained in the audit. Installed identity checks read
-the user-0 package path, APK size/mtime/inode, package version/update time and
-device boot id on each action. A bounded five-minute cache keyed by Worker,
+the user-0 package path, APK size/mtime/inode, package version/update time,
+device boot id and the actual device-side APK SHA256 on each action. Even a
+same-size replacement preserving inode and timestamps changes this fingerprint.
+A bounded five-minute cache keyed by Worker,
 device, user and package reuses the full apksigner result only while that
 fingerprint is unchanged. A changed fingerprint, cache expiry, install,
 revoke, expired grant or lost Agent authorization invalidates the entry.

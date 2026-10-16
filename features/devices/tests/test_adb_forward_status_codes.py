@@ -15,8 +15,8 @@ from unittest.mock import patch
 
 from starlette.requests import Request
 
+from features.auth import CurrentUser
 from features.devices import adb_forward_api
-from features.firmware import gsi_sn_burn
 
 
 class _JSONBody:
@@ -37,6 +37,9 @@ class AdbForwardStartStatusTests(unittest.TestCase):
             device_host="127.0.0.1",
         )
         request = Request({"type": "http", "method": "POST", "headers": []})
+        request.state.current_user = CurrentUser(id='admin', username='admin', role='admin')
+        request.state.auth_method = 'session'
+        request.state.is_elevated = True
         with (
             patch.object(
                 adb_forward_api.adb_forward_manager,
@@ -75,32 +78,6 @@ class AdbForwardStartStatusTests(unittest.TestCase):
     def test_unexpected_error_stays_500(self):
         status = self._start(exc=TypeError("'NoneType' object is not subscriptable"))
         self.assertEqual(status, 500)
-
-
-class GsiBurnPartialFailureStatusTests(unittest.TestCase):
-    def test_error_response_partial_failure_uses_502(self):
-        """烧写经 SSH 在远端执行：部分失败必须返回 502 而非 500。
-
-        直接断言 gsi_sn_burn 源码中的 status_code（路由全链路依赖大量
-        runtime/ssh 状态，mock 成本高；这里锁定关键映射不被回退）。
-        """
-        import inspect
-
-        source = inspect.getsource(gsi_sn_burn)
-        self.assertIn("部分设备烧写失败", source)
-        # error_response 调用携带 status_code=502
-        self.assertRegex(
-            source,
-            r"部分设备烧写失败[\s\S]{0,300}status_code=502",
-        )
-
-    def test_unexpected_gsi_error_is_500(self):
-        """外层兜底保持 500，且不回显 str(e)（request_id 文案 + 日志回查）。"""
-        import inspect
-
-        source = inspect.getsource(gsi_sn_burn)
-        self.assertIn("return ApiError.internal(message).to_response()", source)
-        self.assertNotIn("error_response(str(e)", source)
 
 
 if __name__ == "__main__":

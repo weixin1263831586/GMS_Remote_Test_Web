@@ -578,7 +578,8 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("path === '/api/agent/install.sh'", navigation)
         self.assertIn("path === '/api/system/skills'", navigation)
         self.assertIn("全部独立gms-rt-*命令", api_constants)
-        self.assertIn("获取已脱敏的系统配置", api_constants)
+        self.assertIn("仅已提权管理员可读取系统配置", api_constants)
+        self.assertIn("/api/config/client", api_constants)
         self.assertNotIn("包含所有字段和敏感信息", api_constants)
 
     def test_architecture_page_matches_controller_worker_control_plane(self):

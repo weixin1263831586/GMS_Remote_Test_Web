@@ -107,6 +107,7 @@ async def stop_adb_forward(
                 req.target_worker_id,
             )
             return JSONResponse(content=result)
+        require_elevated_admin(request)
         result = await asyncio.to_thread(adb_forward_manager.stop_forward)
         if result.get("success"):
             return JSONResponse(content=result)

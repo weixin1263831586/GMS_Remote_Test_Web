@@ -69,14 +69,14 @@ def test_verified_identity_cache_is_fenced_by_worker_install_fingerprint_and_ttl
     identity._identity_cache.clear()
     ssh = MagicMock()
     session = {"serial": "SERIAL", "package": APP["package"], "signers": APP["signers"]}
-    with patch.object(identity, "installed_fingerprint", return_value=("/data/app/base.apk", "boot:stat:v1")) as probe, \
+    with patch.object(identity, "installed_fingerprint", return_value=("/data/app/base.apk", "boot:stat:v1:" + DIGEST)) as probe, \
             patch.object(identity, "installed_identity", return_value={**APP, "sha256": DIGEST}) as verify:
         identity.require_installed(ssh, session, worker_id="worker-a")
         identity.require_installed(ssh, session, worker_id="worker-a")
         assert verify.call_count == 1
         identity.require_installed(ssh, session, worker_id="worker-b")
         assert verify.call_count == 2
-        probe.side_effect = [("/data/app/base.apk", "boot:stat:v2"), ("/data/app/base.apk", "boot:stat:v2")]
+        probe.side_effect = [("/data/app/base.apk", "boot:stat:v2:" + DIGEST), ("/data/app/base.apk", "boot:stat:v2:" + DIGEST)]
         identity.require_installed(ssh, session, worker_id="worker-a")
         assert verify.call_count == 3
         assert probe.call_count == 7
@@ -89,9 +89,62 @@ def test_verified_identity_cache_expires(monkeypatch):
     clock = [100.0]
     monkeypatch.setattr(identity.time, "monotonic", lambda: clock[0])
     session = {"serial": "SERIAL", "package": APP["package"], "signers": APP["signers"]}
-    with patch.object(identity, "installed_fingerprint", return_value=("/data/app/base.apk", "boot:stat")), \
+    with patch.object(identity, "installed_fingerprint", return_value=("/data/app/base.apk", "boot:stat:" + DIGEST)), \
             patch.object(identity, "installed_identity", return_value={**APP, "sha256": DIGEST}) as verify:
         identity.require_installed(MagicMock(), session, worker_id="worker")
         clock[0] += identity._IDENTITY_TTL_SECONDS + 1
         identity.require_installed(MagicMock(), session, worker_id="worker")
     assert verify.call_count == 2
+
+
+def test_content_change_with_identical_install_metadata_rechecks_signer():
+    identity._identity_cache.clear()
+    digest = [DIGEST]
+    session = {'serial': 'SERIAL', 'package': APP['package'], 'signers': APP['signers']}
+
+    def command(_ssh, args, *_rest):
+        joined = ' '.join(args)
+        if 'pm list packages' in joined:
+            return 'package:' + APP['package']
+        if 'pm path' in joined:
+            return 'package:/data/app/example/base.apk'
+        if 'stat -c' in joined:
+            return '7:1700000000:123'
+        if 'boot_id' in joined:
+            return '12345678-1234-1234-1234-123456789abc'
+        if 'dumpsys' in joined:
+            return 'versionCode=1\nlastUpdateTime=unchanged'
+        if 'sha256sum' in joined:
+            return digest[0] + '  /data/app/example/base.apk'
+        raise AssertionError(args)
+
+    with patch.object(identity, 'run', side_effect=command), patch.object(
+        identity, 'installed_identity', return_value={**APP, 'sha256': DIGEST},
+    ) as verify:
+        identity.require_installed(MagicMock(), session, worker_id='worker')
+        identity.require_installed(MagicMock(), session, worker_id='worker')
+        assert verify.call_count == 1
+        # External tools can preserve path, inode, size and timestamps.
+        digest[0] = 'c' * 64
+        verify.return_value = {**APP, 'sha256': digest[0], 'signers': ['d' * 64]}
+        with pytest.raises(ApiError) as caught:
+            identity.require_installed(MagicMock(), session, worker_id='worker')
+        assert caught.value.status_code == 403
+        assert verify.call_count == 2
+
+
+def test_missing_identity_during_fill_fails_closed_even_if_metadata_reappears():
+    identity._identity_cache.clear()
+    with patch.object(identity, 'installed_fingerprint', return_value=('/data/app/base.apk', 'stable')), \
+            patch.object(identity, 'installed_identity', return_value=None), pytest.raises(ApiError) as caught:
+        identity.require_installed(MagicMock(), {'serial': 'SERIAL', **APP}, worker_id='worker')
+    assert caught.value.status_code == 409
+
+
+def test_verified_bytes_must_match_the_observed_fingerprint_digest():
+    identity._identity_cache.clear()
+    with patch.object(identity, 'installed_fingerprint', return_value=('/data/app/base.apk', 'boot:' + DIGEST)), \
+            patch.object(identity, 'installed_identity', return_value={**APP, 'sha256': 'c' * 64}), \
+            pytest.raises(ApiError) as caught:
+        identity.require_installed(MagicMock(), {'serial': 'SERIAL', **APP}, worker_id='worker')
+    assert caught.value.status_code == 409

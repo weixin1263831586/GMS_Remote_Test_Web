@@ -10,7 +10,7 @@ from .outbound import UnsafeOutboundURL, normalized_hostname
 
 
 class _NoRedirects(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(self, req, fp, code, msg, headers, _newurl):
         return None
 
 
@@ -24,7 +24,7 @@ def open_outbound(request, target, *, timeout=60, context=None):
         if normalized_hostname(conn.host) != normalized_hostname(target.hostname) or conn.port != target.port:
             raise UnsafeOutboundURL("Connection differs from the authorized target")
 
-        def connect(address, connect_timeout=timeout, source_address=None):
+        def connect(_address, connect_timeout=timeout, source_address=None):
             last_error = None
             for ip in target.addresses:
                 try:

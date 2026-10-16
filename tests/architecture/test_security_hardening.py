@@ -290,12 +290,14 @@ class TestWorkerSqliteHardening(unittest.TestCase):
     """Verify Worker SQLite connection uses WAL and busy_timeout."""
 
     def test_worker_connect_sets_wal_and_busy_timeout(self):
+        from worker_agent.config import WorkerConfig
         from worker_agent.runtime import WorkerRuntime
 
         with tempfile.TemporaryDirectory() as tmp:
-            runtime = object.__new__(WorkerRuntime)
-            runtime.db_path = Path(tmp) / "test.sqlite3"
-            runtime.db_path.parent.mkdir(parents=True, exist_ok=True)
+            runtime = WorkerRuntime(WorkerConfig(
+                controller_url='https://controller.invalid', worker_id='test-worker',
+                token='synthetic-test-token', data_root=Path(tmp),
+            ))
 
             conn = runtime.connect()
             try:

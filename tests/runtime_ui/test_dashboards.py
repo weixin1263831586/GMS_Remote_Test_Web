@@ -578,6 +578,7 @@ class RuntimeDashboardsTests(RuntimeUiHarness):
             self.goto_shell(page)
             page.locator('.sidebar-item[data-page="redmine-agent"]').click()
             redmine = self.frame_for(page, "#redmine-agent-frame")
+            redmine.wait_for_load_state('domcontentloaded')
             redmine.wait_for_function("typeof switchTab === 'function'")
 
             for tab_name in ["department", "stats", "project", "issues", "runs"]:
