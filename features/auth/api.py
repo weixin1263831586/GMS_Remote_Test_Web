@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from foundation.cache import TTLCache
 from foundation.config import config_manager
+from foundation.networking import get_client_ip
 from foundation.responses import error_response
 from foundation.ssh import SSHD_INSTALL_GUIDE
 
@@ -96,7 +97,7 @@ def _set_session_cookie(response: JSONResponse, token: str) -> None:
 
 
 def _request_source_ip(request: Request) -> str:
-    return str(request.client.host if request.client else "unknown")
+    return get_client_ip(request)
 
 
 def _configured_client_login(source_ip: str) -> str:
@@ -151,6 +152,12 @@ def _authenticate_client_ssh_user(
         return None, None
     client_user, client_host = login_name.rsplit("@", 1)
     if not client_user or not client_host:
+        return None, None
+    if not str(password or ""):
+        # 客户端形态的密码是宿主机 SSH 凭据，绝不能为空。真实接线的
+        # detect_username 在空密码时会落入「已存 IP->用户名映射」回退，
+        # 该回退不做任何凭据校验（仅供 /api/users/detect 探测使用），
+        # 决不能让它替代 SSH 验证成为登录凭据。
         return None, None
     try:
         client_ip = ipaddress.ip_address(client_host)

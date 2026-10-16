@@ -25,15 +25,17 @@ released artifact share a single layout contract: a single
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import re
+import threading
 from pathlib import Path
 
 from fastapi import Request
 from fastapi.responses import Response
 
-from features.system.agent_package_builder import build_package_bytes
+from features.system.agent_package_builder import build_package_bytes, payload_files
 from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response
 
@@ -68,12 +70,25 @@ def _build_archive(version: str) -> bytes:
 # any later rebuild whose sha256 differs is refused (500) instead of being
 # served — same version, same bytes, for every client, forever.
 _IMMUTABLE_CACHE: dict[str, tuple[str, bytes]] = {}
+_SOURCE_STAMPS: dict[str, tuple] = {}
+_ARCHIVE_LOCK = threading.Lock()
 
 
 def _immutable_archive(version: str) -> bytes:
+    with _ARCHIVE_LOCK:
+        return _archive_for_source(version)
+
+
+def _archive_for_source(version: str) -> bytes:
+    # Metadata changes trigger a full rebuild/hash; unchanged files reuse bytes.
+    stamp = tuple((str(path), st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_mode)
+                  for path, _ in payload_files(AGENT_PACKAGE_DIR)
+                  for st in (path.stat(),))
     cached = _IMMUTABLE_CACHE.get(version)
     if cached is not None:
         pinned_sha, pinned_archive = cached
+        if _SOURCE_STAMPS.get(version) == stamp:
+            return pinned_archive
         fresh = build_package_bytes(AGENT_PACKAGE_DIR, version, client="universal")
         fresh_sha = hashlib.sha256(fresh).hexdigest()
         if fresh_sha != pinned_sha:
@@ -83,9 +98,11 @@ def _immutable_archive(version: str) -> bytes:
                 version, pinned_sha[:16], fresh_sha[:16],
             )
             raise DriftedVersionError(version, pinned_sha, fresh_sha)
+        _SOURCE_STAMPS[version] = stamp
         return pinned_archive
     archive = build_package_bytes(AGENT_PACKAGE_DIR, version, client="universal")
     _IMMUTABLE_CACHE[version] = (hashlib.sha256(archive).hexdigest(), archive)
+    _SOURCE_STAMPS[version] = stamp
     return archive
 
 
@@ -139,7 +156,7 @@ async def agent_package_manifest(request: Request):
     if not version or not AGENT_PACKAGE_DIR.is_dir():
         return error_response("agent package payload 未生成", status_code=404)
     try:
-        archive = _immutable_archive(version)
+        archive = await asyncio.to_thread(_immutable_archive, version)
     except (DriftedVersionError, FileNotFoundError):
         message = record_internal_error(
             logger, "Agent package 构建", "agent package manifest build failed"
@@ -180,7 +197,7 @@ async def agent_package_download(version: str, request: Request):
             f"版本 {version} 不存在（当前发布版本: {declared or '未知'}）", status_code=404
         )
     try:
-        archive = _immutable_archive(version)
+        archive = await asyncio.to_thread(_immutable_archive, version)
     except (DriftedVersionError, FileNotFoundError):
         message = record_internal_error(
             logger, "Agent package 构建", "agent package download build failed"

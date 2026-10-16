@@ -6,9 +6,11 @@ import tarfile
 import urllib.request
 import zipfile
 from unittest.mock import Mock, patch
+from urllib.parse import urlsplit
 
 import pytest
 
+from foundation.outbound import ResolvedOutboundTarget
 from worker_agent.android_inspection import _aapt2_path
 from worker_agent.config import WorkerConfig
 from worker_agent.inventory import (
@@ -89,7 +91,7 @@ def test_usbip_action_rejects_shell_metacharacters_before_native_execution():
             raise AssertionError("expected invalid host rejection")
     execute.assert_not_called()
 
-def test_wifi_action_passes_credentials_as_argv_without_shell_interpolation():
+def test_wifi_credentials_are_quoted_and_passed_through_stdin():
     probe = [{"serial": "ABC", "state": "available"}]
     completed = subprocess.CompletedProcess([], 0, stdout="ok", stderr="")
     with patch("worker_agent.device_actions.probe_devices", return_value=probe), patch(
@@ -103,8 +105,8 @@ def test_wifi_action_passes_credentials_as_argv_without_shell_interpolation():
     # 必须以单引号包裹后的整串下发（见 device_actions.wifi 分支）。
     assert run.call_args_list[1].args[0] == [
         "adb", "-s", "ABC", "shell",
-        "cmd wifi connect-network 'lab wifi; touch /tmp/no' wpa2 'p a$s'",
     ]
+    assert run.call_args_list[1].kwargs["input"] == "cmd wifi connect-network 'lab wifi; touch /tmp/no' wpa2 'p a$s'\n"
     assert all(call.kwargs.get("shell") is not True for call in run.call_args_list)
 
 
@@ -182,12 +184,17 @@ def test_suite_action_rejects_path_outside_roots(tmp_path):
         raise AssertionError("expected suite root rejection")
 
 
+def _download_target(url, **_kwargs):
+    parsed = urlsplit(url)
+    return ResolvedOutboundTarget(url, parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80), ('93.184.216.34',))
+
+
 def test_suite_download_streams_into_worker_suite_root(tmp_path):
     root = tmp_path / "suites"
     root.mkdir()
     config = WorkerConfig(worker_id="w", controller_url="https://controller", token="t",
                           suite_roots=[root], data_root=tmp_path / "data")
-    with patch("worker_agent.suite_actions.urllib.request.urlopen", return_value=io.BytesIO(b"archive")):
+    with patch("worker_agent.suite_actions.resolve_outbound_target", side_effect=_download_target), patch("worker_agent.suite_actions.open_outbound", return_value=io.BytesIO(b"archive")):
         result = execute_suite_action(config, {
             "action": "download_url", "url": "https://example.test/android-cts-17_r1.zip"
         })
@@ -200,7 +207,7 @@ def test_suite_download_preserves_explicit_original_filename(tmp_path):
     root.mkdir()
     config = WorkerConfig(worker_id="w", controller_url="https://controller", token="t",
                           suite_roots=[root], data_root=tmp_path / "data")
-    with patch("worker_agent.suite_actions.urllib.request.urlopen", return_value=io.BytesIO(b"sts")):
+    with patch("worker_agent.suite_actions.resolve_outbound_target", side_effect=_download_target), patch("worker_agent.suite_actions.open_outbound", return_value=io.BytesIO(b"sts")):
         result = execute_suite_action(config, {
             "action": "download_url", "url": "https://controller/suite-123.zip",
             "filename": "android-sts-17_sts-r52-linux-arm64.zip",
@@ -220,8 +227,8 @@ def test_controller_suite_download_sends_worker_token(tmp_path):
         suite_roots=[root],
         data_root=tmp_path / "data",
     )
-    with patch(
-        "worker_agent.suite_actions.urllib.request.urlopen",
+    with patch("worker_agent.suite_actions.resolve_outbound_target", side_effect=_download_target), patch(
+        "worker_agent.suite_actions.open_outbound",
         return_value=io.BytesIO(b"suite"),
     ) as opened:
         execute_suite_action(
@@ -257,8 +264,8 @@ def test_controller_suite_download_routes_browser_alias_through_controller(tmp_p
         suite_roots=[root],
         data_root=tmp_path / "data",
     )
-    with patch(
-        "worker_agent.suite_actions.urllib.request.urlopen",
+    with patch("worker_agent.suite_actions.resolve_outbound_target", side_effect=_download_target), patch(
+        "worker_agent.suite_actions.open_outbound",
         return_value=io.BytesIO(b"suite"),
     ) as opened:
         execute_suite_action(
@@ -288,8 +295,8 @@ def test_external_suite_download_does_not_send_worker_token(tmp_path):
         suite_roots=[root],
         data_root=tmp_path / "data",
     )
-    with patch(
-        "worker_agent.suite_actions.urllib.request.urlopen",
+    with patch("worker_agent.suite_actions.resolve_outbound_target", side_effect=_download_target), patch(
+        "worker_agent.suite_actions.open_outbound",
         return_value=io.BytesIO(b"suite"),
     ) as opened:
         execute_suite_action(
@@ -517,7 +524,7 @@ def test_suite_download_rejects_truncated_archive(tmp_path):
     root.mkdir()
     config = WorkerConfig(worker_id="w", controller_url="https://controller", token="t",
                           suite_roots=[root], data_root=tmp_path / "data")
-    with patch("worker_agent.suite_actions.urllib.request.urlopen",
+    with patch("worker_agent.suite_actions.resolve_outbound_target", side_effect=_download_target), patch("worker_agent.suite_actions.open_outbound",
                return_value=_TruncatedResponse(b"PK-header-only", 1000)):
         try:
             execute_suite_action(config, {

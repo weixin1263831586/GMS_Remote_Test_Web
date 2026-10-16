@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import signal
 import sqlite3
@@ -19,6 +20,20 @@ from .config import WorkerConfig
 
 logger = logging.getLogger(__name__)
 
+# job_id/attempt_id 直接拼进 work_dir 路径；半可信 Controller 的 "../"
+# 会把 stdout/stderr/exit_code 写到 data_root 之外。
+_PATH_SEGMENT_RE = re.compile(r"[A-Za-z0-9._-]{1,128}")
+
+
+def _validated_job_path_segment(value: Any, field: str) -> str:
+    text = str(value or "").strip()
+    if (
+        not _PATH_SEGMENT_RE.fullmatch(text)
+        or text in {".", ".."}
+    ):
+        raise ValueError(f"invalid {field} in start_test payload: {value!r}")
+    return text
+
 
 class WorkerRuntime:
     def __init__(self, config: WorkerConfig):
@@ -27,10 +42,28 @@ class WorkerRuntime:
         self.db_path = self.config.data_root / "worker.sqlite3"
         self._processes: dict[str, subprocess.Popen] = {}
         self._lock = threading.RLock()
-        with self.connect() as conn:
-            # The schema snapshot and ALTERs must be one process-safe unit.
-            # A per-runtime Python lock is insufficient when the service,
-            # CLI and a restarted worker open the same database together.
+        self._initialize_schema()
+
+    # Connect-time self-check: a long-lived Worker that survives a data/
+    # clear-out or restore must rebuild the database at the same path instead
+    # of failing every later query with "no such table".
+    _REQUIRED_TABLES = frozenset(
+        {'commands', 'jobs', 'device_fences', 'usbip_assignments'}
+    )
+
+    def _open_connection(self):
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=30000")
+        return conn
+
+    def _initialize_schema(self):
+        # The schema snapshot and ALTERs must be one process-safe unit.
+        # A per-runtime Python lock is insufficient when the service,
+        # CLI and a restarted worker open the same database together.
+        with self._lock, self._open_connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute("""CREATE TABLE IF NOT EXISTS commands (
                 id TEXT PRIMARY KEY, status TEXT NOT NULL, result_json TEXT NOT NULL,
@@ -78,11 +111,17 @@ class WorkerRuntime:
                 )
 
     def connect(self):
-        conn = sqlite3.connect(self.db_path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=30000")
+        conn = self._open_connection()
+        existing_tables = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if not self._REQUIRED_TABLES.issubset(existing_tables):
+            conn.close()
+            self._initialize_schema()
+            conn = self._open_connection()
         return conn
 
     def remember_usbip_assignments(
@@ -506,7 +545,13 @@ class WorkerRuntime:
         # tradefed 初始化约 4 秒才失败。argv[1]=test_type, argv[2]=module。
         self._validate_requested_module(argv)
         worker_job_id = payload.get("worker_job_id") or f"wj-{command['id']}"
-        work_dir = self.config.data_root / "jobs" / (command.get("job_id") or command["id"]) / (command.get("attempt_id") or "1")
+        job_segment = _validated_job_path_segment(
+            command.get("job_id") or command["id"], "job_id"
+        )
+        attempt_segment = _validated_job_path_segment(
+            command.get("attempt_id") or "1", "attempt_id"
+        )
+        work_dir = self.config.data_root / "jobs" / job_segment / attempt_segment
         work_dir.mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
         # 与 Controller 共用白名单再过滤一次。正常流量已在入队前
@@ -721,15 +766,3 @@ class WorkerRuntime:
                 "work_dir": row["work_dir"], "command_id": row["command_id"],
                 "job_id": row["job_id"], "attempt_id": row["attempt_id"]}
 
-    def reap(self):
-        with self._lock:
-            items = list(self._processes.items())
-        for worker_job_id, process in items:
-            code = process.poll()
-            if code is None:
-                continue
-            with self.connect() as conn:
-                conn.execute("UPDATE jobs SET status=?,exit_code=? WHERE worker_job_id=?",
-                             ("completed" if code == 0 else "failed", code, worker_job_id))
-            with self._lock:
-                self._processes.pop(worker_job_id, None)

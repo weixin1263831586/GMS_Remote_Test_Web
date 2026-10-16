@@ -13,7 +13,9 @@ from fastapi.responses import HTMLResponse, Response
 
 from features.auth import (
     CurrentUser,
+    auth_service,
     authentication_required,
+    ensure_agent_worker_allowed,
     get_authenticated_user,
     is_elevated,
     require_authenticated_user,
@@ -202,8 +204,9 @@ def heartbeat(worker_id: str, body: WorkerHeartbeat, authorization: str | None =
 
 
 @router.get("/workers")
-def list_workers():
-    return {"success": True, "workers": service().list_workers()}
+def list_workers(request: Request):
+    _require_agent_scope_when_agent(request, "devices.read")
+    return {"success": True, "workers": _visible_workers(request)}
 
 
 @router.get("/worker-tests")
@@ -326,11 +329,42 @@ def _command_owner_id(request: Request, user: CurrentUser | None) -> str:
     return str(authenticated.id) if authenticated else ""
 
 
-@router.get("/hosts")
-def list_hosts():
-    """Return the stable host directory used by host-scoped UI pages."""
-    hosts = []
+def _require_agent_scope_when_agent(request: Request, scope: str) -> None:
+    """Scope gate for Agent Service Tokens on cluster read endpoints.
+
+    Mirrors the jobs_api jobs.read enforcement (ADR 0006) with the
+    /api/cluster/devices variant: the gate keys on the agent auth method
+    because human "user" sessions do not carry devices.read/suites.read via
+    ROLE_PERMISSIONS and must keep their legacy access; dev-mode anonymous
+    callers pass as before. An agent token without the scope fails closed.
+    """
+    if getattr(request.state, "auth_method", None) != "agent_token":
+        return
+    user = get_authenticated_user(request)
+    if user is None or not user.has_permission(scope):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": f"Agent token scope '{scope}' required",
+                "scope_required": scope,
+            },
+        )
+
+
+def _visible_workers(request: Request):
     workers = service().list_workers()
+    if getattr(request.state, "auth_method", "") == "agent_token":
+        record = getattr(request.state, "agent_token_record", None)
+        workers = [worker for worker in workers if auth_service.agent_acl_allows(record, "workers", worker["id"])]
+    return workers
+
+
+@router.get("/hosts")
+def list_hosts(request: Request):
+    """Return the stable host directory used by host-scoped UI pages."""
+    _require_agent_scope_when_agent(request, "devices.read")
+    hosts = []
+    workers = _visible_workers(request)
     if not service().effective_enabled:
         workers = [worker for worker in workers if worker["id"] == service().config.local_worker_id]
     for worker in workers:
@@ -569,8 +603,13 @@ async def _run_worker_command(worker_id: str, command_type: str, payload: dict, 
 
 
 @router.get("/suites/files")
-async def cluster_suite_files(worker_id: str = Query(...), suite_path: str = Query(...),
-                              path: str = Query(default="")):
+async def cluster_suite_files(
+    request: Request,
+    worker_id: str = Query(...), suite_path: str = Query(...),
+    path: str = Query(default=""),
+):
+    _require_agent_scope_when_agent(request, "suites.read")
+    ensure_agent_worker_allowed(request, worker_id)
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
     result = await _run_worker_command(worker_id, "suite_action", {
         "action": "list", "suite_path": suite_path, "path": path,
@@ -602,9 +641,14 @@ async def cluster_file_browse(
 
 
 @router.get("/suites/search")
-async def cluster_suite_search(worker_id: str = Query(...), suite_path: str = Query(...),
-                               query: str = Query(..., min_length=1),
-                               limit: int = Query(default=30, ge=1, le=200)):
+async def cluster_suite_search(
+    request: Request,
+    worker_id: str = Query(...), suite_path: str = Query(...),
+    query: str = Query(..., min_length=1),
+    limit: int = Query(default=30, ge=1, le=200),
+):
+    _require_agent_scope_when_agent(request, "suites.read")
+    ensure_agent_worker_allowed(request, worker_id)
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
     result = await _run_worker_command(worker_id, "suite_action", {
         "action": "search", "suite_path": suite_path, "query": query, "limit": limit,
@@ -712,8 +756,13 @@ def cluster_suite_extract(
 
 
 @router.get("/suites/download")
-async def cluster_suite_download_file(worker_id: str = Query(...), suite_path: str = Query(...),
-                                      path: str = Query(...), inline: bool = Query(default=False)):
+async def cluster_suite_download_file(
+    request: Request,
+    worker_id: str = Query(...), suite_path: str = Query(...),
+    path: str = Query(...), inline: bool = Query(default=False),
+):
+    _require_agent_scope_when_agent(request, "suites.read")
+    ensure_agent_worker_allowed(request, worker_id)
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
     result = await _run_worker_command(worker_id, "suite_action", {
         "action": "read_file", "suite_path": suite_path, "path": path,

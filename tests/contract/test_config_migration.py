@@ -46,6 +46,27 @@ def seed(root):
     return static, runtime, environment
 
 
+def test_cached_config_returns_independent_nested_snapshots(tmp_path):
+    manager = ConfigManager(project_root=tmp_path)
+    manager.update_runtime_config({'nested': {'list': [1], 'password': 'fixture'}})
+    first = manager.load_config()
+    first['nested']['list'].append(2)
+    first['nested']['password'] = 'changed'
+    assert manager.load_config()['nested'] == {'list': [1], 'password': 'fixture'}
+
+
+def test_corrupt_partition_preserves_other_reads_but_blocks_writes(tmp_path):
+    manager = ConfigManager(project_root=tmp_path)
+    manager.update_runtime_config({'sidebar_order': ['devices'], 'ubuntu_host': '192.0.2.3'})
+    store = manager._runtime_store
+    store.paths['credentials'].write_text('{invalid', encoding='utf-8')
+    config = manager.load_config(force_reload=True)
+    assert config['sidebar_order'] == ['devices']
+    assert config['ubuntu_host'] == '192.0.2.3'
+    assert manager.update_runtime_config({'sidebar_order': ['test']}) is False
+    assert store.paths['credentials'].read_text() == '{invalid'
+
+
 def test_migration_preserves_effective_configuration_and_secret_conflicts(tmp_path, monkeypatch):
     seed(tmp_path)
     before = ConfigManager(project_root=tmp_path).load_config()

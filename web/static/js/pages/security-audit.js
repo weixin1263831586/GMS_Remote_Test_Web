@@ -5,8 +5,7 @@ function recordSecurityPageView(pageName) {
     fetch('/api/security-audit/page-view', {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json',
-            ...getClientIdentityHeaders()
+            'Content-Type': 'application/json'
         },
         body: JSON.stringify({
             page: pageName,

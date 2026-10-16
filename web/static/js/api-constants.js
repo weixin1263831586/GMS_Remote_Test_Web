@@ -241,7 +241,7 @@ const API_DETAILS_MAP = {
     },
     '/api/config/read': {
         title: '获取配置',
-        description: '获取已脱敏的系统配置；Wi-Fi 密码仅向已提权管理员会话返回',
+        description: '仅已提权管理员可读取系统配置；页面默认值使用 /api/config/client',
         method: 'GET',
         params: [{ name: 'host', type: 'string', required: false, desc: '目标主机 (user@ip 或 ip)，不传则使用当前客户端' }],
         response: '{ "ubuntu_user": "gms", "ubuntu_host": "192.168.1.10", "wifi": { "password": "", "has_password": true } }',

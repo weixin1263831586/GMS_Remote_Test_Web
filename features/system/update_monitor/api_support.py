@@ -12,6 +12,7 @@ from datetime import datetime
 from fastapi import APIRouter
 
 from foundation.config import settings
+from foundation.sqlite_schema import ensure_schema
 
 from .models import SOURCES
 from .repository import init_db
@@ -61,7 +62,11 @@ def _connect_db() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    init_db(conn)
+    try:
+        ensure_schema(conn, DB_PATH, init_db)
+    except Exception:
+        conn.close()
+        raise
     return conn
 
 

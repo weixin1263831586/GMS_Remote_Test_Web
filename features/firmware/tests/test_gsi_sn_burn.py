@@ -136,7 +136,7 @@ class BurnGsiLockAndDeadlineTests(unittest.TestCase):
         ))
         stack.enter_context(patch.object(
             gsi_sn_burn, "upload_gsi_assets",
-            new=lambda **_kwargs: ("/remote/run.sh", "/remote/misc.img", None),
+            new=lambda **_kwargs: ("/remote/run.sh", "/remote/misc.img"),
         ))
         stack.enter_context(patch.object(
             gsi_sn_burn, "_resolve_gsi_remote_image",
@@ -194,7 +194,7 @@ class BurnGsiLockAndDeadlineTests(unittest.TestCase):
             ))
             response = self._post_burn()
 
-        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.status_code, 504)
         body = response.json()
         self.assertIn("部分设备烧写失败", body["error"])
         self.assertIn("timed out", body["results"][0]["error"])

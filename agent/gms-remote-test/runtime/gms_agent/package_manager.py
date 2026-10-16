@@ -17,6 +17,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -444,8 +445,8 @@ def fetch_registry_package(
     except (urllib.error.URLError, OSError, ValueError) as error:
         raise RuntimeError(f"无法读取 Controller 包清单: {error}") from error
     latest = str(manifest.get("version", ""))
-    if not latest:
-        raise RuntimeError("Controller 清单缺少 version")
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", latest):
+        raise RuntimeError("Controller 清单 version 必须是 X.Y.Z")
     if expected_version and latest != expected_version:
         raise RuntimeError(
             f"清单在版本判定与下载之间发生了变化（判定时 {expected_version}，"
@@ -541,10 +542,7 @@ def normalize_package_tree(source_root: Path) -> Path:
     """
     if (source_root / "scripts").is_dir() or not (source_root / "runtime").is_dir():
         return source_root
-    staging = source_root.parent / f".normalized-{source_root.name}-{os.getpid()}"
-    if staging.exists():
-        shutil.rmtree(staging)
-    staging.mkdir(parents=True)
+    staging = Path(tempfile.mkdtemp(prefix="gms-agent-normalized-"))
     shutil.copytree(
         source_root / "runtime", staging / "scripts",
         ignore=shutil.ignore_patterns("__pycache__"),
@@ -593,6 +591,8 @@ def install_runtime(source_root: Path, version: str, sha256: str) -> Path:
 
 
 def _install_runtime_normalized(source_root: Path, version: str, sha256: str) -> Path:
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+        raise RuntimeError("包版本必须是 X.Y.Z")
     target = VERSIONS_DIR / version
     marker = target / PACKAGE_SHA_MARKER
     if target.exists():
@@ -1805,7 +1805,7 @@ def _cmd_update_locked(args: argparse.Namespace) -> int:
             f"Error: 部分客户端激活失败；已整体回滚到 {current}（运行时与客户端一致）",
             file=sys.stderr,
         )
-        return 1
+        return 7
     if reactivated:
         print(f"Re-activated: {', '.join(reactivated)}")
     try:
@@ -1827,6 +1827,9 @@ def cmd_rollback(args: argparse.Namespace) -> int:
 
 def _cmd_rollback_locked(args: argparse.Namespace) -> int:
     version = args.version
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+        print("Error: version 必须是 X.Y.Z", file=sys.stderr)
+        return 2
     target = VERSIONS_DIR / version
     if not (target / "scripts" / "gms-remote-test.sh").is_file():
         print(f"Error: 未安装版本 {version}", file=sys.stderr)
@@ -1870,7 +1873,7 @@ def _cmd_rollback_locked(args: argparse.Namespace) -> int:
             f"请检查后重试 gms-agent rollback {version}",
             file=sys.stderr,
         )
-        return 1
+        return 7
     if reactivated:
         print(f"Re-activated from {version}: {', '.join(reactivated)}")
     return 0
@@ -1976,12 +1979,16 @@ def cmd_enroll(args: argparse.Namespace) -> int:
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
     try:
-        with urllib.request.urlopen(request, timeout=60, context=context) as response:
+        from gms_agent.http_transport import open_request
+
+        with open_request(request, timeout=60, context=context) as response:
             body = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", "replace")[:300]
         print(f"Error: enrollment 失败: HTTP {error.code} {detail}", file=sys.stderr)
-        return 4
+        from gms_agent.client import _http_exit_code
+
+        return _http_exit_code(error.code)
     except (urllib.error.URLError, OSError, ValueError) as error:
         print(f"Error: enrollment 失败: {error}", file=sys.stderr)
         return 6
@@ -2006,7 +2013,7 @@ def cmd_enroll(args: argparse.Namespace) -> int:
         written = write_enrollment_token(token, profile=profile)
     except OSError as error:
         print(f"Error: token 写盘失败（配对码已消费，请重新生成）: {error}", file=sys.stderr)
-        return 8
+        return 7
     for path in written:
         print(f"Agent token enrolled (0600): {path}")
     if scopes:
@@ -2020,7 +2027,7 @@ def cmd_enroll(args: argparse.Namespace) -> int:
             "或用 --profile 指定目标。",
             file=sys.stderr,
         )
-        return 8
+        return 7
     return 0
 
 

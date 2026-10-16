@@ -220,7 +220,7 @@ ALL_TOOLS: list[dict[str, Any]] = [
                         "enum": ["online", "fastboot", "any"],
                         "default": "online",
                     },
-                    "interval": {"type": "integer", "minimum": 1, "maximum": 300},
+                    "interval": {"type": "integer", "minimum": 1, "maximum": 60},
                     "max_wait": {
                         "type": "integer",
                         "minimum": 1,
@@ -766,13 +766,6 @@ ALL_TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": "Device serial, e.g. RK3562GMS7.",
                     },
-                    "worker_id": {
-                        "type": "string",
-                        "description": (
-                            "Owning cluster worker (optional; ambiguity "
-                            "fails instead of guessing)."
-                        ),
-                    },
                     "command": {
                         "type": "string",
                         "description": (
@@ -809,13 +802,6 @@ ALL_TOOLS: list[dict[str, Any]] = [
                     "device": {
                         "type": "string",
                         "description": "Device serial, e.g. RK3562GMS7.",
-                    },
-                    "worker_id": {
-                        "type": "string",
-                        "description": (
-                            "Owning cluster worker (optional; ambiguity "
-                            "fails instead of guessing)."
-                        ),
                     },
                     "args": {
                         "anyOf": [
@@ -881,13 +867,6 @@ ALL_TOOLS: list[dict[str, Any]] = [
                     "device": {
                         "type": "string",
                         "description": "Device serial, e.g. RK3562GMS7.",
-                    },
-                    "worker_id": {
-                        "type": "string",
-                        "description": (
-                            "Owning cluster worker (optional; ambiguity "
-                            "fails instead of guessing)."
-                        ),
                     },
                     "command": {
                         "type": "string",

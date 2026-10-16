@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 import os
 import stat
+import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -13,6 +15,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from foundation.config import settings
+from foundation.key_cache import cached_key, key_file_fingerprint
 from foundation.runtime_settings import is_production_environment
 
 
@@ -20,6 +23,22 @@ logger = logging.getLogger(__name__)
 
 _CONCURRENT_KEY_READ_ATTEMPTS = 50
 _CONCURRENT_KEY_READ_DELAY_SECONDS = 0.01
+
+# File identity, timestamps and permissions invalidate keys after rotation.
+_KEY_CACHE: dict[str, tuple[object, bytes]] = {}
+_KEY_CACHE_LOCK = threading.Lock()
+
+
+def _key_file_fingerprint(path: Path) -> tuple[int, ...] | None:
+    return key_file_fingerprint(path)
+
+
+def _cached_key(
+    cache_key: str,
+    fingerprint: Callable[[], object],
+    load: Callable[[], bytes],
+) -> bytes:
+    return cached_key(_KEY_CACHE, _KEY_CACHE_LOCK, cache_key, fingerprint, load)
 
 
 def _production() -> bool:
@@ -78,9 +97,21 @@ def _write_all(descriptor: int, payload: bytes) -> None:
 def _load_key() -> bytes:
     injected = os.getenv("GMS_SECRET_KEY", "").strip()
     if injected:
-        return _validate_key(injected.encode("ascii"))
+        return _cached_key(
+            "env:GMS_SECRET_KEY",
+            lambda: injected,
+            lambda: _validate_key(injected.encode("ascii")),
+        )
 
     path = _key_path()
+    return _cached_key(
+        f"file:{path}",
+        lambda: _key_file_fingerprint(path),
+        lambda: _load_key_from_file(path),
+    )
+
+
+def _load_key_from_file(path: Path) -> bytes:
     legacy_path = settings.data_root / "secrets/master.key"
     canonical_path = settings.project_root / "configs/secrets/master.key"
     if path == legacy_path and not canonical_path.exists():

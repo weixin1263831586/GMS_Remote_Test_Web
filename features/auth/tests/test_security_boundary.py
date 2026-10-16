@@ -154,7 +154,9 @@ class SecurityBoundaryTests(SecurityBoundaryFixtureTests):
                 page = self.client.get(path + "/review")
                 self.assertEqual(page.status_code, 200)
                 self.assertIn('id="review-login-form"', page.text)
-                self.assertIn('value="gms"', page.text)
+                # 公开审批壳不预填平台账号名，只给格式提示占位符。
+                self.assertIn('placeholder="平台用户名或 SSH用户@客户端IP"', page.text)
+                self.assertNotIn('value="gms"', page.text)
                 self.assertNotIn('"sha256":', page.text)
                 self.assertEqual(self.client.get(path).status_code, 401)
                 self.assertEqual(self.client.post(path + "/approve").status_code, 401)

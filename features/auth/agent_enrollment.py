@@ -68,6 +68,8 @@ class AgentTokenEnrollmentMixin:
             raise ValueError("ttl_minutes 必须是 1–30 的整数") from None
         if not 1 <= ttl_minutes <= 30:
             raise ValueError("ttl_minutes 必须在 1–30 分钟之间")
+        if expires_days is not None and not 1 <= int(expires_days) <= 3650:
+            raise ValueError("expires_days 必须介于 1 和 3650 之间")
         code = "-".join(secrets.token_hex(3).upper() for _ in range(3))
         now = _utcnow()
         expires_at = now + timedelta(minutes=ttl_minutes)

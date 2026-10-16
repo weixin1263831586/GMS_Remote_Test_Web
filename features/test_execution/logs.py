@@ -298,36 +298,6 @@ class TestLogsManager:
                 'error': str(e)
             }
 
-    def clean_old_logs(self, days: int = 7) -> dict[str, Any]:
-        """清理旧日志"""
-        cleaned = 0
-        failed = 0
-        total_size = 0
-        cutoff_time = datetime.now().timestamp() - (days * 86400)
-
-        for base_dir in self.log_dirs:
-            base_path = Path(base_dir)
-            if not base_path.exists():
-                continue
-
-            for log_file in base_path.rglob('*.log'):
-                try:
-                    st = log_file.stat()
-                    if st.st_mtime < cutoff_time:
-                        total_size += st.st_size
-                        log_file.unlink()
-                        cleaned += 1
-                except Exception as exc:
-                    failed += 1
-                    logger.warning("Failed to clean old log %s: %s", log_file, exc)
-
-        return {
-            'success': True,
-            'cleaned_files': cleaned,
-            'failed_files': failed,
-            'freed_space_mb': round(total_size / (1024 * 1024), 2)
-        }
-
 
 # 全局实例
 test_logs_manager = TestLogsManager()

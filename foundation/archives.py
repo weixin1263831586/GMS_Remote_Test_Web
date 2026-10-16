@@ -28,6 +28,10 @@ ARCHIVE_EXTENSIONS = (
 UPLOAD_ARCHIVE_EXTENSIONS = (*ARCHIVE_EXTENSIONS, '.rar', '.7z')
 _SANITIZE_FILENAME_RE = re.compile(r'[^\w\-_.\[\]]')
 _SANITIZE_DIRNAME_RE = re.compile(r'[^A-Za-z0-9._-]+')
+# 7z prints POSIX symlink entries either with a "Symbolic Link = <target>"
+# field (7-Zip >= 21) or with a mode string like "lrwxrwxrwx" inside the
+# Attributes column ("A_ lrwxrwxrwx").
+_POSIX_SYMLINK_MODE_RE = re.compile(r'\bl[-rwxstST]{9}(?=\s|$)')
 MAX_ARCHIVE_FILES = 10_000
 MAX_ARCHIVE_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
 
@@ -215,6 +219,41 @@ def enforce_post_extraction_safety(base_dir: str) -> None:
                 )
 
 
+def _list_7z_members(archive_path: str, timeout: int) -> list[tuple[str, int, bool]]:
+    """Parse ``7z l -slt`` output into (path, size, is_symlink) triples."""
+    completed = subprocess.run(
+        ['7z', 'l', '-slt', archive_path],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    details = completed.stdout.partition('----------')[2]
+    members: list[tuple[str, int, bool]] = []
+    member_name = ''
+    member_size = 0
+    member_is_symlink = False
+    for line in [*details.splitlines(), 'Path = ']:
+        if line.startswith('Path = '):
+            if member_name:
+                members.append((member_name, member_size, member_is_symlink))
+            member_name = line.removeprefix('Path = ').strip()
+            member_size = 0
+            member_is_symlink = False
+        elif line.startswith('Size = '):
+            try:
+                member_size = max(0, int(line.removeprefix('Size = ').strip()))
+            except ValueError:
+                member_size = 0
+        elif line.startswith(('Symbolic Link = ', 'Hard Link = ')):
+            if line.split(' = ', 1)[1].strip():
+                member_is_symlink = True
+        elif line.startswith('Attributes = '):
+            if _POSIX_SYMLINK_MODE_RE.search(line.removeprefix('Attributes = ')):
+                member_is_symlink = True
+    return members
+
+
 def preflight_system_archive(
     archive_path: str,
     target_dir: str,
@@ -222,47 +261,20 @@ def preflight_system_archive(
     *,
     timeout: int = 120,
 ) -> None:
-    """Validate RAR/7z member paths before the external tool writes files."""
-    if command == 'rar':
-        completed = subprocess.run(
-            [command, 'lb', archive_path],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        members = [(line.strip(), 0) for line in completed.stdout.splitlines()]
-    else:
-        completed = subprocess.run(
-            [command, 'l', '-slt', archive_path],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        details = completed.stdout.partition('----------')[2]
-        members = []
-        member_name = ''
-        member_size = 0
-        for line in [*details.splitlines(), 'Path = ']:
-            if line.startswith('Path = '):
-                if member_name:
-                    members.append((member_name, member_size))
-                member_name = line.removeprefix('Path = ').strip()
-                member_size = 0
-            elif line.startswith('Size = '):
-                try:
-                    member_size = max(0, int(line.removeprefix('Size = ').strip()))
-                except ValueError:
-                    member_size = 0
+    """Reject unsafe paths and links before the external tool writes files."""
+    if command == 'rar' and not shutil.which('7z'):
+        raise ValueError('RAR 安全预检需要 7z 工具')
+    members = _list_7z_members(archive_path, timeout)
 
     file_count = 0
     total_bytes = 0
-    for member_name, member_size in members:
+    for member_name, member_size, member_is_symlink in members:
         if not member_name:
             continue
         normalized = member_name.replace('\\', '/')
         safe_extract_member_path(target_dir, normalized)
+        if member_is_symlink:
+            raise ValueError(f'压缩包包含不安全符号链接: {normalized}')
         file_count += 1
         total_bytes += member_size
         if file_count > MAX_ARCHIVE_FILES:

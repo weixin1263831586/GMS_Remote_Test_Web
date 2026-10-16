@@ -1,4 +1,4 @@
-"""Approval pages prompt for admin login and resume reads without approving."""
+"""Approval login accepts the resource owner and distinguishes missing requests."""
 
 import json
 import time
@@ -7,11 +7,22 @@ from tests.runtime_ui.harness import RuntimeUiHarness
 
 
 class ReviewLoginBrowserTests(RuntimeUiHarness):
-    def test_admin_login_from_anonymous_and_wrong_account_resumes_original_request(self):
+    def test_owner_login_from_anonymous_and_wrong_account_resumes_original_request(self):
         for kind in ("deployments", "debug-sessions"):
             for initial_status in (401, 403, 404):
                 with self.subTest(kind=kind, initial_status=initial_status):
                     page = self.new_page()
+                    role = {401: "admin", 403: "user", 404: "device_operator"}[initial_status]
+                    username = "ui-admin" if role == "admin" else f"ui-owner-{kind}-{initial_status}"
+                    if role != "admin":
+                        elevated = page.request.post(self.base_url + "/api/auth/elevate", data={
+                            "username": "ui-admin", "password": "UiSmokeAdmin-2026!",
+                        })
+                        self.assertTrue(elevated.ok, elevated.text())
+                        created = page.request.post(self.base_url + "/api/auth/users", data={
+                            "username": username, "password": "UiSmokeAdmin-2026!", "role": role,
+                        })
+                        self.assertTrue(created.ok, created.text())
                     if initial_status == 401:
                         page.context.clear_cookies()
                     path = "/api/devices/" + kind + "/" + "a" * 32
@@ -55,7 +66,7 @@ class ReviewLoginBrowserTests(RuntimeUiHarness):
                         page.goto(self.base_url + path + "/review")
                         modal = page.locator("#review-login-modal")
                         modal.wait_for(state="visible")
-                        self.assertEqual(page.locator("#review-login-username").input_value(), "gms")
+                        self.assertEqual(page.locator("#review-login-username").input_value(), "")
                         self.assertEqual(state["approvals"], 0)
                         self.assertEqual(state["logins"], 0)
                         page.keyboard.press("Escape")
@@ -65,8 +76,8 @@ class ReviewLoginBrowserTests(RuntimeUiHarness):
                         # Let ModalManager finish its scheduled initial focus before typing.
                         page.evaluate("() => new Promise(resolve => requestAnimationFrame(resolve))")
                         # Only isolated test credentials are entered in this test browser.
-                        page.locator("#review-login-username").fill("ui-admin")
-                        self.assertEqual(page.locator("#review-login-username").input_value(), "ui-admin")
+                        page.locator("#review-login-username").fill(username)
+                        self.assertEqual(page.locator("#review-login-username").input_value(), username)
                         if kind == "deployments" and initial_status == 401:
                             page.locator("#review-login-password").fill("invalid-fixture-password")
                             page.locator("#review-login-submit").click()
@@ -82,6 +93,8 @@ class ReviewLoginBrowserTests(RuntimeUiHarness):
                         page.wait_for_function("!document.getElementById('approve').disabled")
                         self.assertEqual(page.url, self.base_url + path + "/review")
                         self.assertEqual(page.locator("#review-login-password").input_value(), "")
+                        self.assertIsNone(state["switch_target"])
+                        self.assertEqual(page.request.get(self.base_url + "/api/auth/status").json()["user"]["role"], role)
                         self.assertEqual(state["approvals"], 0)
                         page.locator("#approve").click()
                         page.wait_for_function("document.getElementById('approve').disabled && !document.getElementById('status').textContent.includes('等待批准')")
@@ -89,3 +102,39 @@ class ReviewLoginBrowserTests(RuntimeUiHarness):
                         self.assertEqual(errors, [])
                     finally:
                         page.close()
+
+    def test_successful_login_with_missing_or_other_owner_request_stops_prompting(self):
+        for kind in ("deployments", "debug-sessions"):
+            with self.subTest(kind=kind):
+                page = self.new_page()
+                page.clock.install()
+                path = "/api/devices/" + kind + "/" + "f" * 32
+                reads = []
+
+                def missing(route, _request=None, *, reads=reads):
+                    if route.request.url.endswith("/review"):
+                        route.continue_()
+                        return
+                    reads.append(route.request.method)
+                    route.fulfill(status=404, content_type="application/json", body='{"success":false,"code":"NOT_FOUND"}')
+
+                page.route("**" + path + "**", missing)
+                try:
+                    page.goto(self.base_url + path + "/review")
+                    modal = page.locator("#review-login-modal")
+                    modal.wait_for(state="visible")
+                    page.clock.run_for(100)
+                    page.locator("#review-login-username").fill("ui-admin")
+                    page.locator("#review-login-password").fill("UiSmokeAdmin-2026!")
+                    page.locator("#review-login-submit").click()
+                    page.wait_for_function("document.getElementById('status').textContent.includes('ui-admin 已登录成功')")
+                    modal.wait_for(state="hidden")
+                    self.assertEqual(page.locator("#review-login-password").input_value(), "")
+                    self.assertTrue(page.locator("#approve").is_disabled())
+                    page.clock.fast_forward(60000)
+                    self.assertEqual(reads, ["GET", "GET"])
+                    self.assertFalse(modal.is_visible())
+                    page.locator("#review-login-open").click()
+                    modal.wait_for(state="visible")
+                finally:
+                    page.close()

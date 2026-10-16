@@ -204,8 +204,8 @@ async function checkRouting(targetHost) {
                         <div class="ping-warning" style="border:1px solid var(--warning-color,#e6a700);padding:12px;border-radius:6px;">
                             <h4>⚠️ 无法执行真实连通性检测</h4>
                             <p>Ping 服务不可用，本次仅比较了两个地址是否处于同一 /24 网段。</p>
-                            <p><strong>测试主机:</strong> ${testHostIp}（网段 ${result.test_network}）</p>
-                            <p><strong>客户端:</strong> ${clientIp}（网段 ${result.client_network}）</p>
+                            <p><strong>测试主机:</strong> ${escapeHtml(testHostIp)}（网段 ${escapeHtml(result.test_network)}）</p>
+                            <p><strong>客户端:</strong> ${escapeHtml(clientIp)}（网段 ${escapeHtml(result.client_network)}）</p>
                             <p>状态: ${result.same_network
                                 ? '同一网段（不代表主机实际可达）'
                                 : '不同网段（需要配置路由才能互通）'}</p>
@@ -218,12 +218,12 @@ async function checkRouting(targetHost) {
                     pingResult.innerHTML = `
                         <div class="ping-success">
                             <h4>✅ 连通性测试通过</h4>
-                            <p><strong>测试主机:</strong> ${result.test_host_ip || testHostIp}</p>
-                            <p><strong>测试主机网段:</strong> ${result.test_network || 'N/A'}</p>
-                            <p><strong>客户端:</strong> ${result.client_ip || clientIp}</p>
-                            <p><strong>客户端网段:</strong> ${result.client_network || 'N/A'}</p>
+                            <p><strong>测试主机:</strong> ${escapeHtml(result.test_host_ip || testHostIp)}</p>
+                            <p><strong>测试主机网段:</strong> ${escapeHtml(result.test_network || 'N/A')}</p>
+                            <p><strong>客户端:</strong> ${escapeHtml(result.client_ip || clientIp)}</p>
+                            <p><strong>客户端网段:</strong> ${escapeHtml(result.client_network || 'N/A')}</p>
                             <p>状态: <span class="status-success">${result.same_network ? '同一网段 - 可连通' : '不同网段但可连通'}</span></p>
-                            <p>延迟: ${result.latency || 'N/A'}</p>
+                            <p>延迟: ${escapeHtml(result.latency || 'N/A')}</p>
                             <p>✅ 网络配置正常，无需添加路由</p>
                         </div>
                     `;
@@ -231,10 +231,10 @@ async function checkRouting(targetHost) {
                     pingResult.innerHTML = `
                         <div class="ping-failure">
                             <h4>❌ 连通性测试失败</h4>
-                            <p><strong>测试主机:</strong> ${result.test_host_ip || testHostIp}</p>
-                            <p><strong>测试主机网段:</strong> ${result.test_network || 'N/A'}</p>
-                            <p><strong>客户端:</strong> ${result.client_ip || clientIp}</p>
-                            <p><strong>客户端网段:</strong> ${result.client_network || 'N/A'}</p>
+                            <p><strong>测试主机:</strong> ${escapeHtml(result.test_host_ip || testHostIp)}</p>
+                            <p><strong>测试主机网段:</strong> ${escapeHtml(result.test_network || 'N/A')}</p>
+                            <p><strong>客户端:</strong> ${escapeHtml(result.client_ip || clientIp)}</p>
+                            <p><strong>客户端网段:</strong> ${escapeHtml(result.client_network || 'N/A')}</p>
                             <p>状态: <span class="status-error">不同网段 - 不可连通</span></p>
                             <p><strong>可能原因:</strong></p>
                             <ul>
@@ -244,19 +244,19 @@ async function checkRouting(targetHost) {
                             </ul>
                             <p><strong>⚠️ 重要提示 - 请仔细阅读:</strong></p>
                             <div class="route-warning">
-                                <p>✅ 以下命令应该在您的<strong>测试主机</strong>（${testHostIp}）上执行</p>
+                                <p>✅ 以下命令应该在您的<strong>测试主机</strong>（${escapeHtml(testHostIp)}）上执行</p>
                                 <p>❌ 不要在客户端主机（当前浏览器所在电脑）上执行这些命令</p>
                                 <p><strong>🎯 路由目的：</strong>让测试主机能够访问客户端主机网段</p>
                             </div>
                             <p><strong>建议添加的路由命令:</strong></p>
                             <div class="route-commands">
                                 <h5>Linux:</h5>
-                                <pre id="linux-route-command">${result.route_commands?.linux?.[2] || '无'}</pre>
+                                <pre id="linux-route-command">${escapeHtml(result.route_commands?.linux?.[2] || '无')}</pre>
                                 <h5>Windows:</h5>
-                                <pre id="windows-route-command">${result.route_commands?.windows?.[2] || '无'}</pre>
+                                <pre id="windows-route-command">${escapeHtml(result.route_commands?.windows?.[2] || '无')}</pre>
                             </div>
                             <div class="route-check-terminal-actions">
-                                <button id="open-terminal-btn" class="btn-terminal" data-command="${result.route_commands?.linux?.[2] || ''}">
+                                <button id="open-terminal-btn" class="btn-terminal" data-command="${escapeHtml(result.route_commands?.linux?.[2] || '')}">
                                     🐧 打开主机终端添加路由
                                 </button>
                             </div>

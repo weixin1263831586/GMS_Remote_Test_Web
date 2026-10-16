@@ -104,9 +104,11 @@ class GerritDashboardStatsTests(unittest.TestCase):
         process.communicate = AsyncMock(return_value=(b"200", b""))
         writer = Mock()
         writer.wait_closed = AsyncMock()
-        hostile_host = "gerrit.example;touch-pwn"
+        hostile_host = "gerrit.example"
+        from foundation.outbound import ResolvedOutboundTarget
+        target = ResolvedOutboundTarget("https://gerrit.example/", hostile_host, 443, ("93.184.216.34",))
 
-        with patch.object(
+        with patch.object(api, "resolve_gerrit_target", return_value=target), patch.object(
             api,
             "_dashboard_config_for_request",
             return_value={"ssh_host": hostile_host, "ssh_port": 29418},
@@ -123,12 +125,15 @@ class GerritDashboardStatsTests(unittest.TestCase):
 
         commands = [call.args for call in create_process.call_args_list]
         self.assertEqual(commands[0][:7], (
-            "ping", "-c", "2", "-W", "2", "--", hostile_host
+            "ping", "-c", "2", "-W", "2", "--", "93.184.216.34"
         ))
         self.assertEqual(commands[1][0], "curl")
         self.assertEqual(commands[1][-1], f"https://{hostile_host}/")
         self.assertNotIn("bash", {command[0] for command in commands})
-        open_connection.assert_awaited_once_with(hostile_host, 29418)
+        open_connection.assert_awaited_once_with("93.184.216.34", 29418)
+        self.assertNotIn("-sk", commands[1])
+        self.assertIn("--resolve", commands[1])
+        self.assertEqual(result["data"]["ping_raw"], "")
         self.assertTrue(result["data"]["ssh_port_ok"])
 
 

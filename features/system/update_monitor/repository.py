@@ -20,6 +20,7 @@ from .parsers import *
 
 
 def init_db(conn: sqlite3.Connection) -> None:
+    conn.execute('BEGIN IMMEDIATE')
     conn.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
     conn.execute(
         """

@@ -88,30 +88,9 @@ class RuntimeAgentTests(RuntimeUiHarness):
                 "'#agent-access-scopes .agent-access-scope'))"
                 ".map((input) => input.value)"
             )
-            # AGENT_SCOPES 服务端契约：对象键集合（修复前是 0 个复选框）。
-            # 与 features/auth/constants.py AGENT_SCOPES 保持同步
-            # （ADR 0014：knowledge.read 背景知识只读检索）。
-            self.assertEqual(
-                sorted(scopes),
-                sorted([
-                    "devices.read",
-                    "devices.lease",
-                    "devices.use_leased",
-                    "devices.inventory",
-                    "tests.execute",
-                    "tests.cancel",
-                    "jobs.read",
-                    "reports.read",
-                    "redmine.read",
-                    "artifacts.read_own",
-                    "apk.analyze_own",
-                    "sdk.read",
-                    "knowledge.read",
-                    "build.read",
-                    "build.execute",
-                    "build.cancel",
-                ]),
-            )
+            scope_contract = page.request.get(self.base_url + "/api/auth/agent-scopes")
+            self.assertTrue(scope_contract.ok, scope_contract.text())
+            self.assertEqual(sorted(scopes), sorted(scope_contract.json()["scopes"]))
             self.assertTrue(
                 page.evaluate(
                     "document.querySelector("
@@ -155,7 +134,13 @@ class RuntimeAgentTests(RuntimeUiHarness):
             page.evaluate("switchPage('users')")
             self.close_initial_modals(page)
             page.locator("#agent-access-tab").click()
-            page.wait_for_function("document.querySelectorAll('#agent-access-scopes input').length === 16")
+            scope_contract = page.request.get(self.base_url + "/api/auth/agent-scopes")
+            self.assertTrue(scope_contract.ok, scope_contract.text())
+            expected_scope_count = len(scope_contract.json()["scopes"])
+            page.wait_for_function(
+                "expected => document.querySelectorAll('#agent-access-scopes input').length === expected",
+                arg=expected_scope_count,
+            )
             self.assertEqual(page.locator(".agent-access-table thead th").count(), 7)
             self.assertEqual(page.locator("#agent-access-tokens img").count(), 0)
             self.assertFalse(page.evaluate("Boolean(window.injected)"))

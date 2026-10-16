@@ -594,6 +594,142 @@ class AutomationApiTests(unittest.TestCase):
             self.assertTrue(dry_run['data']['matched'])
             self.assertEqual(dry_run['data']['run_request']['profile_id'], 'p1')
 
+    def test_profile_responses_mask_jenkins_secrets_and_roundtrip(self):
+        """读回表面遮蔽 Jenkins 凭据；"***" 哨兵保存不得覆盖真实值。"""
+        with TemporaryDirectory() as tmp:
+            service = build_service(tmp)
+            with patch.object(automation_api, 'automation_service', service):
+                created = asyncio.run(
+                    automation_api.save_automation_profile(
+                        {
+                            'id': 'p1',
+                            'name': 'Profile 1',
+                            'jenkins': {
+                                'job': 'J1',
+                                'username': 'bot',
+                                'api_token': 'real-token',
+                            },
+                        }
+                    )
+                )
+                self.assertEqual(
+                    created['data']['profile']['jenkins']['api_token'], '***'
+                )
+                listed = asyncio.run(
+                    automation_api.list_automation_profiles(enabled_only=False)
+                )
+                self.assertEqual(
+                    listed['data']['items'][0]['jenkins']['api_token'], '***'
+                )
+                updated = asyncio.run(
+                    automation_api.save_automation_profile(
+                        {
+                            'id': 'p1',
+                            'name': 'Profile 1',
+                            'jenkins': {
+                                'job': 'J1',
+                                'username': 'bot',
+                                'api_token': '***',
+                            },
+                        }
+                    )
+                )
+                self.assertEqual(
+                    updated['data']['profile']['jenkins']['job'], 'J1'
+                )
+                stored = next(
+                    item
+                    for item in service.list_profiles()
+                    if item['id'] == 'p1'
+                )
+                self.assertEqual(stored['jenkins']['api_token'], 'real-token')
+
+
+    def test_preflight_firmware_artifact_roots_are_fail_closed(self):
+        """未配置 firmware_shares.allowed_prefixes 时拒绝固件路径（fail-closed）。"""
+        class Repository:
+            @staticmethod
+            def list_suites():
+                return [{
+                    'worker_id': 'worker-1', 'available': True,
+                    'suite_type': 'CTS', 'suite_version': '17_r1',
+                    'suite_key': 'CTS:17_r1', 'tools_path': '/suite/tools',
+                    'last_scanned_at': '2026-07-13T00:00:00Z',
+                }]
+
+            @staticmethod
+            def get_worker(worker_id):
+                return {'id': worker_id, 'status': 'online'}
+
+            @staticmethod
+            def list_devices(worker_id):
+                return [{
+                    'id': f'{worker_id}:ABC', 'serial': 'ABC', 'state': 'available'
+                }]
+
+        cluster = online_worker_cluster(Repository())
+        with TemporaryDirectory() as tmp:
+            image = Path(tmp) / 'update.img'
+            image.write_bytes(b'firmware')
+            service = AutomationService(
+                store=AutomationStore(Path(tmp) / 'automation.sqlite3'),
+                profiles_path=Path(tmp) / 'profiles.json',
+                cluster_provider=lambda: cluster,
+            )
+            request = {
+                'artifact_path': str(image),
+                'devices': ['ABC'],
+                'test_plan': {
+                    'worker_id': 'worker-1', 'test_type': 'CTS',
+                    'test_module': 'CtsAppSecurityHostTestCases',
+                    'flash': {'mode': 'skip'},
+                },
+            }
+            with patch('foundation.config.config_manager.load_config', return_value={}), self.assertRaisesRegex(
+                ValueError, 'outside the configured firmware roots'
+            ):
+                service.preflight(request)
+            with patch(
+                'foundation.config.config_manager.load_config',
+                return_value={'firmware_shares': {'allowed_prefixes': [tmp]}},
+            ):
+                result = service.preflight(request)
+
+            self.assertTrue(result['ready'])
+
+    def test_profile_ui_roundtrip_saves_masked_listing_verbatim(self):
+        """管理端 UI 把 GET 遮蔽列表原文整体保存，真实凭据不被 "***" 覆盖。"""
+        with TemporaryDirectory() as tmp:
+            service = build_service(tmp)
+            with patch.object(automation_api, 'automation_service', service):
+                asyncio.run(automation_api.save_automation_profile({
+                    'id': 'p1',
+                    'name': 'Profile 1',
+                    'jenkins': {
+                        'job': 'J1', 'username': 'bot', 'api_token': 'real-token',
+                    },
+                    'build': {
+                        'provider': 'ssh', 'server_password': 'real-password',
+                    },
+                }))
+                listed = asyncio.run(
+                    automation_api.list_automation_profiles(enabled_only=False)
+                )
+                # UI 拿到的就是这份遮蔽数据，不重敲字段、原样整体回存。
+                masked_profile = listed['data']['items'][0]
+                self.assertEqual(masked_profile['jenkins']['api_token'], '***')
+                self.assertEqual(masked_profile['build']['server_password'], '***')
+                saved = asyncio.run(
+                    automation_api.save_automation_profile(masked_profile)
+                )
+
+            self.assertTrue(saved['success'])
+            stored = next(
+                item for item in service.list_profiles() if item['id'] == 'p1'
+            )
+            self.assertEqual(stored['jenkins']['api_token'], 'real-token')
+            self.assertEqual(stored['build']['server_password'], 'real-password')
+
 
 class HumanOnlyRunSurfaceTests(unittest.TestCase):
     """ADR 0012 验收：ATS run 表面对 Agent/机器 principal 关闭。

@@ -5,7 +5,6 @@ import logging
 import socket
 import subprocess
 import time
-from urllib.parse import urlparse
 
 
 logger = logging.getLogger(__name__)
@@ -78,17 +77,6 @@ def get_client_ip(request) -> str:
     if real_ip:
         return real_ip
     return _valid_ip(peer) or peer
-
-
-def sanitize_url(url: str) -> str:
-    if not url:
-        return url
-    for prefix in ('view-source://', 'view-source:', 'about://', 'about:'):
-        if url.startswith(prefix):
-            url = url[len(prefix) :]
-            break
-    parsed = urlparse(url)
-    return url if parsed.scheme else f'https://{url}'
 
 
 def parse_host_address(host: str) -> tuple[str | None, str]:

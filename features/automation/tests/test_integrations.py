@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -444,3 +445,164 @@ class HttpAutomationExecutorTests(unittest.TestCase):
         self.assertEqual(session.calls[0][2]["json"]["worker_id"], "worker-246")
         self.assertIn("/api/cluster/jobs/job-1", session.calls[1][1])
         self.assertIn("/api/cluster/jobs/job-1/cancel", session.calls[2][1])
+
+    def test_controller_artifact_roots_fail_closed_without_configured_prefixes(self):
+        from features.automation.executors import (
+            _controller_artifact_roots,
+            _validated_controller_artifact,
+        )
+        from foundation.config import settings
+
+        with TemporaryDirectory() as tmp:
+            controller_data = Path(tmp) / "controller-data"
+            share = Path(tmp) / "firmware-share"
+            share.mkdir()
+            image = share / "update.img"
+            image.write_bytes(b"firmware")
+
+            with patch("foundation.config.settings", replace(settings, data_root=controller_data)):
+                # 未配置 firmware_shares.allowed_prefixes：不再回退到
+                # /home/、/data/、/mnt/ 等宽允许根，仅保留工件暂存目录。
+                for empty_config in ({}, {"firmware_shares": {"allowed_prefixes": []}}):
+                    with patch(
+                        "foundation.config.config_manager.load_config",
+                        return_value=empty_config,
+                    ):
+                        self.assertEqual(
+                            _controller_artifact_roots(),
+                            [(controller_data / "automation" / "artifact-stage").resolve()],
+                        )
+                        with self.assertRaisesRegex(
+                            ValueError, "outside the configured Controller roots"
+                        ):
+                            _validated_controller_artifact(str(image))
+
+                # 配置存在（含 legacy 平铺键）时按白名单收容。
+                for config in (
+                    {"firmware_shares": {"allowed_prefixes": [str(share)]}},
+                    {"firmware_share_allowed_prefixes": [str(share)]},
+                ):
+                    with patch(
+                        "foundation.config.config_manager.load_config",
+                        return_value=config,
+                    ):
+                        roots = _controller_artifact_roots()
+                        self.assertIn((controller_data / "automation" / "artifact-stage").resolve(), roots)
+                        self.assertIn(share.resolve(), roots)
+                        self.assertEqual(
+                            _validated_controller_artifact(str(image)),
+                            image.resolve(),
+                        )
+
+    def test_flash_is_rejected_without_configured_firmware_roots(self):
+        from features.automation.executors import HttpAutomationExecutor
+
+        with TemporaryDirectory() as tmp:
+            image = Path(tmp) / "update.img"
+            image.write_bytes(b"firmware")
+            executor = HttpAutomationExecutor(
+                base_url="http://127.0.0.1:5001", session=FakeSession()
+            )
+            run = {
+                "id": "run_fail_closed",
+                "artifact_path": str(image),
+                "worker_id": "worker-246",
+                "device_reservation_id": "reservation-1",
+                "devices_json": '[{"serial":"worker-246:ABC123"}]',
+                "test_plan_json": '{"worker_id":"worker-246","flash":{"mode":"firmware"}}',
+            }
+            cluster = SimpleNamespace(
+                repository=SimpleNamespace(
+                    renew_reservation=lambda _reservation_id: True
+                )
+            )
+            with patch(
+                "features.cluster.get_cluster_service", return_value=cluster
+            ), patch(
+                "foundation.config.config_manager.load_config", return_value={},
+            ):
+                result = executor.flash(run)
+
+            self.assertFalse(result["success"])
+            self.assertIn("outside the configured Controller roots", result["error"])
+
+    def test_stage_ssh_build_artifact_streams_through_public_build_api(self):
+        from contextlib import contextmanager
+        from io import BytesIO
+
+        from features.automation.executors import HttpAutomationExecutor
+        from foundation.config import settings
+
+        payload = b"firmware-image-bytes"
+        opened = {}
+
+        @contextmanager
+        def fake_open(job_id, path, *, automation_run_id=None):
+            opened["args"] = (job_id, path, automation_run_id)
+            yield BytesIO(payload), len(payload)
+
+        with TemporaryDirectory() as tmp, patch(
+            "features.build.open_build_artifact", fake_open
+        ), patch("foundation.config.settings", replace(settings, data_root=Path(tmp))):
+            executor = HttpAutomationExecutor()
+            result = executor._stage_ssh_build_artifact(
+                {"id": "run_ssh", "jenkins_build_number": "12"}, "out/update.img"
+            )
+
+            self.assertTrue(result["success"])
+            # 公共 API 必须收到归属校验参数（不再伸入 build 私有内部）。
+            self.assertEqual(opened["args"], ("12", "out/update.img", "run_ssh"))
+            staged = Path(result["firmware_path"])
+            self.assertTrue(staged.is_file())
+            self.assertEqual(staged.read_bytes(), payload)
+            self.assertEqual(result["size_bytes"], len(payload))
+            self.assertEqual(result["cleanup_path"], str(staged))
+            self.assertEqual(staged.parent.parent.name, "artifact-stage")
+            self.assertEqual(staged.parent.name, "run_ssh")
+
+    def test_stage_ssh_build_artifact_maps_public_api_errors(self):
+        from contextlib import contextmanager
+
+        from features.automation.executors import HttpAutomationExecutor
+        from features.build import BuildExecutionError
+
+        executor = HttpAutomationExecutor()
+
+        missing = executor._stage_ssh_build_artifact(
+            {"id": "run_ssh"}, "out/update.img"
+        )
+        self.assertFalse(missing["success"])
+        self.assertIn("job id is missing", missing["error"])
+
+        @contextmanager
+        def refuse(_job_id, _path, *, automation_run_id=None):
+            raise BuildExecutionError("Build job belongs to another automation run")
+            yield  # pragma: no cover
+
+        with patch("features.build.open_build_artifact", refuse):
+            denied = executor._stage_ssh_build_artifact(
+                {"id": "run_ssh", "jenkins_build_number": "12"}, "out/update.img"
+            )
+        self.assertFalse(denied["success"])
+        self.assertIn("another automation run", denied["error"])
+
+    def test_stage_ssh_build_artifact_enforces_size_limit(self):
+        import os
+        from contextlib import contextmanager
+        from io import BytesIO
+
+        from features.automation.executors import HttpAutomationExecutor
+
+        @contextmanager
+        def fake_open(_job_id, _path, *, automation_run_id=None):
+            yield BytesIO(b"toolarge"), len(b"toolarge")
+
+        with patch("features.build.open_build_artifact", fake_open), patch.dict(
+            os.environ, {"GMS_AUTOMATION_ARTIFACT_MAX_BYTES": "4"}
+        ):
+            result = HttpAutomationExecutor()._stage_ssh_build_artifact(
+                {"id": "run_ssh", "jenkins_build_number": "12"}, "out/update.img"
+            )
+
+        self.assertFalse(result["success"])
+        self.assertIn("exceeds the ATS size limit", result["error"])

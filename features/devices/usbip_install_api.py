@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from features.auth import require_permission_when_auth_required
+from features.auth import require_elevated_admin
 from features.users import get_client_display_id_from_request
 from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response
@@ -20,6 +20,7 @@ from .usbip import (
     find_device_host_password,
     usbip_manager,
 )
+from .usbip_access import enforce_usbip_host_access
 
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ def resolve_install_host(request: Request, config: dict, client_id: str) -> str:
 async def install_usbipd(
     request: Request,
     device_host: str | None = None,
-    _operator=Depends(require_permission_when_auth_required("devices.lease")),
+    _operator=Depends(require_elevated_admin),
 ):
     """Install usbipd on an authorized Windows host."""
 
@@ -50,6 +51,9 @@ async def install_usbipd(
         config = runtime.config_manager.load_config()
         client_id = runtime.get_client_id_from_request(request)
         selected_host = str(device_host or "").strip()
+        enforce_usbip_host_access(
+            request, selected_host, resolve_install_host(request, config, client_id),
+        )
         if not selected_host:
             tunnel_host, _ = runtime.resolve_tailscale_device_host(
                 request,
@@ -104,6 +108,10 @@ async def install_usbipd(
             return JSONResponse(
                 content=usbip_manager.install_usbipd(win_ssh, config)
             )
+    except HTTPException:
+        raise
+    except ApiError as exc:
+        return exc.to_response()
     except Exception:
         message = record_internal_error(
             logger, "安装 usbipd", "Error installing usbipd"

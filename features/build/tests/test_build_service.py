@@ -493,3 +493,29 @@ def test_delete_build_history_only_allows_terminal_jobs(tmp_path: Path):
         service.delete_job("running")
 
 
+
+
+def test_open_build_artifact_public_surface_routes_through_active_service(monkeypatch, tmp_path: Path):
+    """features.build.open_build_artifact 是跨特性公共面：必须走当前生效的
+    api.build_service，且校验参数原样透传（automation 归属 + 路径）。"""
+    import features.build as build_surface
+    from features.build import api as build_api
+
+    class RecordingService:
+        def open_build_artifact(self, job_id, path, *, automation_run_id=None):
+            from contextlib import contextmanager
+
+            @contextmanager
+            def artifact():
+                yield (f"stream:{job_id}:{path}", 7)
+
+            return artifact()
+
+    recorded = RecordingService()
+    monkeypatch.setattr(build_api, "build_service", recorded)
+
+    with build_surface.open_build_artifact(
+        "build_1", "out/update.img", automation_run_id="ats_1"
+    ) as (stream, size):
+        assert stream == "stream:build_1:out/update.img"
+        assert size == 7

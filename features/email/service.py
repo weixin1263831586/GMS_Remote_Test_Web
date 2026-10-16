@@ -65,6 +65,19 @@ def _load_email_config(manager) -> dict[str, Any]:
     return dashboard_cfg.get("email") or {}
 
 
+def _email_password(email_cfg: dict[str, Any]) -> str:
+    """SMTP 密码优先取密文解密；遗留明文仅作旧部署兼容读取。"""
+    encrypted = str(email_cfg.get("encrypted_password") or "").strip()
+    if encrypted:
+        try:
+            from foundation.secrets import decrypt_secret
+
+            return decrypt_secret(encrypted).strip()
+        except Exception:
+            return ""
+    return str(email_cfg.get("password") or "").strip()
+
+
 def _resolve_allowed_attachment(path: str, allowed_roots: list[str | os.PathLike[str]]) -> Path | None:
     """Return a real attachment path only if it lives under an allowed root."""
     if not path:
@@ -119,7 +132,7 @@ def send_email(
 
     smtp_port = int(email_cfg.get("smtp_port") or 465)
     username = str(email_cfg.get("username") or "").strip()
-    password = str(email_cfg.get("password") or "").strip()
+    password = _email_password(email_cfg)
     is_qiye_163 = smtp_host.lower().endswith("qiye.163.com")
     # 163 企业邮要求发件人与登录账号一致；缺省（default_from）或与账号不符时，强制对齐
     if is_qiye_163 and username and (not from_addr or from_addr == default_from or from_addr != username):

@@ -6,6 +6,33 @@ from tests.runtime_ui.harness import REPO_ROOT, RuntimeUiHarness, expect
 
 
 class RuntimeNavigationTests(RuntimeUiHarness):
+    def test_repeated_category_initialization_binds_each_node_once(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate("""() => {
+                const section = document.createElement('section');
+                section.className = 'category-section';
+                const calls = [];
+                const original = section.addEventListener.bind(section);
+                section.addEventListener = (type, listener, options) => {
+                    calls.push(type);
+                    original(type, listener, options);
+                };
+                document.body.append(section);
+                initDragAndDrop();
+                initDragAndDrop();
+                switchPage('websites', null);
+                switchPage('test', null);
+                switchPage('websites', null);
+                initDragAndDrop();
+                section.remove();
+                return calls;
+            }""")
+            self.assertEqual(sorted(result), ['dragend', 'dragover', 'dragstart', 'drop'])
+        finally:
+            page.close()
+
     def test_sidebar_pages_switch_without_runtime_errors(self):
         page = self.new_page()
         page_errors = []

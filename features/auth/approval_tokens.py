@@ -154,6 +154,41 @@ class ApprovalTokenServiceMixin:
             "ttl_seconds": ttl,
         }
 
+    def validate_approval_token(
+        self, token: str, *, tool: str, device: str, command: str
+    ) -> bool:
+        """Check a one-shot approval WITHOUT consuming it.
+
+        Same binding rules as ``consume_approval_token`` (tool + canonical
+        device list + TTL + command hash), but never sets ``used_at``. Used
+        for preflight rejection (e.g. before an agent burn starts any remote
+        write); the single consuming check still happens at the destructive
+        action.
+        """
+        if not token:
+            return False
+        token_hash = self.hash_token(token)
+        now = _utcnow()
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT command_hash, expires_at, used_at
+                FROM platform_approval_tokens
+                WHERE token_hash = ? AND tool = ? AND device = ?
+                """,
+                (token_hash, str(tool or "").strip(), str(device or "").strip()),
+            ).fetchone()
+        if not row or row["used_at"]:
+            return False
+        try:
+            if _from_iso(row["expires_at"]) <= now:
+                return False
+        except ValueError:
+            return False
+        return hmac.compare_digest(
+            str(row["command_hash"]), self.command_hash(command)
+        )
+
     def consume_approval_token(
         self, token: str, *, tool: str, device: str, command: str
     ) -> bool:

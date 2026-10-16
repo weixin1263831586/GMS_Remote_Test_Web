@@ -11,12 +11,14 @@ import re
 import stat
 import threading
 import urllib.parse
+from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from foundation.key_cache import cached_key, key_file_fingerprint
 from foundation.redaction import redact_sensitive_text
 from foundation.runtime_settings import is_production_environment
 
@@ -35,6 +37,22 @@ SENSITIVE_KEYWORDS = (
 )
 
 _WORD_BOUNDARY_PATTERN = re.compile(r'(?:' + '|'.join(re.escape(kw) for kw in SENSITIVE_KEYWORDS) + r')', re.IGNORECASE)
+
+# Share the same rotation and permission checks as encrypted configuration.
+_AUDIT_KEY_CACHE: dict[str, tuple[object, bytes]] = {}
+_AUDIT_KEY_CACHE_LOCK = threading.Lock()
+
+
+def _audit_key_fingerprint(path: Path) -> tuple[int, ...] | None:
+    return key_file_fingerprint(path)
+
+
+def _cached_audit_key(
+    cache_key: str,
+    fingerprint: Callable[[], object],
+    load: Callable[[], bytes],
+) -> bytes:
+    return cached_key(_AUDIT_KEY_CACHE, _AUDIT_KEY_CACHE_LOCK, cache_key, fingerprint, load)
 
 
 class SecurityAuditLogger:
@@ -105,10 +123,23 @@ class SecurityAuditLogger:
 
         injected = os.getenv('GMS_AUDIT_HMAC_KEY', '').strip()
         if injected:
+            return _cached_audit_key(
+                'env:GMS_AUDIT_HMAC_KEY',
+                lambda: injected,
+                lambda: self._load_audit_key(injected, None),
+            )
+        configured = os.getenv('GMS_AUDIT_HMAC_KEY_FILE', '').strip()
+        path = Path(configured) if configured else settings.data_root / 'secrets/audit_hmac.key'
+        return _cached_audit_key(
+            f'file:{path}',
+            lambda: _audit_key_fingerprint(path),
+            lambda: self._load_audit_key('', path),
+        )
+
+    def _load_audit_key(self, injected: str, path: Path | None) -> bytes:
+        if injected:
             key = injected.encode('utf-8')
         else:
-            configured = os.getenv('GMS_AUDIT_HMAC_KEY_FILE', '').strip()
-            path = Path(configured) if configured else settings.data_root / 'secrets/audit_hmac.key'
             if path.exists():
                 if stat.S_IMODE(path.stat().st_mode) & 0o077:
                     raise RuntimeError(f'audit HMAC key permissions must be 0600: {path}')

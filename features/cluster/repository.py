@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import threading
 import uuid
@@ -128,6 +129,9 @@ class ClusterRepository(
                     "SELECT id FROM cluster_commands WHERE job_id=?", (job_id,)
                 ).fetchall()
             ]
+            upload_ids = [row["id"] for row in conn.execute(
+                "SELECT id FROM cluster_artifact_uploads WHERE job_id=?", (job_id,),
+            ).fetchall()]
             for table in ("cluster_job_events", "cluster_job_artifacts", "cluster_artifact_uploads", "device_leases",
                           "cluster_commands", "cluster_job_attempts", "cluster_timeline_events"):
                 conn.execute(f"DELETE FROM {table} WHERE job_id=?", (job_id,))
@@ -137,6 +141,15 @@ class ClusterRepository(
                     (command_id,),
                 )
             conn.execute("DELETE FROM cluster_jobs WHERE id=?", (job_id,))
+            conn.commit()
+            for root_name, name in [("artifacts", job_id), *[("artifact-uploads", item) for item in upload_ids]]:
+                if not name or name in {".", ".."} or Path(name).name != name:
+                    continue
+                target = self.db_path.parent / root_name / name
+                if target.is_symlink():
+                    target.unlink(missing_ok=True)
+                else:
+                    shutil.rmtree(target, ignore_errors=True)
             return True
 
     def create_job_with_leases(self, data: dict[str, Any]) -> dict[str, Any]:

@@ -380,8 +380,8 @@ gms-rt-terminal-push() {
     local body
     body=$(api_call "/terminal/push" "POST" "" \
         -F "file=@${file_path}" \
-        -F "path=${target_path}" \
-        -F "auto_rename=true") || {
+        --form-string "path=${target_path}" \
+        --form-string "auto_rename=true") || {
         local call_status=$?
         error "Failed to push file"
         echo "$body" | jq '.' 2>/dev/null || echo "$body"
@@ -461,14 +461,12 @@ gms-rt-desktop-vnc-start() {
     check_jq
     echo "🚀 Starting desktop VNC..."
     local data
-    data=$(jq -cn \
+    data=$(GMS_RT_JSON_SECRET="$password" GMS_RT_JSON_VNC_SECRET="$vnc_password" jq -cn \
         --arg host "$host" \
-        --arg password "$password" \
-        --arg vnc_password "$vnc_password" \
         '{
             host: $host,
-            password: $password,
-            vnc_password: $vnc_password
+            password: env.GMS_RT_JSON_SECRET,
+            vnc_password: env.GMS_RT_JSON_VNC_SECRET
         } | with_entries(select(.value != ""))')
     local response=$(api_call "/desktop/vnc/start" "POST" "$data")
     echo "$response" | jq '.'
@@ -656,8 +654,8 @@ gms-rt-users-detect() {
     check_jq
     echo "🔍 Detecting user for $ip..."
     local data
-    data=$(jq -cn --arg ip "$ip" --arg username "$username" --arg password "$password" \
-        '{ip: $ip, username: $username, password: $password}
+    data=$(GMS_RT_JSON_SECRET="$password" jq -cn --arg ip "$ip" --arg username "$username" \
+        '{ip: $ip, username: $username, password: env.GMS_RT_JSON_SECRET}
          | with_entries(select(.value != ""))')
     local response=$(api_call "/users/detect" "POST" "$data")
     echo "$response" | jq '.'

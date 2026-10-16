@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import hashlib
 import logging
 import os
 import re
@@ -42,7 +43,10 @@ from .source_flash import (
     SourceFlashError,
     run_source_flash,
 )
-from .upload_transport import upload_firmware_to_test_host as _upload_firmware_to_test_host
+from .upload_transport import scp_put_with_deadline as _scp_put_with_deadline
+from .upload_transport import (
+    upload_firmware_to_test_host as _upload_firmware_to_test_host,
+)
 from .usbip_transport import (
     device_flash_protocols as _device_flash_protocols,
 )
@@ -99,6 +103,102 @@ def _usbip_device_route_map(routes: list[dict]) -> dict[str, dict]:
 
 def strip_ansi_codes(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", text or "")
+
+
+def _sha256_of_source(source) -> str:
+    """Hash the exact firmware bytes that are about to be transferred.
+
+    ``source`` is either a seekable upload stream or a local file path. The
+    stream is rewound before and after so the following SCP upload reads the
+    same bytes.
+    """
+    digest = hashlib.sha256()
+    if hasattr(source, "read"):
+        with contextlib.suppress(Exception):
+            source.seek(0)
+        while True:
+            chunk = source.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+        with contextlib.suppress(Exception):
+            source.seek(0)
+    else:
+        with open(source, "rb") as firmware_file:
+            while True:
+                chunk = firmware_file.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _parse_remote_sha256(stdout: str) -> str:
+    for line in (stdout or "").splitlines():
+        parts = line.strip().split(None, 1)
+        if (
+            len(parts) == 2
+            and parts[0]
+            and len(parts[0]) == 64
+            and all(c in "0123456789abcdef" for c in parts[0])
+        ):
+            return parts[0]
+    return ""
+
+
+async def _remote_sha256(ssh, remote_path: str) -> str:
+    output = await asyncio.to_thread(
+        runtime.ssh_manager.execute_command,
+        ssh,
+        f"sha256sum {shlex.quote(remote_path)}",
+        timeout=120,
+    )
+    return _parse_remote_sha256(output.stdout)
+
+
+async def _agent_approval_preflight_failure(
+    request: Request,
+    devices: list[str],
+    approval_token: str,
+    burn_mode: str,
+    wipe_data: bool,
+    firmware_sha256: str,
+):
+    """Non-consuming approval validation before any remote write.
+
+    消费时机不变（仍由 _consume_agent_burn_approval 在第一个破坏性动作
+    前完成）；本预检只做工具 + 设备绑定 + TTL + 操作串（含固件 SHA256）
+    的只读校验，让垃圾/过期/绑定不匹配的令牌在固件 SCP 上传或
+    upgrade_tool 推送等任何远端写入之前就被 4xx 拒绝。
+    """
+    from features.auth import auth_service as _auth
+
+    canonical_devices = ",".join(sorted(devices))
+    agent_record = getattr(request.state, "agent_token_record", None)
+    if agent_record is not None and not _auth.agent_acl_allows_all(
+        agent_record,
+        "devices",
+        [str(dev).strip() for dev in devices if str(dev).strip()],
+    ):
+        return ApiError.forbidden(
+            f"Agent token 不允许操作设备 {canonical_devices}"
+        ).to_response()
+    command = _auth.derive_burn_command(
+        device=canonical_devices,
+        firmware_sha256=firmware_sha256,
+        wipe_data=wipe_data,
+        burn_mode=burn_mode,
+    )
+    if not _auth.validate_approval_token(
+        approval_token,
+        tool="gms_rt_burn_firmware",
+        device=canonical_devices,
+        command=command,
+    ):
+        return ApiError.forbidden(
+            "审批令牌无效、已使用或与本次烧录操作（设备/固件/参数）不匹配"
+        ).to_response()
+    return None
 
 
 def _firmware_upload_session_dir(client_id: str, upload_id: str) -> str:
@@ -291,7 +391,7 @@ async def burn_firmware(
             return error_response("Invalid device serial", status_code=400)
 
         if not devices:
-            return error_response("No devices selected")
+            return ApiError.malformed_request("No devices selected").to_response()
         proxy_devices = _adb_proxy_devices(devices)
         if proxy_devices:
             return error_response(
@@ -315,9 +415,9 @@ async def burn_firmware(
         # See docs/architecture/adr/0005-usbip-firmware-ownership.md.
         burn_mode = str(form.get("burn_mode", "auto")).strip().lower() or "auto"
         if burn_mode not in {"auto", "uf"}:
-            return error_response(
+            return ApiError.malformed_request(
                 "Invalid burn_mode, expected 'auto' or 'uf'"
-            )
+            ).to_response()
         # 精确绑定：wipe_data 进入审批绑定串；默认 true（与
         # CLI/API 文档语义一致）。
         wipe_data = str(form.get("wipe_data", "true")).strip().lower() not in {
@@ -328,11 +428,16 @@ async def burn_firmware(
             firmware_path = merged_firmware["path"]
 
         if not firmware_file and not firmware_path:
-            return error_response("Please upload a firmware file or provide a firmware path")
+            return ApiError.malformed_request(
+                "Please upload a firmware file or provide a firmware path"
+            ).to_response()
 
         local_tool = os.path.join(runtime.project_root, "tools", "upgrade_tool")
         if not os.path.exists(local_tool):
-            return error_response(f"upgrade_tool not found: {local_tool}")
+            # 本地工具缺失属部署依赖问题（503），不是编程错误。
+            return ApiError.dependency_unavailable(
+                f"upgrade_tool not found: {local_tool}"
+            ).to_response()
 
         # Staged browser uploads are local files, so reject malformed Rockchip
         # update images before spending time on SCP or rebooting a device.
@@ -353,14 +458,19 @@ async def burn_firmware(
         config = runtime.config_manager.load_config()
         async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
-                return error_response("SSH connection failed")
+                # SSH 建连失败属远端基础设施故障（502）。
+                return ApiError.upstream_failure(
+                    "SSH connection failed", service="ssh"
+                ).to_response()
 
             try:
                 gms_suite_dir = get_default_suites_path(config)
                 if firmware_file:
                     firmware_name = os.path.basename(firmware_file.filename or "").strip()
                     if not firmware_name:
-                        return error_response("Invalid firmware filename")
+                        return ApiError.malformed_request(
+                            "Invalid firmware filename"
+                        ).to_response()
 
                     firmware_stream = firmware_file.file
                     try:
@@ -369,12 +479,26 @@ async def burn_firmware(
                         firmware_stream.seek(0)
                     except Exception:
                         message = record_internal_error(logger, "检查固件大小", "Failed to inspect firmware size")
-                        return error_response(message)
+                        return ApiError.internal(message).to_response()
 
                     if firmware_size <= 0:
-                        return error_response("Uploaded firmware file is empty")
+                        return ApiError.malformed_request(
+                            "Uploaded firmware file is empty"
+                        ).to_response()
 
                     remote_firmware = os.path.join(gms_suite_dir, firmware_name)
+                    if agent_burn:
+                        # SCP 前不消费地校验审批：垃圾令牌不得触发任何
+                        # 远端写入。摘要取将要上传的确切本地字节。
+                        preflight_sha = await asyncio.to_thread(
+                            _sha256_of_source, firmware_stream
+                        )
+                        preflight_failure = await _agent_approval_preflight_failure(
+                            request, devices, approval_token,
+                            burn_mode, wipe_data, preflight_sha,
+                        )
+                        if preflight_failure is not None:
+                            return preflight_failure
                     await _upload_firmware_to_test_host(ssh, client_id, firmware_stream, remote_firmware, firmware_name, firmware_size)
                 else:
                     firmware_name = (
@@ -391,7 +515,9 @@ async def burn_firmware(
                         elif os.path.exists(firmware_path):
                             local_firmware_path = firmware_path
                         else:
-                            return error_response(f"Firmware not found: {firmware_path}")
+                            return ApiError.not_found(
+                                f"Firmware not found: {firmware_path}"
+                            ).to_response()
                     elif os.path.exists(firmware_path):
                         local_firmware_path = firmware_path
                     else:
@@ -399,12 +525,16 @@ async def burn_firmware(
                         if await asyncio.to_thread(_remote_file_exists, ssh, remote_candidate):
                             remote_firmware = remote_candidate
                         else:
-                            return error_response(f"Firmware not found: {firmware_path}")
+                            return ApiError.not_found(
+                                f"Firmware not found: {firmware_path}"
+                            ).to_response()
 
                     if local_firmware_path:
                         file_size = os.path.getsize(local_firmware_path)
                         if file_size <= 0:
-                            return error_response("Firmware file is empty")
+                            return ApiError.malformed_request(
+                                "Firmware file is empty"
+                            ).to_response()
                         if not merged_firmware:
                             local_validation = await asyncio.to_thread(
                                 validate_local_update_image,
@@ -418,6 +548,20 @@ async def burn_firmware(
                                     firmware_name,
                                     local_validation,
                                 )
+                        if agent_burn:
+                            # 同 multipart 分支：SCP 上传前做不消费的审批
+                            # 预检（摘要取本地文件的真实字节）。
+                            preflight_sha = await asyncio.to_thread(
+                                _sha256_of_source, local_firmware_path
+                            )
+                            preflight_failure = (
+                                await _agent_approval_preflight_failure(
+                                    request, devices, approval_token,
+                                    burn_mode, wipe_data, preflight_sha,
+                                )
+                            )
+                            if preflight_failure is not None:
+                                return preflight_failure
                         await _upload_firmware_to_test_host(
                             ssh,
                             client_id,
@@ -448,46 +592,24 @@ async def burn_firmware(
                     # 路径——同名路径不代表同一主机的同一文件。改为在
                     # 测试主机上执行 sha256sum 取真实摘要。
                     # See docs/architecture/adr/0005-usbip-firmware-ownership.md.
-                    _sha_output = await asyncio.to_thread(
-                        runtime.ssh_manager.execute_command,
-                        ssh,
-                        f"sha256sum {shlex.quote(remote_firmware)}",
-                        timeout=120,
-                    )
-                    _remote_digest = ""
-                    for _line in (_sha_output.stdout or "").splitlines():
-                        _parts = _line.strip().split(None, 1)
-                        if (
-                            len(_parts) == 2
-                            and _parts[0]
-                            and len(_parts[0]) == 64
-                            and all(c in "0123456789abcdef" for c in _parts[0])
-                        ):
-                            _remote_digest = _parts[0]
-                            break
+                    _remote_digest = await _remote_sha256(ssh, remote_firmware)
                     if not _remote_digest:
-                        return error_response(
-                            f"无法读取固件摘要，固件不存在或不可读: {remote_firmware}",
-                            status_code=404,
-                        )
+                        return ApiError.not_found(
+                            f"无法读取固件摘要，固件不存在或不可读: {remote_firmware}"
+                        ).to_response()
                     firmware_sha256 = _remote_digest
                     _canonical_devices = ",".join(sorted(devices))
-                    # Agent token device ACL: a token scoped to specific
-                    # devices must not be driven against anything else.
-                    # 逐设备校验：CSV 聚合串不是设备身份。
-                    _agent_record = getattr(
-                        request.state, "agent_token_record", None
+                    # Agent token device ACL + 不消费的审批复检：远端路径
+                    # 分支此前未做过任何校验；multipart/本地分支在此用
+                    # 权威远端摘要再拦一次（上传损坏/换包在推送
+                    # upgrade_tool 之前暴露）。消费时机不变。
+                    _preflight_failure = await _agent_approval_preflight_failure(
+                        request, devices, approval_token,
+                        burn_mode_for_approval, wipe_data, firmware_sha256,
                     )
-                    if _agent_record is not None and not _auth.agent_acl_allows_all(
-                        _agent_record,
-                        "devices",
-                        [str(dev).strip() for dev in devices if str(dev).strip()],
-                    ):
-                        return error_response(
-                            f"Agent token 不允许操作设备 {_canonical_devices}",
-                            status_code=403,
-                        )
-                    _wipe = wipe_data is not False
+                    if _preflight_failure is not None:
+                        return _preflight_failure
+                    _wipe = wipe_data
                     # 审批消费时机：一次性 token 在全部
                     # deterministic preflight 通过、即将执行第一个破坏性
                     # 动作时才消费——否则"设备不在 fastboot/路由不匹配/
@@ -526,10 +648,9 @@ async def burn_firmware(
                 # potentially newer operator-managed upgrade_tool.
                 remote_tool = os.path.join(gms_suite_dir, ".gms_upgrade_tool")
 
-                import scp
-                scp_client = scp.SCPClient(ssh.get_transport())
-                scp_client.put(local_tool, remote_tool)
-                scp_client.close()
+                # 裸 scp put 无超时曾可永挂请求；统一走带单调时钟 deadline
+                # 的传输 helper（超时 504 并关闭 SSH transport 中止线程）。
+                await _scp_put_with_deadline(ssh, local_tool, remote_tool)
 
                 # Validate the exact remote bytes that will be burned. This
                 # catches both invalid loader packages and transport damage.

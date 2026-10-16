@@ -771,6 +771,7 @@
             // 页面切换时保留 VNC iframe 和终端 WebSocket，避免重复连接。
             const pageEl = document.getElementById(`page-${pageName}`);
             if (!pageEl) return;
+            if (pageName !== 'agent' && typeof stopAgentPolling === 'function') stopAgentPolling();
             const initStyle = document.getElementById('page-init-style');
             if (initStyle) {
                 initStyle.remove();

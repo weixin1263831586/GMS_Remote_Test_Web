@@ -96,7 +96,7 @@ def review_session(request: Request, session_id: str):
 ''' + LOGIN_ASSETS + '''
 <script src="/static/js/pages/device-debug-review.js" defer></script></head>
 <body><main><h1>调试会话授权</h1><p>请登录发起申请的 Agent 所属平台账号。批准后，Agent 可在以下设备和应用范围内连续调试，直到到期或撤销。</p>
-<button id="review-login-open" type="button">登录 / 切换管理员账号</button>
+<button id="review-login-open" type="button">登录 / 切换审批账号</button>
 <dl id="details"></dl><p id="status" role="status">正在读取调试请求…</p>
 <button id="approve" disabled>批准调试会话</button><button id="revoke" disabled>撤销授权</button>
 <a href="/">返回平台</a><h2>最近操作</h2><ol id="operations"></ol>

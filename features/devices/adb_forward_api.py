@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from features.auth import (
     ensure_agent_device_allowed,
     ensure_agent_worker_allowed,
+    require_elevated_admin,
     require_permission_when_auth_required,
 )
 from foundation.cluster_port import authenticate_worker
@@ -65,6 +66,7 @@ async def start_adb_forward(
 
         # Preserve the former controller-only SSH tunnel API for old clients.
         # The web UI uses the worker-aware adbproxy-rs flow above.
+        require_elevated_admin(request)
         config = adb_forward_manager.config_manager.load_config()
         device_host = str(
             (req.device_host if req else "")

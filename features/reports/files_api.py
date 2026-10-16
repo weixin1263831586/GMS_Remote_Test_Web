@@ -588,6 +588,4 @@ def resolve_report_attachments(request, report_ids: list) -> tuple[list[Path], l
         target = bundle_dir / f"{report_id}.zip"
         shutil.move(str(bundle.path), target)
         attachments.append(target)
-    for leftover in bundle_dir.glob("gms-report-download-*"):
-        leftover.unlink(missing_ok=True)
     return attachments, denied

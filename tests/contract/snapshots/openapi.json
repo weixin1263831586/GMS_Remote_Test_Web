@@ -997,6 +997,8 @@
           "username": {
             "anyOf": [
               {
+                "maxLength": 64,
+                "pattern": "^[\\w.-]+$",
                 "type": "string"
               },
               {
@@ -10956,6 +10958,22 @@
         "summary": "Get Ai Config"
       }
     },
+    "/api/config/client": {
+      "get": {
+        "description": "Return shell defaults without deployment topology or stored passwords.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Client Config"
+      }
+    },
     "/api/config/client-ssh-credentials": {
       "delete": {
         "description": "删除一条客户端 SSH 凭据（按 device_host 或 username@host 匹配）。",
@@ -13032,6 +13050,7 @@
     },
     "/api/firmware-shares": {
       "get": {
+        "description": "List shared firmware records.\n\n与同文件 create/validate/browse/delete/credentials 一致：列表暴露\n内网 host/user/path，仅提权管理员可读（前端加载失败会降级为表格内\n错误提示，不影响页面其余功能）。download/check 仍按分享链接语义\n保持无认证。",
         "responses": {
           "200": {
             "content": {

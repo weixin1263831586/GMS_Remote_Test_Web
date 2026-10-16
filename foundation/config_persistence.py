@@ -30,6 +30,14 @@ class ConfigPersistenceMixin:
     def save_runtime(self, updates: dict[str, Any]) -> bool:
         return self.update_runtime_config(updates)
 
+    def save_client_host(self, client_ip: str, username: str) -> bool:
+        """Merge a single detected host without replaying credential snapshots."""
+        with self._runtime_write_lock, self._runtime_transaction():
+            runtime = self._load_runtime_config() or {}
+            hosts = dict(runtime.get('client_hosts') or {})
+            hosts[client_ip] = username
+            return self.update_runtime_config({'client_hosts': hosts})
+
     def update_runtime_config(
         self,
         updates: dict[str, Any],

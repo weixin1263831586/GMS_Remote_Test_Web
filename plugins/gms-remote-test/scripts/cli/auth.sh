@@ -26,7 +26,7 @@ _gms_ensure_human_login() {
 }
 
 gms-rt-auth-status() {
-    check_jq || return 1
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
     local response
     response=$(api_call "/auth/status") || return $?
     format_elevated_until "$response" | jq '.'
@@ -81,12 +81,12 @@ gms-rt-auth-login() {
         error "Password is required in non-interactive mode; use --password-stdin"
         return "$GMS_RT_EXIT_USAGE"
     }
-    check_jq || return 1
-    _ensure_auth_cookie_jar || return 1
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
+    _ensure_auth_cookie_jar || return "$GMS_RT_EXIT_OPERATION"
 
     local data response call_status
-    data=$(jq -cn --arg username "$username" --arg password "$password" \
-        '{username: $username, password: $password}')
+    data=$(GMS_RT_JSON_SECRET="$password" jq -cn --arg username "$username" \
+        '{username: $username, password: env.GMS_RT_JSON_SECRET}')
     response=$(api_call "/auth/login" "POST" "$data")
     call_status=$?
     unset password data
@@ -106,16 +106,16 @@ gms-rt-auth-login() {
 }
 
 gms-rt-auth-logout() {
-    check_jq || return 1
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
     local response
-    response=$(api_call "/auth/logout" "POST" "{}") || return 1
+    response=$(api_call "/auth/logout" "POST" "{}") || return $?
     if echo "$response" | jq -e '.success == true' >/dev/null 2>&1; then
         rm -f -- "$GMS_AUTH_COOKIE_JAR"
         success "Logged out"
         return 0
     fi
     error "Logout failed: $(extract_api_error "$response")"
-    return 1
+    return "$GMS_RT_EXIT_OPERATION"
 }
 
 gms-rt-auth-elevate() {
@@ -155,11 +155,11 @@ gms-rt-auth-elevate() {
         error "Admin password is required in non-interactive mode; use --password-stdin"
         return "$GMS_RT_EXIT_USAGE"
     }
-    check_jq || return 1
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
 
     local data response call_status
-    data=$(jq -cn --arg username "$username" --arg password "$password" \
-        '{username: $username, password: $password}')
+    data=$(GMS_RT_JSON_SECRET="$password" jq -cn --arg username "$username" \
+        '{username: $username, password: env.GMS_RT_JSON_SECRET}')
     response=$(api_call "/auth/elevate" "POST" "$data")
     call_status=$?
     unset password data
@@ -174,7 +174,7 @@ gms-rt-auth-elevate() {
 }
 
 gms-rt-auth-elevation-reset() {
-    check_jq || return 1
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
     local response
     response=$(api_call "/auth/elevation/reset" "POST" "{}") || return $?
     if echo "$response" | jq -e '.success == true and .elevated == false' >/dev/null 2>&1; then
@@ -352,10 +352,10 @@ gms-rt-agent-enroll() {
         error "Failed to resolve the enrollment token output path"
         return "$GMS_RT_EXIT_USAGE"
     }
-    check_jq || return 1
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
     _gms_resolve_tls
-    local data response
-    data=$(jq -cn --arg code "$code" '{code: $code}')
+    local data response call_status
+    data=$(GMS_RT_JSON_SECRET="$code" jq -cn '{code: env.GMS_RT_JSON_SECRET}')
     # Enrollment is a cookie-free, token-free call by design. The one-shot
     # pairing code is a credential too — push it via stdin, not argv
     # (this applies to any secret that would land in /proc cmdline).
@@ -363,6 +363,11 @@ gms-rt-agent-enroll() {
         -H "Content-Type: application/json" --data-binary "@-" \
         -w $'\nHTTP_STATUS:%{http_code}' --max-time "$CURL_TIMEOUT" \
         <<< "$data")
+    call_status=$?
+    if [ "$call_status" -ne 0 ]; then
+        error "Enrollment connection failed"
+        return "$GMS_RT_EXIT_NETWORK"
+    fi
     local http_status body
     body=$(_body_from_http_response "$response")
     http_status=$(_status_from_http_response "$response")
@@ -387,7 +392,10 @@ gms-rt-agent-enroll() {
                 error "Enrollment failed: $(extract_api_error "$body")"
                 ;;
         esac
-        return "$GMS_RT_EXIT_PERMISSION"
+        local exit_code
+        exit_code=$(_http_exit_code "$http_status")
+        [ "$exit_code" -ne 0 ] || exit_code="$GMS_RT_EXIT_OPERATION"
+        return "$exit_code"
     fi
     local token scopes
     token=$(echo "$body" | jq -r '.token.token // empty')
@@ -416,7 +424,7 @@ gms-rt-agent-enroll() {
 
 # Show which credential mode the CLI currently uses (token file or cookie).
 gms-rt-auth-credential-mode() {
-    check_jq || return 1
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
     if [ -n "${GMS_AUTH_TOKEN_FILE:-}" ]; then
         if [ -r "$GMS_AUTH_TOKEN_FILE" ]; then
             jq -cn --arg file "$GMS_AUTH_TOKEN_FILE" \
@@ -456,7 +464,7 @@ gms-rt-auth-scopes-check() {
         shift
     done
     : "${requires:=redmine.read,artifacts.read_own,apk.analyze_own,sdk.read}"
-    check_jq || return 1
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
     local response call_status
     response=$(api_call "/auth/agent-scopes" "GET")
     call_status=$?
@@ -540,7 +548,7 @@ gms-rt-approval-create() {
         error "Usage: gms-rt-approval-create --tool <tool> --device <serial>[,<serial>...] [--command <command>|--firmware-sha256 <sha256> [--wipe-data true|false] [--burn-mode auto|uf]]"
         return "$GMS_RT_EXIT_USAGE"
     }
-    check_jq || return 1
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
     local data response
     _gms_ensure_human_login || return $?
     data=$(jq -cn \
@@ -573,7 +581,7 @@ gms-rt-approval-create() {
 # List Agent Service Tokens (admin session required). The raw token is
 # never stored server-side, so listings only show metadata.
 gms-rt-agent-tokens() {
-    check_jq || return 1
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
     local response api_status
     response=$(api_call "/auth/agent-tokens" GET)
     api_status=$?
@@ -613,7 +621,7 @@ gms-rt-agent-enroll-code() {
         error "Usage: gms-rt-agent-enroll-code --name <NAME> [--scopes s1,s2] [--workers w1,w2|*] [--devices d1,d2|*] [--expires-days N] [--ttl-minutes N]"
         return "$GMS_RT_EXIT_USAGE"
     }
-    check_jq || return 1
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
     local data response
     data=$(jq -cn --arg name "$name" --arg scopes "$scopes" \
         --arg workers "$workers" --arg devices "$devices" --argjson days "$expires_days" \
@@ -646,7 +654,7 @@ gms-rt-agent-token-revoke() {
         error "Usage: gms-rt-agent-token-revoke <TOKEN_ID>"
         return "$GMS_RT_EXIT_USAGE"
     }
-    check_jq || return 1
+    check_jq || return "$GMS_RT_EXIT_OPERATION"
     local response api_status
     response=$(api_call "/auth/agent-tokens/$(_urlencode "$token_id")" DELETE)
     api_status=$?

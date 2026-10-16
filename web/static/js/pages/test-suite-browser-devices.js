@@ -415,7 +415,7 @@ async function remountDevices() {
 
 async function connectWifi() {
     if (!validateDeviceSelection()) return;
-    // 预填 config.wifi 的默认 SSID/密码（管理员在 /api/config/read 中拿到明文密码）
+    // 预填已保存的 SSID；密码由用户本次输入。
     const wifi = state.config?.wifi || {};
     const ssidInput = document.getElementById('wifi-ssid');
     const pwdInput = document.getElementById('wifi-password');

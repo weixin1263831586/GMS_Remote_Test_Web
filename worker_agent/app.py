@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import getpass
 import hashlib
+import ipaddress
 import json
 import logging
 import os
@@ -62,6 +63,49 @@ AGENT_VERSION = "0.5.1"
 
 VNC_PORT = 5900
 NOVNC_PORT = 6080
+
+# 与 suite_actions 下载防护同款的自指段：CGNAT（含云元数据服务）。
+_USBIP_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _validate_usbip_source_host(source_host: str) -> str:
+    """usbip 预检目标不得解析到 Worker 自身/本地侧地址。
+
+    私网对等机必须由 Worker 操作者通过 GMS_WORKER_USBIP_ALLOWED_HOSTS
+    显式授权；环回、元数据、保留地址始终拒绝。返回已验证 IP 供探测固定目标。
+    """
+    if not source_host:
+        raise ValueError("usbip source_host is empty")
+    allowed_hosts = {
+        item.strip().lower().rstrip('.')
+        for item in os.getenv("GMS_WORKER_USBIP_ALLOWED_HOSTS", "").split(",") if item.strip()
+    }
+    try:
+        resolved = {
+            item[4][0].split("%", 1)[0]
+            for item in socket.getaddrinfo(source_host, None)
+        }
+    except socket.gaierror as exc:
+        raise ValueError("usbip source_host cannot be resolved") from exc
+    for raw in resolved:
+        try:
+            address = ipaddress.ip_address(raw)
+        except ValueError:
+            continue
+        if (
+            (not address.is_global and source_host.lower().rstrip('.') not in allowed_hosts)
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_unspecified
+            or address.is_reserved
+            or address.is_multicast
+            or address in _USBIP_CGNAT
+        ):
+            raise ValueError(
+                "usbip source_host resolves to a forbidden local address: "
+                f"{source_host} ({address})"
+            )
+    return sorted(resolved)[0]
 
 
 def _rfb_handshake_ok(port: int = VNC_PORT, timeout: float = 1.0) -> bool:
@@ -266,9 +310,12 @@ class WorkerAgent:
         """Best-effort Controller delivery for an already durable terminal state.
 
         A Controller ACK is a transport concern, not part of device command
-        execution.  On failure the unsynced row is retried by heartbeat
-        reconciliation; most importantly, it must not rewrite a completed
-        command as failed.
+        execution.  It must never raise or retry inline: on failure the
+        unsynced row is replayed by heartbeat reconciliation (command_states
+        → reconciled_command_ids), and it must not rewrite a completed
+        command as failed.  Call sites therefore call this directly instead
+        of wrapping it in ``_retry`` (whose retry loop this method used to
+        silently disable by swallowing every exception).
         """
         try:
             (
@@ -281,6 +328,24 @@ class WorkerAgent:
         except Exception:
             logger.warning("command %s ACK delivery failed; will retry", command_id, exc_info=True)
             return False
+
+    def _worker_allowed_roots(self) -> list[Path]:
+        """Worker 本机文件读白名单：数据根 + 套件根。"""
+        return [
+            Path(self.config.data_root).expanduser().resolve(),
+            *[root.expanduser().resolve() for root in self.config.suite_roots],
+        ]
+
+    def _file_browse_roots(self) -> list[Path]:
+        """文件浏览白名单：数据根 + 套件根 + 环境变量追加的额外根。"""
+        roots = self._worker_allowed_roots()
+        configured = os.getenv("GMS_WORKER_FILE_BROWSE_EXTRA_ROOTS", "")
+        roots.extend(
+            Path(item).expanduser().resolve()
+            for item in configured.split(":")
+            if item.strip()
+        )
+        return roots
 
     def handle(self, command):
         previous = self.runtime.previous_command(command["id"])
@@ -348,9 +413,10 @@ class WorkerAgent:
                 return
             elif kind == "usbip_preflight":
                 payload = command.get("payload", {})
-                source_host = str(payload.get("source_host") or "").strip("[]")
+                source_host = str(payload.get("source_host") or "").strip().strip("[]")
+                probe_host = _validate_usbip_source_host(source_host)
                 result = {
-                    "network_quality": probe_tcp_quality(source_host, 3240)
+                    "network_quality": probe_tcp_quality(probe_host, 3240)
                 }
             elif kind == "suite_action":
                 if command.get("payload", {}).get("action") in {"download_url", "extract"}:
@@ -374,14 +440,17 @@ class WorkerAgent:
                 return
             elif kind == "file_browse":
                 payload = command.get("payload") or {}
-                # 默认打开套件根目录（如 ~/GMS-Suite），未配置则回落主目录。
+                # 浏览限制在套件根/数据根之内（GMS_WORKER_FILE_BROWSE_EXTRA_ROOTS
+                # 可追加白名单），默认打开第一个存在的套件根。
                 default_dir = next(
                     (root for root in self.config.suite_roots
                      if Path(root).expanduser().exists()),
                     None,
                 )
                 result = browse_directory(
-                    str(payload.get("path") or ""), default_path=default_dir
+                    str(payload.get("path") or ""),
+                    default_path=default_dir,
+                    allowed_roots=self._file_browse_roots(),
                 )
             elif kind == "report_import":
                 self.runtime.save_command(command["id"], "running", {})
@@ -618,6 +687,9 @@ class WorkerAgent:
             try:
                 tmp_path.write_text(
                     json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+                # 临时文件与正式配置同为 0600：config.json 可能含部署
+                # 级敏感字段，umask 宽松时不经世界可读窗口直接落盘。
+                os.chmod(tmp_path, 0o600)
                 os.replace(tmp_path, path)
             finally:
                 # write/replace 抛异常（磁盘满/权限）时不残留 .tmp-pid 垃圾
@@ -709,7 +781,7 @@ class WorkerAgent:
                     except Exception:
                         logger.exception("failure evidence collection error")
             self.runtime.save_command(command_id, status, result, error)
-            self._retry(lambda: self._ack_command(command_id, status, result, error))
+            self._ack_command(command_id, status, result, error)
         except Exception as exc:
             logger.exception("job monitor failed for %s", worker_job_id)
             self.runtime.save_command(command_id, "failed", error=str(exc))
@@ -732,14 +804,14 @@ class WorkerAgent:
 
             result = execute_suite_action(self.config, command.get("payload", {}), report_progress)
             self.runtime.save_command(command["id"], "completed", result)
-            self._retry(lambda: self._ack_command(command["id"], "completed", result))
+            self._ack_command(command["id"], "completed", result)
             self.suites = scan_suites(self.config)
             self.last_suite_scan = time.monotonic()
         except Exception as exc:
             logger.exception("suite action %s failed", command.get("id"))
             error = str(exc)
             self.runtime.save_command(command["id"], "failed", error=error)
-            self._retry(lambda: self._ack_command(command["id"], "failed", error=error))
+            self._ack_command(command["id"], "failed", error=error)
 
     def run_usbip_action(self, command: dict):
         try:
@@ -790,11 +862,7 @@ class WorkerAgent:
                     else float("inf")
                 )
             self.runtime.save_command(command["id"], "completed", result)
-            self._retry(
-                lambda: self._ack_command(
-                    command["id"], "completed", result
-                )
-            )
+            self._ack_command(command["id"], "completed", result)
         except Exception as exc:
             logger.exception("USB/IP command %s failed", command.get("id"))
             error = str(exc)
@@ -804,10 +872,8 @@ class WorkerAgent:
             self.runtime.save_command(
                 command["id"], "failed", error_result, error=error
             )
-            self._retry(
-                lambda: self._ack_command(
-                    command["id"], "failed", error_result, error=error
-                )
+            self._ack_command(
+                command["id"], "failed", error_result, error=error
             )
         finally:
             self.runtime.release_fencing(command)
@@ -899,7 +965,7 @@ class WorkerAgent:
             summary = {"transfer_id": payload["transfer_id"], "filename": path.name,
                        "size_bytes": path.stat().st_size}
             self.runtime.save_command(command["id"], "completed", summary)
-            self._retry(lambda: self._ack_command(command["id"], "completed", summary))
+            self._ack_command(command["id"], "completed", summary)
         except Exception as exc:
             logger.exception("suite export %s failed", command.get("id"))
             self.runtime.save_command(command["id"], "failed", error=str(exc))
@@ -946,7 +1012,7 @@ class WorkerAgent:
             summary = {"transfer_id": transfer_id, "filename": resolved.name,
                        "size_bytes": source_stat.st_size}
             self.runtime.save_command(command["id"], "completed", summary)
-            self._retry(lambda: self._ack_command(command["id"], "completed", summary))
+            self._ack_command(command["id"], "completed", summary)
         except Exception as exc:
             logger.exception("file transfer %s failed", command.get("id"))
             self.runtime.save_command(command["id"], "failed", error=str(exc))
@@ -993,7 +1059,7 @@ class WorkerAgent:
                 str(payload.get("report_name") or ""),
             )
             self.runtime.save_command(command["id"], "completed", result)
-            self._retry(lambda: self._ack_command(command["id"], "completed", result))
+            self._ack_command(command["id"], "completed", result)
         except Exception as exc:
             logger.exception("report import %s failed", command.get("id"))
             error = str(exc)
@@ -1021,7 +1087,7 @@ class WorkerAgent:
                 "device": payload["devices"][0],
             }
             self.runtime.save_command(command["id"], "completed", summary)
-            self._retry(lambda: self._ack_command(command["id"], "completed", summary))
+            self._ack_command(command["id"], "completed", summary)
         except Exception as exc:
             logger.exception("device export %s failed", command.get("id"))
             self.runtime.save_command(command["id"], "failed", error=str(exc))
@@ -1117,7 +1183,7 @@ class WorkerAgent:
             status = "completed" if result.get("success") else "failed"
             error = "" if status == "completed" else result.get("output", "firmware flash failed")
             self.runtime.save_command(command["id"], status, result, error)
-            self._retry(lambda: self._ack_command(command["id"], status, result, error))
+            self._ack_command(command["id"], status, result, error)
         except Exception as exc:
             logger.exception("firmware command %s failed", command.get("id"))
             error = str(exc)
@@ -1126,7 +1192,7 @@ class WorkerAgent:
                 # 输出证据不能随 daemon uploader 线程丢弃。
                 uploader.flush()
             self.runtime.save_command(command["id"], "failed", error=error)
-            self._retry(lambda: self._ack_command(command["id"], "failed", error=error))
+            self._ack_command(command["id"], "failed", error=error)
         finally:
             self.runtime.release_fencing(command)
             if directory is not None:
@@ -1348,10 +1414,10 @@ class WorkerAgent:
                     logger.info("registered as %s", self.config.worker_id)
                 if not recovered:
                     recoverable_jobs = self.runtime.recoverable_jobs()
-                    for command in self.runtime.fail_interrupted_commands():
-                        self._retry(lambda item=command: self._ack_command(
+                    for item in self.runtime.fail_interrupted_commands():
+                        self._ack_command(
                             item["id"], item["status"], item["result"], item["error"]
-                        ))
+                        )
                     for job in recoverable_jobs:
                         threading.Thread(target=self.monitor_recovered_job, args=(job,),
                                          name=f"Recovered-{job['worker_job_id']}", daemon=True).start()
@@ -1385,13 +1451,7 @@ class WorkerAgent:
             result, error = {}, f"recovered job monitor crashed: {exc}"
         finally:
             self.runtime.save_command(job["command_id"], status, result, error)
-            try:
-                self._retry(lambda: self._ack_command(
-                    job["command_id"], status, result, error))
-            except Exception:
-                logger.exception(
-                    "failed to report recovered job %s terminal state",
-                    job["command_id"])
+            self._ack_command(job["command_id"], status, result, error)
             self.runtime.release_attempt_fencing(str(job.get("attempt_id") or ""))
 
     def _finish_recovered_job(self, job: dict, row: dict) -> tuple[str, dict, str]:

@@ -177,6 +177,7 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute('PRAGMA user_version = 1')
     conn.commit()
 
 

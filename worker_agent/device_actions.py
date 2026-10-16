@@ -473,7 +473,7 @@ def execute_device_action(action: str, device_ids: list[str], options: dict[str,
             else:
                 remote_cmd += " open"
             connected = subprocess.run(
-                ["adb", "-s", serial, "shell", remote_cmd],
+                ["adb", "-s", serial, "shell"], input=remote_cmd + "\n",
                 capture_output=True, text=True, timeout=30, check=False,
             )
             results.append({"device": serial,
@@ -736,16 +736,35 @@ def host_metrics(config: WorkerConfig) -> dict[str, float]:
             "disk_total_gb": round(usage.total / 1024 ** 3, 2)}
 
 
-def browse_directory(path: str = "", default_path: Path | None = None) -> dict[str, Any]:
+def _resolved_within_roots(candidate: Path, allowed_roots: list[Path]) -> bool:
+    """True when the resolved candidate is one allowed root or lies beneath it."""
+    resolved = candidate.expanduser().resolve()
+    for root in allowed_roots:
+        bound = Path(root).expanduser().resolve()
+        if resolved == bound or bound in resolved.parents:
+            return True
+    return False
+
+
+def browse_directory(
+    path: str = "",
+    default_path: Path | None = None,
+    allowed_roots: list[Path] | None = None,
+) -> dict[str, Any]:
     """List one directory on the Worker host for the remote file browser.
 
     空路径时打开 default_path（通常为套件根目录 GMS-Suite），未配置则回落主目录。
+    传入 allowed_roots（套件根/数据根等）时，浏览被限制在这些根之内；
+    远程文件浏览命令必须始终传入，防止半可信 Controller 探测任意主机路径。
     """
     if str(path or "").strip():
         target = Path(path).expanduser()
     else:
         target = Path(default_path).expanduser() if default_path else Path.home()
     target = target.resolve()
+    roots = [root for root in (allowed_roots or [])]
+    if roots and not _resolved_within_roots(target, roots):
+        raise ValueError("path is outside Worker-allowed browse roots")
     if not target.is_dir():
         raise ValueError("path is not a directory on Worker")
     files = []
@@ -767,11 +786,23 @@ def browse_directory(path: str = "", default_path: Path | None = None) -> dict[s
     return {"path": str(target), "files": files}
 
 
-def copy_image_into(source: Path, target: Path, max_bytes: int) -> dict[str, Any]:
-    """Copy one GSI image into Worker staging, returning size and SHA-256."""
+def copy_image_into(
+    source: Path,
+    target: Path,
+    max_bytes: int,
+    allowed_roots: list[Path] | None = None,
+) -> dict[str, Any]:
+    """Copy one GSI image into Worker staging, returning size and SHA-256.
+
+    传入 allowed_roots（Worker 数据根/套件根）时，来源必须位于其中之一，
+    与 file_transfer 的外传白名单同一信任边界，防止借 local_sources
+    读取 staging 之外的任意本地文件。
+    """
     source = Path(source).expanduser().resolve()
     if not source.is_file():
         raise ValueError("GSI image source file not found on Worker")
+    if allowed_roots and not _resolved_within_roots(source, allowed_roots):
+        raise ValueError("GSI image source is outside Worker-allowed roots")
     digest = hashlib.sha256()
     total = 0
     with source.open("rb") as reader, Path(target).open("wb") as writer:

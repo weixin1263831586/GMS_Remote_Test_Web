@@ -5,7 +5,10 @@ import os
 import re
 from typing import Any
 
+from fastapi import HTTPException
+
 from features.cluster import build_argv_from_spec, get_cluster_service
+from foundation.cache import TTLCache
 from foundation.responses import error_response, success_response
 
 
@@ -19,6 +22,13 @@ _INSTRUMENTATION_PACKAGE_RE = re.compile(
     r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$"
 )
 
+# 套件 testcases 目录含数千文件，逐任务全量遍历代价高；模块清单在进程内
+# 短 TTL 缓存（套件目录在任务间极少变化）。
+_SUITE_MODULES_CACHE_TTL_SECONDS = 30.0
+_suite_modules_cache = TTLCache[str, dict[str, str]](
+    _SUITE_MODULES_CACHE_TTL_SECONDS, max_entries=32,
+)
+
 
 def _suite_testcases_dir(tools_path: str) -> str:
     root = str(tools_path or "").rstrip("/")
@@ -28,7 +38,12 @@ def _suite_testcases_dir(tools_path: str) -> str:
 
 
 def _list_suite_modules(testcases_dir: str) -> dict[str, str]:
-    """Map tradefed module name -> testcases file (bounded local walk)."""
+    """Return an isolated module mapping, reusing one scan per directory/TTL."""
+    cache_key = os.path.realpath(os.path.expanduser(testcases_dir))
+    return dict(_suite_modules_cache.get_or_load(cache_key, lambda: _scan_suite_modules(cache_key)))
+
+
+def _scan_suite_modules(testcases_dir: str) -> dict[str, str]:
     modules: dict[str, str] = {}
     for current, dirs, files in os.walk(testcases_dir):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
@@ -162,9 +177,10 @@ def start_cluster_test(request: Any, client_id: str):
     }
     try:
         cmd_parts = build_argv_from_spec(execution_spec)
-    except Exception as exc:  # HTTPException from the shared builder
-        detail = getattr(exc, "detail", None) or str(exc)
-        return error_response(str(detail), 400)
+    except HTTPException as exc:
+        # 共享 builder 只把 ExecutionSpecError 适配为 HTTPException（携带
+        # 原始 status_code）；其它异常属于编程错误，不得吞成 4xx。
+        return error_response(str(exc.detail), exc.status_code)
     # Transport compatibility applies to EVERY job entry point:
     # /api/cluster/jobs runs this check via jobs_api, but /api/test/start
     # previously skipped it, letting ADB Proxy devices receive tests that

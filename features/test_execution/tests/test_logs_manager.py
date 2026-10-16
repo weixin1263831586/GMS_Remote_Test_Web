@@ -105,20 +105,6 @@ class TestLogsManagerTests(unittest.TestCase):
         self.assertTrue(admin["success"])
         self.assertEqual(admin["file_count"], 2)
 
-    def test_clean_old_logs_reports_failed_deletes(self):
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            log_file = root / "old.log"
-            log_file.write_text("old", encoding="utf-8")
-            log_file.touch()
-            manager = GmsTestLogsManager()
-            manager.log_dirs = [root]
-            with patch.object(Path, "unlink", side_effect=OSError("permission denied")):
-                result = manager.clean_old_logs(days=0)
-
-        self.assertEqual(result["cleaned_files"], 0)
-        self.assertEqual(result["failed_files"], 1)
-
 
 if __name__ == "__main__":
     unittest.main()

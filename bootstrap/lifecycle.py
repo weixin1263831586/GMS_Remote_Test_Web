@@ -142,7 +142,7 @@ def _start_local_vnc():
         try:
             from features.system.vnc import vnc_manager
 
-            result = vnc_manager._start_local_vnc(force_restart=False)
+            result = vnc_manager.ensure_local_vnc()
             if result.get("success"):
                 logger.info("[VNC] Auto-started local VNC on boot")
             else:

@@ -110,6 +110,29 @@ class AuthApiTests(AuthApiMixin, unittest.TestCase):
             self.assertEqual(same_host.status_code, 200)
             detect.assert_called_once_with("10.1.1.5", "user", "pw")
 
+    def test_client_ssh_login_rejects_empty_password_even_with_saved_mapping(self):
+        """空密码不得借 detect_username 的已存映射回退（无凭据校验）通过登录。"""
+        with patch.object(
+            config_manager,
+            "find_device_host_password",
+            return_value=None,
+        ), patch(
+            "features.auth.api._request_source_ip",
+            return_value="10.1.1.5",
+        ), patch(
+            "features.auth.api._client_ssh_authenticator",
+            return_value=(True, "user", None),
+        ) as detect:
+            login = self.client.post(
+                "/api/auth/login",
+                json={"username": "user@10.1.1.5", "password": ""},
+            )
+
+        self.assertEqual(login.status_code, 401)
+        # 空密码根本不应到达认证器（真实接线是 detect_username，其
+        # 已存映射回退对空密码直接返回成功）。
+        detect.assert_not_called()
+
     def test_client_ssh_login_rejects_foreign_target_ip(self):
         with patch.object(
             config_manager,

@@ -563,7 +563,7 @@ function checkPendingFirmwareUpload() {
 async function loadConfig() {
     try {
         // 初始化链路读取配置：未登录时静默失败，不弹登录层。
-        const config = await apiCall('/api/config/read', 'GET', null, {background: true});
+        const config = await apiCall('/api/config/client', 'GET', null, {background: true});
         state.config = config;
     } catch (error) {
         debugLog('Failed to load config:', error);

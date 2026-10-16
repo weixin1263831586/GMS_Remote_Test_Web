@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import logging
 import shutil
+import threading
 import time
 import uuid
 
@@ -14,7 +15,7 @@ import paramiko
 from foundation.cluster_port import get_cluster_service
 from foundation.error_model import ApiError, record_internal_error
 
-from . import debug_execution, deployment_execution
+from . import debug_execution, debug_identity, deployment_execution
 from . import deployment_service as deployment
 from .debug_identity import inspect_apk, require_installed
 from .debug_store import DebugStore
@@ -22,10 +23,16 @@ from .debug_store import DebugStore
 
 logger = logging.getLogger(__name__)
 OPERATIONS = frozenset({"install", "launch", "stop", "tap", "swipe", "text", "keyevent", "database_read"})
+_store_lock = threading.Lock()
+_stores = {}
 
 
 def store():
-    return DebugStore(deployment.store().root)
+    root = deployment.store().root
+    with _store_lock:
+        if root not in _stores or not _stores[root].db.exists():
+            _stores[root] = DebugStore(root)
+        return _stores[root]
 
 
 def check_identity(session):
@@ -102,14 +109,17 @@ def approve(request, session_id):
         # Sessions without a baseline install must already target the approved
         # signer. Install sessions remain busy until the installed APK is verified.
         if "install" not in session["operations"]:
-            with deployment.connection(session["worker_id"], config) as ssh:
-                require_installed(ssh, session)
+            with deployment.execution_lease(grants, session_id, approval=True), \
+                    deployment.connection(session["worker_id"], config) as ssh:
+                require_installed(ssh, session, worker_id=session["worker_id"])
         session = grants.activate(session_id, session["owner_id"], {
             "approved_by": user.actor_id, "approved_at": time.time(),
             "expires_at": time.time() + session["duration_minutes"] * 60,
             "_claim_source": source, "_lease_tokens": deployment.bound_claim_tokens(repository, records, session_id),
         })
     except ValueError as exc:
+        if source:
+            repository.claims.release(source)
         grants.reset_approval(session_id, session["owner_id"])
         raise ApiError.conflict(str(exc)) from exc
     except Exception:
@@ -143,18 +153,35 @@ def check_apk(session, payload):
 def check_live(session, *, require_baseline=False):
     current = store().get(session["id"], session["owner_id"])
     if current["status"] != "active":
+        debug_identity.invalidate_installed_identity(
+            current["worker_id"], current["serial"], current["package"],
+        )
         raise ApiError.forbidden("调试会话未批准、已到期或已撤销",
                                  next_actions=({"action": "重新申请并由用户批准调试会话"},))
     if "install" in current["operations"]:
         baseline = deployment.store().get(current["baseline_deployment_id"], current["owner_id"])
         if baseline["status"] in {"failed", "interrupted", "expired"}:
+            if (baseline["status"] == "interrupted"
+                    and baseline.get("result", {}).get("execution_phase") == "queued"):
+                deployment.cleanup_expired_queue(baseline)
             store().revoke(current["id"], current["owner_id"])
+            debug_identity.invalidate_installed_identity(
+                current["worker_id"], current["serial"], current["package"],
+            )
             if current["busy"]:
                 finish(current, current["busy"], "interrupted", {"error": "基线安装失败或中断"})
+            elif current.get("_claim_source"):
+                get_cluster_service().repository.claims.release(current["_claim_source"])
             raise ApiError.forbidden("基线安装失败或中断，调试授权已撤销")
         if require_baseline and baseline["status"] != "completed":
             raise ApiError.conflict("基线 APK 尚未完成安装和身份校验，请先查询部署状态")
-    check_identity(current)
+    try:
+        check_identity(current)
+    except ApiError:
+        debug_identity.invalidate_installed_identity(
+            current["worker_id"], current["serial"], current["package"],
+        )
+        raise
     repository = get_cluster_service().repository
     worker = repository.get_worker(session["worker_id"])
     if not worker or worker.get("status") not in {"online", "busy", "draining"}:
@@ -209,20 +236,31 @@ def finish(session, operation, status, result):
 def execute_install(payload):
     session = payload["_debug_session"]
     repository = deployment.store()
-    repository.begin_execution(payload["id"])
+    execution_token = uuid.uuid4().hex
+    owns_task = False
     status = "failed"
     result = {"error": "安装中断"}
     try:
+        started = repository.begin_execution(payload["id"], execution_token)
+        owns_task = True  # False means this invocation atomically expired the queued task.
+        if not started:
+            status = "interrupted"
+            result = repository.get(payload["id"], payload["owner_id"])["result"]
+            return
+
         def check():
-            repository.heartbeat(payload["id"])
+            repository.heartbeat(payload["id"], execution_token)
             check_live(session)
 
-        with deployment.execution_lease(repository, payload["id"]):
+        with deployment.execution_lease(repository, payload["id"], execution_token):
             check()
             check_apk(session, payload)
             with deployment.connection(payload["worker_id"], payload["_ssh_config"]) as ssh:
                 result = deployment_execution.install(ssh, payload, repository.root / payload["id"] / "artifact.apk", check)
-                require_installed(ssh, session, check)
+                debug_identity.invalidate_installed_identity(
+                    session["worker_id"], session["serial"], session["package"],
+                )
+                require_installed(ssh, session, check, worker_id=session["worker_id"])
         status = "completed"
     except ApiError as exc:
         result = exc.envelope()
@@ -231,11 +269,28 @@ def execute_install(payload):
     except Exception:
         result = ApiError.internal(record_internal_error(logger, "调试安装", "Debug installation failed")).envelope()
     finally:
-        repository.finish(payload["id"], status, result)
-        if status != "completed":
-            store().revoke(session["id"], session["owner_id"])
-        finish(session, payload["_debug_operation"], status, result)
-        shutil.rmtree(repository.root / payload["id"], ignore_errors=True)
+        if not owns_task:
+            owns_task = repository.fail_start(payload["id"], execution_token, result)
+        if owns_task:
+            current_deployment = repository.get(payload["id"], payload["owner_id"])
+            if current_deployment["status"] == "interrupted":
+                status = "interrupted"
+                result = current_deployment["result"]
+            try:
+                if status != "interrupted":
+                    repository.finish(payload["id"], status, result, execution_token)
+            finally:
+                try:
+                    if status != "completed":
+                        store().revoke(session["id"], session["owner_id"])
+                finally:
+                    debug_identity.invalidate_installed_identity(
+                        session["worker_id"], session["serial"], session["package"],
+                    )
+                    try:
+                        finish(session, payload["_debug_operation"], status, result)
+                    finally:
+                        shutil.rmtree(repository.root / payload["id"], ignore_errors=True)
 
 
 def action(request, session_id, body):
@@ -251,7 +306,9 @@ def action(request, session_id, body):
     operation = store().begin(session_id, session["owner_id"], user.actor_id, body.action, details)
     try:
         with deployment.connection(session["worker_id"]) as ssh:
-            require_installed(ssh, session, lambda: check_live(session))
+            require_installed(
+                ssh, session, lambda: check_live(session), worker_id=session["worker_id"],
+            )
             result = debug_execution.perform(ssh, session, body, lambda: check_live(session))
         finish(session, operation, "completed", result)
         return {"operation_id": operation, **result}
@@ -275,6 +332,9 @@ def revoke(request, session_id):
         if user.actor_id != session["actor_id"]:
             raise ApiError.forbidden("不能撤销其他 Agent 的调试会话")
     current = store().revoke(session_id, session["owner_id"])
+    debug_identity.invalidate_installed_identity(
+        session["worker_id"], session["serial"], session["package"],
+    )
     if current.get("_claim_source") and not current["busy"]:
         get_cluster_service().repository.claims.release(current["_claim_source"])
     return current
@@ -296,7 +356,9 @@ def database_query(request, body):
     })
     try:
         with deployment.connection(body.worker_id) as ssh:
-            require_installed(ssh, session, lambda: check_live(session))
+            require_installed(
+                ssh, session, lambda: check_live(session), worker_id=session["worker_id"],
+            )
             check_live(session)
             result = deployment_execution.query_database(ssh, serial, body)
         finish(session, operation, "completed", {"read": True})

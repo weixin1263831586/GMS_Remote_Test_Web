@@ -5,7 +5,6 @@ import hashlib
 import html
 import logging
 import os
-import re
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -138,18 +137,6 @@ async def root(request: Request):
 # agent package source (skill content now lives in agent/.../skill/). The
 # modern install path is GET /api/agent/install (bootstrap → gms-agent).
 
-def _skill_directory(skill_name: str) -> str | None:
-    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", skill_name or ""):
-        return None
-    skills_base_dir = os.path.realpath(
-        os.path.join(PROJECT_ROOT, "agent", "gms-remote-test", "skill")
-    )
-    skills_dir = os.path.realpath(os.path.join(skills_base_dir, skill_name))
-    if not skills_dir.startswith(skills_base_dir + os.sep):
-        return None
-    return skills_dir
-
-
 @router.get("/api/system/skills")
 async def download_skills_zip(
     request: Request,
@@ -214,7 +201,6 @@ async def download_skills_zip(
             # GET /api/agent/install (bootstrap → gms-agent). Advertise the
             # successor so old clients/scripts migrate before removal.
             "Deprecation": "true",
-            "Sunset": "Wed, 31 Dec 2025 23:59:59 GMT",
             'Link': '</api/agent/install.sh>; rel="successor-version"',
         }
         if zip_signature:
@@ -461,7 +447,18 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     })
 
             elif message_type == 'tradefed_list_results':
-                await handle_tradefed_list_results(client_id, websocket, data)
+                # 与 HTTP 孪生路由 POST /api/test/suites/result 一致：执行
+                # tradefed 二进制属于提权操作，非提权会话不得经 WS 绕过。
+                token = websocket.cookies.get(AUTH_COOKIE_NAME)
+                live_user = auth_service.get_user_for_token(token, refresh=False)
+                if live_user is not None and auth_service.get_elevated_until(token):
+                    await handle_tradefed_list_results(client_id, websocket, data)
+                else:
+                    await websocket.send_json({
+                        'type': 'terminal_error',
+                        'error': '需要已提权的管理员会话',
+                        'elevation_required': True,
+                    })
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket client disconnected: {client_id}")

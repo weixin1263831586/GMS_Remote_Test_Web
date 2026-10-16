@@ -226,19 +226,12 @@ class AutomationService:
                 raise ValueError('Artifact URL must use the configured Jenkins origin')
         artifact_path = str(body.get('artifact_path') or '').strip()
         if artifact_path and not build:
-            from foundation.config import config_manager, settings
+            from features.automation.executors import _controller_artifact_roots
 
             path = Path(artifact_path).expanduser().resolve()
-            config = config_manager.load_config()
-            configured_roots = (
-                (config.get('firmware_shares') or {}).get('allowed_prefixes')
-                or config.get('firmware_share_allowed_prefixes')
-                or ['/home/', '/data/', '/mnt/']
-            )
-            allowed_roots = [settings.data_root.resolve()]
-            allowed_roots.extend(Path(str(root)).expanduser().resolve() for root in configured_roots)
             if not path.is_file() or not any(
-                path == root or path.is_relative_to(root) for root in allowed_roots
+                path == root or path.is_relative_to(root)
+                for root in _controller_artifact_roots()
             ):
                 raise ValueError('Firmware artifact is missing or outside the configured firmware roots')
             if path.stat().st_size <= 0:

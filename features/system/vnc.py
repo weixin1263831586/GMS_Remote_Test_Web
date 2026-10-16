@@ -94,6 +94,10 @@ class VNCManager:
             logger.error(f"Error starting VNC: {e}")
             return {'success': False, 'error': str(e)}
 
+    def ensure_local_vnc(self) -> dict[str, Any]:
+        """Ensure local VNC is available without interrupting an existing server."""
+        return self._start_local_vnc(force_restart=False)
+
     def _start_local_vnc(self, force_restart: bool = False) -> dict[str, Any]:
         """启动本地VNC服务
 

@@ -274,15 +274,28 @@ class RepositoryQueryMixin:
         window_cutoff = now - timedelta(days=int(window_days)) if int(window_days or 0) > 0 else None
 
         with self.connect() as conn:
-            rows = conn.execute(
-                """
+            # Assignee names are indexed and far smaller than decoded snapshots.
+            # Preserve Python alias matching before fetching heavy journal JSON.
+            matching = None
+            if owner_keys:
+                names = conn.execute("SELECT DISTINCT assigned_to_name FROM redmine_agent_issues").fetchall()
+                matching = [row[0] for row in names if _name_matches_keys(row[0], owner_keys)]
+            statement = """
                 SELECT issue_id, subject, status_name, priority_name, assigned_to_name,
                        author_name, created_on, updated_on, closed_on, description, category,
                        is_resolved, last_scanned_at, journals_json, attachments_json, failures_json
                 FROM redmine_agent_issues
+                {where}
                 ORDER BY COALESCE(updated_on, created_on) DESC, issue_id DESC
                 """
-            ).fetchall()
+            if matching is None:
+                rows = conn.execute(statement.format(where="")).fetchall()
+            else:
+                rows = []
+                for offset in range(0, len(matching), 500):
+                    batch = matching[offset:offset + 500]
+                    where = "WHERE assigned_to_name IN (" + ",".join("?" for _ in batch) + ")"
+                    rows.extend(conn.execute(statement.format(where=where), batch).fetchall())
 
         issues = [self._decode_row(row) for row in rows]
         if not owner_keys:

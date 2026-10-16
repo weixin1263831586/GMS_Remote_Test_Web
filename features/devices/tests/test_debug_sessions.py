@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -56,7 +57,7 @@ def environment(tmp_path, monkeypatch):
     monkeypatch.setattr(debug_service, "inspect_apk", lambda *_args: IDENTITY.copy())
     monkeypatch.setattr(deployment_service, "inspect_apk", lambda *_args: IDENTITY.copy())
     monkeypatch.setattr(deployment_service, "installed_identity", lambda *_args: None)
-    monkeypatch.setattr(debug_service, "require_installed", lambda *_args: IDENTITY.copy())
+    monkeypatch.setattr(debug_service, "require_installed", lambda *_args, **_kwargs: IDENTITY.copy())
     app = FastAPI()
     register_api_error_handler(app)
 
@@ -107,26 +108,68 @@ def approve(client, session):
 
 
 def test_request_is_pending_has_no_device_effect_and_agent_cannot_self_approve(environment):
-    client, repository, *_ = environment
+    client, *_ = environment
     session = request_session(client)
     assert session["status"] == "pending" and session["duration_minutes"] == 60
     assert "_lease_tokens" not in session
     assert client.get(session["approval_url"]).status_code == 200
     assert client.post("/api/devices/debug-sessions/" + session["id"] + "/approve").status_code == 403
-    assert repository.claims.active_claim("worker:SERIAL") is None
 
 
-def test_human_operator_can_review_own_debug_session_without_agent_read_scope(environment):
-    client, repository, *_ = environment
+def test_debug_install_start_failure_finishes_busy_operation_and_releases_resources(environment, monkeypatch):
+    _client, cluster_repository, _auth, *_ = environment
+    session = request_session(_client, operations="stop")
+    active = approve(_client, session)
+    operation = debug_service.store().begin(
+        active["id"], active["owner_id"], active["actor_id"], "stop", {"test": True},
+    )
+    deployment_id = uuid.uuid4().hex
+    repository = deployment_service.store()
+    repository.create({"id": deployment_id, "owner_id": active["owner_id"], "expires_at": time.time() + 300,
+                       "worker_id": active["worker_id"], "serial": active["serial"],
+                       "package": active["package"], "sha256": active["baseline_sha256"]})
+    repository.start(deployment_id, active["owner_id"], active["owner_id"])
+
+    def fail_start(*_args, **_kwargs):
+        raise RuntimeError("injected begin_execution failure")
+
+    monkeypatch.setattr(deployment_service, "store", lambda: repository)
+    monkeypatch.setattr(repository, "begin_execution", fail_start)
+    payload = {"id": deployment_id, "owner_id": active["owner_id"], "worker_id": active["worker_id"],
+               "serial": active["serial"], "package": active["package"], "sha256": active["baseline_sha256"],
+               "_debug_session": active, "_debug_operation": operation, "_ssh_config": {}}
+    debug_service.execute_install(payload)
+
+    assert repository.get(deployment_id, active["owner_id"])["status"] == "failed"
+    finished = debug_service.store().get(active["id"], active["owner_id"])
+    assert finished["status"] == "revoked" and finished["busy"] == ""
+    history = debug_service.store().history(active["id"], active["owner_id"])
+    assert history[0]["id"] == operation and history[0]["status"] == "failed"
+    assert cluster_repository.claims.active_claim("worker:SERIAL") is None
+
+
+@pytest.mark.parametrize("role", ["user", "device_operator"])
+def test_human_operator_can_review_own_debug_session_without_agent_read_scope(environment, role):
+    client, *_ = environment
     session = request_session(client)
     endpoint = "/api/devices/debug-sessions/" + session["id"]
-    human = {"x-test-principal": "session"}
+    human = {"x-test-principal": "session", "x-test-role": role}
     assert client.get(endpoint, headers=human).status_code == 200
     assert client.get(endpoint + "/review", headers=human).status_code == 200
     assert client.get(endpoint, headers={**human, "x-test-owner": "other"}).status_code == 404
     assert client.get(endpoint, headers={**human, "x-test-role": "worker_service"}).status_code == 403
     assert client.get(endpoint, headers={"x-test-scopes": "devices.use_leased"}).status_code == 403
-    assert repository.claims.active_claim("worker:SERIAL") is None
+
+
+@pytest.mark.parametrize("role", ["user", "device_operator"])
+def test_human_operator_roles_can_approve_own_debug_session(environment, role):
+    client, *_ = environment
+    session = request_session(client)
+    with patch.object(debug_service, "execute_install") as queued:
+        response = client.post("/api/devices/debug-sessions/" + session["id"] + "/approve",
+                               headers={"x-test-principal": "session", "x-test-role": role})
+    assert response.status_code == 200, response.text
+    assert queued.call_count == 1
 
 
 def test_approve_binds_finite_grant_and_first_install_once(environment):
@@ -417,6 +460,8 @@ def test_installed_signer_mismatch_blocks_debug(environment, phase):
     if phase == "action":
         session = approve(client, session)
     with patch.object(debug_service, "require_installed", debug_identity.require_installed), patch.object(
+        debug_identity, "installed_fingerprint", return_value=("/data/app/base.apk", "boot:stat:v1"),
+    ), patch.object(
         debug_identity, "installed_identity", return_value={**IDENTITY, "signers": ["b" * 64]},
     ), patch.object(debug_execution, "perform") as perform:
         if phase == "approval":

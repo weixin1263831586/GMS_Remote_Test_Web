@@ -26,6 +26,7 @@ const AGENT_ACCESS_SCOPE_LABELS = {
     'tests.cancel': '取消自己的测试任务',
     'jobs.read': '读取任务状态与事件',
     'reports.read': '读取测试报告',
+    'suites.read': '读取 Worker 测试套件文件',
     'redmine.read': '读取授权范围内的 Redmine 数据',
     'artifacts.read_own': '读取自己的证据与制品',
     'apk.analyze_own': '分析自己的 APK 制品',
@@ -38,7 +39,7 @@ const AGENT_ACCESS_SCOPE_LABELS = {
 
 const AGENT_ACCESS_SCOPE_GROUPS = [
     {label: '设备与调试', prefixes: ['devices.']},
-    {label: '测试与报告', prefixes: ['tests.', 'jobs.', 'reports.']},
+    {label: '测试与报告', prefixes: ['tests.', 'jobs.', 'reports.', 'suites.']},
     {label: '证据与分析', prefixes: ['redmine.', 'artifacts.', 'apk.', 'sdk.', 'knowledge.']},
     {label: '编译构建', prefixes: ['build.']},
     {label: '其他能力', prefixes: []},

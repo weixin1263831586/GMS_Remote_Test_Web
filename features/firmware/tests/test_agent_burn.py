@@ -125,6 +125,9 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
     """The dependency gate: who may reach the burn handler at all."""
 
     def setUp(self):
+        validation_patch = patch("features.auth.service.auth_service.validate_approval_token", return_value=True)
+        self.prevalidate = validation_patch.start()
+        self.addCleanup(validation_patch.stop)
         self.runtime_directory = TemporaryDirectory()
         runtime.configure_runtime(
             config_manager=FakeConfigManager(),
@@ -218,7 +221,7 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
             )
         self.assertEqual(
             response.json(),
-            {"success": False, "error": "Firmware not found: /tmp/not-found.img"},
+            {"success": False, "error": "Firmware not found: /tmp/not-found.img", "code": "NOT_FOUND"},
         )
         # 审批令牌按 tool+规范化设备列表 被服务端一次性消费，
         # 绑定串包含固件 SHA256（精确绑定；此处路径不存在，
@@ -247,7 +250,7 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
             )
         self.assertEqual(
             response.json(),
-            {"success": False, "error": "Firmware not found: /tmp/not-found.img"},
+            {"success": False, "error": "Firmware not found: /tmp/not-found.img", "code": "NOT_FOUND"},
         )
         consume.assert_not_called()
 
@@ -328,6 +331,7 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
             firmware_name = firmware.name
         self.addCleanup(os.unlink, firmware_name)
         self._set_principal(AGENT_ROLE)
+        self.prevalidate.return_value = False
         with patch(
             "features.firmware.firmware_api.authentication_required",
             return_value=True,
@@ -342,7 +346,7 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
         ), patch(
             "features.firmware.firmware_api._upload_firmware_to_test_host",
             side_effect=_async_none,
-        ), patch(
+        ) as upload, patch(
             "features.firmware.firmware_api._lock_devices",
             side_effect=_fake_lock,
         ), patch(
@@ -359,9 +363,10 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
                 "/api/burn/firmware?devices=D1&approval_token=tok123",
                 data={"firmware_path": firmware_name},
             )
-        # 审批无效：在破坏性执行点被拒，token 恰好消费尝试一次。
+        # 无效令牌在远端写入之前拒绝，既不传输也不消费。
         self.assertEqual(response.status_code, 403)
-        consume.assert_called_once()
+        consume.assert_not_called()
+        upload.assert_not_called()
 
     def test_agent_burn_preflight_failure_does_not_consume_approval(self):
         """无损失败不得提前烧掉一次性审批 token。
@@ -446,7 +451,7 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
         # 管理员走到业务校验：固件不存在（不是 403）。
         self.assertEqual(
             response.json(),
-            {"success": False, "error": "Firmware not found: /tmp/not-found.img"},
+            {"success": False, "error": "Firmware not found: /tmp/not-found.img", "code": "NOT_FOUND"},
         )
 
     def test_elevated_human_admin_reaches_burn_without_agent_approval(self):

@@ -122,7 +122,7 @@ def test_request_success_envelope(server, monkeypatch):
         captured["auth"] = request.headers.get("Authorization")
         return FakeResponse()
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("gms_agent.client.open_request", fake_urlopen)
     envelope = server.request("GET", "/cluster/workers")
     assert envelope == {
         "ok": True,
@@ -136,7 +136,7 @@ def test_request_403_raises_permission_error(server, monkeypatch):
     def fake_urlopen(request, timeout=0, context=None):
         raise urllib.error.HTTPError(request.full_url, 403, "forbidden", {}, None)
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("gms_agent.client.open_request", fake_urlopen)
     with pytest.raises(GmsApiError) as excinfo:
         server.request("GET", "/cluster/workers")
     assert excinfo.value.exit_code == EXIT_PERMISSION
@@ -191,7 +191,7 @@ def test_request_rereads_rotated_token_file(monkeypatch, tmp_path):
         captured["auth"] = request.get_header("Authorization")
         raise urllib.error.HTTPError(request.full_url, 500, "boom", {}, None)
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("gms_agent.client.open_request", fake_urlopen)
 
     # 就地轮换：文件内容变化必须体现在下一次请求头里。
     token_file.write_text("token-v2\n")

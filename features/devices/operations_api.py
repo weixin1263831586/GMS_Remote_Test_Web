@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import shlex
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -295,9 +294,7 @@ async def connect_wifi(req: WifiConnectRequest, request: Request):
 async def open_device_shell(req: DeviceShellRequest, request: Request):
     """Open device ADB Shell - prepare device connection for terminal page."""
     try:
-        # device_shells 是运行时会话状态（actor 身份）；conflict 复查用
-        # fencing owner（ADR 0010），两者分开。
-        client_id = require_authenticated_user(request).id
+        require_authenticated_user(request)
         conflict = device_claim_conflict_response(
             [req.serial_no],
             device_fencing_owner_id(request),
@@ -317,14 +314,6 @@ async def open_device_shell(req: DeviceShellRequest, request: Request):
             )
 
             if ready_result.get("ready"):
-                if not hasattr(runtime.global_state, "device_shells"):
-                    runtime.global_state.device_shells = {}
-
-                runtime.global_state.device_shells[client_id] = {
-                    "serial_no": req.serial_no,
-                    "connected_at": datetime.now().isoformat(),
-                }
-
                 return JSONResponse(
                     content={
                         "success": True,

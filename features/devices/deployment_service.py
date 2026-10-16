@@ -29,15 +29,21 @@ from foundation.security import is_safe_device_id
 
 from . import deployment_execution as execution
 from . import runtime
-from .debug_identity import inspect_apk, installed_identity
+from .debug_identity import inspect_apk, installed_identity, invalidate_installed_identity
 from .deployment_store import DeploymentStore
 
 
 logger = logging.getLogger(__name__)
+_store_lock = threading.Lock()
+_stores: dict[Path, DeploymentStore] = {}
 
 
 def store():
-    return DeploymentStore(get_cluster_service().repository.db_path.parent / "apk-deployments")
+    root = (get_cluster_service().repository.db_path.parent / "apk-deployments").resolve()
+    with _store_lock:
+        if root not in _stores or not _stores[root].db.exists():
+            _stores[root] = DeploymentStore(root)
+        return _stores[root]
 
 
 def authorize(request, permission: str, *, human_permission: str | None = None):
@@ -117,7 +123,7 @@ def connection(worker_id: str, approved_config=None):
 
 
 async def prepare(request, worker_id: str, device: str, replace_existing: bool, upload):
-    user, serial, _key = target(request, worker_id, device, "devices.use_leased")
+    user, serial, _ = target(request, worker_id, device, "devices.use_leased")
     ssh_config(worker_id)
     repository = store()
     for expired in repository.expire_pending():
@@ -145,21 +151,13 @@ async def prepare(request, worker_id: str, device: str, replace_existing: bool, 
         path.chmod(0o400)
         identity = await asyncio.to_thread(inspect_apk, path, digest.hexdigest())
 
-        def observe():
-            held = get_cluster_service().repository.claims.active_claim(_key)
-            if held and held["owner_id"] != user.resource_owner_id:
-                raise ApiError.conflict("设备由其他用户占用")
-            with connection(worker_id) as ssh:
-                return installed_identity(ssh, serial, identity["package"])
-
-        installed = await asyncio.to_thread(observe)
         return repository.create({
             "id": request_id, "owner_id": user.resource_owner_id,
             "actor_id": user.actor_id, "worker_id": worker_id, "serial": serial,
             "filename": Path(upload.filename or "artifact.apk").name[:200],
             "sha256": digest.hexdigest(), "size_bytes": size,
-            **identity, "installed_identity": installed,
-            "installed_signers_match": installed["signers"] == identity["signers"] if installed else None,
+            **identity, "installed_identity": None, "installed_signers_match": None,
+            "installed_identity_precheck": "deferred_until_approval",
             "replace_existing": replace_existing, "expires_at": time.time() + 300,
         })
     except Exception:
@@ -236,6 +234,23 @@ def approve(request, request_id: str):
     source = ""
     try:
         source = claim(request, payload)
+        def observe_installed():
+            check_claim_tokens(payload.get("_lease_tokens"), payload["owner_id"])
+            with connection(payload["worker_id"], approved_config) as ssh:
+                result = installed_identity(
+                    ssh, payload["serial"], payload["package"],
+                    lambda: check_claim_tokens(payload.get("_lease_tokens"), payload["owner_id"]),
+                )
+            check_claim_tokens(payload.get("_lease_tokens"), payload["owner_id"])
+            return result
+
+        with execution_lease(repository, request_id, approval=True):
+            installed = observe_installed()
+        repository.record_precheck(request_id, {
+            "status": "verified", "checked_at": time.time(),
+            "installed_identity": installed,
+            "signers_match": installed["signers"] == payload["signers"] if installed else None,
+        })
         # ADR 0006: server-issued single-use approval, bound to the complete
         # immutable operation. The secret stays in this human request's memory.
         command = json.dumps({key: payload[key] for key in (
@@ -261,45 +276,74 @@ def approve(request, request_id: str):
 
 def execute(payload: dict, source: str):
     repository = store()
-    repository.begin_execution(payload["id"])
+    execution_token = uuid.uuid4().hex
+    owns_task = False
+    status = "failed"
+    result = {"error": "部署任务未能启动"}
 
     def check_claim():
-        repository.heartbeat(payload["id"])
+        repository.heartbeat(payload["id"], execution_token)
         claims = get_cluster_service().repository.claims
         check_claim_tokens(payload.get("_lease_tokens"), payload["owner_id"])
         if source:
             claims.renew(source, 1200)
 
     try:
-        with execution_lease(repository, payload["id"]):
-            check_claim()
-            with connection(payload["worker_id"], payload["_ssh_config"]) as ssh:
-                result = execution.install(ssh, payload, repository.root / payload["id"] / "artifact.apk", check_claim)
-        repository.finish(payload["id"], "completed", result)
+        started = repository.begin_execution(payload["id"], execution_token)
+        owns_task = True  # False means this invocation atomically expired the queued task.
+        if not started:
+            status = "interrupted"
+            result = repository.get(payload["id"], payload["owner_id"])["result"]
+        else:
+            with execution_lease(repository, payload["id"], execution_token):
+                check_claim()
+                with connection(payload["worker_id"], payload["_ssh_config"]) as ssh:
+                    result = execution.install(
+                        ssh, payload, repository.root / payload["id"] / "artifact.apk", check_claim,
+                    )
+            status = "completed"
     except ApiError as exc:
-        repository.finish(payload["id"], "failed", exc.envelope())
+        result = exc.envelope()
     except (OSError, EOFError, paramiko.SSHException):
-        repository.finish(payload["id"], "failed", ApiError.upstream_failure(
+        result = ApiError.upstream_failure(
             "SSH/制品传输中断", service="sftp",
-        ).envelope())
+        ).envelope()
     except Exception:
         message = record_internal_error(logger, "APK 部署", "APK deployment failed")
-        repository.finish(payload["id"], "failed", ApiError.internal(message).envelope())
+        result = ApiError.internal(message).envelope()
     finally:
-        if source:
-            get_cluster_service().repository.claims.release(source)
-        shutil.rmtree(repository.root / payload["id"], ignore_errors=True)
+        if not owns_task:
+            owns_task = repository.fail_start(payload["id"], execution_token, result)
+        if owns_task:
+            current = repository.get(payload["id"], payload["owner_id"])
+            if current["status"] == "interrupted":
+                status = "interrupted"
+                result = current["result"]
+            try:
+                if status != "interrupted":
+                    repository.finish(payload["id"], status, result, execution_token)
+            finally:
+                invalidate_installed_identity(payload["worker_id"], payload["serial"], payload["package"])
+                try:
+                    if source:
+                        get_cluster_service().repository.claims.release(source)
+                finally:
+                    shutil.rmtree(repository.root / payload["id"], ignore_errors=True)
 
 
 @contextlib.contextmanager
-def execution_lease(repository, request_id):
+def execution_lease(repository, request_id, execution_token=None, *, approval=False):
     """One durable queued task wins execution; live work renews its own lease."""
     stop = threading.Event()
+    renew = (lambda: repository.approval_heartbeat(request_id)) if approval else (
+        lambda: repository.heartbeat(request_id, execution_token)
+    )
+    renew()
 
     def heartbeat():
         while not stop.wait(20):
             try:
-                repository.heartbeat(request_id)
+                renew()
             except Exception:
                 return  # The next fenced step must fail closed.
 
@@ -307,10 +351,26 @@ def execution_lease(repository, request_id):
     thread.start()
     try:
         yield
-        repository.heartbeat(request_id)
+        renew()
     finally:
         stop.set()
         thread.join(timeout=2)
+
+
+def cleanup_expired_queue(payload):
+    """Reap an expired approval only if no executor has claimed its queue row."""
+    repository = store()
+    token = uuid.uuid4().hex
+    if not repository.claim_expired_queue_cleanup(payload["id"], payload["owner_id"], token):
+        return False
+    source = "operation:apk-deploy:" + payload["id"]
+    claims = get_cluster_service().repository.claims
+    active = claims.active_claim(payload["worker_id"] + ":" + payload["serial"])
+    if (active and active.get("owner_id") == payload["owner_id"]
+            and active.get("source_id") == source and active.get("source_type") == "apk-deploy"):
+        claims.release(source)
+    shutil.rmtree(repository.root / payload["id"], ignore_errors=True)
+    return True
 
 
 def reconcile_interrupted(request, payload):

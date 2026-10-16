@@ -515,7 +515,9 @@ async def download_suite_directory(suite_path: str = Query(...), path: str = Que
             status = 400 if isinstance(exc, ValueError) else 404
             return ApiResponse.error(str(exc), status_code=status)
 
-    ssh = runtime.ssh_manager.get_connection(config)
+    # 同步 SSH 连接获取（默认 20s 超时）同样可能阻塞事件循环；与上方
+    # 文件下载分支的 prepare 一致，移入 worker 线程执行。
+    ssh = await run_in_threadpool(runtime.ssh_manager.get_connection, config)
     if not ssh:
         return ssh_connection_failed_response()
 
@@ -697,14 +699,18 @@ async def create_suite_apk_analysis_task(req: SuiteApkAnalyzeRequest, request: R
             "source_path": req.path,
         })
 
-    ssh = runtime.ssh_manager.get_connection(config)
+    # 同步 SSH 连接获取与 info 脚本（默认 20s 超时）必须在 worker 线程执行，
+    # 否则慢主机会阻塞事件循环（与 download_suite_directory 同一规则）。
+    ssh = await run_in_threadpool(runtime.ssh_manager.get_connection, config)
     if not ssh:
         return ssh_connection_failed_response()
 
     task_id = str(uuid.uuid4())
     sftp = None
     try:
-        info = _run_suite_file_script(ssh, SUITE_FILE_INFO_SCRIPT, suite_root, remote_path)
+        info = await run_in_threadpool(
+            _run_suite_file_script, ssh, SUITE_FILE_INFO_SCRIPT, suite_root, remote_path
+        )
         if not info.get("success"):
             return ApiResponse.error(info.get("error", "File not found"), status_code=404)
         if not (info.get("is_apk") or info.get("is_jar")):

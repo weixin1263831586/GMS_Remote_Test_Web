@@ -492,8 +492,8 @@ gms-rt-usbip-connect() {
     check_jq
     echo "🔌 Starting USB/IP connection to $device_host..."
     local data
-    data=$(jq -cn --arg device_host "$device_host" --arg device_password "$device_password" \
-        '{device_host: $device_host, device_password: $device_password}
+    data=$(GMS_RT_JSON_SECRET="$device_password" jq -cn --arg device_host "$device_host" \
+        '{device_host: $device_host, device_password: env.GMS_RT_JSON_SECRET}
          | with_entries(select(.value != ""))')
     local response=$(api_call "/usbip/connect" "POST" "$data")
     if echo "$response" | jq -e '.success' > /dev/null; then

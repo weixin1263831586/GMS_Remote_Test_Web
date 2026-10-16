@@ -1125,7 +1125,7 @@ async def get_weekly_report_ai_summary(
 
 
 DEFAULT_ANDROID17_SHEET_URL = "https://docs.qq.com/sheet/DQnVLa3NVeHdISXpy?tab=BB08J2"
-DEFAULT_ANDROID17_OWNER = "黄超群"
+DEFAULT_ANDROID17_OWNER = ""
 
 
 def android17_sheet_url() -> str:

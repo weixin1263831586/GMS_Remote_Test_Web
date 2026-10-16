@@ -12,6 +12,7 @@
     let failures = 0;
     let stopped = false;
     let hidden = false;
+    let reviewAccount = '';
 
     async function request(method, path) {
         const response = await fetch(path, {method, credentials: 'same-origin',
@@ -20,7 +21,7 @@
             stopped = true;
             clearTimeout(timer);
             details.replaceChildren();
-            const reason = '登录已失效或权限不足，请重新登录管理员 gms 账号。';
+            const reason = '登录已失效或权限不足，请重新登录发起申请的 Agent 所属平台账号。';
             window.DeviceReviewLogin.open(reason);
             throw new Error(reason);
         }
@@ -28,8 +29,10 @@
             stopped = true;
             clearTimeout(timer);
             details.replaceChildren();
-            const reason = '请求不存在或不属于当前登录账号。请登录发起申请的 Agent 所属平台账号（管理员 gms）；仍不可用时请由原 Agent 重新申请。';
-            window.DeviceReviewLogin.open(reason);
+            const reason = reviewAccount
+                ? `账号 ${reviewAccount} 已登录成功，但无法读取此请求。请求不存在或属于其他账号，请切换为发起申请的 Agent 所属平台账号；仍不可用时请由原 Agent 重新申请。`
+                : '请求不存在或不属于当前登录账号。请登录发起申请的 Agent 所属平台账号；仍不可用时请由原 Agent 重新申请。';
+            if (!reviewAccount) window.DeviceReviewLogin.open(reason);
             throw new Error(reason);
         }
         const body = await response.json();
@@ -43,12 +46,16 @@
         let poll = true;
         try {
             const {deployment: d} = await request('GET', endpoint);
+            const precheck = d.result?.installed_identity_precheck;
+            const installed = d.installed_identity || precheck?.installed_identity;
             details.replaceChildren();
             const entries = [['APK', d.filename], ['包名', d.package || '未知'],
                 ['版本', `${d.version_name || ''} (${d.version_code || ''})`],
                 ['签名证书 SHA256', (d.signers || []).join(', ')],
-                ['设备已安装签名', d.installed_identity?.signers?.join(', ') || '未安装'],
-                ['签名匹配', d.installed_signers_match === null ? '未安装' : d.installed_signers_match ? '一致' : '不一致'],
+                ['设备已安装签名', installed?.signers?.join(', ') || (precheck?.status === 'verified' ? '未安装' : '审批时核验')],
+                ['签名匹配', precheck ? precheck.signers_match === null ? '未安装' : precheck.signers_match ? '一致' : '不一致'
+                    : d.installed_signers_match === null ? '审批时核验' : d.installed_signers_match ? '一致' : '不一致'],
+                ['设备身份核验', precheck?.status === 'verified' ? '审批时已核验' : '将在批准时锁定设备并核验'],
                 ['SHA256', d.sha256], ['Worker', d.worker_id],
                 ['设备', d.serial], ['安装方式', d.replace_existing ? '覆盖安装，保留应用数据（-r）' : '首次安装'],
                 ['有效至', new Date(d.expires_at * 1000).toLocaleString()]];
@@ -88,8 +95,9 @@
             if (errorMessage) status.textContent = errorMessage;
         }
     });
-    window.addEventListener('device-review-authenticated', () => {
+    window.addEventListener('device-review-authenticated', event => {
         if (hidden) return;
+        reviewAccount = event.detail?.username || '当前账号';
         stopped = false;
         failures = 0;
         refresh();

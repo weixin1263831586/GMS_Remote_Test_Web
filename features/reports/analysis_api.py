@@ -342,6 +342,8 @@ def _resolve_suite_log_dir(suite_path: str, rel_path: str, config) -> tuple[str,
         return "", "非法路径"
 
     base = (config.get("suites_path") or "").replace("\\", "/").strip().rstrip("/")
+    if not base:
+        return "", "尚未配置测试套件根目录"
     if base:
         base = os.path.realpath(os.path.expanduser(base))
     if base and not (suite_root == base or suite_root.startswith(base + "/")):

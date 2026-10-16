@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime
 from typing import Any
 
@@ -209,7 +210,7 @@ async def get_workload_statistics(
     stale_days = int(stale_days or stats_cfg["stale_days"])
     freshness_days = int(stats_cfg.get("freshness_days") or 180)
     cache_key = f"{_request_user_id(request)}:{stale_days}:{list_limit}:{name}"
-    now_ts = datetime.now().timestamp()
+    now_ts = time.monotonic()
     cached = _check_ttl_cache(_WORKLOAD_STATS_CACHE, cache_key, stats_cfg["cache_ttl"], now_ts, refresh=refresh)
     if cached is not None:
         return {"success": True, "data": {**cached, "cache_hit": True}}
@@ -358,7 +359,7 @@ async def get_workload_statistics(
         data.update(live_stats)
     data.setdefault("meta", {})["count_source"] = "redmine_live" if live_stats else "local_snapshot"
     data["generated_at"] = datetime.now().isoformat(timespec="seconds")
-    _update_ttl_cache(_WORKLOAD_STATS_CACHE, cache_key, now_ts, data)
+    _update_ttl_cache(_WORKLOAD_STATS_CACHE, cache_key, time.monotonic(), data, ttl=stats_cfg["cache_ttl"])
     return {"success": True, "data": data}
 
 
@@ -486,7 +487,7 @@ async def get_department_overdue_statistics(
     if not _has_redmine_credentials(request):
         return _missing_credentials_payload(request)
     service = _service_for_request(request)
-    now_ts = datetime.now().timestamp()
+    now_ts = time.monotonic()
     stats_cfg = _get_redmine_stats_config(request)
     dashboard_cfg = _dashboard_config_for_request(request)
     profile = select_redmine_dashboard_profile(dashboard_cfg, profile_id)
@@ -559,7 +560,7 @@ async def get_department_overdue_statistics(
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "cache_hit": False,
         }
-        _update_ttl_cache(_DEPARTMENT_OVERDUE_CACHE, cache_key, now_ts, data)
+        _update_ttl_cache(_DEPARTMENT_OVERDUE_CACHE, cache_key, time.monotonic(), data, ttl=stats_cfg["cache_ttl"])
         return {"success": True, "data": data}
     finally:
         await client.close()
@@ -574,7 +575,7 @@ async def get_project_statistics(
     if not _has_redmine_credentials(request):
         return _missing_credentials_payload(request)
     service = _service_for_request(request)
-    now_ts = datetime.now().timestamp()
+    now_ts = time.monotonic()
     manager = _config_for_request(request)
     stats_cfg = _get_redmine_stats_config(request)
     dashboard_cfg = manager.get_redmine_dashboard_config()
@@ -602,7 +603,7 @@ async def get_project_statistics(
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "cache_hit": False,
         })
-        _update_ttl_cache(_PROJECT_STATS_CACHE, cache_key, now_ts, data)
+        _update_ttl_cache(_PROJECT_STATS_CACHE, cache_key, time.monotonic(), data, ttl=stats_cfg["cache_ttl"])
         return {"success": True, "data": data}
     except Exception as exc:
         return {"success": False, "error": f"project statistics failed: {exc}"}

@@ -10,12 +10,63 @@ import time
 
 import scp
 
-from foundation.error_model import ApiError
+from foundation.error_model import ApiError, record_internal_error
 
 from . import runtime
 
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_TRANSFER_TIMEOUT_SECONDS = 3600.0
+
+
+def transfer_timeout_seconds() -> float:
+    """Configured SCP transfer deadline (monotonic-clock, >= 1s)."""
+    try:
+        return max(float(runtime.firmware_transfer_timeout or 0), 1.0)
+    except (TypeError, ValueError):
+        return _DEFAULT_TRANSFER_TIMEOUT_SECONDS
+
+
+def _abort_transport(ssh) -> None:
+    """Close the SSH transport so a blocked SCP worker thread aborts.
+
+    paramiko offers no cooperative cancel; closing the transport makes the
+    blocked read/write raise inside the worker thread.
+    """
+    with contextlib.suppress(Exception):
+        ssh.get_transport().close()
+
+
+async def scp_put_with_deadline(ssh, local_path: str, remote_path: str) -> None:
+    """Run a bare ``SCPClient.put`` bounded by the configured transfer timeout.
+
+    On timeout the SSH transport is closed to abort the blocked worker
+    thread and the caller sees ``ApiError.dependency_timeout`` (504); a
+    transport-level failure maps to ``upstream_failure`` (502) instead of
+    the generic 500.
+    """
+    timeout_seconds = transfer_timeout_seconds()
+    client = scp.SCPClient(ssh.get_transport())
+    loop = asyncio.get_running_loop()
+    try:
+        await asyncio.wait_for(
+            loop.run_in_executor(None, client.put, local_path, remote_path),
+            timeout=timeout_seconds,
+        )
+    except asyncio.TimeoutError as exc:
+        _abort_transport(ssh)
+        raise ApiError.dependency_timeout(
+            f'SCP transfer timed out after {int(timeout_seconds)}s: {local_path}'
+        ) from exc
+    except Exception as exc:
+        message = record_internal_error(logger, 'SCP transfer', 'SCP transfer failed')
+        raise ApiError.upstream_failure(
+            message, service='scp'
+        ) from exc
+    finally:
+        with contextlib.suppress(Exception):
+            client.close()
 
 
 async def upload_firmware_to_test_host(
@@ -84,7 +135,15 @@ async def upload_firmware_to_test_host(
 
         last_percentage = 0.0
         last_update_time = time.time()
+        # 单调时钟 deadline：卡死的 SCP 传输按 504 收口（time.time() 会被
+        # NTP 跳变破坏，deadline 必须用 time.monotonic()）。
+        deadline = time.monotonic() + transfer_timeout_seconds()
         while not complete.is_set():
+            if time.monotonic() >= deadline:
+                _abort_transport(ssh)
+                raise ApiError.dependency_timeout(
+                    'Firmware upload to test host timed out'
+                )
             await asyncio.sleep(1.0)
             percentage = progress['current_percentage']
             now = time.time()

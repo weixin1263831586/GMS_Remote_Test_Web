@@ -6,6 +6,8 @@ import re
 import shlex
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -289,6 +291,37 @@ class BuildService:
         if server_password and job["status"] not in TERMINAL_JOB_STATUSES:
             self._runtime_passwords.set(job_id, server_password)
         return self._decorate_job(job)
+
+    @contextmanager
+    def open_build_artifact(
+        self,
+        job_id: str,
+        path: str,
+        *,
+        automation_run_id: str | None = None,
+    ) -> Iterator[tuple[Any, int]]:
+        """Stream one artifact of a completed build job as (binary stream, size).
+
+        Only paths the job itself reported as artifacts are readable. When
+        ``automation_run_id`` is given and the job belongs to another run,
+        the artifact is refused.
+        """
+        job = self.get_job(job_id)
+        if job.get("status") != JOB_COMPLETED:
+            raise BuildExecutionError("Build job is not completed")
+        if automation_run_id is not None:
+            owner = str(job.get("automation_run_id") or "")
+            if owner and owner != str(automation_run_id):
+                raise BuildExecutionError("Build job belongs to another automation run")
+        known_paths = {str(item.get("path") or "") for item in job.get("artifacts") or []}
+        if str(path) not in known_paths:
+            raise BuildExecutionError("Selected artifact is not part of the completed build job")
+        server = self._with_runtime_password(
+            self._get_server(job["server_id"]),
+            self._runtime_passwords.get(job_id),
+        )
+        with self._backend(server).open_artifact(server=server, path=str(path)) as artifact:
+            yield artifact
 
     def discover_workspaces(self, server_id: str, server_password: str = "", base_dir: str = "") -> list[str]:
         server = self._with_runtime_password(self._get_server(server_id), server_password)

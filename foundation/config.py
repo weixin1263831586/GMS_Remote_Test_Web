@@ -1,6 +1,7 @@
 """
 配置管理器 - 核心业务逻辑
 """
+import copy
 import getpass
 import json
 import logging
@@ -39,13 +40,6 @@ PROXY_HEADERS_ENABLED = settings.proxy_headers_enabled
 FORWARDED_ALLOW_IPS = settings.forwarded_allow_ips
 
 
-def _parse_csv_env(env_name: str, default: str) -> list[str]:
-    items = [item.strip() for item in os.getenv(env_name, default).split(',') if item.strip()]
-    return items or [default]
-
-
-TRUSTED_HOSTS = _parse_csv_env('TRUSTED_HOSTS', '*')
-
 GSI_PROGRESS_POLL_INTERVAL = 0.5
 DEFAULT_FAVICON_TIMEOUT = 10
 MAX_BATCH_SIZE = 20
@@ -63,11 +57,16 @@ DEVICE_SSH_POOLS_MAX = 10
 VALID_NOTIFICATION_LEVELS = {'info', 'success', 'warning', 'error'}
 MAX_NOTIFICATIONS_PER_CLIENT = 200
 JADX_PATH = os.path.join(PROJECT_ROOT, 'tools', 'jadx', 'bin', 'jadx')
-APK_UPLOAD_DIR = os.path.join(PROJECT_ROOT, 'data', 'apk_uploads')
+# 上传目录跟随 GMS_DATA_ROOT（见 RuntimeSettings.data_root），与其它运行
+# 数据一致；项目根下的 data/ 只是默认值。
+APK_UPLOAD_DIR = os.path.join(str(settings.data_root), 'apk_uploads')
 APK_MAX_FILE_SIZE = 500 * 1024 * 1024
 APK_MAX_SOURCE_FILE_SIZE = 2 * 1024 * 1024
 APK_MAX_TASKS = 50
 JADX_TIMEOUT = 600
+# 固件/工具 SCP 传输的单调时钟 deadline（秒）：卡死的传输按 504 收口，
+# 不得永挂。可用 GMS_FIRMWARE_TRANSFER_TIMEOUT 按网络情况调整。
+FIRMWARE_TRANSFER_TIMEOUT = int(os.getenv('GMS_FIRMWARE_TRANSFER_TIMEOUT', '3600') or '3600')
 REDMINE_ISSUE_ID_CACHE_MAX_SIZE = 100
 TOOLS_DATA_FILE = str(user_tools_path(PROJECT_ROOT))
 
@@ -123,14 +122,14 @@ class ConfigManager(ConfigPersistenceMixin):
         with self._runtime_transaction(), self._cache_lock:
             current_time = time.time()
             if not force_reload and self._is_cache_valid(current_time):
-                return self._cache.copy() if self._cache else {}
+                return copy.deepcopy(self._cache) if self._cache else {}
 
             config = self._load_and_merge_config()
 
             self._cache = config
             self._cache_timestamp = current_time
 
-            return config.copy() if config else {}
+            return copy.deepcopy(config) if config else {}
 
     def _is_cache_valid(self, current_time: float) -> bool:
         """True iff the cached snapshot is within its TTL and no config file changed on disk."""
@@ -210,7 +209,8 @@ class ConfigManager(ConfigPersistenceMixin):
     def get_redmine_config(self) -> dict[str, Any]:
         """Return the Redmine config (domain + base_url); raise ValueError if incomplete."""
         config = self.load_config()
-        redmine_config = config.get('redmine', {})
+        # 补充派生字段只作用于本次调用的配置快照。
+        redmine_config = dict(config.get('redmine') or {})
 
         if not redmine_config or 'base_url' not in redmine_config:
             raise ValueError(
@@ -270,7 +270,11 @@ class ConfigManager(ConfigPersistenceMixin):
                 if self._uses_runtime_store():
                     from foundation.runtime_config_store import DEPLOYMENT_KEYS
 
-                    deployment = self._runtime_store.read()
+                    try:
+                        deployment = self._runtime_store.read()
+                    except Exception as e:
+                        logger.error(f"Error loading runtime config store: {e}")
+                        deployment = {}
                     config.update({key: value for key, value in deployment.items() if key in DEPLOYMENT_KEYS})
 
                 config_copy = self._replace_placeholders(config)
@@ -389,7 +393,14 @@ class ConfigManager(ConfigPersistenceMixin):
         覆盖随源码携带的静态默认值（config.json）。
         """
         if self._uses_runtime_store():
-            return self._runtime_store.read()
+            try:
+                return self._runtime_store.read(tolerate_corruption=True)
+            except Exception as e:
+                # runtime store 由多个分片文件组成：单文件损坏时与 legacy
+                # 分支同样记录日志并降级为“仅静态配置”，而不是让每个
+                # load_config 调用方崩溃。
+                logger.error(f"Error loading runtime config store: {e}")
+                return None
         try:
             with open(self.runtime_config_path, encoding='utf-8') as f:
                 data = json.load(f)

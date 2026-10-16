@@ -20,7 +20,6 @@ from features.automation.executor_contract import (
     StubAutomationExecutor as StubAutomationExecutor,
 )
 from features.automation.jenkins_client import JenkinsClient
-from foundation.ssh_security import configure_strict_host_keys
 
 
 def _run_devices(run: dict[str, Any]) -> list[str]:
@@ -78,21 +77,35 @@ def _artifact_limit_bytes() -> int:
     )
 
 
-def _validated_controller_artifact(value: str) -> Path:
-    """Resolve a firmware file only from configured Controller-side roots."""
+def _controller_artifact_roots() -> list[Path]:
+    """Controller-local roots a firmware artifact may be served from.
+
+    Fail-closed: without ``firmware_shares.allowed_prefixes`` configured,
+    only the Controller's artifact staging area is
+    accepted — no broad filesystem defaults.
+    """
     from foundation.config import config_manager, settings
 
-    path = Path(value).expanduser().resolve()
     config = config_manager.load_config()
     configured = (
         (config.get("firmware_shares") or {}).get("allowed_prefixes")
         or config.get("firmware_share_allowed_prefixes")
-        or ["/home/", "/data/", "/mnt/"]
+        or []
     )
-    roots = [settings.data_root.resolve()]
-    roots.extend(Path(str(root)).expanduser().resolve() for root in configured)
+    roots = [(settings.data_root / "automation" / "artifact-stage").resolve()]
+    roots.extend(
+        Path(str(root)).expanduser().resolve()
+        for root in configured
+        if str(root).strip()
+    )
+    return roots
+
+
+def _validated_controller_artifact(value: str) -> Path:
+    """Resolve a firmware file only from configured Controller-side roots."""
+    path = Path(value).expanduser().resolve()
     if not path.is_file() or not any(
-        path == root or path.is_relative_to(root) for root in roots
+        path == root or path.is_relative_to(root) for root in _controller_artifact_roots()
     ):
         raise ValueError(
             "Firmware artifact is missing or outside the configured Controller roots"
@@ -597,39 +610,18 @@ class HttpAutomationExecutor:
 
     def _stage_ssh_build_artifact(self, run: dict[str, Any], artifact_path: str) -> dict[str, Any]:
         """Stream an approved SSH build artifact onto the Controller."""
-        source_ssh = None
         temporary: Path | None = None
         try:
-            import paramiko
+            from features.build import open_build_artifact
 
-            from features.build import get_build_service
-
-            build_service = get_build_service()
             job_id = str(run.get("jenkins_build_number") or "")
             if not job_id:
                 return {"success": False, "error": "SSH build job id is missing"}
-            job = build_service.get_job(job_id)
-            if job.get("status") != "completed":
-                return {"success": False, "error": "SSH build job is not completed"}
-            if job.get("automation_run_id") and job["automation_run_id"] != run.get("id"):
-                return {"success": False, "error": "SSH build job belongs to another automation run"}
-            known_paths = {str(item.get("path") or "") for item in job.get("artifacts") or []}
-            if artifact_path not in known_paths:
-                return {"success": False, "error": "Selected artifact is not part of the completed build job"}
-
-            server = build_service._with_runtime_password(
-                build_service._get_server(job["server_id"]),
-                build_service._runtime_passwords.get(job_id, ""),
-            )
-            backend = build_service._backend(server)
-            connect_kwargs = backend._connect_kwargs(server)
-            source_ssh = paramiko.SSHClient()
-            configure_strict_host_keys(source_ssh)
-            source_ssh.connect(**connect_kwargs)
-            source_sftp = source_ssh.open_sftp()
-            try:
-                stat = source_sftp.stat(artifact_path)
-                size = int(stat.st_size or 0)
+            with open_build_artifact(
+                job_id,
+                artifact_path,
+                automation_run_id=str(run.get("id") or ""),
+            ) as (source, size):
                 if size <= 0:
                     return {"success": False, "error": "SSH build artifact is empty"}
                 if size > _artifact_limit_bytes():
@@ -638,7 +630,7 @@ class HttpAutomationExecutor:
                     str(run.get("id") or "ats"), Path(artifact_path).name
                 )
                 total = 0
-                with source_sftp.open(artifact_path, "rb") as source, temporary.open("wb") as output:
+                with temporary.open("wb") as output:
                     while chunk := source.read(4 * 1024 * 1024):
                         total += len(chunk)
                         if total > _artifact_limit_bytes():
@@ -652,8 +644,6 @@ class HttpAutomationExecutor:
                     )
                 temporary.replace(target)
                 temporary = None
-            finally:
-                source_sftp.close()
             return {
                 "success": True,
                 "firmware_path": str(target),
@@ -665,8 +655,6 @@ class HttpAutomationExecutor:
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
-            if source_ssh is not None:
-                source_ssh.close()
 
     def _stage_http_artifact(self, run: dict[str, Any], artifact_url: str) -> dict[str, Any]:
         """Stream a Jenkins artifact to the Controller without buffering it."""
