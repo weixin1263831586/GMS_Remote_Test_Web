@@ -169,3 +169,74 @@ def test_async_invalidation_affects_only_its_key():
         assert not cache._key_versions
 
     asyncio.run(scenario())
+
+
+def test_mixed_sync_async_interleave_keeps_newest_started_load():
+    """同步/异步对同一键交错完成时，后启动的加载持有缓存槽位（外部评审 P2）。"""
+    cache = TTLCache(10)
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        async_started, async_release = asyncio.Event(), asyncio.Event()
+        sync_started, sync_release = Event(), Event()
+
+        async def async_load():
+            async_started.set()
+            await async_release.wait()
+            return 'old'
+
+        async_task = asyncio.create_task(cache.get_or_load_async('key', async_load))
+        await async_started.wait()
+
+        def sync_load():
+            sync_started.set()
+            assert sync_release.wait(5)
+            return 'new'
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            sync_future = pool.submit(cache.get_or_load, 'key', sync_load)
+            await loop.run_in_executor(None, sync_started.wait, 5)
+            # 同步加载（后启动）先完成并写入；异步（先启动）最后完成。
+            sync_release.set()
+            assert sync_future.result(5) == 'new'
+            async_release.set()
+            assert await async_task == 'old'
+        assert cache.get('key') == 'new'
+        assert not cache._key_versions
+        assert not cache._load_seq
+
+    asyncio.run(scenario())
+
+
+def test_reverse_mixed_interleave_also_keeps_newest_started_load():
+    """先同步后异步交错完成，同样是后启动的异步加载持有缓存槽位。"""
+    cache = TTLCache(10)
+    sync_started, sync_release = Event(), Event()
+
+    def sync_load():
+        sync_started.set()
+        assert sync_release.wait(5)
+        return 'old'
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            sync_future = pool.submit(cache.get_or_load, 'key', sync_load)
+            await loop.run_in_executor(None, sync_started.wait, 5)
+            async_started, async_release = asyncio.Event(), asyncio.Event()
+
+            async def async_load():
+                async_started.set()
+                await async_release.wait()
+                return 'new'
+
+            async_task = asyncio.create_task(cache.get_or_load_async('key', async_load))
+            await async_started.wait()
+            # 先启动的同步加载最后完成，只回调用方、不回写缓存。
+            sync_release.set()
+            assert sync_future.result(5) == 'old'
+            async_release.set()
+            assert await async_task == 'new'
+        assert cache.get('key') == 'new'
+
+    asyncio.run(scenario())

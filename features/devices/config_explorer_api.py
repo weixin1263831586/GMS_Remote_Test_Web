@@ -23,6 +23,7 @@ from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 
 from .config_explorer import (
+    device_file_size,
     explore,
     list_all_packages,
     list_devices,
@@ -280,6 +281,8 @@ async def decompile_device_apk(req: DecompileRequest, request: Request):
     if not req.path.strip():
         return error_response("缺少 APK 路径", status_code=400)
     on_device_path = req.path.strip()
+    if not on_device_path.lower().endswith((".apk", ".jar")):
+        return error_response("仅支持拉取 .apk / .jar 后缀的文件", status_code=400)
 
     # 从包名或路径末段生成下载文件名。
     base = os.path.basename(on_device_path.rstrip("/")) or "app.apk"
@@ -296,11 +299,24 @@ async def decompile_device_apk(req: DecompileRequest, request: Request):
     os.makedirs(task_dir, exist_ok=True)
     apk_path = _safe_join_fn(task_dir, filename)
 
+    device_id = _readable_device(request, req.device_id)
+    # 传输前用设备端大小封顶，超限文件不产生任何传输流量；拉取后仍复查。
+    try:
+        remote_size = await asyncio.to_thread(device_file_size, device_id, on_device_path)
+    except RuntimeError:
+        logger.error("decompile size probe failed for %s", on_device_path)
+        return error_response("无法读取设备端文件大小，请确认路径有效", status_code=400)
+    if remote_size > APK_MAX_FILE_SIZE:
+        _cleanup_files_fn([apk_path])
+        return error_response(
+            f"文件过大，上限 {APK_MAX_FILE_SIZE // (1024 * 1024)}MB", status_code=400
+        )
+
     try:
         # Pull on a worker thread (blocking adb transfer).
         await asyncio.to_thread(
             lambda: pull_device_file(
-                _readable_device(request, req.device_id),
+                device_id,
                 on_device_path,
                 apk_path,
             )

@@ -5,13 +5,12 @@ import logging
 import re
 import time
 import uuid
-from datetime import datetime
-from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Body, Request
 from pydantic import BaseModel, Field
 
+from features.assistant import session_store
 from features.assistant.context import _parse_chinese_number, record_user_message, update_context
 from features.assistant.executor import _json_body, executor
 from features.assistant.payloads import display_record as _display_record
@@ -25,6 +24,25 @@ from features.assistant.response import (
     generate_clarification,
     generate_page_overview,
     page_quick_actions,
+)
+from features.assistant.session_registry import (
+    AgentRequestShim,
+    _agent_monitor_tasks,
+    _agent_sessions,
+    _now_iso,
+    cleanup_due,
+)
+from features.assistant.session_registry import (
+    cleanup_sessions as _cleanup_sessions,
+)
+from features.assistant.session_registry import (
+    expired_session_payload as _expired_session_payload,
+)
+from features.assistant.session_registry import (
+    get_or_create_session as _get_or_create_session,
+)
+from features.assistant.session_registry import (
+    restore_session as _restore_session,
 )
 from features.assistant.tools import registry
 from features.cluster import (
@@ -48,7 +66,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-AGENT_SESSION_TTL_SECONDS = 6 * 60 * 60
 MAX_AGENT_RETRIES = 3
 WEBAPP_PAGES = {
     "test": ("测试界面", "运行测试、查看测试日志"),
@@ -74,11 +91,6 @@ WEBAPP_PAGES = {
     "notes": ("个人知识库", "管理 Wiki 文档、附件和知识问答"),
     "agent": ("对话Agent", "自然语言操作 Web_app"),
 }
-
-_agent_sessions: dict[str, dict[str, Any]] = {}
-_agent_sessions_lock = asyncio.Lock()
-_last_session_cleanup = 0.0
-_agent_monitor_tasks: dict[str, asyncio.Task] = {}
 
 
 class AgentChatRequest(BaseModel):
@@ -132,33 +144,19 @@ def _normalize_workspace_context(raw: dict[str, Any] | None) -> dict[str, Any]:
     return context
 
 
-class AgentRequestShim:
-    """Minimal request object for reusing existing route handlers."""
-
-    def __init__(
-        self,
-        request: Request,
-        query_params: dict[str, Any] | None = None,
-        json_body: dict[str, Any] | None = None,
-    ):
-        self.headers = request.headers
-        self.client = request.client
-        self.cookies = getattr(request, "cookies", {})
-        self.state = getattr(request, "state", SimpleNamespace())
-        self.method = getattr(request, "method", "POST")
-        self.url = getattr(request, "url", None)
-        self.query_params = query_params if query_params is not None else getattr(request, "query_params", {})
-        self._json_body = dict(json_body or {})
-
-    async def form(self):
-        return {}
-
-    async def json(self):
-        return dict(self._json_body)
+def _save_session_anchor(session: dict[str, Any]) -> None:
+    """Persist the crash-recovery anchor (外部评审报告项，会话恢复)."""
+    try:
+        session_store.save_anchor(session)
+    except Exception:
+        logger.debug("保存 Agent 会话恢复锚点失败", exc_info=True)
 
 
-def _now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+def _clear_session_anchor(session: dict[str, Any]) -> None:
+    try:
+        session_store.drop_anchor(session.get("session_id") or "")
+    except Exception:
+        logger.debug("清理 Agent 会话恢复锚点失败", exc_info=True)
 
 
 def _new_message(role: str, content: str, kind: str = "text", data: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -170,58 +168,6 @@ def _new_message(role: str, content: str, kind: str = "text", data: dict[str, An
         "data": data or {},
         "created_at": _now_iso(),
     }
-
-
-def _expired_session_payload(session_id: str) -> dict[str, Any]:
-    return {
-        "expired": True,
-        "session": {
-            "session_id": session_id,
-            "status": "idle",
-            "messages": [],
-            "steps": [],
-            "pending_plan": None,
-            "active_run": None,
-        },
-    }
-
-
-async def _get_or_create_session(session_id: str | None, client_id: str) -> dict[str, Any]:
-    async with _agent_sessions_lock:
-        existing = _agent_sessions.get(session_id or "")
-        sid = session_id if existing and existing.get("client_id") == client_id else str(uuid.uuid4())
-        session = _agent_sessions.get(sid)
-        if not session:
-            session = {
-                "session_id": sid,
-                "client_id": client_id,
-                "status": "idle",
-                "messages": [],
-                "steps": [],
-                "pending_plan": None,
-                "active_run": None,
-                "workspace_context": {},
-                "created_at": _now_iso(),
-                "updated_at": _now_iso(),
-            }
-            _agent_sessions[sid] = session
-        session["updated_at"] = _now_iso()
-        return session
-
-
-async def _cleanup_sessions() -> None:
-    cutoff = time.time() - AGENT_SESSION_TTL_SECONDS
-    async with _agent_sessions_lock:
-        stale_ids = []
-        for sid, session in _agent_sessions.items():
-            try:
-                updated = datetime.fromisoformat(session.get("updated_at", "")).timestamp()
-            except Exception:
-                updated = 0
-            if updated < cutoff and session.get("status") not in {"running", "monitoring"}:
-                stale_ids.append(sid)
-        for sid in stale_ids:
-            _agent_sessions.pop(sid, None)
 
 
 def _append_step(session: dict[str, Any], title: str, status: str = "done", detail: str = "", data: dict[str, Any] | None = None) -> None:
@@ -554,13 +500,22 @@ def _normalize_failure(raw_failure: dict[str, Any], index: int = 0) -> dict[str,
     }
 
 
-async def _analyze_saved_report(session: dict[str, Any], report_timestamp: str) -> dict[str, Any] | None:
+async def _analyze_saved_report(
+    session: dict[str, Any], report_timestamp: str, request: Any = None
+) -> dict[str, Any] | None:
     """Analyze a saved report and append an Agent step."""
     from features.reports import test_report_manager
 
     _append_step(session, "报告分析", "running", f"正在分析报告 {report_timestamp}")
     try:
-        owner_id = str(session.get("owner_id") or session.get("client_id") or "")
+        # 报告按账号分区（ADR 0010）：owner 一律取请求主体的
+        # resource_owner_id（executor._query_reports 同款），agent 主体映射
+        # 回注册账号；会话里残留的 client_id 只作无请求时的兜底。
+        owner_id = str(
+            owner_id_from_request(request)
+            if request is not None
+            else (session.get("owner_id") or session.get("client_id") or "")
+        )
         if not owner_id:
             _append_step(session, "报告分析", "warning", "缺少当前用户身份")
             return None
@@ -771,7 +726,7 @@ async def _run_failure_analysis_pipeline(
 ) -> dict[str, Any]:
     """Analyze report failures, diagnose the first failure, and optionally inspect APK source."""
     report_timestamp = report.get("timestamp", "")
-    analysis = await _analyze_saved_report(session, report_timestamp)
+    analysis = await _analyze_saved_report(session, report_timestamp, request)
     if not analysis:
         return {"report_timestamp": report_timestamp, "report_analysis": None}
 
@@ -852,6 +807,7 @@ async def _start_test_with_plan(session: dict[str, Any], request_shim: AgentRequ
                 "attempt_id": correlation.get("attempt_id", ""),
                 "worker_id": resolved_worker_id,
             })
+            _save_session_anchor(session)
             workspace = session.setdefault("workspace_context", {})
             workspace.update({
                 "scope_mode": "single" if _is_local_worker_id(resolved_worker_id) else "cluster",
@@ -921,17 +877,37 @@ async def _run_pre_actions(
     return {"success": True}
 
 
+def _owner_id_from_request_shim(request_shim: Any) -> str:
+    """Resolve the ADR 0010 owner from a request-like object, tolerantly.
+
+    监控/恢复路径可能拿到没有 ``state`` 的极简请求对象（回归测试 shim、
+    恢复会话的重建监控），此时返回空串，由调用方回退会话持久化的
+    ``owner_id``，不因缺请求身份而中断监控。
+    """
+    try:
+        return str(owner_id_from_request(request_shim) or "")
+    except (AttributeError, TypeError):
+        return ""
+
+
 async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) -> None:
     session = _agent_sessions.get(session_id)
     if not session:
         return
 
     plan = session.get("pending_plan") or session.get("active_run", {}).get("plan")
-    if not plan:
+    # 恢复会话（Controller 重启后从锚点重建）没有持久化 plan（防凭据落盘），
+    # 降级为纯跟踪：等待任务终态、关联报告、更新工作区；retry/分析因缺少
+    # 计划与凭据自动跳过（policy 视为空）。非恢复会话无 plan 则无需监控。
+    if not plan and not session.get("recovered"):
         return
-
+    policy = (plan or {}).get("policy", {})
     client_id = session.get("owner_id") or session.get("client_id")
-    policy = plan.get("policy", {})
+    # 报告按请求主体的 resource_owner_id 分区（ADR 0010），与会话里用于
+    # 运行时状态的 client_id 分开解析；agent 主体由此映射回注册账号。
+    # 请求对象缺身份（恢复重建的监控、极简 shim）时回退会话锚点里
+    # 持久化的 owner_id。
+    report_owner_id = _owner_id_from_request_shim(request_shim) or str(session.get("owner_id") or "")
     retries_left = int(policy.get("retry_count") or 0)
     attempt = 0
     latest_report_timestamp = None
@@ -952,6 +928,7 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
                     job = repository.get_job(cluster_job_id)
                 if not job:
                     session["status"] = "error"
+                    _clear_session_anchor(session)
                     _append_step(session, "读取集群任务", "error", f"任务不存在: {cluster_job_id}")
                     return
 
@@ -961,7 +938,7 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
                     report = _report_for_cluster_job(
                         cluster_job_id,
                         attempt_id,
-                        str(client_id or ""),
+                        str(report_owner_id or ""),
                     )
                     if report and report.get("status") != "collecting":
                         break
@@ -992,6 +969,7 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
                     "artifact_id": (report or {}).get("artifact_id", ""),
                     "origin_page": "agent",
                 })
+                _save_session_anchor(session)
 
                 if failed and retries_left > 0 and latest_report_timestamp:
                     attempt += 1
@@ -1005,6 +983,7 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
                     )
                     if not payload.get("success"):
                         session["status"] = "error"
+                        _clear_session_anchor(session)
                         _append_message(
                             session, "assistant",
                             f"retry 启动失败：{payload.get('error') or payload.get('message')}",
@@ -1034,6 +1013,7 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
                     )
                 session["status"] = "done"
                 session["active_run"] = None
+                _clear_session_anchor(session)
                 return
 
             user_state = get_or_create_user_state(client_id)
@@ -1042,7 +1022,9 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
                 user_state = get_or_create_user_state(client_id)
 
             await asyncio.sleep(1)
-            report = _latest_report_for_client(client_id, exclude_timestamp=baseline_report_timestamp)
+            report = _latest_report_for_client(
+                report_owner_id, exclude_timestamp=baseline_report_timestamp
+            )
             if report:
                 latest_report_timestamp = report.get("timestamp")
                 failed = _report_failed(report)
@@ -1064,6 +1046,7 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
                 payload = await _start_test_with_plan(session, request_shim, plan, latest_report_timestamp)
                 if not payload.get("success"):
                     session["status"] = "error"
+                    _clear_session_anchor(session)
                     _append_message(session, "assistant", f"retry 启动失败：{payload.get('error') or payload.get('message')}")
                     return
                 baseline_report_timestamp = latest_report_timestamp
@@ -1081,14 +1064,17 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
 
             session["status"] = "done"
             session["active_run"] = None
+            _clear_session_anchor(session)
             return
     except asyncio.CancelledError:
         session["status"] = "cancelled"
         session["active_run"] = None
+        _clear_session_anchor(session)
         _append_step(session, "Agent 监控已停止", "warning", "用户取消了 Agent 后台监控")
         raise
     except Exception:
         session["status"] = "error"
+        _clear_session_anchor(session)
         err = record_internal_error(logger, "Agent 监控", "[Agent] monitor failed")
         _append_step(session, "Agent 监控异常", "error", err)
         _append_message(session, "assistant", err)
@@ -1103,7 +1089,8 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
     if not req.get("test_suite") and not req.get("retry_dir"):
         return {"success": False, "error": "没有匹配到测试套件"}
 
-    latest_existing_report = _latest_report_for_client(session.get("owner_id") or session.get("client_id", ""))
+    # 报告基线同样按请求主体的 resource_owner_id 解析（ADR 0010）。
+    latest_existing_report = _latest_report_for_client(owner_id_from_request(request))
     session["status"] = "running"
     session["active_run"] = {
         "plan": plan,
@@ -1111,16 +1098,19 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
         "baseline_report_timestamp": latest_existing_report.get("timestamp") if latest_existing_report else None,
         "worker_id": req.get("worker_id") or _local_worker_id(),
     }
+    _save_session_anchor(session)
     request_shim = AgentRequestShim(request)
 
     pre_result = await _run_pre_actions(session, plan, request_shim)
     if not pre_result.get("success"):
         session["status"] = "error"
+        _clear_session_anchor(session)
         return pre_result
 
     payload = await _start_test_with_plan(session, request_shim, plan)
     if not payload.get("success"):
         session["status"] = "error"
+        _clear_session_anchor(session)
         return payload
 
     session["status"] = "monitoring"
@@ -1137,9 +1127,7 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
 @router.post("/api/agent/chat")
 async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     """Chat with the local GMS workflow Agent."""
-    global _last_session_cleanup
-    if time.monotonic() - _last_session_cleanup >= 50:
-        _last_session_cleanup = time.monotonic()
+    if cleanup_due():
         await _cleanup_sessions()
     message = (req.message or "").strip()
     if not message:
@@ -1391,8 +1379,19 @@ def _format_params(params: dict[str, Any]) -> str:
 @router.get("/api/agent/sessions/{session_id}")
 async def get_agent_session(session_id: str, request: Request):
     """Get Agent session status."""
-    session = _agent_sessions.get(session_id)
     client_id = get_client_id_from_request(request)
+    owner_id = owner_id_from_request(request)
+    session = _agent_sessions.get(session_id)
+    if not session or session.get("client_id") != client_id:
+        # Controller 重启后内存会话丢失；若有持久恢复锚点则按请求主体
+        # （client_id 或 resource owner，ADR 0010）重建监控状态并续接
+        # 监控协程直到任务终态。
+        session = _restore_session(session_id, client_id, owner_id)
+        if session and session_id not in _agent_monitor_tasks:
+            request_shim = AgentRequestShim(request)
+            _append_step(session, "会话已恢复", "running", "Controller 重启后根据持久任务重建监控状态")
+            task = asyncio.create_task(_monitor_agent_run(session_id, request_shim))
+            _agent_monitor_tasks[session_id] = task
     if not session or session.get("client_id") != client_id:
         return success_response(_expired_session_payload(session_id), "Agent session expired")
     return success_response({"session": _session_payload(session)})
@@ -1401,8 +1400,11 @@ async def get_agent_session(session_id: str, request: Request):
 @router.post("/api/agent/sessions/{session_id}/cancel")
 async def cancel_agent_session(session_id: str, request: Request):
     """Cancel Agent monitoring state. Running tests should still be stopped from the test page."""
-    session = _agent_sessions.get(session_id)
     client_id = get_client_id_from_request(request)
+    owner_id = owner_id_from_request(request)
+    session = _agent_sessions.get(session_id)
+    if not session or session.get("client_id") != client_id:
+        session = _restore_session(session_id, client_id, owner_id)
     if not session or session.get("client_id") != client_id:
         return success_response(_expired_session_payload(session_id), "Agent session expired")
     task = _agent_monitor_tasks.pop(session_id, None)
@@ -1410,6 +1412,7 @@ async def cancel_agent_session(session_id: str, request: Request):
         task.cancel()
     session["status"] = "cancelled"
     session["active_run"] = None
+    _clear_session_anchor(session)
     _append_step(session, "Agent 已取消", "warning", "如果测试仍在运行，请到测试界面停止测试")
     _append_message(session, "assistant", "Agent 会话已取消。如果测试仍在运行，请到测试界面停止测试。")
     return success_response({"session": _session_payload(session)})

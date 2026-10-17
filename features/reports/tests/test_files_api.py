@@ -496,5 +496,122 @@ class ReportFilesApiTests(unittest.TestCase):
         )
 
 
+class ResolveReportAttachmentsCleanupTests(unittest.TestCase):
+    """附件解析的临时 ZIP/目录清理：拒绝与异常路径都不留残余。"""
+
+    def _request(self):
+        return SimpleNamespace(
+            principal=SimpleNamespace(
+                role="user", resource_owner_id="owner-1"
+            )
+        )
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.created_dirs: list[Path] = []
+        self._real_mkdtemp = files_api.tempfile.mkdtemp
+
+        def tracking_mkdtemp(*args, **kwargs):
+            path = Path(self._real_mkdtemp(*args, **kwargs))
+            self.created_dirs.append(path)
+            return str(path)
+
+        self._patches = [
+            patch.object(
+                files_api.tempfile, "mkdtemp", side_effect=tracking_mkdtemp
+            ),
+            patch(
+                "features.reports.files_api.require_authenticated_user",
+                return_value=SimpleNamespace(
+                    role="user", resource_owner_id="owner-1"
+                ),
+            ),
+        ]
+        for item in self._patches:
+            item.start()
+        self.addCleanup(lambda: [item.stop() for item in self._patches])
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _fake_db(self, reports: dict):
+        class _Db:
+            @staticmethod
+            def get_report(report_id, **_kwargs):
+                return reports.get(report_id)
+
+        return _Db()
+
+    def _bundle_stub(self, reports: dict):
+        def _create(report):
+            path = Path(self.tmp.name) / f"{report['report_id']}.zip"
+            path.write_bytes(b"PK")
+            return SimpleNamespace(path=path, file_count=1, sources=())
+
+        return _create
+
+    def test_denied_report_leaves_no_temp_bundles(self):
+        from features.reports import files_api as mod
+
+        with patch(
+            "features.reports.repository.test_report_db",
+            self._fake_db({"r1": {"report_id": "r1"}}),
+        ), patch(
+            "features.reports.access.can_access_report", return_value=False
+        ), patch(
+            "features.reports.downloads.create_local_report_bundle",
+            side_effect=self._bundle_stub({"r1": None}),
+        ) as bundle:
+            attachments, denied = mod.resolve_report_attachments(
+                self._request(), ["r1", "r2"]
+            )
+        self.assertEqual(denied, ["r1", "r2"])
+        self.assertEqual(attachments, [])
+        bundle.assert_not_called()
+        self.assertTrue(self.created_dirs)
+        for directory in self.created_dirs:
+            self.assertFalse(directory.exists())
+
+    def test_exception_during_bundling_cleans_bundle_dir(self):
+        from features.reports import files_api as mod
+
+        def exploding_bundle(_report):
+            raise RuntimeError("zip boom")
+
+        with patch(
+            "features.reports.repository.test_report_db",
+            self._fake_db({"r1": {"report_id": "r1"}}),
+        ), patch(
+            "features.reports.access.can_access_report", return_value=True
+        ), patch(
+            "features.reports.downloads.create_local_report_bundle",
+            side_effect=exploding_bundle,
+        ), self.assertRaises(RuntimeError):
+            mod.resolve_report_attachments(self._request(), ["r1"])
+        self.assertTrue(self.created_dirs)
+        for directory in self.created_dirs:
+            self.assertFalse(directory.exists())
+
+    def test_successful_resolution_keeps_attachments(self):
+        from features.reports import files_api as mod
+
+        with patch(
+            "features.reports.repository.test_report_db",
+            self._fake_db({"r1": {"report_id": "r1"}}),
+        ), patch(
+            "features.reports.access.can_access_report", return_value=True
+        ), patch(
+            "features.reports.downloads.create_local_report_bundle",
+            side_effect=self._bundle_stub({"r1": None}),
+        ):
+            attachments, denied = mod.resolve_report_attachments(
+                self._request(), ["r1"]
+            )
+        self.assertEqual(denied, [])
+        self.assertEqual(len(attachments), 1)
+        self.assertTrue(attachments[0].exists())
+        self.assertTrue(self.created_dirs[0].exists())
+
+
 if __name__ == "__main__":
     unittest.main()

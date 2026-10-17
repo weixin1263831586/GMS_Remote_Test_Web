@@ -75,11 +75,26 @@ def interactive_allowed():
             and os.environ.get("GMS_RT_OUTPUT") != "json")
 
 
+def _enroll_requested_profile(argv):
+    """Return the --profile value passed to gms-rt-agent-enroll, if any."""
+    for index, value in enumerate(argv):
+        if value == "--profile" and index + 1 < len(argv):
+            return argv[index + 1]
+        if value.startswith("--profile="):
+            return value.split("=", 1)[1]
+    return ""
+
+
 def resolve_cli_context(profile, server, argv=None):
     # Library sourcing retains normal context resolution and never prompts.
     if argv is not None and local_invocation(argv):
         return {"mode": "local", "profile": "", "server": "", "ca_cert": "",
                 "token_file": "", "insecure": "", "error": ""}
+    # Sourced entrypoints never parse startup flags, so enrollment carries its
+    # own --profile argument; treat it as the explicit identity selection the
+    # same way a direct `gms-rt-agent-enroll --profile NAME` call would.
+    if not profile and argv and argv[0] == "gms-rt-agent-enroll":
+        profile = _enroll_requested_profile(argv)
     unattended = (
         argv is None or "--json" in argv or "--non-interactive" in argv
         or os.environ.get("GMS_RT_OUTPUT") == "json"

@@ -508,6 +508,13 @@ function ut_createToolCard(tool, category, index, cardColor) {
 }
 
 // 常用工具拖拽排序。
+// 隐患标注（暂不改架构）：本页复用 dnd-sort.js 的共享拖拽状态
+// （draggedTool/draggedCategory/draggedCategoryIndex）与
+// dragstart/dragover 处理器，仅 drop 换成下面的 ut_* 版本操作
+// ut_categorizedTools。dnd-sort.js 的 initDragAndDrop 用全局
+// .category-section 选择器绑事件，不排除本页节点；两页网格又都
+// 常驻 DOM，跨页拖拽或叠加绑定会把对方页面的索引/数据集混进
+// 本页的 moveTool/moveCategory。改动任一侧需同步核对另一侧。
 
 function ut_handleToolDrop(e) {
     e.preventDefault();

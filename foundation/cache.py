@@ -20,7 +20,15 @@ class _KeyVersion:
 
 
 class TTLCache(Generic[KeyT, ValueT]):
-    """Small thread-safe in-memory cache with monotonic expiry."""
+    """Small thread-safe in-memory cache with monotonic expiry.
+
+    Per-key load contract: every cold load takes a start sequence number and
+    only the latest-started load may populate the cache slot. A slow earlier
+    load (sync or async) still returns its own value to its caller but cannot
+    overwrite a newer load's stored value, so mixing ``get_or_load`` and
+    ``get_or_load_async`` on one key degrades to "newest load wins" instead of
+    stale-over-fresh.
+    """
 
     def __init__(self, ttl_seconds: float, *, max_entries: int | None = None):
         if ttl_seconds < 0:
@@ -36,22 +44,30 @@ class TTLCache(Generic[KeyT, ValueT]):
         self._pending: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self._generation = 0
         self._key_versions: dict[KeyT, _KeyVersion] = {}
+        self._load_seq: dict[KeyT, int] = {}
 
     def _begin_load(self, key):
         with self._lock:
             version = self._key_versions.setdefault(key, _KeyVersion())
             version.users += 1
-            return self._generation, version
+            seq = self._load_seq.get(key, 0) + 1
+            self._load_seq[key] = seq
+            return self._generation, version, seq
 
     def _end_load(self, key, version):
         with self._lock:
             version.users -= 1
             if version.users == 0 and self._key_versions.get(key) is version:
                 self._key_versions.pop(key)
+                self._load_seq.pop(key, None)
 
-    def _store_loaded(self, key, value, generation, version):
+    def _store_loaded(self, key, value, generation, version, seq):
         with self._lock:
-            if generation == self._generation and self._key_versions.get(key) is version:
+            if (
+                generation == self._generation
+                and self._key_versions.get(key) is version
+                and self._load_seq.get(key) == seq
+            ):
                 self.set(key, value)
 
     def get(self, key: KeyT, default: ValueT | None = None) -> ValueT | None:
@@ -90,10 +106,10 @@ class TTLCache(Generic[KeyT, ValueT]):
             cached = self.get(key)
             if cached is not None:
                 return cached
-            generation, version = self._begin_load(key)
+            generation, version, seq = self._begin_load(key)
             try:
                 value = load()
-                self._store_loaded(key, value, generation, version)
+                self._store_loaded(key, value, generation, version, seq)
                 return value
             finally:
                 self._end_load(key, version)
@@ -108,11 +124,11 @@ class TTLCache(Generic[KeyT, ValueT]):
             pending = self._pending.setdefault(loop, {})
             task = pending.get(key)
             if task is None:
-                generation, version = self._begin_load(key)
+                generation, version, seq = self._begin_load(key)
 
                 async def fill():
                     value = await load()
-                    self._store_loaded(key, value, generation, version)
+                    self._store_loaded(key, value, generation, version, seq)
                     return value
 
                 task = loop.create_task(fill())
@@ -134,6 +150,7 @@ class TTLCache(Generic[KeyT, ValueT]):
         with self._lock:
             self._items.pop(key, None)
             self._key_versions.pop(key, None)
+            self._load_seq.pop(key, None)
             for pending in self._pending.values():
                 pending.pop(key, None)
 
@@ -142,4 +159,5 @@ class TTLCache(Generic[KeyT, ValueT]):
             self._items.clear()
             self._generation += 1
             self._key_versions.clear()
+            self._load_seq.clear()
             self._pending.clear()

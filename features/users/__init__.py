@@ -26,9 +26,8 @@ from .device_groups import (
     save_device_groups,
     soc_series,
 )
-from .models import ClientInfoRequest
 from .sessions import client_manager
-from .users_api import list_users
+from .users_api import ClientInfoRequest, list_users
 from .workspace_context import load_workspace_context, save_workspace_context
 
 

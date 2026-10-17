@@ -682,3 +682,67 @@ def test_wait_for_devices_gone_never_fails_the_disconnect():
         _wait_for_devices_gone(["SERIAL"], "gms-src", timeout=0.5)
 
     assert probe.call_count >= 2
+
+
+def test_mutating_adb_proxy_actions_hold_the_state_lock():
+    """变更动作（source_start/target_connect/...）执行期间必须持有模块状态锁。"""
+    from worker_agent import adb_proxy
+
+    observed = {}
+
+    def fake_execute_transport(_bin, *, transport, action, payload, timeout, builtin):
+        observed[action] = adb_proxy._STATE_LOCK.acquire(blocking=False)
+        if observed[action]:
+            adb_proxy._STATE_LOCK.release()
+        return {"transport": transport, "action": action}
+
+    with patch(
+        "worker_agent.adb_proxy.execute_transport",
+        side_effect=fake_execute_transport,
+    ):
+        mutating = execute_adb_proxy_action("target_connect", {"generation": 1})
+        readonly = execute_adb_proxy_action("status")
+
+    assert mutating["action"] == "target_connect"
+    assert observed["target_connect"] is False
+    assert readonly["action"] == "status"
+    # 只读心跳路径不得被状态锁阻塞。
+    assert observed["status"] is True
+
+
+def test_recover_managed_state_skips_while_operation_in_progress(tmp_path):
+    """命令进行中时恢复用非阻塞获取直接跳过，绝不阻塞心跳线程。"""
+    import os
+
+    from worker_agent import adb_proxy
+
+    (tmp_path / "source.json").write_text(
+        '{"running":true,"devices":["SERIAL"],"access_token":"grant"}',
+        encoding="utf-8",
+    )
+    with patch.dict(
+        "os.environ", {"GMS_ADB_PROXY_STATE_ROOT": str(tmp_path)}
+    ), patch("worker_agent.adb_proxy._source_start") as start:
+        with adb_proxy._STATE_LOCK:
+            result = recover_managed_state(secret="worker-secret")
+
+    assert result == {
+        "recovered": [],
+        "errors": ["ADB Proxy operation is already in progress"],
+    }
+    start.assert_not_called()
+
+
+def test_sync_source_policy_skips_while_operation_in_progress(tmp_path):
+    """source_start 进行中时策略刷新跳过本轮，避免用旧 source.json 踩回新策略。"""
+    from worker_agent import adb_proxy
+
+    with patch(
+        "worker_agent.adb_proxy._write_source_policy"
+    ) as write, patch.dict(
+        "os.environ", {"GMS_ADB_PROXY_STATE_ROOT": str(tmp_path)}
+    ):
+        with adb_proxy._STATE_LOCK:
+            adb_proxy.sync_source_policy()
+
+    write.assert_not_called()

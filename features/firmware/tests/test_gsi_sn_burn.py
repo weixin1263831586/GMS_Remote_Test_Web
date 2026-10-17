@@ -216,6 +216,50 @@ class BurnGsiLockAndDeadlineTests(unittest.TestCase):
         self.assertEqual(response.json()['code'], 'UPSTREAM_FAILURE')
         self.assertIn('部分设备烧写失败', response.json()['error'])
 
+    def test_shell_metacharacter_device_serial_rejected_before_remote_work(self):
+        """设备序列号先过 sanitize_device_ids：注入串直接 400，不触远端。"""
+        with contextlib.ExitStack() as stack:
+            partition = stack.enter_context(patch.object(
+                gsi_sn_burn, "_partition_devices_by_flash_state",
+                return_value=(["D1"], []),
+            ))
+            response = self.client.post(
+                "/api/burn/gsi",
+                json={
+                    "devices": ["D1;reboot"],
+                    "script_path": "/tmp/run_GSI_Burn.sh",
+                    "system_img": "/tmp/system.img",
+                },
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "MALFORMED_REQUEST")
+        self.assertIn("Invalid device serial", response.json()["error"])
+        partition.assert_not_called()
+        self.assertEqual(self.locks.locked, [])
+
+    def test_devices_are_deduplicated_before_partition(self):
+        """重复/空设备项归一去重后才进入远端探测。"""
+        captured: list[list[str]] = []
+
+        def recording_partition(_ssh, devices):
+            captured.append(list(devices))
+            return [], list(devices)
+
+        with contextlib.ExitStack() as stack:
+            self._patch_common(stack, partition=recording_partition)
+            response = self.client.post(
+                "/api/burn/gsi",
+                json={
+                    "devices": ["D1", "D1", "", "D2"],
+                    "script_path": "/tmp/run_GSI_Burn.sh",
+                    "system_img": "/tmp/system.img",
+                },
+            )
+        self.assertEqual(captured, [["D1", "D2"]])
+        # 探测后无可烧写设备：409 冲突信封（不再是无状态码的 500）。
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "STATE_CONFLICT")
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

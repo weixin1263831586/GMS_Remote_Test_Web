@@ -8,6 +8,8 @@ override this variable and verify the production behavior.
 
 import os
 
+import pytest as _pytest
+
 
 # 在应用导入前隔离部署环境配置。
 os.environ["GMS_SKIP_RUNTIME_ENV"] = "1"
@@ -22,3 +24,17 @@ from features.cluster import register_cluster_port
 
 
 register_cluster_port()
+
+
+# Agent 会话恢复锚点默认写在 data/assistant/；任何触发
+# _start_test_with_plan/_execute_plan/_cleanup_sessions 的测试若未显式
+# 重定向都会污染真实运行时目录。autouse 统一重定向到 pytest 临时目录。
+
+
+@_pytest.fixture(autouse=True)
+def _isolate_agent_session_anchor_store(tmp_path, monkeypatch):
+    from features.assistant import session_store as _session_store
+
+    store_path = tmp_path / "agent_sessions.json"
+    monkeypatch.setattr(_session_store, "default_sessions_path", lambda: store_path)
+    yield store_path

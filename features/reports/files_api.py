@@ -567,9 +567,11 @@ def resolve_report_attachments(request, report_ids: list) -> tuple[list[Path], l
     from features.reports.repository import test_report_db
 
     principal = require_authenticated_user(request)
-    attachments: list[Path] = []
-    denied: list[str] = []
     bundle_dir = Path(tempfile.mkdtemp(prefix="gms-email-attach-"))
+    # 先完成全部 owner 校验再打包：任一报告被拒时调用方会整体放弃本次
+    # 请求，先打包后拒绝会把已生成的 ZIP 连同打包目录泄漏在临时区。
+    resolved: list[tuple[str, dict]] = []
+    denied: list[str] = []
     for raw_id in report_ids:
         report_id = str(raw_id or "").strip()
         if not report_id:
@@ -582,10 +584,21 @@ def resolve_report_attachments(request, report_ids: list) -> tuple[list[Path], l
         if not report or not can_access_report(request, report):
             denied.append(report_id)
             continue
-        bundle = create_local_report_bundle(report)
-        if bundle is None:
-            continue
-        target = bundle_dir / f"{report_id}.zip"
-        shutil.move(str(bundle.path), target)
-        attachments.append(target)
+        resolved.append((report_id, report))
+    if denied:
+        shutil.rmtree(bundle_dir, ignore_errors=True)
+        return [], denied
+    attachments: list[Path] = []
+    try:
+        for report_id, report in resolved:
+            bundle = create_local_report_bundle(report)
+            if bundle is None:
+                continue
+            target = bundle_dir / f"{report_id}.zip"
+            shutil.move(str(bundle.path), target)
+            attachments.append(target)
+    except Exception:
+        # 请求失败路径同样要清掉已生成的 ZIP 与打包目录，不留残余。
+        shutil.rmtree(bundle_dir, ignore_errors=True)
+        raise
     return attachments, denied

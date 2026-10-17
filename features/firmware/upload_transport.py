@@ -10,7 +10,7 @@ import time
 
 import scp
 
-from foundation.error_model import ApiError, record_internal_error
+from foundation.error_model import ApiError
 
 from . import runtime
 
@@ -60,9 +60,11 @@ async def scp_put_with_deadline(ssh, local_path: str, remote_path: str) -> None:
             f'SCP transfer timed out after {int(timeout_seconds)}s: {local_path}'
         ) from exc
     except Exception as exc:
-        message = record_internal_error(logger, 'SCP transfer', 'SCP transfer failed')
+        # 传输失败属远端基础设施故障（502）：与下方 upload_error 的映射
+        # 一致；异常细节只进服务端日志，客户端消息保留失败上下文。
+        logger.error('SCP transfer failed: %s', exc)
         raise ApiError.upstream_failure(
-            message, service='scp'
+            f'SCP transfer failed while uploading {local_path}', service='scp'
         ) from exc
     finally:
         with contextlib.suppress(Exception):

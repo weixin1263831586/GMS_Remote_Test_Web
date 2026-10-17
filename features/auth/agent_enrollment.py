@@ -13,6 +13,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .agent_tokens import coerce_expires_days
 from .constants import DEFAULT_AGENT_TOKEN_DAYS, CurrentUser
 
 
@@ -64,12 +65,13 @@ class AgentTokenEnrollmentMixin:
             ttl_minutes = self.ENROLLMENT_TTL_MINUTES
         try:
             ttl_minutes = int(ttl_minutes)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             raise ValueError("ttl_minutes 必须是 1–30 的整数") from None
         if not 1 <= ttl_minutes <= 30:
             raise ValueError("ttl_minutes 必须在 1–30 分钟之间")
-        if expires_days is not None and not 1 <= int(expires_days) <= 3650:
-            raise ValueError("expires_days 必须介于 1 和 3650 之间")
+        token_days = coerce_expires_days(
+            expires_days if expires_days is not None else DEFAULT_AGENT_TOKEN_DAYS
+        )
         code = "-".join(secrets.token_hex(3).upper() for _ in range(3))
         now = _utcnow()
         expires_at = now + timedelta(minutes=ttl_minutes)
@@ -92,7 +94,7 @@ class AgentTokenEnrollmentMixin:
                     self.normalize_scopes(scopes),
                     self._normalize_acl(allowed_workers),
                     self._normalize_acl(allowed_devices),
-                    max(1, int(expires_days or DEFAULT_AGENT_TOKEN_DAYS)),
+                    token_days,
                     _to_iso(now),
                     _to_iso(expires_at),
                 ),
@@ -155,7 +157,11 @@ class AgentTokenEnrollmentMixin:
                 return None, {"reason": "used", "used_at": _to_iso(now)}
             token = secrets.token_urlsafe(32)
             token_id = f"agt_{secrets.token_hex(8)}"
-            token_expires_at = now + timedelta(days=int(row["expires_days"]))
+            try:
+                redeemed_days = coerce_expires_days(row["expires_days"])
+            except ValueError:
+                redeemed_days = DEFAULT_AGENT_TOKEN_DAYS
+            token_expires_at = now + timedelta(days=redeemed_days)
             conn.execute(
                 """
                 INSERT INTO platform_agent_tokens (

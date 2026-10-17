@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -280,10 +281,13 @@ class RepositoryQueryMixin:
             if owner_keys:
                 names = conn.execute("SELECT DISTINCT assigned_to_name FROM redmine_agent_issues").fetchall()
                 matching = [row[0] for row in names if _name_matches_keys(row[0], owner_keys)]
+            # 轻列扫描：JSON 快照列（journals/attachments/failures）对绝大多数
+            # 行（已解决且有 closed_on、非本人工单）从不参与计算，却是最贵的
+            # decode 负担；它们稍后只对需要的行按 issue_id 批量补拉。
             statement = """
                 SELECT issue_id, subject, status_name, priority_name, assigned_to_name,
                        author_name, created_on, updated_on, closed_on, description, category,
-                       is_resolved, last_scanned_at, journals_json, attachments_json, failures_json
+                       is_resolved, last_scanned_at
                 FROM redmine_agent_issues
                 {where}
                 ORDER BY COALESCE(updated_on, created_on) DESC, issue_id DESC
@@ -309,6 +313,7 @@ class RepositoryQueryMixin:
             issue for issue in issues
             if self._is_assigned_to_owner(issue, owner_keys)
         ]
+        self._attach_workload_json_columns(owned_issues)
         open_issues: list[dict[str, Any]] = []
         waiting_my_reply: list[dict[str, Any]] = []
         stale_my_reply: list[dict[str, Any]] = []
@@ -404,6 +409,59 @@ class RepositoryQueryMixin:
                 "generated_at": _now(),
             },
         }
+
+    # JSON 快照列按需补拉：每请求全表 decode journals_json 是统计页的主要
+    # CPU 负担，而多数行（已解决且有 closed_on）从不读它。
+    _WORKLOAD_JSON_CHUNK = 500
+
+    def _attach_workload_json_columns(self, issues: list[dict[str, Any]]) -> None:
+        """Decode journals/attachments/failures only for issues that use them.
+
+        未解决工单参与等待归因（journals）与缺报告判定（attachments/
+        failures）；已解决且带 closed_on 的工单只贡献计数，跳过 decode。
+        其余消费者都以 ``issue.get(...) or []`` 读这些键，缺席即空表。
+        """
+        pending = [
+            issue for issue in issues
+            if (not self._is_issue_resolved(issue))
+            or not str(issue.get("closed_on") or "").strip()
+        ]
+        if not pending:
+            return
+        columns = ("journals_json", "attachments_json", "failures_json")
+        wanted_ids = [int(issue["issue_id"]) for issue in pending]
+        decoded: dict[int, dict[str, Any]] = {}
+        with self.connect() as conn:
+            for offset in range(0, len(wanted_ids), self._WORKLOAD_JSON_CHUNK):
+                batch = wanted_ids[offset:offset + self._WORKLOAD_JSON_CHUNK]
+                placeholders = ",".join("?" for _ in batch)
+                rows = conn.execute(
+                    f"""
+                    SELECT issue_id, journals_json, attachments_json, failures_json
+                    FROM redmine_agent_issues WHERE issue_id IN ({placeholders})
+                    """,
+                    batch,
+                ).fetchall()
+                for row in rows:
+                    decoded[int(row["issue_id"])] = dict(row)
+        for issue in issues:
+            for column in columns:
+                issue.setdefault(column, [])
+        for issue in pending:
+            row = decoded.get(int(issue["issue_id"]))
+            if row is None:
+                continue
+            for column in columns:
+                issue[column] = self._decode_json_snapshot(row.get(column))
+
+    @staticmethod
+    def _decode_json_snapshot(raw: Any) -> list:
+        """Decode one *_json snapshot column; invalid/empty values yield []."""
+        try:
+            parsed = json.loads(raw or "[]")
+        except Exception:
+            return []
+        return parsed if isinstance(parsed, list) else []
 
     def list_assignee_names(self) -> list[str]:
         with self.connect() as conn:

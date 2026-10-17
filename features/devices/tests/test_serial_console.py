@@ -16,9 +16,11 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from features.devices import serial_console_api
-from features.devices.serial_console import SerialConsoleService
+from features.devices.serial_console import (
+    SerialConsoleService,
+    serial_port_identity,
+)
 from features.devices.serial_console_access import device_serial_availability, visible_ports
-from features.devices.serial_console_identity import serial_port_identity
 from features.devices.serial_console_storage import BindingStore
 
 

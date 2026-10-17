@@ -52,6 +52,16 @@ class ResolveSuiteLogDirTests(unittest.TestCase):
         )
         self.assertEqual(err, "无效的测试套件路径")
 
+    def test_fail_closed_when_suites_path_unconfigured(self):
+        """suites_path 为空时必须 fail-closed 拒绝，绝不退化为无边界校验。"""
+        with TemporaryDirectory() as tmp:
+            for config in ({}, {"suites_path": ""}, {"suites_path": "   "}):
+                _abs, err = _resolve_suite_log_dir(
+                    f"{tmp}/android-vts/tools", "logs", config
+                )
+                self.assertEqual(err, "尚未配置测试套件根目录")
+                self.assertEqual(_abs, "")
+
     def test_expands_home_in_configured_suites_path(self):
         suite_root = Path.home() / "GMS-Suite" / "android-vts" / "android-vts"
         abs_path, err = _resolve_suite_log_dir(

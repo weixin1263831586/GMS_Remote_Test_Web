@@ -11,12 +11,12 @@ from fastapi.responses import FileResponse
 
 from features.auth import CurrentUser, require_elevated_admin_when_auth_required
 from features.system.models import SecurityPageViewRequest
-from features.system.security_audit import security_audit_logger
 from features.system.security_audit_utils import AUDIT_PAGE_VIEW_SKIP_PAGES
 from features.system.state import global_state
 from features.users import get_client_id_from_request, parse_client_id
 from foundation.errors import handle_api_errors
 from foundation.responses import ApiResponse
+from foundation.security_audit import security_audit_logger
 
 
 logger = logging.getLogger(__name__)

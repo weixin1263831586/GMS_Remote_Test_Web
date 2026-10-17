@@ -434,6 +434,48 @@ class TestEnrollTomlOnly(EnvSandbox):
         self.assertEqual(result.returncode, 2)
         self.assertIn("different Controllers", result.stderr)
 
+    def test_shell_enroll_warns_when_profile_drops_global_tls_options(self):
+        """--profile 的 TLS 选择是权威的，但被覆盖的全局
+        GMS_CURL_CA_CERT / GMS_CURL_INSECURE 不能静默丢弃——否则
+        「配了 CA 却走了系统信任库」难以排查。"""
+        config_root = self.root / "config"
+        state_root = self.root / "state"
+        profile_root = config_root / "gms-agent" / "profiles"
+        profile_root.mkdir(parents=True)
+        (profile_root / "production.toml").write_text(
+            'profile = "production"\nclient = "codex"\n\n'
+            '[controller]\nurl = "https://ctrl-b:5001"\n\n'
+            '[auth]\ntoken_file = "' + str(state_root / "production.token") + '"\n',
+            encoding="utf-8",
+        )
+        script = REPO_ROOT / "agent/gms-remote-test/runtime/gms-remote-test.sh"
+        command = """
+source "$1"
+curl() {
+  printf '%s\\n' '{"success":true,"token":{"token":"enrolled","scopes":[]}}' 'HTTP_STATUS:200'
+}
+gms-rt-agent-enroll CODE --profile production
+"""
+        result = subprocess.run(
+            ["bash", "-c", command, "bash", str(script)],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "XDG_CONFIG_HOME": str(config_root),
+                "XDG_STATE_HOME": str(state_root),
+                "GMS_REMOTE_TEST_SERVER": "https://ctrl-b:5001",
+                "GMS_CURL_CA_CERT": str(self.root / "global-ca.crt"),
+                "GMS_CURL_INSECURE": "1",
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("GMS_CURL_CA_CERT", result.stdout)
+        self.assertIn("GMS_CURL_INSECURE=1", result.stdout)
+        self.assertIn("被忽略", result.stdout)
+        # The profile's own TLS verdicts win over the dropped globals.
+        self.assertEqual((state_root / "production.token").read_text().strip(), "enrolled")
+
     def test_shell_enrollment_code_json_success_returns_zero(self):
         script = REPO_ROOT / "agent/gms-remote-test/runtime/gms-remote-test.sh"
         command = """

@@ -64,8 +64,14 @@ async def start_adb_forward(
             )
             return JSONResponse(content=result)
 
-        # Preserve the former controller-only SSH tunnel API for old clients.
-        # The web UI uses the worker-aware adbproxy-rs flow above.
+        # DEPRECATED: former controller-only SSH tunnel API, kept only for old
+        # clients. The web UI exclusively uses the worker-aware adbproxy-rs
+        # flow above (firmware-burn-adb-proxy.js), and no agent/frontend
+        # consumer passes a bare device_host here. The branch is already
+        # fenced by require_elevated_admin, which subsumes the usbip
+        # per-client host-access check (enforce_usbip_host_access is a no-op
+        # for elevated sessions). Do not add new callers; remove with the
+        # legacy client retirement.
         require_elevated_admin(request)
         config = adb_forward_manager.config_manager.load_config()
         device_host = str(

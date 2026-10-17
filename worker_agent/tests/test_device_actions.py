@@ -722,3 +722,92 @@ def test_run_with_output_stream_reports_lines_without_trailing_newline():
         _os.close(r)
     assert received == ["progress 50%"]
     assert result["returncode"] == 0
+
+
+def _getaddrinfo_response(address):
+    import socket
+
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, 0))]
+
+
+@pytest.mark.parametrize("address", [
+    "127.0.0.1", "::1", "10.1.2.3", "192.168.1.5", "172.16.0.9",
+    "169.254.169.254", "100.64.0.7", "0.0.0.0",
+])
+def test_suite_download_rejects_hosts_resolving_to_local_addresses(tmp_path, address):
+    """SSRF 防护：下载主机解析到环回/私网/链路本地/CGNAT 等本地侧地址时拒绝。"""
+    root = tmp_path / "suites"
+    root.mkdir()
+    config = WorkerConfig(worker_id="w", controller_url="https://controller", token="t",
+                          suite_roots=[root], data_root=tmp_path / "data")
+    with patch(
+        "socket.getaddrinfo",
+        return_value=_getaddrinfo_response(address),
+    ):
+        try:
+            execute_suite_action(config, {
+                "action": "download_url", "url": "https://rebind.test/file.zip",
+            })
+        except ValueError as exc:
+            assert "forbidden local address" in str(exc)
+        else:
+            raise AssertionError("expected local-address download rejection")
+    assert not list(root.glob("*.zip"))
+    assert not list(root.glob(".*.part"))
+
+
+def test_controller_suite_download_exempts_configured_private_controller(tmp_path):
+    """配置的 Controller 同源下载端点豁免本地地址检查（管理员显式信任）。"""
+    root = tmp_path / "suites"
+    root.mkdir()
+    config = WorkerConfig(
+        worker_id="w",
+        controller_url="https://10.10.10.206",
+        token="worker-secret",
+        suite_roots=[root],
+        data_root=tmp_path / "data",
+    )
+    with patch(
+        "socket.getaddrinfo",
+        return_value=_getaddrinfo_response("10.10.10.206"),
+    ), patch(
+        "worker_agent.suite_actions.urllib.request.urlopen",
+        return_value=io.BytesIO(b"suite"),
+    ) as opened:
+        execute_suite_action(config, {
+            "action": "download_url",
+            "url": "https://10.10.10.206/api/cluster/suite-library-download/safe/file.zip",
+            "filename": "file.zip",
+        })
+
+    assert (root / "file.zip").read_bytes() == b"suite"
+    assert opened.call_args.args[0].get_header("Authorization") == "Bearer worker-secret"
+
+
+def test_suite_download_part_file_carries_unique_suffix(tmp_path):
+    """并发下载同一文件名时 .part 临时文件互不覆盖。"""
+    from types import SimpleNamespace
+
+    root = tmp_path / "suites"
+    root.mkdir()
+    config = WorkerConfig(worker_id="w", controller_url="https://controller", token="t",
+                          suite_roots=[root], data_root=tmp_path / "data")
+    captured = []
+
+    def fake_urlopen(_request, timeout=None, context=None):
+        captured.extend(path.name for path in root.glob(".*.part"))
+        return io.BytesIO(b"archive")
+
+    with patch(
+        "worker_agent.suite_actions.uuid.uuid4",
+        return_value=SimpleNamespace(hex="0123abcd"),
+    ), patch(
+        "worker_agent.suite_actions.urllib.request.urlopen",
+        side_effect=fake_urlopen,
+    ):
+        execute_suite_action(config, {
+            "action": "download_url", "url": "https://example.test/suite.zip",
+        })
+
+    assert captured == [".suite.zip.0123abcd.part"]
+    assert (root / "suite.zip").read_bytes() == b"archive"

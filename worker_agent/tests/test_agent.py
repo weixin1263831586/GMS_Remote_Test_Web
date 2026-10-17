@@ -797,7 +797,9 @@ def test_firmware_flash_local_sources_copy_images_into_staging(tmp_path):
     """Worker 目录来源的 GSI 镜像应拷贝进本机 staging 后直接烧写。"""
     agent = WorkerAgent(worker_config(tmp_path))
     agent.client = MagicMock()
-    source = tmp_path / "images" / "gsi_arm64.img"
+    # local_sources 与 file_transfer 同一信任边界：来源必须位于
+    # 数据根/套件根之内（此处取套件根下的 images 目录）。
+    source = tmp_path / "suites" / "images" / "gsi_arm64.img"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"system-image")
     stage_id = "fw-" + "c" * 32
@@ -821,6 +823,33 @@ def test_firmware_flash_local_sources_copy_images_into_staging(tmp_path):
     assert saved["status"] == "completed"
     # 烧写结束后 staging 目录被清理。
     assert not system_arg.exists()
+
+
+def test_firmware_flash_local_sources_reject_paths_outside_allowed_roots(tmp_path):
+    """local_sources 不得成为读取 staging 之外任意本地文件的通道。"""
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+    outside = tmp_path / "secrets" / "root.key"
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(b"secret")
+    command = {
+        "id": "cmd-gsi-escape",
+        "command_type": "flash_gsi",
+        "payload": {
+            "stage_id": "fw-" + "d" * 32,
+            "files": [],
+            "local_sources": [{"kind": "system", "path": str(outside)}],
+            "devices": ["worker-test:ABC"],
+        },
+    }
+
+    with patch("worker_agent.app.flash_gsi") as flash:
+        agent.run_firmware_flash(command)
+
+    flash.assert_not_called()
+    saved = agent.runtime.previous_command("cmd-gsi-escape")
+    assert saved["status"] == "failed"
+    assert "outside Worker-allowed roots" in saved["error"]
 
 
 def test_start_process_closes_parent_log_descriptors(tmp_path):
@@ -1063,3 +1092,138 @@ def test_upload_tradefed_results_tolerates_sqlite_row_without_result_dir(tmp_pat
     # stdout without RESULT DIRECTORY -> upload path returns before row access
     (work_dir / "stdout.log").write_text("No matched tradefed modules\n", encoding="utf-8")
     agent._upload_tradefed_results(row, work_dir)
+
+
+def test_start_process_rejects_unsafe_job_path_segments(tmp_path):
+    """job_id/attempt_id 直接拼 work_dir 路径，必须按白名单校验。"""
+    config = worker_config(tmp_path)
+    executable = config.suite_roots[0] / "android-cts" / "tools" / "cts-tradefed"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    runtime = WorkerRuntime(config)
+
+    for bad_job_id in ("../../escape", "..", "job/1", "a" * 129, "job:1"):
+        with pytest.raises(ValueError, match="invalid job_id"):
+            runtime.start_process({
+                "id": "cmd-process",
+                "job_id": bad_job_id,
+                "attempt_id": "attempt-1",
+                "payload": {"argv": [str(executable), "list", "devices"]},
+            })
+    with pytest.raises(ValueError, match="invalid attempt_id"):
+        runtime.start_process({
+            "id": "cmd-process",
+            "job_id": "job-1",
+            "attempt_id": "../escape",
+            "payload": {"argv": [str(executable), "list", "devices"]},
+        })
+    assert not (config.data_root / "escape").exists()
+
+
+def test_file_browse_is_confined_to_configured_roots(tmp_path):
+    """远程文件浏览限制在套件根/数据根之内，不得探测任意主机路径。"""
+    suites = tmp_path / "suites"
+    suites.mkdir()
+    (suites / "android-cts").mkdir()
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+
+    agent.handle({"id": "cmd-browse-ok", "command_type": "file_browse",
+                  "payload": {"path": str(suites)}})
+    saved = agent.runtime.previous_command("cmd-browse-ok")
+    assert saved["status"] == "completed"
+    assert saved["result"]["path"] == str(suites.resolve())
+
+    agent.handle({"id": "cmd-browse-escape", "command_type": "file_browse",
+                  "payload": {"path": str(secrets)}})
+    saved = agent.runtime.previous_command("cmd-browse-escape")
+    assert saved["status"] == "failed"
+    assert "outside Worker-allowed browse roots" in saved["error"]
+
+    extra_root = tmp_path / "extra"
+    extra_root.mkdir()
+    with patch.dict("os.environ", {"GMS_WORKER_FILE_BROWSE_EXTRA_ROOTS": str(extra_root)}):
+        agent.handle({"id": "cmd-browse-extra", "command_type": "file_browse",
+                      "payload": {"path": str(extra_root)}})
+    assert agent.runtime.previous_command("cmd-browse-extra")["status"] == "completed"
+
+
+def test_update_worker_config_persists_private_permissions(tmp_path):
+    """配置临时文件必须 0600 后再原子替换，避免世界可读窗口。"""
+    import stat as stat_module
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"max_jobs": 1}', encoding="utf-8")
+    agent = WorkerAgent(worker_config(tmp_path))
+
+    with patch.dict("os.environ", {"GMS_WORKER_CONFIG": str(config_path)}):
+        agent.update_worker_config({"max_jobs": 4})
+
+    assert stat_module.S_IMODE(config_path.stat().st_mode) == 0o600
+    assert config_path.read_text(encoding="utf-8") == '{\n  "max_jobs": 4\n}'
+    assert not list(tmp_path.glob("*.tmp-*"))
+
+
+def _getaddrinfo_response(address):
+    import socket
+
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, 0))]
+
+
+def test_usbip_preflight_rejects_local_source_host(tmp_path):
+    """预检不得成为探测 Worker 本机/链路本地（含元数据）服务的通道。"""
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+
+    for address in ("169.254.169.254", "127.0.0.1"):
+        with patch(
+            "socket.getaddrinfo",
+            return_value=_getaddrinfo_response(address),
+        ):
+            agent.handle({"id": f"cmd-preflight-{address}",
+                          "command_type": "usbip_preflight",
+                          "payload": {"source_host": "metadata.internal"}})
+
+        saved = agent.runtime.previous_command(f"cmd-preflight-{address}")
+        assert saved["status"] == "failed"
+        assert "forbidden local address" in saved["error"]
+
+
+def test_usbip_preflight_rejects_unauthorized_private_peer(tmp_path):
+    """未列入 GMS_WORKER_USBIP_ALLOWED_HOSTS 的私网对等机同样拒绝。"""
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+
+    with patch(
+        "socket.getaddrinfo",
+        return_value=_getaddrinfo_response("10.1.2.3"),
+    ):
+        agent.handle({"id": "cmd-preflight-private", "command_type": "usbip_preflight",
+                      "payload": {"source_host": "peer.lab"}})
+
+    saved = agent.runtime.previous_command("cmd-preflight-private")
+    assert saved["status"] == "failed"
+    assert "forbidden local address" in saved["error"]
+
+
+def test_usbip_preflight_probes_authorized_peer_at_pinned_ip(tmp_path):
+    """授权私网对等机预检照常执行，且探测固定到已验证 IP（防 DNS 重绑定）。"""
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+
+    with patch.dict(
+        "os.environ", {"GMS_WORKER_USBIP_ALLOWED_HOSTS": "peer.lab"}
+    ), patch(
+        "socket.getaddrinfo",
+        return_value=_getaddrinfo_response("10.1.2.3"),
+    ), patch(
+        "worker_agent.app.probe_tcp_quality",
+        return_value={"rating": "good"},
+    ) as probe:
+        agent.handle({"id": "cmd-preflight-ok", "command_type": "usbip_preflight",
+                      "payload": {"source_host": "peer.lab"}})
+
+    assert agent.runtime.previous_command("cmd-preflight-ok")["status"] == "completed"
+    probe.assert_called_once_with("10.1.2.3", 3240)

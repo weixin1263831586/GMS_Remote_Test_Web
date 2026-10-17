@@ -117,7 +117,7 @@ mcp_debug_tools = _load_typed_tools("mcp_debug_tools")
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.58"
+SERVER_VERSION = "0.22.59"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -942,6 +942,13 @@ def auth_login_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     )
 
 
+def _enroll_state_dir() -> Path:
+    """Token state dir, mirroring gms_agent.profile_store.STATE_DIR."""
+    return Path(
+        os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))
+    ) / "gms-remote-test"
+
+
 def agent_enroll_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     """Exchange a one-shot enrollment code for a 0600 agent token file."""
     code = str(arguments.get("code") or "").strip()
@@ -950,6 +957,24 @@ def agent_enroll_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     args: list[str] = [code]
     out_file = str(arguments.get("out_file") or "").strip()
     if out_file:
+        # The MCP server is an unattended agent surface: a caller-chosen
+        # --out path would let a client-side prompt steer the freshly
+        # minted service token anywhere on the host. Restrict the target
+        # to the agent state dir (resolve() folds '..' and symlinks, so
+        # lexical escapes cannot slip through). The interactive human CLI
+        # keeps the unrestricted --out.
+        state_dir = _enroll_state_dir().resolve()
+        try:
+            candidate = Path(out_file).expanduser().resolve()
+            candidate.relative_to(state_dir)
+        except (ValueError, OSError):
+            return (
+                "denied: out_file must stay inside the agent token state "
+                f"dir ({state_dir}); unattended enrollment cannot write "
+                "elsewhere. Omit out_file to use the profile's default "
+                "token path.",
+                True,
+            )
         args.extend(["--out", out_file])
     profile = str(arguments.get("profile") or "").strip()
     if profile:

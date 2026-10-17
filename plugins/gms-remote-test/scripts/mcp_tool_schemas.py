@@ -354,7 +354,11 @@ ALL_TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": (
                             "Optional token file path (default "
-                            "~/.local/state/gms-remote-test/<profile>.token, 0600)."
+                            "~/.local/state/gms-remote-test/<profile>.token, 0600). "
+                            "Restricted to the agent state dir "
+                            "~/.local/state/gms-remote-test/ on this "
+                            "unattended surface; the interactive CLI "
+                            "accepts any path."
                         ),
                     },
                     "profile": {

@@ -302,5 +302,68 @@ class EnrollmentServiceTests(unittest.TestCase):
             )
 
 
+class TokenLifetimeClampTests(unittest.TestCase):
+    """expires_days/ttl_minutes 必须是有限且有界的数值。
+
+    ``int(float('inf'))`` 抛 OverflowError、超大整数让 timedelta 溢出——
+    两者都不是 ValueError，此前会穿透路由层的 (ValueError, TypeError)
+    捕获变成 500。服务层必须统一拒绝为 ValueError（路由映射 400）。
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.service = AuthService(db_path=Path(self._tmp.name) / "auth.sqlite3")
+        self.service.initialize()
+        self.admin = self.service.create_user("admin", "password123", role="admin")
+
+    def test_create_agent_token_rejects_non_finite_days(self):
+        for bad in (float("inf"), float("-inf"), float("nan")):
+            with self.assertRaises(ValueError):
+                self.service.create_agent_token(
+                    name=f"token-{bad!r}",
+                    owner=self.admin,
+                    scopes=["devices.read"],
+                    expires_days=bad,
+                )
+
+    def test_create_agent_token_rejects_out_of_range_days(self):
+        for bad in (0, -5, 3651, 10**12, "10**12"):
+            with self.assertRaises(ValueError):
+                self.service.create_agent_token(
+                    name="token-range",
+                    owner=self.admin,
+                    scopes=["devices.read"],
+                    expires_days=bad,
+                )
+
+    def test_create_agent_token_accepts_bounded_days(self):
+        record = self.service.create_agent_token(
+            name="token-3650",
+            owner=self.admin,
+            scopes=["devices.read"],
+            expires_days=3650,
+        )
+        self.assertTrue(record["expires_at"])
+
+    def test_enrollment_rejects_non_finite_values(self):
+        for bad_ttl in (float("inf"), float("nan")):
+            with self.assertRaises(ValueError):
+                self.service.create_agent_enrollment(
+                    name="enroll-inf",
+                    creator=self.admin,
+                    scopes=["devices.read"],
+                    ttl_minutes=bad_ttl,
+                )
+        for bad_days in (float("inf"), float("nan"), 10**12):
+            with self.assertRaises(ValueError):
+                self.service.create_agent_enrollment(
+                    name="enroll-inf-days",
+                    creator=self.admin,
+                    scopes=["devices.read"],
+                    expires_days=bad_days,
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

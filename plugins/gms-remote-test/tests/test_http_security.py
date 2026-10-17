@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import sys
+import tempfile
 import threading
 import urllib.error
 import urllib.request
@@ -78,6 +79,52 @@ def test_sdk_blocks_redirects(redirect_server, monkeypatch):
     assert received == []
 
 
+def test_sdk_redirect_to_other_port_never_resends_authorization(monkeypatch):
+    """A 30x to a DIFFERENT port must not be followed: urllib's default
+    opener would replay the Authorization header cross-origin."""
+    sink_seen = []
+
+    class SinkHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            sink_seen.append(self.headers.get('Authorization'))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *_args):
+            pass
+
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header('Location', self.location)
+            self.end_headers()
+
+        def log_message(self, *_args):
+            pass
+
+    sink = ThreadingHTTPServer(('127.0.0.1', 0), SinkHandler)
+    threading.Thread(target=sink.serve_forever, daemon=True).start()
+    RedirectHandler.location = f'http://127.0.0.1:{sink.server_port}/sink'
+    origin = ThreadingHTTPServer(('127.0.0.1', 0), RedirectHandler)
+    threading.Thread(target=origin.serve_forever, daemon=True).start()
+    try:
+        token = Path(tempfile.mkstemp(suffix='.token')[1])
+        token.write_text('secret-sentinel\n', encoding='utf-8')
+        token.chmod(0o600)
+        monkeypatch.delenv('GMS_AUTH_TOKEN_FILE', raising=False)
+        client = GmsClient(server_url=f'http://127.0.0.1:{origin.server_port}',
+                           token_file=str(token))
+        with pytest.raises(GmsApiError) as error:
+            client.request('GET', '/api/anything')
+        assert error.value.status == 302
+        assert sink_seen == []
+    finally:
+        origin.shutdown()
+        origin.server_close()
+        sink.shutdown()
+        sink.server_close()
+
+
 def test_package_download_blocks_redirects(redirect_server):
     origin, received = redirect_server
     with pytest.raises(urllib.error.HTTPError):
@@ -130,5 +177,55 @@ def test_registry_rejects_checksum_mismatch_before_extraction(tmp_path, monkeypa
         'url': 'https://controller/pkg.zip', 'sha256': hashlib.sha256(b'valid').hexdigest(),
     }}}
     with patch.object(pm, 'http_get', side_effect=[(json.dumps(manifest).encode(), {}), (b'tampered', {})]), pytest.raises(RuntimeError, match='SHA-256'):
+        pm.fetch_registry_package('https://controller', '')
+    assert not pm.VERSIONS_DIR.exists()
+
+
+def _pinned_key_env(monkeypatch) -> str:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    private = Ed25519PrivateKey.generate()
+    pem = private.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    key = base64.b64encode(pem).decode()
+    monkeypatch.setenv('GMS_AGENT_VERIFY_KEY_B64', key)
+    return private
+
+
+def test_registry_rejects_unsigned_manifest_when_key_pinned(tmp_path, monkeypatch):
+    """Pinned release key: an absent signature is a hard failure, not a
+    silent SHA-256-only install (the whole point of pinning the key)."""
+    monkeypatch.setattr(pm, 'VERSIONS_DIR', tmp_path / 'versions')
+    _pinned_key_env(monkeypatch)
+    payload = b'valid'
+    manifest = {'version': '1.2.3', 'artifacts': {'universal': {
+        'url': 'https://controller/pkg.zip',
+        'sha256': hashlib.sha256(payload).hexdigest(),
+    }}}
+    with patch.object(pm, 'http_get', side_effect=[(json.dumps(manifest).encode(), {}), (payload, {})]), pytest.raises(RuntimeError, match='Ed25519'):
+        pm.fetch_registry_package('https://controller', '')
+    assert not pm.VERSIONS_DIR.exists()
+
+
+def test_registry_rejects_signature_by_foreign_key(tmp_path, monkeypatch):
+    """A validly-formed signature from a DIFFERENT key than the pinned one
+    must fail verification (tampered manifest swap)."""
+    monkeypatch.setattr(pm, 'VERSIONS_DIR', tmp_path / 'versions')
+    _pinned_key_env(monkeypatch)
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    attacker = Ed25519PrivateKey.generate()
+    payload = b'valid'
+    manifest = {'version': '1.2.3', 'artifacts': {'universal': {
+        'url': 'https://controller/pkg.zip',
+        'sha256': hashlib.sha256(payload).hexdigest(),
+    }}}
+    signature = base64.b64encode(
+        attacker.sign(pm._manifest_signature_payload(manifest))
+    ).decode()
+    manifest['signature'] = signature
+    with patch.object(pm, 'http_get', side_effect=[(json.dumps(manifest).encode(), {}), (payload, {})]), pytest.raises(RuntimeError, match='签名校验失败'):
         pm.fetch_registry_package('https://controller', '')
     assert not pm.VERSIONS_DIR.exists()
