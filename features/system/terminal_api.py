@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# 分片索引/总数来自表单：负值、倒置或天文数字的 total_chunks 会触发
+# range(total_chunks) 全量 os.path.exists 轮询与巨型 chunk 文件名集合。
+_MAX_UPLOAD_CHUNKS = 100_000
+
 
 # ==================== SSH Terminal Info ====================
 
@@ -221,6 +225,18 @@ async def _upload_file_chunk(
     try:
         if not upload_id or not file_name:
             return error_response("upload_id and file_name are required for chunk upload", 400)
+
+        if (
+            chunk_index < 0
+            or total_chunks < 1
+            or chunk_index >= total_chunks
+            or total_chunks > _MAX_UPLOAD_CHUNKS
+        ):
+            return error_response(
+                "chunk_index/total_chunks out of allowed range "
+                f"(0 <= chunk_index < total_chunks <= {_MAX_UPLOAD_CHUNKS})",
+                400,
+            )
 
         # 消毒 upload_id，杜绝 session_dir 目录穿越写入；
         # 恶意形态会被重写为安全 token（与固件分片上传同一防御）。

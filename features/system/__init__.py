@@ -1,5 +1,7 @@
 """System-owned public feature interfaces."""
 
+from foundation.security_audit import security_audit_logger
+
 from .api_docs_list import API_DOCS_LIST
 from .health_api import health_check
 from .mainline_issues import (
@@ -11,7 +13,6 @@ from .mainline_issues import (
 from .models import VNCStartRequest, VPNConnectRequest
 from .network import check_local_vpn_connected
 from .notifications import queue_notification
-from .security_audit import security_audit_logger
 from .source_provider import (
     initialize_source_runtime,
     registry_state,

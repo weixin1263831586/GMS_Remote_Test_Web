@@ -499,6 +499,28 @@ def list_all_packages(device_id: str | None = None) -> list[str]:
     return pkgs
 
 
+def device_file_size(
+    device_id: str | None, on_device_path: str, timeout: int = 15
+) -> int:
+    """Return the on-device file size in bytes; raises RuntimeError on failure.
+
+    Used to bound ``pull_device_file`` transfers before any bytes move.
+    """
+    adb = _adb_path()
+    serial = f"-s {shlex.quote(device_id)} " if device_id else ""
+    stat_result = run_local_shell_command(
+        f"{adb} {serial}shell stat -c %s {shlex.quote(on_device_path)}",
+        timeout=timeout,
+    )
+    size = stat_result.stdout.strip() if stat_result.ok else ""
+    if not size.isdigit():
+        raise RuntimeError(
+            f"读取 {on_device_path} 大小失败: "
+            f"{(stat_result.stderr or stat_result.stdout).strip()}"
+        )
+    return int(size)
+
+
 def pull_device_file(
     device_id: str | None, on_device_path: str, local_path: str, timeout: int = 120
 ) -> None:

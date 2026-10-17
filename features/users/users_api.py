@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from features.auth import (
     CurrentUser,
@@ -29,7 +30,6 @@ from .clients import (
     parse_client_id,
     resolve_client_display_id,
 )
-from .models import ClientInfoRequest
 from .sessions import client_manager
 
 
@@ -37,6 +37,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 USER_ONLINE_WINDOW = timedelta(minutes=5)
+
+
+class ClientInfoRequest(BaseModel):
+    username: str | None = Field(default=None, max_length=64, pattern=r"^[\w.-]+$")
+    password: str | None = None
+    ip: str | None = None
 
 
 def _is_loopback_device_host(device_host: str) -> bool:

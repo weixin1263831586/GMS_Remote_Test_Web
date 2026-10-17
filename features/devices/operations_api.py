@@ -9,7 +9,6 @@ from fastapi.responses import JSONResponse
 
 from features.auth import (
     CurrentUser,
-    principal_actor_id,
     require_authenticated_user,
     require_elevated_admin,
 )
@@ -51,13 +50,14 @@ async def list_user_locks(request: Request):
     current_user = require_authenticated_user(request)
     locks = device_lock_manager.get_all_locks()
     if current_user.role != "admin":
-        # 锁持有者是"操作主体"（actor）语义：agent 令牌的锁应跟 token 走，
-        # 不能误用 resource_owner_id 混入账号分区（ADR 0010）。
-        client_id = principal_actor_id(request)
+        # 锁记录按 resource owner（fencing 身份）存储（ADR 0010）：agent
+        # 令牌发起的操作登记在其所属账号名下，过滤也必须按 resource
+        # owner 对齐，否则 agent 主体永远看不到自己触发的锁。
+        owner_id = device_fencing_owner_id(request)
         locks = {
             key: value
             for key, value in locks.items()
-            if value.get("client_id") == client_id
+            if value.get("client_id") == owner_id
         }
     return JSONResponse(
         content={"success": True, "data": locks}

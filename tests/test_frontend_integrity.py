@@ -1035,6 +1035,99 @@ class FrontendIntegrityTests(unittest.TestCase):
                 duplicate_functions = sorted({item for item in function_names if function_names.count(item) > 1})
                 self.assertEqual(duplicate_functions, [])
 
+    def test_websites_category_dnd_binding_is_idempotent(self):
+        """网站页双渲染后类别拖放不得重复触发（前端审查回归钉）。
+
+        renderToolsGrid 有双渲染路径（服务器同步 + 本地回退各渲染
+        一次，server-sync.js 两处 setTimeout(initDragAndDrop)），两次
+        绑定可能命中同一批新 DOM；没有 dndBound 守卫时同一
+        .category-section 绑两份 drop，moveCategory 连续执行两次，
+        分类被移到错误位置。
+        手工验证：常用网址页触发一次会改数据的操作（如保存分类，
+        会走 render→bind 两条路径）后，把任一分类拖到相邻位置，
+        分类应只移动一格、不跳位。
+        """
+        dnd = read_text("web/static/js/shell/dnd-sort.js")
+        self.assertIn("function initDragAndDrop()", dnd)
+        self.assertIn("if (section.dataset.dndBound === 'true') return;", dnd)
+        self.assertIn("section.dataset.dndBound = 'true';", dnd)
+        server_sync = read_text("web/static/js/shell/server-sync.js")
+        self.assertEqual(
+            server_sync.count("setTimeout(() => initDragAndDrop(), 100)"), 2
+        )
+
+    def test_vpn_route_check_escapes_server_derived_interpolations(self):
+        """路由检查弹框的服务端派生插值必须全部转义（安全回归钉）。
+
+        checkRouting 的 result.* 来自 Ping API 响应（含 fallback 本地
+        拼装的路由命令），未转义直接进 innerHTML 即存储型 XSS；
+        data-command 属性上下文同样必须经 escapeHtml（其转义 & < >
+        " '，足以覆盖双引号属性）。same_network 为布尔三元、固定
+        文案，不属于转义对象。
+        """
+        vpn = read_text("web/static/js/pages/vpn-control.js")
+        for fragment in (
+            "escapeHtml(result.test_host_ip",
+            "escapeHtml(result.test_network",
+            "escapeHtml(result.client_ip",
+            "escapeHtml(result.client_network",
+            "escapeHtml(result.latency",
+            "escapeHtml(result.route_commands?.linux?.[2]",
+            "escapeHtml(result.route_commands?.windows?.[2]",
+        ):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, vpn)
+        self.assertIn('data-command="${escapeHtml(result.route_commands?.linux?.[2] || \'\')}"', vpn)
+        # 棘轮：这些键不允许再出现未转义的裸插值（${result.x 形式）。
+        for raw in (
+            "${result.test_host_ip",
+            "${result.test_network",
+            "${result.client_ip",
+            "${result.client_network",
+            "${result.latency",
+            "${result.route_commands",
+        ):
+            with self.subTest(raw=raw):
+                self.assertNotIn(raw, vpn)
+
+    def test_agent_polling_stops_when_leaving_agent_page(self):
+        """离开 Agent 页必须停止会话轮询（前端审查回归钉）。
+
+        agentPollTimer 每 3s 拉一次 /api/agent/sessions/...；SPA 切页
+        不销毁页面，不停止就会在后台一直打接口。所有页内导航都汇
+        聚到 switchPage，在离开 agent 页时调用 stopAgentPolling；
+        关闭标签页时整个 JS 上下文销毁，定时器随之消亡。
+        """
+        agent = read_text("web/static/js/pages/conversational-agent.js")
+        self.assertIn("function stopAgentPolling()", agent)
+        self.assertIn("clearInterval(agentPollTimer);", agent)
+        switching = read_text("web/static/js/shell/shell-page-switching.js")
+        self.assertIn(
+            "if (pageName !== 'agent' && typeof stopAgentPolling === 'function') stopAgentPolling();",
+            switching,
+        )
+
+    def test_api_call_has_no_client_identity_dead_layer(self):
+        """api.js 不得再有 client identity 死层（前端审查回归钉）。
+
+        getClientIdentityHeaders 恒返回 {}、applyClientIdentityHeadersToXhr
+        只是空遍历：既不携带身份（身份经 Cookie/会话），又让每次调用
+        看起来"设置了"请求头，属于纯误导性死代码，已在全前端移除。
+        """
+        for path in ["web/static/js/api.js", "web/static/js/navigation.js", *[
+            str(p) for p in Path("web/static/js").glob("*.js")
+        ], *[
+            str(p) for p in Path("web/static/js/shell").glob("*.js")
+        ], *[
+            str(p) for p in Path("web/static/js/pages").glob("*.js")
+        ]]:
+            with self.subTest(path=path):
+                text = read_text(path)
+                self.assertNotIn("getClientIdentityHeaders", text)
+                self.assertNotIn("applyClientIdentityHeadersToXhr", text)
+        api = read_text("web/static/js/api.js")
+        self.assertIn("headers: {}", api)
+
 
 class WorkspaceIdentityRegressions(unittest.TestCase):
     """第二轮代码评审遗留回归：serial 含 ":" 不得被误判为 Worker 前缀；

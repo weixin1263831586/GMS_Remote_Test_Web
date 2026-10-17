@@ -6,6 +6,7 @@ import asyncio
 import codecs
 import contextlib
 import errno
+import hashlib
 import logging
 import os
 import re
@@ -24,7 +25,6 @@ import pyudev
 
 from foundation.config import settings
 
-from .serial_console_identity import serial_port_identity
 from .serial_console_storage import (
     SUPPORTED_NEWLINES,
     BindingStore,
@@ -40,6 +40,39 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_LOG_BYTES = 50 * 1024 * 1024
 DEFAULT_LOG_RETENTION_DAYS = 14
 DATE_RE = re.compile(r"^\d{8}$")
+
+
+# ---- merged from serial_console_identity.py ----
+
+def serial_port_identity(
+    *, by_id: str, devname: str, usb_path: str
+) -> dict[str, str | bool]:
+    """Stable USB-serial port identity: udev by-id symlink, then USB path.
+
+    Kernel tty names are allocation order, not hardware identity.  Persistent
+    bindings therefore prefer udev's by-id symlink, then a physical USB path.
+    A bare tty name remains usable for the current process but is explicitly
+    marked unstable so callers never silently restore a binding onto
+    different hardware.
+    """
+    if by_id:
+        return {
+            "port_key": Path(by_id).name,
+            "identity_source": "by-id",
+            "identity_stable": True,
+        }
+    if usb_path:
+        digest = hashlib.sha256(usb_path.encode("utf-8")).hexdigest()[:20]
+        return {
+            "port_key": f"usb-path-{digest}",
+            "identity_source": "usb-path",
+            "identity_stable": True,
+        }
+    return {
+        "port_key": Path(devname).name,
+        "identity_source": "kernel-node",
+        "identity_stable": False,
+    }
 
 
 # ---- merged from serial_console_errors.py ----

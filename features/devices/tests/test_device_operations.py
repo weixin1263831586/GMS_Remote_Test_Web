@@ -400,6 +400,39 @@ class DeviceOperationsTests(unittest.TestCase):
         self.assertGreaterEqual(observed["generation"], 1)
         self.assertIsNone(device_lock_manager.get_lock_status(serial))
 
+    def test_user_locked_filters_by_resource_owner_not_actor(self):
+        def request_for(role, user_id, resource_owner_id):
+            request = Request({
+                "type": "http", "method": "GET", "path": "/", "headers": [],
+                "client": ("127.0.0.1", 1234),
+            })
+            request.state.current_user = CurrentUser(
+                id=user_id, username=user_id, role=role,
+                resource_owner_id=resource_owner_id,
+            )
+            request.state.auth_method = "agent_token" if role == "agent_service" else "session"
+            return request
+
+        locks = {
+            "SERIAL-OWNED": {"client_id": "acct-1", "username": "acct-1"},
+            "SERIAL-OTHER": {"client_id": "acct-2", "username": "acct-2"},
+        }
+        with patch.object(operations_api.device_lock_manager, "get_all_locks", return_value=locks):
+            # 锁记录按 resource owner 存储；agent 令牌的 actor id
+            # （agent:one）永远匹配不上，必须按所属账号过滤。
+            agent_view = json.loads(asyncio.run(operations_api.list_user_locks(
+                request_for("agent_service", "agent:one", "acct-1"),
+            )).body)["data"]
+            human_view = json.loads(asyncio.run(operations_api.list_user_locks(
+                request_for("user", "acct-1", "acct-1"),
+            )).body)["data"]
+            admin_view = json.loads(asyncio.run(operations_api.list_user_locks(
+                request_for("admin", "admin", "admin"),
+            )).body)["data"]
+        self.assertEqual(sorted(agent_view), ["SERIAL-OWNED"])
+        self.assertEqual(sorted(human_view), ["SERIAL-OWNED"])
+        self.assertEqual(sorted(admin_view), ["SERIAL-OTHER", "SERIAL-OWNED"])
+
 
 if __name__ == "__main__":
     unittest.main()

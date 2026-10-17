@@ -343,10 +343,11 @@ def _resolve_suite_log_dir(suite_path: str, rel_path: str, config) -> tuple[str,
 
     base = (config.get("suites_path") or "").replace("\\", "/").strip().rstrip("/")
     if not base:
+        # fail-closed：没有可对照的套件根目录时拒绝解析，绝不退化为
+        # 无边界校验。
         return "", "尚未配置测试套件根目录"
-    if base:
-        base = os.path.realpath(os.path.expanduser(base))
-    if base and not (suite_root == base or suite_root.startswith(base + "/")):
+    base = os.path.realpath(os.path.expanduser(base))
+    if not (suite_root == base or suite_root.startswith(base + "/")):
         return "", "测试套件不在配置的套件目录内"
 
     abs_path = os.path.realpath(

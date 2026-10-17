@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from features.system.security_audit import SecurityAuditLogger
+from foundation.security_audit import SecurityAuditLogger
 
 
 class SecurityAuditIntegrityTests(unittest.TestCase):

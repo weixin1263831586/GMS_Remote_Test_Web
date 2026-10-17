@@ -820,25 +820,33 @@ gms-rt-devices-shell() {
                 esac ;;
             cmd|am|pm|dpm|content)
                 # 这些二进制的只读子命令集合在 MCP 层枚举
-                # (_SHELL_CMD_READONLY_SUBCOMMANDS)；CLI 端必须逐前缀镜像，
-                # 否则 MCP 放行的命令到 CLI 被拒（工具契约破裂）。
-                # 注意 MCP 是 exact-or-prefix(sub+" ")匹配，CLI 的 glob
-                # "cmd package list"* 等价于 startswith——但 MCP 还接受
-                # joined == sub（无参数形式，如 "pm help"），CLI 用裸 *
-                # 或精确串覆盖这两种形态。
+                # (_SHELL_CMD_READONLY_SUBCOMMANDS)；CLI 端必须逐条镜像
+                # MCP 的 exact-or-prefix 语义（joined == sub 或 sub+" " 开头），
+                # 裸 glob "cmd package path"* 会把 "cmd package pathx" 这类
+                # 越界子命令一并放行。每个条目用 精确串|"子命令 " 双形态覆盖
+                # MCP 接受的两种输入。
                 case "$_ro_check" in
-                    "cmd list"*|"cmd help"*|\
-                    "cmd package list"*|"cmd package path"*|"cmd package dump"*|\
-                    "cmd package help"*|"cmd package query-activities"*|\
-                    "cmd package query-services"*|"cmd package query-receivers"*|\
-                    "cmd package query-content-providers"*|\
-                    "am stack list"*|"am get-current-user"*|"am get-standby-bucket"*|\
-                    "pm list users"*|"pm list packages"*|"pm list permissions"*|\
-                    "pm list permission-groups"*|"pm list features"*|\
-                    "pm list libraries"*|"pm list instrumentation"*|"pm list jobs"*|\
+                    "cmd list"|"cmd list "*|"cmd help"|"cmd help "*|\
+                    "cmd package list"|"cmd package list "*|\
+                    "cmd package path"|"cmd package path "*|\
+                    "cmd package dump"|"cmd package dump "*|\
+                    "cmd package help"|"cmd package help "*|\
+                    "cmd package query-activities"|"cmd package query-activities "*|\
+                    "cmd package query-services"|"cmd package query-services "*|\
+                    "cmd package query-receivers"|"cmd package query-receivers "*|\
+                    "cmd package query-content-providers"|"cmd package query-content-providers "*|\
+                    "am stack list"|"am stack list "*|"am get-current-user"|"am get-current-user "*|\
+                    "am get-standby-bucket"|"am get-standby-bucket "*|\
+                    "pm list users"|"pm list users "*|"pm list packages"|"pm list packages "*|\
+                    "pm list permissions"|"pm list permissions "*|\
+                    "pm list permission-groups"|"pm list permission-groups "*|\
+                    "pm list features"|"pm list features "*|\
+                    "pm list libraries"|"pm list libraries "*|\
+                    "pm list instrumentation"|"pm list instrumentation "*|\
+                    "pm list jobs"|"pm list jobs "*|\
                     "pm path"|"pm path "*|"pm help"|\
                     "dpm list-owners"|\
-                    "content query"*) ;;
+                    "content query"|"content query "*) ;;
                     *) error "只读子命令白名单之外的 '$_ro_first' 需一次性审批令牌"; return "$GMS_RT_EXIT_PERMISSION" ;;
                 esac ;;
             *)

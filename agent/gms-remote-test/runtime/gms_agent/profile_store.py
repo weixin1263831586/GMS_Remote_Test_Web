@@ -340,12 +340,23 @@ def resolve_direct_cli_context(
             "error": "",
         }
 
-    if len(loaded) == 1 and not requested_server and not human_session:
+    if len(loaded) == 1 and not human_session:
+        # A single usable profile is the unambiguous identity: auto-select it
+        # even before enrollment created the token file (enroll's whole job is
+        # to mint that token) and even when --server restates the same
+        # Controller. A server mismatch still refuses to route the profile's
+        # identity elsewhere, mirroring the named-profile guard above.
         name, flat = loaded[0]
+        server = controller_url(flat)
+        if requested_server and requested_server != server:
+            return _direct_cli_error(
+                f"唯一的 Agent profile {name} 绑定 {server}，"
+                f"拒绝向 {requested_server} 发送其凭据。"
+            )
         return {
             "mode": "profile",
             "profile": name,
-            "server": controller_url(flat),
+            "server": requested_server or server,
             "ca_cert": ca_cert(flat),
             "token_file": flat.get("token_file", ""),
             "insecure": flat.get("insecure", ""),

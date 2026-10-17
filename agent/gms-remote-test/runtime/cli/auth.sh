@@ -339,6 +339,14 @@ gms-rt-agent-enroll() {
         API_BASE="${SERVER_URL}/api"
         profile_ca=$(_gms_enroll_profile_controller_field "$profile_flag" ca_cert)
         profile_insecure=$(_gms_enroll_profile_controller_field "$profile_flag" insecure)
+        # profile 的 TLS 选择是权威的；被覆盖掉的全局选项不再静默丢弃，
+        # 否则「配了 GMS_CURL_CA_CERT 却走了系统信任库/自签拒绝」难以排查。
+        if [ -n "${GMS_CURL_CA_CERT:-}" ] && [ "$GMS_CURL_CA_CERT" != "$profile_ca" ]; then
+            warning "profile '$profile_flag' TLS 配置覆盖了全局 GMS_CURL_CA_CERT（${GMS_CURL_CA_CERT} → ${profile_ca:-<无：使用系统信任库>}）"
+        fi
+        if [ "${GMS_CURL_INSECURE:-0}" = "1" ] && [ "$profile_insecure" != "true" ]; then
+            warning "profile '$profile_flag' 未开启 insecure，全局 GMS_CURL_INSECURE=1 被忽略"
+        fi
         GMS_CURL_CA_CERT="$profile_ca"
         if [ "$profile_insecure" = "true" ]; then
             GMS_CURL_INSECURE=1

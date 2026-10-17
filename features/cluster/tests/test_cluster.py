@@ -469,6 +469,45 @@ class ClusterRepositoryTests(unittest.TestCase):
         self.assertEqual(self.repo.list_suites("worker-246"), [])
         self.assertEqual(self.repo.poll_commands("worker-246"), [])
 
+    def test_delete_job_removes_artifact_directory(self):
+        """删除历史任务时同步清理 on-disk 工件目录（data/cluster/artifacts/<job_id>/）。"""
+        self.register()
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1", "running_jobs": [],
+            "devices": [
+                {"serial": "ABC", "state": "available"},
+                {"serial": "DEF", "state": "available"},
+            ],
+            "suites": [],
+        })
+        job = self.repo.create_job_with_leases({
+            "worker_id": "worker-246", "owner_id": "tester",
+            "devices": ["worker-246:ABC"], "suite_key": "CTS:17_r1",
+        })
+        artifacts_root = self.repo.db_path.parent / "artifacts"
+        job_dir = artifacts_root / job["id"] / job["current_attempt_id"]
+        job_dir.mkdir(parents=True)
+        (job_dir / "stdout.log").write_text("done", encoding="utf-8")
+        self.repo.transition_job(job["id"], "completed", source="worker")
+
+        # 另一任务使用独立设备：验证 delete_job 只清理目标任务目录。
+        other = self.repo.create_job_with_leases({
+            "worker_id": "worker-246", "owner_id": "tester",
+            "devices": ["worker-246:DEF"], "suite_key": "CTS:17_r1",
+        })
+        other_dir = artifacts_root / other["id"]
+        other_dir.mkdir(parents=True)
+
+        self.assertTrue(self.repo.delete_job(job["id"]))
+
+        self.assertFalse(job_dir.exists())
+        self.assertFalse((artifacts_root / job["id"]).exists())
+        # 未删除任务的工件目录不受影响。
+        self.assertTrue(other_dir.exists())
+        self.repo.transition_job(other["id"], "completed", source="worker")
+        self.assertTrue(self.repo.delete_job(other["id"]))
+        self.assertFalse(other_dir.exists())
+
     def test_missing_devices_are_marked_offline(self):
         self.register()
         base = {"agent_version": "1", "running_jobs": [], "suites": None}

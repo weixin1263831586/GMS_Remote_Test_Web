@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import Response
 
-from features.system.security_audit import security_audit_logger
+from foundation.security_audit import security_audit_logger
 
 
 AUDIT_SKIP_PREFIXES = (

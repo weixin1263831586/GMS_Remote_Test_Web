@@ -13,7 +13,6 @@ import socket
 import subprocess
 import threading
 import time
-from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -26,19 +25,25 @@ _SAFE_NAME = re.compile(r"[A-Za-z0-9._-]{1,128}")
 _PAIR_CONTEXT = b"gms-adbproxy-rs-v0.4.5-grant"
 _LOG_MONITORS: set[str] = set()
 _LOG_MONITOR_LOCK = threading.Lock()
-_STATE_LOCK = threading.RLock()
-
-
-def _serialize_state(action):
-    @wraps(action)
-    def serialized(*args, **kwargs):
-        with _STATE_LOCK:
-            return action(*args, **kwargs)
-    return serialized
+# 串行化 source/target 状态文件与托管进程的全部变更路径：命令线程
+# （source_start/target_connect/...，最长 120s）与心跳里的
+# recover_managed_state / sync_source_policy 并发读写同一组
+# JSON/TOML/pid 文件时会互相踩踏（对齐 app.py usbip_operation_lock
+# 的做法）。只读动作（status/logs/source_devices）不加锁；恢复与
+# 策略刷新用非阻塞获取，命令进行中时本轮跳过，绝不阻塞心跳。
+# 使用不可重入 Lock：公共入口不会同线程嵌套（内置实现只调内部
+# helper），可重入反而让跨线程互斥无法被测试钉住。
+_STATE_LOCK = threading.Lock()
+_STATE_MUTATING_ACTIONS = frozenset(
+    {"source_start", "source_stop", "target_connect", "target_disconnect"}
+)
 
 
 def pair_code_from_grant(secret: str | bytes, grant: str) -> str:
     """Derive an assignment-specific adbproxy-rs code from a signed grant."""
+    # TODO(外部依赖): 配对码为 8 字符 Base32（40 bit），抗暴力枚举依赖
+    # adbproxy-rs（Rust 端）对配对失败的限速；提高熵需要同步放宽
+    # adbproxy-rs 的码长约束，Python 端单独加长只会破坏配对协议。
     value = secret.encode("utf-8") if isinstance(secret, str) else secret
     if not value:
         raise ValueError("ADB Proxy secret is empty")
@@ -131,20 +136,45 @@ def imported_device_for_serial(serial: str) -> dict[str, str] | None:
 
 
 def sync_source_policy() -> None:
-    """Refresh the explicit source allowlist used by the default-deny proxy."""
-    root = _state_root()
-    state = _read_json(root / "source.json")
-    if not state.get("running") or not _managed_running(
-        root / "proxy.pid", "adb-proxy"
-    ):
+    """Refresh the explicit source allowlist used by the default-deny proxy.
+
+    非阻塞获取状态锁：命令进行中时跳过本轮刷新——source_start 自己
+    会按新选择重写策略，此刻读旧 source.json 重写会把它踩回去。
+    """
+    if not _STATE_LOCK.acquire(blocking=False):
         return
-    selected = set(_validated_serials(state.get("devices") or []))
-    _write_source_policy(root / "proxy.toml", sorted(selected))
+    try:
+        root = _state_root()
+        state = _read_json(root / "source.json")
+        if not state.get("running") or not _managed_running(
+            root / "proxy.pid", "adb-proxy"
+        ):
+            return
+        selected = set(_validated_serials(state.get("devices") or []))
+        _write_source_policy(root / "proxy.toml", sorted(selected))
+    finally:
+        _STATE_LOCK.release()
 
 
-@_serialize_state
 def recover_managed_state(*, secret: str | bytes = "") -> dict[str, Any]:
-    """Restore persisted adb-proxy/adb-hub processes after a host restart."""
+    """Restore persisted adb-proxy/adb-hub processes after a host restart.
+
+    与命令线程共用模块级 _STATE_LOCK 串行化状态变更；恢复用非阻塞
+    获取：命令进行中（target_connect 最长 120s）时本轮跳过、交由下一
+    次心跳重试，绝不阻塞心跳线程（对齐 usbip 恢复的做法）。
+    """
+    if not _STATE_LOCK.acquire(blocking=False):
+        return {
+            "recovered": [],
+            "errors": ["ADB Proxy operation is already in progress"],
+        }
+    try:
+        return _recover_managed_state_locked(secret=secret)
+    finally:
+        _STATE_LOCK.release()
+
+
+def _recover_managed_state_locked(*, secret: str | bytes = "") -> dict[str, Any]:
     root = _state_root()
     recovered: list[str] = []
     errors: list[str] = []
@@ -189,7 +219,6 @@ def recover_managed_state(*, secret: str | bytes = "") -> dict[str, Any]:
     return {"recovered": recovered, "errors": errors}
 
 
-@_serialize_state
 def execute_adb_proxy_action(
     action: str,
     payload: dict[str, Any] | None = None,
@@ -200,6 +229,20 @@ def execute_adb_proxy_action(
     external_payload = dict(payload)
     if pair_code:
         external_payload["pair_code"] = pair_code
+    # 只序列化变更动作：status/logs/source_devices 是心跳高频只读路径，
+    # 不得被长命令（target_connect 最长 120s）持有状态锁时阻塞。
+    if action not in _STATE_MUTATING_ACTIONS:
+        return _execute_adb_proxy_transport(action, external_payload, payload, pair_code)
+    with _STATE_LOCK:
+        return _execute_adb_proxy_transport(action, external_payload, payload, pair_code)
+
+
+def _execute_adb_proxy_transport(
+    action: str,
+    external_payload: dict[str, Any],
+    payload: dict[str, Any],
+    pair_code: str,
+) -> dict[str, Any]:
     return execute_transport(
         "GMS_ADB_PROXY_CONTROL_BIN",
         transport="adb_proxy",

@@ -30,3 +30,27 @@ def test_shell_defaults_are_available_without_exposing_admin_configuration(monke
     assert 'device_hosts' not in response.json()
     assert 'private-password' not in response.text
     assert response.json()['wifi']['password'] == ''
+
+
+def test_opengrok_config_requires_authenticated_user(monkeypatch):
+    monkeypatch.setenv('GMS_AUTH_REQUIRED', 'true')
+    app = FastAPI()
+    app.include_router(config_api.router)
+    with TestClient(app) as client:
+        assert client.get('/api/config/opengrok').status_code == 401
+
+
+def test_opengrok_config_served_in_dev_mode(monkeypatch):
+    monkeypatch.delenv('GMS_AUTH_REQUIRED', raising=False)
+
+    class FakeConfigManager:
+        def load_config(self):
+            return {'opengrok': {'base_url': 'http://opengrok.local/source', 'project': 'gms'}}
+
+    monkeypatch.setattr(config_api, 'config_manager', FakeConfigManager())
+    app = FastAPI()
+    app.include_router(config_api.router)
+    with TestClient(app) as client:
+        response = client.get('/api/config/opengrok')
+    assert response.status_code == 200
+    assert response.json()['data']['base_url'] == 'http://opengrok.local/source'

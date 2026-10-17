@@ -1,5 +1,12 @@
 // Shell 模块：拖拽排序（从 shell.html 内联脚本尾部提取）。
 // ==================== 拖拽排序功能 ====================
+// 共享拖拽状态（隐患标注，暂不改架构）：本文件服务「常用网址」页，
+// 但 utility-tools.js（实用工具页）复用 handleToolDragStart 等
+// dragstart/dragover 处理器，同样写入以下模块级变量。两个页面的
+// 网格在 SPA 中都常驻 DOM（切页仅隐藏不销毁），若一次拖拽的
+// dragstart 与 drop 落在不同页面的网格上，drop 处理器会把对方
+// 页面的索引当成自己的消费（splice 错位甚至丢工具）。改动任何
+// 一侧的拖拽行为前必须同时核对另一侧。
 let draggedTool = null;
 let draggedCategory = null;
 let draggedCategoryIndex = null;
@@ -148,6 +155,14 @@ function moveCategory(dataObj, fromIndex, toIndex, applyFn) {
 
 // 初始化拖拽功能
 function initDragAndDrop() {
+    // dndBound 守卫：renderToolsGrid 存在双渲染路径（服务器同步 +
+    // 本地回退各渲染一次），两次 setTimeout(initDragAndDrop) 可能
+    // 指向同一批新 DOM；无守卫时同一 section 绑两份 drop，
+    // moveCategory 连续执行两次，分类被移到错误位置。
+    // 隐患标注（暂不改架构）：querySelectorAll 不按页面容器过滤，
+    // 若实用工具页（utility-tools.js）的 .category-section 也在
+    // DOM 中，会被一并绑上 handleCategoryDrop，与该页自己的
+    // ut_handleCategoryDrop 在同一次 drop 上叠加触发。
     // 分类拖拽
     document.querySelectorAll('.category-section').forEach(section => {
         if (section.dataset.dndBound === 'true') return;

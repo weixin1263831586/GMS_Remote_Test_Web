@@ -33,7 +33,7 @@ from features.firmware.apk import (
     normalize_apk_filename,
     safe_join,
 )
-from features.firmware.dependencies import configure_firmware_dependencies
+from features.firmware.runtime import configure_runtime
 from features.gerrit import api as gerrit_dashboard
 from features.gerrit.config import (
     denormalize_gerrit_dashboard_config,
@@ -88,7 +88,7 @@ from features.users import (
     probe_windows_usbipd,
     resolve_tailscale_device_host,
 )
-from features.users.dependencies import configure_user_dependencies
+from features.users.runtime import configure_user_dependencies
 from foundation.config import (
     APK_MAX_FILE_SIZE,
     APK_MAX_SOURCE_FILE_SIZE,
@@ -213,7 +213,7 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
         from features.system.source_provider import initialize_source_runtime
 
         initialize_source_runtime(config_manager.load_config())
-        configure_firmware_dependencies(
+        configure_runtime(
             config_manager=config_manager,
             ssh_manager=ssh_manager,
             global_state=global_state,

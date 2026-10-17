@@ -500,6 +500,127 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["success"])
 
+    def test_garbage_approval_token_triggers_no_remote_write(self):
+        """垃圾审批令牌不得触发任何远端写入。
+
+        预检（不消费）失败必须在固件 SCP 上传与 upgrade_tool 推送之前
+        拦截：上传 helper 与 SCPClient 都不允许被调用，consume 也不发生。
+        """
+        with tempfile.NamedTemporaryFile(
+            suffix=".img", delete=False
+        ) as firmware:
+            firmware.write(b"GMS-FAKE-FIRMWARE-BYTES")
+            firmware_name = firmware.name
+        self.addCleanup(os.unlink, firmware_name)
+        self._set_principal(AGENT_ROLE)
+        self.prevalidate.return_value = False
+        upload_calls = []
+        scp_instantiated = []
+
+        class _TrackingSCPClient:
+            def __init__(self, *_args, **_kwargs):
+                scp_instantiated.append(True)
+
+            def put(self, *_args, **_kwargs):
+                scp_instantiated.append("put")
+
+            def close(self):
+                return None
+
+        async def _tracked_upload(*_args, **_kwargs):
+            upload_calls.append(True)
+
+        with patch(
+            "features.firmware.firmware_api.authentication_required",
+            return_value=True,
+        ), patch(
+            "features.auth.service.auth_service.consume_approval_token",
+            return_value=True,
+        ) as consume, patch(
+            "features.firmware.firmware_api._adb_proxy_devices",
+            return_value=[],
+        ), patch(
+            "features.firmware.firmware_api.validate_local_update_image",
+        ), patch(
+            "features.firmware.firmware_api._upload_firmware_to_test_host",
+            side_effect=_tracked_upload,
+        ), patch("scp.SCPClient", _TrackingSCPClient):
+            response = self.client.post(
+                "/api/burn/firmware?devices=D1&approval_token=garbage-token",
+                data={"firmware_path": firmware_name},
+            )
+        self.assertEqual(response.status_code, 403)
+        body = response.json()
+        self.assertEqual(body.get("code"), "FORBIDDEN")
+        self.assertIn("审批令牌", body.get("error", ""))
+        # 远端写入零次：固件未上传，upgrade_tool 也未推送。
+        self.assertEqual(upload_calls, [])
+        self.assertEqual(scp_instantiated, [])
+        consume.assert_not_called()
+        # 预检绑定的是将要上传的本地字节摘要（与远端 sha256sum 一致）。
+        self.prevalidate.assert_called_once()
+        kwargs = self.prevalidate.call_args.kwargs
+        self.assertEqual(kwargs.get("tool"), "gms_rt_burn_firmware")
+        self.assertEqual(kwargs.get("device"), "D1")
+        self.assertIn(hashlib.sha256(
+            b"GMS-FAKE-FIRMWARE-BYTES"
+        ).hexdigest(), kwargs.get("command", ""))
+
+    def test_validate_approval_token_is_non_consuming(self):
+        """validate_approval_token 只读校验：不置 used_at，可反复调用。
+
+        消费仍由 consume_approval_token 一次性完成；消费后 validate
+        必须立即失效。
+        """
+        from pathlib import Path
+
+        from features.auth import auth_service
+
+        original_db = auth_service.db_path
+        with tempfile.TemporaryDirectory() as auth_dir:
+            auth_service.db_path = Path(auth_dir) / "platform_auth.sqlite3"
+            auth_service._initialized = False
+            try:
+                user = CurrentUser(id="u-agent", username="agent", role="admin")
+                created = auth_service.create_approval_token(
+                    user=user,
+                    tool="gms_rt_burn_firmware",
+                    device="D1",
+                    firmware_sha256="a" * 64,
+                    wipe_data=True,
+                    burn_mode="auto",
+                )
+                token = created["token"]
+                command = auth_service.derive_burn_command(
+                    device="D1",
+                    firmware_sha256="a" * 64,
+                    wipe_data=True,
+                    burn_mode="auto",
+                )
+                # setUp 对实例属性的 prevalidate patch 不影响这里：直接
+                # 走类上的真实实现。
+                service_class = type(auth_service)
+                check = lambda: service_class.validate_approval_token(  # noqa: E731
+                    auth_service,
+                    token,
+                    tool="gms_rt_burn_firmware",
+                    device="D1",
+                    command=command,
+                )
+                self.assertTrue(check())
+                self.assertTrue(check())  # 未消费：重复校验仍通过
+                self.assertTrue(service_class.consume_approval_token(
+                    auth_service,
+                    token,
+                    tool="gms_rt_burn_firmware",
+                    device="D1",
+                    command=command,
+                ))
+                self.assertFalse(check())  # 已消费：validate 立即失效
+            finally:
+                auth_service.db_path = original_db
+                auth_service._initialized = False
+
 
 if __name__ == "__main__":
     unittest.main()

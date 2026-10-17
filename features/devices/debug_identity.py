@@ -65,18 +65,24 @@ def inspect_apk(path: Path, sha256: str):
             "version_code": versions.get("versionCode", ""), "version_name": versions.get("versionName", "")}
 
 
-def installed_fingerprint(ssh, serial, package, check=lambda: None):
-    """Bind metadata to actual APK bytes; only misses transfer and verify the APK."""
+def _shell_runner(ssh, serial, check):
     def shell(args):
         check()
         return run(ssh, ["adb", "-s", serial, "shell", shlex.join(args)])
+    return shell
 
+
+def _installed_package_present(shell, package):
+    # pm path may exit nonzero for a missing package. Use the successful list
+    # command to distinguish absence from an unavailable package manager.
     listing = shell(["pm", "list", "packages", "--user", "0", package])
     lines = [line.strip() for line in listing.splitlines() if line.strip()]
     if any(not re.fullmatch(r"package:[A-Za-z][A-Za-z0-9_.]*", line) for line in lines):
         raise ApiError.upstream_failure("无法读取已安装应用列表", service="adb")
-    if "package:" + package not in lines:
-        return None
+    return "package:" + package in lines
+
+
+def _installed_base_apk(shell, package):
     output = shell(["pm", "path", "--user", "0", package])
     paths = re.findall(r"(?m)^package:(/[^\r\n]+\.apk)\s*$", output)
     bases = [path for path in paths if path.endswith("/base.apk")]
@@ -84,10 +90,26 @@ def installed_fingerprint(ssh, serial, package, check=lambda: None):
         bases = paths
     if len(bases) != 1 or not re.fullmatch(r"/[A-Za-z0-9_./+=@~-]+\.apk", bases[0]):
         raise ApiError.upstream_failure("无法确定已安装应用的 base APK", service="adb")
-    path = bases[0]
+    return bases[0]
+
+
+def _installed_stat(shell, path):
+    """One stat format for every caller: ``size:mtime:inode``."""
     stat = shell(["stat", "-c", "%s:%Y:%i", path]).strip()
-    if not re.fullmatch(r"[1-9]\d*:\d+:\d+", stat) or int(stat.split(":", 1)[0]) > 256 * 1024 * 1024:
+    if not re.fullmatch(r"[1-9]\d*:\d+:\d+", stat):
         raise ApiError.invalid_semantics("已安装 APK 超出身份校验大小限制或元数据无效")
+    return stat
+
+
+def installed_fingerprint(ssh, serial, package, check=lambda: None):
+    """Bind metadata to actual APK bytes; only misses transfer and verify the APK."""
+    shell = _shell_runner(ssh, serial, check)
+    if not _installed_package_present(shell, package):
+        return None
+    path = _installed_base_apk(shell, package)
+    stat = _installed_stat(shell, path)
+    if int(stat.split(":", 1)[0]) > 256 * 1024 * 1024:
+        raise ApiError.invalid_semantics("已安装 APK 超出身份校验大小限制")
     boot = shell(["cat", "/proc/sys/kernel/random/boot_id"]).strip()
     if not re.fullmatch(r"[a-f0-9-]{16,64}", boot):
         raise ApiError.upstream_failure("无法读取设备启动标识", service="adb")
@@ -127,28 +149,13 @@ def _remember_identity(key, fingerprint, identity):
 
 def installed_identity(ssh, serial, package, check=lambda: None):
     """Pull and verify user 0's actual base APK through the audited SSH channel."""
-    def shell(args):
-        check()
-        return run(ssh, ["adb", "-s", serial, "shell", shlex.join(args)])
-
-    # pm path may exit nonzero for a missing package. Use the successful list
-    # command to distinguish absence from an unavailable package manager.
-    listing = shell(["pm", "list", "packages", "--user", "0", package])
-    lines = [line.strip() for line in listing.splitlines() if line.strip()]
-    if any(not re.fullmatch(r"package:[A-Za-z][A-Za-z0-9_.]*", line) for line in lines):
-        raise ApiError.upstream_failure("无法读取已安装应用列表", service="adb")
-    if "package:" + package not in lines:
+    shell = _shell_runner(ssh, serial, check)
+    if not _installed_package_present(shell, package):
         return None
-    output = shell(["pm", "path", "--user", "0", package])
-    paths = re.findall(r"(?m)^package:(/[^\r\n]+\.apk)\s*$", output)
-    bases = [path for path in paths if path.endswith("/base.apk")]
-    if len(paths) == 1:
-        bases = paths
-    if len(bases) != 1 or not re.fullmatch(r"/[A-Za-z0-9_./+=@~-]+\.apk", bases[0]):
-        raise ApiError.upstream_failure("无法确定已安装应用的 base APK", service="adb")
-    path = bases[0]
-    size = shell(["stat", "-c", "%s", path]).strip()
-    if not size.isdigit() or not 0 < int(size) <= 256 * 1024 * 1024:
+    path = _installed_base_apk(shell, package)
+    stat = _installed_stat(shell, path)
+    size = int(stat.split(":", 1)[0])
+    if size > 256 * 1024 * 1024:
         raise ApiError.invalid_semantics("已安装 APK 超出身份校验大小限制")
     digest = shell(["sha256sum", path]).split()
     if not digest or not re.fullmatch(r"[a-f0-9]{64}", digest[0]):

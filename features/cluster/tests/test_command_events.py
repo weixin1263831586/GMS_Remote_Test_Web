@@ -104,7 +104,7 @@ class CommandEventsRepositoryTests(unittest.TestCase):
             with repo.connect() as conn:
                 conn.execute(
                     "UPDATE cluster_commands SET status='completed',"
-                    "updated_at='2020-01-01T00:00:00Z' WHERE id='cmd-1'"
+                    " updated_at='2020-01-01T00:00:00Z' WHERE id='cmd-1'"
                 )
                 conn.execute("""INSERT INTO cluster_commands
                     (id,worker_id,command_type,job_id,attempt_id,dispatch_token,
@@ -117,6 +117,20 @@ class CommandEventsRepositoryTests(unittest.TestCase):
             ])
             self.assertEqual(repo.prune_terminal_command_events(retention_hours=1, limit=1), 1)
             self.assertEqual(repo.list_command_events("cmd-2"), [])
+
+    def test_delete_worker_cleans_command_events(self):
+        """删除 Worker 时同步清理其命令事件，不留孤儿行。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = _repository(tmp)
+            repo.append_command_events("worker-A", "cmd-1", [
+                {"sequence": 0, "message": "flash output"},
+            ])
+            self.assertTrue(repo.delete_worker("worker-A"))
+            with repo.connect() as conn:
+                remaining = conn.execute(
+                    "SELECT COUNT(*) FROM cluster_command_events"
+                ).fetchone()[0]
+            self.assertEqual(remaining, 0)
 
 
 class CommandEventsApiTests(unittest.TestCase):

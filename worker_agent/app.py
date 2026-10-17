@@ -16,6 +16,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote, urlencode
 
 from foundation.network_quality import probe_tcp_quality
 from foundation.transport_contract import TransportOperationError
@@ -1039,7 +1040,7 @@ class WorkerAgent:
             owns_directory = True
             archive = directory / "report.zip"
             self.client.download(
-                f"/api/cluster/workers/{self.config.worker_id}/report-copies/{transfer_id}",
+                f"/api/cluster/workers/{quote(self.config.worker_id)}/report-copies/{transfer_id}",
                 archive,
                 max_bytes=int(payload.get("size_bytes") or 0) + (64 * 1024 * 1024),
             )
@@ -1113,8 +1114,6 @@ class WorkerAgent:
                 raise ValueError("invalid firmware staging id")
             directory = self.config.data_root / "firmware" / stage_id
             directory.mkdir(parents=True, exist_ok=False)
-            import hashlib
-            from urllib.parse import quote, urlencode
             specs = list(payload.get("files") or [])
             if not specs and "filename" in payload:
                 specs = [{"filename": payload["filename"],
@@ -1129,7 +1128,12 @@ class WorkerAgent:
                 target = directory / f"{kind}.img"
                 max_bytes = int(os.getenv(
                     "GMS_WORKER_GSI_STAGE_MAX_BYTES", str(20 * 1024 ** 3)))
-                staged = copy_image_into(str(source.get("path") or ""), target, max_bytes)
+                staged = copy_image_into(
+                    str(source.get("path") or ""),
+                    target,
+                    max_bytes,
+                    allowed_roots=self._worker_allowed_roots(),
+                )
                 specs.append({"kind": kind, "filename": target.name, "local": True, **staged})
             downloaded = {}
             for spec in specs:

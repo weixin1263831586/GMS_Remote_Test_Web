@@ -28,6 +28,30 @@ def _to_iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat()
 
 
+MAX_AGENT_TOKEN_DAYS = 3650
+
+
+def coerce_expires_days(value: Any) -> int | None:
+    """Validate an admin-supplied token lifetime into a bounded int.
+
+    ``int()`` alone lets ``float('inf')`` escape as OverflowError (a 500 from
+    the route layer, which only maps ValueError/TypeError to 400) and NaN
+    compare falsely against the range check. Everything non-finite or outside
+    1..3650 is rejected as a plain ValueError instead.
+    """
+    if value is None:
+        return None
+    if isinstance(value, float) and value != value:  # NaN never orders
+        raise ValueError("expires_days 必须是 1–3650 的整数")
+    try:
+        days = int(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("expires_days 必须是 1–3650 的整数") from None
+    if not 1 <= days <= MAX_AGENT_TOKEN_DAYS:
+        raise ValueError("expires_days 必须介于 1 和 3650 之间")
+    return days
+
+
 def _from_iso(value: str) -> datetime:
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
@@ -104,12 +128,9 @@ class AgentTokenServiceMixin:
         token = secrets.token_urlsafe(32)
         token_id = f"agt_{secrets.token_hex(8)}"
         now = _utcnow()
-        if expires_days is not None and not 1 <= int(expires_days) <= 3650:
-            raise ValueError("expires_days 必须介于 1 和 3650 之间")
+        days = coerce_expires_days(expires_days)
         expires_at = (
-            _to_iso(now + timedelta(days=max(1, int(expires_days))))
-            if expires_days is not None
-            else None
+            _to_iso(now + timedelta(days=days)) if days is not None else None
         )
         with self._lock, self._connect() as conn:
             conn.execute(

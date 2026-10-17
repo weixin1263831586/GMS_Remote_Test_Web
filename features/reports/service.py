@@ -9,7 +9,6 @@
 import logging
 import os
 import re
-from pathlib import Path
 from typing import Any
 
 from .analysis_agent import ReportAnalysisAgent
@@ -19,6 +18,51 @@ from .repository import test_report_db
 
 
 logger = logging.getLogger(__name__)
+
+
+def _report_suite_root(report: dict[str, Any], result_dir: str) -> str | None:
+    """Resolve the report's trusted suite root for untrusted-path containment.
+
+    Prefers the recorded absolute ``suite_path`` (same ``tools``-stripping
+    semantics as ``downloads.report_suite_location``); legacy records
+    without one fall back to the trusted result_dir layout
+    ``<suite_root>/results/<run_folder>``.
+    """
+    suite_path = str(report.get("suite_path") or "").strip()
+    if suite_path:
+        expanded = os.path.expanduser(suite_path)
+        if os.path.isabs(expanded):
+            root = os.path.realpath(expanded)
+            if os.path.basename(root) == "tools":
+                root = os.path.dirname(root)
+            return root
+    if not result_dir:
+        return None
+    return os.path.dirname(os.path.dirname(os.path.abspath(result_dir)))
+
+
+def _contained_log_dir(
+    report: dict[str, Any], result_dir: str, candidate: str
+) -> str | None:
+    """Confine an untrusted ``LOG DIRECTORY`` value to the report suite root.
+
+    ``invocation_summary.txt`` 是设备/套件运行环境产出的不可信证据：其中
+    声明的任意绝对路径不得被直接当作可读日志目录（收容做法与
+    ``downloads.local_report_directories`` 一致）。越界（含 symlink 经
+    realpath 解析后出根）一律忽略该目录。
+    """
+    if not candidate:
+        return None
+    root = _report_suite_root(report, result_dir)
+    if not root:
+        return None
+    resolved = os.path.realpath(candidate)
+    if resolved != root and not resolved.startswith(root + os.sep):
+        logger.warning(
+            "Ignoring LOG DIRECTORY outside report suite root: %s", candidate
+        )
+        return None
+    return resolved
 
 
 class TestReportManager:
@@ -119,17 +163,27 @@ class TestReportManager:
             if summary_content:
                 log_dir_match = re.search(r'LOG DIRECTORY\s*:\s*(/[^\s]+)', summary_content)
                 if log_dir_match:
-                    # Summary text is untrusted. Only sibling suite logs are evidence.
-                    result_path = Path(result_dir).resolve()
-                    suite_root = result_path.parent.parent if result_path.parent.name == 'results' else result_path
-                    candidate = Path(log_dir_match.group(1).strip()).resolve()
-                    if candidate.is_relative_to(suite_root) and candidate.is_dir():
-                        log_dir = str(candidate)
-                        inv_dirs = [d for d in os.listdir(log_dir) if d.startswith('inv_')
-                                    and (candidate / d).resolve().is_relative_to(suite_root)
-                                    and (candidate / d).is_dir()]
+                    # Summary text is untrusted: the declared directory is
+                    # only honored inside the report suite root (prefers the
+                    # recorded suite_path, falls back to the trusted
+                    # result_dir layout); anything else is ignored.
+                    log_dir = _contained_log_dir(
+                        report, result_dir, log_dir_match.group(1).strip()
+                    )
+                    if log_dir and os.path.isdir(log_dir):
+                        inv_dirs = [
+                            d for d in os.listdir(log_dir)
+                            if d.startswith('inv_') and os.path.isdir(os.path.join(log_dir, d))
+                        ]
                         if inv_dirs:
-                            inv_dir = os.path.join(log_dir, inv_dirs[0])
+                            # inv_* 本身也可能是指向套件根外的 symlink：
+                            # realpath 后仍须收容在套件根内，否则忽略。
+                            confined_inv = _contained_log_dir(
+                                report, result_dir,
+                                os.path.join(log_dir, inv_dirs[0]),
+                            )
+                            if confined_inv:
+                                inv_dir = confined_inv
 
             # 如果 XML 显示 0 个测试，从 host_log 中提取模块执行失败信息
             if analysis['summary'].get('total', 0) == 0 and not result.get('failures'):
@@ -158,12 +212,18 @@ class TestReportManager:
 
             # 从 log 目录提取 host_log 和 device_log 错误
             if inv_dir:
-                # 单次遍历收集所有日志文件
+                # 单次遍历收集所有日志文件；单文件级的 symlink 出根
+                # （realpath 解析）同样跳过，纵深防御。
+                suite_root = _report_suite_root(report, result_dir)
                 host_log_path = None
                 device_log_path = None
                 for f in os.listdir(inv_dir):
-                    if not (Path(inv_dir) / f).resolve().is_relative_to(suite_root):
-                        continue
+                    if suite_root:
+                        resolved = os.path.realpath(os.path.join(inv_dir, f))
+                        if resolved != suite_root and not resolved.startswith(
+                            suite_root + os.sep
+                        ):
+                            continue
                     if f.startswith('host_log') and f.endswith('.txt'):
                         host_log_path = os.path.join(inv_dir, f)
                     elif f.startswith('device_logcat_test') and f.endswith('.txt'):

@@ -48,6 +48,22 @@ class UpdateDocTypeValidationTests(unittest.TestCase):
         resp = self._update(doc_id, {"links": 5})
         self.assertEqual(resp.status_code, 422, resp.text)
 
+    def test_non_dict_link_element_rejected_with_422(self):
+        doc_id = self._create_doc()
+        for bad_element in (5, "redmine_issue:123", None):
+            resp = self._update(doc_id, {"links": [bad_element]})
+            self.assertEqual(resp.status_code, 422, resp.text)
+            self.assertIn("对象", resp.json()["error"])
+
+    def test_create_doc_non_dict_link_element_rejected(self):
+        with patch("features.knowledge.api._user", return_value="u1"):
+            resp = self.client.post(
+                "/api/knowledge/docs",
+                json={"title": "t", "content_md": "b", "links": [7]},
+            )
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self.assertFalse(resp.json().get("success", True))
+
     def test_non_string_tags_rejected_with_422(self):
         doc_id = self._create_doc()
         resp = self._update(doc_id, {"tags": {"a": 1}})

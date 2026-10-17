@@ -28,7 +28,7 @@ def test_installed_base_apk_is_pulled_verified_and_cleaned():
         if "pm path" in joined:
             return "package:/data/app/example/base.apk\npackage:/data/app/example/split_config.en.apk\n"
         if "stat -c" in joined:
-            return "7\n"
+            return "7:1700000000:123"
         if "sha256sum" in joined:
             return DIGEST + "  /data/app/example/base.apk\n"
         return ""

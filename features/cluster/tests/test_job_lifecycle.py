@@ -143,6 +143,50 @@ class ClusterJobLifecycleTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["command"]["payload"]["worker_job_id"], f"wj-{job['id']}")
 
+    def test_cancel_race_with_terminal_transition_returns_refreshed_job(self):
+        """终态判定与 transition_job 之间的竞态返回刷新后的终态（200）。
+
+        Worker 在 already_terminal 检查之后、stopping 过渡之前完成任务：
+        transition_job 按 completed->stopping 拒绝过渡并抛
+        InvalidJobTransitionError，端点必须降级为幂等取消应答而不是 500。
+        """
+        self.register()
+        self.repo.heartbeat("worker-246", {"agent_version": "1", "running_jobs": [],
+            "suites": [], "devices": [{"serial": "ABC", "state": "available"}]})
+        job = self.repo.create_job_with_leases({"worker_id": "worker-246", "owner_id": "tester",
+            "devices": ["worker-246:ABC"], "suite_key": "CTS:17_r1"})
+        original_transition = self.repo.transition_job
+
+        def racing_transition(job_id, to_status, **kwargs):
+            if to_status == "stopping":
+                # 模拟并发 Worker 完成：任务先进入 completed，随后真实的
+                # stopping 过渡按状态机被拒绝。
+                original_transition(job_id, "completed", source="worker")
+            return original_transition(job_id, to_status, **kwargs)
+
+        previous = cluster_api.cluster_service
+        cluster_api.cluster_service = ClusterService(self.repo)
+        try:
+            app = FastAPI()
+            @app.middleware("http")
+            async def identify_test_owner(request, call_next):
+                request.state.current_user = CurrentUser(
+                    id="tester", username="tester", role="user"
+                )
+                return await call_next(request)
+            app.include_router(cluster_api.router)
+            with TestClient(app) as client, patch.object(
+                self.repo, "transition_job", side_effect=racing_transition
+            ):
+                response = client.post(f"/api/cluster/jobs/{job['id']}/cancel")
+        finally:
+            cluster_api.cluster_service = previous
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertTrue(payload["already_terminal"])
+        self.assertEqual(payload["job"]["status"], "completed")
+
     def test_agent_cancel_requires_tests_cancel_scope(self):
         self.register()
         self.repo.heartbeat("worker-246", {

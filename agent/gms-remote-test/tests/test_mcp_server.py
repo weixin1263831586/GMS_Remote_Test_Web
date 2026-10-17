@@ -1337,6 +1337,111 @@ class ShellToolGateTests(unittest.TestCase):
             self.assertTrue(allowed, f"{cmd!r} should be allowed: {reason}")
 
 
+class CliShellGateAlignmentTests(unittest.TestCase):
+    """CLI/MCP bilateral alignment of the typed read-only shell gate.
+
+    devices.sh documents that its service-token allowlist is the CLI
+    mirror of ``_SHELL_CMD_READONLY_SUBCOMMANDS``: a command one side
+    allows must not be denied by the other (that drift breaks the tool
+    contract). ``pm path`` is the regression sentinel: the CLI accepts
+    both the bare form and the space-bounded prefix, matching the MCP
+    exact-or-``sub + ' '`` match.
+    """
+
+    ALLOWED = (
+        "pm path",
+        "pm path com.android.gms",
+        "pm help",
+        "cmd package path com.foo",
+        "cmd list",
+        "dpm list-owners",
+    )
+    DENIED = (
+        "pm pathx",            # shared prefix without the space boundary
+        "pm paths",
+        "pm install /data/x.apk",
+        "cmd package pathx",
+        "am start -n pkg/.Activity",
+    )
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        self.adb_log = root / "adb-calls.log"
+        stub_dir = root / "bin"
+        stub_dir.mkdir()
+        stub = stub_dir / "adb"
+        stub.write_text(
+            "#!/bin/bash\n"
+            'if [ "$1" = "devices" ]; then\n'
+            '  printf "List of devices attached\\nD1\\tdevice\\n"\n'
+            "  exit 0\n"
+            "fi\n"
+            f'printf "%s\\n" "$*" >> {self.adb_log.as_posix()}\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        token = root / "agent.token"
+        token.write_text("gate-alignment-token", encoding="utf-8")
+        token.chmod(0o600)
+        self.env = {
+            **os.environ,
+            "PATH": f"{stub_dir}:{os.environ.get('PATH', '')}",
+            "HOME": str(root / "home"),
+            "TMPDIR": str(root / "tmp"),
+            "XDG_CONFIG_HOME": str(root / "config"),
+            "XDG_STATE_HOME": str(root / "state"),
+            "GMS_REMOTE_TEST_SERVER": "https://127.0.0.1:5001",
+            "GMS_AUTH_TOKEN_FILE": str(token),
+        }
+        self.env.pop("GMS_RT_PROFILE", None)
+
+    def _run_cli_gate(self, command: str) -> subprocess.CompletedProcess:
+        script = RUNTIME_DIR / "gms-remote-test.sh"
+        snippet = (
+            'source "$1"\n'
+            'GMS_RT_TYPED_READONLY=1 gms-rt-devices-shell D1 "$2"\n'
+        )
+        return subprocess.run(
+            ["bash", "-c", snippet, "bash", str(script), command],
+            capture_output=True,
+            text=True,
+            env=self.env,
+        )
+
+    def _assert_sides_agree(self, command: str, expect_allowed: bool) -> None:
+        allowed, reason = mcp_server._validate_shell_command(command)
+        self.assertEqual(
+            allowed, expect_allowed, f"MCP verdict for {command!r}: {reason}"
+        )
+        result = self._run_cli_gate(command)
+        if expect_allowed:
+            self.assertEqual(
+                result.returncode, 0, f"CLI denied {command!r}: {result.stderr}"
+            )
+            self.assertIn(f"-s D1 shell {command}", self.adb_log.read_text())
+        else:
+            self.assertEqual(
+                result.returncode, 4, f"CLI allowed {command!r}: {result.stdout}"
+            )
+            # The stub adb only appends allowed invocations, so a command
+            # denied on both sides may never create the log at all.
+            logged = self.adb_log.read_text() if self.adb_log.exists() else ""
+            self.assertNotIn(f"-s D1 shell {command}", logged)
+
+    def test_allowed_subcommands_agree_on_both_sides(self):
+        for command in self.ALLOWED:
+            with self.subTest(command=command):
+                self._assert_sides_agree(command, True)
+
+    def test_denied_subcommands_agree_on_both_sides(self):
+        for command in self.DENIED:
+            with self.subTest(command=command):
+                self._assert_sides_agree(command, False)
+
+
 class LogcatToolTests(unittest.TestCase):
     """gms_rt_logcat typed tool (added v0.7.0)."""
 
@@ -1451,6 +1556,58 @@ class LogcatToolTests(unittest.TestCase):
         self.assertTrue(is_err)
         self.assertIn("timeout", out)
 
+    _UNTIL_FIXTURE = (
+        "--------- beginning of main\n"
+        "09-07 10:52:00.000 E/one: boundary-second start\n"
+        "09-07 10:52:00.500 E/two: boundary-half\n"
+        "09-07 10:52:00.900 E/three: boundary-late-ms\n"
+        "09-07 10:52:01.000 E/four: next-second\n"
+    )
+
+    def _run_until(self, until: str) -> str:
+        def fake_run(command, args=None, stdin_text=None, timeout=None,
+                     env_extra=None):
+            return self._UNTIL_FIXTURE, False
+
+        original = mcp_server.run_cli
+        mcp_server.run_cli = fake_run
+        self.addCleanup(lambda: setattr(mcp_server, "run_cli", original))
+        text, is_err = mcp_server.logcat_tool({"device": "D1", "until": until})
+        self.assertFalse(is_err)
+        return text
+
+    def test_until_second_precision_is_inclusive_of_whole_second(self):
+        # until without milliseconds means ".999": the entire named second
+        # survives and only the NEXT second is dropped (strictly-after).
+        text = self._run_until("09-07 10:52:00")
+        self.assertIn("boundary-second start", text)
+        self.assertIn("boundary-half", text)
+        self.assertIn("boundary-late-ms", text)
+        self.assertNotIn("next-second", text)
+        self.assertIn("until trim: dropped 1 entries", text)
+
+    def test_until_fractional_is_padded_not_lexically_reordered(self):
+        # ".5" must behave as ".500" (inclusive), not sort before ".000"
+        # stamps lexicographically — padding to 18 chars keeps the
+        # strictly-after comparison aligned on equal-length timestamps.
+        text = self._run_until("09-07 10:52:00.5")
+        self.assertIn("boundary-second start", text)
+        self.assertIn("boundary-half", text)
+        self.assertNotIn("boundary-late-ms", text)
+        self.assertNotIn("next-second", text)
+
+    def test_until_keeps_untimestamped_header_lines(self):
+        text = self._run_until("09-07 10:52:00")
+        self.assertIn("beginning of main", text)
+
+    def test_until_rejects_malformed_timestamp(self):
+        for bad in ("2026-09-07 10:52:00", "09-07 10:52", "09-0710:52:00.000"):
+            out, is_err = mcp_server.logcat_tool(
+                {"device": "D1", "until": bad}
+            )
+            self.assertTrue(is_err, bad)
+            self.assertIn("denied", out)
+
     def test_logcat_registered_in_tools_and_handlers(self):
         names = {tool["name"] for tool in mcp_server.tools()}
         self.assertIn("gms_rt_logcat", names)
@@ -1538,6 +1695,71 @@ class ShellExecToolTests(unittest.TestCase):
         names = {tool["name"] for tool in mcp_server.tools()}
         self.assertIn("gms_rt_shell_exec", names)
         self.assertIn("gms_rt_shell_exec", mcp_server._TOOL_HANDLERS)
+
+
+class AgentEnrollOutFileTests(unittest.TestCase):
+    """gms_rt_agent_enroll out_file stays inside the agent state dir.
+
+    The MCP surface is unattended: an unrestricted --out would let the
+    client steer the freshly minted service token anywhere on the host
+    (overwriting another profile's token or an unrelated 0600 file).
+    The interactive human CLI keeps the unrestricted --out.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.state_dir = Path(self._tmp.name) / "gms-remote-test"
+        patcher = patch.dict(
+            os.environ, {"XDG_STATE_HOME": str(Path(self._tmp.name))}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _capture_run(self):
+        captured = {}
+
+        def fake_run(command, args=None, stdin_text=None, timeout=None,
+                     env_extra=None):
+            captured["args"] = args
+            return '{"ok":true,"exit_code":0,"data":{}}', False
+
+        original = mcp_server.run_cli
+        mcp_server.run_cli = fake_run
+        self.addCleanup(lambda: setattr(mcp_server, "run_cli", original))
+        return captured
+
+    def test_out_file_inside_state_dir_is_forwarded(self):
+        captured = self._capture_run()
+        target = self.state_dir / "extra.token"
+        _out, is_err = mcp_server.agent_enroll_tool(
+            {"code": "CODE", "out_file": str(target)}
+        )
+        self.assertFalse(is_err)
+        self.assertIn("--out", captured["args"])
+        self.assertIn(str(target), captured["args"])
+
+    def test_out_file_outside_state_dir_is_denied(self):
+        for bad in (
+            str(Path(self._tmp.name) / "elsewhere.token"),
+            str(Path.home() / ".ssh" / "authorized_keys"),
+            str(self.state_dir / ".." / ".." / "escape.token"),
+        ):
+            with self.subTest(out_file=bad):
+                captured = self._capture_run()
+                out, is_err = mcp_server.agent_enroll_tool(
+                    {"code": "CODE", "out_file": bad}
+                )
+                self.assertTrue(is_err)
+                self.assertIn("denied", out)
+                self.assertIn("state dir", out)
+                self.assertIsNone(captured.get("args"))
+
+    def test_default_path_omits_out_argument(self):
+        captured = self._capture_run()
+        _out, is_err = mcp_server.agent_enroll_tool({"code": "CODE"})
+        self.assertFalse(is_err)
+        self.assertNotIn("--out", captured["args"])
 
 
 class ApkToolTests(unittest.TestCase):

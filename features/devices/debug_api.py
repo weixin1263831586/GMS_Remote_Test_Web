@@ -13,7 +13,7 @@ from features.auth import require_permission
 from foundation.error_model import ApiError
 
 from . import debug_service as service
-from .review_pages import LOGIN_ASSETS, LOGIN_PANEL
+from .support import LOGIN_ASSETS, LOGIN_PANEL
 
 
 router = APIRouter()

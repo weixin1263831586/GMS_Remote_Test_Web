@@ -289,7 +289,12 @@ async def get_client_config(
 
 
 @router.get("/api/config/opengrok")
-async def get_opengrok_config(request: Request):
+async def get_opengrok_config(
+    request: Request,
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
+):
     """获取OpenGrok配置 - 供前端源码链接使用"""
     config = config_manager.load_config()
     opengrok_config = config.get('opengrok', {})

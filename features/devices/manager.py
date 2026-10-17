@@ -9,6 +9,7 @@ import threading
 from typing import Any
 
 from foundation.networking import is_local_host
+from foundation.security import is_safe_device_id
 
 from .adb_ops import fastboot_reboot_with_runner, reboot_with_runner, root_and_remount
 from .rockusb import (
@@ -22,6 +23,12 @@ from .utils import DeviceUtils
 
 logger = logging.getLogger(__name__)
 _local_adb_devices_lock = threading.Lock()
+
+
+def _require_safe_device_id(device_id: str) -> None:
+    """device_id 进入 adb 命令字符串前必须过白名单校验（对齐 support.py）。"""
+    if not is_safe_device_id(device_id):
+        raise ValueError(f"unsafe device id: {device_id!r}")
 
 
 def has_blocked_adb_process() -> bool:
@@ -293,6 +300,7 @@ class DeviceManager:
         ssh=None
     ) -> dict[str, Any]:
         """返回指定设备的详细信息。"""
+        _require_safe_device_id(device_id)
         config = self.config_manager.load_config()
 
         if ssh is None:
@@ -363,6 +371,7 @@ class DeviceManager:
         wait_for_online: bool = True,
     ) -> dict[str, Any]:
         """重启指定设备，并可等待设备重新上线。"""
+        _require_safe_device_id(device_id)
         config = self.config_manager.load_config()
 
         if ssh is None:
@@ -437,6 +446,7 @@ class DeviceManager:
         ssh=None
     ) -> dict[str, Any]:
         """以 root 权限重新挂载指定设备。"""
+        _require_safe_device_id(device_id)
         config = self.config_manager.load_config()
 
         if ssh is None:
