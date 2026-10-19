@@ -149,7 +149,7 @@ jobs:
           PY
       - name: Upload semgrep report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: semgrep-report
           path: artifacts/semgrep.json
@@ -184,7 +184,7 @@ jobs:
             -q --junitxml=artifacts/unit-foundation.xml --durations=30
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-unit-foundation
           path: artifacts/
@@ -211,7 +211,7 @@ jobs:
             -q --junitxml=artifacts/unit-auth-system.xml --durations=30
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-unit-auth-system
           path: artifacts/
@@ -238,7 +238,7 @@ jobs:
             -q --junitxml=artifacts/unit-devices-firmware.xml --durations=30
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-unit-devices-firmware
           path: artifacts/
@@ -265,7 +265,7 @@ jobs:
             -q --junitxml=artifacts/unit-execution.xml --durations=30
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-unit-execution
           path: artifacts/
@@ -293,7 +293,7 @@ jobs:
             -q --junitxml=artifacts/unit-assistant-reports.xml --durations=30
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-unit-assistant-reports
           path: artifacts/
@@ -386,7 +386,7 @@ jobs:
         run: pytest tests/soak -q
       - name: Upload JUnit report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-worker-agent
           path: artifacts/
