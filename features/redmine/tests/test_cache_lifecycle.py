@@ -133,3 +133,23 @@ def test_concurrent_counts_share_the_upstream_queries_and_isolate_results():
         assert (await client.count_issues_by_assignee(1))['total_owned'] == 3
 
     asyncio.run(scenario())
+
+
+def test_same_assignee_count_is_cached_per_owner():
+    class Result(list):
+        total_count = 3
+
+    first = fake_client('owner-a')
+    second = fake_client('owner-b')
+    first._redmine = SimpleNamespace(issue=SimpleNamespace(filter=Mock(return_value=Result())))
+    second._redmine = SimpleNamespace(issue=SimpleNamespace(filter=Mock(return_value=Result())))
+
+    async def scenario():
+        assert (await first.count_issues_by_assignee(7))['total_owned'] == 3
+        # 不同 owner（不同 Redmine 端点/凭据）同 assignee_id 不得复用缓存。
+        assert second._redmine.issue.filter.call_count == 0
+        assert (await second.count_issues_by_assignee(7))['total_owned'] == 3
+        assert second._redmine.issue.filter.call_count == 2
+        assert first._redmine.issue.filter.call_count == 2
+
+    asyncio.run(scenario())

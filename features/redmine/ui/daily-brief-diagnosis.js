@@ -38,33 +38,36 @@ function dailyBriefEvidenceGateNotice(result) {
     findings.push('测试失败缺少可追溯的源码级证据');
   }
   if (!findings.length) findings.push('运行时证据校验尚未闭环');
-  return '<div class="daily-brief-warning"><div><b>⚠️ 取证未闭环，仅供人工复核</b><ul>'
-    + findings.map(function (item) { return '<li>' + esc(item) + '</li>'; }).join('')
-    + '</ul></div></div>';
+  // 单行紧凑条:findings 内联,标题徽章已含「取证未闭环」,不再 <ul> 大块铺陈。
+  return '<div class="daily-brief-warning daily-brief-gate-notice"><b>⚠️ 取证未闭环 · 仅供人工复核</b>'
+    + '<span class="daily-brief-gate-findings">' + esc(findings.join('；')) + '</span></div>';
 }
 
-function dailyBriefSystemMetadata(result) {
+function dailyBriefSystemMetadata(result, extraChips) {
   var meta = result && result.report_metadata;
-  if (!meta || typeof meta !== 'object') return '';
+  var chips = String(extraChips || '');
+  if (!meta || typeof meta !== 'object') {
+    // 无元数据也要让质量徽章有处安放(与正文同一视觉行)。
+    return chips ? '<div class="daily-brief-section"><div class="daily-brief-section-body daily-brief-meta-row">' + chips + '</div></div>' : '';
+  }
   var source = meta.source === 'redmine_live' ? 'Redmine 实时校验' : '分析快照';
   var fields = [
     ['报告人', meta.author_name], ['当前负责人', meta.assigned_to_name],
     ['状态', meta.status_name], ['Redmine 更新时间', meta.updated_on],
     ['系统校验时间', meta.verified_at], ['数据来源', source]
   ].filter(function (item) { return String(item[1] || '').trim(); });
-  return '<div class="daily-brief-section"><div class="daily-brief-section-title">系统权威元数据</div>'
-    + '<div class="daily-brief-section-body">'
+  return '<div class="daily-brief-section"><div class="daily-brief-section-body daily-brief-meta-row">'
     + fields.map(function (item) { return '<span class="daily-brief-meta-item"><b>'
-      + esc(item[0]) + '</b> ' + esc(item[1]) + '</span>'; }).join(' · ')
-    + '</div></div>';
+      + esc(item[0]) + '</b> ' + esc(item[1]) + '</span>'; }).join('')
+    + chips + '</div></div>';
 }
 
-function dailyBriefQualityNotice(result) {
+function dailyBriefQualityChip(result) {
   var quality = String((result || {}).evidence_quality || '');
   if (!quality) return '';
   var label = ({ verified: '证据已验证', partial: '证据部分闭环', insufficient: '证据不足' })[quality] || quality;
-  return '<div class="daily-brief-warning"><b>执行状态：</b>已完成 · <b>证据质量：</b>'
-    + esc(label) + '</div>';
+  var cls = ({ verified: 'quality-verified', partial: 'quality-partial', insufficient: 'quality-insufficient' })[quality] || 'quality-partial';
+  return '<span class="daily-brief-quality-chip ' + cls + '">' + esc(label) + '</span>';
 }
 
 function singleIssueAnalysisMeta(run, issue) {

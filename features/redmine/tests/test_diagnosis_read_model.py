@@ -103,6 +103,98 @@ class ReadModelFromIssueResultTests(unittest.TestCase):
         self.assertIn("fingerprint", execution["failure_identity"])
 
 
+class NativeSummaryProjectionTests(unittest.TestCase):
+    """kkagent_markdown 结果（当前唯一新生成格式）的 claims → conclusion 投影。"""
+
+    @staticmethod
+    def _native(claims, confidence=0.85):
+        return {
+            "result_format": "kkagent_markdown",
+            "native_summary_version": 2,
+            "problem_summary": "RK3576 CTS AdServices 失败",
+            "detailed_report": "# 报告\n## 关键结论\n",
+            "claims": claims,
+            "evidence_gate": {"history_checked": True},
+            "confidence": confidence,
+            "confidence_source": "controller_evidence_gate",
+            "needs_human_review": False,
+        }
+
+    def test_symptom_facts_do_not_confirm_causal_inferences(self):
+        model = read_model_from_issue_result(self._native([
+            {"claim_type": "fact", "text": "同设备跨主机结果翻转",
+             "evidence_ids": ["EV-006"]},
+            {"claim_type": "inference", "text": "主机环境异常"},
+        ]), issue_id=643748)
+        self.assertEqual(validate_diagnosis_read_model(model), [])
+        conclusion = model["conclusion"]
+        self.assertEqual(conclusion["status"], "likely")
+        self.assertEqual(conclusion["root_cause"], "主机环境异常")
+        self.assertEqual(conclusion["confidence"], 0.85)
+        self.assertEqual(conclusion["missing_information"], [])
+
+    def test_observed_crash_with_unverified_cause_never_confirms_root_cause(self):
+        model = read_model_from_issue_result(self._native([
+            {"claim_type": "fact", "text": "日志存在一次崩溃", "evidence_ids": ["EV-001"]},
+            {"claim_type": "inference", "text": "可能是内存破坏"},
+            {"claim_type": "unverified", "text": "尚未确认根因"},
+        ]), issue_id=1)
+        self.assertEqual(model["conclusion"]["status"], "likely")
+        self.assertEqual(model["conclusion"]["root_cause"], "可能是内存破坏")
+        self.assertEqual(model["conclusion"]["missing_information"], ["尚未确认根因"])
+
+    def test_only_background_facts_leave_cause_unknown(self):
+        model = read_model_from_issue_result(self._native([
+            {"claim_type": "fact", "text": "设备运行 Android 16", "evidence_ids": ["EV-001"]},
+        ]), issue_id=1)
+        self.assertEqual(model["conclusion"]["status"], "unknown")
+        self.assertEqual(model["conclusion"]["root_cause"], "")
+
+    def test_inference_only_claims_project_to_likely(self):
+        model = read_model_from_issue_result(self._native([
+            {"claim_type": "inference", "text": "疑似主机磁盘配额", "evidence_ids": []},
+        ]), issue_id=1)
+        self.assertEqual(model["conclusion"]["status"], "likely")
+
+    def test_unverified_claims_fill_missing_information(self):
+        model = read_model_from_issue_result(self._native([
+            {"claim_type": "unverified", "text": "139 项展开机制未核验", "evidence_ids": []},
+        ]), issue_id=1)
+        self.assertEqual(model["conclusion"]["status"], "possible")
+        self.assertEqual(
+            model["conclusion"]["missing_information"], ["139 项展开机制未核验"],
+        )
+
+    def test_no_claims_stays_unknown_without_fabrication(self):
+        model = read_model_from_issue_result(self._native([]), issue_id=1)
+        self.assertEqual(validate_diagnosis_read_model(model), [])
+        self.assertEqual(model["conclusion"]["status"], "unknown")
+        self.assertEqual(model["conclusion"]["root_cause"], "")
+        self.assertEqual(model["conclusion"]["confidence"], 0.85)
+
+    def test_fact_without_refs_is_ignored_not_escalated(self):
+        """生产端会把无引用 fact 打回；投影侧同样不采信，整体维持 unknown。"""
+        model = read_model_from_issue_result(self._native([
+            {"claim_type": "fact", "text": "无引用断言", "evidence_ids": []},
+        ]), issue_id=1)
+        self.assertEqual(model["conclusion"]["status"], "unknown")
+
+    def test_native_result_has_no_structured_actions_or_similar(self):
+        model = read_model_from_issue_result(
+            self._native([
+                {"claim_type": "fact", "text": "结论", "evidence_ids": ["EV-001"]},
+            ]),
+            issue_id=1,
+        )
+        self.assertEqual(model["recommended_actions"], [])
+        self.assertEqual(model["similar_cases"], [])
+
+    def test_legacy_schema_projection_unchanged(self):
+        model = read_model_from_issue_result(_result(), issue_id=648900)
+        self.assertEqual(model["conclusion"]["status"], "likely")
+        self.assertEqual(model["conclusion"]["root_cause"], "overlay 覆盖了 color 资源")
+
+
 class IssuePayloadIntegrationTests(unittest.TestCase):
     def test_issue_payload_carries_read_model(self):
         payload = issue_payload(DailyBriefIssue(

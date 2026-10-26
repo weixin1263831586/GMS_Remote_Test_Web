@@ -123,11 +123,19 @@ class DailyBriefApiAuthzTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 403)
         resp = self.client.post('/api/redmine-agent/daily-brief/analyze-issue', headers=headers, json={'issue_id': 647338})
         self.assertEqual(resp.status_code, 403)
+        # 删除是破坏性写操作，与触发分析同级：agent token 一律 403。
+        resp = self.client.delete("/api/redmine-agent/daily-brief/issue-analyses/647338", headers=headers)
+        self.assertEqual(resp.status_code, 403)
         resp = self.client.put(
             "/api/redmine-agent/daily-brief/config",
             headers=headers, json={"enabled": False},
         )
         self.assertEqual(resp.status_code, 403)
+
+    def test_delete_issue_history_not_found_returns_404(self):
+        resp = self.client.delete("/api/redmine-agent/daily-brief/issue-analyses/123456")
+        self.assertEqual(resp.status_code, 404)
+        self.assertFalse(resp.json()["success"])
 
     def test_human_session_can_trigger_run(self):
         resp = self.client.post("/api/redmine-agent/daily-brief/run")

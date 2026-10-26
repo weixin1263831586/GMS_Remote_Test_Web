@@ -52,8 +52,7 @@ PROFILE_ROOT = profile_store.PROFILE_ROOT
 
 def _apply_env(values: dict[str, str]) -> None:
     for key, value in values.items():
-        if value:
-            os.environ[key] = value
+        os.environ[key] = value
 
 
 def _env_mapping(flat: dict[str, str]) -> dict[str, str]:
@@ -65,9 +64,8 @@ def _env_mapping(flat: dict[str, str]) -> dict[str, str]:
         "GMS_CURL_CA_CERT": flat.get("ca_cert", ""),
         "GMS_AUTH_TOKEN_FILE": flat.get("token_file", ""),
     }
-    if flat.get("insecure", "").lower() == "true":
-        mapping["GMS_CURL_INSECURE"] = "1"
-    return {k: v for k, v in mapping.items() if v}
+    mapping["GMS_CURL_INSECURE"] = "1" if flat.get("insecure", "").lower() == "true" else "0"
+    return mapping
 
 
 def load_named_profile(profile: str, expected_client: str = "") -> bool:

@@ -106,7 +106,8 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
             row.get_by_text('查看分析', exact=True).click()
             modal = page.locator('[id^="singleIssueAnalysisModal-"].show')
             expect(modal.locator('.daily-brief-modal-title')).to_contain_text('取证未闭环')
-            expect(modal).to_contain_text('取证未闭环，仅供人工复核')
+            # 单行紧凑门禁条：徽章 + findings 内联（不再是 <ul> 大块）。
+            expect(modal).to_contain_text('取证未闭环 · 仅供人工复核')
             expect(modal).to_contain_text('附件尚未全部读取或校验')
             expect(modal).to_contain_text('相似历史工单检索未达到要求')
             expect(modal).to_contain_text('测试失败缺少可追溯的源码级证据')
@@ -1301,12 +1302,76 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
             toggle.click()
             expect(page.locator('[id^="analysisTimelineModal-"] .analysis-timeline')).to_contain_text('分析完成')
             expect(toggle).to_have_text('查看报告')
+            # 同一工具的 started/completed 合并为一行（完成翻转 ✓ 并补耗时），
+            # 不再出现「同名动作占两行」的重复。
+            tool_rows = timeline.locator('.analysis-timeline-item', has_text='读取 Redmine 工单详情')
+            self.assertEqual(tool_rows.count(), 1)
+            expect(tool_rows.first).to_contain_text('0.8s')
             # 切回过程视图：标题恢复「执行过程 + 徽标」。
             self.assertIn('执行过程', modal.locator('.modal-title').inner_text())
             toggle.click()
             expect(page.locator(".analysis-timeline-final")).to_contain_text("已修复")
             expect(toggle).to_have_text('查看过程')
             self.assertIn('分析总结', modal.locator('.modal-title').inner_text())
+        finally:
+            page.close()
+
+    def test_queued_live_modal_title_follows_run_status(self):
+        """排队中的实时弹框：标题从「⏳ 排队中」起步，run_status 流转到
+        analyzing 后标题自动切换「🔵 正在分析」，不能全程停留在「正在分析」
+        与正文「排队中，等待 Worker 领取任务…」自相矛盾。
+        """
+        page = self.new_page()
+        polls = {"count": 0}
+
+        def respond(route):
+            url = route.request.url
+            if "/events" in url:
+                polls["count"] += 1
+                if polls["count"] <= 2:
+                    # 前两轮：Worker 尚未领取，队列排队中，无任何事件。
+                    payload = {"events": [], "next_sequence": 0,
+                               "run_status": "pending", "terminal": False}
+                else:
+                    payload = {"events": [{"sequence": 1, "event_type": "analysis_started",
+                                           "stage": "", "tool_name": "", "status": "",
+                                           "summary": "开始分析 #652654", "duration_ms": 0,
+                                           "created_at": "2026-09-16T10:00:00"},
+                                          {"sequence": 2, "event_type": "session_started",
+                                           "stage": "kkagent", "tool_name": "", "status": "",
+                                           "summary": "session_id=ee9b5efe-2967-4a92",
+                                           "duration_ms": 0,
+                                           "created_at": "2026-09-16T10:00:01"}],
+                               "next_sequence": 2, "run_status": "analyzing",
+                               "terminal": False}
+                route.fulfill(status=200, content_type="application/json",
+                              body=json.dumps({"success": True, "data": payload}))
+                return
+            route.fulfill(status=200, content_type="application/json", body='{"success":true,"data":{}}')
+
+        page.route("**/api/redmine-agent/**", respond)
+        try:
+            page.goto(f"{self.base_url}/redmine-agent", wait_until="domcontentloaded")
+            page.wait_for_function("typeof showAnalysisTimelineModal === 'function'")
+            page.evaluate("switchTab('daily-brief')")
+            page.evaluate(
+                "showAnalysisTimelineModal('queued-fixture', 652654, {subject: '自动亮度异常'})"
+            )
+            modal = page.locator('.modal[id^="analysisTimelineModal-"]')
+            # 初始 DOM（首轮轮询前）：排队前缀 + 排队空态正文。
+            title = modal.locator('.modal-title')
+            expect(title).to_contain_text('排队中')
+            self.assertNotIn('正在分析', title.inner_text())
+            expect(modal.locator('.analysis-timeline')).to_contain_text(
+                '排队中，等待 Worker 领取任务')
+            # run_status 流转到 analyzing 后标题自动跟随（约两轮轮询）。
+            expect(title).to_contain_text('正在分析', timeout=15_000)
+            self.assertNotIn('排队中', title.inner_text())
+            expect(modal.locator('.analysis-timeline')).to_contain_text('开始分析')
+            # session_started 不再裸显 session_id，只给一行友好提示。
+            expect(modal.locator('.analysis-timeline')).to_contain_text(
+                'AI 取证会话已启动')
+            self.assertNotIn('session_id=', modal.locator('.analysis-timeline').inner_text())
         finally:
             page.close()
 

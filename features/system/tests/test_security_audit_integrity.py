@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import stat
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlencode
 
+from starlette.requests import Request
+
+from features.system.security_audit_utils import summarize_audit_request
 from foundation.security_audit import SecurityAuditLogger
 
 
@@ -40,6 +45,33 @@ class SecurityAuditIntegrityTests(unittest.TestCase):
 
         self.assertNotIn('customer-secret', summary['preview'])
         self.assertIn('***REDACTED***', summary['preview'])
+
+    def test_deep_query_cannot_drop_a_signed_audit_event(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ",
+            {"GMS_AUDIT_HMAC_KEY": "a" * 64, "GMS_ENV": "production"},
+        ):
+            path = Path(tmp) / "audit.jsonl"
+            audit = SecurityAuditLogger(str(path))
+            for nested in ("[" * 1500, '{"nested":' * 1100):
+                query = {"q": "response: " + nested, "access_token": "private-value"}
+                request = Request({
+                    "type": "http", "method": "GET", "path": "/api/devices",
+                    "headers": [], "query_string": urlencode(query).encode(),
+                })
+                with patch("features.system.security_audit_utils.security_audit_logger", audit):
+                    summary = asyncio.run(summarize_audit_request(request, True))
+                audit.log_event({
+                    "operation": "device.read",
+                    "query": query, "request_summary": summary,
+                    "status_code": 200,
+                })
+            records = [json.loads(line) for line in path.read_text().splitlines()]
+            self.assertEqual(len(records), 2)
+            self.assertTrue(all(row["operation"] == "device.read" for row in records))
+            self.assertTrue(all(row["status_code"] == 200 for row in records))
+            self.assertNotIn("private-value", path.read_text())
+            self.assertTrue(audit.verify_chain()["valid"])
 
     def test_signed_chain_detects_record_tampering(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(

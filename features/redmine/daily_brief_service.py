@@ -36,6 +36,7 @@ from .daily_brief_report import (
 )
 from .daily_brief_repository import (
     TERMINAL_RUN_STATUSES,
+    DailyBriefIssueHistoryActiveError,
     DailyBriefRepository,
     canonical_owner_id,
     new_run_id,
@@ -199,6 +200,17 @@ class DailyBriefService:
         """Return one saved standalone analysis for an exact Redmine number."""
         run = self.repository.latest_issue_run(self.owner_id, issue_id)
         return self.run_payload(run) if run is not None else None
+
+    def delete_issue_history(self, issue_id: int) -> dict[str, Any]:
+        """Delete all saved standalone analyses of one Redmine issue."""
+        try:
+            deleted = self.repository.delete_issue_history(self.owner_id, issue_id)
+        except DailyBriefIssueHistoryActiveError:
+            return {
+                "error": "该单号仍有排队或执行中的分析，请先停止后再删除。",
+                "code": "ISSUE_ANALYSIS_ACTIVE",
+            }
+        return {"issue_id": int(issue_id), "deleted_runs": deleted}
 
     async def sync_display_subjects(self) -> dict[str, Any]:
         """Pull latest Redmine subjects and refresh display titles.

@@ -7,12 +7,11 @@ import subprocess
 from typing import Any
 
 from .source_codesearch import CodesearchProvider
+from .source_git_search import grep_matches
 from .source_provider_contract import (
     _COMMIT_RE,
     GIT_TIMEOUT_SECONDS,
     MAX_BLOB_BYTES,
-    MAX_SEARCH_FILES,
-    MAX_SEARCH_SCAN_BYTES,
     SEARCH_DEFAULT_LIMIT,
     SEARCH_MAX_LIMIT,
     _git,
@@ -97,42 +96,18 @@ class LocalGitProvider:
         limit = max(1, min(int(limit or SEARCH_DEFAULT_LIMIT), SEARCH_MAX_LIMIT))
         self._verify_repo()
         commit = self.resolve_commit(revision)
-        listing = _git(self.config.repo_root, "ls-tree", "-r", "--name-only", "-z", commit)
-        names = [name for name in listing.split("\0") if name]
-        if len(names) > MAX_SEARCH_FILES:
-            names = names[:MAX_SEARCH_FILES]
         filter_value = str(path_filter or "").strip().lower()
-        needle = str(query)
-        lowered = needle.lower()
-        matches: list[dict[str, Any]] = []
-        scanned = 0
-        scanned_bytes = 0
-        limited = False
-        for name in names:
-            if filter_value and filter_value not in name.lower():
-                continue
-            if scanned >= MAX_SEARCH_FILES or scanned_bytes >= MAX_SEARCH_SCAN_BYTES:
-                limited = True
-                break
-            scanned += 1
-            blob = self._blob(commit, name)
-            if blob is None:
-                continue
-            scanned_bytes += len(blob)
-            lines = blob.decode("utf-8", errors="replace").splitlines()
-            for line_no, line in enumerate(lines, start=1):
-                if needle in line or lowered in line.lower():
-                    matches.append({
-                        "source_id": self.config.source_id,
-                        "commit": commit,
-                        "path": name,
-                        "line": line_no,
-                        "snippet": line[:400],
-                    })
-                    if len(matches) >= limit:
-                        # 到达 limit 即结果集被截断：与扫描预算耗尽一样按
-                        # limited 上报（原 `limited or True` 是恒真死表达式）。
-                        return self._search_payload(commit, matches, scanned, True)
+        # 单进程 git grep 替代逐文件 cat-file 扫描：旧实现按 ls-tree 文件
+        # 清单逐个 `git show` 再逐行匹配，真实 SDK 树（约 2 万文件）要
+        # 分钟级，HTTP 30s 客户端必超时；git grep 全树只需数秒。
+        # --fixed-strings/--ignore-case 与旧 Python 匹配的字面量、大小写
+        # 不敏感语义一致；-I 跳过二进制。
+        matches, scanned, limited = grep_matches(
+            self.config.repo_root, commit, str(query),
+            path_filter=filter_value, limit=limit, timeout=GIT_TIMEOUT_SECONDS,
+        )
+        for match in matches:
+            match.update(source_id=self.config.source_id, commit=commit)
         return self._search_payload(commit, matches, scanned, limited)
 
     def _search_payload(

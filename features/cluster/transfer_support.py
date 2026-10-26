@@ -2,10 +2,33 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request
 
-from features.auth import principal_display_name, principal_owner_id
+from features.auth import (
+    auth_service,
+    ensure_agent_device_allowed,
+    ensure_agent_worker_allowed,
+    principal_display_name,
+    principal_owner_id,
+)
 
-from .api import service
+from .api import _require_agent_scope_when_agent, service
 from .operation_claims import operation_claim_payload
+
+
+def require_export_read(
+    request: Request, worker_id: str, *, device_id: str = ""
+) -> None:
+    _require_agent_scope_when_agent(
+        request, "devices.read" if device_id else "suites.read"
+    )
+    ensure_agent_worker_allowed(request, worker_id)
+    if device_id:
+        # Resolve only the explicitly selected Worker's namespace; TCP
+        # serials may contain colons and must not be split heuristically.
+        prefix = f"{worker_id}:"
+        serial = device_id[len(prefix):] if device_id.startswith(prefix) else device_id
+        record = getattr(request.state, "agent_token_record", None)
+        if not auth_service.agent_acl_allows(record, "devices", f"{prefix}{serial}"):
+            ensure_agent_device_allowed(request, serial)
 
 
 def worker_device(

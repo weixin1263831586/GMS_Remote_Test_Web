@@ -1974,6 +1974,12 @@
   },
   {
     "methods": [
+      "DELETE"
+    ],
+    "path": "/api/redmine-agent/daily-brief/issue-analyses/{issue_id}"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/redmine-agent/daily-brief/issue-analyses/{issue_id}"

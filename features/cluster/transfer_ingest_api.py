@@ -15,13 +15,13 @@ from pathlib import Path
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
-from features.auth import principal_display_name, principal_owner_id
+from features.auth import principal_display_name, principal_owner_id, require_agent_scope
 
 from .api import _authenticate, _require_cluster_enabled, service
 from .config import configured_max_bytes
 from .models import TransferComplete
 from .repository import utc_now
-from .transfer_support import worker_device
+from .transfer_support import require_export_read, worker_device
 
 
 router = APIRouter()
@@ -79,6 +79,7 @@ def create_device_export(
 ):
     from worker_agent.android_inspection import validate_export_path
 
+    require_export_read(request, worker_id, device_id=device_id)
     helpers = _transfer_helpers()
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
     helpers._online_worker(worker_id)
@@ -98,7 +99,9 @@ def create_device_export(
         )
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    lease_tokens = service().repository.claim_fencing_tokens(records, operation_id)
+    lease_tokens = service().repository.claim_fencing_tokens(
+        records, operation_id, device_ids={device}
+    )
     request.state.device_lease_tokens = [
         {**token, "owner_id": owner_id} for token in lease_tokens
     ]
@@ -299,6 +302,7 @@ def download_transfer(transfer_id: str, request: Request):
 def import_transfer_for_apk_analysis(transfer_id: str, request: Request):
     from features.test_execution import runtime as test_runtime
 
+    require_agent_scope("apk.analyze_own")(request)
     helpers = _transfer_helpers()
     transfer = service().repository.get_transfer(transfer_id)
     if not transfer:
@@ -366,6 +370,7 @@ def import_transfer_for_apk_analysis(transfer_id: str, request: Request):
 async def analyze_transferred_log_directory(transfer_id: str, request: Request):
     from features.reports import ArchiveReportAnalyzer
 
+    require_agent_scope("reports.read")(request)
     helpers = _transfer_helpers()
     transfer = service().repository.get_transfer(transfer_id)
     if not transfer:

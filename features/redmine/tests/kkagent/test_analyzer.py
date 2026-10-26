@@ -337,22 +337,43 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v22")
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v27")
 
     def test_diagnostic_prompt_has_no_journal_timeline_section(self):
-        """v19: 处理时间线只是 Redmine journal 流水的复述，读者点开工单就有；
-        问题概况须钉死报告人=author、单号格式、禁内部 id、时间统一 UTC+8。"""
+        """处理时间线只是 Redmine journal 流水的复述，读者点开工单就有；
+        问题概况须钉死报告人=author、单号格式、禁内部 id、时间统一 UTC+8。
+        v23: 结构按工单性质分支——咨询/配置/流程类走 B 支章节，不套
+        失败现场框架，结论文不强制"真实失败 vs 测试侧噪音"二分。"""
         prompt = KkAgentRedmineAnalyzer().build_prompt({
             **ENTRY, "analysis_mode": "diagnostic",
         })
         self.assertNotIn("处理时间线", prompt)
         self.assertIn("journal timeline of who changed what", prompt)
-        self.assertIn("## 一、问题概况", prompt)
-        self.assertIn("## 六、建议下一步", prompt)
-        self.assertIn("issue author (创建人) field", prompt)
+        self.assertIn("## 问题概况", prompt)
+        self.assertIn("## 建议处理路径", prompt)
+        self.assertIn("issue author (创建人)", prompt)
         self.assertIn("`#<issue_id>`", prompt)
         self.assertIn("(`ev_*`)", prompt)
         self.assertIn("北京时间（UTC+8）", prompt)
+        # 定性判别:出厂签名/认证类发现不得因修复脚本难执行而降级为测试侧噪声。
+        self.assertIn("CLASSIFY the issue's true nature", prompt)
+        self.assertIn("测试侧/使用侧", prompt)
+        # B 支：咨询/配置/流程类工单的专属章节与结论文案约束。
+        self.assertIn("BRANCH B", prompt)
+        self.assertIn("EXACTLY these section titles", prompt)
+        self.assertIn("## 工单概况", prompt)
+        self.assertIn("## 处理结论（按讨论时间线）", prompt)
+        self.assertIn("## 最终结论", prompt)
+        self.assertIn("## 核心要点", prompt)
+        self.assertIn("Do NOT force failure", prompt)
+        self.assertIn("branch B: state and answer the question directly", prompt)
+        # 提示词内部术语不得泄漏进报告正文。
+        self.assertIn("NEVER mention the words 分支/branch", prompt)
+        # v27：截图取证行为钉死——每个 image 附件先读后说。
+        self.assertIn("OCR'd by the platform", prompt)
+        self.assertIn("at least one", prompt)
+        self.assertIn("artifact-read call", prompt)
+        self.assertIn("without an actual failed read attempt", prompt)
 
     def test_prompt_includes_operator_observation_as_verifiable_context(self):
         prompt = KkAgentRedmineAnalyzer().build_prompt({
@@ -488,6 +509,78 @@ class MergeTracesReplayTests(unittest.TestCase):
         ]
         merged = _merge_traces(first, second)
         self.assertEqual(merged.tool_calls[0].status, "succeeded")
+
+
+class RepairSecondRoundContractTests(unittest.TestCase):
+    """首轮 repair 未产出可用报告时,第二轮提示必须追加完整报告重发的
+    强约束(禁止只回引用对照/工具索引/自述)——晨报复盘:4 条 nightly 中
+    3 条把两轮 repair 预算耗在"引用已修正但报告未重发"上。"""
+
+    def test_second_repair_round_appends_strict_output_requirement(self):
+        analyzer = KkAgentRedmineAnalyzer(env_extra={})
+        failed_round = KkAgentTrace(session_id="s", exit_code=0, final_event={
+            "type": "result", "subtype": "success", "exit_code": 0,
+            "session_id": "s", "message": "引用对照：EV-001 -> snapshot。",
+        })
+        ok_round = KkAgentTrace(session_id="s", exit_code=0, final_event={
+            "type": "result", "subtype": "success", "exit_code": 0,
+            "session_id": "s", "message": (
+                "# #1 分析\n\n## 关键结论\n\n"
+                "- [事实][EV-001] 已读取工单与日志。"
+            ),
+        })
+        # gate 要求的最小取证轨迹:issue fetch + journals + 2 个不同历史检索。
+        for t in (failed_round, ok_round):
+            t.tool_calls = [
+                ToolTrace(
+                    tool_call_id="issue", tool_name="gms_rt_redmine_issue_fetch",
+                    tool_input={"issue_id": 1}, status="succeeded",
+                    evidence_issue_ids=[1], snapshot_ids=["snap-1"],
+                ),
+                ToolTrace(
+                    tool_call_id="journals", tool_name="gms_rt_redmine_journals",
+                    tool_input={"snapshot_id": "snap-1"}, status="succeeded",
+                ),
+                ToolTrace(
+                    tool_call_id="history-1", tool_name="gms_rt_redmine_history_search",
+                    tool_input={"query": "first"}, status="succeeded",
+                ),
+                ToolTrace(
+                    tool_call_id="history-2", tool_name="gms_rt_redmine_history_search",
+                    tool_input={"query": "second"}, status="succeeded",
+                ),
+            ]
+        calls = []
+
+        async def fake_stream(command, progress=None, on_started=None):
+            calls.append(command)
+            # 调用序:main(1)→repair#1(2)→repair#2(3)。main 与 repair#1
+            # 返回无 `## ` 的叙事文本(不产出可用报告),迫使第二轮 repair
+            # 触发并携带 STRICT OUTPUT REQUIREMENT;repair#2 返回完整报告。
+            return (failed_round if len(calls) <= 2 else ok_round, _StreamFallback(), False)
+
+        entry = {
+            "issue_id": 1,
+            "analysis_mode": "diagnostic",
+            "_controller_evidence_ids": {"EV-001"},
+        }
+        # 实例属性直挂 async 函数(AsyncMock 包装会吞掉 calls 的迭代时序)。
+        analyzer._run_stream = fake_stream
+        with patch(
+            "features.redmine.kkagent.analyzer.probe_kkagent_mcp_health",
+            AsyncMock(return_value=McpHealthProbe(ok=True, skipped=True)),
+        ):
+            outcome = asyncio.run(analyzer.analyze(entry))
+        self.assertTrue(outcome.ok, outcome.error)
+        self.assertGreaterEqual(len(calls), 3, "第二轮 repair 应被触发")
+        # 主分析与 repair#1 是自然修复(无强契约);repair#2 必须携带
+        # STRICT OUTPUT REQUIREMENT(禁止只回引用对照/自述)。
+        self.assertNotIn("STRICT OUTPUT REQUIREMENT", " ".join(calls[0]))
+        self.assertNotIn("STRICT OUTPUT REQUIREMENT", " ".join(calls[1]))
+        third = " ".join(calls[2])
+        self.assertIn("STRICT OUTPUT REQUIREMENT", third)
+        self.assertIn("FULL corrected", third)
+        self.assertIn("`## 关键结论`", third)
 
 
 class McpHealthPreflightTests(unittest.TestCase):

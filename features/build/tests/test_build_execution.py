@@ -224,7 +224,7 @@ def test_runtime_password_is_removed_when_start_fails(tmp_path: Path):
     assert service._runtime_passwords.get(job['id']) == ""
 
 
-def test_runtime_password_persists_encrypted_with_ttl(tmp_path: Path):
+def test_runtime_password_persists_encrypted_with_ttl(tmp_path: Path, monkeypatch):
     """runtime password 加密落盘 + TTL，跨进程/重启可 poll。
 
     进程内 dict 会因多 Uvicorn worker 或 Controller 重启而丢失，使密码
@@ -247,10 +247,9 @@ def test_runtime_password_persists_encrypted_with_ttl(tmp_path: Path):
 
     # 过期即不可读（无解密尝试）。
     expired = RuntimePasswordStore(store_path)
-    expired._load()
-    blob, _ = expired._cache["job-1"]
-    expired._cache["job-1"] = (blob, time.time() - 1)
-    assert expired.get("job-1") == ""
+    with monkeypatch.context() as clock:
+        clock.setattr("features.build.runtime_passwords.time.time", lambda: 10**12)
+        assert expired.get("job-1") == ""
 
     second.pop("job-1")
     assert RuntimePasswordStore(store_path).get("job-1") == ""

@@ -60,6 +60,23 @@ def test_native_report_is_preserved_without_invented_labels():
     assert "root_cause_type" not in result
 
 
+def test_repair_narration_before_first_heading_is_stripped():
+    """Evidence-repair 轮以自述开场(门禁索引已核对…)时,首个 # 标题前的
+    散文不属于报告内容,落库前剥掉。"""
+    narrated = (
+        "门禁索引已核对：上一轮的支撑调用均已成功入库，无需补新调用。"
+        "以下为修正后的完整报告。\n\n"
+        "# #644070 CtsSecurityTestCases 报错分析\n\n"
+        + REPORT
+    )
+    result = native_summary_result(final_trace(report=narrated), ENTRY)
+    assert result["detailed_report"].startswith("# #644070")
+    assert "门禁索引已核对" not in result["detailed_report"]
+    # 无 H1 的报告不受影响(结论段直起的旧格式原样保留)。
+    untouched = native_summary_result(final_trace(), ENTRY)
+    assert untouched["detailed_report"] == REPORT
+
+
 def test_native_claims_are_bound_to_controller_evidence_ids():
     result = native_summary_result(complete_trace(), ENTRY)
     assert result["claims"] == [{

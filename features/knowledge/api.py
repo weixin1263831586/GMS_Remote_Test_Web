@@ -7,9 +7,10 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
+from features.auth import require_human_principal_when_auth_required
 from features.users import owner_id_from_request
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
@@ -30,6 +31,12 @@ from . import external_api as _external_api  # noqa: E402
 
 router.include_router(_external_api.router)
 router.include_router(_external_api.agent_router)
+
+# Personal documents have no Agent write/read capability. Keep the external
+# knowledge.read API on its own scope boundary (ADR 0014).
+personal_router = APIRouter(
+    dependencies=[Depends(require_human_principal_when_auth_required)]
+)
 
 MAX_UPLOAD_SIZE = 100 * 1024 * 1024
 LIST_PREVIEW_CHARS = 500
@@ -127,13 +134,13 @@ async def knowledge_page():
     return HTMLResponse("<!-- knowledge page is rendered inline in shell.html -->")
 
 
-@router.get("/spaces")
+@personal_router.get("/spaces")
 @handle_api_errors
 async def list_spaces(request: Request):
     return success_response(data={"spaces": _service.store.list_spaces(_user(request))})
 
 
-@router.post("/spaces")
+@personal_router.post("/spaces")
 @handle_api_errors
 async def create_space(request: Request):
     data = await _json_object_body(request)
@@ -145,14 +152,14 @@ async def create_space(request: Request):
     return success_response(data=_service.store.create_space(_user(request), name, str(data.get("icon") or "")))
 
 
-@router.get("/tree")
+@personal_router.get("/tree")
 @handle_api_errors
 async def get_tree(request: Request, space_id: str = Query("gms")):
     user_id = _user(request)
     return success_response(data={"nodes": _service.store.list_tree(user_id, _space_id(user_id, space_id))})
 
 
-@router.post("/folders")
+@personal_router.post("/folders")
 @handle_api_errors
 async def create_folder(request: Request):
     data = await _json_object_body(request)
@@ -171,7 +178,7 @@ async def create_folder(request: Request):
     return success_response(data=node)
 
 
-@router.post("/docs")
+@personal_router.post("/docs")
 @handle_api_errors
 async def create_doc(request: Request):
     data = await _json_object_body(request)
@@ -199,7 +206,7 @@ async def create_doc(request: Request):
     return success_response(data=note, message="文档已创建")
 
 
-@router.get("/docs")
+@personal_router.get("/docs")
 @handle_api_errors
 async def list_docs(
     request: Request,
@@ -220,7 +227,7 @@ async def list_docs(
     return success_response(data={"docs": [_preview(d) for d in docs], "count": len(docs)})
 
 
-@router.get("/docs/{doc_id}")
+@personal_router.get("/docs/{doc_id}")
 @handle_api_errors
 async def get_doc(request: Request, doc_id: str):
     doc = _service.store.get_doc(_user(request), doc_id)
@@ -229,7 +236,7 @@ async def get_doc(request: Request, doc_id: str):
     return success_response(data=doc)
 
 
-@router.put("/docs/{doc_id}")
+@personal_router.put("/docs/{doc_id}")
 @handle_api_errors
 async def update_doc(request: Request, doc_id: str):
     data = await _json_object_body(request)
@@ -267,7 +274,7 @@ async def update_doc(request: Request, doc_id: str):
     return success_response(data=doc, message="已保存")
 
 
-@router.get("/docs/{doc_id}/versions")
+@personal_router.get("/docs/{doc_id}/versions")
 @handle_api_errors
 async def list_doc_versions(request: Request, doc_id: str, limit: int = Query(100, ge=1, le=500)):
     user_id = _user(request)
@@ -277,7 +284,7 @@ async def list_doc_versions(request: Request, doc_id: str, limit: int = Query(10
     return success_response(data={"versions": versions, "count": len(versions)})
 
 
-@router.post("/docs/{doc_id}/versions/{version_id}/restore")
+@personal_router.post("/docs/{doc_id}/versions/{version_id}/restore")
 @handle_api_errors
 async def restore_doc_version(request: Request, doc_id: str, version_id: str):
     doc = _service.store.restore_version(_user(request), doc_id, version_id)
@@ -286,7 +293,7 @@ async def restore_doc_version(request: Request, doc_id: str, version_id: str):
     return success_response(data=doc, message="历史版本已恢复")
 
 
-@router.delete("/nodes/{node_id}")
+@personal_router.delete("/nodes/{node_id}")
 @handle_api_errors
 async def delete_node(request: Request, node_id: str):
     if not await asyncio.to_thread(_service.store.delete_node, _user(request), node_id):
@@ -294,7 +301,7 @@ async def delete_node(request: Request, node_id: str):
     return success_response(message="已删除")
 
 
-@router.post("/nodes/{node_id}/move")
+@personal_router.post("/nodes/{node_id}/move")
 @handle_api_errors
 async def move_node(request: Request, node_id: str):
     data = await _json_object_body(request)
@@ -321,7 +328,7 @@ async def move_node(request: Request, node_id: str):
     return success_response(message="已移动")
 
 
-@router.get("/search")
+@personal_router.get("/search")
 @handle_api_errors
 async def search_docs(
     request: Request,
@@ -334,13 +341,13 @@ async def search_docs(
     return success_response(data={"items": [_preview(d) for d in docs], "count": len(docs)})
 
 
-@router.get("/tags")
+@personal_router.get("/tags")
 @handle_api_errors
 async def list_tags(request: Request):
     return success_response(data={"tags": _service.store.list_tags(_user(request))})
 
 
-@router.post("/docs/{doc_id}/attachments")
+@personal_router.post("/docs/{doc_id}/attachments")
 @handle_api_errors
 async def upload_attachment(request: Request, doc_id: str, file: UploadFile | None = File(None)):
     if not file or not file.filename:
@@ -357,7 +364,7 @@ async def upload_attachment(request: Request, doc_id: str, file: UploadFile | No
     return success_response(data=attachment)
 
 
-@router.get("/docs/{doc_id}/attachments/{attachment_id}/download")
+@personal_router.get("/docs/{doc_id}/attachments/{attachment_id}/download")
 @handle_api_errors
 async def download_attachment(request: Request, doc_id: str, attachment_id: str):
     user_id = _user(request)
@@ -383,7 +390,7 @@ async def download_attachment(request: Request, doc_id: str, attachment_id: str)
     )
 
 
-@router.post("/upload")
+@personal_router.post("/upload")
 @handle_api_errors
 async def upload_doc_file(
     request: Request,
@@ -410,7 +417,7 @@ async def upload_doc_file(
     return success_response(data=doc, message="文件已入库")
 
 
-@router.post("/ask")
+@personal_router.post("/ask")
 @handle_api_errors
 async def ask_knowledge(request: Request):
     data = await _json_object_body(request)
@@ -428,3 +435,6 @@ async def ask_knowledge(request: Request):
         limit=limit,
     )
     return success_response(data=result)
+
+
+router.include_router(personal_router)

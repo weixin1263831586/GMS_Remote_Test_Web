@@ -159,8 +159,10 @@ class ClusterClaimRepositoryMixin:
 
     @staticmethod
     def claim_fencing_tokens(
-        records: list[dict[str, Any]], attempt_id: str
+        records: list[dict[str, Any]], attempt_id: str,
+        *, device_ids: set[str] | None = None,
     ) -> list[dict[str, Any]]:
+        """Keep physical-alias claims global; fence only requested execution targets."""
         return [
             {
                 "lease_id": record["id"],
@@ -169,4 +171,5 @@ class ClusterClaimRepositoryMixin:
                 "attempt_id": attempt_id,
             }
             for record in records
+            if device_ids is None or record["device_key"] in device_ids
         ]

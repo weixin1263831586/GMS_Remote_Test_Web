@@ -2,7 +2,8 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, Request, UploadFile
+from fastapi import APIRouter, Depends, Request
+from starlette.datastructures import UploadFile
 
 from features.auth import (
     CurrentUser,
@@ -21,6 +22,8 @@ router = APIRouter()
 # 回复附件与证据链路同级的单附件上限，并限制总上传量（内容全量驻留内存）。
 _MAX_REPLY_ATTACHMENT_BYTES = 256 * 1024 * 1024
 _MAX_REPLY_ATTACHMENT_TOTAL_BYTES = 256 * 1024 * 1024
+# multipart 表单在附件之外的元数据余量（issue_id / reply_text / 分隔符）。
+_MULTIPART_FORM_SLACK_BYTES = 64 * 1024
 
 
 @router.post("/api/redmine/reply")
@@ -35,9 +38,21 @@ async def redmine_reply(
         content_type = (request.headers.get("content-type") or "").lower()
         files: list[UploadFile] = []
         if content_type.startswith("multipart/form-data"):
+            # 在解析 multipart 之前先拒绝声明过大的请求体，防止解析阶段
+            # 先消耗内存/磁盘资源（外部评审报告项）。
+            declared_length = request.headers.get("content-length")
+            try:
+                content_length = int(declared_length) if declared_length else 0
+            except ValueError:
+                content_length = 0
+            if content_length > _MAX_REPLY_ATTACHMENT_TOTAL_BYTES + _MULTIPART_FORM_SLACK_BYTES:
+                return error_response('请求体超过大小限制', status_code=413)
             form = await request.form()
             issue_id = str(form.get("issue_id") or "").strip()
             reply_text = str(form.get("reply_text") or "").strip()
+            # Starlette 的 multipart 解析器产出 starlette.datastructures.UploadFile；
+            # fastapi.UploadFile 是它的子类，反向 isinstance 会把合法附件
+            # 静默过滤掉（外部评审报告项），因此必须按基类判定。
             files = [item for item in form.getlist("files") if isinstance(item, UploadFile)]
         else:
             body = await request.json()
@@ -77,7 +92,9 @@ async def redmine_reply(
         attachment_files = []
         total_bytes = 0
         for f in files:
-            content = await f.read()
+            # 限额读取：比上限多读 1 字节即可判定超限，超大附件不再整体
+            # 读入内存（外部评审报告项）。
+            content = await f.read(_MAX_REPLY_ATTACHMENT_BYTES + 1)
             if not content:
                 continue
             # 文件名来自不可信输入（可含换行/敏感内容），不写日志；

@@ -144,9 +144,9 @@ class DownloadAttachmentGuardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stream_size_cap_aborts_download(self):
         ok = _DownloadResponse(status=200, chunks=[b"a" * 16, b"b" * 16])
-        with patch("features.redmine.attachments.ATTACHMENT_MAX_BYTES", 16):
-            with self.assertRaises(RuntimeError) as ctx:
-                await self._download([ok])
+        with patch("features.redmine.attachments.ATTACHMENT_MAX_BYTES", 16), \
+                self.assertRaises(RuntimeError) as ctx:
+            await self._download([ok])
         self.assertIn("exceeds size limit", str(ctx.exception))
 
     async def test_happy_path_follows_one_redirect_and_writes_file(self):

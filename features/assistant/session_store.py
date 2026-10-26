@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 import threading
@@ -97,12 +99,33 @@ def save_anchor(session: dict[str, Any], path: Path | str | None = None) -> None
 def drop_anchor(session_id: str, path: Path | str | None = None) -> None:
     """Remove an anchor after the session is cancelled/expired cleanly."""
     target = Path(path) if path else default_sessions_path()
-    with _LOCK:
+    with _LOCK, _store_file_lock(target):
         anchors = _read_store_unlocked(target)
         if session_id not in anchors:
             return
         anchors.pop(session_id, None)
         _write_store_unlocked(target, anchors)
+
+
+@contextlib.contextmanager
+def _store_file_lock(target: Path):
+    """Cross-process advisory lock for the anchor store.
+
+    ``_LOCK`` 只保证单进程内互斥；多 Uvicorn Worker 进程并发执行
+    「读入 → 更新 → 替换」时会发生后写覆盖先写（外部评审报告项）。
+    与 ``foundation/security_audit.py`` 同款 ``fcntl.flock`` 侧车锁，
+    使读改写序列在部署内的多个进程之间串行化。文件锁本身不保护
+    ``load_anchors()`` 的纯读路径——``os.replace`` 原子替换保证读者
+    看到完整的新旧文件之一。
+    """
+    lock_path = target.with_suffix(".json.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _write_store(
@@ -112,7 +135,7 @@ def _write_store(
     replace_all: bool,
 ) -> None:
     target = Path(path) if path else default_sessions_path()
-    with _LOCK:
+    with _LOCK, _store_file_lock(target):
         anchors = {} if replace_all else _read_store_unlocked(target)
         anchors.update(update)
         _write_store_unlocked(target, anchors)
@@ -144,9 +167,29 @@ def _write_store_unlocked(target: Path, anchors: dict[str, dict[str, Any]]) -> N
         separators=(",", ":"),
     )
     tmp_path = target.with_suffix(".json.tmp")
-    # os.replace 保证原子性；与 security_audit.json 同款写法。
-    with open(tmp_path, "w", encoding="utf-8") as handle:
-        handle.write(payload)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(tmp_path, target)
+    # 锚点虽不含明文凭据（字段白名单剥离 plan），但含 owner/client/Job
+    # 关联，按受限权限创建（外部评审报告项）。
+    file_descriptor = os.open(
+        tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600
+    )
+    try:
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        # fdopen 失败时描述符仍打开；已关闭时重复 close 仅报 EBADF。
+        with contextlib.suppress(OSError):
+            os.close(file_descriptor)
+        with contextlib.suppress(OSError):
+            tmp_path.unlink()
+        raise
+    # umask 可能压制 open 的 mode 参数，替换前显式 chmod 确定收敛 0600。
+    os.chmod(tmp_path, 0o600)
+    try:
+        # os.replace 保证原子性；与 security_audit.json 同款写法。
+        os.replace(tmp_path, target)
+    except OSError:
+        with contextlib.suppress(OSError):
+            tmp_path.unlink()
+        raise

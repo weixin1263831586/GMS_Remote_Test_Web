@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 
 from features.auth import (
     principal_owner_id,
+    require_human_principal,
     require_resource_owner,
 )
 
@@ -19,6 +20,7 @@ from .config import configured_max_bytes
 from .models import ReportCopyCreate
 from .repository import utc_now
 from .transfer_ingest_api import router as transfer_ingest_router
+from .transfer_support import require_export_read
 from .transfers_staging import router as transfers_staging_router
 
 
@@ -49,6 +51,12 @@ def _require_transfer_access(request: Request, transfer: dict) -> None:
         request,
         transfer.get("owner_id"),
         not_found_detail="transfer not found",
+    )
+    metadata = transfer.get("metadata") or {}
+    require_export_read(
+        request, str(transfer.get("worker_id") or ""),
+        device_id=(str(metadata.get("device_id") or "")
+                   if transfer.get("transfer_type") == "device_export" else ""),
     )
 
 
@@ -187,6 +195,7 @@ def create_suite_export(
     path: str = Query(...),
     directory: bool = Query(default=False),
 ):
+    require_export_read(request, worker_id)
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
     _online_worker(worker_id)
     transfer = service().repository.create_transfer(
@@ -213,6 +222,7 @@ async def create_report_copy(
     request: Request,
 ):
     """Export one results/<timestamp> directory for a cross-Worker copy."""
+    require_human_principal(request)
     local_worker_id = service().config.local_worker_id
     if body.source_worker_id == body.target_worker_id:
         raise HTTPException(400, "source and target Workers must be different")
@@ -288,6 +298,7 @@ async def create_report_copy(
 @router.post("/suites/report-copies/{transfer_id}/import")
 async def import_report_copy(transfer_id: str, request: Request):
     """Import a completed report-copy transfer into its locked target suite."""
+    require_human_principal(request)
     transfer = service().repository.get_transfer(transfer_id)
     if not transfer or transfer.get("transfer_type") != "report_copy":
         raise HTTPException(404, "report copy not found")

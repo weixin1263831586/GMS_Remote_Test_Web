@@ -60,6 +60,10 @@ def new_run_id() -> str:
     return "db_" + uuid.uuid4().hex
 
 
+class DailyBriefIssueHistoryActiveError(RuntimeError):
+    """该单号仍有排队/执行中的分析任务，禁止删除其历史记录。"""
+
+
 class DailyBriefRepository:
     """一个 owner 一个实例；线程安全由 RLock + SQLite 自身保证。"""
 
@@ -488,6 +492,58 @@ class DailyBriefRepository:
             if match and int(match.group(1)) == int(issue_id):
                 return run
         return None
+
+    def delete_issue_history(self, owner_id: str, issue_id: int) -> int:
+        """Delete every standalone-analysis record of one Redmine issue.
+
+        覆盖版本化（``issue:<id>:full:…``）与旧格式（``issue:<id>``）的全部
+        run 及其 issues/snapshots/jobs/AI 执行明细；返回删除的 run 数。
+        仍处于 queued/running 的分析任务必须先停止——活跃 Job 的终态回写
+        会重建记录（外部删除请求随后表现为「任务已完成但记录消失」的
+        竞态），因此这里显式拒绝而不是静默部分删除。
+        """
+        owner_id = canonical_owner_id(owner_id)
+        run_ids: list[str] = []
+        with self._lock, self._connect() as conn:
+            # Serialize the active-job check with enqueue/claim across
+            # independent Web and Worker connections.
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                "SELECT * FROM redmine_daily_brief_runs WHERE owner_id=? "
+                "AND mode LIKE ?",
+                # 前缀 LIKE 预筛（命中 issue:<id> 与 issue:<id>:...），
+                # issue:<id>0 这类更长的单号由下方正则按完整段排除。
+                (owner_id, f"issue:{int(issue_id)}%"),
+            ).fetchall()
+            for row in rows:
+                run = self._row_to_run(row)
+                match = re.match(r"^issue:(\d+)(?::|$)", run.mode)
+                if match and int(match.group(1)) == int(issue_id):
+                    run_ids.append(run.run_id)
+            if not run_ids:
+                return 0
+            active = conn.execute(
+                "SELECT COUNT(*) FROM redmine_daily_brief_jobs "
+                f"WHERE run_id IN ({', '.join('?' * len(run_ids))}) "
+                "AND status IN ('queued','running')",
+                run_ids,
+            ).fetchone()[0]
+            if int(active or 0) > 0:
+                raise DailyBriefIssueHistoryActiveError(
+                    f"issue {int(issue_id)} still has a queued or running analysis"
+                )
+            for run_id in run_ids:
+                for table in (
+                    "redmine_daily_brief_issues",
+                    "redmine_daily_brief_snapshots",
+                    "redmine_daily_brief_jobs",
+                    "redmine_daily_brief_ai_executions",
+                ):
+                    conn.execute(f"DELETE FROM {table} WHERE run_id=?", (run_id,))
+                conn.execute(
+                    "DELETE FROM redmine_daily_brief_runs WHERE run_id=?", (run_id,)
+                )
+            return len(run_ids)
 
     def latest_issue_run_with_report(
         self, owner_id: str, issue_id: int, *, exclude_run_id: str = ""

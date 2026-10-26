@@ -16340,6 +16340,42 @@
       }
     },
     "/api/redmine-agent/daily-brief/issue-analyses/{issue_id}": {
+      "delete": {
+        "description": "删除一个 Redmine 单号的全部已保存分析记录（人工会话专用）。\n\n覆盖该单号的全量/增量历史 run 及其 issues/快照/Job/AI 执行明细；\n仍有排队或执行中的分析时返回 409，不部分删除。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issue_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Issue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Issue Analysis History"
+      },
       "get": {
         "description": "Look up a saved standalone analysis before creating a new one.",
         "parameters": [

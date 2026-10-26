@@ -70,14 +70,14 @@ class ControllerClient:
     def heartbeat(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.request(
             "POST",
-            f"/api/cluster/workers/{quote(self.config.worker_id)}/heartbeat",
+            f"/api/cluster/workers/{quote(self.config.worker_id, safe='')}/heartbeat",
             payload,
         )
 
     def poll(self) -> list[dict[str, Any]]:
         result = self.request(
             "POST",
-            f"/api/cluster/workers/{quote(self.config.worker_id)}/commands/poll",
+            f"/api/cluster/workers/{quote(self.config.worker_id, safe='')}/commands/poll",
             {},
         )
         return result.get("commands", [])
@@ -85,7 +85,7 @@ class ControllerClient:
     def ack(self, command_id: str, status: str, result: dict | None = None, error: str = ""):
         return self.request(
             "POST",
-            f"/api/cluster/workers/{quote(self.config.worker_id)}/commands/{quote(command_id)}/ack",
+            f"/api/cluster/workers/{quote(self.config.worker_id, safe='')}/commands/{quote(command_id, safe='')}/ack",
             {"status": status, "result": result or {}, "error": error},
         )
 
@@ -94,7 +94,7 @@ class ControllerClient:
     ) -> str:
         result = self.request(
             "POST",
-            f"/api/cluster/workers/{quote(self.config.worker_id)}/adb-proxy/pair-code",
+            f"/api/cluster/workers/{quote(self.config.worker_id, safe='')}/adb-proxy/pair-code",
             {
                 "source_worker_id": source_worker_id,
                 "access_token": access_token,
@@ -106,7 +106,7 @@ class ControllerClient:
         return pair_code
 
     def events(self, job_id: str, attempt_id: str, events: list[dict[str, Any]]):
-        path = f"/api/cluster/jobs/{quote(job_id)}/events"
+        path = f"/api/cluster/jobs/{quote(job_id, safe='')}/events"
         body = {"attempt_id": attempt_id, "events": events}
         # 事件接口还会校验令牌绑定的 Worker ID。
         return self._request_with_worker_header("POST", path, json.dumps(body, separators=(",", ":")).encode(),
@@ -118,7 +118,7 @@ class ControllerClient:
         timeout 默认压到 5s：调用方是后台 uploader 线程，失败由其退避重试，
         不需要 60s 的长超时占用连接。
         """
-        path = f"/api/cluster/workers/{quote(self.config.worker_id)}/commands/{quote(command_id)}/events"
+        path = f"/api/cluster/workers/{quote(self.config.worker_id, safe='')}/commands/{quote(command_id, safe='')}/events"
         body = {"events": events}
         return self._request_with_worker_header("POST", path, json.dumps(body, separators=(",", ":")).encode(),
                                                 "application/json", timeout=timeout)
@@ -141,7 +141,7 @@ class ControllerClient:
             "chunk_size": chunk_size,
             "chunk_count": chunk_count,
         }, separators=(",", ":")).encode()
-        base = f"/api/cluster/jobs/{quote(job_id)}/artifacts/uploads"
+        base = f"/api/cluster/jobs/{quote(job_id, safe='')}/artifacts/uploads"
         initialized = self._request_with_worker_header(
             "POST", base, init_body, "application/json"
         )
@@ -156,7 +156,7 @@ class ControllerClient:
                     block_digest = hashlib.sha256(block).hexdigest()
                     self._request_with_worker_header(
                         "PUT",
-                        f"{base}/{quote(upload['id'])}/chunks/{index}",
+                        f"{base}/{quote(upload['id'], safe='')}/chunks/{index}",
                         block,
                         "application/octet-stream",
                         timeout=300,
@@ -164,7 +164,7 @@ class ControllerClient:
                     )
         complete = json.dumps({"chunk_count": chunk_count}, separators=(",", ":")).encode()
         return self._request_with_worker_header(
-            "POST", f"{base}/{quote(upload['id'])}/complete", complete,
+            "POST", f"{base}/{quote(upload['id'], safe='')}/complete", complete,
             "application/json", timeout=3600,
         )
 
@@ -190,7 +190,7 @@ class ControllerClient:
                     break
                 digest.update(block)
                 size += len(block)
-                endpoint = f"/api/cluster/transfers/{quote(transfer_id)}/chunks/{count}"
+                endpoint = f"/api/cluster/transfers/{quote(transfer_id, safe='')}/chunks/{count}"
                 self._request_with_worker_header("PUT", endpoint, block, "application/octet-stream")
                 count += 1
         if count == 0:
@@ -200,7 +200,7 @@ class ControllerClient:
                               "sha256": digest.hexdigest(), "chunk_count": count},
                              separators=(",", ":")).encode()
         return self._request_with_worker_header("POST",
-            f"/api/cluster/transfers/{quote(transfer_id)}/complete", payload, "application/json")
+            f"/api/cluster/transfers/{quote(transfer_id, safe='')}/complete", payload, "application/json")
 
     def _request_with_worker_header(
         self,

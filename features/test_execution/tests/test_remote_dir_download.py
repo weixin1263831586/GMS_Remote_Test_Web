@@ -364,5 +364,26 @@ class RemoteFileDownloadLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager.returned, 1)
 
 
+class SuiteRootConfinementTests(unittest.TestCase):
+    """套件根未配置时必须 fail-closed，不得放行任意绝对路径。"""
+
+    def test_unset_suites_path_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, "未配置"):
+            suites_api._get_suite_root_from_path(
+                "/srv/GMS-Suite/android-cts", {}
+            )
+
+    def test_configured_base_confinement_still_enforced(self):
+        config = {"suites_path": "/srv/GMS-Suite"}
+        self.assertEqual(
+            suites_api._get_suite_root_from_path(
+                "/srv/GMS-Suite/android-cts/tools", config
+            ),
+            "/srv/GMS-Suite/android-cts",
+        )
+        with self.assertRaises(ValueError):
+            suites_api._get_suite_root_from_path("/etc", config)
+
+
 if __name__ == "__main__":
     unittest.main()

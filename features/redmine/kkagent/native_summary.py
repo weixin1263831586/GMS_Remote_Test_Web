@@ -38,6 +38,11 @@ Continue this exact session and complete only the missing evidence checks.
   art_*/ev_*/src:* references; never number tools yourself. Keep every original
   report section, remove repair narration, and check both test-side and
   platform-side causes. A process crash alone does not establish the owner.
+- Do NOT re-classify the issue's nature while repairing. If the pre-repair
+  report called a signing/certification/config finding a real image defect,
+  keep that verdict; a hard-to-run fix script or a missed build step is
+  secondary execution friction, never grounds to demote the finding to
+  测试侧/使用侧 noise. Repair fixes evidence coverage and citations only.
 """
 
 _CLAIM_RE = re.compile(
@@ -144,6 +149,12 @@ def native_summary_result(
         return None
     if re.search(r"(?m)^##\s+\S", report) is None:
         return None
+    # Evidence-repair rounds tend to open with narration ("门禁索引已核对…
+    # 以下为修正后的完整报告"). Anything before the first `# ` heading is
+    # never report content — drop it instead of shipping repair chatter.
+    body = re.search(r"(?ms)^#\s+.+$", report)
+    if body:
+        report = report[body.start():]
     gate = evaluate_evidence_gate(trace, entry)
     findings = gate_errors(gate)
     ledger = trace.evidence_ledger()

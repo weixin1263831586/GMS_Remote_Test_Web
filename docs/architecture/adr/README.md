@@ -24,3 +24,4 @@
 | 0016 | [Account-scoped Cluster job submission receipts](0016-cluster-job-submission-receipts.md) | Accepted | — | — |
 | 0017 | [One approval for APK transmission and installation](0017-reviewed-apk-deployment.md) | Accepted | — | — |
 | 0018 | [Finite app-scoped Agent debugging sessions](0018-scoped-debug-sessions.md) | Accepted | — | — |
+| 0019 | [对话 Agent 会话持久化与崩溃恢复](0019-agent-session-persistence-recovery.md) | Accepted | — | — |

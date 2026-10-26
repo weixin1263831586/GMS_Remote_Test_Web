@@ -84,5 +84,9 @@ Infrastructure
 - [ADR-0005 USB/IP 固件烧写所有权](adr/0005-usbip-firmware-ownership.md)
 - [ADR-0013 Daily Brief 统一诊断流水线](adr/0013-daily-brief-batch-matches-single-issue-diagnosis.md)
 - [ADR-0014 外部知识联邦（background only）](adr/0014-external-knowledge-federation.md)
+- [ADR-0019 对话 Agent 会话持久化与崩溃恢复](adr/0019-agent-session-persistence-recovery.md)
+  （`data/assistant/agent_sessions.json` 恢复锚点：0600 + 原子替换 +
+  跨进程 flock；监控连续性是 Controller 进程内语义，任务权威状态仍在
+  Cluster Job 与报告）
 - [AI 执行治理与诊断质量层](ai-governance.md)（execution receipt 账本、
   golden corpus、failure identity、section 级知识检索与全部门禁图）

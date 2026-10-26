@@ -34,6 +34,23 @@ class _FakeRequest:
         return self._form
 
 
+class _Upload(UploadFile):
+    """绕开 starlette 的 anyio 线程池读取（与 unittest 事件循环共存）。"""
+
+    async def read(self, size: int = -1) -> bytes:
+        if size is None or size < 0:
+            return self.file.read()
+        return self.file.read(size)
+
+
+def _upload(content: bytes, filename: str) -> _Upload:
+    return _Upload(
+        io.BytesIO(content),
+        filename=filename,
+        headers=Headers({"content-type": "text/plain"}),
+    )
+
+
 def _manager(with_credentials=True):
     creds = {"username": "user", "password": "pass"} if with_credentials else {}
 
@@ -98,11 +115,7 @@ class RedmineReplyValidationTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(payload["success"])
 
     async def test_oversize_attachment_is_rejected_before_upload(self):
-        upload = UploadFile(
-            io.BytesIO(b"abcdef"),
-            filename="huge.log",
-            headers=Headers({"content-type": "text/plain"}),
-        )
+        upload = _upload(b"abcdef", "huge.log")
         form = _FakeForm({"issue_id": "12345", "reply_text": "hello", "files": [upload]})
         with patch.object(reply_api, "get_redmine_config_for_request", return_value=_manager()), \
                 patch.object(reply_api, "_MAX_REPLY_ATTACHMENT_BYTES", 4):
@@ -110,18 +123,14 @@ class RedmineReplyValidationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 400)
 
     async def test_filename_never_reaches_logs_and_success_envelope_kept(self):
-        upload = UploadFile(
-            io.BytesIO(b"abcdef"),
-            filename="customer\r\ninjected-name.log",
-            headers=Headers({"content-type": "text/plain"}),
-        )
+        upload = _upload(b"abcdef", "customer\r\ninjected-name.log")
         form = _FakeForm({"issue_id": "42", "reply_text": "hello", "files": [upload]})
         with patch.object(reply_api, "get_redmine_config_for_request", return_value=_manager()), \
-                patch.object(reply_api, "RedmineClient", _ok_client()):
-            with self.assertLogs("features.redmine.reply_api", level="INFO") as logs:
-                response = await reply_api.redmine_reply(
-                    _FakeRequest("multipart/form-data", form=form), _user=None
-                )
+                patch.object(reply_api, "RedmineClient", _ok_client()), \
+                self.assertLogs("features.redmine.reply_api", level="INFO") as logs:
+            response = await reply_api.redmine_reply(
+                _FakeRequest("multipart/form-data", form=form), _user=None
+            )
         output = "\n".join(logs.output)
         self.assertNotIn("customer\r\ninjected-name.log", output)
         self.assertNotIn("injected-name", output)
