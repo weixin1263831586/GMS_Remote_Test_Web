@@ -152,14 +152,18 @@ def serial_availability(
 def update_binding(request: Request, port_key: str, body: BindingUpdate):
     try:
         value = body.model_dump()
-        if not value["device_id"]:
-            return ApiError.invalid_semantics("绑定设备不能为空").to_response()
-        if value["device_id"] and not value["worker_id"]:
-            value["worker_id"] = get_local_worker_id()
-        if value["worker_id"] != get_local_worker_id():
-            return ApiError.invalid_semantics(
-                "Controller 本机串口只能绑定到本机 Worker 设备"
-            ).to_response()
+        if value["device_id"]:
+            if not value["worker_id"]:
+                value["worker_id"] = get_local_worker_id()
+            if value["worker_id"] != get_local_worker_id():
+                return ApiError.invalid_semantics(
+                    "Controller 本机串口只能绑定到本机 Worker 设备"
+                ).to_response()
+        else:
+            # 设备无法开机/未枚举拿不到 SN 时允许不关联设备：仅备注+
+            # 波特率+常驻采集即可完成绑定（前端弹窗对应留空下拉），
+            # 设备关联待板卡可枚举后再编辑补填。
+            value["worker_id"] = ""
         port = next(
             (
                 item

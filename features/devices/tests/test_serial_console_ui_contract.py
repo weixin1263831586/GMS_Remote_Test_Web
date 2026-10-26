@@ -88,6 +88,22 @@ def test_binding_persists_structured_identity_and_empty_logs_explain_state():
     assert "data.capture_status?.hint" in SCRIPT
 
 
+def test_binding_device_is_optional_for_unbootable_boards():
+    """设备无法开机拿不到 SN 时，串口绑定必须仍然可保存。
+
+    后端 BindingStore 允许空 device_id（仅备注+波特率+采集）；弹窗
+    不得用 required 挡住该场景，空值语义要在界面与端口卡片上可见。
+    """
+    HTML = Path("features/devices/ui/page.html").read_text(
+        encoding="utf-8", errors="ignore"
+    )
+    assert '<select id="binding-label" required>' not in HTML
+    assert '<select id="binding-label">' in HTML
+    assert "设备无法开机" in HTML
+    assert "不关联设备（无法开机/未枚举的板卡）" in SCRIPT
+    assert "未关联（见备注）" in SCRIPT
+
+
 def test_console_distinguishes_channel_from_port_and_reconnects():
     assert "通道已连接" in SCRIPT
     assert "串口已打开" in SCRIPT
