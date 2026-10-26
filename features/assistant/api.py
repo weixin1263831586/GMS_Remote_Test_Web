@@ -848,6 +848,18 @@ async def _run_pre_actions(
     return {"success": True}
 
 
+def _finish_run_state(session: dict[str, Any], status: str) -> None:
+    """统一收敛一轮运行的终态：状态、运行对象与恢复锚点一起处理。
+
+    终态此前散落在监控循环与执行入口的多处分支，错误分支漏清
+    ``active_run`` 会让 UI 残留已失败的运行计划；调用方仍须先通过
+    ``_monitor_run_is_current`` 判定自己仍是当前轮。
+    """
+    session["status"] = status
+    session["active_run"] = None
+    _clear_session_anchor(session)
+
+
 async def _monitor_agent_run(
     session_id: str, request_shim: AgentRequestShim, monitor_token: str | None = None
 ) -> None:
@@ -892,8 +904,7 @@ async def _monitor_agent_run(
                     return
                 if not job:
                     if _monitor_run_is_current(session, monitor_token):
-                        session["status"] = "error"
-                        _clear_session_anchor(session)
+                        _finish_run_state(session, "error")
                         _append_step(session, "读取集群任务", "error", f"任务不存在: {cluster_job_id}")
                     return
 
@@ -953,8 +964,7 @@ async def _monitor_agent_run(
                     )
                     if not payload.get("success"):
                         if _monitor_run_is_current(session, monitor_token):
-                            session["status"] = "error"
-                            _clear_session_anchor(session)
+                            _finish_run_state(session, "error")
                             _append_message(
                                 session, "assistant",
                                 f"retry 启动失败：{payload.get('error') or payload.get('message')}",
@@ -983,9 +993,7 @@ async def _monitor_agent_run(
                         },
                     )
                 if _monitor_run_is_current(session, monitor_token):
-                    session["status"] = "done"
-                    session["active_run"] = None
-                    _clear_session_anchor(session)
+                    _finish_run_state(session, "done")
                 return
 
             user_state = get_or_create_user_state(client_id)
@@ -1021,8 +1029,7 @@ async def _monitor_agent_run(
                 payload = await _start_test_with_plan(session, request_shim, plan, latest_report_timestamp)
                 if not payload.get("success"):
                     if _monitor_run_is_current(session, monitor_token):
-                        session["status"] = "error"
-                        _clear_session_anchor(session)
+                        _finish_run_state(session, "error")
                         _append_message(session, "assistant", f"retry 启动失败：{payload.get('error') or payload.get('message')}")
                     return
                 baseline_report_timestamp = latest_report_timestamp
@@ -1042,21 +1049,16 @@ async def _monitor_agent_run(
             else:
                 _append_message(session, "assistant", f"测试完成，未检测到失败报告。最近报告：{latest_report_timestamp or '未找到'}")
 
-            session["status"] = "done"
-            session["active_run"] = None
-            _clear_session_anchor(session)
+            _finish_run_state(session, "done")
             return
     except asyncio.CancelledError:
         if _monitor_run_is_current(session, monitor_token):
-            session["status"] = "cancelled"
-            session["active_run"] = None
-            _clear_session_anchor(session)
+            _finish_run_state(session, "cancelled")
             _append_step(session, "Agent 监控已停止", "warning", "用户取消了 Agent 后台监控")
         raise
     except Exception:
         if _monitor_run_is_current(session, monitor_token):
-            session["status"] = "error"
-            _clear_session_anchor(session)
+            _finish_run_state(session, "error")
             err = record_internal_error(logger, "Agent 监控", "[Agent] monitor failed")
             _append_step(session, "Agent 监控异常", "error", err)
             _append_message(session, "assistant", err)
@@ -1093,18 +1095,12 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
 
     pre_result = await _run_pre_actions(session, plan, request_shim)
     if not pre_result.get("success"):
-        # 失败终态统一清理：状态、运行对象与恢复锚点一起收敛，避免 UI
-        # 残留已失败的运行计划。
-        session["status"] = "error"
-        session["active_run"] = None
-        _clear_session_anchor(session)
+        _finish_run_state(session, "error")
         return pre_result
 
     payload = await _start_test_with_plan(session, request_shim, plan)
     if not payload.get("success"):
-        session["status"] = "error"
-        session["active_run"] = None
-        _clear_session_anchor(session)
+        _finish_run_state(session, "error")
         return payload
 
     session["status"] = "monitoring"
@@ -1406,9 +1402,7 @@ async def cancel_agent_session(session_id: str, request: Request):
     task = _agent_monitor_tasks.pop(session_id, None)
     if task and not task.done():
         task.cancel()
-    session["status"] = "cancelled"
-    session["active_run"] = None
-    _clear_session_anchor(session)
+    _finish_run_state(session, "cancelled")
     _append_step(session, "Agent 已取消", "warning", "如果测试仍在运行，请到测试界面停止测试")
     _append_message(session, "assistant", "Agent 会话已取消。如果测试仍在运行，请到测试界面停止测试。")
     return success_response({"session": _session_payload(session)})

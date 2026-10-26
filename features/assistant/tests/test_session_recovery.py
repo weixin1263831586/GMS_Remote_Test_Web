@@ -307,3 +307,83 @@ def test_clear_anchor_success_resets_failure_flag():
     }
     api._clear_session_anchor(session)
     assert "recovery_anchor_failed" not in session
+
+
+def test_restore_reuses_live_session_for_same_owner_instead_of_rebuild(tmp_path):
+    """同属主第二客户端恢复时必须复用内存会话对象。
+
+    监控任务正持有并更新内存对象；若从锚点重建覆盖，监控会继续写旧
+    对象、新查询拿到停滞副本（46.txt 审核第 4 条的竞态场景）。
+    """
+    from features.assistant import api, session_registry, session_store
+
+    store = _tmp_store(tmp_path)
+    session_store.save_anchor({
+        "session_id": "s-live",
+        "client_id": "c1",
+        "owner_id": "user-42",
+        "status": "monitoring",
+        "active_run": {"cluster_job_id": "job-x", "attempt_id": "a1", "worker_id": "w1"},
+        "created_at": "2026-10-26T00:00:00",
+        "updated_at": "2026-10-26T00:00:00",
+    }, path=store)
+    live_session = {
+        "session_id": "s-live",
+        "client_id": "c1",
+        "owner_id": "user-42",
+        "status": "monitoring",
+        "messages": [{"role": "assistant", "content": "运行中"}],
+        "steps": [{"title": "监控中"}],
+        "active_run": {"cluster_job_id": "job-x", "monitor_token": "tok-live"},
+        "workspace_context": {"cluster_job_id": "job-x"},
+    }
+    api._agent_sessions["s-live"] = live_session
+    try:
+        with patch.object(
+            session_registry.session_store, "default_sessions_path", return_value=store,
+        ):
+            restored = api._restore_session("s-live", "client-b", "user-42")
+        assert restored is live_session  # 同一对象，不是锚点重建
+        assert restored["client_id"] == "client-b"
+        assert restored["messages"] == [{"role": "assistant", "content": "运行中"}]
+        assert restored["active_run"]["monitor_token"] == "tok-live"
+        assert restored.get("recovered") is not True
+    finally:
+        api._agent_sessions.pop("s-live", None)
+
+
+def test_failed_plan_start_clears_active_run_and_anchor(tmp_path):
+    """启动失败终态：状态、active_run 与恢复锚点一起清理，UI 不残留。"""
+    from features.assistant import api, session_registry, session_store
+
+    store = _tmp_store(tmp_path)
+    session = {
+        "session_id": "s-failstart",
+        "client_id": "c1",
+        "owner_id": "user-42",
+        "status": "running",
+        "messages": [],
+        "steps": [],
+        "active_run": None,
+        "workspace_context": {},
+    }
+    plan = {"request": {"devices": ["ABC"], "test_suite": "cts", "worker_id": "w1"}}
+    request = _agent_request("user-42")
+
+    async def scenario():
+        with patch.object(
+            api.test_report_db, "get_reports", return_value=[]
+        ), patch.object(
+            api, "_run_pre_actions",
+            new=AsyncMock(return_value={"success": False, "error": "烧写失败"}),
+        ), patch.object(
+            session_registry.session_store, "default_sessions_path", return_value=store,
+        ):
+            return await api._execute_plan(session, request, plan)
+
+    payload = asyncio.run(scenario())
+    assert payload["success"] is False
+    assert session["status"] == "error"
+    assert session["active_run"] is None
+    anchors = session_store.load_anchors(store)
+    assert not anchors.get("s-failstart")
