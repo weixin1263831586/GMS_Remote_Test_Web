@@ -8,6 +8,8 @@ issue payload、AI 执行用量统计。
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from .daily_brief_models import DailyBriefIssue, DailyBriefRun
@@ -182,12 +184,39 @@ def _number(value: Any) -> int:
         return 0
 
 
+# 轮询/等待类工具按设计就要同参数反复调用（等任务终态），同参重复不算浪费。
+_POLLING_TOOL_MARKERS = ("status", "wait")
+
+
+def _tool_call_signature(tool: dict[str, Any]) -> str:
+    """调用参数指纹（sha256，不落原文）：同单同参 = 真重复调用。
+
+    旧启发式按纯调用次数报警，会把提示词强制的多次**不同参数**取证
+    （如 history_search 的初查 + 补充检索、sdk_read 的多个源码窗口）
+    误报成重复。这里只对参数指纹完全一致的调用计重复；没有参数记录
+    （旧轨迹）无法判定，一律不算。
+    """
+    tool_input = tool.get("tool_input")
+    if not isinstance(tool_input, dict) or not tool_input:
+        return ""
+    try:
+        encoded = json.dumps(
+            tool_input, ensure_ascii=False, sort_keys=True, default=str
+        )
+    except (TypeError, ValueError):
+        return ""
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def summarize_execution_statistics(
     executions: list[dict[str, Any]],
     *,
     fallback_model: str = "",
 ) -> dict[str, Any]:
-    """Summarize persisted trace metadata without exposing tool inputs/output."""
+    """Summarize persisted trace metadata without exposing tool inputs/output.
+
+    ``tool_input`` 只用于计算同参重复指纹，不进入任何返回值。
+    """
     fallback = str(fallback_model or "").strip() or DEFAULT_MODEL_LABEL
     tokens = {
         "input_tokens": 0,
@@ -263,10 +292,21 @@ def summarize_execution_statistics(
                 "failed_count": 0,
                 "pending_count": 0,
                 "issue_ids": set(),
+                "arg_signatures": set(),
+                "duplicate_call_count": 0,
             })
             row["call_count"] += 1
             if issue_id:
                 row["issue_ids"].add(issue_id)
+            # 重复判定按 (单号, 参数指纹) 作用域：每个单号的分析是独立
+            # 会话、各自完成必做取证，跨单号同参不判重复。
+            signature = _tool_call_signature(tool)
+            if signature:
+                scope_key = (issue_id or 0, signature)
+                if scope_key in row["arg_signatures"]:
+                    row["duplicate_call_count"] += 1
+                else:
+                    row["arg_signatures"].add(scope_key)
             status = str(tool.get("status") or "").lower()
             if status == "succeeded" or (
                 not status and not tool.get("is_error")
@@ -294,7 +334,10 @@ def summarize_execution_statistics(
     tool_rows = []
     recommendations = []
     for tool in tools.values():
-        row = {key: value for key, value in tool.items() if key != "issue_ids"}
+        row = {
+            key: value for key, value in tool.items()
+            if key not in ("issue_ids", "arg_signatures")
+        }
         row["issue_count"] = len(tool["issue_ids"])
         row["failure_rate"] = (
             round(row["failed_count"] / row["call_count"], 4)
@@ -310,13 +353,18 @@ def summarize_execution_statistics(
                     "优先补充失败码、参数校验和重试指引。"
                 ),
             })
-        elif row["call_count"] >= max(3, row["issue_count"] * 2):
+        elif (
+            row["duplicate_call_count"] >= 2
+            and not any(marker in row["tool_name"] for marker in _POLLING_TOOL_MARKERS)
+        ):
             recommendations.append({
                 "tool_name": row["tool_name"],
                 "kind": "efficiency",
+                "duplicate_call_count": row["duplicate_call_count"],
                 "message": (
-                    f"覆盖 {row['issue_count']} 个单号却调用 {row['call_count']} 次；"
-                    "评估批量查询、结果缓存或提示词去重。"
+                    f"覆盖 {row['issue_count']} 个单号调用 {row['call_count']} 次，"
+                    f"其中 {row['duplicate_call_count']} 次为同参数重复；"
+                    "评估结果缓存或提示词去重。"
                 ),
             })
     tool_rows.sort(key=lambda row: (-row["call_count"], row["tool_name"]))

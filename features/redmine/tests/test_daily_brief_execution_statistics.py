@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import Any
 
 from features.redmine.daily_brief_report import (
     DEFAULT_MODEL_LABEL,
@@ -117,8 +118,9 @@ class DailyBriefExecutionStatisticsTests(unittest.TestCase):
             row["tool_name"]: row["kind"]
             for row in statistics["tool_improvement_recommendations"]
         }
-        self.assertEqual(recommendations["gms_rt_redmine_issue_fetch"], "efficiency")
+        # 三次调用都没记录参数指纹，无法证明同参重复，不得再按纯次数报警。
         self.assertEqual(recommendations["gms_rt_redmine_journals"], "reliability")
+        self.assertNotIn("gms_rt_redmine_issue_fetch", recommendations)
 
     def test_uses_honest_default_model_label_when_none_was_persisted(self):
         statistics = summarize_execution_statistics([{"issue_id": 101}])
@@ -171,6 +173,173 @@ class DailyBriefExecutionStatisticsTests(unittest.TestCase):
         self.assertEqual(tools["gms_rt_redmine_journals"]["call_count"], 2)
         self.assertEqual(tools["gms_rt_redmine_journals"]["failed_count"], 1)
         self.assertNotIn("TodoList", tools)
+
+    def test_distinct_argument_calls_are_not_flagged_as_duplicates(self):
+        """history_search 的初查 + 补充检索、sdk_read 的多个源码窗口都是
+        提示词强制的不同参数取证；旧启发式按纯次数报警是常态误报。"""
+        statistics = summarize_execution_statistics(
+            [
+                {
+                    "issue_id": 655644,
+                    "tools": [
+                        {
+                            "tool_name": "gms_rt_redmine_history_search",
+                            "status": "succeeded",
+                            "output_sha256": "a",
+                            "tool_input": {"q": "RK3562 Android16 STS"},
+                        },
+                        {
+                            "tool_name": "gms_rt_redmine_history_search",
+                            "status": "succeeded",
+                            "output_sha256": "b",
+                            "tool_input": {"q": "system_server people NPE"},
+                        },
+                        {
+                            "tool_name": "gms_rt_redmine_history_search",
+                            "status": "succeeded",
+                            "output_sha256": "c",
+                            "tool_input": {"q": "IntentFilter getDataType"},
+                        },
+                        {
+                            "tool_name": "gms_rt_sdk_read",
+                            "status": "succeeded",
+                            "output_sha256": "d",
+                            "tool_input": {"result_id": "window-1"},
+                        },
+                        {
+                            "tool_name": "gms_rt_sdk_read",
+                            "status": "succeeded",
+                            "output_sha256": "e",
+                            "tool_input": {"result_id": "window-2"},
+                        },
+                        {
+                            "tool_name": "gms_rt_sdk_read",
+                            "status": "succeeded",
+                            "output_sha256": "f",
+                            "tool_input": {"result_id": "window-3"},
+                        },
+                    ],
+                },
+            ],
+            fallback_model="configured-model",
+        )
+
+        self.assertEqual(statistics["gms_tool_call_count"], 6)
+        self.assertEqual(statistics["tool_improvement_recommendations"], [])
+
+    def test_flags_repeated_identical_argument_calls_but_not_polling(self):
+        """同参数重复调用才构成浪费；轮询类工具同参反复调用是等终态的
+        设计内行为，不得报警。"""
+        statistics = summarize_execution_statistics(
+            [
+                {
+                    "issue_id": 655644,
+                    "tools": [
+                        {
+                            "tool_name": "gms_rt_redmine_history_search",
+                            "status": "succeeded",
+                            "output_sha256": "a",
+                            "tool_input": {"q": "same query"},
+                        },
+                        {
+                            "tool_name": "gms_rt_redmine_history_search",
+                            "status": "succeeded",
+                            "output_sha256": "b",
+                            "tool_input": {"q": "same query"},
+                        },
+                        {
+                            "tool_name": "gms_rt_redmine_history_search",
+                            "status": "succeeded",
+                            "output_sha256": "c",
+                            "tool_input": {"q": "same query"},
+                        },
+                        {
+                            "tool_name": "gms_rt_apk_status",
+                            "status": "succeeded",
+                            "output_sha256": "d",
+                            "tool_input": {"task_id": "t1"},
+                        },
+                        {
+                            "tool_name": "gms_rt_apk_status",
+                            "status": "succeeded",
+                            "output_sha256": "e",
+                            "tool_input": {"task_id": "t1"},
+                        },
+                        {
+                            "tool_name": "gms_rt_apk_status",
+                            "status": "succeeded",
+                            "output_sha256": "f",
+                            "tool_input": {"task_id": "t1"},
+                        },
+                    ],
+                },
+            ],
+            fallback_model="configured-model",
+        )
+
+        recommendations = statistics["tool_improvement_recommendations"]
+        self.assertEqual(
+            [row["tool_name"] for row in recommendations],
+            ["gms_rt_redmine_history_search"],
+        )
+        self.assertEqual(recommendations[0]["kind"], "efficiency")
+        self.assertEqual(recommendations[0]["duplicate_call_count"], 2)
+        self.assertIn("2 次为同参数重复", recommendations[0]["message"])
+
+    def test_same_arguments_across_issues_are_not_duplicates(self):
+        """每个单号的分析是独立会话、各自完成必做取证；跨单号同参不判重复。"""
+        def one_call(sha: str) -> dict[str, Any]:
+            return {
+                "tool_name": "gms_rt_redmine_history_search",
+                "status": "succeeded",
+                "output_sha256": sha,
+                "tool_input": {"q": "shared query"},
+            }
+        statistics = summarize_execution_statistics(
+            [
+                {"issue_id": 101, "tools": [one_call("a")]},
+                {"issue_id": 102, "tools": [one_call("b")]},
+            ],
+            fallback_model="configured-model",
+        )
+
+        tools_by_name = {
+            row["tool_name"]: row for row in statistics["gms_tools"]
+        }
+        self.assertEqual(tools_by_name["gms_rt_redmine_history_search"]["call_count"], 2)
+        self.assertEqual(tools_by_name["gms_rt_redmine_history_search"]["duplicate_call_count"], 0)
+        self.assertEqual(statistics["tool_improvement_recommendations"], [])
+
+    def test_tool_input_fingerprint_is_never_returned_to_clients(self):
+        """tool_input 只用于重复指纹，任何返回行都不得带参数原文。"""
+        statistics = summarize_execution_statistics(
+            [
+                {
+                    "issue_id": 101,
+                    "tools": [
+                        {
+                            "tool_name": "gms_rt_redmine_history_search",
+                            "status": "succeeded",
+                            "output_sha256": "a",
+                            "tool_input": {"q": "same query"},
+                        },
+                        {
+                            "tool_name": "gms_rt_redmine_history_search",
+                            "status": "succeeded",
+                            "output_sha256": "b",
+                            "tool_input": {"q": "same query"},
+                        },
+                    ],
+                },
+            ],
+            fallback_model="configured-model",
+        )
+
+        row = statistics["gms_tools"][0]
+        self.assertEqual(row["duplicate_call_count"], 1)
+        self.assertNotIn("tool_input", row)
+        self.assertNotIn("arg_signatures", row)
+        self.assertEqual(row["call_count"], 2)
 
 
 if __name__ == "__main__":
