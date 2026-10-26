@@ -163,7 +163,9 @@
             addMeta(meta, '稳定标识', port.by_id || port.port_key);
             addMeta(meta, '标识可靠性', port.identity_stable === false ? '临时节点，重插后需确认' : '稳定');
             addMeta(meta, 'USB 芯片', [port.vendor_product, port.driver].filter(Boolean).join(' · '));
-            addMeta(meta, '绑定设备', port.binding?.device_id || '未绑定');
+            addMeta(meta, '绑定设备', port.binding
+                ? (port.binding.device_id || '未关联（见备注）')
+                : '未绑定');
             addMeta(meta, '波特率', port.binding ? String(port.binding.baudrate) : '未绑定');
             addMeta(meta, '常驻采集', port.capture_enabled ? (port.capture_active ? '采集中' : '等待端口') : '关闭');
             addMeta(meta, '最近输出', port.last_output_at ? new Date(port.last_output_at).toLocaleString() : '—');
@@ -272,7 +274,10 @@
                     workerId: String(device.worker_id || '').trim(),
                 });
             });
-            select.replaceChildren(new Option(options.size ? '请选择设备' : '未发现 Controller 本机设备', ''));
+            select.replaceChildren(new Option(
+                options.size ? '不关联设备（无法开机/未枚举的板卡）' : '未发现本机设备，可直接保存绑定',
+                '',
+            ));
             options.forEach((item, value) => {
                 const option = new Option(item.text, value);
                 option.dataset.workerId = item.workerId;
@@ -287,7 +292,7 @@
             }
         } catch (error) {
             if (state.editingKey !== editingKey) return;
-            select.replaceChildren(new Option('设备列表加载失败', ''));
+            select.replaceChildren(new Option('设备列表加载失败，可不关联设备直接保存', ''));
             if (selectedDevice) select.add(new Option(`${selectedDevice} · 当前绑定`, selectedDevice));
             select.value = selectedDevice || '';
             notice(`设备列表加载失败：${error.message}`, 'error');

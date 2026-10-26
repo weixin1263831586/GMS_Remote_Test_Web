@@ -135,6 +135,19 @@ class SerialConsoleStoreTests(unittest.TestCase):
             self.assertEqual(saved["worker_id"], "worker-a")
             self.assertTrue(saved["identity_verified"])
 
+    def test_note_only_binding_without_device_is_not_verified(self):
+        """设备无法开机时的绑定：无 device_id → 不标记 identity_verified。"""
+        with tempfile.TemporaryDirectory() as directory:
+            store = BindingStore(Path(directory) / "bindings.json")
+            saved = store.upsert(
+                "usb-FTDI_A-if00-port0",
+                {"note": "板卡无法开机", "baudrate": 1_500_000},
+            )
+            self.assertEqual(saved["device_id"], "")
+            self.assertEqual(saved["worker_id"], "")
+            self.assertFalse(saved["identity_verified"])
+            self.assertEqual(saved["note"], "板卡无法开机")
+
     def test_invalid_baudrate_and_port_key_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             store = BindingStore(Path(directory) / "bindings.json")
@@ -458,6 +471,29 @@ class SerialConsoleApiTests(unittest.TestCase):
             self.client.delete("/api/devices/console/bindings/ttyUSB0").status_code,
             200,
         )
+
+    def test_binding_without_device_allows_note_only_for_unbootable_boards(self):
+        """设备无法开机拿不到 SN 时：不关联设备也可保存绑定（仅备注）。"""
+        response = self.client.put(
+            "/api/devices/console/bindings/ttyUSB0",
+            json={"note": "7486-03# 板卡无法开机", "baudrate": 1500000},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        binding = response.json()["data"]["binding"]
+        self.assertEqual(binding["device_id"], "")
+        self.assertEqual(binding["worker_id"], "")
+        # 极简 fake service 不合成 identity_verified；真实 store 行为
+        # 在 BindingStore 测试里断言。
+        self.assertFalse(binding.get("identity_verified"))
+        self.assertEqual(binding["note"], "7486-03# 板卡无法开机")
+
+    def test_device_binding_still_requires_local_worker(self):
+        # 关联设备的绑定仍只允许本机 Worker；空设备绑定不走该校验。
+        foreign = self.client.put(
+            "/api/devices/console/bindings/ttyUSB0",
+            json={"device_id": "DEVICE-1", "worker_id": "worker-b"},
+        )
+        self.assertEqual(foreign.status_code, 422)
 
     def test_empty_log_read_carries_capture_status_hint(self):
         # 空结果必须能区分「没接线 / 没绑定 / 没开采集」。
