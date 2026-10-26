@@ -2164,8 +2164,33 @@ class RedmineEvidenceToolTests(unittest.TestCase):
         self.assertIn("keywords", schema["properties"])
         self.assertNotIn("query", schema["required"])
         self.assertIn(
-            {"required": ["keywords"]}, schema["anyOf"],
+            {"required": ["keywords"]}, schema["oneOf"],
         )
+
+    def test_sdk_search_rejects_both_aliases_and_out_of_range_limit(self):
+        # query/keywords 严格互斥（schema oneOf 同约束）：同传是调用方
+        # 请求歧义，必须显式报错而不是静默挑一个。
+        text, is_error = mcp_server.sdk_search_tool({
+            "source": "android14", "revision": "main",
+            "query": "getDataType", "keywords": "getDataType",
+        })
+        self.assertTrue(is_error)
+        self.assertIn("exactly one", text)
+        # limit 与 Controller 契约对齐（le=200）：越界显式报错，不静默截断。
+        text, is_error = mcp_server.sdk_search_tool({
+            "source": "android14", "revision": "main",
+            "query": "test", "limit": 400,
+        })
+        self.assertTrue(is_error)
+        self.assertIn("limit", text)
+        captured = self._capture_run()
+        mcp_server.sdk_search_tool({
+            "source": "android14", "revision": "main", "query": "test", "limit": 200,
+        })
+        self.assertEqual(captured["args"][-2:], ["--limit", "200"])
+        by_name = {tool["name"]: tool for tool in mcp_server.tools()}
+        limit_schema = by_name["gms_rt_sdk_search"]["inputSchema"]["properties"]["limit"]
+        self.assertEqual(limit_schema["maximum"], 200)
 
     def test_knowledge_search_args(self):
         # ADR 0014: background-only knowledge search maps to the CLI verb.

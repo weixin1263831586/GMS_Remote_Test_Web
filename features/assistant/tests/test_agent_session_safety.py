@@ -311,3 +311,115 @@ def test_monitor_run_is_current_requires_active_run_and_token_match():
     assert monitor_run_is_current(live, "tok-a") is True
     assert monitor_run_is_current(live, "tok-b") is False
     assert monitor_run_is_current(live, None) is False
+
+
+def _bare_request():
+    from starlette.requests import Request
+
+    return Request({
+        "type": "http", "app": None, "headers": [], "method": "POST",
+        "scheme": "http", "path": "/api/agent/chat", "query_string": b"",
+        "server": ("controller", 80), "client": ("192.0.2.77", 51000),
+    })
+
+
+def _seed_confirm_session(api, plan: dict) -> str:
+    request = _bare_request()
+    client_id = api.get_client_id_from_request(request)
+    session = {
+        "session_id": "s-confirm",
+        "client_id": client_id,
+        "status": "planning",
+        "messages": [],
+        "steps": [],
+        "pending_plan": plan,
+        "active_run": None,
+        # 缺 updated_at 会被 agent_chat 首次触发的过期清扫当作 0 时间戳
+        # 删除，导致请求落入新会话的意图解析路径。
+        "created_at": api._now_iso(),
+        "updated_at": api._now_iso(),
+    }
+    api._agent_sessions["s-confirm"] = session
+    return session
+
+
+def test_duplicate_plan_confirmation_submits_only_once(monkeypatch):
+    """确认执行状态机：同一计划重复确认只提交一次（评审 P1）。"""
+    import asyncio
+
+    from features.assistant import api
+
+    saved_sessions = dict(api._agent_sessions)
+    try:
+        plan = {
+            "type": "test_execution",
+            "operation_id": "op-confirm-1",
+            "submit_state": "pending",
+            "request": {"devices": ["ABC"], "test_suite": "cts"},
+            "pre_actions": [],
+            "policy": {},
+        }
+        session = _seed_confirm_session(api, plan)
+        calls: list[str] = []
+
+        async def fake_execute(sess, request, submitted):
+            calls.append(submitted["operation_id"])
+            return {"success": True}
+
+        monkeypatch.setattr(api, "_execute_plan", fake_execute)
+        request = _bare_request()
+        body = api.AgentChatRequest(session_id="s-confirm", message="确认执行")
+
+        asyncio.run(api.agent_chat(request, body))
+        assert calls == ["op-confirm-1"]
+        assert plan["submit_state"] == "submitted"
+        assert session["pending_plan"] is plan
+
+        # 浏览器超时重发/双击：submitted 终态吸收重复确认，不再提交。
+        asyncio.run(api.agent_chat(request, body))
+        assert calls == ["op-confirm-1"]
+        assert plan["submit_state"] == "submitted"
+        assert "请勿重复确认" in session["messages"][-1]["content"]
+    finally:
+        api._agent_sessions.clear()
+        api._agent_sessions.update(saved_sessions)
+
+
+def test_failed_plan_confirmation_keeps_plan_reconfirmable(monkeypatch):
+    """提交失败 → failed 状态保留计划，修正后允许重新确认。"""
+    import asyncio
+
+    from features.assistant import api
+
+    saved_sessions = dict(api._agent_sessions)
+    try:
+        plan = {
+            "type": "test_execution",
+            "operation_id": "op-confirm-2",
+            "submit_state": "pending",
+            "request": {"devices": ["ABC"], "test_suite": "cts"},
+            "pre_actions": [],
+            "policy": {},
+        }
+        _seed_confirm_session(api, plan)
+        calls: list[str] = []
+
+        async def fake_execute(sess, request, submitted):
+            calls.append(submitted["operation_id"])
+            return {"success": False, "error": "没有可用设备"}
+
+        monkeypatch.setattr(api, "_execute_plan", fake_execute)
+        request = _bare_request()
+        body = api.AgentChatRequest(session_id="s-confirm", message="确认执行")
+
+        asyncio.run(api.agent_chat(request, body))
+        assert calls == ["op-confirm-2"]
+        assert plan["submit_state"] == "failed"
+
+        # 失败后再次确认允许重试（重新进入提交状态机）。
+        asyncio.run(api.agent_chat(request, body))
+        assert calls == ["op-confirm-2", "op-confirm-2"]
+        assert plan["submit_state"] == "failed"
+    finally:
+        api._agent_sessions.clear()
+        api._agent_sessions.update(saved_sessions)

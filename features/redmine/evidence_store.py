@@ -19,6 +19,7 @@ server-internal and must never be returned to clients.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
@@ -118,8 +119,7 @@ class EvidenceStore:
             )
             self._migrate_derived_status(conn)
 
-    @staticmethod
-    def _migrate_derived_status(conn: sqlite3.Connection) -> None:
+    def _migrate_derived_status(self, conn: sqlite3.Connection) -> None:
         """Idempotent cross-process migration: add derived_status, backfill.
 
         Process-safe per the repo architecture rule: BEGIN IMMEDIATE before
@@ -150,10 +150,57 @@ class EvidenceStore:
                     "UPDATE redmine_evidence_artifacts SET derived_status = 'missing' "
                     "WHERE status = 'partial' AND derived_text_path = ''"
                 )
+                self._restore_legacy_partial_originals(conn)
         except Exception:
             conn.rollback()
             raise
         conn.commit()
+
+    def _restore_legacy_partial_originals(self, conn: sqlite3.Connection) -> None:
+        """旧语义 status=partial 记录的原件重判定（评审 P2）。
+
+        新契约是"原件保存成功即 ready"，派生失败只落在 derived_status；
+        历史 partial 记录必须先通过磁盘原件校验才能恢复 ready——
+        摘要不符或原件缺失的记录保持 partial，绝不无条件翻绿。
+        旧记录 error 字段里的派生错误原样保留，与新版"派生告警独立于
+        原件状态"的语义一致。
+        """
+        rows = conn.execute(
+            "SELECT artifact_id, stored_path, sha256, size_bytes "
+            "FROM redmine_evidence_artifacts WHERE status = 'partial' AND stored_path != ''"
+        ).fetchall()
+        for row in rows:
+            path = self.evidence_dir / str(row["stored_path"])
+            if not self._original_file_verified(path, row):
+                continue
+            conn.execute(
+                "UPDATE redmine_evidence_artifacts SET status = 'ready' "
+                "WHERE artifact_id = ?",
+                (str(row["artifact_id"]),),
+            )
+
+    @staticmethod
+    def _original_file_verified(path: Path, row: sqlite3.Row) -> bool:
+        """磁盘原件校验：优先 SHA-256，旧记录无摘要时退回字节数核对。"""
+        if not path.is_file():
+            return False
+        expected_digest = str(row["sha256"] or "")
+        if expected_digest:
+            digest = hashlib.sha256()
+            try:
+                with path.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        digest.update(chunk)
+            except OSError:
+                return False
+            return digest.hexdigest() == expected_digest
+        expected_size = int(row["size_bytes"] or 0)
+        if expected_size <= 0:
+            return False
+        try:
+            return path.stat().st_size == expected_size
+        except OSError:
+            return False
 
     # --------------------------------------------------------------- snapshots
 
@@ -246,6 +293,22 @@ class EvidenceStore:
                 LIMIT ?
                 """,
                 (int(issue_id), int(limit)),
+            ).fetchall()
+        return [self._snapshot_from_row(row) for row in rows]
+
+    def list_snapshots_by_status(self, statuses: set[str]) -> list[dict[str, Any]]:
+        """全部处于给定状态的快照（启动中断对账用）。"""
+
+        if not statuses:
+            return []
+        placeholders = ", ".join("?" for _ in statuses)
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM redmine_evidence_snapshots
+                WHERE status IN ({placeholders})
+                """,
+                [str(item) for item in statuses],
             ).fetchall()
         return [self._snapshot_from_row(row) for row in rows]
 

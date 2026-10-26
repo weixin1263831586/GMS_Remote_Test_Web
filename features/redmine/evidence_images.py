@@ -33,11 +33,16 @@ def extract_image_ocr_text(
     """对图片附件做 best-effort OCR，产出可检索派生文本。
 
     返回 ``(derived_rel, error)``，签名与 zip/archive 派生函数一致。
-    语义分两档：OCR 正常执行但图片本身无文字（空结果）返回
-    ``("", "")``——附件保持 ready、只是没有可检索文本，这不是证据缺口
-    （示意图/照片类截图是常态，翻 partial 会让快照噪声化）；OCR 依赖
-    缺失、像素超限、识别超时或抛错返回 error，转 partial 并写进快照 errors，让
-    missing_information 显性化（2026-10 #656295/#655644 复盘）。
+    语义分两档（原件状态与派生状态分离——status 保持"原件保存成功即
+    ready"，派生结果只落在 derived_status）：
+    - OCR 正常执行但图片本身无文字（空结果）：返回 ``("", "")``，附件
+      ready、derived_status=empty，不是证据缺口（示意图/照片类截图是
+      常态，降级原件只会让快照噪声化）；
+    - OCR 依赖缺失、像素超限、识别超时或抛错：返回 error，调用方
+      （evidence_fetch._run_derivation）把 derived_status 记为 missing
+      并把 derive 阶段错误写进快照 errors（拉低 completeness 的
+      derived_text 维度），让 missing_information 显性化，原件保持
+      ready（2026-10 #656295/#655644 复盘）。
     识别语言 chi_sim+eng（中文工单截图为主）；超限时按字节截断到
     _DERIVED_TEXT_MAX_BYTES。
     """

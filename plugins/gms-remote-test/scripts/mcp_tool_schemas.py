@@ -1431,14 +1431,25 @@ ALL_TOOLS: list[dict[str, Any]] = [
                         "deprecated": True,
                         "description": (
                             "Alias of query (codesearch-style tool naming); "
-                            "exactly one of query/keywords is required."
+                            "provide exactly one of query/keywords, never both."
                         ),
                     },
                     "path": {"type": "string", "description": "Path substring filter."},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 400},
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "description": (
+                            "Max results, 1-200 (Controller hard cap on "
+                            "/api/sdk/search); out-of-range values are "
+                            "rejected, not truncated."
+                        ),
+                    },
                 },
                 "required": ["source", "revision"],
-                "anyOf": [
+                # oneOf = 恰好其一：query/keywords 严格互斥，与运行时
+                # 校验（两者同时出现报错）一致；anyOf 会放行同传。
+                "oneOf": [
                     {"required": ["query"]},
                     {"required": ["keywords"]},
                 ],

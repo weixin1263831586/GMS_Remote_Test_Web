@@ -15,6 +15,13 @@ from features.redmine.kkagent.trace import _attachment_manifest
 from features.redmine.tests import test_evidence_pipeline as pipeline
 
 
+def _archive_source_file(tmp_path: Path, magic: bytes) -> Path:
+    """派生函数签名是磁盘原件路径；测试用临时文件承载魔数。"""
+    source = tmp_path / "attachment-source.bin"
+    source.write_bytes(magic)
+    return source
+
+
 def test_rar_members_become_searchable_text_with_stable_member_references(tmp_path):
     store = EvidenceStore(tmp_path / 'owner')
 
@@ -32,7 +39,8 @@ def test_rar_members_become_searchable_text_with_stable_member_references(tmp_pa
 
     with patch('features.redmine.evidence_archives.extract_system_archive', side_effect=extract):
         derived, note = extract_system_archive_text(
-            store, write, 'art_test', '123/ev_test', b'Rar!\x1a\x07\x01',
+            store, write, 'art_test', '123/ev_test',
+            _archive_source_file(tmp_path, b'Rar!\x1a\x07\x01'),
         )
     assert not note
     text = store.resolve_internal(derived).read_text()
@@ -55,7 +63,8 @@ def test_archive_extractor_failure_is_reported_as_unread_not_as_missing_logs(tmp
     with patch('features.redmine.evidence_archives.extract_system_archive', side_effect=ValueError('unsafe')):
         derived, note = extract_system_archive_text(
             store, lambda *_: pytest.fail('failed extraction must not publish text'),
-            'art_test', '123/ev_test', b'Rar!\x1a\x07\x01',
+            'art_test', '123/ev_test',
+            _archive_source_file(tmp_path, b'Rar!\x1a\x07\x01'),
         )
     assert not derived
     assert '尚未提取' in note
@@ -76,7 +85,8 @@ def test_archive_text_budget_marks_skipped_members_and_preserves_result_priority
         'features.redmine.evidence_archives.ZIP_MEMBER_TEXT_MAX_MEMBERS', 1,
     ):
         derived, note = extract_system_archive_text(
-            store, write, 'art_test', '123/ev_test', b'Rar!\x1a\x07\x01',
+            store, write, 'art_test', '123/ev_test',
+            _archive_source_file(tmp_path, b'Rar!\x1a\x07\x01'),
         )
     assert '检索索引不完整' in note
     assert list(dict(split_zip_derived_text(store.resolve_internal(derived).read_text()))) == ['test_result.xml']

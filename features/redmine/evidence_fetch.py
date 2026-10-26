@@ -436,27 +436,18 @@ class EvidenceFetcher:
                 "kind": kind,
                 "snapshot_rel": snapshot_rel,
                 "path": absolute,
-                "data": b"",
-            })
-        elif kind == "archive" and data[:2] == b"PK":
-            # zip 内文本成员（logcat / test_result.xml 等）派生成可检索文本，
-            # 命中可以 attachment:<file>.zip!/<member>:L<line> 引用。
-            self._pending_derive.append({
-                "artifact_id": str(artifact["artifact_id"]),
-                "attachment_id": str(attachment.get("id") or ""),
-                "kind": kind,
-                "snapshot_rel": snapshot_rel,
-                "path": absolute,
-                "data": data,
             })
         elif kind == "archive":
+            # 队列只保留元数据（磁盘路径/格式），不引用原始字节：压缩包
+            # 可能接近快照总下载预算，字节数组常驻待处理队列会随批量下载
+            # 推高 Controller 内存峰值；派生 Worker 统一从磁盘原件读取。
             self._pending_derive.append({
                 "artifact_id": str(artifact["artifact_id"]),
                 "attachment_id": str(attachment.get("id") or ""),
                 "kind": kind,
+                "format": "zip" if data[:2] == b"PK" else "archive",
                 "snapshot_rel": snapshot_rel,
                 "path": absolute,
-                "data": data,
             })
 
         size_note = ""
@@ -505,16 +496,19 @@ class EvidenceFetcher:
                             self.store, self._atomic_write,
                             job["artifact_id"], job["snapshot_rel"], job["path"],
                         )
-                    elif job["data"][:2] == b"PK":
-                        derived_rel, note = extract_zip_derived_text(
+                    elif job.get("format") == "zip":
+                        # 磁盘原件上流式派生，连同解压一起放入工作线程，
+                        # 不阻塞事件循环上的其他 HTTP 请求与任务。
+                        derived_rel, note = await asyncio.to_thread(
+                            extract_zip_derived_text,
                             self.store, self._atomic_write,
-                            job["artifact_id"], job["snapshot_rel"], job["data"],
+                            job["artifact_id"], job["snapshot_rel"], job["path"],
                         )
                     else:
                         derived_rel, note = await asyncio.to_thread(
                             extract_system_archive_text,
                             self.store, self._atomic_write,
-                            job["artifact_id"], job["snapshot_rel"], job["data"],
+                            job["artifact_id"], job["snapshot_rel"], job["path"],
                         )
                 except Exception as exc:  # 派生器未捕获的异常也只记派生状态
                     derived_rel, note = "", f"派生异常: {type(exc).__name__}"
