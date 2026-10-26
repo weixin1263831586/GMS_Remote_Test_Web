@@ -89,7 +89,7 @@ async def search_evidence(
         }
         for artifact in artifacts
         if str(artifact.get("kind") or "") == "archive"
-        and str(artifact.get("status") or "") == "partial"
+        and str(artifact.get("derived_status") or "") in {"partial", "missing"}
         and artifact.get("error")
     ]
     for artifact in artifacts:

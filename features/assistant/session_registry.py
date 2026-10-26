@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -31,6 +32,10 @@ AGENT_SESSION_MAX_LIFETIME_SECONDS = 24 * 60 * 60
 _agent_sessions: dict[str, dict[str, Any]] = {}
 _agent_sessions_lock = asyncio.Lock()
 _agent_monitor_tasks: dict[str, asyncio.Task] = {}
+# 会话恢复临界锁：查找内存会话 → 决定复用/重建 → 登记回注册表必须
+# 原子完成，避免两个客户端同时恢复同一 session_id 时互相覆盖。
+# 恢复路径无 await，线程锁足够。
+_restore_lock = threading.Lock()
 _last_session_cleanup = 0.0
 
 
@@ -153,20 +158,28 @@ def monitor_run_is_current(session: dict[str, Any], monitor_token: str | None) -
 
     同一会话连续提交新计划时，旧监控任务的取消回调可能晚于新一轮
     ``active_run`` 注册（外部评审报告项），旧任务据此识别自己已过期，
-    不清空新任务的 active_run / 恢复锚点。恢复会话没有 token（锚点未
-    持久化该字段），以 None == None 视为匹配。
+    不清空新任务的 active_run / 恢复锚点。恢复会话的 active_run 来自
+    锚点、没有 token 字段，与恢复监控的 None token 匹配。active_run
+    不存在（终态已清理）时必须返回 False：避免"空运行 + None token"
+    意外匹配成当前轮。
     """
-    return (session.get("active_run") or {}).get("monitor_token") == monitor_token
+    active_run = session.get("active_run")
+    if not active_run:
+        return False
+    return active_run.get("monitor_token") == monitor_token
 
 
 def save_session_anchor(session: dict[str, Any]) -> None:
     """Persist the crash-recovery anchor，失败时显式标示「不可恢复」。
 
     持久化失败不能静默降级：Controller 重启后的恢复保证已失效，
-    必须在日志与会话诊断里可见（外部评审报告项）。
+    必须在日志与会话诊断里可见（外部评审报告项）。下一次保存成功时
+    清除失败标记，磁盘短暂不可写恢复后 UI 不再显示过期状态
+    。
     """
     try:
         session_store.save_anchor(session)
+        session.pop("recovery_anchor_failed", None)
     except Exception:
         _logger.warning(
             "保存 Agent 会话恢复锚点失败，Controller 重启后该会话不可恢复",
@@ -227,17 +240,28 @@ def restore_session(session_id: str, client_id: str, owner_id: str = "") -> dict
     resource_owner_id 做属主判定：client_id 直接命中，或 owner 命中，
     才允许恢复；恢复出的会话以请求主体身份为准，否则同属主重启后将
     永远「过期」。
+
+    同属主已有内存会话时必须复用现有对象（只重绑请求主体身份），不能
+    从锚点重建覆盖：内存对象正被活跃监控任务持有并更新，重建会让
+    监控任务继续写旧对象、新查询拿到停滞的副本。
     """
-    anchor = session_store.load_anchors().get(session_id)
-    if not anchor:
-        return None
-    owner_matches = bool(owner_id) and anchor.get("owner_id") == owner_id
-    if anchor.get("client_id") != client_id and not owner_matches:
-        return None
-    session = session_from_anchor(anchor)
-    if session:
-        session["client_id"] = client_id
-        if owner_id:
-            session["owner_id"] = owner_id
-        _agent_sessions[session_id] = session
-    return session
+    with _restore_lock:
+        anchor = session_store.load_anchors().get(session_id)
+        if not anchor:
+            return None
+        owner_matches = bool(owner_id) and anchor.get("owner_id") == owner_id
+        if anchor.get("client_id") != client_id and not owner_matches:
+            return None
+        existing = _agent_sessions.get(session_id)
+        if existing and str(existing.get("owner_id") or "") == str(anchor.get("owner_id") or ""):
+            existing["client_id"] = client_id
+            if owner_id:
+                existing["owner_id"] = owner_id
+            return existing
+        session = session_from_anchor(anchor)
+        if session:
+            session["client_id"] = client_id
+            if owner_id:
+                session["owner_id"] = owner_id
+            _agent_sessions[session_id] = session
+        return session

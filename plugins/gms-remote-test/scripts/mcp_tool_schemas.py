@@ -1416,11 +1416,32 @@ ALL_TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "source": {"type": "string", "minLength": 0, "maxLength": 2048},
                     "revision": {"type": "string", "minLength": 0, "maxLength": 2048},
-                    "query": {"type": "string", "minLength": 0, "maxLength": 256},
+                    "query": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 256,
+                        "description": (
+                            "Search text; keywords is accepted as an alias."
+                        ),
+                    },
+                    "keywords": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 256,
+                        "deprecated": True,
+                        "description": (
+                            "Alias of query (codesearch-style tool naming); "
+                            "exactly one of query/keywords is required."
+                        ),
+                    },
                     "path": {"type": "string", "description": "Path substring filter."},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 400},
                 },
-                "required": ["source", "revision", "query"],
+                "required": ["source", "revision"],
+                "anyOf": [
+                    {"required": ["query"]},
+                    {"required": ["keywords"]},
+                ],
                 "additionalProperties": False,
             },
         },

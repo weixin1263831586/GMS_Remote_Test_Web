@@ -292,3 +292,22 @@ def test_plan_echo_hides_pre_actions_password_but_keeps_it_server_side():
     assert masked and masked[0]["password"] != "wifi-secret-pw"
     # 服务端保留明文用于执行（_run_pre_actions 读取）。
     assert session["pending_plan"]["pre_actions"][0]["password"] == "wifi-secret-pw"
+
+
+def test_monitor_run_is_current_requires_active_run_and_token_match():
+    """旧监控任务必须先确认 active_run 仍存在且 token 匹配。
+
+    active_run 已被终态清理（None）时，None token 不得与"空运行"意外
+    匹配成当前轮；恢复会话的锚点 active_run 没有 token 字段，与恢复
+    监控的 None token 保持匹配；token 不一致立即判过期。
+    """
+    from features.assistant.session_registry import monitor_run_is_current
+
+    assert monitor_run_is_current({}, None) is False
+    assert monitor_run_is_current({"active_run": None}, None) is False
+    restored = {"active_run": {"cluster_job_id": "job-1"}}
+    assert monitor_run_is_current(restored, None) is True
+    live = {"active_run": {"monitor_token": "tok-a"}}
+    assert monitor_run_is_current(live, "tok-a") is True
+    assert monitor_run_is_current(live, "tok-b") is False
+    assert monitor_run_is_current(live, None) is False

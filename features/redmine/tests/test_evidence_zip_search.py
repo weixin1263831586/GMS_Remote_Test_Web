@@ -15,12 +15,12 @@ import zipfile
 from unittest.mock import patch
 
 from features.redmine.tests.test_evidence_pipeline import (
-    EvidencePipelineTests,
+    EvidencePipelineFixture,
     FakeRedmineServer,
 )
 
 
-class ZipDerivedTextTests(EvidencePipelineTests):
+class ZipDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
     def test_zip_attachment_gets_searchable_derived_text(self):
         from features.redmine.evidence import EvidenceFetcher, split_zip_derived_text
         from features.redmine.evidence_search_api import _collect_zip_member_matches
@@ -91,8 +91,10 @@ class ZipDerivedTextTests(EvidencePipelineTests):
         self.assertEqual(entry["line"], 1)
         self.assertEqual(entry["zip_member"], "logs/logcat.txt")
 
-    def test_zip_member_limit_marks_snapshot_and_artifact_partial(self):
-        from features.redmine.evidence import EvidenceFetcher
+    def test_zip_member_limit_records_derived_partial(self):
+        """成员超限：派生索引不完整记 derived_status=partial + derive
+        阶段错误，zip 原件保持 ready（检索兜底仍扫原文/已索引成员）。"""
+        from features.redmine.evidence import EvidenceFetcher, snapshot_completeness
         from features.redmine.evidence_store import owner_evidence_store
 
         buf = io.BytesIO()
@@ -120,13 +122,17 @@ class ZipDerivedTextTests(EvidencePipelineTests):
                     fetcher.run(fetcher.create_snapshot(648526, download="all"))
                 )
 
-        self.assertEqual(result["status"], "partial")
+        # 下载完整 → 快照 ready；索引缺口由 derive 错误与 completeness
+        # 的 derived_text 维度显性表达。
+        self.assertEqual(result["status"], "ready")
         self.assertTrue(any(item["stage"] == "derive" for item in result["errors"]))
+        self.assertFalse(snapshot_completeness(result)["derived_text"])
         artifacts = owner_evidence_store("owner-a").list_artifacts(
             result["snapshot_id"]
         )
         limited = next(item for item in artifacts if item["attachment_id"] == "776658")
-        self.assertEqual(limited["status"], "partial")
+        self.assertEqual(limited["status"], "ready")
+        self.assertEqual(limited["derived_status"], "partial")
         self.assertIn("检索索引不完整", limited["error"])
 
 
