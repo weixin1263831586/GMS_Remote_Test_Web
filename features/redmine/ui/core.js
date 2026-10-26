@@ -707,6 +707,9 @@ function renderMarkdownDoc(text) {
     var h = line.match(/^(#{1,6})\s+(.*)$/);
     if (h) {
       var level = h[1].length;
+      // H1 是报告自带的文档标题(与弹窗标题重复),降级为 h3 视觉,避免一屏
+      // 被 24px+ 的大标题挤占;H2 起才是正文章节。
+      if (level === 1) level = 3;
       html += '<h' + level + ' class="md-h">' + esc(h[2]) + '</h' + level + '>';
       i++; continue;
     }
@@ -714,7 +717,19 @@ function renderMarkdownDoc(text) {
     if (/^\s*[-*]\s+/.test(line)) {
       var items = [];
       while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*[-*]\s+/, '')); i++; }
-      html += '<ul class="md-ul">' + items.map(function(t){ return '<li>' + _inlineMd(esc(t)) + '</li>'; }).join('') + '</ul>';
+      // "问题概况"等节的 "- **键**：内容" bullet 渲染为键值行(键锚点列),
+      // 非该形态的 bullet 保持普通列表项。
+      if (items.every(function(t){ return /^(\*\*|【)[^*】]+(\*\*|】)[:：]/.test(t); })) {
+        html += '<div class="md-kv-list">' + items.map(function(t){
+          var kv = t.match(/^(\*\*|【)([^*】]+)(\*\*|】)[:：]\s*([\s\S]*)$/);
+          return '<div class="md-kv-row"><b>' + esc(kv[2]) + '</b><span>' + _inlineMd(esc(kv[4] || '-')) + '</span></div>';
+        }).join('') + '</div>';
+        continue;
+      }
+      html += '<ul class="md-ul">' + items.map(function(t){
+        var claim = _claimBadgeHtml(t);
+        return '<li>' + (claim || _inlineMd(esc(t))) + '</li>';
+      }).join('') + '</ul>';
       continue;
     }
     // Ordered list
@@ -764,6 +779,21 @@ function renderMarkdownDoc(text) {
     html += '<p class="md-p">' + _nl2br(_inlineMd(esc(para.join(_NL)))) + '</p>';
   }
   return html;
+}
+
+// AI 诊断「关键结论」claim 行:- [事实][EV-001,EV-002] 文本。
+// 渲染为 彩色徽章 + EV 引用 chip + 正文;非 claim 行返回 null 走原路径。
+function _claimBadgeHtml(text) {
+  var m = String(text).match(/^\[(事实|推断|待验证)\](?:\[([^\]]*)\])?\s*([\s\S]+)$/);
+  if (!m) return null;
+  var refs = (m[2] || '').split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+  var chips = refs.map(function(r){ return '<span class="claim-ref">' + esc(r) + '</span>'; }).join(' ');
+  // chip 后补真实空格:纯文本复制时徽章/chip/正文不粘连。
+  return '<span class="claim-line"><span class="claim-badge claim-'
+    + ({ '事实': 'fact', '推断': 'inference', '待验证': 'unverified' })[m[1]]
+    + '">' + m[1] + '</span>' + ' '
+    + chips + ' '
+    + '<span class="claim-text">' + _inlineMd(esc(m[3])) + '</span></span>';
 }
 
 function _renderMarkdownTable(rows) {

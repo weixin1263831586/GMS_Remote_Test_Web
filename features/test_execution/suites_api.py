@@ -187,7 +187,11 @@ def _get_suite_root_from_path(suite_path: str, config: dict[str, Any]) -> str:
     if not suite_root:
         raise ValueError("Invalid test suite path")
     base_path = (config.get("suites_path") or "").replace("\\", "/").strip().rstrip("/")
-    if base_path.startswith("/") and not (suite_root == base_path or suite_root.startswith(base_path + "/")):
+    if not base_path.startswith("/"):
+        # fail-closed：套件根未配置时不得放行任意绝对路径（与
+        # reports/analysis_api._resolve_suite_log_dir 同一策略）。
+        raise ValueError("测试套件根目录未配置，无法访问套件路径")
+    if not (suite_root == base_path or suite_root.startswith(base_path + "/")):
         raise ValueError("Test suite not in configured suites directory")
     return suite_root
 

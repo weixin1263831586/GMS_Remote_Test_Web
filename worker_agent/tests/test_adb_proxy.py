@@ -712,7 +712,6 @@ def test_mutating_adb_proxy_actions_hold_the_state_lock():
 
 def test_recover_managed_state_skips_while_operation_in_progress(tmp_path):
     """命令进行中时恢复用非阻塞获取直接跳过，绝不阻塞心跳线程。"""
-    import os
 
     from worker_agent import adb_proxy
 
@@ -722,9 +721,8 @@ def test_recover_managed_state_skips_while_operation_in_progress(tmp_path):
     )
     with patch.dict(
         "os.environ", {"GMS_ADB_PROXY_STATE_ROOT": str(tmp_path)}
-    ), patch("worker_agent.adb_proxy._source_start") as start:
-        with adb_proxy._STATE_LOCK:
-            result = recover_managed_state(secret="worker-secret")
+    ), patch("worker_agent.adb_proxy._source_start") as start, adb_proxy._STATE_LOCK:
+        result = recover_managed_state(secret="worker-secret")
 
     assert result == {
         "recovered": [],
@@ -741,8 +739,7 @@ def test_sync_source_policy_skips_while_operation_in_progress(tmp_path):
         "worker_agent.adb_proxy._write_source_policy"
     ) as write, patch.dict(
         "os.environ", {"GMS_ADB_PROXY_STATE_ROOT": str(tmp_path)}
-    ):
-        with adb_proxy._STATE_LOCK:
-            adb_proxy.sync_source_policy()
+    ), adb_proxy._STATE_LOCK:
+        adb_proxy.sync_source_policy()
 
     write.assert_not_called()

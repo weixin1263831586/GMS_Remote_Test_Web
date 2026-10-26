@@ -17,11 +17,12 @@ from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response
 from foundation.uploads import (
     merge_files_to_path,
-    remote_home_file_path,
     safe_upload_target_path,
     save_upload_to_path,
     upload_temp_root,
 )
+
+from .terminal_upload_sessions import bind_upload_session, push_terminal_upload, upload_binding
 
 
 logger = logging.getLogger(__name__)
@@ -88,60 +89,40 @@ async def upload_file(
     user: str = Form(""),
 ):
     """File upload - supports chunked upload and resume."""
-    # HEAD request: check uploaded chunks for resume
+    if not (check_chunks and upload_id) and not file:
+        return error_response("No file provided", 400)
+    try:
+        config = await _upload_target_config(worker_id)
+    except ValueError as exc:
+        return ApiError.malformed_request(str(exc)).to_response()
+    except RuntimeError:
+        return ApiError.dependency_unavailable("终端目标服务不可用").to_response()
+
     if check_chunks and upload_id:
-        # upload_id 不可信——必须消毒后再拼路径，防止
-        # upload_id=../../x 的目录穿越读/写（对齐固件链路 safe_upload_token）。
-        from foundation.uploads import safe_upload_token
+        try:
+            session_dir = bind_upload_session(
+                upload_temp_root(), _admin.resource_owner_id, upload_id,
+                upload_binding(config, path, file_name, total_chunks, file_size),
+            )
+        except ApiError as exc:
+            return exc.to_response()
+        chunks_file = session_dir / "uploaded_chunks.json"
+        try:
+            uploaded_chunks = json.loads(chunks_file.read_text()) if chunks_file.exists() else []
+        except (OSError, ValueError):
+            uploaded_chunks = []
+        return JSONResponse(content={"success": True, "uploaded_chunks": uploaded_chunks})
 
-        session_dir = os.path.join(
-            upload_temp_root(), safe_upload_token(upload_id)
-        )
-        chunks_file = os.path.join(session_dir, "uploaded_chunks.json")
-
-        if os.path.exists(chunks_file):
-            try:
-                with open(chunks_file) as f:
-                    uploaded_chunks = json.load(f)
-            except (OSError, ValueError) as exc:
-                logger.warning(f"Invalid chunk state for {upload_id}: {exc}")
-                uploaded_chunks = []
-            return JSONResponse(content={"success": True, "uploaded_chunks": uploaded_chunks})
-        else:
-            return JSONResponse(content={"success": True, "uploaded_chunks": []})
-
-    # Check file parameter for chunk upload
-    if chunk_index is not None and not file:
-        return error_response("No file provided for chunk upload", 400)
-
-    # Chunked upload mode
     if chunk_index is not None and total_chunks is not None:
-        return await _upload_file_chunk(file, chunk_index, total_chunks, upload_id, file_name or file.filename, file_size, resume)
+        return await _upload_file_chunk(
+            file, chunk_index, total_chunks, upload_id, file_name or file.filename,
+            file_size, resume, config=config, path=path, owner_id=_admin.resource_owner_id,
+        )
 
     # Normal upload mode
     try:
         if not file or file.filename == "":
             return error_response("No file selected", 400)
-
-        config = config_manager.load_config()
-        try:
-            resolved_worker, resolved_host, resolved_user, password, _serial = (
-                await asyncio.to_thread(
-                    resolve_authorized_terminal_target, worker_id, mode="ssh"
-                )
-            )
-        except ValueError as exc:
-            return error_response(str(exc), 400)
-        config = {
-            **config,
-            "ubuntu_host": resolved_host,
-            "ubuntu_user": resolved_user,
-            "ubuntu_pswd": password,
-            "host": resolved_host,
-            "username": resolved_user,
-            "password": password,
-            "worker_id": resolved_worker,
-        }
 
         upload_dir = upload_temp_root()
         os.makedirs(upload_dir, exist_ok=True)
@@ -151,7 +132,6 @@ async def upload_file(
         except ValueError as e:
             return error_response(str(e), 400)
 
-        safe_filename = os.path.basename(temp_path)
         await save_upload_to_path(file, temp_path)
 
         try:
@@ -164,37 +144,10 @@ async def upload_file(
                         next_actions=({"action": "检查目标主机 SSH 服务与凭据"},),
                     ).to_response()
 
-                # Determine target path and upload via SFTP. sftp.put is a
-                # blocking transfer (files can be GB-sized) — run the whole
-                # upload off the event loop so a large upload doesn't freeze
-                # every other request.
-                default_remote = remote_home_file_path(
-                    config_manager.get_ubuntu_user(config),
-                    safe_filename,
+                remote_path = await asyncio.to_thread(
+                    push_terminal_upload, ssh, temp_path, path, config["username"],
+                    ssh_manager.optimize_sftp_performance,
                 )
-
-                def _sftp_upload() -> str:
-                    if path and path.strip():
-                        target_dir = path.rstrip("/")
-                        try:
-                            with ssh.open_sftp() as sftp:
-                                ssh_manager.optimize_sftp_performance(sftp)
-                                try:
-                                    sftp.stat(target_dir)
-                                except OSError:
-                                    sftp.mkdir(target_dir)
-                                remote = f"{target_dir}/{safe_filename}"
-                                sftp.put(temp_path, remote)
-                                return remote
-                        except Exception as e:
-                            logger.error(f"Failed to upload to specified path: {e}")
-                    remote = default_remote
-                    with ssh.open_sftp() as sftp:
-                        ssh_manager.optimize_sftp_performance(sftp)
-                        sftp.put(temp_path, remote)
-                    return remote
-
-                remote_path = await asyncio.to_thread(_sftp_upload)
 
                 os.remove(temp_path)
 
@@ -205,11 +158,24 @@ async def upload_file(
             raise e
 
 
+    except OSError:
+        return ApiError.upstream_failure("终端文件传输失败，请检查目标目录和 SSH/SFTP 服务").to_response()
     except Exception:
         message = record_internal_error(
             logger, "上传终端文件", "Error uploading file"
         )
         return ApiError.internal(message).to_response()
+
+
+async def _upload_target_config(worker_id: str) -> dict:
+    worker, host, user, password, _serial = await asyncio.to_thread(
+        resolve_authorized_terminal_target, worker_id, mode="ssh"
+    )
+    return {
+        **config_manager.load_config(), "worker_id": worker,
+        "ubuntu_host": host, "ubuntu_user": user, "ubuntu_pswd": password,
+        "host": host, "username": user, "password": password,
+    }
 
 
 async def _upload_file_chunk(
@@ -220,6 +186,7 @@ async def _upload_file_chunk(
     file_name: str,
     file_size: int | None = None,
     resume: str | None = None,
+    *, config: dict | None = None, path: str = "", owner_id: str = "",
 ):
     """Handle chunked file upload."""
     try:
@@ -238,18 +205,16 @@ async def _upload_file_chunk(
                 400,
             )
 
-        # 消毒 upload_id，杜绝 session_dir 目录穿越写入；
-        # 恶意形态会被重写为安全 token（与固件分片上传同一防御）。
-        from foundation.uploads import safe_upload_token
-
-        upload_id = safe_upload_token(upload_id)
+        if config is None:
+            raise ApiError.forbidden("上传分片缺少已授权的终端目标")
+        session_dir = str(bind_upload_session(
+            upload_temp_root(), owner_id, upload_id,
+            upload_binding(config, path, file_name, total_chunks, file_size),
+        ))
 
         import time
         start_time = time.time()
-        logger.info(f"[ChunkUpload] Received chunk {chunk_index}/{total_chunks} for {upload_id}")
-
-        session_dir = os.path.join(upload_temp_root(), upload_id)
-        os.makedirs(session_dir, exist_ok=True)
+        logger.info("[ChunkUpload] Received chunk %s/%s", chunk_index, total_chunks)
 
         chunk_filename = f"chunk_{chunk_index:05d}"
         chunk_path = os.path.join(session_dir, chunk_filename)
@@ -308,7 +273,6 @@ async def _upload_file_chunk(
             merge_time = time.time() - merge_start
             logger.info(f"[ChunkUpload] Merged {total_chunks} chunks in {merge_time:.2f}s")
 
-            config = config_manager.load_config()
             async with ssh_manager.async_optional_connection(config) as ssh:
 
                 if not ssh:
@@ -327,21 +291,11 @@ async def _upload_file_chunk(
                     ).to_response()
 
                 try:
-                    remote_filename = os.path.basename(merged_file)
-                    remote_path = remote_home_file_path(
-                        config_manager.get_ubuntu_user(config),
-                        remote_filename,
-                    )
                     upload_start = time.time()
-
-                    def _sftp_upload_merged() -> None:
-                        # sftp.put 是阻塞传输（分块上传的本意就是 GB 级大文件），
-                        # 必须移出事件循环，同单文件路径的 _sftp_upload。
-                        with ssh.open_sftp() as sftp:
-                            ssh_manager.optimize_sftp_performance(sftp)
-                            sftp.put(merged_file, remote_path, confirm=True)
-
-                    await asyncio.to_thread(_sftp_upload_merged)
+                    remote_path = await asyncio.to_thread(
+                        push_terminal_upload, ssh, merged_file, path, config["username"],
+                        ssh_manager.optimize_sftp_performance,
+                    )
 
                     upload_time = time.time() - upload_start
                     file_size_mb = os.path.getsize(merged_file) / (1024 * 1024)
@@ -380,6 +334,8 @@ async def _upload_file_chunk(
             "upload_complete": False, "progress": round((len(uploaded_chunks) / total_chunks) * 100, 2),
         })
 
+    except ApiError as exc:
+        return exc.to_response()
     except Exception:
         if "merge_lock_path" in locals():
             try:

@@ -7,7 +7,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
-from features.redmine.daily_brief_repository import DailyBriefRepository, new_run_id
+from features.redmine.daily_brief_repository import (
+    DailyBriefIssueHistoryActiveError,
+    DailyBriefRepository,
+    new_run_id,
+)
 
 
 def make_run(owner="u1", date="2026-09-13", mode="nightly", **kw) -> DailyBriefRun:
@@ -734,6 +738,71 @@ class UpdateDisplaySubjectsTests(unittest.TestCase):
                 "rk3588 Android16 SSI GMS测试项支持----POWER问题",
             )
         self.assertEqual(self.repo.get_issue(run_a.run_id, 111).subject, "same title")
+
+
+class IssueHistoryDeletionTests(unittest.TestCase):
+    """按单号删除全部分析记录：范围、活跃保护与 owner 隔离。"""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = DailyBriefRepository(Path(self._tmp.name))
+
+    def _save_issue_run(self, owner="u1", issue_id=653167, mode_suffix=":full:abc"):
+        run = make_run(owner=owner, mode=f"issue:{issue_id}{mode_suffix}")
+        self.repo.create_run(run)
+        self.repo.upsert_issue(DailyBriefIssue(
+            run_id=run.run_id, issue_id=issue_id, buckets=[], subject="demo",
+        ))
+        return run
+
+    def test_delete_removes_every_run_of_issue_but_keeps_others(self):
+        full = self._save_issue_run(mode_suffix=":full:abc")
+        legacy = self._save_issue_run(mode_suffix="")
+        other_issue = self._save_issue_run(issue_id=999, mode_suffix=":full:def")
+        nightly = make_run(mode="nightly")
+        self.repo.create_run(nightly)
+
+        deleted = self.repo.delete_issue_history("u1", 653167)
+
+        self.assertEqual(deleted, 2)
+        self.assertIsNone(self.repo.get_run(full.run_id))
+        self.assertIsNone(self.repo.get_run(legacy.run_id))
+        self.assertIsNone(self.repo.get_issue(full.run_id, 653167))
+        # 其他单号与晨报 run 不受影响。
+        self.assertIsNotNone(self.repo.get_run(other_issue.run_id))
+        self.assertIsNotNone(self.repo.get_run(nightly.run_id))
+        self.assertIsNone(self.repo.latest_issue_run("u1", 653167))
+
+    def test_delete_is_owner_scoped_and_missing_issue_is_noop(self):
+        self._save_issue_run(owner="u1")
+        # 其他 owner 的同单号记录不受影响。
+        self.assertEqual(self.repo.delete_issue_history("u2", 653167), 0)
+        self.assertIsNotNone(self.repo.latest_issue_run("u1", 653167))
+        # 删除后再删为幂等 no-op。
+        self.assertEqual(self.repo.delete_issue_history("u1", 653167), 1)
+        self.assertEqual(self.repo.delete_issue_history("u1", 653167), 0)
+
+    def test_delete_refuses_while_issue_has_active_job(self):
+        run = self._save_issue_run()
+        self.repo.enqueue_job(run.run_id, kind="issue", issue_id=653167)
+        with self.assertRaises(DailyBriefIssueHistoryActiveError):
+            self.repo.delete_issue_history("u1", 653167)
+        # 活跃保护：记录保持完整。
+        self.assertIsNotNone(self.repo.get_run(run.run_id))
+        self.assertIsNotNone(self.repo.latest_issue_run("u1", 653167))
+
+    def test_delete_allows_terminal_job_runs(self):
+        run = self._save_issue_run()
+        job, _queued = self.repo.enqueue_job(run.run_id, kind="issue", issue_id=653167)
+        claimed = self.repo.claim_next_job("worker-a")
+        self.assertEqual(claimed["job_id"], job["job_id"])
+        self.assertTrue(self.repo.finish_job(
+            claimed["job_id"], "worker-a", claimed["lease_token"]
+        ))
+        deleted = self.repo.delete_issue_history("u1", 653167)
+        self.assertEqual(deleted, 1)
+        self.assertIsNone(self.repo.get_run(run.run_id))
 
 
 if __name__ == "__main__":

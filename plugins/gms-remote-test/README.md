@@ -50,6 +50,11 @@ Restart kkagent afterwards so the new MCP server process is spawned.
 
 ## Requirements
 
+With a selected profile, the Controller URL, token file and TLS settings come
+from that profile as one identity. Ambient `GMS_AUTH_TOKEN_FILE`,
+`GMS_CURL_CA_CERT` and `GMS_CURL_INSECURE` cannot replace those bindings.
+Without a profile, explicit environment configuration remains supported:
+
 - `GMS_REMOTE_TEST_SERVER` — Controller base URL, e.g. `https://CONTROLLER:5001`
   (required)
 - `GMS_CURL_CA_CERT` — trusted CA bundle for the Controller's TLS certificate;

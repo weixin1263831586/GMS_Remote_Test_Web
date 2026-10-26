@@ -39,30 +39,34 @@ def bundled_tesseract_env() -> dict[str, str]:
     root = _tesseract_dir()
     env = dict(os.environ)
     lib_path = str(root)
-    env["LD_LIBRARY_PATH"] = lib_path + (os.pathsep + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
+    for key in ("LD_LIBRARY_PATH", "PATH"):
+        paths = env[key].split(os.pathsep) if env.get(key) else []
+        env[key] = os.pathsep.join([lib_path, *(path for path in paths if path != lib_path)])
     env["TESSDATA_PREFIX"] = str(root / "tessdata")
-    env["PATH"] = lib_path + (os.pathsep + env["PATH"] if env.get("PATH") else "")
     return env
 
 
-# Tesseract 路径和环境在进程内只探测一次。
+# Cache only binary availability; repair environment variables on every call.
 _configured: bool | None = None
 
 
 def configure_bundled_tesseract() -> bool:
     """If a bundled tesseract exists, update process env so subprocess can find it.
 
-    Idempotent and memoized: the binary path and env are fixed, so this probes
-    the filesystem and mutates ``os.environ`` only once per process. Subsequent
-    calls return the cached result.
+    Idempotent: ``_configured`` 只记忆二进制探测结果（路径进程内固定）；
+    而 LD_LIBRARY_PATH/TESSDATA_PREFIX 这类全局副作用**不能**随之 memoize
+    ——测试或宿主代码里的 ``patch.dict(os.environ, clear=True)`` 恢复时会把
+    这里写入的键一并抹掉，之后所有 tesseract 子进程都会 127
+    （libtesseract.so.4 找不到）。因此每次调用都做 O(1) 检查并按需重设。
     """
     global _configured
-    if _configured is not None:
-        return _configured
-    if bundled_tesseract_cmd() is None:
-        _configured = False
+    if _configured is None:
+        _configured = bundled_tesseract_cmd() is not None
+    if not _configured:
         return False
-    for key, value in bundled_tesseract_env().items():
-        os.environ[key] = value
-    _configured = True
+    env = bundled_tesseract_env()
+    # Each variable may have been changed independently by the host. Repair
+    # all required values without copying unrelated environment variables.
+    for key in ("LD_LIBRARY_PATH", "PATH", "TESSDATA_PREFIX"):
+        os.environ[key] = env[key]
     return True

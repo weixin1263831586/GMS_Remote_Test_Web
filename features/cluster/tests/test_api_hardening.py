@@ -655,20 +655,32 @@ class ClusterApiHardeningTests(ClusterApiHardeningFixture, unittest.TestCase):
         self.assertFalse((self.repo.db_path.parent / "transfers" / transfer_id).exists())
 
     def test_file_browse_lists_controller_local_directory(self):
-        browse_dir = Path(self.temp.name).resolve() / "browse-me"
-        browse_dir.mkdir()
+        browse_root = Path(self.temp.name).resolve() / "suite-root"
+        browse_dir = browse_root / "browse-me"
+        browse_dir.mkdir(parents=True)
         (browse_dir / "gsi.img").write_bytes(b"img")
         local_worker_id = cluster_api.service().config.local_worker_id
         self._register_online_worker(local_worker_id)
 
-        response = self.client.get(
-            f"/api/cluster/files/browse?worker_id={local_worker_id}&path={browse_dir}"
-        )
+        # 本机桥与远端 Worker 的 file_browse 同一边界：浏览限制在
+        # 套件根内，套件根外的任意主机目录一律拒绝。
+        with patch(
+            "features.cluster.local_bridge._suite_roots",
+            return_value=[str(browse_root)],
+        ):
+            response = self.client.get(
+                f"/api/cluster/files/browse?worker_id={local_worker_id}&path={browse_dir}"
+            )
+            outside = self.client.get(
+                f"/api/cluster/files/browse?worker_id={local_worker_id}"
+                f"&path={Path(self.temp.name).resolve()}"
+            )
 
         self.assertEqual(response.status_code, 200, response.text)
         data = response.json()["data"]
         self.assertEqual(data["path"], str(browse_dir))
         self.assertEqual([item["name"] for item in data["files"]], ["gsi.img"])
+        self.assertTrue(400 <= outside.status_code < 500, outside.text)
 
     def test_get_command_redacts_wifi_password_for_owner(self):
         """wifi action 命令的 payload 返回给 owner 前必须打码密码。

@@ -333,15 +333,13 @@ def _require_agent_scope_when_agent(request: Request, scope: str) -> None:
     """Scope gate for Agent Service Tokens on cluster read endpoints.
 
     Mirrors the jobs_api jobs.read enforcement (ADR 0006) with the
-    /api/cluster/devices variant: the gate keys on the agent auth method
-    because human "user" sessions do not carry devices.read/suites.read via
-    ROLE_PERMISSIONS and must keep their legacy access; dev-mode anonymous
-    callers pass as before. An agent token without the scope fails closed.
+    /api/cluster/devices variant: machine and Agent principals need their
+    explicit capability; human sessions retain their existing access because
+    the user role does not carry devices.read/suites.read. Anonymous dev-mode
+    callers pass as before.
     """
-    if getattr(request.state, "auth_method", None) != "agent_token":
-        return
     user = get_authenticated_user(request)
-    if user is None or not user.has_permission(scope):
+    if user is not None and user.role == "agent_service" and not user.has_permission(scope):
         raise HTTPException(
             status_code=403,
             detail={
@@ -486,7 +484,19 @@ def _local_execute(command_type: str, payload: dict) -> dict:
             (Path(root) for root in _suite_roots() if Path(root).expanduser().exists()),
             None,
         )
-        return browse_directory(str(payload.get("path") or ""), default_path=default_dir)
+        # 与远端 Worker 的 file_browse 同一边界：浏览限制在套件根内，
+        # 防止本机桥把 Controller 任意主机路径回显给调用方。
+        allowed_roots = [
+            Path(root).expanduser() for root in _suite_roots()
+        ]
+        try:
+            return browse_directory(
+                str(payload.get("path") or ""),
+                default_path=default_dir,
+                allowed_roots=allowed_roots,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
     if command_type == "get_config":
         return _read_local_worker_config()
     if command_type == "update_config":
@@ -658,6 +668,7 @@ async def cluster_suite_search(
 
 @router.post("/suites/results")
 async def cluster_suite_results(
+    request: Request,
     worker_id: str = Query(...),
     suite_path: str = Query(...),
     _user: CurrentUser | None = Depends(require_authenticated_user_when_auth_required),
@@ -667,6 +678,8 @@ async def cluster_suite_results(
         parse_tradefed_list_results,
     )
 
+    _require_agent_scope_when_agent(request, "suites.read")
+    ensure_agent_worker_allowed(request, worker_id)
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
     result = await _run_worker_command(worker_id, "suite_action", {
         "action": "list_results", "suite_path": suite_path,

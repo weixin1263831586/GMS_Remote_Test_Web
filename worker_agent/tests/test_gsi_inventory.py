@@ -159,3 +159,39 @@ def test_worker_gsi_accepts_vendor_only_image(tmp_path: Path) -> None:
     assert argv[3] == ""
     assert argv[5:] == ["vendor_boot", str(vendor_img)]
     assert result["success"] is True
+
+
+def test_browse_directory_is_confined_to_allowed_roots(tmp_path: Path) -> None:
+    import pytest
+
+    allowed = tmp_path / "allowed"
+    (allowed / "inner").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    result = browse_directory(str(allowed), allowed_roots=[allowed])
+    assert result["path"] == str(allowed.resolve())
+
+    with pytest.raises(ValueError, match="outside Worker-allowed browse roots"):
+        browse_directory(str(outside), allowed_roots=[allowed])
+    # 未传 default_path 时回落主目录，同样不允许逃出白名单。
+    with pytest.raises(ValueError, match="outside Worker-allowed browse roots"):
+        browse_directory("", allowed_roots=[allowed])
+
+
+def test_copy_image_into_rejects_sources_outside_allowed_roots(tmp_path: Path) -> None:
+    import pytest
+
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    source = allowed / "system.img"
+    source.write_bytes(b"12345")
+
+    staged = copy_image_into(source, tmp_path / "out.img", 1024, allowed_roots=[allowed])
+    assert staged["size_bytes"] == 5
+
+    secret = tmp_path / "secret.img"
+    secret.write_bytes(b"x")
+    with pytest.raises(ValueError, match="outside Worker-allowed roots"):
+        copy_image_into(secret, tmp_path / "out2.img", 1024, allowed_roots=[allowed])
+    assert not (tmp_path / "out2.img").exists()

@@ -127,8 +127,13 @@ EVIDENCE QUALITY GATE (complete this silently before returning JSON):
 - List attachments and read every TEXT attachment (md/txt/log/json/csv) that
   may change the diagnosis via artifact read — e.g. a "缺失文件清单" checklist
   must be read and its key facts cited (source "attachment"), not guessed from
-  its filename. Image attachments cannot be rendered: describe them only from
-  journal text, and record unreadable screenshots in missing_information.
+  its filename. Image attachments (screenshots) are OCR'd by the platform at
+  snapshot time: for EVERY image artifact you MUST attempt at least one
+  artifact-read call on it (text_available=true makes this cheap); cite the
+  OCR text as evidence when it succeeds. Only after a read attempt failed or
+  returned empty may you write 截图读取失败 in missing_information — never
+  claim unreadable screenshots without an actual failed read attempt in this
+  session, and never guess their content from the filename alone.
 - Every evidence.reference must be an exact, existing journal ID, attachment ID,
   filename, issue field or history issue id. Each fact must say whether it is
   reporter-provided evidence or independently verified evidence when that
@@ -217,49 +222,99 @@ def prompt_template_for(entry: dict) -> str:
         return """Analyze Redmine issue #{issue_id}: {subject}
 Status: {status}. Attachments: {attachment_count}.
 Return your final analysis directly in Simplified Chinese Markdown (no JSON,
-enum labels or duplicate summaries). The FIRST paragraph is a standalone
-conclusion line: `**结论：**` + 2-3 sentences stating whether this is a real
-device/platform failure or a test-side/noise artifact, the exact failing point
-and the owner direction. Then structure the report with these level-2
-sections, in order (include the final 关键结论 section; do NOT output a dated
-journal timeline of who changed what — Redmine already shows it):
-1. "## 一、问题概况" — a compact Markdown table (one row per key); facts from
-   the issue and journals only, cell text short; paths, commands and test
-   names go in `code` spans. Test-failure issues (subject mentions
-   CTS/VTS/GTS/STS/LTP or a test-case fail) use rows: 单号, 报告人,
-   报告设备, 系统/构建版本, 测试套件/复现环境, 执行命令, 失败用例,
-   当前状态. Every other issue uses rows: 单号, 报告人, 报告设备,
-   系统/构建版本, 复现方式, 失败现象, 当前状态. Hard rules:
-   - 单号 is just `#<issue_id>`; never print evidence snapshot ids (`ev_*`),
-     Redmine numeric user ids, controller URLs or site-internal paths.
-   - 报告人 is the issue author (创建人) field; the FAE who triaged or is
-     currently assigned is NOT the reporter.
-   - 当前状态 is one short clause: status plus the current blocker or who
-     must act next (e.g. 等客户回传新 log / 等模组侧补丁).
+enum labels or duplicate summaries). After reading the issue and its latest
+journals, FIRST classify the issue nature: branch A — a real test/log failure
+(failing CTS/VTS/GTS/STS/LTP/ITS case, crash or log error); branch B — a
+consultation/configuration/process/certification/usage question with no
+failing test. The FIRST paragraph is a standalone conclusion line:
+`**结论：**` + 2-3 sentences naming the issue nature in plain words (a
+configuration consultation, a real test failure, a certification/process
+question — never the words 分支/branch), the decisive
+fact or the current answer, and the owner direction. Do NOT force failure
+wording onto branch B: state and answer the question directly instead of
+padding with "不是失败，而是…". Then structure the report with the matching
+branch below, in order (both branches end with the 关键结论 section; do NOT
+output a dated journal timeline of who changed what — Redmine already shows
+it). Write it like an engineer's handover note: short bullets, quoted
+evidence, plain 因果 explanations — NOT an audit document of wide tables (a
+compact table is allowed only where a row-per-item mapping is genuinely
+clearer, e.g. branch-B config values or the evidence segment overview):
+1. (branch A) "## 问题概况" — 2-5 bullets, not a table: 平台/环境 (device,
+   Android and suite versions in `code` spans), 现象 (which test/module fails
+   and how), 当前状态 (one clause: current blocker or who must act next).
+   Facts come from the issue and journals only. Shared hard rules (apply to
+   whichever 概况 section a branch uses):
+   - 单号 only appears in the title line as `#<issue_id>`; never print
+     evidence snapshot ids (`ev_*`), Redmine numeric user ids, controller
+     URLs or site-internal paths.
+   - 报告人 is the issue author (创建人); the FAE who triaged or is currently
+     assigned is NOT the reporter.
    - Issue/journal timestamps are UTC; convert to 北京时间（UTC+8）and state
-     the convention once where first used. Device-log timestamps stay as
-     recorded in the log.
-2. "## 二、失败链路还原（日志时间线）" — for test/log failures: when evidence
-   spans multiple log directories, runs or attachments, FIRST give a small
-   table marking each segment 真实失败/未执行/噪音, THEN a numbered timeline of
-   the decisive device/host log events with second-level timestamps, quoting
-   each decisive line verbatim in backticks (log lines stay original, your
-   narration is 中文). Explicitly label unrelated records (cache/UID warnings,
-   system-checker messages) as 噪音 so readers do not chase them. If no logs
-   exist, write 无可用日志，改为引用工单描述中的关键句。
-3. "## 三、机制分析（源码级）" — how the tested feature/mechanism actually
-   works, citing real host/device/AOSP source paths and key logic; when source
-   evidence is unavailable, describe the mechanism and say so instead of
-   inventing paths.
-4. "## 四、根因分析（按可能性排序）" — numbered hypotheses, most likely
-   first, each with how to verify it (config/file/log to check); mark each
-   hypothesis 待验证 unless backed by direct causal evidence.
-5. "## 五、本地设备现状" — only live device/tool output, with ✅/⚠️ markers;
-   if no device was inspected write "未检查本地设备。" and skip the rest.
-6. "## 六、建议下一步" — numbered concrete actions; adb/shell commands in a
-   fenced code block; state preconditions explicitly (SSI/GRF, dpi, version).
-7. "## 关键结论" — bullets labeled 事实/推断/待验证 with real observed
-   Controller evidence references; never invent evidence IDs.
+     the convention once. Device-log timestamps stay as recorded.
+2. (branch A) "## 失败现场" — when test reports/logs exist: ONE fenced ```text block
+   quoting the decisive failure verbatim (assertion, stack or failing log
+   lines, original language), then 2-4 sentences of plain-language reading:
+   what this failure actually is ("这不是 X，而是 Y"), which phase it happened
+   in (setup/test/tearDown), what the assertion really checks. With no logs,
+   quote the key sentence from the issue description instead.
+3. (branch A) "## 关键定性" — 2-4 numbered findings, most decision-relevant first. Each
+   finding is ONE bold causal claim + its evidence chain (journal facts,
+   source paths with line numbers from your own source-evidence calls).
+   State unproven parts inline as 待验证. This carries the mechanism and
+   root-cause substance — findings, not hypothesis essays.
+4. (branch A) "## 排查与证据" — only when evidence spans multiple runs/attachments: a
+   small table marking each segment 真实失败/未执行/噪音, then the decisive
+   device/host log timeline with second-level timestamps, quoting each
+   decisive line verbatim (log lines stay original, narration is 中文).
+   Label unrelated records (cache/UID warnings, system-checker messages) as
+   噪音. If the failure is single-run and already quoted in 失败现场, keep
+   this section to a few bullets — never re-quote the same lines.
+5. (branch A; also usable in branch B when live device calls returned data)
+   "## 本地设备现状" — only live device/tool output, with ✅/⚠️ markers; if
+   no device was inspected, omit this section entirely.
+6. (both branches) "## 建议处理路径" — numbered concrete actions ordered by what to do first;
+   flaky qualification guidance (rerun counts, what to capture when it fails:
+   logcat filters, /proc or dumpsys checks); adb/shell commands in a fenced
+   code block; state preconditions explicitly (SSI/GRF, dpi, version). When
+   a reply to the customer is expected, add 回复客户要点 bullets.
+7. (both branches) "## 关键结论" — bullets labeled 事实/推断/待验证 with real observed
+   Controller evidence references; never invent evidence IDs. End with one
+   final line `一句话：` + a single-sentence wrap-up of the verdict and next
+   step.
+BRANCH B (consultation/configuration/process/certification/usage question
+with no failing test) — use EXACTLY these section titles, in this order; do
+NOT reuse branch-A titles (问题概况/失败现场/关键定性/排查与证据) for a
+branch-B issue, and NEVER mention the words 分支/branch or any other
+prompt-internal structure terminology in the report itself:
+1. "## 工单概况" — a compact two-column table (项目/内容): 提出方 (customer
+   side), 处理链 (hand-off chain of who triaged/answered, current owner),
+   时间 (created date and last update, 北京时间), 平台 (SoC/Android/认证
+   context), 当前状态 (one clause: answered/closed/pending whom). Follow it
+   with one short paragraph 客户问题 restating what the customer actually
+   asks, and — when the customer pasted reference configs/macros — list
+   them as bullets with `code` spans.
+2. "## 处理结论（按讨论时间线）" — numbered substantive conclusions in
+   chronological order, one per real decision or answer (merge pure status
+   changes and hand-offs): 日期（北京时间）+ 人员与角色（客户侧/支持侧）+
+   one-sentence conclusion; quote the decisive journal sentence verbatim
+   with [journal:ID] when a point depends on it. This section replaces a
+   raw journal changelog — Redmine already shows the raw stream.
+3. "## 最终结论" — the decisive answer so far (keep this title even when
+   some items stay 未决). For configuration questions use a small table
+   (变量/生效值/说明) plus the one property/step that must be explicitly
+   added; quote the final deciding reply verbatim with its date and author.
+   Mark 未决/待确认 items inline and name who must close them.
+4. "## 核心要点" — 3-6 bullets: the scenario distinction (why the obvious
+   precedent configs do or do not apply), the underlying mechanism in one
+   plain causal sentence, how to verify (concrete tool/command), ticket
+   status / who holds the ball now; optionally one bullet on
+   history-search outcome. No repetition of the 最终结论 table.
+5. "## 建议处理路径" — same rules as branch A, including 回复客户要点 bullets
+   when a reply to the customer is expected.
+6. "## 关键结论" — same as branch A, including the `一句话：` final line.
+Keep the whole report under ~2500 字: bullets and short paragraphs over wide
+tables (justified tables: the branch-B 当前结论 values and the evidence
+segment overview).
 DIAGNOSTIC REASONING REQUIREMENTS:
 - Separate the observed failure from its cause and owner. `Process crashed`
   proves an instrumentation run failed, not whether the test APK, runner,
@@ -281,6 +336,16 @@ DIAGNOSTIC REASONING REQUIREMENTS:
   and a decision rule for each hypothesis. Do not prescribe package upgrades
   without a verified version/stack relationship. Do not invent execution
   commands from module names; label commands as proposed, not observed.
+- CLASSIFY the issue's true nature with a test-correctness check before
+  assigning 测试侧/环境侧 wording. A CTS/GMS/.security check that flags
+  well-known signing keys, debuggable builds, missing certifications or
+  visible personal data is the test doing its job: the defect is real and
+  ships with the image (出厂签名/配置缺陷), even when the immediate customer
+  friction is a hard-to-run fix script or a missed build step. Never demote
+  such findings to 测试侧/使用侧 noise because the fix path was bumpy; name
+  BOTH the image defect (primary) and the execution difficulty (secondary).
+  Reserve 测试侧/环境侧 for failures where the same device+build passes on a
+  different host or the assertion itself is wrong.
 Cite actual issue/journal/attachment/source references where relevant — cite
 journal ids inline like [journal:ID] when a fact depends on one, but never as
 a standalone timeline section. Prefer tables and lists over prose; keep the
@@ -302,6 +367,14 @@ chapter, applicable_versions and last_verified inline, e.g. 背景
 Reading long artifacts: prefer gms_rt_redmine_artifact_read with offset/limit
 paging (continue from the previous offset) instead of re-reading from the
 start; never re-read the same window twice.
+ATTACHMENT READS (mandatory): read every text attachment that may change the
+diagnosis. Image attachments (screenshots) are OCR'd by the platform at
+snapshot time — for EVERY image artifact you MUST attempt at least one
+artifact-read call (gms_rt_redmine_artifact_read); when it succeeds, cite the
+OCR text as evidence. Only after a failed or empty read attempt in this
+session may you write 截图读取失败 in missing_information — never claim
+unreadable screenshots without an actual failed read attempt, and never guess
+their content from the filename alone.
 
 Read the current issue and its latest journals first, then relevant attachments.
 Use registered read-only GMS MCP tools directly. The runtime Evidence Gate can

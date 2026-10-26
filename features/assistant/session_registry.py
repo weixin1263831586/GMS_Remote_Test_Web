@@ -10,6 +10,7 @@ pre_actions 密码）；消息/步骤等完整 UI 状态仍是可丢弃的。
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from datetime import datetime
@@ -19,6 +20,7 @@ from typing import Any
 from fastapi import Request
 
 from features.assistant import session_store
+from features.users import owner_id_from_request
 
 
 AGENT_SESSION_TTL_SECONDS = 6 * 60 * 60
@@ -141,6 +143,57 @@ async def cleanup_sessions() -> None:
             session_store.drop_anchor(sid)
         except Exception:
             pass
+
+
+_logger = logging.getLogger(__name__)
+
+
+def monitor_run_is_current(session: dict[str, Any], monitor_token: str | None) -> bool:
+    """仅当 active_run 仍是本监控任务登记的那一轮时才允许改共享状态。
+
+    同一会话连续提交新计划时，旧监控任务的取消回调可能晚于新一轮
+    ``active_run`` 注册（外部评审报告项），旧任务据此识别自己已过期，
+    不清空新任务的 active_run / 恢复锚点。恢复会话没有 token（锚点未
+    持久化该字段），以 None == None 视为匹配。
+    """
+    return (session.get("active_run") or {}).get("monitor_token") == monitor_token
+
+
+def save_session_anchor(session: dict[str, Any]) -> None:
+    """Persist the crash-recovery anchor，失败时显式标示「不可恢复」。
+
+    持久化失败不能静默降级：Controller 重启后的恢复保证已失效，
+    必须在日志与会话诊断里可见（外部评审报告项）。
+    """
+    try:
+        session_store.save_anchor(session)
+    except Exception:
+        _logger.warning(
+            "保存 Agent 会话恢复锚点失败，Controller 重启后该会话不可恢复",
+            exc_info=True,
+        )
+        session["recovery_anchor_failed"] = True
+
+
+def clear_session_anchor(session: dict[str, Any]) -> None:
+    try:
+        session_store.drop_anchor(session.get("session_id") or "")
+        session.pop("recovery_anchor_failed", None)
+    except Exception:
+        _logger.warning("清理 Agent 会话恢复锚点失败", exc_info=True)
+
+
+def owner_id_from_request_shim(request_shim: Any) -> str:
+    """Resolve the ADR 0010 owner from a request-like object, tolerantly.
+
+    监控/恢复路径可能拿到没有 ``state`` 的极简请求对象（回归测试 shim、
+    恢复会话的重建监控），此时返回空串，由调用方回退会话持久化的
+    ``owner_id``，不因缺请求身份而中断监控。
+    """
+    try:
+        return str(owner_id_from_request(request_shim) or "")
+    except (AttributeError, TypeError):
+        return ""
 
 
 def session_from_anchor(anchor: dict[str, Any]) -> dict[str, Any] | None:

@@ -470,9 +470,10 @@ gms-rt-agent-enroll CODE --profile production
             },
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("GMS_CURL_CA_CERT", result.stdout)
-        self.assertIn("GMS_CURL_INSECURE=1", result.stdout)
-        self.assertIn("被忽略", result.stdout)
+        diagnostics = result.stdout + result.stderr
+        self.assertIn("GMS_CURL_CA_CERT", diagnostics)
+        self.assertIn("GMS_CURL_INSECURE=1", diagnostics)
+        self.assertIn("被忽略", diagnostics)
         # The profile's own TLS verdicts win over the dropped globals.
         self.assertEqual((state_root / "production.token").read_text().strip(), "enrolled")
 

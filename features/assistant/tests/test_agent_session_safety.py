@@ -154,6 +154,104 @@ def test_cleanup_sweeps_over_lifetime_monitoring_sessions():
         api._agent_monitor_tasks.update(saved_tasks)
 
 
+def test_stale_monitor_cancellation_does_not_clobber_new_run():
+    """旧监控任务的取消回调晚于新一轮注册时，不得清空新任务的共享状态。
+
+    回归覆盖外部评审报告项：同一会话连续提交新测试计划时，
+    ``_execute_plan`` 取消旧监控任务；若旧任务的 CancelledError 清理
+    无条件改写会话状态，会把新一轮的 active_run / 恢复锚点清掉。
+    """
+    from features.assistant import api, session_registry
+
+    plan = {"request": {"devices": ["ABC"], "test_suite": "cts"}}
+    session = {
+        "session_id": "s-race",
+        "client_id": "c@192.0.2.9",
+        "owner_id": "owner-1",
+        "status": "monitoring",
+        "messages": [],
+        "steps": [],
+        "pending_plan": None,
+        "active_run": {
+            "plan": plan,
+            "cluster_job_id": "job-old",
+            "attempt_id": "a1",
+            "worker_id": "w1",
+            "monitor_token": "gen-old",
+        },
+        "created_at": "2026-01-01T00:00:00",
+        "updated_at": "2026-01-01T00:00:00",
+    }
+    api._agent_sessions["s-race"] = session
+
+    saved_sessions = dict(api._agent_sessions)
+    saved_tasks = dict(api._agent_monitor_tasks)
+
+    class _FakeRepository:
+        def get_job(self, job_id):
+            return {"cluster_job_id": job_id, "status": "running"}
+
+    class _FakeService:
+        repository = _FakeRepository()
+
+    async def scenario():
+        request = _agent_request("owner-1")
+        shim = api.AgentRequestShim(request)
+        with patch(
+            "features.cluster.get_cluster_service", return_value=_FakeService()
+        ):
+            old_task = asyncio.create_task(
+                api._monitor_agent_run("s-race", shim, "gen-old")
+            )
+            # 让旧任务进入集群任务轮询（内部 await sleep 挂起）。
+            await asyncio.sleep(0.01)
+
+            with patch.object(
+                api, "_latest_report_for_client", return_value=None
+            ), patch.object(
+                api, "_run_pre_actions", new=AsyncMock(return_value={"success": True})
+            ), patch.object(
+                api, "_start_test_with_plan",
+                new=AsyncMock(return_value={"success": True}),
+            ), patch.object(
+                api, "_monitor_agent_run", new=AsyncMock()
+            ), patch.object(
+                session_registry.session_store, "save_anchor"
+            ) as save_anchor, patch.object(
+                session_registry.session_store, "drop_anchor"
+            ) as drop_anchor:
+                await api._execute_plan(session, request, dict(plan))
+                new_token = session["active_run"]["monitor_token"]
+                assert new_token != "gen-old"
+                # 让旧任务的取消回调真正执行（晚于新任务注册的竞争顺序）。
+                try:
+                    await asyncio.wait_for(old_task, timeout=2)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+                return old_task, new_token, save_anchor, drop_anchor
+
+    try:
+        old_task, new_token, save_anchor, drop_anchor = asyncio.run(scenario())
+        # 新一轮监控状态未被旧任务取消清理覆盖。
+        assert session["status"] == "monitoring", session["status"]
+        assert session["active_run"]["monitor_token"] == new_token
+        # 旧任务过期清理不得删除新一轮恢复锚点。
+        drop_anchor.assert_not_called()
+        # 新一轮 active_run 注册时锚点照常刷新。
+        save_anchor.assert_called()
+        # 任务表里登记的是新一轮任务，旧任务退出时不得误删。
+        current = api._agent_monitor_tasks.get("s-race")
+        assert current is not None and current is not old_task
+    finally:
+        task = api._agent_monitor_tasks.pop("s-race", None)
+        if task and not task.done():
+            task.cancel()
+        api._agent_sessions.clear()
+        api._agent_sessions.update(saved_sessions)
+        api._agent_monitor_tasks.clear()
+        api._agent_monitor_tasks.update(saved_tasks)
+
+
 def test_plan_echo_hides_pre_actions_password_but_keeps_it_server_side():
     from features.assistant import api
 

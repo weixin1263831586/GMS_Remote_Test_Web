@@ -3,8 +3,14 @@
 设计要点（外部深度评审后）：
 
 - 自由文本键值对分「带引号」和「不带引号」两段匹配：带引号的值取完整
-  引号内容（可含空格），不再在第一个空格处截断；
-- 能解析为 JSON 的字符串先走结构化脱敏，等价于按对象逐字段处理；
+  引号内容（可含空格与转义引号 ``\"``），不再在第一个空格或转义引号处
+  截断；
+- 能解析为 JSON 的字符串先走结构化脱敏；日志文本中嵌入的 JSON 片段
+  （「错误前缀 + JSON 片段」）也先提取、解析，再做结构化脱敏；解析失败
+  才退回保守的自由文本正则；
+- 自由文本键名与结构化路径共用同一套敏感字段名（子串匹配，
+  ``access_token`` 等复合键同样命中）与 token 计数豁免，两套规则不再
+  各自维护；
 - 仅统计语义的 token 计数字段（``input_tokens``、``token_count`` 等）
   不是凭据，保持原始类型与数值。
 """
@@ -16,23 +22,7 @@ import re
 from typing import Any
 
 
-# 自由文本脱敏只认这些键名；token 计数字段单独排除（见下方）。
-_SENSITIVE_NAME_PATTERN = (
-    r'(?:password|passwd|pswd|token|secret|api[_-]?key|apikey|authorization|cookie|pair_code)'
-)
-# key["\'']?\s*[:=]\s*"..."：值取到匹配的收尾引号为止，允许内部空格。
-# 转义引号（\"）不在此正则处理范围，由 JSON 结构化路径兜底。
-_QUOTED_ASSIGNMENT_PATTERN = re.compile(
-    r'(?i)(\b' + _SENSITIVE_NAME_PATTERN + r'\b["\']?\s*[:=]\s*)(["\'])(.*?)\2'
-)
-_UNQUOTED_ASSIGNMENT_PATTERN = re.compile(
-    r'(?i)(\b' + _SENSITIVE_NAME_PATTERN + r'\b["\']?\s*[:=]\s*)([^\s,;}&"\']+)'
-)
-_AUTHORIZATION_VALUE_PATTERN = re.compile(
-    r'(?i)\b(Bearer|Basic)\s+[A-Za-z0-9._~+\-/=]+'
-)
-_OPENAI_STYLE_SECRET_PATTERN = re.compile(r'\bsk-[A-Za-z0-9_-]+\b')
-_URL_CREDENTIAL_PATTERN = re.compile(r'(?i)(https?://)[^/@\s]+@')
+# 结构化与自由文本路径共用的敏感字段名（对键名做子串匹配）。
 _SENSITIVE_FIELD_PATTERN = re.compile(
     r'password|passwd|pswd|token|secret|api[_-]?key|authorization|cookie|pair[_-]?code|private[_-]?key',
     re.IGNORECASE,
@@ -47,6 +37,23 @@ _TOKEN_COUNTER_FIELD_PATTERN = re.compile(
     r'(?:_|$)',
     re.IGNORECASE,
 )
+# Identify each complete key once, then test its sensitivity. Starting inside
+# a word would retry every suffix of long identifiers and make masking O(n²).
+_ASSIGNMENT_KEY_PATTERN = re.compile(r'''(?<![\w-])(?P<key>[\w-]+)["']?\s*[:=]\s*''')
+_QUOTED_VALUE_PATTERN = re.compile(
+    r'''(?P<quote>["'])(?:\\[\s\S]|(?!(?P=quote))[^\\])*(?P<close>(?P=quote))?'''
+)
+_UNQUOTED_VALUE_PATTERN = re.compile(r'''[^\s,;}&"']+''')
+_AUTHORIZATION_VALUE_PATTERN = re.compile(
+    r'(?i)\b(Bearer|Basic)\s+[A-Za-z0-9._~+\-/=]+'
+)
+_OPENAI_STYLE_SECRET_PATTERN = re.compile(r'\bsk-[A-Za-z0-9_-]+\b')
+_URL_CREDENTIAL_PATTERN = re.compile(r'(?i)(https?://)[^/@\s]+@')
+_PLAIN_LOG_TAG_PATTERN = re.compile(r'\[[\w -]+\]')
+_MAX_REDACTION_DEPTH = 32
+_MAX_JSON_FRAGMENT_CHARS = 64 * 1024
+_MAX_JSON_TOTAL_CHARS = 256 * 1024
+_MAX_JSON_FRAGMENTS = 32
 
 
 def _field_is_sensitive(name: str) -> bool:
@@ -60,29 +67,34 @@ def _is_token_counter_field(name: str) -> bool:
 def redact_sensitive_data(value: Any, *, known_values=(), mask: str = '***') -> Any:
     """Copy display data, masking secret fields and their occurrences in text."""
     secrets = {str(item) for item in known_values if item}
+    json_budget = {'attempts': _MAX_JSON_FRAGMENTS, 'chars': _MAX_JSON_TOTAL_CHARS}
 
-    def collect(item, secret=False):
+    def collect(item, secret=False, depth=0):
+        if depth >= _MAX_REDACTION_DEPTH:
+            return
         if isinstance(item, dict):
             for key, child in item.items():
-                collect(child, secret or _field_is_sensitive(str(key)))
+                collect(child, secret or _field_is_sensitive(str(key)), depth + 1)
         elif isinstance(item, (list, tuple)):
             for child in item:
-                collect(child, secret)
+                collect(child, secret, depth + 1)
         elif secret and isinstance(item, (str, int)) and item:
             secrets.add(str(item))
 
-    def public(item):
+    def public(item, depth=0):
+        if depth >= _MAX_REDACTION_DEPTH:
+            return mask
         if isinstance(item, dict):
             return {key: (mask if child else '') if _field_is_sensitive(str(key))
-                    else public(child) for key, child in item.items()}
+                    else public(child, depth + 1) for key, child in item.items()}
         if isinstance(item, (list, tuple)):
-            return [public(child) for child in item]
+            return [public(child, depth + 1) for child in item]
         if isinstance(item, str):
             for secret in ordered_secrets:
                 item = item.replace(secret, mask)
-            json_view = _redact_json_string(item, public)
-            if json_view is not None:
-                return json_view
+            item = _redact_embedded_json_fragments(
+                item, lambda parsed: public(parsed, depth + 1), json_budget, mask,
+            )
             return redact_sensitive_text(item)
         return item
 
@@ -91,23 +103,94 @@ def redact_sensitive_data(value: Any, *, known_values=(), mask: str = '***') -> 
     return public(value)
 
 
-def _redact_json_string(value: str, public) -> str | None:
-    """Redact strings that parse as a JSON object/array via the structured path.
+_JSON_DECODER = json.JSONDecoder()
 
-    命中时返回重新序列化的脱敏文本；不是 JSON 或解析失败时返回 None，
-    交回自由文本正则路径。整段字符串与 JSON 完全一致（允许首尾空白），
-    避免把「错误信息里提到 JSON 片段」误判为结构化数据。
+
+def _bounded_json_end(value: str, start: int, max_chars: int) -> int | None:
+    """Find a complete container without giving unbounded input to the decoder."""
+    closing: list[str] = []
+    quoted = escaped = False
+    for index in range(start, min(len(value), start + max_chars)):
+        char = value[index]
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif char in '{[':
+            closing.append('}' if char == '{' else ']')
+            if len(closing) > _MAX_REDACTION_DEPTH:
+                return None
+        elif char in '}]':
+            if not closing or closing.pop() != char:
+                return None
+            if not closing:
+                return index + 1
+    return None
+
+
+def _redact_embedded_json_fragments(value: str, public, budget: dict[str, int], mask: str) -> str:
+    """Extract and structurally redact JSON fragments embedded in log text.
+
+    「错误前缀 + JSON 片段」类文本整体不进入 JSON 解析分支，此前只能
+    退回自由文本正则；这里在每个 ``{``/``[`` 处先界定完整 JSON 容器，
+    再尝试解析。扫描深度、单片段长度及一次调用的总工作量均有限制；
+    超限或不完整的剩余内容整体遮蔽，保留外层审计事件及其上下文。
     """
-    stripped = value.strip()
-    if not stripped or stripped[0] not in '{[':
-        return None
-    try:
-        parsed = json.loads(stripped)
-    except (ValueError, TypeError):
-        return None
-    if not isinstance(parsed, (dict, list)):
-        return None
-    return json.dumps(public(parsed), ensure_ascii=False)
+    pieces: list[str] = []
+    cursor = 0
+    index = 0
+    length = len(value)
+    while index < length:
+        if value[index] not in '{[':
+            index += 1
+            continue
+        pieces.append(value[cursor:index])
+        max_chars = min(_MAX_JSON_FRAGMENT_CHARS, budget['chars'])
+        end = _bounded_json_end(value, index, max_chars) if budget['attempts'] > 0 else None
+        if end is None:
+            pieces.append(mask)
+            return ''.join(pieces)
+        fragment = value[index:end]
+        budget['attempts'] -= 1
+        budget['chars'] -= len(fragment)
+        try:
+            parsed = _JSON_DECODER.decode(fragment)
+            pieces.append(json.dumps(public(parsed), ensure_ascii=False))
+        except (ValueError, RecursionError):
+            # Keep ordinary bracketed tags (e.g. [WARN]); invalid objects
+            # cannot safely expose values hidden behind escaped JSON keys.
+            pieces.append(redact_sensitive_text(fragment) if _PLAIN_LOG_TAG_PATTERN.fullmatch(fragment) else mask)
+        cursor = index = end
+    pieces.append(value[cursor:])
+    return ''.join(pieces)
+
+
+def _redact_assignments(value: str) -> str:
+    pieces: list[str] = []
+    cursor = position = 0
+    while match := _ASSIGNMENT_KEY_PATTERN.search(value, position):
+        position = match.end()
+        if not _field_is_sensitive(match.group('key')):
+            # Keep scanning inside ordinary values: a message may itself
+            # contain a password assignment that must still be masked.
+            continue
+        quoted = _QUOTED_VALUE_PATTERN.match(value, position)
+        secret = quoted or _UNQUOTED_VALUE_PATTERN.match(value, position)
+        if secret is None:
+            continue
+        pieces.append(value[cursor:position])
+        if quoted:
+            pieces.append(quoted.group('quote') + '***REDACTED***' + (quoted.group('close') or ''))
+        else:
+            pieces.append('***REDACTED***')
+        cursor = position = secret.end()
+    pieces.append(value[cursor:])
+    return ''.join(pieces)
 
 
 def redact_sensitive_text(value: object) -> str:
@@ -122,11 +205,4 @@ def redact_sensitive_text(value: object) -> str:
         redacted,
     )
     redacted = _OPENAI_STYLE_SECRET_PATTERN.sub('***REDACTED***', redacted)
-    redacted = _QUOTED_ASSIGNMENT_PATTERN.sub(
-        lambda match: f'{match.group(1)}{match.group(2)}***REDACTED***{match.group(2)}',
-        redacted,
-    )
-    return _UNQUOTED_ASSIGNMENT_PATTERN.sub(
-        lambda match: f'{match.group(1)}***REDACTED***',
-        redacted,
-    )
+    return _redact_assignments(redacted)

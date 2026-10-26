@@ -6,7 +6,7 @@ set -o pipefail
 # propagated here (GMS_RT_VERSION) by tools/scripts/agent/release.py.
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.59"
+GMS_RT_VERSION="0.22.61"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -124,11 +124,24 @@ fi
 if [ "$_gms_profile_mode" != "none" ] && [ "$_gms_profile_mode" != "local" ]; then
     GMS_RT_PROFILE="${_gms_profile_context[1]}"
     SERVER_URL="${_gms_profile_context[2]}"
-    [ -n "${GMS_CURL_CA_CERT:-}" ] || GMS_CURL_CA_CERT="${_gms_profile_context[3]}"
+    if [ "$_gms_profile_mode" = "profile" ] || [ "$_gms_profile_mode" = "direct" ] || [ "$_gms_human_session" = "1" ]; then
+        # Controller, credential and TLS policy form one profile identity
+        # (ADR 0003). Ambient credentials must not cross Controller boundaries.
+        if [ -n "${GMS_CURL_CA_CERT:-}" ] && [ "$GMS_CURL_CA_CERT" != "${_gms_profile_context[3]}" ]; then
+            printf '%s\n' "WARNING: 全局 GMS_CURL_CA_CERT 与所选 profile 不一致，已被忽略。" >&2
+        fi
+        if [ "${GMS_CURL_INSECURE:-0}" = "1" ] && [ "${_gms_profile_context[5]}" != "true" ]; then
+            printf '%s\n' "WARNING: 所选 profile 未开启 insecure，全局 GMS_CURL_INSECURE=1 被忽略。" >&2
+        fi
+        GMS_CURL_CA_CERT="${_gms_profile_context[3]}"
+        GMS_AUTH_TOKEN_FILE="${_gms_profile_context[4]}"
+        GMS_CURL_INSECURE=0
+    else
+        [ -n "${GMS_CURL_CA_CERT:-}" ] || GMS_CURL_CA_CERT="${_gms_profile_context[3]}"
+        [ -n "${GMS_AUTH_TOKEN_FILE:-}" ] || GMS_AUTH_TOKEN_FILE="${_gms_profile_context[4]}"
+    fi
     if [ "$_gms_human_session" = "1" ]; then
         GMS_AUTH_TOKEN_FILE=""
-    else
-        [ -n "${GMS_AUTH_TOKEN_FILE:-}" ] || GMS_AUTH_TOKEN_FILE="${_gms_profile_context[4]}"
     fi
     if [ -z "${GMS_CURL_CA_CERT:-}" ] \
         && [ "${_gms_profile_context[5]}" = "true" ]; then

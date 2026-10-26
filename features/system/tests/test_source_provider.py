@@ -173,6 +173,19 @@ class LocalGitProviderTests(unittest.TestCase):
         result = self.provider.search("main", "Service", path_filter="framework")
         self.assertEqual(result["total"], 1)
 
+    def test_search_preserves_special_filenames_and_signed_reads(self):
+        names = ["vendor:chip.c", "tab\tfile.c", "new\nline.c", "中文.c"]
+        for name in names:
+            (self.repo / "framework" / name).write_text("special_filename_marker\n", encoding="utf-8")
+        _run_git(self.repo, "add", ".")
+        _run_git(self.repo, "commit", "-q", "-m", "special filenames")
+        result = self.provider.search("main", "special_filename_marker")
+        self.assertEqual({item["path"] for item in result["matches"]}, {"framework/" + n for n in names})
+        for match in result["matches"]:
+            self.assertEqual(match["line"], 1)
+            read = self.provider.read_signed(match["result_id"])
+            self.assertEqual(read["lines"][0]["text"], "special_filename_marker")
+
 
 class SdkApiTests(unittest.TestCase):
     """source_api HTTP 层：scope 与未配置 provider 的降级。"""

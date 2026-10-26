@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from foundation.outbound import ResolvedOutboundTarget
+from foundation.outbound import ResolvedOutboundTarget, UnsafeOutboundURLError
 from worker_agent.android_inspection import _aapt2_path
 from worker_agent.config import WorkerConfig
 from worker_agent.inventory import (
@@ -735,7 +735,11 @@ def _getaddrinfo_response(address):
     "169.254.169.254", "100.64.0.7", "0.0.0.0",
 ])
 def test_suite_download_rejects_hosts_resolving_to_local_addresses(tmp_path, address):
-    """SSRF 防护：下载主机解析到环回/私网/链路本地/CGNAT 等本地侧地址时拒绝。"""
+    """SSRF 防护：下载主机解析到环回/私网/链路本地/CGNAT 等本地侧地址时拒绝。
+
+    断言明确的异常类型（UnsafeOutboundURLError），不绑定具体英文文案
+    （外部评审报告项：文案已随安全传输接口演进）。
+    """
     root = tmp_path / "suites"
     root.mkdir()
     config = WorkerConfig(worker_id="w", controller_url="https://controller", token="t",
@@ -748,8 +752,8 @@ def test_suite_download_rejects_hosts_resolving_to_local_addresses(tmp_path, add
             execute_suite_action(config, {
                 "action": "download_url", "url": "https://rebind.test/file.zip",
             })
-        except ValueError as exc:
-            assert "forbidden local address" in str(exc)
+        except UnsafeOutboundURLError as exc:
+            assert isinstance(exc, ValueError)
         else:
             raise AssertionError("expected local-address download rejection")
     assert not list(root.glob("*.zip"))
@@ -771,7 +775,7 @@ def test_controller_suite_download_exempts_configured_private_controller(tmp_pat
         "socket.getaddrinfo",
         return_value=_getaddrinfo_response("10.10.10.206"),
     ), patch(
-        "worker_agent.suite_actions.urllib.request.urlopen",
+        "worker_agent.suite_actions.open_outbound",
         return_value=io.BytesIO(b"suite"),
     ) as opened:
         execute_suite_action(config, {
@@ -794,16 +798,27 @@ def test_suite_download_part_file_carries_unique_suffix(tmp_path):
                           suite_roots=[root], data_root=tmp_path / "data")
     captured = []
 
-    def fake_urlopen(_request, timeout=None, context=None):
-        captured.extend(path.name for path in root.glob(".*.part"))
-        return io.BytesIO(b"archive")
+    def fake_open(_request, _target, *, timeout=None, context=None):
+        # open_outbound 先于 temporary.open("wb") 执行，此时 .part 尚未
+        # 创建；改为在首个读块时捕获，与「流式下载期间临时文件存在」的
+        # 原断言语义一致。
+        class _CaptureOnRead(io.BytesIO):
+            def read(self, *args):
+                if not captured:
+                    captured.extend(path.name for path in root.glob(".*.part"))
+                return super().read(*args)
+
+        return _CaptureOnRead(b"archive")
 
     with patch(
         "worker_agent.suite_actions.uuid.uuid4",
         return_value=SimpleNamespace(hex="0123abcd"),
     ), patch(
-        "worker_agent.suite_actions.urllib.request.urlopen",
-        side_effect=fake_urlopen,
+        "worker_agent.suite_actions.resolve_outbound_target",
+        side_effect=_download_target,
+    ), patch(
+        "worker_agent.suite_actions.open_outbound",
+        side_effect=fake_open,
     ):
         execute_suite_action(config, {
             "action": "download_url", "url": "https://example.test/suite.zip",

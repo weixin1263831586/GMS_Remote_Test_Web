@@ -40,7 +40,7 @@ def _tmp_store(tmp_path):
 
 
 def test_execute_plan_persists_anchor_with_job_link(tmp_path):
-    from features.assistant import api, session_store
+    from features.assistant import api, session_registry, session_store
 
     store = _tmp_store(tmp_path)
     session = {
@@ -74,7 +74,7 @@ def test_execute_plan_persists_anchor_with_job_link(tmp_path):
     session.setdefault("active_run", {}).update({
         "cluster_job_id": "job-9", "attempt_id": "a1", "worker_id": "w1",
     })
-    with patch.object(api.session_store, "default_sessions_path", return_value=store):
+    with patch.object(session_registry.session_store, "default_sessions_path", return_value=store):
         api._save_session_anchor(session)
 
     anchors = session_store.load_anchors(store)
@@ -107,7 +107,7 @@ def test_anchor_never_persists_pre_actions_password(tmp_path):
 
 
 def test_restored_session_rebuilds_monitoring_state_for_owner(tmp_path):
-    from features.assistant import api, session_store
+    from features.assistant import api, session_registry, session_store
 
     store = _tmp_store(tmp_path)
     session_store.save_anchor({
@@ -121,7 +121,7 @@ def test_restored_session_rebuilds_monitoring_state_for_owner(tmp_path):
         "updated_at": "2026-10-16T00:00:00",
     }, path=store)
 
-    with patch.object(api.session_store, "default_sessions_path", return_value=store):
+    with patch.object(session_registry.session_store, "default_sessions_path", return_value=store):
         rebuilt = api._restore_session("s-res", "c1")
         assert rebuilt is not None
         assert rebuilt["active_run"]["cluster_job_id"] == "job-7"
@@ -188,7 +188,7 @@ def test_recovered_session_without_plan_still_tracked_to_terminal(tmp_path):
 
 
 def test_get_agent_session_restores_and_resumes_monitoring(tmp_path):
-    from features.assistant import api, session_store
+    from features.assistant import api, session_registry, session_store
 
     store = _tmp_store(tmp_path)
     session_store.save_anchor({
@@ -203,7 +203,7 @@ def test_get_agent_session_restores_and_resumes_monitoring(tmp_path):
 
     request = _agent_request("user-42")
     with (
-        patch.object(api.session_store, "default_sessions_path", return_value=store),
+        patch.object(session_registry.session_store, "default_sessions_path", return_value=store),
         patch.object(api, "_monitor_agent_run", new=AsyncMock()),
     ):
         try:
@@ -231,7 +231,7 @@ def test_get_agent_session_restores_and_resumes_monitoring(tmp_path):
 
 
 def test_terminal_states_clear_anchor(tmp_path):
-    from features.assistant import api
+    from features.assistant import api, session_registry
 
     store = _tmp_store(tmp_path)
     session = {
@@ -243,7 +243,7 @@ def test_terminal_states_clear_anchor(tmp_path):
         "steps": [],
         "active_run": {"cluster_job_id": "job-3", "attempt_id": "a"},
     }
-    with patch.object(api.session_store, "default_sessions_path", return_value=store):
+    with patch.object(session_registry.session_store, "default_sessions_path", return_value=store):
         api._save_session_anchor(session)
         assert json.loads(store.read_text(encoding="utf-8"))["sessions"].get("s-term")
         session["active_run"] = None
@@ -259,3 +259,51 @@ def test_corrupt_store_loads_empty(tmp_path):
     assert session_store.load_anchors(store) == {}
     store.write_text("not json at all", encoding="utf-8")
     assert session_store.load_anchors(store) == {}
+
+
+def test_anchor_store_file_and_tmp_are_owner_only(tmp_path):
+    """锚点文件 0600：umask 022 下不得出现 0644（外部评审报告项）。"""
+    import os
+    import stat
+
+    from features.assistant import session_store
+
+    store = _tmp_store(tmp_path)
+    old_umask = os.umask(0o022)
+    try:
+        session_store.save_anchor(
+            {"session_id": "s-mode", "client_id": "c1", "owner_id": "u1"},
+            path=store,
+        )
+    finally:
+        os.umask(old_umask)
+    assert stat.S_IMODE(store.stat().st_mode) == 0o600
+    # 原子替换后不残留临时文件。
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_save_anchor_failure_marks_session_unrecoverable(caplog):
+    """持久化失败不再静默：日志提升为 warning，并在会话上标记不可恢复。"""
+    import logging
+
+    from features.assistant import api, session_registry
+
+    session = {"session_id": "s-fail", "client_id": "c1"}
+    with caplog.at_level(logging.WARNING, logger=api.logger.name), patch.object(
+        session_registry.session_store, "save_anchor", side_effect=OSError("disk full")
+    ):
+        api._save_session_anchor(session)
+    assert session.get("recovery_anchor_failed") is True
+    assert any("不可恢复" in record.message for record in caplog.records)
+
+
+def test_clear_anchor_success_resets_failure_flag():
+    from features.assistant import api
+
+    session = {
+        "session_id": "s-reset",
+        "client_id": "c1",
+        "recovery_anchor_failed": True,
+    }
+    api._clear_session_anchor(session)
+    assert "recovery_anchor_failed" not in session

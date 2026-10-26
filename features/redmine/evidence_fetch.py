@@ -42,6 +42,7 @@ from .evidence import (
     _same_origin,
     owner_evidence_store,
 )
+from .evidence_images import extract_image_ocr_text
 from .evidence_store import EvidenceStore
 from .evidence_zip import extract_zip_derived_text
 
@@ -402,6 +403,15 @@ class EvidenceFetcher:
                     self._atomic_write(self.store.resolve_internal(derived_rel), derived)
                 except (UnicodeDecodeError, OSError) as exc:
                     derived_error = f"派生 UTF-8 文本失败: {type(exc).__name__}"
+        elif kind == "image":
+            # 截图/图片附件 OCR 成可检索文本（best-effort）：分析链路经
+            # artifact_read 读派生文本，不再依赖 MCP 图片载荷。派生失败
+            # 与 zip 一样转 partial 并显性写入 errors，静默丢截图会直接
+            # 造成"取证未闭环"（2026-10 #656295/#655644 复盘）。
+            derived_rel, derived_error = await asyncio.to_thread(
+                extract_image_ocr_text,
+                self.store, self._atomic_write, artifact_id, snapshot_rel, absolute,
+            )
         elif kind == "archive" and data[:2] == b"PK":
             # zip 内文本成员（logcat /
             # test_result.xml 等）派生成可检索文本，命中可以

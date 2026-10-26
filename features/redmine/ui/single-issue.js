@@ -15,6 +15,8 @@ var singleIssueIndexedHistoryId = '';
 var singleIssueIndexedHistoryTimer = null;
 var singleIssueHistoryRunTimers = {};
 var singleIssueStopRequested = {};
+// 已提交删除请求的 issue：防止轮询重绘期间重复点击/重复请求。
+var singleIssueDeleteRequested = {};
 var SINGLE_ISSUE_ANALYSIS_PAGE_SIZE = 8;
 var singleIssueAnalysisHint = '';
 
@@ -234,7 +236,8 @@ function renderSingleIssueAnalysisHistory() {
         + '<option value="incremental">增量</option><option value="full">全量</option></select>'
         + (running
           ? '<button class="ka-btn" data-single-issue-cancel="' + esc(run.run_id) + '"' + (stopping ? ' disabled' : '') + '>' + (stopping ? '停止中…' : '停止分析') + '</button>'
-          : '<button class="ka-btn" data-single-issue-reanalyze="' + esc(run.run_id) + '" data-single-issue-id="' + esc(issue.issue_id) + '">重新分析</button>')
+          : '<button class="ka-btn danger" data-single-issue-delete="' + esc(issue.issue_id) + '" data-single-issue-delete-run="' + esc(run.run_id) + '">删除</button>'
+            + '<button class="ka-btn" data-single-issue-reanalyze="' + esc(run.run_id) + '" data-single-issue-id="' + esc(issue.issue_id) + '">重新分析</button>')
         + '</div></div></article>';
     }).join('');
   if (pagination) {
@@ -311,8 +314,8 @@ function singleIssueAnalysisReportBody(item) {
       + (previousAt ? '（' + esc(previousAt) + '）' : '') + '。</div>'
     : '';
   if (report) {
-    return previousNotice + dailyBriefSystemMetadata(displayedResult)
-      + dailyBriefQualityNotice(displayedResult) + dailyBriefEvidenceGateNotice(displayedResult)
+    return previousNotice + dailyBriefSystemMetadata(displayedResult, dailyBriefQualityChip(displayedResult))
+      + dailyBriefEvidenceGateNotice(displayedResult)
       + '<div class="daily-brief-section daily-brief-section-md"><div class="daily-brief-section-body analysis-doc">'
       + renderMarkdownDoc(report) + '</div></div>';
   }
@@ -602,6 +605,50 @@ async function stopSavedSingleIssueAnalysis(runId, button) {
   }
 }
 
+async function deleteSavedSingleIssueHistory(issueId, runId, button) {
+  // 删除以 issue 为单位（覆盖该单号的全部全量/增量历史），不是单条 run；
+  // run_id 仅用于识别当前按钮所在行。
+  var id = String(issueId || '');
+  if (!id || singleIssueDeleteRequested[id]) return;
+  var entry = findSingleIssueAnalysisByIssueId(id);
+  var run = (entry || {}).run || {};
+  if (run.run_id && singleIssueAnalysisIsRunning(run, (entry.issues || [])[0] || {})) {
+    notifyUser('无法删除', '该单号的分析仍在进行中，请先停止。', 'warning');
+    return;
+  }
+  var confirmed = await confirmUserAction('删除单号分析', '确定删除 #' + id + ' 的全部分析记录吗？删除后不可恢复。');
+  if (!confirmed) return;
+  singleIssueDeleteRequested[id] = true;
+  if (button) {
+    button.disabled = true;
+    button.textContent = '删除中…';
+  }
+  try {
+    var result = await api('/api/redmine-agent/daily-brief/issue-analyses/' + encodeURIComponent(id), {method: 'DELETE'});
+    // 同单号可能有多条历史行（全量/增量并存），全部移除。
+    singleIssueAnalysisHistory = singleIssueAnalysisHistory.filter(function (item) {
+      var issue = ((item || {}).issues || [])[0] || {};
+      return String(issue.issue_id) !== id;
+    });
+    renderSingleIssueAnalysisHistory();
+    // 被跟踪的 run 已随删除消失时，复位顶部轮询与表单状态（下一轮
+    // 轮询本会 404 兜底，这里主动复位避免一次多余请求）。
+    if (singleIssueAnalysisRunId
+      && !singleIssueAnalysisHistory.some(function (item) {
+        return String(((item.run || {}).run_id) || '') === String(singleIssueAnalysisRunId);
+      })) {
+      rememberSingleIssueAnalysisRun('');
+      clearTimeout(singleIssueAnalysisTimer);
+      setSingleIssueAnalysisBusy(false);
+    }
+    notifyUser('已删除', '已删除 #' + id + ' 的 ' + ((result && result.deleted_runs) || 0) + ' 条分析记录。', 'success');
+  } catch (error) {
+    notifyUser('删除失败', error.message, 'error');
+  } finally {
+    delete singleIssueDeleteRequested[id];
+  }
+}
+
 document.addEventListener('pointerdown', function (event) {
   var cancel = event.target.closest('[data-single-issue-cancel]');
   if (!cancel || cancel.disabled) return;
@@ -619,6 +666,15 @@ document.addEventListener('click', function (event) {
   var reanalyze = event.target.closest('[data-single-issue-reanalyze]');
   if (reanalyze) {
     reanalyzeSavedSingleIssue(reanalyze.dataset.singleIssueReanalyze, reanalyze.dataset.singleIssueId);
+    return;
+  }
+  var remove = event.target.closest('[data-single-issue-delete]');
+  if (remove && !remove.disabled) {
+    deleteSavedSingleIssueHistory(
+      remove.dataset.singleIssueDelete,
+      remove.dataset.singleIssueDeleteRun,
+      remove
+    );
     return;
   }
   var view = event.target.closest('[data-single-issue-view]');

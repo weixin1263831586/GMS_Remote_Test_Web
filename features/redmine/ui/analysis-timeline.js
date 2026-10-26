@@ -130,6 +130,10 @@ function analysisTimelineToolAction(toolName) {
 function analysisTimelineEventText(event) {
   var type = String(event.event_type || '');
   var summary = String(event.summary || '');
+  if (type === 'session_started') {
+    // 裸 session_id 对用户没有信息量；会话追踪由下方会话轨迹区呈现。
+    return { text: 'AI 取证会话已启动，实时轨迹开始跟踪', tool: '' };
+  }
   if (['tool_started', 'tool_completed', 'tool_failed'].indexOf(type) < 0) {
     return { text: esc(summary || type), tool: '' };
   }
@@ -158,7 +162,7 @@ function analysisTimelineEventRow(event) {
   var cls = ({ tool_completed: 'done', analysis_completed: 'done',
     tool_failed: 'failed', analysis_failed: cancelled ? 'stopped' : 'failed' })[type] || 'running';
   var icon = ({ analysis_started: '▶', stage_changed: '◆', tool_started: '●',
-    tool_completed: '✓', tool_failed: '✗', progress: '●',
+    tool_completed: '✓', tool_failed: '✗', progress: '●', session_started: '🧵',
     analysis_completed: '✓', analysis_failed: cancelled ? '■' : '✗' })[type] || '·';
   var time = String(event.created_at || '').replace('T', ' ').slice(11, 19);
   var duration = type === 'tool_completed' && Number(event.duration_ms) > 0
@@ -212,6 +216,7 @@ async function loadAnalysisTimelineHistory() {
       // 罕见竞态：历史入口打开瞬间 run 刚被重新分析置回运行态。退回实时
       // 轮询，终态后照常原地切换报告。
       state.history = false;
+      state.runStatus = result.runStatus;
       analysisTimelineSetTitle('live', '');
       pollAnalysisTimeline();
       return;
@@ -314,6 +319,9 @@ function showAnalysisTimelineModal(runId, issueId, options) {
   // 历史模式：终态 run 的完整时间线回看。不轮询、无停止按钮，终态时不
   // 自动切换报告；「查看报告 / 查看过程」可互相切换。
   state.history = Boolean(options.history);
+  // 实时弹框初始按排队阶段起标题（真实 run 状态由首轮轮询立即刷新）；
+  // 历史模式不轮询，保持空状态避免误用实时前缀。
+  state.runStatus = state.history ? '' : 'pending';
   var subject = String(options.subject || '').trim();
   var modal = document.createElement('div');
   modal.id = modalId;
@@ -321,7 +329,7 @@ function showAnalysisTimelineModal(runId, issueId, options) {
   modal.innerHTML = '<div class="modal-content daily-brief-modal">'
     + '<div class="modal-header"><span class="modal-title daily-brief-modal-title">'
     + '<span id="' + modalId + '-title"><span>'
-    + (state.history ? '🕐 执行过程 · #' : '🔵 正在分析 · #') + esc(state.issueId) + '</span>'
+    + (state.history ? '🕐 执行过程 · #' : analysisTimelineLiveTitlePrefix(state.runStatus)) + esc(state.issueId) + '</span>'
     + (state.history ? '<span class="analysis-timeline-badge">已结束</span>' : '')
     + '</span>'
     + (subject ? '<span class="daily-brief-modal-subject">' + esc(subject) + '</span>' : '')
@@ -379,8 +387,15 @@ async function pollAnalysisTimeline() {
     // 会话增长不一定伴随新的 Controller 进度事件，所以
     // tail 必须在每轮 events 轮询后独立运行。
     if (state.sessionId && !state.sessionEnd) pollAnalysisTimelineSession();
+    // 标题随 run 阶段切换（⏳ 排队中 → 🔵 准备中 → 🔵 正在分析），仅在
+    // 变化时重写；run_status 缺失时沿用当前值，避免抖回默认前缀。
+    var runStatus = String(data.run_status || state.runStatus || '');
+    if (runStatus !== state.runStatus) {
+      state.runStatus = runStatus;
+      analysisTimelineSetTitle('live', '');
+    }
     var meta = document.getElementById(state.modalId + '-meta');
-    if (meta) meta.innerHTML = analysisTimelineMetaHtml(String(data.run_status || ''));
+    if (meta) meta.innerHTML = analysisTimelineMetaHtml(runStatus);
     if (data.terminal) {
       await finishAnalysisTimeline(modalId, runId, issueId);
       return;

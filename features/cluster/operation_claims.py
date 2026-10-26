@@ -39,7 +39,9 @@ def device_action_claim_payload(
         "owner_id": owner_id,
         "claim_source_id": source_id,
         "release_claim_on_terminal": bool(missing),
-        "lease_tokens": repository.claim_fencing_tokens(records, operation_id),
+        "lease_tokens": repository.claim_fencing_tokens(
+            records, operation_id, device_ids=set(device_ids)
+        ),
     }
 
 
@@ -85,5 +87,7 @@ def operation_claim_payload(
         "owner_id": owner_id,
         "claim_source_id": claim_source,
         "release_claim_on_terminal": release_on_terminal,
-        "lease_tokens": repository.claim_fencing_tokens(records, operation_id),
+        "lease_tokens": repository.claim_fencing_tokens(
+            records, operation_id, device_ids={device_id}
+        ),
     }

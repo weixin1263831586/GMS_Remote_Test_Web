@@ -10,7 +10,6 @@ from typing import Any
 from fastapi import APIRouter, Body, Request
 from pydantic import BaseModel, Field
 
-from features.assistant import session_store
 from features.assistant.context import _parse_chinese_number, record_user_message, update_context
 from features.assistant.executor import _json_body, executor
 from features.assistant.payloads import display_record as _display_record
@@ -31,9 +30,13 @@ from features.assistant.session_registry import (
     _agent_sessions,
     _now_iso,
     cleanup_due,
+    owner_id_from_request_shim,
 )
 from features.assistant.session_registry import (
     cleanup_sessions as _cleanup_sessions,
+)
+from features.assistant.session_registry import (
+    clear_session_anchor as _clear_session_anchor,
 )
 from features.assistant.session_registry import (
     expired_session_payload as _expired_session_payload,
@@ -42,7 +45,13 @@ from features.assistant.session_registry import (
     get_or_create_session as _get_or_create_session,
 )
 from features.assistant.session_registry import (
+    monitor_run_is_current as _monitor_run_is_current,
+)
+from features.assistant.session_registry import (
     restore_session as _restore_session,
+)
+from features.assistant.session_registry import (
+    save_session_anchor as _save_session_anchor,
 )
 from features.assistant.tools import registry
 from features.cluster import (
@@ -142,21 +151,6 @@ def _normalize_workspace_context(raw: dict[str, Any] | None) -> dict[str, Any]:
     elif context.get("scope_mode") == "cluster":
         context["worker_id"] = context.get("worker_id") or _local_worker_id()
     return context
-
-
-def _save_session_anchor(session: dict[str, Any]) -> None:
-    """Persist the crash-recovery anchor (外部评审报告项，会话恢复)."""
-    try:
-        session_store.save_anchor(session)
-    except Exception:
-        logger.debug("保存 Agent 会话恢复锚点失败", exc_info=True)
-
-
-def _clear_session_anchor(session: dict[str, Any]) -> None:
-    try:
-        session_store.drop_anchor(session.get("session_id") or "")
-    except Exception:
-        logger.debug("清理 Agent 会话恢复锚点失败", exc_info=True)
 
 
 def _new_message(role: str, content: str, kind: str = "text", data: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -877,20 +871,9 @@ async def _run_pre_actions(
     return {"success": True}
 
 
-def _owner_id_from_request_shim(request_shim: Any) -> str:
-    """Resolve the ADR 0010 owner from a request-like object, tolerantly.
-
-    监控/恢复路径可能拿到没有 ``state`` 的极简请求对象（回归测试 shim、
-    恢复会话的重建监控），此时返回空串，由调用方回退会话持久化的
-    ``owner_id``，不因缺请求身份而中断监控。
-    """
-    try:
-        return str(owner_id_from_request(request_shim) or "")
-    except (AttributeError, TypeError):
-        return ""
-
-
-async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) -> None:
+async def _monitor_agent_run(
+    session_id: str, request_shim: AgentRequestShim, monitor_token: str | None = None
+) -> None:
     session = _agent_sessions.get(session_id)
     if not session:
         return
@@ -905,17 +888,18 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
     client_id = session.get("owner_id") or session.get("client_id")
     # 报告按请求主体的 resource_owner_id 分区（ADR 0010），与会话里用于
     # 运行时状态的 client_id 分开解析；agent 主体由此映射回注册账号。
-    # 请求对象缺身份（恢复重建的监控、极简 shim）时回退会话锚点里
-    # 持久化的 owner_id。
-    report_owner_id = _owner_id_from_request_shim(request_shim) or str(session.get("owner_id") or "")
+    # 请求对象缺身份（恢复重建的监控、极简 shim）时回退锚点里的 owner_id。
+    report_owner_id = owner_id_from_request_shim(request_shim) or str(session.get("owner_id") or "")
     retries_left = int(policy.get("retry_count") or 0)
     attempt = 0
     latest_report_timestamp = None
-    active_run = session.get("active_run") or {}
-    baseline_report_timestamp = active_run.get("baseline_report_timestamp")
+    baseline_report_timestamp = (session.get("active_run") or {}).get("baseline_report_timestamp")
 
     try:
         while True:
+            if not _monitor_run_is_current(session, monitor_token):
+                # 本轮监控已被替换：立即退出，不改任何共享状态。
+                return
             active_run = session.get("active_run") or {}
             cluster_job_id = active_run.get("cluster_job_id") or ""
             if cluster_job_id:
@@ -927,9 +911,10 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
                     await asyncio.sleep(3)
                     job = repository.get_job(cluster_job_id)
                 if not job:
-                    session["status"] = "error"
-                    _clear_session_anchor(session)
-                    _append_step(session, "读取集群任务", "error", f"任务不存在: {cluster_job_id}")
+                    if _monitor_run_is_current(session, monitor_token):
+                        session["status"] = "error"
+                        _clear_session_anchor(session)
+                        _append_step(session, "读取集群任务", "error", f"任务不存在: {cluster_job_id}")
                     return
 
                 attempt_id = active_run.get("attempt_id") or job.get("current_attempt_id", "")
@@ -956,6 +941,9 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
                     + (f" / 报告 {latest_report_timestamp}" if latest_report_timestamp else " / 未生成报告"),
                     {"job": job, "report": report or {}},
                 )
+                if not _monitor_run_is_current(session, monitor_token):
+                    # 已被新一轮监控替换：跳过 retry/分析/终态写入。
+                    return
 
                 workspace = session.setdefault("workspace_context", {})
                 assigned_worker_id = job.get("assigned_worker_id", "")
@@ -982,12 +970,13 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
                         session, request_shim, plan, latest_report_timestamp
                     )
                     if not payload.get("success"):
-                        session["status"] = "error"
-                        _clear_session_anchor(session)
-                        _append_message(
-                            session, "assistant",
-                            f"retry 启动失败：{payload.get('error') or payload.get('message')}",
-                        )
+                        if _monitor_run_is_current(session, monitor_token):
+                            session["status"] = "error"
+                            _clear_session_anchor(session)
+                            _append_message(
+                                session, "assistant",
+                                f"retry 启动失败：{payload.get('error') or payload.get('message')}",
+                            )
                         return
                     continue
 
@@ -1011,9 +1000,10 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
                             "report_timestamp": latest_report_timestamp or "",
                         },
                     )
-                session["status"] = "done"
-                session["active_run"] = None
-                _clear_session_anchor(session)
+                if _monitor_run_is_current(session, monitor_token):
+                    session["status"] = "done"
+                    session["active_run"] = None
+                    _clear_session_anchor(session)
                 return
 
             user_state = get_or_create_user_state(client_id)
@@ -1045,12 +1035,17 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
                 _append_message(session, "assistant", f"检测到失败，开始第 {attempt} 次 retry：{latest_report_timestamp}")
                 payload = await _start_test_with_plan(session, request_shim, plan, latest_report_timestamp)
                 if not payload.get("success"):
-                    session["status"] = "error"
-                    _clear_session_anchor(session)
-                    _append_message(session, "assistant", f"retry 启动失败：{payload.get('error') or payload.get('message')}")
+                    if _monitor_run_is_current(session, monitor_token):
+                        session["status"] = "error"
+                        _clear_session_anchor(session)
+                        _append_message(session, "assistant", f"retry 启动失败：{payload.get('error') or payload.get('message')}")
                     return
                 baseline_report_timestamp = latest_report_timestamp
                 continue
+
+            if not _monitor_run_is_current(session, monitor_token):
+                # 已被新一轮计划替换：不再改共享状态，终态与锚点清理由新任务负责。
+                return
 
             if failed and policy.get("analyze_on_failure") and latest_report_timestamp and report:
                 session["status"] = "analyzing"
@@ -1067,19 +1062,25 @@ async def _monitor_agent_run(session_id: str, request_shim: AgentRequestShim) ->
             _clear_session_anchor(session)
             return
     except asyncio.CancelledError:
-        session["status"] = "cancelled"
-        session["active_run"] = None
-        _clear_session_anchor(session)
-        _append_step(session, "Agent 监控已停止", "warning", "用户取消了 Agent 后台监控")
+        if _monitor_run_is_current(session, monitor_token):
+            session["status"] = "cancelled"
+            session["active_run"] = None
+            _clear_session_anchor(session)
+            _append_step(session, "Agent 监控已停止", "warning", "用户取消了 Agent 后台监控")
         raise
     except Exception:
-        session["status"] = "error"
-        _clear_session_anchor(session)
-        err = record_internal_error(logger, "Agent 监控", "[Agent] monitor failed")
-        _append_step(session, "Agent 监控异常", "error", err)
-        _append_message(session, "assistant", err)
+        if _monitor_run_is_current(session, monitor_token):
+            session["status"] = "error"
+            _clear_session_anchor(session)
+            err = record_internal_error(logger, "Agent 监控", "[Agent] monitor failed")
+            _append_step(session, "Agent 监控异常", "error", err)
+            _append_message(session, "assistant", err)
+        else:
+            logger.debug("旧 Agent 监控任务被新一轮监控替换，跳过终态清理", exc_info=True)
     finally:
-        _agent_monitor_tasks.pop(session_id, None)
+        # 只有任务表里登记的仍是自己时才移除，避免旧任务退出时误删新任务。
+        if _agent_monitor_tasks.get(session_id) is asyncio.current_task():
+            _agent_monitor_tasks.pop(session_id, None)
 
 
 async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[str, Any]) -> dict[str, Any]:
@@ -1091,12 +1092,16 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
 
     # 报告基线同样按请求主体的 resource_owner_id 解析（ADR 0010）。
     latest_existing_report = _latest_report_for_client(owner_id_from_request(request))
+    # 每轮监控的唯一 token：旧任务的取消回调据此识别自己已过期，不再
+    # 覆盖新一轮的 active_run / 恢复锚点（外部评审报告项）。
+    monitor_token = str(uuid.uuid4())
     session["status"] = "running"
     session["active_run"] = {
         "plan": plan,
         "started_at": _now_iso(),
         "baseline_report_timestamp": latest_existing_report.get("timestamp") if latest_existing_report else None,
         "worker_id": req.get("worker_id") or _local_worker_id(),
+        "monitor_token": monitor_token,
     }
     _save_session_anchor(session)
     request_shim = AgentRequestShim(request)
@@ -1118,7 +1123,9 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
     old_task = _agent_monitor_tasks.pop(session["session_id"], None)
     if old_task and not old_task.done():
         old_task.cancel()
-    task = asyncio.create_task(_monitor_agent_run(session["session_id"], request_shim))
+    task = asyncio.create_task(
+        _monitor_agent_run(session["session_id"], request_shim, monitor_token)
+    )
     _agent_monitor_tasks[session["session_id"]] = task
     session["monitor_task_id"] = id(task)
     return payload

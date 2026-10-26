@@ -879,5 +879,46 @@ class FrozenSnapshotTests(unittest.TestCase):
         self.assertEqual(run.status, "completed")
 
 
+class DeleteIssueHistoryTests(unittest.TestCase):
+    """删除接口的服务层语义：活跃 409、成功计数、不存在返回 0。"""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.service = make_service(Path(self._tmp.name))
+
+    def _save_issue_run(self, issue_id=653167):
+        from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
+        from features.redmine.daily_brief_repository import new_run_id
+
+        run = DailyBriefRun(
+            owner_id="u1", brief_date="2026-09-13",
+            mode=f"issue:{issue_id}:full:abc", run_id=new_run_id(),
+            started_at="2026-09-13T00:00:00", issue_count=1,
+        )
+        self.service.repository.create_run(run)
+        self.service.repository.upsert_issue(DailyBriefIssue(
+            run_id=run.run_id, issue_id=issue_id, buckets=[], subject="demo",
+        ))
+        return run
+
+    def test_active_issue_returns_conflict_code(self):
+        run = self._save_issue_run()
+        self.service.repository.enqueue_job(run.run_id, kind="issue", issue_id=653167)
+        result = self.service.delete_issue_history(653167)
+        self.assertEqual(result.get("code"), "ISSUE_ANALYSIS_ACTIVE")
+        self.assertIsNotNone(self.service.repository.get_run(run.run_id))
+
+    def test_delete_returns_deleted_run_count(self):
+        self._save_issue_run()
+        result = self.service.delete_issue_history(653167)
+        self.assertEqual(result, {"issue_id": 653167, "deleted_runs": 1})
+        self.assertIsNone(self.service.latest_issue_run(653167))
+
+    def test_missing_issue_returns_zero(self):
+        result = self.service.delete_issue_history(42)
+        self.assertEqual(result, {"issue_id": 42, "deleted_runs": 0})
+
+
 if __name__ == "__main__":
     unittest.main()

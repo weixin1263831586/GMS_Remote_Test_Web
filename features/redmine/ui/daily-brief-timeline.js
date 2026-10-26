@@ -37,6 +37,43 @@ function analysisTimelineSessionTurnRow(turn) {
     + '<span class="analysis-timeline-text">' + parts.join('<br>') + '</span></div>';
 }
 
+// tool_started 与配对的 tool_completed/tool_failed 合并渲染为一行：行位置
+// 取开始时间，完成后原行翻转 ✓/✗ 并补耗时，同一动作不再占两行。同名工具
+// 并发时按栈配对；没有配对终态的 started 保持 ● 原样展示。
+function analysisTimelineMergeToolRows(events) {
+  var merged = [];
+  var open = {};
+  events.forEach(function (event) {
+    var type = String(event.event_type || '');
+    var tool = String(event.tool_name || '');
+    if (type === 'tool_started') {
+      if (!open[tool]) open[tool] = [];
+      open[tool].push(merged.length);
+      merged.push(event);
+      return;
+    }
+    if (type === 'tool_completed' || type === 'tool_failed') {
+      var stack = open[tool];
+      if (stack && stack.length) {
+        var index = stack.pop();
+        var started = merged[index];
+        var row = {};
+        for (var key in started) {
+          if (Object.prototype.hasOwnProperty.call(started, key)) row[key] = started[key];
+        }
+        row.event_type = type;
+        row.summary = String(event.summary || started.summary || '');
+        row.status = String(event.status || started.status || '');
+        row.duration_ms = event.duration_ms;
+        merged[index] = row;
+        return;
+      }
+    }
+    merged.push(event);
+  });
+  return merged;
+}
+
 function renderAnalysisTimelineBody() {
   var state = analysisTimelineState;
   if (!state.events.length && !state.sessionTurns.length) {
@@ -50,13 +87,15 @@ function renderAnalysisTimelineBody() {
   }
   var html = '';
   var currentStage = null;
-  state.events.forEach(function (event) {
+  analysisTimelineMergeToolRows(state.events).forEach(function (event) {
     var stage = String(event.stage || '') || null;
     if (ANALYSIS_STAGE_LABELS[stage] && stage !== currentStage) {
       html += '<div class="analysis-timeline-stage">'
         + '<span>' + esc(ANALYSIS_STAGE_LABELS[stage]) + '</span></div>';
     }
     currentStage = stage;
+    // 阶段切换已由分组标题表达，stage_changed 事件行不再重复渲染。
+    if (String(event.event_type || '') === 'stage_changed') return;
     html += analysisTimelineEventRow(event);
   });
   if (state.sessionTurns.length) {
@@ -91,11 +130,20 @@ function analysisTimelineMetaHtml(runStatus) {
     + (live ? '<span>本次观察 ' + elapsedText + '</span>' : '');
 }
 
+// 实时弹框标题随 run 阶段切换：pending（排队等 Worker）→ snapshotting
+// （Controller 证据预采集）→ analyzing（kkagent 取证）。排队阶段不能沿用
+// 「正在分析」，否则标题与正文「排队中，等待 Worker 领取任务…」自相矛盾。
+function analysisTimelineLiveTitlePrefix(runStatus) {
+  return ({ pending: '⏳ 排队中 · #', snapshotting: '🔵 准备中 · #',
+    analyzing: '🔵 正在分析 · #' })[runStatus] || '🔵 正在分析 · #';
+}
+
 function analysisTimelineSetTitle(view, statusText) {
   var state = analysisTimelineState;
   var title = document.getElementById(state.modalId + '-title');
   if (!title) return;
-  var prefix = ({ live: '🔵 正在分析 · #', timeline: '🕐 执行过程 · #',
+  var prefix = ({ live: analysisTimelineLiveTitlePrefix(state.runStatus),
+    timeline: '🕐 执行过程 · #',
     report: '📋 分析总结 · #' })[view] || '🕐 执行过程 · #';
   title.innerHTML = '<span>' + prefix + esc(state.issueId) + '</span>'
     + (view === 'timeline' ? '<span class="analysis-timeline-badge">已结束'

@@ -15,13 +15,16 @@ password at start time), so the TTL only needs to outlive a typical job.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
+from foundation.private_config import write_private_json
 from foundation.secrets import decrypt_secret, encrypt_secret
 
 
@@ -44,12 +47,22 @@ class RuntimePasswordStore:
         self.ttl_seconds = max(60, int(ttl_seconds))
         self._lock = threading.RLock()
         self._cache: dict[str, tuple[str, float]] = {}
-        self._loaded = False
+
+    @contextmanager
+    def _locked(self):
+        # The sidecar inode survives atomic replacement of the JSON file.
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(self.path.with_suffix(self.path.suffix + ".lock"),
+                                 os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+                yield
+            finally:
+                os.close(descriptor)
 
     def _load(self) -> None:
-        if self._loaded:
-            return
-        self._loaded = True
+        # Re-read inside the cross-process lock for every operation.
         try:
             raw = self.path.read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -80,25 +93,12 @@ class RuntimePasswordStore:
             if expires > now
         }
         self._cache = live
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            descriptor = os.open(
-                self.path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600
-            )
-            try:
-                os.write(
-                    descriptor,
-                    json.dumps(live).encode("utf-8"),
-                )
-            finally:
-                os.close(descriptor)
-        except OSError as exc:
-            logger.warning("Runtime password store unwritable (%s): %s", self.path, exc)
+        write_private_json(self.path, live)
 
     def set(self, job_id: str, password: str) -> None:
         if not job_id or not password:
             return
-        with self._lock:
+        with self._locked():
             self._load()
             self._cache[job_id] = (
                 encrypt_secret(password),
@@ -109,7 +109,7 @@ class RuntimePasswordStore:
     def get(self, job_id: str) -> str:
         if not job_id:
             return ""
-        with self._lock:
+        with self._locked():
             self._load()
             entry = self._cache.get(job_id)
             if not entry:
@@ -128,7 +128,7 @@ class RuntimePasswordStore:
     def pop(self, job_id: str) -> None:
         if not job_id:
             return
-        with self._lock:
+        with self._locked():
             self._load()
             if self._cache.pop(job_id, None) is not None:
                 self._persist()

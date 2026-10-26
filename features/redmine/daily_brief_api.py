@@ -211,6 +211,22 @@ async def get_issue_analysis(request: Request, issue_id: int = Path(ge=1)):
     return {"success": True, "data": item}
 
 
+@router.delete("/daily-brief/issue-analyses/{issue_id}")
+async def delete_issue_analysis_history(request: Request, issue_id: int = Path(ge=1)):
+    """删除一个 Redmine 单号的全部已保存分析记录（人工会话专用）。
+
+    覆盖该单号的全量/增量历史 run 及其 issues/快照/Job/AI 执行明细；
+    仍有排队或执行中的分析时返回 409，不部分删除。
+    """
+    _require_human(request)
+    result = _service_for_request(request).delete_issue_history(issue_id)
+    if str(result.get("code") or "") == "ISSUE_ANALYSIS_ACTIVE":
+        return ApiError.conflict(str(result["error"])).to_response()
+    if not result.get("deleted_runs"):
+        return ApiError.not_found("该 Redmine 单号暂无已保存的分析。").to_response()
+    return {"success": True, "data": result}
+
+
 @router.post("/daily-brief/sync-subjects")
 async def sync_display_subjects(request: Request):
     """刷新前同步展示标题：把晨报/单号分析条目的 subject 与 Redmine 对齐。

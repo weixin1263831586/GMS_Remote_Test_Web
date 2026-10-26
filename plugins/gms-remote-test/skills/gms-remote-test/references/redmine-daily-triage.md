@@ -34,7 +34,11 @@ diagnostic 深度诊断），二者唯一的区别是触发来源：晨报由 ni
 5. 日志/XML/PDF：优先用已有解析结果；大日志必须
    `gms_rt_redmine_artifact_search` 先搜、`gms_rt_redmine_artifact_read`
    按窗口读，禁止整文件入 prompt。
-6. 截图：`gms_rt_redmine_image`（OCR/元数据已由平台完成）。
+6. 截图：图片附件已在快照下载时由平台 OCR 成可检索文本
+   （`text_available=true`），直接用 `gms_rt_redmine_artifact_read`
+   窗口读取；`gms_rt_redmine_image` 仅在确需图片载荷时尝试（多数部署
+   不返回）。读取失败或无 OCR 文本时记入 missing_information，不得凭
+   文件名猜测截图内容。
 7. 必须调用 `gms_rt_redmine_history_search` 做 2–4 个不同关键词查询；
    重复大小写或空白变化仍视为同一查询。相似 issue 只有在成功的历史检索
    或后续 issue fetch 结果中真实出现过，才可写入结果。

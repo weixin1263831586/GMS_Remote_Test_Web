@@ -43,7 +43,21 @@ logger = logging.getLogger(__name__)
 
 # v18: 晨报与单号分析统一走 diagnostic 深度诊断（ADR 0013）。
 # v19: 删"处理时间线"节；概况表分测试类/非测试类，钉死报告人=issue.author、单号格式、禁内部 id、北京时间。
-PROMPT_VERSION = "redmine_daily_triage_v22"
+# v22: 概况改 bullet 化"工程师交接笔记"排版（ADR 0013 复盘）。
+# v23: 报告结构按工单性质分支——测试失败类沿用失败现场/关键定性；
+#      咨询/配置/流程类改用工单概况/处理过程与各方结论/当前结论，
+#      结论文不再强制"真实失败 vs 测试侧噪音"二分。
+# v24: B 支章节名钉死（首跑实测模型自拟"问题概况/原厂答复与最终配置"
+#      标题），并把"依据与证据缺口"纳入 B 支可选规范节。
+# v25: B 支按运营认可的"分析纪要"骨架重写：工单概况(表+客户问题) /
+#      处理结论（按讨论时间线）/ 最终结论(配置值表) / 核心要点 /
+#      建议处理路径 / 关键结论；禁止提示词内部术语（分支 A/B）泄漏进正文。
+# v26: 图片附件改为平台预 OCR——artifact_read 直接读派生文本，
+#      替换"图片不可渲染"旧话术（evidence_images 管道配套）。
+# v27: 钉死截图取证行为——每个 image 附件至少一次 artifact_read 尝试，
+#      成功即引用 OCR 文本；未实际尝试不得写"截图读取失败"
+#      （#655644 夜批实测：管道已通但模型跳读，错误申报缺口）。
+PROMPT_VERSION = "redmine_daily_triage_v27"
 
 # analyzer 实现版本（Ledger logical_key 组成项）：kkagent analyzer 实现
 # 升级但 prompt/model 不变时，逻辑键也必须变化（全局审查：否则错误
@@ -645,6 +659,18 @@ class KkAgentRedmineAnalyzer:
                 native_evidence_repair_prompt(findings, merged.evidence_ledger())
                 if native_summary else self.build_repair_prompt(findings)
             )
+            if _attempt > 0:
+                # 首轮 repair 后仍无有效产出时,把"只回引用对照、不重发报告"
+                # 的模式点名禁止:第二轮必须直接返回完整报告正文。
+                repair_prompt += (
+                    "\n\nSTRICT OUTPUT REQUIREMENT (previous repair round did not "
+                    "produce a usable report): reply with the FULL corrected "
+                    "Simplified Chinese Markdown report in THIS turn — starting "
+                    "with the `# ` title heading and including the final "
+                    "`## 关键结论` section. Do not reply with reference "
+                    "mappings, tool indexes, narration about what you checked, "
+                    "or any promise to write the report later."
+                )
             if progress is not None:
                 progress.stage_changed(
                     "正在自动补齐取证" if native_summary else "正在自动修复输出格式"
