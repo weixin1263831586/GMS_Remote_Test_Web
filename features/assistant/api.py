@@ -321,6 +321,8 @@ def _build_plan(
 
     return {
         "type": "test_execution",
+        "operation_id": str(uuid.uuid4()),
+        "submit_state": "pending",
         "intent": intent,
         "steps": steps,
         "request": {
@@ -1085,6 +1087,9 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
     session["status"] = "running"
     session["active_run"] = {
         "plan": plan,
+        # 计划的唯一操作 ID：重复确认/重试链路的可追溯键；旧会话中的
+        # 计划可能没有该字段，这里补齐兜底。
+        "operation_id": str(plan.get("operation_id") or uuid.uuid4()),
         "started_at": _now_iso(),
         "baseline_report_timestamp": latest_existing_report.get("timestamp") if latest_existing_report else None,
         "worker_id": req.get("worker_id") or _local_worker_id(),
@@ -1177,8 +1182,29 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
             session["pending_plan"] = None
             session["status"] = "idle"
         elif pending_plan.get("type") == "test_execution":
-            result = await _execute_plan(session, request, pending_plan)
-            if not result.get("success"):
+            # 提交状态机 pending→submitting→submitted/failed：确认请求可能
+            # 因浏览器超时重发或用户重复点击而到达多次，同一计划只允许
+            # 提交一次；失败保留计划（failed），允许修正后重新确认。
+            state = str(pending_plan.get("submit_state") or "pending")
+            if state == "submitting":
+                _append_message(session, "assistant", "该计划正在提交中，请勿重复确认。")
+                return success_response({"session": _session_payload(session)}, "Agent updated")
+            if state == "submitted":
+                _append_message(session, "assistant", "该计划已提交执行，请勿重复确认；当前运行进度见会话状态。")
+                return success_response({"session": _session_payload(session)}, "Agent updated")
+            pending_plan["submit_state"] = "submitting"
+            try:
+                result = await _execute_plan(session, request, pending_plan)
+            except Exception:
+                pending_plan["submit_state"] = "failed"
+                raise
+            if result.get("success"):
+                pending_plan["submit_state"] = "submitted"
+                # submitted 是终态但计划保留在会话上：重复“确认执行”
+                # （浏览器超时重发/双击）被 submitted 分支吸收为提示，
+                # 不会再次进入启动逻辑；新一轮计划生成时会整体覆盖。
+            else:
+                pending_plan["submit_state"] = "failed"
                 _append_message(session, "assistant", f"执行失败：{result.get('error') or result.get('message')}")
         else:
             session["pending_plan"] = None

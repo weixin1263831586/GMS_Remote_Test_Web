@@ -117,7 +117,7 @@ mcp_debug_tools = _load_typed_tools("mcp_debug_tools")
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.62"
+SERVER_VERSION = "0.22.63"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -2749,13 +2749,27 @@ def sdk_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     source = str(arguments.get("source") or "").strip()
     revision = str(arguments.get("revision") or "").strip()
     # keywords 是 query 的别名：codesearch 风格工具用 keywords，调用方
-    # 混用工具名时不应让整次检索失败（schema 里用 anyOf 放行任一字段）。
+    # 混用工具名时不应让整次检索失败。两字段严格互斥（schema oneOf 同
+    # 约束）：同时出现说明调用请求本身有歧义，静默挑一个会掩盖错误。
+    has_query = bool(str(arguments.get("query") or "").strip())
+    has_keywords = bool(str(arguments.get("keywords") or "").strip())
+    if has_query and has_keywords:
+        return "provide exactly one of query/keywords, not both", True
     query = str(arguments.get("query") or arguments.get("keywords") or "").strip()
     if not source or not revision or not query:
         return "source, revision, and query (or its alias keywords) are required", True
     args = ["--source", source, "--revision", revision, "--query", query]
-    if arguments.get("limit"):
-        args.extend(["--limit", str(_int_arg(arguments, "limit", 50, 1, 200))])
+    # limit 与 Controller 契约对齐（/api/sdk/search 的 limit le=200，
+    # SEARCH_MAX_LIMIT）：越界显式报错而不是静默截断调用方的请求。
+    raw_limit = arguments.get("limit")
+    if raw_limit is not None and raw_limit != "":
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            return "limit must be an integer in [1, 200]", True
+        if not 1 <= limit <= 200:
+            return "limit must be an integer in [1, 200]", True
+        args.extend(["--limit", str(limit)])
     path_filter = str(arguments.get("path") or "").strip()
     if path_filter:
         args.extend(["--path", path_filter])

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
@@ -42,9 +41,13 @@ def extract_zip_derived_text(
     write_file: Callable[[Path, bytes], None],
     artifact_id: str,
     snapshot_rel: str,
-    data: bytes,
+    source: Path,
 ) -> tuple[str, str]:
-    """Build a bounded framed index without extracting member files."""
+    """Build a bounded framed index without extracting member files.
+
+    直接打开磁盘原件流式派生：zipfile 只解析中央目录并按需解压文本成员，
+    调用方（待派生队列）因此无需把整个压缩包字节保留在内存里。
+    """
 
     chunks: list[str] = []
     total = 0
@@ -52,7 +55,7 @@ def extract_zip_derived_text(
     skipped_large = 0
     limit_note = ""
     try:
-        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        with zipfile.ZipFile(source) as archive:
             members = sorted(
                 (
                     info

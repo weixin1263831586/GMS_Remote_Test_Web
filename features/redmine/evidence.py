@@ -28,6 +28,7 @@ from urllib.parse import urlparse
 
 from .config import config_manager as redmine_config_manager
 from .evidence_store import owner_evidence_store
+from .users import sanitize_owner_id
 
 
 logger = logging.getLogger(__name__)
@@ -320,10 +321,66 @@ from .evidence_fetch import EvidenceFetcher  # noqa: E402
 
 _BACKGROUND_TASKS: set[asyncio.Task] = set()
 
+# 进程内活跃抓取（sanitize(owner_id), snapshot_id）：重启对账据此区分
+# "仍在执行"与"无执行者的遗留中间态"（评审 P1）。
+_ACTIVE_FETCH_SNAPSHOTS: set[tuple[str, str]] = set()
+
+# 抓取过程的中间态：进程意外退出后，处于这些状态的快照不会再有执行者。
+INTERMEDIATE_FETCH_STATUSES = ("fetching", "downloading")
+
+
+def reconcile_interrupted_fetches(root: Path | None = None) -> list[dict[str, str]]:
+    """启动对账：把无活跃执行者的中间态快照推进到 ``interrupted`` 终态。
+
+    Controller 重启后 asyncio 后台抓取任务不复存在，数据库里残留的
+    fetching/downloading 快照会让 wait_for_snapshot 与状态轮询永久等待。
+    中断标记保留已下载的附件、issue.json 与派生结果（不删除任何证据），
+    重试时重新发起抓取即可；活跃执行者存在的快照不做改动。
+    """
+    if root is None:
+        from foundation.config import settings
+
+        root = settings.data_root / "redmine" / "by_user"
+    reconciled: list[dict[str, str]] = []
+    root = Path(root)
+    if not root.is_dir():
+        return reconciled
+    from .evidence_store import EvidenceStore
+
+    for owner_dir in sorted(root.iterdir()):
+        # 只认已存在的 evidence 存储，绝不因对账创建新库。
+        if not (owner_dir / "evidence.sqlite3").is_file():
+            continue
+        store = EvidenceStore(owner_dir)
+        orphans = store.list_snapshots_by_status(set(INTERMEDIATE_FETCH_STATUSES))
+        for snapshot in orphans:
+            snapshot_id = str(snapshot.get("snapshot_id") or "")
+            if (str(owner_dir.name), snapshot_id) in _ACTIVE_FETCH_SNAPSHOTS:
+                continue
+            store.update_snapshot(
+                snapshot_id,
+                status="interrupted",
+                error_json=[
+                    *(snapshot.get("errors") or []),
+                    {
+                        "stage": "fetch",
+                        "message": (
+                            "Controller 重启导致抓取中断；已下载附件与派生结果"
+                            "已保留，可重新发起抓取"
+                        ),
+                    },
+                ],
+            )
+            reconciled.append({"owner": str(owner_dir.name), "snapshot_id": snapshot_id})
+    return reconciled
+
 
 def start_evidence_fetch(owner_id: str, snapshot: dict[str, Any]) -> asyncio.Task:
     """启动受控后台抓取任务（Controller 生命周期内跟踪）。"""
     fetcher = EvidenceFetcher(owner_id)
+    # 活跃登记：重启对账据此识别"有执行者"的中间态，不做中断标记。
+    active_key = (sanitize_owner_id(owner_id), str(snapshot.get("snapshot_id") or ""))
+    _ACTIVE_FETCH_SNAPSHOTS.add(active_key)
 
     async def _runner() -> None:
         try:
@@ -355,7 +412,12 @@ def start_evidence_fetch(owner_id: str, snapshot: dict[str, Any]) -> asyncio.Tas
 
     task = asyncio.create_task(_runner())
     _BACKGROUND_TASKS.add(task)
-    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
+    def _forget(done_task: asyncio.Task) -> None:
+        _BACKGROUND_TASKS.discard(done_task)
+        _ACTIVE_FETCH_SNAPSHOTS.discard(active_key)
+
+    task.add_done_callback(_forget)
     return task
 
 
@@ -396,7 +458,11 @@ def wait_for_snapshot(
         snapshot = store.get_snapshot(snapshot_id)
         if snapshot is None:
             raise EvidenceNotFoundError("snapshot 不存在")
-        if str(snapshot.get("status")) in {"ready", "partial", "failed"}:
+        # interrupted 是重启对账写入的终态：立即返回而不是等满超时。
+        # 默认 120s 只是阻塞调用方的上限，不是抓取预算——派生阶段
+        # （OCR/压缩包）最坏可达 ~17 分钟，超时返回当前快照，由调用方
+        # 按状态轮询或稍后重查，证据不会丢失。
+        if str(snapshot.get("status")) in {"ready", "partial", "failed", "interrupted"}:
             return snapshot
         if time.monotonic() >= deadline:
             return snapshot
