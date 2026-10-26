@@ -45,6 +45,11 @@ SNAPSHOT_MAX_TOTAL_DOWNLOAD_BYTES = 1024 * 1024 * 1024
 SNAPSHOT_MAX_ATTACHMENTS = 200
 MAX_REDIRECTS = 3
 SNAPSHOT_TTL_SECONDS = 300
+# 派生阶段（OCR/系统压缩包解包）在附件下载完成后的并发上限。与单图
+# OCR 超时（evidence_images.OCR_TIMEOUT_SECONDS）共同把最坏派生时间从
+# 串行 200×20s 压到 ~17 分钟量级；派生失败只记
+# 派生状态，不做超时跳过（保证分析结论准确优先）。
+DERIVE_CONCURRENCY = 4
 
 TEXT_KIND_EXTENSIONS = {
     ".txt", ".log", ".xml", ".json", ".html", ".htm", ".csv", ".md",
@@ -365,6 +370,9 @@ def snapshot_completeness(snapshot: dict[str, Any], artifacts: list[dict[str, An
         downloads_ok = True
     else:
         downloads_ok = False
+    # 派生文本（OCR/压缩包索引/转码）单独计一个维度：派生失败不再把
+    # 快照整体拉成 partial，completeness 必须如实反映这部分缺口。
+    derived_ok = not any(str(item.get("stage")) == "derive" for item in errors)
     return {
         "issue": issue_ok,
         "journals": journals_ok,
@@ -372,6 +380,7 @@ def snapshot_completeness(snapshot: dict[str, Any], artifacts: list[dict[str, An
         "requested_downloads": downloads_ok and not any(
             str(item.get("stage")) == "download" for item in errors
         ),
+        "derived_text": derived_ok,
     }
 
 

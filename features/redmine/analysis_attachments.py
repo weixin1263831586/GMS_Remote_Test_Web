@@ -265,10 +265,21 @@ class AttachmentAnalysisMixin:
 
         Uses a bundled tesseract binary (tools/tesseract) when the system one is
         not installed, so screenshot analysis works without apt/sudo access.
+        Timeout/pixel limits mirror evidence_images so both OCR paths behave
+        identically with the evidence-pipeline OCR path.
         """
         try:
             import pytesseract
             from PIL import Image
+
+            # OCR 限额从 evidence_images 延迟导入：该模块经 evidence →
+            # evidence_fetch 回指本包，顶层导入会造成循环（agent.py →
+            # analysis_attachments → evidence_images → evidence →
+            # evidence_fetch → evidence_images）。
+            from features.redmine.evidence_images import (
+                OCR_MAX_IMAGE_PIXELS,
+                OCR_TIMEOUT_SECONDS,
+            )
         except Exception:
             return ""
         try:
@@ -280,7 +291,14 @@ class AttachmentAnalysisMixin:
                 import pytesseract.pytesseract as _pt
                 _pt.tesseract_cmd = cmd
             with Image.open(path) as image:
-                return str(pytesseract.image_to_string(image, lang="chi_sim+eng") or "")
+                if image.width * image.height > OCR_MAX_IMAGE_PIXELS:
+                    logger.debug(
+                        "[RedmineAgent] OCR skipped (pixel budget): %s", path
+                    )
+                    return ""
+                return str(pytesseract.image_to_string(
+                    image, lang="chi_sim+eng", timeout=OCR_TIMEOUT_SECONDS,
+                ) or "")
         except Exception as exc:
             logger.debug("[RedmineAgent] OCR skipped for %s: %s", path, exc)
             return ""

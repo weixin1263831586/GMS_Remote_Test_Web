@@ -70,7 +70,14 @@ def extract_image_ocr_text(
         return "", f"OCR 失败: {type(exc).__name__}: {summary}"
     if not text.strip():
         return "", ""
-    payload = text.strip().encode("utf-8")[:_DERIVED_TEXT_MAX_BYTES]
+    # 按字节截断必须落在 UTF-8 字符边界上：直接切片可能把多字节汉字
+    # 劈成非法序列，下游严格解码会失败。
+    payload = (
+        text.strip()
+        .encode("utf-8")[:_DERIVED_TEXT_MAX_BYTES]
+        .decode("utf-8", errors="ignore")
+        .encode("utf-8")
+    )
     derived_rel = f"{snapshot_rel}/derived/{artifact_id}.txt"
     try:
         atomic_write(store.resolve_internal(derived_rel), payload)

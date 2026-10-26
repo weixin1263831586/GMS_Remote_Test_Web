@@ -256,7 +256,8 @@ class EvidenceApiTests(unittest.TestCase):
         )
         store.update_artifact(
             artifact["artifact_id"],
-            status="partial",
+            status="ready",
+            derived_status="partial",
             error="zip 文本成员数超过上限，检索索引不完整",
         )
         response = self.client.get(

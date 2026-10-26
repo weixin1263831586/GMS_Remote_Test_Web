@@ -16,13 +16,14 @@ from features.assistant.payloads import display_record as _display_record
 from features.assistant.payloads import jsonable as _jsonable
 from features.assistant.payloads import session_payload as _session_payload
 from features.assistant.response import (
-    generate as gen_response,
-)
-from features.assistant.response import (
+    WEBAPP_PAGES,
     generate_capability_overview,
     generate_clarification,
     generate_page_overview,
     page_quick_actions,
+)
+from features.assistant.response import (
+    generate as gen_response,
 )
 from features.assistant.session_registry import (
     AgentRequestShim,
@@ -76,30 +77,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 MAX_AGENT_RETRIES = 3
-WEBAPP_PAGES = {
-    "test": ("测试界面", "运行测试、查看测试日志"),
-    "desktop": ("主机桌面", "查看和控制主机桌面"),
-    "terminal": ("主机终端", "打开主机终端和上传文件"),
-    "users": ("用户管理", "查看在线用户和测试占用"),
-    "devices": ("设备管理", "查看 ADB 设备、锁定状态和来源"),
-    "devices-console": ("设备串口", "查看 Controller 本机串口控制台和早期启动日志"),
-    "reports": ("报告管理", "查看、下载、删除测试报告"),
-    "report-analysis": ("报告分析", "上传或打开报告并诊断失败"),
-    "apk-analysis": ("APK分析", "上传、反编译和查看 APK/JAR 源码"),
-    "test-suites": ("测试套件", "浏览、下载、解压和反编译套件文件"),
-    "api-docs": ("系统接口", "查看 API 和 curl 示例"),
-    "architecture": ("系统架构", "查看系统架构图"),
-    "websites": ("常用网址", "管理常用站点"),
-    "tools": ("常用工具", "下载和维护常用工具"),
-    "security-audit": ("安全审计", "查看访问和接口审计"),
-    "gms-assistant": ("GMS助手", "外部 GMS 助手"),
-    "automation": ("GMS ATS", "查看和管理自动化测试流水线"),
-    "cluster": ("主机集群", "查看 Worker、设备和持久化集群任务"),
-    "redmine-agent": ("Redmine看板", "个人/部门 Redmine 统计、未回复问题和 RedmineAgent 扫描"),
-    "gerrit-dashboard": ("Gerrit看板", "查询 Gerrit 变更和配置 Gerrit dashboard profiles"),
-    "notes": ("个人知识库", "管理 Wiki 文档、附件和知识问答"),
-    "agent": ("对话Agent", "自然语言操作 Web_app"),
-}
 
 
 class AgentChatRequest(BaseModel):
@@ -910,6 +887,9 @@ async def _monitor_agent_run(
                 while job and job.get("status") in _ACTIVE_CLUSTER_JOB_STATUSES:
                     await asyncio.sleep(3)
                     job = repository.get_job(cluster_job_id)
+                if not _monitor_run_is_current(session, monitor_token):
+                    # 长等待期间被新一轮监控替换：不再读结果/写步骤。
+                    return
                 if not job:
                     if _monitor_run_is_current(session, monitor_token):
                         session["status"] = "error"
@@ -930,6 +910,8 @@ async def _monitor_agent_run(
                     if job.get("status") != "completed" and not report:
                         break
                     await asyncio.sleep(1)
+                if not _monitor_run_is_current(session, monitor_token):
+                    return
                 latest_report_timestamp = report.get("timestamp") if report else None
                 job_failed = job.get("status") != "completed"
                 failed = job_failed or _report_failed(report)
@@ -1015,6 +997,9 @@ async def _monitor_agent_run(
             report = _latest_report_for_client(
                 report_owner_id, exclude_timestamp=baseline_report_timestamp
             )
+            if not _monitor_run_is_current(session, monitor_token):
+                # 等待期间被新一轮计划替换：跳过步骤/消息写入，终态与锚点清理由新任务负责。
+                return
             if report:
                 latest_report_timestamp = report.get("timestamp")
                 failed = _report_failed(report)
@@ -1108,13 +1093,17 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
 
     pre_result = await _run_pre_actions(session, plan, request_shim)
     if not pre_result.get("success"):
+        # 失败终态统一清理：状态、运行对象与恢复锚点一起收敛，避免 UI
+        # 残留已失败的运行计划。
         session["status"] = "error"
+        session["active_run"] = None
         _clear_session_anchor(session)
         return pre_result
 
     payload = await _start_test_with_plan(session, request_shim, plan)
     if not payload.get("success"):
         session["status"] = "error"
+        session["active_run"] = None
         _clear_session_anchor(session)
         return payload
 

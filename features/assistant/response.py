@@ -12,29 +12,36 @@ from typing import Any
 from features.assistant.execution_result import ToolResult
 
 
+# 单一页面注册表：page → (显示名, 功能描述)。
+# Agent 提示（api.py 能力说明）、快捷导航（page_quick_actions）和页面
+# 功能说明都从这里派生，新增/重命名页面只改这一处。
+WEBAPP_PAGES: dict[str, tuple[str, str]] = {
+    "test": ("测试界面", "运行测试、查看测试日志"),
+    "desktop": ("主机桌面", "查看和控制主机桌面"),
+    "terminal": ("主机终端", "打开主机终端和上传文件"),
+    "users": ("用户管理", "查看在线用户和测试占用"),
+    "devices": ("设备管理", "查看 ADB 设备、锁定状态和来源"),
+    "devices-console": ("设备串口", "查看 Controller 本机串口控制台和早期启动日志"),
+    "reports": ("报告管理", "查看、下载、删除测试报告"),
+    "report-analysis": ("报告分析", "上传或打开报告并诊断失败"),
+    "apk-analysis": ("APK分析", "上传、反编译和查看 APK/JAR 源码"),
+    "test-suites": ("测试套件", "浏览、下载、解压和反编译套件文件"),
+    "api-docs": ("系统接口", "查看 API 和 curl 示例"),
+    "architecture": ("系统架构", "查看系统架构图"),
+    "websites": ("常用网址", "管理常用站点"),
+    "tools": ("常用工具", "下载和维护常用工具"),
+    "security-audit": ("安全审计", "查看访问和接口审计"),
+    "gms-assistant": ("GMS助手", "外部 GMS 助手"),
+    "automation": ("GMS ATS", "查看和管理自动化测试流水线"),
+    "cluster": ("主机集群", "查看 Worker、设备和持久化集群任务"),
+    "redmine-agent": ("Redmine看板", "个人/部门 Redmine 统计、未回复问题和 RedmineAgent 扫描"),
+    "gerrit-dashboard": ("Gerrit看板", "查询 Gerrit 变更和配置 Gerrit dashboard profiles"),
+    "notes": ("个人知识库", "管理 Wiki 文档、附件和知识问答"),
+    "agent": ("对话Agent", "自然语言操作 Web_app"),
+}
+
 PAGE_DISPLAY_NAMES: dict[str, str] = {
-    "test": "测试界面",
-    "desktop": "主机桌面",
-    "terminal": "主机终端",
-    "users": "用户管理",
-    "devices": "设备管理",
-    "devices-console": "设备串口",
-    "reports": "报告管理",
-    "report-analysis": "报告分析",
-    "apk-analysis": "APK分析",
-    "test-suites": "测试套件",
-    "api-docs": "系统接口",
-    "architecture": "系统架构",
-    "websites": "常用网址",
-    "tools": "常用工具",
-    "security-audit": "安全审计",
-    "gms-assistant": "GMS助手",
-    "automation": "GMS ATS",
-    "cluster": "主机集群",
-    "redmine-agent": "Redmine看板",
-    "gerrit-dashboard": "Gerrit看板",
-    "notes": "个人知识库",
-    "agent": "对话Agent",
+    page: name for page, (name, _description) in WEBAPP_PAGES.items()
 }
 
 

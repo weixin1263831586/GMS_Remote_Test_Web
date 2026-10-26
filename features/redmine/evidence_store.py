@@ -31,6 +31,15 @@ from .users import _now, owner_redmine_root
 
 SNAPSHOT_STATUSES = ("queued", "fetching", "downloading", "ready", "partial", "failed")
 ARTIFACT_STATUSES = ("metadata", "downloading", "ready", "partial", "rejected", "failed")
+# 派生文本状态与原件 status 正交：原件字节已完整下载即为 ready；派生
+# （OCR/zip 索引/转码）是否可用由 derived_status 表达，避免一次 OCR
+# 失败把"原件可用"误报成"证据不完整"。
+#   ready   派生文本完整可用
+#   partial 派生文本已生成但索引不完整（如 zip 成员超限被跳过）
+#   missing 派生失败且无文本产出（OCR 依赖缺失/超时、解包失败）
+#   empty   派生正常执行但零文本（无文字截图/照片），非证据缺口
+# 空字符串表示该附件未参与派生（text/log 原件即 UTF-8、rejected/failed）。
+DERIVED_STATUSES = ("ready", "partial", "missing", "empty")
 
 
 def new_snapshot_id() -> str:
@@ -95,6 +104,7 @@ class EvidenceStore:
                     sha256 TEXT DEFAULT '',
                     stored_path TEXT DEFAULT '',
                     derived_text_path TEXT DEFAULT '',
+                    derived_status TEXT DEFAULT '',
                     kind TEXT DEFAULT 'unknown',
                     status TEXT DEFAULT 'metadata',
                     error TEXT DEFAULT '',
@@ -106,6 +116,44 @@ class EvidenceStore:
                     ON redmine_evidence_artifacts(attachment_id);
                 """
             )
+            self._migrate_derived_status(conn)
+
+    @staticmethod
+    def _migrate_derived_status(conn: sqlite3.Connection) -> None:
+        """Idempotent cross-process migration: add derived_status, backfill.
+
+        Process-safe per the repo architecture rule: BEGIN IMMEDIATE before
+        reading the schema, then ALTER TABLE. Legacy rows marked partial
+        because of a derivation failure are backfilled so historical
+        snapshots keep accurate index warnings.
+        """
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            columns = {
+                str(row["name"])
+                for row in conn.execute(
+                    "PRAGMA table_info(redmine_evidence_artifacts)"
+                )
+            }
+            if "derived_status" not in columns:
+                conn.execute(
+                    "ALTER TABLE redmine_evidence_artifacts "
+                    "ADD COLUMN derived_status TEXT DEFAULT ''"
+                )
+                # 旧语义里 status=partial 只由派生失败产生（下载失败是
+                # failed），回填为 partial 保留检索索引警告的准确性。
+                conn.execute(
+                    "UPDATE redmine_evidence_artifacts SET derived_status = 'partial' "
+                    "WHERE status = 'partial' AND derived_text_path != ''"
+                )
+                conn.execute(
+                    "UPDATE redmine_evidence_artifacts SET derived_status = 'missing' "
+                    "WHERE status = 'partial' AND derived_text_path = ''"
+                )
+        except Exception:
+            conn.rollback()
+            raise
+        conn.commit()
 
     # --------------------------------------------------------------- snapshots
 
@@ -264,6 +312,7 @@ class EvidenceStore:
             "sha256",
             "stored_path",
             "derived_text_path",
+            "derived_status",
             "kind",
             "status",
             "error",
@@ -333,7 +382,6 @@ class EvidenceStore:
         item.pop("stored_path", None)
         item.pop("derived_text_path", None)
         return item
-
     # -------------------------------------------------------------- file paths
 
     def snapshot_dir(self, snapshot: dict[str, Any]) -> Path:

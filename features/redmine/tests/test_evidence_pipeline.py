@@ -192,7 +192,13 @@ def _runtime_config(base_url: str) -> dict:
     }
 
 
-class EvidencePipelineTests(unittest.TestCase):
+class EvidencePipelineFixture:
+    """公共夹具（无测试方法）：隔离密钥/owner 目录/store 缓存。
+
+    测试类不得直接继承含测试方法的基类，否则父类
+    用例在子类里被再次收集执行。各测试类改为继承本 Mixin + TestCase。
+    """
+
     def setUp(self):
         self.secret_env = patch.dict(
             "os.environ", {"GMS_SECRET_KEY": Fernet.generate_key().decode("ascii")}
@@ -246,6 +252,8 @@ class EvidencePipelineTests(unittest.TestCase):
         import features.redmine.evidence as evidence
         return patch.object(evidence, "redmine_config_manager", manager)
 
+
+class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
     # ------------------------------------------------------------------ tests
 
     def test_long_journal_preserved_byte_for_byte(self):

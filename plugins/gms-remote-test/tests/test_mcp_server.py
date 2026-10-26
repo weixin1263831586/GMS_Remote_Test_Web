@@ -2146,6 +2146,27 @@ class RedmineEvidenceToolTests(unittest.TestCase):
             captured["args"][-4:], ["--offset", "10", "--limit", "100"],
         )
 
+    def test_sdk_search_accepts_keywords_alias(self):
+        # codesearch 风格的 keywords 等价于 query；两者都缺时报错点名别名。
+        captured = self._capture_run()
+        mcp_server.sdk_search_tool({
+            "source": "android14", "revision": "main", "keywords": "getDataType",
+        })
+        self.assertEqual(
+            captured["args"],
+            ["--source", "android14", "--revision", "main", "--query", "getDataType"],
+        )
+        text, is_error = mcp_server.sdk_search_tool({"source": "s"})
+        self.assertTrue(is_error)
+        self.assertIn("keywords", text)
+        by_name = {tool["name"]: tool for tool in mcp_server.tools()}
+        schema = by_name["gms_rt_sdk_search"]["inputSchema"]
+        self.assertIn("keywords", schema["properties"])
+        self.assertNotIn("query", schema["required"])
+        self.assertIn(
+            {"required": ["keywords"]}, schema["anyOf"],
+        )
+
     def test_knowledge_search_args(self):
         # ADR 0014: background-only knowledge search maps to the CLI verb.
         text, is_error = mcp_server.knowledge_search_tool({})

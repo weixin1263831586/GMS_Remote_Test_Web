@@ -26,6 +26,7 @@ from .evidence import (
     ATTACHMENT_CONNECT_TIMEOUT_SECONDS,
     ATTACHMENT_MAX_BYTES,
     ATTACHMENT_READ_TIMEOUT_SECONDS,
+    DERIVE_CONCURRENCY,
     DOWNLOAD_POLICIES,
     MAX_REDIRECTS,
     SNAPSHOT_ISSUE_TIMEOUT_SECONDS,
@@ -42,6 +43,7 @@ from .evidence import (
     _same_origin,
     owner_evidence_store,
 )
+from .evidence_archives import extract_system_archive_text
 from .evidence_images import extract_image_ocr_text
 from .evidence_store import EvidenceStore
 from .evidence_zip import extract_zip_derived_text
@@ -58,6 +60,8 @@ class EvidenceFetcher:
     def __init__(self, owner_id: str, store: EvidenceStore | None = None):
         self.owner_id = str(owner_id)
         self.store = store or owner_evidence_store(owner_id)
+        # 下载阶段收集、统一在派生阶段并发执行的作业（image/archive）。
+        self._pending_derive: list[dict[str, Any]] = []
 
     # ------------------------------------------------------------- public API
 
@@ -209,7 +213,7 @@ class EvidenceFetcher:
                             })
                             continue
                         try:
-                            spent = await self._download_attachment(
+                            spent, inline_derive_error = await self._download_attachment(
                                 session, base_url, attachment,
                                 credentials_headers, artifact, snapshot_dir,
                             )
@@ -234,19 +238,23 @@ class EvidenceFetcher:
                             continue
                         total_budget -= spent
                         downloaded += 1
-                        updated_artifact = self.store.get_artifact(
-                            str(artifact["artifact_id"])
-                        ) or {}
-                        if str(updated_artifact.get("status")) == "partial":
+                        if inline_derive_error:
                             errors.append({
                                 "stage": "derive",
                                 "message": (
-                                    f"attachment {attachment.get('id')}: "
-                                    f"{updated_artifact.get('error') or '派生索引不完整'}"
+                                    f"attachment {attachment.get('id')}: {inline_derive_error}"
                                 ),
                             })
 
-        final_status = "ready" if not errors else "partial"
+        # 派生阶段与下载解耦：OCR/压缩包索引并发执行，失败/索引不全只
+        # 记 derive 阶段错误与 artifact.derived_status，不把原件 ready
+        # 降级成 partial。
+        errors.extend(await self._run_derivation())
+        final_status = (
+            "partial"
+            if any(str(item.get("stage")) == "download" for item in errors)
+            else "ready"
+        )
         self.store.update_snapshot(
             snapshot_id,
             status=final_status,
@@ -315,7 +323,12 @@ class EvidenceFetcher:
         headers: dict[str, str],
         artifact: dict[str, Any],
         snapshot_dir: Path,
-    ) -> int:
+    ) -> tuple[int, str]:
+        """下载附件原件并登记派生作业；返回 ``(字节数, 内联派生错误)``。
+
+        原件字节完整落盘即 ready；image/archive 的文本派生延迟到
+        ``_run_derivation`` 并发执行，text/log 的转码很轻、仍内联完成。
+        """
         artifact_id = str(artifact["artifact_id"])
         evidence_root = self.store.evidence_dir.resolve()
         # snapshot_dir = evidence/<issue>/<snapshot>；转换成 evidence 根相对路径
@@ -393,6 +406,7 @@ class EvidenceFetcher:
 
         derived_rel = ""
         derived_error = ""
+        derived_status = ""
         kind = str(artifact.get("kind") or "unknown")
         if kind in {"text", "log"}:
             encoding = _detect_text_encoding(data)
@@ -401,31 +415,49 @@ class EvidenceFetcher:
                     derived = data.decode(encoding).encode("utf-8")
                     derived_rel = f"{snapshot_rel}/derived/{artifact_id}.txt"
                     self._atomic_write(self.store.resolve_internal(derived_rel), derived)
+                    derived_status = "ready"
                 except (UnicodeDecodeError, OSError) as exc:
                     derived_error = f"派生 UTF-8 文本失败: {type(exc).__name__}"
+                    derived_status = "missing"
+            elif encoding == "utf-8":
+                # 原件已是 UTF-8：检索直接扫原文（stored_path 兜底），
+                # 无需派生副本，derived_status 留空表示"不适用"。
+                pass
+            else:
+                # 未知编码且超出上限：无法生成派生文本。
+                derived_status = "missing"
+                derived_error = "文本编码未识别，未生成派生文本"
         elif kind == "image":
-            # 截图/图片附件 OCR 成可检索文本（best-effort）：分析链路经
-            # artifact_read 读派生文本，不再依赖 MCP 图片载荷。派生失败
-            # 与 zip 一样转 partial 并显性写入 errors，静默丢截图会直接
-            # 造成"取证未闭环"（2026-10 #656295/#655644 复盘）。
-            derived_rel, derived_error = await asyncio.to_thread(
-                extract_image_ocr_text,
-                self.store, self._atomic_write, artifact_id, snapshot_rel, absolute,
-            )
+            # 截图/图片附件 OCR 成可检索文本（best-effort），延迟到
+            # 派生阶段并发执行；失败只影响 derived_status，不降级原件。
+            self._pending_derive.append({
+                "artifact_id": str(artifact["artifact_id"]),
+                "attachment_id": str(attachment.get("id") or ""),
+                "kind": kind,
+                "snapshot_rel": snapshot_rel,
+                "path": absolute,
+                "data": b"",
+            })
         elif kind == "archive" and data[:2] == b"PK":
-            # zip 内文本成员（logcat /
-            # test_result.xml 等）派生成可检索文本，命中可以
-            # attachment:<file>.zip!/<member>:L<line> 引用。
-            derived_rel, derived_error = extract_zip_derived_text(
-                self.store, self._atomic_write, artifact_id, snapshot_rel, data
-            )
+            # zip 内文本成员（logcat / test_result.xml 等）派生成可检索文本，
+            # 命中可以 attachment:<file>.zip!/<member>:L<line> 引用。
+            self._pending_derive.append({
+                "artifact_id": str(artifact["artifact_id"]),
+                "attachment_id": str(attachment.get("id") or ""),
+                "kind": kind,
+                "snapshot_rel": snapshot_rel,
+                "path": absolute,
+                "data": data,
+            })
         elif kind == "archive":
-            from .evidence_archives import extract_system_archive_text
-
-            derived_rel, derived_error = await asyncio.to_thread(
-                extract_system_archive_text,
-                self.store, self._atomic_write, artifact_id, snapshot_rel, data,
-            )
+            self._pending_derive.append({
+                "artifact_id": str(artifact["artifact_id"]),
+                "attachment_id": str(attachment.get("id") or ""),
+                "kind": kind,
+                "snapshot_rel": snapshot_rel,
+                "path": absolute,
+                "data": data,
+            })
 
         size_note = ""
         if declared and declared != len(data):
@@ -433,11 +465,12 @@ class EvidenceFetcher:
 
         self.store.update_artifact(
             artifact_id,
-            status="partial" if derived_error else "ready",
+            status="ready",
             size_bytes=len(data),
             sha256=digest.hexdigest(),
             stored_path=target_rel,
             derived_text_path=derived_rel,
+            derived_status=derived_status,
             detected_content_type=detected_type,
             error="; ".join(part for part in (size_note, derived_error) if part),
         )
@@ -445,7 +478,71 @@ class EvidenceFetcher:
             logger.info(
                 "Redmine attachment %s 大小不一致: %s", attachment.get("id"), size_note
             )
-        return len(data)
+        return len(data), derived_error
+
+    async def _run_derivation(self) -> list[dict[str, str]]:
+        """并发执行下载阶段登记的派生作业，返回 derive 阶段错误列表。
+
+        语义（原件可用性与派生索引状态分离）：
+        - 派生成功且索引完整 → derived_status=ready
+        - 派生成功但索引不完整（zip 成员超限等 note）→ partial
+        - 派生失败无文本（OCR 依赖缺失/超时、解包失败）→ missing
+        - 派生正常执行但零文本（无文字截图）→ empty，非证据缺口
+        不设超时跳过：宁可慢，也不让证据索引出现"跳过即完成"的假阳性
+        （分析结论准确优先；并发上限 DERIVE_CONCURRENCY 控制总时长）。
+        """
+        jobs, self._pending_derive = self._pending_derive, []
+        if not jobs:
+            return []
+        semaphore = asyncio.Semaphore(DERIVE_CONCURRENCY)
+
+        async def _derive(job: dict[str, Any]) -> dict[str, str]:
+            async with semaphore:
+                try:
+                    if job["kind"] == "image":
+                        derived_rel, note = await asyncio.to_thread(
+                            extract_image_ocr_text,
+                            self.store, self._atomic_write,
+                            job["artifact_id"], job["snapshot_rel"], job["path"],
+                        )
+                    elif job["data"][:2] == b"PK":
+                        derived_rel, note = extract_zip_derived_text(
+                            self.store, self._atomic_write,
+                            job["artifact_id"], job["snapshot_rel"], job["data"],
+                        )
+                    else:
+                        derived_rel, note = await asyncio.to_thread(
+                            extract_system_archive_text,
+                            self.store, self._atomic_write,
+                            job["artifact_id"], job["snapshot_rel"], job["data"],
+                        )
+                except Exception as exc:  # 派生器未捕获的异常也只记派生状态
+                    derived_rel, note = "", f"派生异常: {type(exc).__name__}"
+                if derived_rel:
+                    derived_status = "partial" if note else "ready"
+                else:
+                    derived_status = "missing" if note else "empty"
+                existing = self.store.get_artifact(job["artifact_id"]) or {}
+                merged_error = "; ".join(
+                    part
+                    for part in (str(existing.get("error") or ""), str(note or ""))
+                    if part
+                )
+                self.store.update_artifact(
+                    job["artifact_id"],
+                    derived_text_path=derived_rel,
+                    derived_status=derived_status,
+                    error=merged_error,
+                )
+                if derived_status in {"missing", "partial"}:
+                    return {
+                        "stage": "derive",
+                        "message": f"attachment {job['attachment_id']}: {note}",
+                    }
+                return {}
+
+        results = await asyncio.gather(*(_derive(job) for job in jobs))
+        return [item for item in results if item]
 
     # ------------------------------------------------------------- normalize
 

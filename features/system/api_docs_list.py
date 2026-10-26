@@ -680,7 +680,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "列出所有APK反编译任务",
         "params": [],
         "category": "apk",
-        "skill": "gms-rt-apk-tasks"
+        "skill": "gms-rt-apk-status"
     },
     {
         "method": "GET",
@@ -696,7 +696,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "查看APK声明的权限列表（任务ID）",
         "params": [{"name": "task_id", "type": "string", "required": True, "desc": "APK任务ID"}],
         "category": "apk",
-        "skill": "gms-rt-apk-permissions"
+        "skill": "gms-rt-apk-manifest"
     },
     {
         "method": "GET",
@@ -730,7 +730,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
             {"name": "symbol", "type": "string", "required": True, "desc": "符号名"}
         ],
         "category": "apk",
-        "skill": "gms-rt-apk-definition"
+        "skill": "gms-rt-apk-search"
     },
     {
         "method": "POST",
@@ -753,7 +753,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
             {"name": "report_name", "type": "string", "required": False, "desc": "报告时间戳"}
         ],
         "category": "report",
-        "skill": "gms-rt-reports-diagnose"
+        "skill": ""
     },
     {
         "method": "POST",
@@ -761,7 +761,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "从URL分析测试报告",
         "params": [{"name": "url", "type": "string", "required": True, "desc": "报告URL"}],
         "category": "report",
-        "skill": "gms-rt-reports-analyze-url"
+        "skill": ""
     },
     {
         "method": "POST",
@@ -769,7 +769,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "从Redmine附件提取报告信息",
         "params": [],
         "category": "report",
-        "skill": "gms-rt-reports-extract-redmine"
+        "skill": ""
     },
 
     # ==================== 知识库 ====================
@@ -782,7 +782,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
             {"name": "limit", "type": "integer", "required": False, "desc": "返回条数"}
         ],
         "category": "file",
-        "skill": "gms-rt-kb-search"
+        "skill": ""
     },
     {
         "method": "GET",
@@ -790,7 +790,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "知识库统计信息",
         "params": [],
         "category": "file",
-        "skill": "gms-rt-kb-stats"
+        "skill": ""
     },
 
     # ==================== 测试日志/套件（补充） ====================
@@ -800,7 +800,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "列出测试日志文件",
         "params": [],
         "category": "test",
-        "skill": "gms-rt-test-logs-list"
+        "skill": ""
     },
     {
         "method": "GET",
@@ -808,7 +808,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "读取指定测试日志内容",
         "params": [{"name": "name", "type": "string", "required": True, "desc": "日志文件名"}],
         "category": "test",
-        "skill": "gms-rt-test-logs-get"
+        "skill": ""
     },
     {
         "method": "GET",
@@ -816,7 +816,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "列出测试套件目录下的文件",
         "params": [{"name": "path", "type": "string", "required": False, "desc": "套件路径"}],
         "category": "test",
-        "skill": "gms-rt-suites-files"
+        "skill": ""
     },
     {
         "method": "GET",
@@ -824,7 +824,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "列出测试套件归档文件",
         "params": [],
         "category": "test",
-        "skill": "gms-rt-suites-archives"
+        "skill": ""
     },
     {
         "method": "POST",
@@ -832,7 +832,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "根据失败信息定位套件中的APK/JAR构件",
         "params": [],
         "category": "test",
-        "skill": "gms-rt-suites-diagnose-target"
+        "skill": ""
     },
     {
         "method": "GET",
@@ -840,7 +840,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "查询套件下载任务状态（任务ID）",
         "params": [{"name": "task_id", "type": "string", "required": True, "desc": "下载任务ID"}],
         "category": "test",
-        "skill": "gms-rt-suites-download-status"
+        "skill": ""
     },
     {
         "method": "GET",
@@ -848,7 +848,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "查询套件解压任务状态（任务ID）",
         "params": [{"name": "task_id", "type": "string", "required": True, "desc": "解压任务ID"}],
         "category": "test",
-        "skill": "gms-rt-suites-extract-status"
+        "skill": ""
     },
 
     # ==================== 通知 ====================
@@ -858,7 +858,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "获取通知列表",
         "params": [],
         "category": "notification",
-        "skill": "gms-rt-notifications"
+        "skill": ""
     },
     {
         "method": "POST",
@@ -866,7 +866,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "标记通知为已读",
         "params": [{"name": "id", "type": "string", "required": False, "desc": "通知ID，不传则全部已读"}],
         "category": "notification",
-        "skill": "gms-rt-notifications-mark-read"
+        "skill": ""
     },
     {
         "method": "POST",
@@ -874,7 +874,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "清空通知",
         "params": [],
         "category": "notification",
-        "skill": "gms-rt-notifications-clear"
+        "skill": ""
     },
 
     # ==================== 安全审计 ====================
@@ -887,7 +887,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
             {"name": "action_type", "type": "string", "required": False, "desc": "事件类型过滤（api/page_view/page_visit）"}
         ],
         "category": "audit",
-        "skill": "gms-rt-audit-logs"
+        "skill": ""
     },
     {
         "method": "GET",
@@ -895,7 +895,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "查看审计事件详情（事件ID）",
         "params": [{"name": "event_id", "type": "string", "required": True, "desc": "事件ID"}],
         "category": "audit",
-        "skill": "gms-rt-audit-detail"
+        "skill": ""
     },
     {
         "method": "GET",
@@ -903,7 +903,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "导出安全审计日志",
         "params": [],
         "category": "audit",
-        "skill": "gms-rt-audit-export"
+        "skill": ""
     },
 
     # ==================== 网址/工具/Favicon（assets 补充） ====================
@@ -913,7 +913,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "加载常用网址列表",
         "params": [],
         "category": "assets",
-        "skill": "gms-rt-websites-load"
+        "skill": ""
     },
     {
         "method": "GET",
@@ -921,7 +921,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "列出常用工具",
         "params": [],
         "category": "assets",
-        "skill": "gms-rt-tools-list"
+        "skill": ""
     },
 
     # ==================== Tailscale ====================
@@ -931,7 +931,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "查询Tailscale VPN状态",
         "params": [],
         "category": "vpn",
-        "skill": "gms-rt-tailscale-status"
+        "skill": ""
     },
 
     # ==================== 配置（补充） ====================
@@ -941,7 +941,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "获取AI模型配置",
         "params": [],
         "category": "config",
-        "skill": "gms-rt-config-ai"
+        "skill": ""
     },
     {
         "method": "GET",
@@ -949,7 +949,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "获取OpenGrok源码搜索配置",
         "params": [],
         "category": "config",
-        "skill": "gms-rt-config-opengrok"
+        "skill": ""
     },
     {
         "method": "GET",
@@ -957,7 +957,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "获取Redmine看板配置",
         "params": [],
         "category": "config",
-        "skill": "gms-rt-config-redmine"
+        "skill": ""
     },
 
     # ==================== VPN/连接（补充） ====================
@@ -967,7 +967,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "description": "获取VPN连接列表",
         "params": [],
         "category": "vpn",
-        "skill": "gms-rt-vpn-connections"
+        "skill": ""
     }
 ]
 
