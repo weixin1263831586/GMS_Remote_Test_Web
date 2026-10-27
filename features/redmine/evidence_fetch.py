@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import secrets
 from pathlib import Path
 from typing import Any
@@ -340,6 +341,14 @@ class EvidenceFetcher:
             raw_url = urljoin(base_url + "/", raw_url)
         url = raw_url
         redirects = 0
+        from .utils import sanitize_attachment_filename
+
+        safe_name = sanitize_attachment_filename(
+            str(attachment.get("filename") or f"attachment_{attachment.get('id')}")
+        )
+        # stored_path 是 evidence 根下的相对路径：issue/<snapshot>/attachments/<artifact>/<name>
+        target_rel = f"{snapshot_rel}/attachments/{artifact_id}/{safe_name}"
+        absolute = self.store.resolve_internal(target_rel)
         while True:
             parsed = urlparse(url)
             if parsed.scheme not in {"http", "https"}:
@@ -372,36 +381,44 @@ class EvidenceFetcher:
                     raise EvidenceError(
                         f"声明大小 {declared} 超过单附件上限 {ATTACHMENT_MAX_BYTES}",
                     )
+                # 流式落盘：256MiB 级附件不再整包驻留内存，边收边写临时
+                # 文件并滚动 SHA-256，完成后原子重命名；任何失败（含取消）
+                # 都删除半成品，绝不留下截断的原件。
                 digest = hashlib.sha256()
-                payload = bytearray()
-                async for chunk in response.content.iter_chunked(256 * 1024):
-                    payload.extend(chunk)
-                    digest.update(chunk)
-                    if len(payload) > ATTACHMENT_MAX_BYTES:
-                        raise EvidenceError("附件超过单附件大小上限")
-                data = bytes(payload)
+                size = 0
+                header = b""
+                absolute.parent.mkdir(parents=True, exist_ok=True)
+                temporary = absolute.with_name(
+                    f".{absolute.name}.{secrets.token_hex(8)}.part"
+                )
+                try:
+                    with open(temporary, "wb") as sink:
+                        async for chunk in response.content.iter_chunked(256 * 1024):
+                            size += len(chunk)
+                            if size > ATTACHMENT_MAX_BYTES:
+                                raise EvidenceError("附件超过单附件大小上限")
+                            if len(header) < 8:
+                                header = (header + chunk)[:8]
+                            digest.update(chunk)
+                            sink.write(chunk)
+                        sink.flush()
+                        os.fsync(sink.fileno())
+                    temporary.replace(absolute)
+                except BaseException:
+                    temporary.unlink(missing_ok=True)
+                    raise
                 break
 
-        from .utils import sanitize_attachment_filename
-
-        safe_name = sanitize_attachment_filename(
-            str(attachment.get("filename") or f"attachment_{attachment.get('id')}")
-        )
-        # stored_path 是 evidence 根下的相对路径：issue/<snapshot>/attachments/<artifact>/<name>
-        target_rel = f"{snapshot_rel}/attachments/{artifact_id}/{safe_name}"
-        absolute = self.store.resolve_internal(target_rel)
-        self._atomic_write(absolute, data)
-
         detected_type = ""
-        if data[:3] == b"\xff\xd8\xff":
+        if header[:3] == b"\xff\xd8\xff":
             detected_type = "image/jpeg"
-        elif data[:8] == b"\x89PNG\r\n\x1a\n":
+        elif header[:8] == b"\x89PNG\r\n\x1a\n":
             detected_type = "image/png"
-        elif data[:6] in (b"GIF87a", b"GIF89a"):
+        elif header[:6] in (b"GIF87a", b"GIF89a"):
             detected_type = "image/gif"
-        elif data[:2] == b"PK":
+        elif header[:2] == b"PK":
             detected_type = "application/zip"
-        elif data[:4] == b"%PDF":
+        elif header[:4] == b"%PDF":
             detected_type = "application/pdf"
 
         derived_rel = ""
@@ -409,8 +426,15 @@ class EvidenceFetcher:
         derived_status = ""
         kind = str(artifact.get("kind") or "unknown")
         if kind in {"text", "log"}:
-            encoding = _detect_text_encoding(data)
-            if encoding and encoding != "utf-8" and len(data) <= _DERIVED_TEXT_MAX_BYTES:
+            # 转码是唯一需要整包字节的路径：仅小文本附件按需回读磁盘，
+            # 大文件不再为编码探测把原件整体载入内存。
+            data = absolute.read_bytes() if size <= _DERIVED_TEXT_MAX_BYTES else b""
+            encoding = _detect_text_encoding(data) if data else ""
+            if not data:
+                # 超出派生上限：不为编码探测载入大文件，无派生文本。
+                derived_status = "missing"
+                derived_error = "文本附件超出派生上限，未生成派生文本"
+            elif encoding and encoding != "utf-8":
                 try:
                     derived = data.decode(encoding).encode("utf-8")
                     derived_rel = f"{snapshot_rel}/derived/{artifact_id}.txt"
@@ -424,7 +448,7 @@ class EvidenceFetcher:
                 # 无需派生副本，derived_status 留空表示"不适用"。
                 pass
             else:
-                # 未知编码且超出上限：无法生成派生文本。
+                # 无法识别编码：无法生成派生文本。
                 derived_status = "missing"
                 derived_error = "文本编码未识别，未生成派生文本"
         elif kind == "image":
@@ -445,19 +469,19 @@ class EvidenceFetcher:
                 "artifact_id": str(artifact["artifact_id"]),
                 "attachment_id": str(attachment.get("id") or ""),
                 "kind": kind,
-                "format": "zip" if data[:2] == b"PK" else "archive",
+                "format": "zip" if header[:2] == b"PK" else "archive",
                 "snapshot_rel": snapshot_rel,
                 "path": absolute,
             })
 
         size_note = ""
-        if declared and declared != len(data):
-            size_note = f"声明 {declared} 字节，实际 {len(data)} 字节"
+        if declared and declared != size:
+            size_note = f"声明 {declared} 字节，实际 {size} 字节"
 
         self.store.update_artifact(
             artifact_id,
             status="ready",
-            size_bytes=len(data),
+            size_bytes=size,
             sha256=digest.hexdigest(),
             stored_path=target_rel,
             derived_text_path=derived_rel,
@@ -469,7 +493,7 @@ class EvidenceFetcher:
             logger.info(
                 "Redmine attachment %s 大小不一致: %s", attachment.get("id"), size_note
             )
-        return len(data), derived_error
+        return size, derived_error
 
     async def _run_derivation(self) -> list[dict[str, str]]:
         """并发执行下载阶段登记的派生作业，返回 derive 阶段错误列表。

@@ -150,14 +150,40 @@ class EvidenceStore:
                     "UPDATE redmine_evidence_artifacts SET derived_status = 'missing' "
                     "WHERE status = 'partial' AND derived_text_path = ''"
                 )
-                self._restore_legacy_partial_originals(conn)
+            # 历史修复与新增列迁移解耦：0.22.62 升级库已带 derived_status
+            # 列，只看列存在性会永远跳过恢复（升级部署恰恰是最需要修复的
+            # 场景）。meta 标记保证任意数据库只执行一次。
+            self._restore_legacy_partial_originals_once(conn)
         except Exception:
             conn.rollback()
             raise
         conn.commit()
 
+    def _restore_legacy_partial_originals_once(self, conn: sqlite3.Connection) -> None:
+        """一次性执行历史 partial 原件恢复，与新增列迁移解耦。
+
+        标记存在即跳过；标记与恢复在同一 BEGIN IMMEDIATE 事务内读写，
+        并发进程不会重复执行。恢复本身也幂等（磁盘校验通过才翻 ready），
+        标记只是避免每次启动都全表校验。
+        """
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS redmine_evidence_meta ("
+            "key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        done = conn.execute(
+            "SELECT value FROM redmine_evidence_meta "
+            "WHERE key = 'legacy_partial_originals_restored'"
+        ).fetchone()
+        if done:
+            return
+        self._restore_legacy_partial_originals(conn)
+        conn.execute(
+            "INSERT INTO redmine_evidence_meta(key, value) "
+            "VALUES ('legacy_partial_originals_restored', '1')"
+        )
+
     def _restore_legacy_partial_originals(self, conn: sqlite3.Connection) -> None:
-        """旧语义 status=partial 记录的原件重判定（评审 P2）。
+        """旧语义 status=partial 记录的原件重判定。
 
         新契约是"原件保存成功即 ready"，派生失败只落在 derived_status；
         历史 partial 记录必须先通过磁盘原件校验才能恢复 ready——

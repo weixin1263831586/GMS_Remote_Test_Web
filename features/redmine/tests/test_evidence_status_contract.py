@@ -1,4 +1,4 @@
-"""status / derived_status / completeness 的语义契约（评审 P2）。
+"""status / derived_status / completeness 的语义契约。
 
 2026-10（000bd13 起）原件状态与派生状态分离：
 - 附件原件保存成功 → ``status=ready``，与派生成败无关；

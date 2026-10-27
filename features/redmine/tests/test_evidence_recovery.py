@@ -1,4 +1,4 @@
-"""重启对账：无执行者的中间态证据快照必须进入 interrupted 终态（评审 P1）。"""
+"""重启对账：无执行者的中间态证据快照必须进入 interrupted 终态。"""
 
 from pathlib import Path
 
@@ -129,3 +129,59 @@ def test_legacy_partial_originals_restored_only_after_file_verification(tmp_path
     again = EvidenceStore(tmp_path / "owner-a")
     assert again.get_artifact("art_ok")["status"] == "ready"
     assert again.get_artifact("art_baddigest")["status"] == "partial"
+
+
+def test_upgrade_from_02262_database_still_restores_partial_originals(tmp_path):
+    """0.22.62 → 0.22.63 升级：已带 derived_status 列的库也必须恢复。
+
+    历史修复此前挂在"列缺失"分支上，升级库（已有该列）会永远跳过；
+    解耦后由 meta 标记保证任意形态的旧库恰好执行一次恢复。
+    """
+    import sqlite3
+
+    owner_root = tmp_path / "owner-upgrade"
+    rows = _seed_legacy_partial_rows(owner_root)
+    # 模拟 0.22.62：列迁移已发生过（有 derived_status），但恢复从未执行。
+    conn = sqlite3.connect(owner_root / "evidence.sqlite3")
+    conn.execute(
+        "ALTER TABLE redmine_evidence_artifacts ADD COLUMN derived_status TEXT DEFAULT ''"
+    )
+    conn.commit()
+    conn.close()
+
+    store = EvidenceStore(owner_root)
+
+    assert store.get_artifact("art_ok")["status"] == "ready"
+    assert store.get_artifact("art_nodigest")["status"] == "ready"
+    assert store.get_artifact("art_baddigest")["status"] == "partial"
+    # 标记已写入，再次打开不再重复执行。
+    again = EvidenceStore(owner_root)
+    assert again.get_artifact("art_ok")["status"] == "ready"
+
+
+def test_meta_marker_short_circuits_restore(tmp_path):
+    """meta 标记存在时跳过恢复：新产生的 partial 不被历史修复翻绿。"""
+    import hashlib
+    import sqlite3
+
+    owner_root = tmp_path / "owner-marked"
+    rows = _seed_legacy_partial_rows(owner_root)
+    conn = sqlite3.connect(owner_root / "evidence.sqlite3")
+    conn.execute(
+        "ALTER TABLE redmine_evidence_artifacts ADD COLUMN derived_status TEXT DEFAULT ''"
+    )
+    conn.execute(
+        "CREATE TABLE redmine_evidence_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO redmine_evidence_meta VALUES ('legacy_partial_originals_restored', '1')"
+    )
+    conn.commit()
+    conn.close()
+
+    EvidenceStore(owner_root)
+
+    # 标记短路：即使磁盘原件完整，历史 partial 也保持原状。
+    for artifact_id, _stored, _digest, _size, _derived, expected in rows:
+        artifact = EvidenceStore(owner_root).get_artifact(artifact_id)
+        assert artifact["status"] == "partial", artifact_id

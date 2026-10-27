@@ -242,6 +242,57 @@ class StartClusterTestArgvUnificationTests(unittest.TestCase):
         self.assertTrue(json.loads(result.body)["success"])
 
 
+class StartClusterTestOperationIdempotencyTests(unittest.TestCase):
+    def test_same_agent_operation_id_returns_existing_job(self):
+        """agent-op: 前缀的 automation_run_id 提供跨重启幂等。
+
+        任务已持久化而成功响应未到达时（Controller 中断/客户端重试），
+        同一 operation_id 的再次提交必须返回既有任务（deduplicated），
+        而不是创建第二个 job 抢占同样的设备。
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            repository = _repository(Path(directory))
+            with patch(
+                "workflows.cluster_test_execution.get_cluster_service"
+            ) as get_service:
+                get_service.return_value = SimpleNamespace(repository=repository)
+                first = start_cluster_test(
+                    _request(automation_run_id="agent-op:op-123"), "alice"
+                )
+                retry = start_cluster_test(
+                    _request(automation_run_id="agent-op:op-123"), "alice"
+                )
+
+            self.assertEqual(first.status_code, 200, first.body)
+            self.assertEqual(retry.status_code, 200, retry.body)
+            first_body = json.loads(first.body)["data"]
+            retry_body = json.loads(retry.body)["data"]
+            self.assertEqual(
+                first_body["cluster_job_id"], retry_body["cluster_job_id"]
+            )
+            self.assertTrue(retry_body.get("deduplicated"))
+            job_ids = [item["id"] for item in repository.list_jobs(owner_id="alice")]
+            self.assertEqual(job_ids, [first_body["cluster_job_id"]])
+
+    def test_other_owner_operation_id_is_not_replayed(self):
+        """operation_id 属于首个 owner：他人同 ID 提交不接管既有任务。"""
+        with tempfile.TemporaryDirectory() as directory:
+            repository = _repository(Path(directory))
+            with patch(
+                "workflows.cluster_test_execution.get_cluster_service"
+            ) as get_service:
+                get_service.return_value = SimpleNamespace(repository=repository)
+                first = start_cluster_test(
+                    _request(automation_run_id="agent-op:op-shared"), "alice"
+                )
+                second = start_cluster_test(
+                    _request(automation_run_id="agent-op:op-shared"), "bob"
+                )
+
+            self.assertEqual(first.status_code, 200, first.body)
+            self.assertEqual(second.status_code, 409, second.body)
+
+
 if __name__ == "__main__":
     unittest.main()
 
