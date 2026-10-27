@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import io
-import sys
 import unittest
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -112,13 +111,21 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         self.assertFalse(str(artifact.get("derived_text_path") or ""))
 
     def test_image_ocr_dependency_missing_is_explicit_not_fatal(self):
-        # sys.modules 注入 None 让 import pytesseract / PIL 直接 ImportError，
-        # 模拟无 OCR 依赖的部署：PNG 原件保持 ready（字节完整落盘），
-        # 派生状态记 missing、原因写明"依赖缺失"并进入快照 derive 阶段
-        # 错误，不阻塞其余附件，也不把快照整体拉成 partial。
-        png = _tiny_png_bytes()
-        with patch.dict(sys.modules, {"pytesseract": None, "PIL": None}):
-            result, store = self._fetch_with_png(png=png)
+        # 在模块依赖加载入口注入失败：extract_image_ocr_text 经
+        # _load_ocr_dependencies() 取依赖，这里让它直接抛
+        # ModuleNotFoundError，模拟无 OCR 依赖的部署。不操纵
+        # sys.modules / builtins.__import__（进程级全局状态，OCR 又在
+        # 工作线程执行，组合运行下会互相污染——外部复审 P2）。
+        # PNG 原件保持 ready（字节完整落盘），派生状态记 missing、
+        # 原因写明"依赖缺失"并进入快照 derive 阶段错误，不阻塞其余
+        # 附件，也不把快照整体拉成 partial。
+        from features.redmine import evidence_images
+
+        def _no_ocr():
+            raise ModuleNotFoundError("No module named 'pytesseract' (test)")
+
+        with patch.object(evidence_images, "_load_ocr_dependencies", _no_ocr):
+            result, store = self._fetch_with_png(png=_tiny_png_bytes())
         self.assertEqual(result["status"], "ready")
         self.assertTrue(
             any(item.get("stage") == "derive" for item in result["errors"])

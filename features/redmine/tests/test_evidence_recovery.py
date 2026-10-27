@@ -140,7 +140,7 @@ def test_upgrade_from_02262_database_still_restores_partial_originals(tmp_path):
     import sqlite3
 
     owner_root = tmp_path / "owner-upgrade"
-    rows = _seed_legacy_partial_rows(owner_root)
+    _seed_legacy_partial_rows(owner_root)
     # 模拟 0.22.62：列迁移已发生过（有 derived_status），但恢复从未执行。
     conn = sqlite3.connect(owner_root / "evidence.sqlite3")
     conn.execute(
@@ -161,7 +161,6 @@ def test_upgrade_from_02262_database_still_restores_partial_originals(tmp_path):
 
 def test_meta_marker_short_circuits_restore(tmp_path):
     """meta 标记存在时跳过恢复：新产生的 partial 不被历史修复翻绿。"""
-    import hashlib
     import sqlite3
 
     owner_root = tmp_path / "owner-marked"
@@ -182,6 +181,6 @@ def test_meta_marker_short_circuits_restore(tmp_path):
     EvidenceStore(owner_root)
 
     # 标记短路：即使磁盘原件完整，历史 partial 也保持原状。
-    for artifact_id, _stored, _digest, _size, _derived, expected in rows:
+    for artifact_id, *_rest in rows:
         artifact = EvidenceStore(owner_root).get_artifact(artifact_id)
         assert artifact["status"] == "partial", artifact_id
