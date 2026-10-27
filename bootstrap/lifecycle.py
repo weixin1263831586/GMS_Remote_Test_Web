@@ -233,7 +233,7 @@ def create_lifespan(services: AppServices):
         with controller_process_lock(services.settings.data_root):
             app.state.services = services
             initialize_runtime_data(services)
-            # 证据抓取中断对账（评审 P1）：重启后无执行者的 fetching/
+            # 证据抓取中断对账：重启后无执行者的 queued/fetching/
             # downloading 快照推进到 interrupted 终态，避免 wait_for_snapshot
             # 与状态轮询永久等待；失败绝不阻断启动。
             try:

@@ -276,7 +276,10 @@ jobs:
 
   unit-feature-assistant-reports:
     name: unit-assistant-reports-rest
-    runs-on: ubuntu-latest
+    # 固定 22.04：tools/tesseract 内置引擎按 libtiff.so.5/libgif.so.7 链接，
+    # ubuntu-latest(24.04) 只有 libtiff6，OCR 真机加载测试全部失败。迁移
+    # 24.04 前必须在目标系统重建内置引擎（ldd 全量核查），不要逐库打补丁。
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -288,13 +291,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
-      - name: Install system library for the bundled OCR engine
+      - name: Install system libraries for the bundled OCR engine
         run: |
-          # tools/tesseract 内置二进制动态链接 libgif.so.7（Ubuntu 镜像默认
-          # 不带该库）；缺失时 tesseract_finder 真机加载测试与 OCR 单测
-          # 全部以 "error while loading shared libraries" 失败。
+          # tools/tesseract 内置二进制动态链接 libgif.so.7 / libtiff.so.5
+          # （镜像默认不带）；缺失时 tesseract_finder 真机加载测试与 OCR
+          # 单测全部以 "error while loading shared libraries" 失败。
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libgif7
+          sudo apt-get install -y -qq libgif7 libtiff5
       - name: Assistant / reports / redmine / gerrit / knowledge / email tests
         run: |
           mkdir -p artifacts

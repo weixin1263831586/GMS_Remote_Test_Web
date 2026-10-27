@@ -15,6 +15,7 @@ from features.assistant.executor import _json_body, executor
 from features.assistant.payloads import display_record as _display_record
 from features.assistant.payloads import jsonable as _jsonable
 from features.assistant.payloads import session_payload as _session_payload
+from features.assistant.plan_submission import submit_pending_plan_once
 from features.assistant.response import (
     WEBAPP_PAGES,
     generate_capability_overview,
@@ -760,6 +761,12 @@ async def _start_test_with_plan(session: dict[str, Any], request_shim: AgentRequ
         req_data["retry_dir"] = retry_timestamp
         req_data["test_module"] = ""
         req_data["test_case"] = ""
+    # 跨重启幂等：plan.operation_id 以 "agent-op:" 前缀走 automation_run_id
+    # 通道（集群仓库持久化 + 唯一查询）：任务已创建而响应未达时，同 ID
+    # 重试返回既有任务；retry 复用任务目录，不注入。
+    operation_id = str(plan.get("operation_id") or "")
+    if operation_id and not retry_timestamp and not req_data.get("automation_run_id"):
+        req_data["automation_run_id"] = f"agent-op:{operation_id}"
     req = TestStartRequest(**req_data)
     response = await start_test(request_shim, help=False, req=req)
     payload = _json_body(response)
@@ -1182,29 +1189,13 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
             session["pending_plan"] = None
             session["status"] = "idle"
         elif pending_plan.get("type") == "test_execution":
-            # 提交状态机 pending→submitting→submitted/failed：确认请求可能
-            # 因浏览器超时重发或用户重复点击而到达多次，同一计划只允许
-            # 提交一次；失败保留计划（failed），允许修正后重新确认。
-            state = str(pending_plan.get("submit_state") or "pending")
-            if state == "submitting":
-                _append_message(session, "assistant", "该计划正在提交中，请勿重复确认。")
-                return success_response({"session": _session_payload(session)}, "Agent updated")
-            if state == "submitted":
-                _append_message(session, "assistant", "该计划已提交执行，请勿重复确认；当前运行进度见会话状态。")
-                return success_response({"session": _session_payload(session)}, "Agent updated")
-            pending_plan["submit_state"] = "submitting"
-            try:
-                result = await _execute_plan(session, request, pending_plan)
-            except Exception:
-                pending_plan["submit_state"] = "failed"
-                raise
-            if result.get("success"):
-                pending_plan["submit_state"] = "submitted"
-                # submitted 是终态但计划保留在会话上：重复“确认执行”
-                # （浏览器超时重发/双击）被 submitted 分支吸收为提示，
-                # 不会再次进入启动逻辑；新一轮计划生成时会整体覆盖。
-            else:
-                pending_plan["submit_state"] = "failed"
+            # 确认提交状态机在 plan_submission：同一计划只提交一次。
+            result, repeat_hint = await submit_pending_plan_once(
+                pending_plan,
+                lambda _plan: _execute_plan(session, request, pending_plan))
+            if result is None:
+                _append_message(session, "assistant", repeat_hint)
+            elif not result.get("success"):
                 _append_message(session, "assistant", f"执行失败：{result.get('error') or result.get('message')}")
         else:
             session["pending_plan"] = None

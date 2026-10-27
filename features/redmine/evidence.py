@@ -322,20 +322,22 @@ from .evidence_fetch import EvidenceFetcher  # noqa: E402
 _BACKGROUND_TASKS: set[asyncio.Task] = set()
 
 # 进程内活跃抓取（sanitize(owner_id), snapshot_id）：重启对账据此区分
-# "仍在执行"与"无执行者的遗留中间态"（评审 P1）。
+# "仍在执行"与"无执行者的遗留中间态"。
 _ACTIVE_FETCH_SNAPSHOTS: set[tuple[str, str]] = set()
 
 # 抓取过程的中间态：进程意外退出后，处于这些状态的快照不会再有执行者。
-INTERMEDIATE_FETCH_STATUSES = ("fetching", "downloading")
+# queued 也纳入对账：快照创建与后台任务启动之间存在窗口，进程在该窗口
+# 退出会留下永远无人认领的 queued 记录。
+INTERMEDIATE_FETCH_STATUSES = ("queued", "fetching", "downloading")
 
 
 def reconcile_interrupted_fetches(root: Path | None = None) -> list[dict[str, str]]:
     """启动对账：把无活跃执行者的中间态快照推进到 ``interrupted`` 终态。
 
     Controller 重启后 asyncio 后台抓取任务不复存在，数据库里残留的
-    fetching/downloading 快照会让 wait_for_snapshot 与状态轮询永久等待。
-    中断标记保留已下载的附件、issue.json 与派生结果（不删除任何证据），
-    重试时重新发起抓取即可；活跃执行者存在的快照不做改动。
+    queued/fetching/downloading 快照会让 wait_for_snapshot 与状态轮询
+    永久等待。中断标记保留已下载的附件、issue.json 与派生结果（不删除
+    任何证据），重试时重新发起抓取即可；活跃执行者存在的快照不做改动。
     """
     if root is None:
         from foundation.config import settings

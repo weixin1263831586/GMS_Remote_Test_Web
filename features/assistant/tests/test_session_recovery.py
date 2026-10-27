@@ -313,7 +313,7 @@ def test_restore_reuses_live_session_for_same_owner_instead_of_rebuild(tmp_path)
     """同属主第二客户端恢复时必须复用内存会话对象。
 
     监控任务正持有并更新内存对象；若从锚点重建覆盖，监控会继续写旧
-    对象、新查询拿到停滞副本（46.txt 审核第 4 条的竞态场景）。
+    对象、新查询拿到停滞副本（同属主并发恢复竞态场景）。
     """
     from features.assistant import api, session_registry, session_store
 

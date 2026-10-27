@@ -344,7 +344,7 @@ def _seed_confirm_session(api, plan: dict) -> str:
 
 
 def test_duplicate_plan_confirmation_submits_only_once(monkeypatch):
-    """确认执行状态机：同一计划重复确认只提交一次（评审 P1）。"""
+    """确认执行状态机：同一计划重复确认只提交一次。"""
     import asyncio
 
     from features.assistant import api
@@ -362,7 +362,7 @@ def test_duplicate_plan_confirmation_submits_only_once(monkeypatch):
         session = _seed_confirm_session(api, plan)
         calls: list[str] = []
 
-        async def fake_execute(sess, request, submitted):
+        async def fake_execute(_sess, request, submitted):
             calls.append(submitted["operation_id"])
             return {"success": True}
 
@@ -404,7 +404,7 @@ def test_failed_plan_confirmation_keeps_plan_reconfirmable(monkeypatch):
         _seed_confirm_session(api, plan)
         calls: list[str] = []
 
-        async def fake_execute(sess, request, submitted):
+        async def fake_execute(_sess, request, submitted):
             calls.append(submitted["operation_id"])
             return {"success": False, "error": "没有可用设备"}
 
@@ -423,3 +423,38 @@ def test_failed_plan_confirmation_keeps_plan_reconfirmable(monkeypatch):
     finally:
         api._agent_sessions.clear()
         api._agent_sessions.update(saved_sessions)
+
+
+def test_plan_operation_id_flows_to_cluster_idempotency_key(monkeypatch):
+    """plan.operation_id 以 agent-op: 前缀进入 automation_run_id 幂等通道。
+
+    任务持久化在集群仓库、响应丢失时的客户端重试据此返回既有任务；
+    retry 链路复用既有任务目录，不注入该键。
+    """
+    from features.assistant import api
+    from features.assistant.session_registry import AgentRequestShim
+    from features.test_execution import models as te_models
+
+    captured: list[te_models.TestStartRequest] = []
+
+    async def fake_start_test(_shim, help, req):  # noqa: A002
+        captured.append(req)
+        return SimpleNamespace(
+            body=json.dumps({"success": True, "data": {"cluster_job_id": "job-1"}})
+        )
+
+    import features.test_execution as te
+
+    monkeypatch.setattr(te, "start_test", fake_start_test)
+    session = {"session_id": "s-op", "steps": []}
+    shim = AgentRequestShim(_bare_request())
+    plan = {
+        "operation_id": "op-abc",
+        "request": {"devices": ["ABC"], "test_suite": "cts"},
+    }
+
+    asyncio.run(api._start_test_with_plan(session, shim, plan))
+    assert captured[0].automation_run_id == "agent-op:op-abc"
+
+    asyncio.run(api._start_test_with_plan(session, shim, plan, retry_timestamp="2026.10.27_10.00.00"))
+    assert captured[1].automation_run_id == ""
