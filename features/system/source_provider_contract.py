@@ -29,7 +29,11 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-GIT_TIMEOUT_SECONDS = 30
+# git grep 单次超时。30s 在 frameworks/base 这类大仓的全树字面量检索
+# （如 PATTERN_RESTRICTED_ANDROID_SUBTREES）上会被 deadline 掐掉，
+# limited=True 且零命中，分析端随后凭记忆伪造 source 引用被证据门禁
+# 拒绝（2026-10-27 晨报 #644070 实测 40.6s 超时）；放宽到 60s。
+GIT_TIMEOUT_SECONDS = 60
 MAX_BLOB_BYTES = 8 * 1024 * 1024
 MAX_SEARCH_FILES = 20000
 MAX_SEARCH_SCAN_BYTES = 512 * 1024 * 1024
