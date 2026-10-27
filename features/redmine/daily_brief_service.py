@@ -119,6 +119,34 @@ async def precollect_deep_evidence(
         raise cancellation.RunCancelledError()
 
 
+_TOKEN_TRACE_KEYS = (
+    "input_tokens", "output_tokens",
+    "cache_read_tokens", "cache_creation_tokens",
+)
+
+
+def trace_usage_from(trace: dict[str, Any]) -> dict[str, int] | None:
+    """从 kkagent trace 提取 token 用量，供 AI 执行回执落库。
+
+    trace 优先带显式 ``usage`` 子字典；kkagent 的 AnalysisTrace 是把
+    token 字段平铺在顶层的，回退到顶层构造——否则回执 ``usage_json``
+    永远是 ``{}``，AI 用量统计断链（2026-10-27 晨报复盘）。
+    """
+    explicit = trace.get("usage")
+    if isinstance(explicit, dict):
+        return {
+            str(key): int(value)
+            for key, value in explicit.items()
+            if isinstance(value, (int, float))
+        }
+    tokens = {
+        key: int(trace[key])
+        for key in _TOKEN_TRACE_KEYS
+        if trace.get(key)
+    }
+    return tokens or None
+
+
 def _emit_preflight_progress(
     progress: Any, tool_name: str, tool_input: Any, phase: str, ok: bool,
 ) -> None:
@@ -980,10 +1008,8 @@ class DailyBriefService:
             logger.exception("failed to persist ai execution trace")
         # 账本终态收敛：outcome 已确定（completed/failed）；不会覆盖任何
         # 先前终态（unknown 已在异常路径写下的场景）。
-        trace_usage = (
-            (outcome.trace or {}).get("usage")
-            if isinstance(outcome.trace, dict) else None
-        )
+        trace = outcome.trace if isinstance(outcome.trace, dict) else {}
+        trace_usage = trace_usage_from(trace)
         self.ai_ledger.finish(
             receipt["receipt_id"],
             ok=bool(outcome.ok),

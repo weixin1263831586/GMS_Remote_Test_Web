@@ -315,3 +315,37 @@ def test_service_owns_heartbeat_and_uses_stored_issue_facts(tmp_path, cancelled)
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TraceUsageExtractionTests(unittest.TestCase):
+    """kkagent trace 平铺 token 字段必须进入回执 usage_json（2026-10-27 复盘）。"""
+
+    def test_flat_trace_tokens_are_extracted(self):
+        from features.redmine.daily_brief_service import trace_usage_from
+
+        usage = trace_usage_from({
+            "input_tokens": 869612,
+            "output_tokens": 41038,
+            "cache_read_tokens": 350720,
+            "cache_creation_tokens": 0,
+            "rounds": 25,
+        })
+        self.assertEqual(usage, {
+            "input_tokens": 869612,
+            "output_tokens": 41038,
+            "cache_read_tokens": 350720,
+        })
+
+    def test_explicit_usage_dict_wins_and_non_numeric_values_are_dropped(self):
+        from features.redmine.daily_brief_service import trace_usage_from
+
+        usage = trace_usage_from({
+            "usage": {"input_tokens": 10, "output_tokens": "5", "model": "x"},
+        })
+        self.assertEqual(usage, {"input_tokens": 10})
+
+    def test_empty_trace_yields_none(self):
+        from features.redmine.daily_brief_service import trace_usage_from
+
+        self.assertIsNone(trace_usage_from({"rounds": 3}))
+        self.assertIsNone(trace_usage_from({}))
