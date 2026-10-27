@@ -138,7 +138,7 @@ def test_reconcile_removes_orphan_dirs_without_task_row(tmp_path):
 
 
 def test_reconcile_keeps_active_upload_sessions_and_fresh_dirs(tmp_path):
-    """含分块会话（metadata/.part）或冷却期内的目录一律保留。"""
+    """含分块会话（metadata/.part）的目录按续传 TTL 判定，未过期保留。"""
     store = ApkTaskStore(tmp_path / "tasks.sqlite3")
     resumable = uuid.uuid4().hex
     (tmp_path / resumable).mkdir()
@@ -155,6 +155,49 @@ def test_reconcile_keeps_active_upload_sessions_and_fresh_dirs(tmp_path):
     assert (tmp_path / resumable).exists()
     assert (tmp_path / fresh_orphan).exists()
     assert (tmp_path / chunks).exists()
+
+
+def test_reconcile_removes_expired_upload_session(tmp_path):
+    """放弃的分块会话（超续传 TTL）必须能回收，而不是永久排除。"""
+    from features.firmware.apk_store import UPLOAD_SESSION_TTL_SECONDS
+
+    store = ApkTaskStore(tmp_path / "tasks.sqlite3")
+    abandoned = uuid.uuid4().hex
+    (tmp_path / abandoned).mkdir()
+    (tmp_path / abandoned / "upload_metadata.json").write_text("{}")
+    (tmp_path / abandoned / "app.apk.part0").write_bytes(b"x" * 10)
+    # 先写内容再回拨时间：写文件会刷新目录 mtime；会话内全部文件
+    # 都计入"最后活动时间"，需一并回拨。
+    old = time.time() - UPLOAD_SESSION_TTL_SECONDS - 3600
+    for item in (tmp_path / abandoned).iterdir():
+        os.utime(item, (old, old))
+    os.utime(tmp_path / abandoned, (old, old))
+
+    cleaned = store.reconcile_orphan_uploads()
+
+    assert cleaned == [abandoned]
+    assert not (tmp_path / abandoned).exists()
+
+
+def test_reconcile_failed_rmtree_not_counted_as_cleaned(tmp_path, monkeypatch):
+    """rmtree 失败（权限/占用）不得计入 cleaned——如实报告而非虚报。"""
+    store = ApkTaskStore(tmp_path / "tasks.sqlite3")
+    orphan = uuid.uuid4().hex
+    _old_dir(tmp_path / orphan, age_seconds=ORPHAN_UPLOAD_COOLDOWN_SECONDS * 2)
+
+    real_rmtree = __import__("shutil").rmtree
+
+    def failing_rmtree(path, *args, **kwargs):
+        real_rmtree(path, *args, **kwargs)  # 先真删，模拟竞态后仍失败的场景反例：
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(
+        "features.firmware.apk_store.shutil.rmtree", failing_rmtree
+    )
+
+    cleaned = store.reconcile_orphan_uploads()
+
+    assert cleaned == []
 
 
 def test_reconcile_ignores_non_uuid_and_files(tmp_path):

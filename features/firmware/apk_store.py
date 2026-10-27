@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 # 上传中断对账冷却期：目录 mtime 距今不足该值时跳过——分块上传可能
 # 持续较久，冷却期内绝不删除，宁可让孤儿目录多活一个周期。
 ORPHAN_UPLOAD_COOLDOWN_SECONDS = 24 * 60 * 60
+# 带会话痕迹（upload_metadata.json / *.part 分块）的目录按续传 TTL 判定：
+# 中断的分块上传最常见，但活跃会话由 metadata/.part 标记可续传；超过
+# 该 TTL 仍无任务行即视为放弃，允许回收。
+UPLOAD_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
 class ApkTaskStore:
@@ -173,16 +177,39 @@ class ApkTaskStore:
                 has_session = (entry / "upload_metadata.json").is_file() or any(
                     entry.glob("*.part*")
                 )
-                age = now - entry.stat().st_mtime
+                # 目录 mtime 会被续传分块刷新；取目录与其内容的最晚
+                # mtime 作为"最后活动时间"。
+                age = now - max(
+                    [entry.stat().st_mtime]
+                    + [item.stat().st_mtime for item in entry.iterdir()]
+                )
             except OSError:
                 continue
-            if has_session or age < ORPHAN_UPLOAD_COOLDOWN_SECONDS:
+            # 会话目录（可续传）按更长的续传 TTL 判定过期，而不是永久
+            # 保留——分块上传中途断网/放弃是最常见的孤儿来源（复审 P1）。
+            ttl = (
+                UPLOAD_SESSION_TTL_SECONDS if has_session
+                else ORPHAN_UPLOAD_COOLDOWN_SECONDS
+            )
+            if age < ttl:
                 continue
             try:
-                shutil.rmtree(entry, ignore_errors=True)
-                cleaned.append(entry.name)
+                shutil.rmtree(entry)
             except OSError:
-                logger.warning("Failed to clean orphan APK upload dir %s", entry.name, exc_info=True)
+                # rmtree 不带 ignore_errors：删除失败（权限/占用）必须
+                # 如实报告，不能把失败目录计入 cleaned。
+                logger.warning(
+                    "Failed to clean orphan APK upload dir %s",
+                    entry.name, exc_info=True,
+                )
+                continue
+            if entry.exists():
+                logger.warning(
+                    "Orphan APK upload dir %s still present after rmtree",
+                    entry.name,
+                )
+                continue
+            cleaned.append(entry.name)
         if cleaned:
             logger.info(
                 "Reconciled %d orphan APK upload dir(s): %s",

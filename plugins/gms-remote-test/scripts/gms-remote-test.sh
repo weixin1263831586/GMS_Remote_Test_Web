@@ -6,7 +6,7 @@ set -o pipefail
 # propagated here (GMS_RT_VERSION) by tools/scripts/agent/release.py.
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.63"
+GMS_RT_VERSION="0.22.64"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -686,15 +686,19 @@ api_call() {
                     # scope_required / agent_forbidden，让 agent 能区分
                     # 「缺 scope」（可自查 agent-scopes / 申请新 token）与
                     # 「human-only 端点」（跑 auth-elevate 也没有意义）。
-                    local _scope_required _agent_forbidden
+                    local _scope_required _agent_forbidden _elevation_required
                     _scope_required=$(printf '%s' "$body" | jq -r '.detail.scope_required // .scope_required // empty' 2>/dev/null || true)
                     _agent_forbidden=$(printf '%s' "$body" | jq -r '.detail.agent_forbidden // .agent_forbidden // empty' 2>/dev/null || true)
+                    _elevation_required=$(printf '%s' "$body" | jq -r '.detail.elevation_required // .elevation_required // empty' 2>/dev/null || true)
                     if [ -n "$_agent_forbidden" ] && [ "$_agent_forbidden" != "false" ]; then
                         diagnostic "该端点仅限人工会话（agent token 被服务端拒绝）。agent 无法自行提权，请联系管理员评估。"
                     elif [ -n "$_scope_required" ]; then
                         diagnostic "当前 token 缺少 scope '$_scope_required'。scope 目录: GET /api/auth/agent-scopes；请在 Web UI 重新注册并勾选该 scope。"
+                    elif [ -n "$_elevation_required" ] && [ "$_elevation_required" != "false" ]; then
+                        # 明确的两步指引：先 step-up 提权（管理员密码），再重跑原命令。
+                        diagnostic "需要管理员提权（step-up）：先运行 gms-rt-auth-elevate [用户名] 并输入管理员密码，提权成功后重新运行原命令。"
                     else
-                        diagnostic "权限不足或需要管理员提权。请运行: gms-rt-auth-elevate [username]"
+                        diagnostic "权限不足。若该操作需要管理员提权，请运行: gms-rt-auth-elevate [用户名]；否则确认当前账号角色/scope 是否覆盖该操作。"
                     fi
                 fi
                 ;;

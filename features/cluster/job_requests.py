@@ -74,7 +74,12 @@ class ClusterJobRequestRepositoryMixin:
             ).fetchone()
         if row and job["status"] != "assigned":
             return self.get_command(row["id"])
-        if job["status"] != "assigned" or not attempt or attempt["attempt_number"] != 1:
+        # dispatching 且无 start 命令 = "Job+回执已提交、派发命令未写"
+        # 的崩溃窗口（attach 命令前 Controller 退出，命令行不存在）。
+        # 与 assigned 一样允许 initial 恢复：重放请求据此补派发，
+        # 而不是返回 None 让重试者拿到 deduplicated 却永不执行。
+        if job["status"] not in {"assigned", "dispatching"} or not attempt \
+                or attempt["attempt_number"] != 1:
             return self.get_command(row["id"]) if row else None
         # Resume only the initial job/command commit gap. Later attempts and
         # terminal states are owned by the lifecycle, not submission retries.

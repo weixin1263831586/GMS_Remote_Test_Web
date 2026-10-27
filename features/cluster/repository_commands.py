@@ -429,6 +429,19 @@ class ClusterCommandRepositoryMixin:
             conn.execute("BEGIN IMMEDIATE")
             self._attach_command_to_job_conn(conn, job_id, command)
 
+    def _attempt_has_no_start_command(
+        self, conn: Any, job_id: str, attempt_id: str, *,
+        exclude_command_id: str = "",
+    ) -> bool:
+        query = """SELECT 1 FROM cluster_commands
+                   WHERE job_id=? AND attempt_id=? AND command_type='start_test'"""
+        params: list[str] = [job_id, attempt_id]
+        if exclude_command_id:
+            query += " AND id != ?"
+            params.append(exclude_command_id)
+        query += " LIMIT 1"
+        return conn.execute(query, params).fetchone() is None
+
     def _attach_command_to_job_conn(
         self, conn: Any, job_id: str, command: dict[str, Any], *, newly_created: bool = False,
     ) -> None:
@@ -442,7 +455,17 @@ class ClusterCommandRepositoryMixin:
                 or (command.get("attempt_id") and command["attempt_id"] != job["current_attempt_id"])):
             raise ValueError("start command does not match the current job attempt")
         if job["status"] != "assigned":
-            if newly_created:
+            if newly_created and job["status"] == "dispatching" and \
+                    self._attempt_has_no_start_command(
+                        conn, job_id, job["current_attempt_id"],
+                        exclude_command_id=str(command.get("id") or ""),
+                    ):
+                # 崩溃窗口恢复：Job 已推进到 dispatching 但 start 命令行
+                # 从未写入（两段提交之间退出）。本次重放刚 INSERT 的命令
+                # 行不计入（exclude 当前 id）——补插后状态已是 dispatching，
+                # 无需也不能回退重放 assigned→dispatching。
+                pass
+            elif newly_created:
                 raise ValueError("job is no longer awaiting dispatch")
             # A replay racing a Worker ack must never rewind its state.
             return
