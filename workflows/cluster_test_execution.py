@@ -136,11 +136,20 @@ def start_cluster_test(request: Any, client_id: str):
     # 请求都可能在创建前查不到既有任务而各自建 Job。回执与任务同事务
     # 持久化；request_hash 保证同一 ID 换参数时显式冲突而不是静默复用。
     if request.automation_run_id:
+        # 指纹覆盖所有影响任务行为/权限/关联的参数（复审 P2）：核心执行
+        # 参数 + 设备预约（权限边界）+ 构建/Gerrit/Redmine 关联（报告
+        # 归属）。local_server 等纯展示字段不纳入。
         fingerprint = request_fingerprint({
             "worker_id": request.worker_id, "test_type": request.test_type,
             "test_suite": request.test_suite, "test_module": request.test_module,
             "test_case": request.test_case, "retry_dir": request.retry_dir,
-            "devices": list(request.devices), "local_server": request.local_server,
+            "devices": list(request.devices),
+            "device_reservation_id": request.device_reservation_id,
+            "build_id": request.build_id,
+            "build_artifact_id": request.build_artifact_id,
+            "gerrit_change_id": request.gerrit_change_id,
+            "gerrit_patchset": request.gerrit_patchset,
+            "redmine_issue_id": request.redmine_issue_id,
         })
         try:
             with repository.job_request_guard(owner_id, request.automation_run_id):
@@ -194,12 +203,26 @@ def _start_cluster_test_guarded(
         if existing:
             if existing.get("owner_id") != owner_id:
                 return error_response("Automation job belongs to another owner", 409)
+            # 崩溃窗口补偿：Job+回执已提交而 start_test 派发命令未写时
+            # （Controller 在两段提交之间退出），直接返回 deduplicated
+            # 会留下一个永远不会执行的 Job。replay_job_command 恢复
+            # 初始派发缺口（同一契约：/api/cluster/jobs 的重放路径）；
+            # 非 initial 态由其返回真实命令或 None。
+            try:
+                replayed = repository.replay_job_command(existing)
+            except ApiError as exc:
+                return error_response(exc.message, exc.status_code)
+            message = (
+                "Distributed test already queued"
+                if replayed is not None
+                else "Distributed test already exists"
+            )
             return success_response({
                 "cluster_job_id": existing["id"],
                 "attempt_id": existing["current_attempt_id"],
                 "worker_id": existing["assigned_worker_id"],
                 "deduplicated": True,
-            }, message="Distributed test already queued")
+            }, message=message)
     if reservation and reservation.get("status") != "active":
         return error_response("Device reservation is missing or expired", 409)
     suites = repository.list_suites(request.worker_id)

@@ -27,7 +27,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .users import _now, owner_redmine_root
+from . import users as _users
+from .users import _now
 
 
 SNAPSHOT_STATUSES = ("queued", "fetching", "downloading", "ready", "partial", "failed")
@@ -427,24 +428,40 @@ class EvidenceStore:
             return None
         return self._artifact_from_row(row)
 
-    def get_artifact_by_attachment_id(self, attachment_id: str) -> dict[str, Any] | None:
+    def get_artifact_by_attachment_id(
+        self, attachment_id: str, *, snapshot_id: str | None = None,
+    ) -> dict[str, Any] | None:
         """Map a numeric Redmine attachment id to its latest artifact row.
 
         Models occasionally pass the Redmine numeric id where an ``art_*``
         evidence id is expected; resolving the alias server-side saves a
         wasted round trip (2026-09-24 brief run). Multiple snapshots of the
         same issue can register the same attachment id: the newest row wins.
+        ``snapshot_id`` scopes the lookup to one snapshot — created_at has
+        second resolution, so same-second rows from different snapshots are
+        otherwise ordered by the random artifact id (non-deterministic).
         """
         with self._lock, self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT * FROM redmine_evidence_artifacts
-                WHERE attachment_id = ?
-                ORDER BY created_at DESC, artifact_id DESC
-                LIMIT 1
-                """,
-                (str(attachment_id or ""),),
-            ).fetchone()
+            if snapshot_id:
+                row = conn.execute(
+                    """
+                    SELECT * FROM redmine_evidence_artifacts
+                    WHERE attachment_id = ? AND snapshot_id = ?
+                    ORDER BY created_at DESC, artifact_id DESC
+                    LIMIT 1
+                    """,
+                    (str(attachment_id or ""), str(snapshot_id)),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT * FROM redmine_evidence_artifacts
+                    WHERE attachment_id = ?
+                    ORDER BY created_at DESC, artifact_id DESC
+                    LIMIT 1
+                    """,
+                    (str(attachment_id or ""),),
+                ).fetchone()
         if row is None:
             return None
         return self._artifact_from_row(row)
@@ -495,6 +512,9 @@ def owner_evidence_store(owner_id: str) -> EvidenceStore:
     with _STORE_LOCK:
         store = _STORE_CACHE.get(key)
         if store is None:
-            store = EvidenceStore(owner_redmine_root(key))
+            # 动态经 users 模块解析 owner 根：测试通过 patch
+            # users.owner_redmine_root 隔离数据目录，直接绑定会让
+            # patch 失效、测试写进真实 data/（评审确认的泄漏路径）。
+            store = EvidenceStore(_users.owner_redmine_root(key))
             _STORE_CACHE[key] = store
         return store

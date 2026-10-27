@@ -433,3 +433,49 @@ class StartClusterTestDispatchCompensationTests(unittest.TestCase):
                 if claim.get("source_id") == f"job:{job['id']}"
             ]
             self.assertEqual(active_claims, [])
+
+
+class StartClusterTestDispatchRecoveryTests(unittest.TestCase):
+    def test_retry_replays_missing_start_command_after_crash(self):
+        """崩溃窗口：Job+回执已提交而派发命令未写，重试必须补派发。
+
+        模拟 create_job_with_leases 之后、dispatch_job_start_command
+        之前进程退出：直接用 repository 构造该状态（删掉 start 命令），
+        再以同一 automation_run_id 重试，验证 replay_job_command 被触发
+        且命令恢复。
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            repository = _repository(Path(directory))
+            with patch(
+                "workflows.cluster_test_execution.get_cluster_service"
+            ) as get_service:
+                get_service.return_value = SimpleNamespace(repository=repository)
+                first = start_cluster_test(
+                    _request(automation_run_id="agent-op:op-crash"), "alice"
+                )
+                self.assertEqual(first.status_code, 200, first.body)
+                job_id = json.loads(first.body)["data"]["cluster_job_id"]
+
+                # 抹掉 start_test 命令，制造"Job 已提交、派发缺失"状态。
+                with repository.connect() as conn:
+                    conn.execute(
+                        "DELETE FROM cluster_commands WHERE job_id=? AND command_type='start_test'",
+                        (job_id,),
+                    )
+                    conn.commit()
+
+                retry = start_cluster_test(
+                    _request(automation_run_id="agent-op:op-crash"), "alice"
+                )
+
+            self.assertEqual(retry.status_code, 200, retry.body)
+            body = json.loads(retry.body)["data"]
+            self.assertEqual(body["cluster_job_id"], job_id)
+            self.assertTrue(body.get("deduplicated"))
+            # 派发命令已恢复
+            with repository.connect() as conn:
+                cmd = conn.execute(
+                    "SELECT id FROM cluster_commands WHERE job_id=? AND command_type='start_test'",
+                    (job_id,),
+                ).fetchone()
+            self.assertIsNotNone(cmd)

@@ -67,12 +67,22 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
                 result = asyncio.run(
                     fetcher.run(fetcher.create_snapshot(issue_id, download="all"))
                 )
-        return result, owner_evidence_store(owner_id)
+        store = owner_evidence_store(owner_id)
+        # 隔离守卫：store 根绝不能落在真实 data/ 下——fixture 靠 patch
+        # users.owner_redmine_root 重定向；若实现改为直接绑定该函数，
+        # patch 失效，测试会污染生产目录（历史上 owner-a 曾泄漏 133MB）。
+        self.assertTrue(
+            str(store.owner_root).startswith(str(self.root)),
+            f"evidence store escaped fixture isolation: {store.owner_root}",
+        )
+        return result, store
 
     def test_image_attachment_gets_ocr_derived_text(self):
         result, store = self._fetch_with_png()
         self.assertEqual(result["status"], "ready")
-        artifact = store.get_artifact_by_attachment_id("776701")
+        artifact = store.get_artifact_by_attachment_id(
+            "776701", snapshot_id=result["snapshot_id"],
+        )
         self.assertIsNotNone(artifact)
         self.assertEqual(str(artifact.get("kind")), "image")
         self.assertEqual(str(artifact.get("status")), "ready")
@@ -103,7 +113,9 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         ):
             result, store = self._fetch_with_png()
         self.assertEqual(result["status"], "ready")
-        artifact = store.get_artifact_by_attachment_id("776701")
+        artifact = store.get_artifact_by_attachment_id(
+            "776701", snapshot_id=result["snapshot_id"],
+        )
         self.assertEqual(str(artifact.get("status")), "ready")
         self.assertEqual(str(artifact.get("error") or ""), "")
         self.assertEqual(artifact.get("derived_status"), "empty")
@@ -130,7 +142,9 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         self.assertTrue(
             any(item.get("stage") == "derive" for item in result["errors"])
         )
-        artifact = store.get_artifact_by_attachment_id("776701")
+        artifact = store.get_artifact_by_attachment_id(
+            "776701", snapshot_id=result["snapshot_id"],
+        )
         self.assertEqual(str(artifact.get("status")), "ready")
         self.assertEqual(artifact.get("derived_status"), "missing")
         self.assertIn("OCR 依赖缺失", str(artifact.get("error") or ""))
@@ -151,14 +165,21 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         # derived_text 维度如实反映，而不是伪造"证据不完整"。
         self.assertEqual(result["status"], "ready")
         self.assertFalse(snapshot_completeness(result)["derived_text"])
-        artifact = store.get_artifact_by_attachment_id("776701")
+        artifact = store.get_artifact_by_attachment_id(
+            "776701", snapshot_id=result["snapshot_id"],
+        )
         self.assertEqual(artifact["status"], "ready")
         self.assertEqual(artifact["derived_status"], "missing")
         self.assertIn("timeout", artifact["error"])
         # The fixture has other text attachments; an OCR error must not
         # prevent their download or the snapshot reaching its terminal state.
         self.assertGreater(result["downloaded_count"], 1)
-        self.assertEqual(store.get_artifact_by_attachment_id("776656")["status"], "ready")
+        self.assertEqual(
+            store.get_artifact_by_attachment_id(
+                "776656", snapshot_id=result["snapshot_id"],
+            )["status"],
+            "ready",
+        )
 
     def test_image_pixel_budget_rejects_before_ocr(self):
         with patch("features.redmine.evidence_images.OCR_MAX_IMAGE_PIXELS", 100), patch(
@@ -169,7 +190,9 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
             image = call.args[0]
             self.assertLessEqual(image.width * image.height, 100)
         self.assertEqual(result["status"], "ready")
-        artifact = store.get_artifact_by_attachment_id("776701")
+        artifact = store.get_artifact_by_attachment_id(
+            "776701", snapshot_id=result["snapshot_id"],
+        )
         self.assertEqual(artifact["status"], "ready")
         self.assertEqual(artifact["derived_status"], "missing")
         self.assertIn("像素超过上限", artifact["error"])

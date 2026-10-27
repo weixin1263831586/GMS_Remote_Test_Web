@@ -6,13 +6,14 @@
 
 ## Python
 
-| 版本 | 角色 | 依赖审计 | 说明 |
-|------|------|----------|------|
-| 3.10 | 运行基线（生产） | `dependency-audit` 3.10 腿 | Pillow 固定 12.3.0（13.0.0 要求 ≥3.11），已知告警按 `.github/pip-audit-py310-waivers.txt` 逐 ID 豁免；清单外新告警失败门禁 |
-| 3.11 | 审计参考 + CI unit | `dependency-audit` 3.11 腿（零豁免） | 解析出 Pillow 13.0.0 安全修复版；升级 3.10 → 3.11 后删除 12.3.0 分支与豁免清单 |
+| 版本 | 角色 | CI 运行位置 | 依赖审计 | 说明 |
+|------|------|-------------|----------|------|
+| 3.10 | 运行基线（生产）+ **全部 CI 单测/集成 job** | `unit-*`、`browser-e2e`、`worker-agent`、设备与固件等 job 的 `python-version: "3.10"` | `dependency-audit` 3.10 腿 | Pillow 固定 12.3.0（13.0.0 要求 ≥3.11），已知告警按 `.github/pip-audit-py310-waivers.txt` 逐 ID 豁免；清单外新告警失败门禁 |
+| 3.11 | 依赖审计参考腿 | 仅 `dependency-audit` matrix 的 3.11 腿 | `dependency-audit` 3.11 腿（零豁免） | 解析出 Pillow 13.0.0 安全修复版；升级 3.10 → 3.11 后删除 12.3.0 分支与豁免清单 |
 
 退出条件：生产解释器升级到 3.11 后，`requirements.txt` 删除
-`python_version < "3.11"` 分支，删除豁免清单与 3.10 审计腿。
+`python_version < "3.11"` 分支，删除豁免清单与 3.10 审计腿，并给出
+风险退出时间表（37 条公告为"显式接受"，不是"已修复"）。
 
 ## Ubuntu（Controller / Worker 宿主）
 
@@ -32,6 +33,11 @@
 - OCR：真实 Tesseract 集成测试只在 22.04 基线上运行；`bundled_tesseract_cmd`
   在引擎缺失/不可加载时优雅降级（派生状态 missing），部署到不支持宿主
   不会崩溃，但"OCR 可用"仅承诺 22.04。
-- 本机复验（22.04 宿主）：`python3 -m pip_audit -r requirements.txt --strict`
-  （3.10 + 豁免清单）与
-  `pytest features/redmine/tests/test_evidence_images.py -q`。
+- 本机复验（22.04 宿主，3.10 解释器）——与 CI 3.10 腿等价，**必须带豁免
+  参数**：
+  ```bash
+  WAIVERS=$(grep -v '^#' .github/pip-audit-py310-waivers.txt | sed '/^$/d' | sed 's/^/--ignore-vuln /' | tr '\n' ' ')
+  python3 -m pip_audit -r requirements.txt --strict $WAIVERS
+  python3 -m pip_audit -r requirements-dev.txt --strict $WAIVERS
+  pytest features/redmine/tests/test_evidence_images.py -q
+  ```

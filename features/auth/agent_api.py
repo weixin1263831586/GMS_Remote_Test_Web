@@ -215,7 +215,14 @@ async def auth_create_approval_token(request: Request, req: dict):
         # 烧录审批必须二次认证（step-up）。admin 角色本身不能
         # 绕过提权——必须存在活的提权会话才能签发烧录审批。
         if not is_elevated(request):
-            return error_response("烧录审批需要管理员提权会话", status_code=403)
+            # detail.elevation_required 与 require_elevated_admin 对齐，
+            # CLI 据此给出准确的 step-up 指引（403 兜底提示不够具体）。
+            return error_response(
+                "烧录审批需要管理员提权会话：请先执行 gms-rt-auth-elevate [用户名]（输入管理员密码），"
+                "提权后 2 小时内重新运行本命令",
+                status_code=403,
+                detail={"message": "Elevation required", "elevation_required": True},
+            )
     try:
         if tool == auth_service.BURN_TOOL:
             # 精确绑定：烧录审批绑定 固件SHA256 + wipe_data +

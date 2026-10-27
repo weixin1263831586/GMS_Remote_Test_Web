@@ -706,11 +706,36 @@ class EvidenceFetcher:
 
         pump_task = asyncio.create_task(_pump())
         try:
-            await _drain()
-            await pump_task
-        except BaseException:
-            pump_task.cancel()
+            # drain/pump 是一个生命周期整体（网络断开/超限会让 _pump 在
+            # put(None) 前终止，_drain 若已阻塞在 queue.get() 将永久等
+            # 不到 EOF）：先并发等待，任一方失败立即取消另一方，再收集
+            # 双方结果——pump 的异常原样上抛，drain 不被无声悬置。
+            drain_task = asyncio.create_task(_drain())
+            await asyncio.wait(
+                {pump_task, drain_task}, return_when=asyncio.FIRST_EXCEPTION,
+            )
+            # pump 先失败（网络/超限/取消）→ drain 还卡在 queue.get()：
+            # 取消并等待其退出，才不会把半开的文件句柄留在 to_thread 里。
+            if not drain_task.done():
+                drain_task.cancel()
+            if not pump_task.done():
+                pump_task.cancel()
+            # 收尾等待： swallowing CancelledError，只让真实异常传播。
             with contextlib.suppress(asyncio.CancelledError):
+                await pump_task
+            with contextlib.suppress(asyncio.CancelledError):
+                await drain_task
+            # 两者都退出后按序复现失败：pump 优先（网络侧是根因），
+            # 其次 drain（磁盘侧）。全部正常时两者异常均为 None。
+            pump_exc = pump_task.exception()
+            drain_exc = drain_task.exception()
+            if pump_exc is not None:
+                raise pump_exc
+            if drain_exc is not None:
+                raise drain_exc
+        except asyncio.CancelledError:
+            pump_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await pump_task
             raise
         return size, header
