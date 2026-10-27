@@ -9,7 +9,9 @@ owner evidence store stay in ``evidence.py``; this module accesses them via
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
+import io
 import json
 import logging
 import os
@@ -384,6 +386,10 @@ class EvidenceFetcher:
                 # 流式落盘：256MiB 级附件不再整包驻留内存，边收边写临时
                 # 文件并滚动 SHA-256，完成后原子重命名；任何失败（含取消）
                 # 都删除半成品，绝不留下截断的原件。
+                # 磁盘写入/flush/fsync 全部在下载工作线程执行（阻塞 I/O
+                # 不得进事件循环——慢盘会让其它用户的请求卡住）：
+                # 网络块经内存队列喂给写盘线程，主协程只做
+                # 网络读与背压等待。
                 digest = hashlib.sha256()
                 size = 0
                 header = b""
@@ -392,20 +398,12 @@ class EvidenceFetcher:
                     f".{absolute.name}.{secrets.token_hex(8)}.part"
                 )
                 try:
-                    with open(temporary, "wb") as sink:
-                        async for chunk in response.content.iter_chunked(256 * 1024):
-                            size += len(chunk)
-                            if size > ATTACHMENT_MAX_BYTES:
-                                raise EvidenceError("附件超过单附件大小上限")
-                            if len(header) < 8:
-                                header = (header + chunk)[:8]
-                            digest.update(chunk)
-                            sink.write(chunk)
-                        sink.flush()
-                        os.fsync(sink.fileno())
+                    size, header = await self._stream_to_disk(
+                        response, temporary, digest
+                    )
                     temporary.replace(absolute)
                 except BaseException:
-                    temporary.unlink(missing_ok=True)
+                    await asyncio.to_thread(temporary.unlink, True)
                     raise
                 break
 
@@ -657,6 +655,65 @@ class EvidenceFetcher:
             status="failed",
             error_json=[{"stage": "issue", "message": message}],
         )
+
+    async def _stream_to_disk(
+        self,
+        response: aiohttp.ClientResponse,
+        temporary: Path,
+        digest: hashlib._Hash,
+    ) -> tuple[int, bytes]:
+        """把响应体流式写入临时文件，返回 ``(字节数, 头部 8 字节)``。
+
+        读写管道：网络读在事件循环协程里执行（aiohttp 内容流不保证跨
+        线程安全），磁盘 write/flush/fsync 在 ``asyncio.to_thread`` 的
+        工作线程里执行——慢盘只拖慢本下载，不阻塞其它请求。
+        ``queue.join()``/事件循环调度提供自然背压：写盘慢
+        时网络读随之暂停，不会把附件缓冲进内存。SHA-256 在读侧滚动
+        计算，主协程在整段流水线期间可响应取消。
+        """
+        # maxsize 有界：工作线程写盘期间主协程在 put 上等待而非堆积。
+        queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=2)
+        size = 0
+        header = b""
+
+        async def _pump() -> None:
+            nonlocal size, header
+            async for chunk in response.content.iter_chunked(256 * 1024):
+                size += len(chunk)
+                if size > ATTACHMENT_MAX_BYTES:
+                    raise EvidenceError("附件超过单附件大小上限")
+                if len(header) < 8:
+                    header = (header + chunk)[:8]
+                digest.update(chunk)
+                await queue.put(chunk)
+            await queue.put(None)
+
+        async def _drain() -> None:
+            # 文件对象本身只在事件循环线程持有；每次把纯磁盘操作
+            # （write/flush/fsync）单独丢给 to_thread，慢盘只拖慢本
+            # 下载的推进速度，事件循环始终空闲可调度其它协程。
+            with open(temporary, "wb") as sink:
+                while True:
+                    chunk = await queue.get()
+                    if chunk is None:
+                        break
+                    await asyncio.to_thread(sink.write, chunk)
+                await asyncio.to_thread(_flush_sync, sink)
+
+        def _flush_sync(sink: io.BufferedWriter) -> None:
+            sink.flush()
+            os.fsync(sink.fileno())
+
+        pump_task = asyncio.create_task(_pump())
+        try:
+            await _drain()
+            await pump_task
+        except BaseException:
+            pump_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await pump_task
+            raise
+        return size, header
 
     @staticmethod
     def _atomic_write(path: Path, data: bytes) -> None:

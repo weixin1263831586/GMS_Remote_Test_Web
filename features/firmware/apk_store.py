@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 import json
+import logging
+import shutil
 import sqlite3
 import threading
+import time
+import uuid
 from pathlib import Path
 from typing import Any
+
+
+logger = logging.getLogger(__name__)
+
+# 上传中断对账冷却期：目录 mtime 距今不足该值时跳过——分块上传可能
+# 持续较久，冷却期内绝不删除，宁可让孤儿目录多活一个周期。
+ORPHAN_UPLOAD_COOLDOWN_SECONDS = 24 * 60 * 60
 
 
 class ApkTaskStore:
@@ -115,3 +126,66 @@ class ApkTaskStore:
                 (task_id,),
             )
         return cursor.rowcount == 1
+
+    def known_task_ids(self) -> set[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT task_id FROM apk_analysis_tasks"
+            ).fetchall()
+        return {str(row["task_id"]) for row in rows}
+
+    def reconcile_orphan_uploads(
+        self, *, now: float | None = None,
+    ) -> list[str]:
+        """删除无任务行且无活跃上传会话的遗留目录，返回已清理的 task_id。
+
+        目录在上传开始时创建、任务行在 finalize 时落库：进程在上传
+        中途退出（或 finalize 前异常）会留下无 DB 行的目录，逐个累积
+        可到数百 MB（2026-10 审核发现 378MB）。安全规则：
+        - 目录名必须是合法 UUID（normalize_apk_task_id 只允许 UUID），
+          其它名字一律不碰；
+        - 目录里存在 ``upload_metadata.json`` 或 ``*.part*`` 分块视为
+          活跃/可续传的上传会话，跳过；
+        - 目录 mtime 在冷却期内的跳过（慢速分块上传保护）。
+        单目录删除失败只记日志，不中断整体对账。
+        """
+        if now is None:
+            now = time.time()
+        root = self.db_path.parent
+        if not root.is_dir():
+            return []
+        known = self.known_task_ids()
+        cleaned: list[str] = []
+        try:
+            entries = list(root.iterdir())
+        except OSError:
+            return []
+        for entry in entries:
+            if not entry.is_dir():
+                continue
+            try:
+                uuid.UUID(entry.name)
+            except ValueError:
+                continue  # 非任务目录（tasks.sqlite3 等）一律不碰
+            if entry.name in known:
+                continue
+            try:
+                has_session = (entry / "upload_metadata.json").is_file() or any(
+                    entry.glob("*.part*")
+                )
+                age = now - entry.stat().st_mtime
+            except OSError:
+                continue
+            if has_session or age < ORPHAN_UPLOAD_COOLDOWN_SECONDS:
+                continue
+            try:
+                shutil.rmtree(entry, ignore_errors=True)
+                cleaned.append(entry.name)
+            except OSError:
+                logger.warning("Failed to clean orphan APK upload dir %s", entry.name, exc_info=True)
+        if cleaned:
+            logger.info(
+                "Reconciled %d orphan APK upload dir(s): %s",
+                len(cleaned), ", ".join(cleaned),
+            )
+        return cleaned

@@ -27,27 +27,45 @@ jobs:
   dependency-audit:
     name: dependency-audit
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    strategy:
+      # 双解释器审计（46.txt 评审要求）：只审计 3.11 解析会掩盖 3.10
+      # 运行基线的真实风险；3.10 腿带显式豁免清单，清单外新告警仍失败。
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.10"]
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
       # pip-audit 扫描 requirements*.txt 的已知漏洞(OSV/PyPIADVISORY)。
       # 精确 pin 的依赖使结果可复现;新漏洞进入门禁而不是潜伏到运行时。
       # PYSEC-2026-2858(paramiko rsakey SHA-1)已随 paramiko 5.0.0 升级修复,
       # 不再需要豁免;如新增豁免必须在注释中给出理由与退出条件。
-      # 审计解释器固定 3.11：Pillow 13.0.0（安全修复版）requires-python>=3.11,
-      # requirements.txt 按 python_version 分流,3.11 解析出的才是修复版;
-      # 3.10 解析只会得到仍带漏洞的 12.3.0,审计必然失败。
+      # requirements.txt 按 python_version 分流 Pillow：3.11 解析出安全
+      # 修复版 13.0.0（本腿零豁免、零告警）；3.10 只能解析出 12.3.0
+      # （13.0.0 requires-python>=3.11，无可用修复版本），其 37 个已知
+      # 告警按 .github/pip-audit-py310-waivers.txt 逐 ID 显式豁免——
+      # 显式接受风险而不是换解释器绕开审计；清单之外的新告警仍失败。
       - name: Audit runtime dependencies
         run: |
           python -m pip install --upgrade pip pip-audit
-          pip-audit -r requirements.txt --strict
+          if [ "${{ matrix.python-version }}" = "3.10" ]; then
+            WAIVERS=$(grep -v '^#' .github/pip-audit-py310-waivers.txt | sed '/^$/d' | sed 's/^/--ignore-vuln /' | tr '\n' ' ')
+            pip-audit -r requirements.txt --strict $WAIVERS
+          else
+            pip-audit -r requirements.txt --strict
+          fi
       - name: Audit dev dependencies
         run: |
-          # requirements-dev.txt 内联 requirements.txt,同栈审计。
-          pip-audit -r requirements-dev.txt --strict
+          # requirements-dev.txt 内联 requirements.txt,同栈审计（豁免同上）。
+          if [ "${{ matrix.python-version }}" = "3.10" ]; then
+            WAIVERS=$(grep -v '^#' .github/pip-audit-py310-waivers.txt | sed '/^$/d' | sed 's/^/--ignore-vuln /' | tr '\n' ' ')
+            pip-audit -r requirements-dev.txt --strict $WAIVERS
+          else
+            pip-audit -r requirements-dev.txt --strict
+          fi
 
   secret-scan:
     name: secret-scan

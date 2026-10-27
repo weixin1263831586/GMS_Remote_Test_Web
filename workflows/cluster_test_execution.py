@@ -8,7 +8,9 @@ from typing import Any
 from fastapi import HTTPException
 
 from features.cluster import build_argv_from_spec, get_cluster_service
+from features.cluster.job_requests import request_fingerprint
 from foundation.cache import TTLCache
+from foundation.error_model import ApiError
 from foundation.responses import error_response, success_response
 
 
@@ -128,6 +130,33 @@ def start_cluster_test(request: Any, client_id: str):
     """Translate the existing test form into a durable remote Worker job."""
     repository = get_cluster_service().repository
     owner_id = client_id
+    # automation_run_id（含 agent 的 agent-op:<operation_id>）是幂等去重键。
+    # 去重检查与任务创建必须在同一把跨进程 guard 内完成（ADR 0016 的
+    # job_request_guard / cluster_job_requests 回执表）：否则并发同 ID
+    # 请求都可能在创建前查不到既有任务而各自建 Job。回执与任务同事务
+    # 持久化；request_hash 保证同一 ID 换参数时显式冲突而不是静默复用。
+    if request.automation_run_id:
+        fingerprint = request_fingerprint({
+            "worker_id": request.worker_id, "test_type": request.test_type,
+            "test_suite": request.test_suite, "test_module": request.test_module,
+            "test_case": request.test_case, "retry_dir": request.retry_dir,
+            "devices": list(request.devices), "local_server": request.local_server,
+        })
+        try:
+            with repository.job_request_guard(owner_id, request.automation_run_id):
+                return _start_cluster_test_guarded(
+                    request, client_id, fingerprint
+                )
+        except ApiError as exc:
+            return error_response(exc.message, exc.status_code)
+    return _start_cluster_test_guarded(request, client_id, None)
+
+
+def _start_cluster_test_guarded(
+    request: Any, client_id: str, fingerprint: str | None,
+):
+    repository = get_cluster_service().repository
+    owner_id = client_id
     reservation = None
     if request.device_reservation_id:
         reservation = repository.get_reservation(request.device_reservation_id)
@@ -138,7 +167,30 @@ def start_cluster_test(request: Any, client_id: str):
         if request.automation_run_id and reservation.get("source_id") != request.automation_run_id:
             return error_response("Device reservation belongs to another automation run", 409)
     if request.automation_run_id:
-        existing = repository.get_job_by_automation_run(request.automation_run_id)
+        # 回执优先（原子去重）；哈希不符（同 ID 换参数）抛 409 不吞。
+        # 无回执时回退 request_json 扫描，兜住历史上创建的无回执任务。
+        existing = repository.find_job_request(
+            owner_id, request.automation_run_id, fingerprint or ""
+        )
+        if existing is None:
+            existing = repository.get_job_by_automation_run(request.automation_run_id)
+            if existing and existing.get("owner_id") == owner_id and fingerprint:
+                # 历史无回执任务：语义级比对关键字段，同 ID 换参数显式冲突。
+                prior = existing.get("request") or {}
+                if any(
+                    str(prior.get(key) or "") != str(value or "")
+                    for key, value in {
+                        "worker_id": request.worker_id,
+                        "suite_path": request.test_suite,
+                        "test_module": request.test_module,
+                        "test_case": request.test_case,
+                        "retry_dir": request.retry_dir,
+                    }.items()
+                ) or list(prior.get("devices") or []) != list(request.devices):
+                    return error_response(
+                        "automation_run_id 已绑定不同参数的既有任务，请更换 operation_id 或复用原参数",
+                        409,
+                    )
         if existing:
             if existing.get("owner_id") != owner_id:
                 return error_response("Automation job belongs to another owner", 409)
@@ -224,6 +276,12 @@ def start_cluster_test(request: Any, client_id: str):
             "test_module": request.test_module, "test_case": request.test_case,
             "retry_dir": request.retry_dir}
     data["execution_spec"] = execution_spec
+    if fingerprint is not None:
+        # 回执与任务同一事务提交（create_job_with_leases 内部处理）：
+        # 崩溃后要么两者都在（find_job_request 命中），要么都不在（重试
+        # 走创建），不存在"任务在、回执丢"的半状态。
+        data["_idempotency_key"] = request.automation_run_id
+        data["_request_hash"] = fingerprint
     data.update({
         "automation_run_id": request.automation_run_id,
         "device_reservation_id": request.device_reservation_id,

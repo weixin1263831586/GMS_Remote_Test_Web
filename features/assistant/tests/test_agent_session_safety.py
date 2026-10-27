@@ -437,7 +437,7 @@ def test_plan_operation_id_flows_to_cluster_idempotency_key(monkeypatch):
 
     captured: list[te_models.TestStartRequest] = []
 
-    async def fake_start_test(_shim, help, req):  # noqa: A002
+    async def fake_start_test(_shim, help, req):
         captured.append(req)
         return SimpleNamespace(
             body=json.dumps({"success": True, "data": {"cluster_job_id": "job-1"}})

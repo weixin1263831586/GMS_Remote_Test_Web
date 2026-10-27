@@ -98,6 +98,16 @@ async def _periodic_cleanup() -> None:
                 get_cluster_service().repository.prune_terminal_command_events()
             except Exception:
                 logger.debug('command event prune skipped', exc_info=True)
+            # APK 上传孤儿目录对账：无任务行且无活跃上传会话的目录
+            # 超过冷却期即清理（失败只记日志，不影响其余清理项）。
+            try:
+                from features.firmware import runtime as firmware_runtime
+
+                store = firmware_runtime.apk_task_store
+                if store is not None:
+                    store.reconcile_orphan_uploads()
+            except Exception:
+                logger.debug('APK orphan upload reconcile skipped', exc_info=True)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -248,6 +258,16 @@ def create_lifespan(services: AppServices):
             except Exception:
                 logger.exception("Evidence startup reconciliation failed")
             serial_console_service.configure_data_root(services.settings.data_root)
+            # APK 上传孤儿目录对账（与每小时周期清理同一套安全规则）：
+            # 上传中断留下的无任务行目录在启动时即回收，冷却期内的跳过。
+            try:
+                from features.firmware import runtime as firmware_runtime
+
+                store = firmware_runtime.apk_task_store
+                if store is not None:
+                    store.reconcile_orphan_uploads()
+            except Exception:
+                logger.debug("APK orphan upload reconcile skipped", exc_info=True)
             cluster = get_cluster_service()
             start_local_bridge(cluster.repository, cluster.config)
             event_loop = bind_event_bus_loop()

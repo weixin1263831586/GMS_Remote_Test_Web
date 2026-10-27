@@ -273,6 +273,72 @@ class StartClusterTestOperationIdempotencyTests(unittest.TestCase):
             self.assertTrue(retry_body.get("deduplicated"))
             job_ids = [item["id"] for item in repository.list_jobs(owner_id="alice")]
             self.assertEqual(job_ids, [first_body["cluster_job_id"]])
+            # 回执与任务同事务落库：后续同 ID 提交走原子回执去重，不再
+            # 依赖 request_json 扫描。
+            with repository.connect() as conn:
+                receipt = conn.execute(
+                    "SELECT request_hash FROM cluster_job_requests"
+                    " WHERE owner_id='alice' AND request_key='agent-op:op-123'"
+                ).fetchone()
+            self.assertIsNotNone(receipt)
+
+    def test_same_operation_id_with_different_params_conflicts(self):
+        """同 ID 换参数必须显式 409，不得静默复用原任务。"""
+        with tempfile.TemporaryDirectory() as directory:
+            repository = _repository(Path(directory))
+            with patch(
+                "workflows.cluster_test_execution.get_cluster_service"
+            ) as get_service:
+                get_service.return_value = SimpleNamespace(repository=repository)
+                first = start_cluster_test(
+                    _request(automation_run_id="agent-op:op-xyz"), "alice"
+                )
+                second = start_cluster_test(
+                    _request(
+                        automation_run_id="agent-op:op-xyz",
+                        test_module="CtsCameraTestCases",
+                    ),
+                    "alice",
+                )
+
+            self.assertEqual(first.status_code, 200, first.body)
+            self.assertEqual(second.status_code, 409, second.body)
+            job_count = len(repository.list_jobs(owner_id="alice"))
+            self.assertEqual(job_count, 1)
+
+    def test_concurrent_same_operation_id_creates_exactly_one_job(self):
+        """并发同 ID 提交只创建一个 Job（跨进程 guard 串行化创建段）。"""
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        with tempfile.TemporaryDirectory() as directory:
+            repository = _repository(Path(directory))
+            with patch(
+                "workflows.cluster_test_execution.get_cluster_service"
+            ) as get_service:
+                get_service.return_value = SimpleNamespace(repository=repository)
+                barrier = threading.Barrier(4, timeout=30)
+
+                def submit(_index):
+                    barrier.wait()
+                    return start_cluster_test(
+                        _request(automation_run_id="agent-op:op-race"), "alice"
+                    )
+
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    results = list(pool.map(submit, range(4)))
+
+            statuses = [item.status_code for item in results]
+            # 恰好一个成功创建；其余要么幂等复用（200+deduplicated），
+            # 要么被创建段 guard 顶回 409 busy——绝不出现第二个 Job。
+            self.assertEqual(statuses.count(200) + statuses.count(409), 4, statuses)
+            job_ids = [item["id"] for item in repository.list_jobs(owner_id="alice")]
+            self.assertEqual(len(job_ids), 1, statuses)
+            replays = [
+                json.loads(item.body)["data"]
+                for item in results if item.status_code == 200
+            ]
+            self.assertTrue(all(r.get("deduplicated") for r in replays[1:]))
 
     def test_other_owner_operation_id_is_not_replayed(self):
         """operation_id 属于首个 owner：他人同 ID 提交不接管既有任务。"""

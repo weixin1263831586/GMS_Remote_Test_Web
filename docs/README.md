@@ -14,6 +14,7 @@
 | CLI | [cli/gms-rt.md](cli/gms-rt.md) | gms-rt 命令设计原则、[命令参考](cli/command-reference.md)（生成文档）、工作流示例 |
 | 安全 | [security.md](security.md) | 认证双轨、scope/elevation、审批 Token、执行边界、秘密管理 |
 | 开发 | [development.md](development.md) | 仓库布局、架构门禁、测试组织、文档政策、提交清单 |
+| 支持矩阵 | [platform-support-matrix.md](platform-support-matrix.md) | Python/Ubuntu 支持清单、依赖审计双腿、内置 OCR 引擎兼容性边界与升级条件 |
 
 ## 文档维护规则
 

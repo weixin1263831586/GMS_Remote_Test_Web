@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from .evidence import _DERIVED_TEXT_MAX_BYTES
 from .evidence_store import EvidenceStore
@@ -21,6 +22,19 @@ logger = logging.getLogger(__name__)
 
 OCR_TIMEOUT_SECONDS = 20
 OCR_MAX_IMAGE_PIXELS = 16_000_000
+
+
+def _load_ocr_dependencies() -> tuple[Any, Any]:
+    """加载 OCR 依赖 ``(pytesseract, PIL.Image)``；失败由调用方降级。
+
+    独立函数而非内联 import：无 OCR 依赖部署的降级测试注入此入口，
+    避免测试操纵 sys.modules / builtins.__import__ 这类进程级全局状态
+    （OCR 在工作线程执行，全局注入在组合运行下会互相污染）。
+    """
+    import pytesseract
+    from PIL import Image
+
+    return pytesseract, Image
 
 
 def extract_image_ocr_text(
@@ -47,8 +61,7 @@ def extract_image_ocr_text(
     _DERIVED_TEXT_MAX_BYTES。
     """
     try:
-        import pytesseract
-        from PIL import Image
+        pytesseract, Image = _load_ocr_dependencies()
     except Exception as exc:
         return "", f"OCR 依赖缺失: {type(exc).__name__}"
     try:

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import threading
+import time
+import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from features.firmware import apk, runtime
-from features.firmware.apk_store import ApkTaskStore
+from features.firmware.apk_store import ORPHAN_UPLOAD_COOLDOWN_SECONDS, ApkTaskStore
 
 
 def _task(root, task_id: str, owner_id: str = "alice"):
@@ -109,3 +112,58 @@ def test_resolve_jadx_path_ignores_broken_config_manager(monkeypatch):
     monkeypatch.setattr(apk.runtime, "config_manager", BrokenManager())
     monkeypatch.setattr(apk.runtime, "jadx_path", "/fallback/jadx")
     assert apk._resolve_jadx_path() == "/fallback/jadx"
+
+
+def _old_dir(path, *, age_seconds: float) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    old = time.time() - age_seconds
+    os.utime(path, (old, old))
+
+
+def test_reconcile_removes_orphan_dirs_without_task_row(tmp_path):
+    """无任务行、无上传会话、超冷却期的目录被清理。"""
+    store = ApkTaskStore(tmp_path / "tasks.sqlite3")
+    orphan = uuid.uuid4().hex
+    kept_task = "00000000-0000-0000-0000-000000000010"
+    task_row = _task(tmp_path, kept_task)
+    _old_dir(tmp_path / kept_task, age_seconds=ORPHAN_UPLOAD_COOLDOWN_SECONDS * 2)
+    store.upsert(kept_task, task_row)
+    _old_dir(tmp_path / orphan, age_seconds=ORPHAN_UPLOAD_COOLDOWN_SECONDS * 2)
+
+    cleaned = store.reconcile_orphan_uploads()
+
+    assert cleaned == [orphan]
+    assert not (tmp_path / orphan).exists()
+    assert (tmp_path / kept_task).exists()
+
+
+def test_reconcile_keeps_active_upload_sessions_and_fresh_dirs(tmp_path):
+    """含分块会话（metadata/.part）或冷却期内的目录一律保留。"""
+    store = ApkTaskStore(tmp_path / "tasks.sqlite3")
+    resumable = uuid.uuid4().hex
+    (tmp_path / resumable).mkdir()
+    (tmp_path / resumable / "upload_metadata.json").write_text("{}")
+    fresh_orphan = uuid.uuid4().hex
+    _old_dir(tmp_path / fresh_orphan, age_seconds=60)  # 冷却期内
+    chunks = uuid.uuid4().hex
+    (tmp_path / chunks).mkdir()
+    (tmp_path / chunks / "app.apk.part0").write_bytes(b"x")
+
+    cleaned = store.reconcile_orphan_uploads()
+
+    assert cleaned == []
+    assert (tmp_path / resumable).exists()
+    assert (tmp_path / fresh_orphan).exists()
+    assert (tmp_path / chunks).exists()
+
+
+def test_reconcile_ignores_non_uuid_and_files(tmp_path):
+    """非 UUID 名目录与普通文件不碰（tasks.sqlite3 等同住一个根）。"""
+    store = ApkTaskStore(tmp_path / "tasks.sqlite3")
+    foreign = tmp_path / "not-a-uuid-dir"
+    _old_dir(foreign, age_seconds=ORPHAN_UPLOAD_COOLDOWN_SECONDS * 2)
+    plain = tmp_path / "tasks.sqlite3"
+
+    assert store.reconcile_orphan_uploads() == []
+    assert foreign.exists()
+    assert plain.exists()
