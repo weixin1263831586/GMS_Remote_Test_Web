@@ -196,6 +196,17 @@ def clear_session_anchor(session: dict[str, Any]) -> None:
         _logger.warning("清理 Agent 会话恢复锚点失败", exc_info=True)
 
 
+def finish_run_state(session: dict[str, Any], status: str) -> None:
+    """Finish a run and clear its recovery anchor together.
+
+    Monitors must first check monitor_run_is_current() so an old run cannot
+    clear the state or anchor belonging to its replacement.
+    """
+    session["status"] = status
+    session["active_run"] = None
+    clear_session_anchor(session)
+
+
 def owner_id_from_request_shim(request_shim: Any) -> str:
     """Resolve the ADR 0010 owner from a request-like object, tolerantly.
 

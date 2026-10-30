@@ -247,7 +247,7 @@ def test_terminal_states_clear_anchor(tmp_path):
         api._save_session_anchor(session)
         assert json.loads(store.read_text(encoding="utf-8"))["sessions"].get("s-term")
         session["active_run"] = None
-        api._clear_session_anchor(session)
+        session_registry.clear_session_anchor(session)
         assert not json.loads(store.read_text(encoding="utf-8"))["sessions"].get("s-term")
 
 
@@ -298,14 +298,14 @@ def test_save_anchor_failure_marks_session_unrecoverable(caplog):
 
 
 def test_clear_anchor_success_resets_failure_flag():
-    from features.assistant import api
+    from features.assistant import session_registry
 
     session = {
         "session_id": "s-reset",
         "client_id": "c1",
         "recovery_anchor_failed": True,
     }
-    api._clear_session_anchor(session)
+    session_registry.clear_session_anchor(session)
     assert "recovery_anchor_failed" not in session
 
 

@@ -1118,7 +1118,7 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                     expect(page.locator("body")).to_have_class(
                         re.compile(r"workspace-scope-pending")
                     )
-                    expect(page.locator("#btn-copy-test-report")).to_be_hidden()
+                    expect(page.locator("#btn-copy-test-report")).to_be_visible()
                     expect(page.locator("#suite-worker-select")).to_be_hidden()
 
                     expect(page.locator("body")).to_have_class(
@@ -1128,7 +1128,7 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                         expect(page.locator("#btn-copy-test-report")).to_be_visible()
                         expect(page.locator("#suite-worker-select")).to_be_visible()
                     else:
-                        expect(page.locator("#btn-copy-test-report")).to_be_hidden()
+                        expect(page.locator("#btn-copy-test-report")).to_be_visible()
                         expect(page.locator("#suite-worker-select")).to_be_hidden()
                 finally:
                     page.close()

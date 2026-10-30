@@ -62,6 +62,41 @@ def _request(**overrides):
 
 
 class StartClusterTestArgvUnificationTests(unittest.TestCase):
+    def test_legacy_job_without_receipt_still_checks_all_business_parameters(self):
+        for field, changed in {
+            "build_id": "build-new", "build_artifact_id": "artifact-new",
+            "gerrit_change_id": "change-new", "gerrit_patchset": "2",
+            "redmine_issue_id": "123", "test_type": "gts",
+        }.items():
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                repository = _repository(Path(directory))
+                with patch("workflows.cluster_test_execution.get_cluster_service") as get_service:
+                    get_service.return_value = SimpleNamespace(repository=repository)
+                    first = start_cluster_test(_request(automation_run_id="op-legacy"), "alice")
+                    self.assertEqual(first.status_code, 200, first.body)
+                    with repository.connect() as conn:
+                        conn.execute("DELETE FROM cluster_job_requests")
+                    same = start_cluster_test(_request(automation_run_id="op-legacy"), "alice")
+                    self.assertEqual(same.status_code, 200, same.body)
+                    changed_response = start_cluster_test(
+                        _request(automation_run_id="op-legacy", **{field: changed}), "alice",
+                    )
+                self.assertEqual(changed_response.status_code, 409, changed_response.body)
+                self.assertEqual(json.loads(changed_response.body)["code"], "STATE_CONFLICT")
+                self.assertEqual(len(repository.list_jobs(owner_id="alice")), 1)
+
+    def test_busy_submission_preserves_error_code_and_retry_hint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = _repository(Path(directory))
+            with patch("workflows.cluster_test_execution.get_cluster_service") as get_service:
+                get_service.return_value = SimpleNamespace(repository=repository)
+                with repository.job_request_guard("alice", "op-busy"):
+                    result = start_cluster_test(_request(automation_run_id="op-busy"), "alice")
+            self.assertEqual(result.status_code, 409, result.body)
+            payload = json.loads(result.body)
+            self.assertEqual(payload["code"], "STATE_CONFLICT")
+            self.assertIn("Retry", payload["next_actions"][0]["action"])
+
     def test_argv_is_built_from_shared_execution_spec_builder(self):
 
         with tempfile.TemporaryDirectory() as directory:
@@ -303,6 +338,7 @@ class StartClusterTestOperationIdempotencyTests(unittest.TestCase):
 
             self.assertEqual(first.status_code, 200, first.body)
             self.assertEqual(second.status_code, 409, second.body)
+            self.assertEqual(json.loads(second.body)["code"], "STATE_CONFLICT")
             job_count = len(repository.list_jobs(owner_id="alice"))
             self.assertEqual(job_count, 1)
 

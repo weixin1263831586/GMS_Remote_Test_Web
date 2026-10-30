@@ -9,7 +9,6 @@ owner evidence store stay in ``evidence.py``; this module accesses them via
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
 import io
 import json
@@ -53,6 +52,31 @@ from .evidence_zip import extract_zip_derived_text
 
 
 logger = logging.getLogger(__name__)
+
+
+async def _settle_tasks(*tasks: asyncio.Future) -> None:
+    """Join tasks even if the caller is cancelled again during cleanup."""
+    waiter = asyncio.gather(*tasks, return_exceptions=True)
+    cancelled = False
+    while not waiter.done():
+        try:
+            await asyncio.shield(waiter)
+        except asyncio.CancelledError:
+            cancelled = True
+    if cancelled:
+        raise asyncio.CancelledError
+
+
+async def _disk_operation(operation, *args) -> None:
+    """Finish an in-flight thread operation before its file can be closed."""
+    # An executor Future is not independently cancelled by shutdown's
+    # all_tasks() sweep. Shield it until the real thread operation finishes.
+    task = asyncio.get_running_loop().run_in_executor(None, operation, *args)
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await _settle_tasks(task)
+        raise
 
 
 # -------------------------------------------------------------- fetch engine
@@ -403,7 +427,7 @@ class EvidenceFetcher:
                     )
                     temporary.replace(absolute)
                 except BaseException:
-                    await asyncio.to_thread(temporary.unlink, True)
+                    await _disk_operation(temporary.unlink, True)
                     raise
                 break
 
@@ -665,9 +689,9 @@ class EvidenceFetcher:
         """把响应体流式写入临时文件，返回 ``(字节数, 头部 8 字节)``。
 
         读写管道：网络读在事件循环协程里执行（aiohttp 内容流不保证跨
-        线程安全），磁盘 write/flush/fsync 在 ``asyncio.to_thread`` 的
-        工作线程里执行——慢盘只拖慢本下载，不阻塞其它请求。
-        ``queue.join()``/事件循环调度提供自然背压：写盘慢
+        线程安全），磁盘 write/flush/fsync 在 executor 工作线程里执行——
+        慢盘只拖慢本下载，不阻塞其它请求。
+        有界队列提供自然背压：写盘慢
         时网络读随之暂停，不会把附件缓冲进内存。SHA-256 在读侧滚动
         计算，主协程在整段流水线期间可响应取消。
         """
@@ -689,55 +713,41 @@ class EvidenceFetcher:
             await queue.put(None)
 
         async def _drain() -> None:
-            # 文件对象本身只在事件循环线程持有；每次把纯磁盘操作
-            # （write/flush/fsync）单独丢给 to_thread，慢盘只拖慢本
-            # 下载的推进速度，事件循环始终空闲可调度其它协程。
-            with open(temporary, "wb") as sink:
+            # The drain owns the file. Each disk operation, including close
+            # (which may flush buffered bytes), finishes before releasing it.
+            sink = open(temporary, "wb")  # noqa: SIM115 -- close must await the executor
+            try:
                 while True:
                     chunk = await queue.get()
                     if chunk is None:
                         break
-                    await asyncio.to_thread(sink.write, chunk)
-                await asyncio.to_thread(_flush_sync, sink)
+                    await _disk_operation(sink.write, chunk)
+                await _disk_operation(_flush_sync, sink)
+            finally:
+                await _disk_operation(sink.close)
 
         def _flush_sync(sink: io.BufferedWriter) -> None:
             sink.flush()
             os.fsync(sink.fileno())
 
         pump_task = asyncio.create_task(_pump())
+        drain_task = asyncio.create_task(_drain())
         try:
-            # drain/pump 是一个生命周期整体（网络断开/超限会让 _pump 在
-            # put(None) 前终止，_drain 若已阻塞在 queue.get() 将永久等
-            # 不到 EOF）：先并发等待，任一方失败立即取消另一方，再收集
-            # 双方结果——pump 的异常原样上抛，drain 不被无声悬置。
-            drain_task = asyncio.create_task(_drain())
             await asyncio.wait(
                 {pump_task, drain_task}, return_when=asyncio.FIRST_EXCEPTION,
             )
-            # pump 先失败（网络/超限/取消）→ drain 还卡在 queue.get()：
-            # 取消并等待其退出，才不会把半开的文件句柄留在 to_thread 里。
-            if not drain_task.done():
-                drain_task.cancel()
-            if not pump_task.done():
-                pump_task.cancel()
-            # 收尾等待： swallowing CancelledError，只让真实异常传播。
-            with contextlib.suppress(asyncio.CancelledError):
-                await pump_task
-            with contextlib.suppress(asyncio.CancelledError):
-                await drain_task
-            # 两者都退出后按序复现失败：pump 优先（网络侧是根因），
-            # 其次 drain（磁盘侧）。全部正常时两者异常均为 None。
-            pump_exc = pump_task.exception()
-            drain_exc = drain_task.exception()
-            if pump_exc is not None:
-                raise pump_exc
-            if drain_exc is not None:
-                raise drain_exc
-        except asyncio.CancelledError:
-            pump_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await pump_task
-            raise
+            for task in (pump_task, drain_task):
+                if task.done():
+                    # result() preserves both exceptions and cancellation.
+                    task.result()
+        finally:
+            # Both coroutines belong to this download, including on outer
+            # cancellation. The drain joins any in-flight write/fsync before
+            # closing its file; only then may the caller unlink the .part.
+            for task in (pump_task, drain_task):
+                if not task.done():
+                    task.cancel()
+            await _settle_tasks(pump_task, drain_task)
         return size, header
 
     @staticmethod

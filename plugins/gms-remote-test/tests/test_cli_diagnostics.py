@@ -188,6 +188,49 @@ class CliDiagnosticsTests(unittest.TestCase):
         audit = self.state_root / "gms-remote-test" / "diag-audit.log"
         self.assertIn("exit=4", audit.read_text(encoding="utf-8"))
 
+    def test_optional_config_denial_does_not_poison_shell_or_snapshot_status(self):
+        self._service_token_env()
+        for command in ("gms-rt-devices-shell DIAGDEV 'ls /vendor/etc/permissions'",
+                        "gms-rt-devices-snapshot DIAGDEV"):
+            with self.subTest(command=command):
+                result = self.run_snippet('''
+_is_test_host() { return 1; }
+api_call() { _record_api_exit_code 4; return 4; }
+ssh() { printf '%s\n' 'diagnostic output' 'topResumedActivity=com.example.app' 'mDreamingLockscreen=false' '[ro.build.id]: [test]' '[ro.boot.mode]: [normal]'; }
+GMS_RT_TYPED_READONLY=1
+_gms_rt_dispatch ''' + command + ' --json --non-interactive')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                payload = json.loads(result.stdout)
+                self.assertTrue(payload["ok"], payload)
+                if "snapshot" in command:
+                    self.assertEqual(payload["data"]["collected"], 9)
+                    self.assertEqual(payload["data"]["errors"], [])
+                else:
+                    self.assertIn("diagnostic output", payload["output"])
+
+    def test_optional_config_denial_does_not_mask_actual_ssh_failure(self):
+        self._service_token_env()
+        result = self.run_snippet('''
+_is_test_host() { return 1; }
+api_call() { _record_api_exit_code 4; return 4; }
+ssh() { echo 'Worker SSH failed' >&2; return 255; }
+GMS_RT_TYPED_READONLY=1
+_gms_rt_dispatch gms-rt-devices-shell DIAGDEV 'ls /vendor/etc/permissions' --json
+''')
+        self.assertEqual(result.returncode, 7, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertFalse(payload["ok"])
+        self.assertIn("Worker SSH failed", payload["diagnostics"])
+
+    def test_missing_debug_apk_reports_actionable_json_diagnostics(self):
+        result = self.run_cli("gms-rt-debug-session-request", "worker", "SERIAL", "com.android.vending",
+                              "/product/priv-app/Phonesky/Phonesky.apk", "--json", "--non-interactive")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertFalse(payload["ok"])
+        self.assertIn("Agent host", payload["diagnostics"])
+        self.assertIn("installed=true", payload["diagnostics"])
+
     def test_diag_denies_shell_metacharacters(self):
         self._service_token_env()
         self._stub_adb()

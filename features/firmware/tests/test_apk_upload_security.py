@@ -35,7 +35,7 @@ class ApkUploadSecurityTests(unittest.TestCase):
         async def authenticate_test_request(request, call_next):
             owner_id = request.headers.get('x-test-owner', 'owner')
             request.state.current_user = CurrentUser(
-                id=owner_id, username=owner_id, role='user'
+                id=owner_id, username=owner_id, role=request.headers.get('x-test-role', 'user')
             )
             return await call_next(request)
 
@@ -107,7 +107,7 @@ class ApkUploadSecurityTests(unittest.TestCase):
     def test_capacity_never_evicts_analyzing_task(self):
         existing_id = '00000000-0000-0000-0000-000000000004'
         runtime.global_state.apk_analysis_tasks[existing_id] = {
-            'status': 'analyzing', 'timestamp': 1,
+            'status': 'analyzing', 'timestamp': 1, 'owner_id': 'owner',
         }
         with TemporaryDirectory() as tmp, patch.object(runtime, 'apk_upload_dir', tmp), patch.object(runtime, 'apk_max_tasks', 1):
             response = self.client.post('/api/apk/upload', data={
@@ -116,6 +116,23 @@ class ApkUploadSecurityTests(unittest.TestCase):
             }, files={'file': ('new.apk', b'apk')})
         self.assertEqual(response.status_code, 429)
         self.assertIn(existing_id, runtime.global_state.apk_analysis_tasks)
+
+    def test_admin_and_user_can_upload_when_other_accounts_fill_the_pool(self):
+        foreign_ids = ['00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000012']
+        for task_id, status in zip(foreign_ids, ['analyzing', 'completed']):
+            runtime.global_state.apk_analysis_tasks[task_id] = {
+                'status': status, 'timestamp': 1, 'owner_id': 'other-account',
+            }
+        with patch.object(runtime, 'apk_max_tasks', 1):
+            for role, owner_id in [('admin', 'admin-account'), ('user', 'user-account')]:
+                with self.subTest(role=role):
+                    response = self.client.post('/api/apk/upload', headers={
+                        'x-test-owner': owner_id, 'x-test-role': role,
+                    }, files={'file': ('new.apk', b'apk')})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    task_id = response.json()['data']['task_id']
+                    self.assertEqual(runtime.global_state.apk_analysis_tasks[task_id]['owner_id'], owner_id)
+        self.assertTrue(all(task_id in runtime.global_state.apk_analysis_tasks for task_id in foreign_ids))
 
     def test_capacity_cleanup_never_evicts_another_owners_completed_task(self):
         existing_id = '00000000-0000-0000-0000-000000000009'
@@ -128,8 +145,11 @@ class ApkUploadSecurityTests(unittest.TestCase):
                 'file_name': 'new.apk',
             }, files={'file': ('new.apk', b'apk')})
 
-        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.status_code, 200)
         self.assertIn(existing_id, runtime.global_state.apk_analysis_tasks)
+        self.assertEqual(runtime.global_state.apk_analysis_tasks[
+            '00000000-0000-0000-0000-000000000010'
+        ]['owner_id'], 'alice')
 
     def test_tasks_are_isolated_by_owner(self):
         task_id = '00000000-0000-0000-0000-000000000006'

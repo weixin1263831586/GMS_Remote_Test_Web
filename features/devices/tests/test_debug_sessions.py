@@ -116,6 +116,96 @@ def test_request_is_pending_has_no_device_effect_and_agent_cannot_self_approve(e
     assert client.post("/api/devices/debug-sessions/" + session["id"] + "/approve").status_code == 403
 
 
+def request_installed(client, **values):
+    return client.post("/api/devices/debug-sessions", data={
+        "worker_id": "worker", "device": "worker:SERIAL", "package": "com.example.app", "installed": "true", **values,
+    })
+
+
+def test_installed_app_session_verifies_identity_without_upload_or_install(environment, monkeypatch):
+    client, repository, *_ = environment
+    observed = MagicMock(return_value={**IDENTITY, "sha256": "b" * 64})
+    monkeypatch.setattr(debug_identity, "installed_identity", observed)
+    response = request_installed(client)
+    assert response.status_code == 200, response.text
+    session = response.json()["session"]
+    assert session["status"] == "pending" and session["baseline_source"] == "installed"
+    assert session["serial"] == "SERIAL" and session["baseline_deployment_id"] == ""
+    assert session["signers"] == IDENTITY["signers"] and session["baseline_sha256"] == "b" * 64
+    assert "install" not in session["operations"]
+    observed.assert_called_once()
+    assert repository.claims.active_claim("worker:SERIAL") is None
+    assert not list(deployment_service.store().root.glob("*/artifact.apk"))
+    endpoint = "/api/devices/debug-sessions/" + session["id"]
+    assert client.post(endpoint + "/approve").status_code == 403
+    with patch.object(debug_service, "require_installed", return_value=IDENTITY) as verify, \
+            patch.object(debug_service, "start_install") as install:
+        active = approve(client, session)
+    verify.assert_called_once()
+    install.assert_not_called()
+    assert active["status"] == "active" and not active["busy"]
+    assert repository.claims.active_claim("worker:SERIAL")
+    assert client.get(endpoint).json()["session"]["usable"]
+    with patch.object(debug_execution, "perform", return_value={"ok": True}):
+        assert client.post(endpoint + "/actions", json={"action": "launch"}).status_code == 200
+    response = client.post("/api/devices/deployments", data={
+        "worker_id": "worker", "device": "SERIAL", "debug_session_id": session["id"],
+    }, files={"apk_file": ("new.apk", b"unused")})
+    assert response.status_code == 403
+    assert client.post(endpoint + "/revoke").status_code == 200
+    assert repository.claims.active_claim("worker:SERIAL") is None
+    assert client.post(endpoint + "/actions", json={"action": "launch"}).status_code == 403
+
+
+@pytest.mark.parametrize("values, status", [
+    ({"operations": "install,launch"}, 422), ({"operations": "unknown"}, 422),
+    ({"device": "MISSING"}, 409), ({"worker_id": "other"}, 409),
+])
+def test_invalid_installed_request_does_not_read_device(environment, monkeypatch, values, status):
+    client, *_ = environment
+    observe = MagicMock()
+    monkeypatch.setattr(debug_identity, "installed_identity", observe)
+    response = request_installed(client, **values)
+    assert response.status_code == status, response.text
+    observe.assert_not_called()
+
+
+def test_installed_request_rejects_uploaded_apk_and_missing_source(environment):
+    client, *_ = environment
+    values = {"worker_id": "worker", "device": "SERIAL", "package": "com.example.app"}
+    assert client.post("/api/devices/debug-sessions", data=values).status_code == 422
+    response = client.post("/api/devices/debug-sessions", data={**values, "installed": "true"},
+                           files={"apk_file": ("app.apk", b"unused")})
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("failure", ["absent", "ssh", "acl"])
+def test_installed_identity_failures_are_semantic(environment, monkeypatch, failure):
+    client, *_ = environment
+    observe = MagicMock(return_value=None)
+    if failure == "ssh":
+        observe.side_effect = ApiError.upstream_failure("Worker SSH failed", service="ssh")
+    elif failure == "acl":
+        monkeypatch.setattr(debug_service, "check_identity", MagicMock(side_effect=ApiError.forbidden("ACL denied")))
+    monkeypatch.setattr(debug_identity, "installed_identity", observe)
+    response = request_installed(client)
+    assert response.status_code == {"absent": 404, "ssh": 502, "acl": 403}[failure], response.text
+    if failure == "acl":
+        observe.assert_not_called()
+
+
+def test_installed_signer_change_before_approval_releases_claim(environment, monkeypatch):
+    client, repository, *_ = environment
+    monkeypatch.setattr(debug_identity, "installed_identity", lambda *_args: {**IDENTITY, "sha256": "b" * 64})
+    session = request_installed(client).json()["session"]
+    monkeypatch.setattr(debug_service, "require_installed", MagicMock(side_effect=ApiError.forbidden("signer changed")))
+    response = client.post("/api/devices/debug-sessions/" + session["id"] + "/approve",
+                           headers={"x-test-principal": "session"})
+    assert response.status_code == 403
+    assert debug_service.store().get(session["id"], session["owner_id"])["status"] == "pending"
+    assert repository.claims.active_claim("worker:SERIAL") is None
+
+
 def test_debug_install_start_failure_finishes_busy_operation_and_releases_resources(environment, monkeypatch):
     _client, cluster_repository, _auth, *_ = environment
     session = request_session(_client, operations="stop")
@@ -423,7 +513,7 @@ def test_launch_and_tap_compile_typed_quoted_commands():
     assert "am start -W --user 0 -n com.example.app/.Main" in run.call_args.args[1][-1]
     with patch.object(debug_execution, "run", side_effect=["mCurrentFocus=Window{abc u0 com.example.app/.Main}", ""]) as run:
         debug_execution.perform(object(), session, debug_api.DebugAction(action="tap", x=10, y=20), lambda: None)
-    assert run.call_args.args[1] == ["adb", "-s", "SERIAL", "shell", "input tap 10 20"]
+    assert run.call_args.args[1] == ["adb", "-s", "SERIAL", "shell", "input -d 0 tap 10 20"]
 
 
 @pytest.mark.parametrize("body", [{"action": "text", "text": "a;reboot"}, {"action": "keyevent", "key": "POWER"},

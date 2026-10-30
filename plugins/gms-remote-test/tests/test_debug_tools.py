@@ -36,6 +36,63 @@ def test_action_preserves_zero_coordinates_and_text_as_argv():
     run.assert_called_once_with("gms-rt-debug-action", ["a" * 32, "tap", "--x", "0", "--y", "20"], timeout=90)
 
 
+def test_installed_session_needs_no_host_apk():
+    run = Mock(return_value=("{}", False))
+    module.handlers(run)["gms_rt_debug_session_request"]({
+        "worker_id": "worker", "device": "SERIAL", "package": "com.android.vending", "installed": True,
+        "operations": ["launch", "tap", "text"],
+    })
+    run.assert_called_once_with("gms-rt-debug-session-request", [
+        "worker", "SERIAL", "com.android.vending", "--installed", "--operations", "launch,tap,text",
+    ], timeout=300)
+
+
+@pytest.mark.parametrize("values", [
+    {}, {"installed": True, "apk_file": "/device.apk"}, {"installed": True, "operations": ["install"]},
+    {"installed": "true"}, {"installed": True, "operations": None},
+])
+def test_invalid_identity_source_is_actionable_and_never_runs(values):
+    run = Mock()
+    message, failed = module.handlers(run)["gms_rt_debug_session_request"]({
+        "worker_id": "worker", "device": "SERIAL", "package": "com.android.vending", **values,
+    })
+    assert failed and message
+    run.assert_not_called()
+
+
+@pytest.mark.parametrize("arguments, expected", [
+    ("", "Usage:"),
+    ("worker SERIAL com.app /missing.apk", "Agent host"),
+    ("worker SERIAL com.app --installed --minutes 0", "15 to 120"),
+    ("worker SERIAL com.app --installed --minutes abc", "15 to 120"),
+    ("worker SERIAL com.app --installed --operations install", "cannot grant install"),
+    ("worker SERIAL com.app --installed --operations launch,unknown", "Unsupported debug operation"),
+    ("worker SERIAL com.app --installed --minutes", "Missing value"),
+    ("worker SERIAL com.app --installed --unknown value", "Unknown debug-session option"),
+])
+def test_cli_request_reports_validation_errors_without_http(tmp_path, arguments, expected):
+    result = subprocess.run(["bash", "-c", '''source "$GMS_TEST_RUNTIME/cli/debug.sh"
+error() { printf '%s\\n' "$1" >&2; }
+api_call() { touch unexpected-http; }
+gms-rt-debug-session-request ''' + arguments], cwd=tmp_path, capture_output=True, text=True, check=False,
+        env={**os.environ, "GMS_TEST_RUNTIME": str(RUNTIME), "GMS_RT_EXIT_USAGE": "2"})
+    assert result.returncode == 2
+    assert expected in result.stderr
+    assert not (tmp_path / "unexpected-http").exists()
+
+
+def test_cli_installed_request_does_not_upload_or_install(tmp_path):
+    result = subprocess.run(["bash", "-c", '''source "$GMS_TEST_RUNTIME/cli/debug.sh"
+api_call() { printf '%s\\n' "$@"; }
+gms-rt-debug-session-request worker SERIAL com.android.vending --installed
+'''], cwd=tmp_path, capture_output=True, text=True, check=False,
+        env={**os.environ, "GMS_TEST_RUNTIME": str(RUNTIME), "GMS_RT_EXIT_USAGE": "2"})
+    assert result.returncode == 0, result.stderr
+    assert "installed=true" in result.stdout
+    assert "operations=launch,stop,tap,swipe,text,keyevent" in result.stdout
+    assert "apk_file=" not in result.stdout
+
+
 def test_repeated_install_passes_session_reference():
     spec = importlib.util.spec_from_file_location("deploy_tools_debug_test", RUNTIME / "mcp_deployment_tools.py")
     deployment = importlib.util.module_from_spec(spec)

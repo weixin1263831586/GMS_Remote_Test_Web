@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 _INTERNAL_ERROR_MESSAGE = "Internal server error"
 
 
+class TaskCapacityError(ValueError):
+    """A task quota is full and no existing task can safely be removed."""
+
+
 def handle_api_errors(function):
     @wraps(function)
     async def async_wrapper(*args, **kwargs):

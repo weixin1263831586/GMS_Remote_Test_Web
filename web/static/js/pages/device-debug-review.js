@@ -53,7 +53,8 @@
             const {session: s, operations} = await request('GET', endpoint);
             details.replaceChildren();
             const entries = [['Agent', s.actor_id], ['Worker', s.worker_id], ['设备', s.serial], ['应用', s.package],
-                ['签名 SHA256', s.signers.join(', ')], ['首次 APK SHA256', s.baseline_sha256],
+                ['签名 SHA256', s.signers.join(', ')],
+                [s.baseline_source === 'installed' ? '已安装 APK SHA256' : '首次 APK SHA256', s.baseline_sha256],
                 ['授权范围', s.operations.map(a => actions[a] || a).join('、')],
                 ['调试时长', `${s.duration_minutes} 分钟（从批准时开始）`],
                 [s.status === 'pending' ? '审批截止' : '有效至', new Date(s.expires_at * 1000).toLocaleString()]];

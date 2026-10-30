@@ -461,9 +461,16 @@
       "Body_prepare_session_api_devices_debug_sessions_post": {
         "properties": {
           "apk_file": {
-            "contentMediaType": "application/octet-stream",
-            "title": "Apk File",
-            "type": "string"
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apk File"
           },
           "device": {
             "maxLength": 256,
@@ -478,11 +485,22 @@
             "title": "Duration Minutes",
             "type": "integer"
           },
+          "installed": {
+            "default": false,
+            "title": "Installed",
+            "type": "boolean"
+          },
           "operations": {
-            "default": "install,launch,stop,tap,swipe,text,keyevent",
-            "maxLength": 100,
-            "title": "Operations",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operations"
           },
           "package": {
             "maxLength": 255,
@@ -500,8 +518,7 @@
         "required": [
           "worker_id",
           "device",
-          "package",
-          "apk_file"
+          "package"
         ],
         "title": "Body_prepare_session_api_devices_debug_sessions_post",
         "type": "object"
@@ -12053,7 +12070,7 @@
     },
     "/api/devices/debug-sessions": {
       "post": {
-        "description": "Request a grant bound to the calling Agent and a verified baseline APK.",
+        "description": "Bind a grant to an uploaded APK or the verified installed app.",
         "requestBody": {
           "content": {
             "multipart/form-data": {

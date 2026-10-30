@@ -7,8 +7,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from features.cluster import build_argv_from_spec, get_cluster_service
-from features.cluster.job_requests import request_fingerprint
+from features.cluster import build_argv_from_spec, get_cluster_service, request_fingerprint
 from foundation.cache import TTLCache
 from foundation.error_model import ApiError
 from foundation.responses import error_response, success_response
@@ -157,7 +156,7 @@ def start_cluster_test(request: Any, client_id: str):
                     request, client_id, fingerprint
                 )
         except ApiError as exc:
-            return error_response(exc.message, exc.status_code)
+            return exc.to_response()
     return _start_cluster_test_guarded(request, client_id, None)
 
 
@@ -194,12 +193,22 @@ def _start_cluster_test_guarded(
                         "test_module": request.test_module,
                         "test_case": request.test_case,
                         "retry_dir": request.retry_dir,
+                        "device_reservation_id": request.device_reservation_id,
+                        "build_id": request.build_id,
+                        "build_artifact_id": request.build_artifact_id,
+                        "gerrit_change_id": request.gerrit_change_id,
+                        "gerrit_patchset": request.gerrit_patchset,
+                        "redmine_issue_id": request.redmine_issue_id,
                     }.items()
-                ) or list(prior.get("devices") or []) != list(request.devices):
-                    return error_response(
+                ) or list(prior.get("devices") or []) != list(request.devices) or (
+                    request.test_type and request.test_type.lower() != str(
+                        (prior.get("execution_spec") or {}).get("test_type")
+                        or prior.get("test_type") or ""
+                    ).lower()
+                ):
+                    return ApiError.conflict(
                         "automation_run_id 已绑定不同参数的既有任务，请更换 operation_id 或复用原参数",
-                        409,
-                    )
+                    ).to_response()
         if existing:
             if existing.get("owner_id") != owner_id:
                 return error_response("Automation job belongs to another owner", 409)
@@ -211,7 +220,7 @@ def _start_cluster_test_guarded(
             try:
                 replayed = repository.replay_job_command(existing)
             except ApiError as exc:
-                return error_response(exc.message, exc.status_code)
+                return exc.to_response()
             message = (
                 "Distributed test already queued"
                 if replayed is not None

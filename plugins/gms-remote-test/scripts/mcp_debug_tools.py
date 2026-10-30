@@ -15,13 +15,17 @@ SCHEMAS = [
            "Request one human-approved, finite debug session bound to this Agent, exact Worker/device, "
            "APK package and verified signing certificates. Return approval_url to the human; never copy tokens. "
            "Approval starts the first installation if install is requested. Request database_read explicitly for app database access. Duration defaults to 60 min, max 120. "
-           "CLI: gms-rt-debug-session-request <worker_id> <device> <package> <apk_file> "
+           "apk_file must be a readable APK on the Agent host, never an Android device path. "
+           "For preinstalled apps (including Play Store), omit apk_file and set installed=true; "
+           "the Controller verifies the installed APK over SSH. This mode never grants install. "
+           "CLI: gms-rt-debug-session-request <worker_id> <device> <package> <apk_file|--installed> "
            "[--minutes N] [--operations install,launch,stop,tap,swipe,text,keyevent].",
            {"worker_id": {"type": "string"}, "device": {"type": "string"}, "package": {"type": "string"},
-            "apk_file": {"type": "string"}, "duration_minutes": {"type": "integer", "minimum": 15, "maximum": 120, "default": 60},
+            "apk_file": {"type": "string", "minLength": 1}, "installed": {"type": "boolean", "default": False},
+            "duration_minutes": {"type": "integer", "minimum": 15, "maximum": 120, "default": 60},
             "operations": {"type": "array", "minItems": 1, "uniqueItems": True,
                            "items": {"type": "string", "enum": ["install", "launch", "stop", "tap", "swipe", "text", "keyevent", "database_read"]}}},
-           ["worker_id", "device", "package", "apk_file"]),
+           ["worker_id", "device", "package"]),
     schema("gms_rt_debug_session_status", "Read grant status and recent operations; poll until active and not busy. "
            "CLI: gms-rt-debug-session-status <session_id>.", SESSION, ["session_id"]),
     schema("gms_rt_debug_session_revoke", "Revoke this Agent's exact debug session when requested by the user or "
@@ -45,15 +49,27 @@ SCHEMAS = [
 
 def handlers(run_cli):
     def request(args):
-        argv = [str(args.get(k) or "") for k in ("worker_id", "device", "package", "apk_file")]
+        argv = [str(args.get(k) or "") for k in ("worker_id", "device", "package")]
         if not all(argv):
-            return "worker_id, device, package and apk_file are required", True
-        if "duration_minutes" in args:
-            argv.extend(["--minutes", str(args["duration_minutes"])])
+            return "worker_id, device and package are required", True
+        installed = args.get("installed", False)
+        if not isinstance(installed, bool):
+            return "installed must be a boolean", True
         if "operations" in args:
             operations = args["operations"]
             if not isinstance(operations, list) or not operations or not all(isinstance(op, str) for op in operations):
                 return "operations must be a nonempty string array", True
+        if installed:
+            if args.get("apk_file") or "install" in args.get("operations", []):
+                return "installed=true cannot include apk_file or install", True
+            argv.append("--installed")
+        elif args.get("apk_file"):
+            argv.append(str(args["apk_file"]))
+        else:
+            return "Provide a local apk_file, or set installed=true for an already installed app", True
+        if "duration_minutes" in args:
+            argv.extend(["--minutes", str(args["duration_minutes"])])
+        if "operations" in args:
             argv.extend(["--operations", ",".join(operations)])
         return run_cli("gms-rt-debug-session-request", argv, timeout=300)
 

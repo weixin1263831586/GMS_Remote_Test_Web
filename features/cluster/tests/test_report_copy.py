@@ -16,6 +16,7 @@ from features.cluster import api as cluster_api
 from features.cluster.config import ClusterConfig
 from features.cluster.repository import ClusterRepository, utc_now
 from features.cluster.service import ClusterService
+from foundation.error_model import register_api_error_handler
 from worker_agent.config import WorkerConfig
 
 
@@ -76,6 +77,7 @@ class ReportCopyApiTests(unittest.TestCase):
             ),
         )
         app = FastAPI()
+        register_api_error_handler(app)
 
         @app.middleware("http")
         async def user_identity(request: Request, call_next):
@@ -230,7 +232,78 @@ class ReportCopyApiTests(unittest.TestCase):
         self.assertEqual(allowed.status_code, 200)
         self.assertEqual(allowed.content, archive.read_bytes())
 
-    def test_report_copy_rejects_same_worker_and_unknown_target_suite(self):
+    def test_controller_can_copy_between_local_suites_without_overwriting(self):
+        cluster_api.cluster_service.config = ClusterConfig(
+            enabled=False, remote_dispatch_enabled=False, local_worker_id=self.local_worker,
+        )
+        source = self.local_tools.parent / "results" / REPORT_NAME
+        source.mkdir(parents=True)
+        (source / "test_result.xml").write_text("source-result", encoding="utf-8")
+        for destination_exists in (False, True):
+            with self.subTest(destination_exists=destination_exists):
+                target_tools = self.root / "local-suites" / f"gts-r4-{destination_exists}" / "tools"
+                target_tools.mkdir(parents=True)
+                self.repo.replace_worker_suites(self.local_worker, [
+                    {"tools_path": str(self.local_tools), "available": True},
+                    {"tools_path": str(target_tools), "available": True},
+                ])
+                destination = target_tools.parent / "results" / REPORT_NAME
+                if destination_exists:
+                    destination.mkdir(parents=True)
+                    (destination / "test_result.xml").write_text("retained-result", encoding="utf-8")
+
+                def local_config(data_root: Path) -> WorkerConfig:
+                    return WorkerConfig(
+                        worker_id=self.local_worker, controller_url="https://controller", token="unused",
+                        suite_roots=[self.root / "local-suites"], data_root=data_root,
+                    )
+
+                with patch("features.cluster.transfers_api._local_worker_config", side_effect=local_config):
+                    created = self.client.post("/api/cluster/suites/report-copies", json={
+                        "source_worker_id": self.local_worker, "source_suite_path": str(self.local_tools),
+                        "report_name": REPORT_NAME, "target_worker_id": self.local_worker,
+                        "target_suite_path": str(target_tools),
+                    })
+                    self.assertEqual(created.status_code, 200, created.text)
+                    copy_id = created.json()["copy_id"]
+                    imported = self.client.post(f"/api/cluster/suites/report-copies/{copy_id}/import")
+                    self.assertEqual(imported.status_code, 409 if destination_exists else 200, imported.text)
+                    if not destination_exists:
+                        repeated = self.client.post(f"/api/cluster/suites/report-copies/{copy_id}/import")
+                        self.assertEqual(repeated.status_code, 200, repeated.text)
+                        self.assertTrue(repeated.json()["deduplicated"])
+
+                expected = "retained-result" if destination_exists else "source-result"
+                self.assertEqual((destination / "test_result.xml").read_text(encoding="utf-8"), expected)
+                self.assertEqual((source / "test_result.xml").read_text(encoding="utf-8"), "source-result")
+
+    def test_remote_worker_can_export_and_import_between_its_own_suites(self):
+        target_path = "/home/wlq/GMS-Suite/android-cts-17_r2/android-cts/tools"
+        self.repo.replace_worker_suites(self.source_worker, [
+            {"tools_path": self.source_tools, "available": True},
+            {"tools_path": target_path, "available": True},
+        ])
+        created = self._create_copy(self.source_worker, target_path)
+        export = self.repo.get_command(created["export_command_id"])
+        self.assertEqual(export["worker_id"], self.source_worker)
+        self.assertEqual(export["command_type"], "suite_export")
+        archive = self._complete_copy_transfer(created["copy_id"])
+
+        imported = self.client.post(f"/api/cluster/suites/report-copies/{created['copy_id']}/import")
+
+        self.assertEqual(imported.status_code, 200, imported.text)
+        command = self.repo.get_command(imported.json()["command_id"])
+        self.assertEqual(command["worker_id"], self.source_worker)
+        self.assertEqual(command["command_type"], "report_import")
+        self.assertEqual(command["payload"]["target_suite_path"], target_path)
+        downloaded = self.client.get(
+            f"/api/cluster/workers/{self.source_worker}/report-copies/{created['copy_id']}",
+            headers={"Authorization": "Bearer source-token"},
+        )
+        self.assertEqual(downloaded.status_code, 200, downloaded.text)
+        self.assertEqual(downloaded.content, archive.read_bytes())
+
+    def test_report_copy_rejects_same_suite_and_unknown_target_suite(self):
         same_worker = self.client.post("/api/cluster/suites/report-copies", json={
             "source_worker_id": self.source_worker,
             "source_suite_path": self.source_tools,
@@ -247,6 +320,7 @@ class ReportCopyApiTests(unittest.TestCase):
         })
 
         self.assertEqual(same_worker.status_code, 400)
+        self.assertEqual(same_worker.json()["code"], "MALFORMED_REQUEST")
         self.assertEqual(unknown_suite.status_code, 409)
 
 

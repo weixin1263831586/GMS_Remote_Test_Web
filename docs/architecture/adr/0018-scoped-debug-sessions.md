@@ -21,6 +21,17 @@ resource owner must approve within five minutes. Approval activates a
 15–120 minute session (default 60), reserves or borrows that owner's explicit
 device reservation and starts the baseline installation if install is granted.
 
+For preinstalled apps, the Agent may explicitly select `installed=true`
+instead of uploading a baseline. Controller resolves the user-0 base APK on
+the exact Worker/serial and verifies its package, hash and signing certificate
+set using the same audited SSH/SFTP and Build-Tools path as installed identity
+checks. The request checks Agent identity, scopes, ACLs and target inventory;
+it grants no UI operation before human approval. This mode rejects uploads
+and the install operation. The review page shows the observed APK hash and
+signers; approval acquires the normal device claim and rechecks installed
+identity before activation. Every later action retains the existing signer,
+foreground, Agent and lease checks. No raw Agent-side ADB connection is needed.
+
 The grant binds the exact Agent actor id, owner, Worker, device, package,
 signer certificate set and allowed operations. It carries no Bearer or SSH
 secret. Every operation rechecks the grant, enabled/unrevoked Agent identity,
@@ -51,7 +62,9 @@ Interrupted baseline execution also blocks and revokes subsequent actions.
 database_read is opt-in, additionally requires devices.database.read, and is
 limited to the grant's package and lease, with result-free access auditing.
 UI input requires the
-approved package's foreground window in user 0; system dialogs fail closed.
+approved package's foreground window in user 0. Input explicitly targets
+display 0; all reported focus aliases must agree. System/null windows,
+conflicting focus records or a detected non-default display fail closed.
 App start/stop are user-0 and package-bound. Shell, raw SQL, firmware, app-data
 clearing, permission grants, root and system settings receive no new authority.
 Existing read-only evidence tools retain their own scopes and ACLs.
