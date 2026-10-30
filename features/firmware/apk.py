@@ -10,6 +10,7 @@ import time
 import uuid
 from typing import Any
 
+from foundation.errors import TaskCapacityError
 from foundation.responses import ApiResponse
 from foundation.uploads import safe_upload_target_path
 
@@ -33,24 +34,26 @@ APK_SYMBOL_INDEX_MAX_FILE_SIZE = 2 * 1024 * 1024
 
 
 def create_apk_task(task_id, apk_path, filename, owner_id: str):
-    """创建APK分析任务并限制总数"""
+    """Create an owner-scoped APK task and enforce that account's task quota."""
     owner_id = str(owner_id or '').strip()
     if not owner_id:
         raise ValueError('APK analysis owner is required')
     os.makedirs(runtime.apk_upload_dir, exist_ok=True)
     with runtime.global_state.apk_analysis_tasks_lock:
-        if len(runtime.global_state.apk_analysis_tasks) >= runtime.apk_max_tasks:
-            # Capacity cleanup must never delete another user's durable result.
-            # A user may rotate their own oldest terminal task; otherwise the
-            # shared pool reports pressure and leaves every owner's data intact.
+        owned_tasks = [
+            item for item in runtime.global_state.apk_analysis_tasks.items()
+            if item[1].get('owner_id') == owner_id
+        ]
+        if len(owned_tasks) >= runtime.apk_max_tasks:
+            # Quotas follow resource ownership (ADR 0010), for all account
+            # roles. Other accounts' tasks neither consume this quota nor
+            # become candidates for automatic cleanup.
             removable = [
-                item
-                for item in runtime.global_state.apk_analysis_tasks.items()
+                item for item in owned_tasks
                 if item[1].get('status') != 'analyzing'
-                and item[1].get('owner_id') == owner_id
             ]
             if not removable:
-                raise ValueError('APK analysis capacity is full; retry later')
+                raise TaskCapacityError('APK analysis capacity for this account is full; retry later')
             oldest = min(removable, key=lambda t: t[1].get('timestamp', 0))
             old_dir = safe_join(runtime.apk_upload_dir, oldest[0])
             shutil.rmtree(old_dir, ignore_errors=True)

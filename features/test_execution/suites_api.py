@@ -33,6 +33,7 @@ from foundation.responses import ApiResponse
 
 from . import runtime
 from .models import SuiteApkAnalyzeRequest, SuiteDiagnosisTargetRequest
+from .suite_apk_analysis import register_suite_apk_task
 from .suite_helpers import (
     get_available_test_suites,
     resolve_suite_diagnosis_target,
@@ -690,7 +691,7 @@ async def create_suite_apk_analysis_task(req: SuiteApkAnalyzeRequest, request: R
         os.makedirs(task_dir, exist_ok=True)
         apk_path = runtime.safe_join(task_dir, filename)
         await asyncio.to_thread(shutil.copyfile, info["real_path"], apk_path)
-        runtime.create_apk_task(
+        register_suite_apk_task(
             task_id,
             apk_path,
             filename,
@@ -734,7 +735,7 @@ async def create_suite_apk_analysis_task(req: SuiteApkAnalyzeRequest, request: R
             runtime.cleanup_files([apk_path])
             return ApiResponse.error(f"File too large, max {runtime.apk_max_file_size // (1024*1024)}MB", status_code=400)
 
-        runtime.create_apk_task(
+        register_suite_apk_task(
             task_id,
             apk_path,
             filename,

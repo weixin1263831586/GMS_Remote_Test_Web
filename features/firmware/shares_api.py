@@ -166,12 +166,10 @@ def _host_credentials(host: str, user: str | None, config: dict[str, Any]) -> di
     share_config = config.get("firmware_shares") or {}
     host_configs = share_config.get("hosts") or {}
     host_config = host_configs.get(host) or {}
-    default_user = user or host_config.get("user") or config.get("firmware_share_user")
-    if not default_user:
-        local_server = str(config.get("local_server") or "")
-        if "@" in local_server:
-            default_user = local_server.rsplit("@", 1)[0]
-    default_user = default_user or config.get("ubuntu_user") or getpass.getuser()
+    default_user = (
+        user or host_config.get("user") or share_config.get("default_user")
+        or config.get("firmware_share_user") or config.get("ubuntu_user") or getpass.getuser()
+    )
 
     key_filename = host_config.get("key_filename") or share_config.get("key_filename") or config.get("firmware_share_key")
     password_env = str(host_config.get("password_env") or "").strip()
@@ -476,30 +474,30 @@ async def browse_firmware_share_remote(
             remote_path = ""
             if default_remote:
                 remote_host, remote_user, remote_path = _parse_remote_spec(default_remote)
-            local_server = str(config.get("local_server") or "").strip()
-            local_user, _, local_host = local_server.rpartition("@")
-            if not local_user:
-                local_host = local_server
+            # local_server is a client return address (possibly Windows), never
+            # a fallback for the firmware server or its SSH username.
+            connection = str(share_config.get("default_host") or config.get("ubuntu_host") or "").strip()
+            connection_user, separator, connection_host = connection.rpartition("@")
+            if not separator:
+                connection_host = connection
             host = str(
                 payload.get("host")
-                or share_config.get("default_host")
                 or remote_host
-                or local_host
-                or config.get("ubuntu_host")
+                or connection_host
                 or ""
             ).strip()
             user = str(
                 payload.get("user")
-                or share_config.get("default_user")
                 or remote_user
-                or local_user
+                or share_config.get("default_user")
+                or (connection_user if not remote_host else "")
                 or config.get("ubuntu_user")
                 or getpass.getuser()
             ).strip() or None
             requested_path = str(
                 payload.get("path")
-                or share_config.get("default_path")
                 or remote_path
+                or share_config.get("default_path")
                 or ""
             ).strip()
             path = (

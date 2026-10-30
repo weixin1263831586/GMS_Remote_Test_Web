@@ -111,6 +111,20 @@ class DebugStore:
             conn.execute("UPDATE debug_sessions SET status='revoked' WHERE id=? AND owner_id=?", (session_id, owner_id))
         return self.get(session_id, owner_id)
 
+    def active_for_target(self, owner_id, worker_id, serial, package):
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM debug_sessions WHERE owner_id=? "
+                "AND status IN ('approving','active') AND expires_at>? "
+                "ORDER BY expires_at DESC",
+                (owner_id, time.time())).fetchall()
+        for row in rows:
+            payload = self.decode(row)
+            if (payload.get("worker_id"), payload.get("serial"), payload.get("package")) == (
+                    worker_id, serial, package):
+                return payload
+        return None
+
     def begin(self, session_id, owner_id, actor_id, action, details):
         op_id = uuid.uuid4().hex
         with self.connect() as conn:

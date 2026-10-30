@@ -280,12 +280,18 @@ API callers get the same behavior without the CLI.
 
 ## Finite app debugging
 
-- `gms-rt-debug-session-request <worker_id> <device> <package> <apk_file>
+- `gms-rt-debug-session-request <worker_id> <device> <package> <apk_file|--installed>
   [--minutes N] [--operations install,launch,stop,tap,swipe,text,keyevent]`
   uploads a signed baseline to `POST /api/devices/debug-sessions`. The
   requesting Agent owns the grant; a human approves via its review URL.
   Duration defaults to 60 minutes, is bounded to 15–120, and starts at
   approval. Including install starts the baseline deployment after approval.
+  `apk_file` must be readable on the Agent host; Android device paths cannot
+  be uploaded. `--installed` (MCP: `installed=true`, omit `apk_file`) instead
+  verifies the installed user-0 APK through Controller→Worker SSH, binds its
+  package/signers/hash for human review, and excludes `install`. Approval
+  rechecks the installed signer set. For feature diagnostics use the existing
+  read-only `gms_rt_shell` command `pm list features`.
 - `gms-rt-debug-session-status <session_id>` reads
   `GET /api/devices/debug-sessions/{session_id}`, including recent operations.
 - `gms-rt-debug-session-revoke <session_id>` posts

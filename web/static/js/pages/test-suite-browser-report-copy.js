@@ -68,6 +68,7 @@ async function loadReportCopySuites(workerId, selectId, preferredPath = '') {
     if (!select) return [];
     select.disabled = true;
     select.innerHTML = '<option value="">正在加载套件...</option>';
+    updateReportCopySubmitState();
     try {
         let suites = _reportCopySuites.get(workerId);
         if (!suites) {
@@ -107,6 +108,12 @@ function selectedReportCopySuite(role) {
 function matchingTargetSuitePath(targetSuites) {
     const source = selectedReportCopySuite('source');
     if (!source) return '';
+    const sameWorker = $('report-copy-source-worker')?.value === $('report-copy-target-worker')?.value;
+    if (sameWorker) {
+        targetSuites = targetSuites.filter(suite =>
+            reportCopySuiteRoot(suite.tools_path) !== reportCopySuiteRoot(source.tools_path)
+        );
+    }
     const sourceLabel = reportCopySuiteLabel(source).toLocaleLowerCase();
     const releaseMatch = targetSuites.find(
         suite => reportCopySuiteLabel(suite).toLocaleLowerCase() === sourceLabel
@@ -120,7 +127,17 @@ function matchingTargetSuitePath(targetSuites) {
                 === String(source.suite_version || source.version || '')
         )
     );
-    return match?.tools_path || '';
+    return match?.tools_path || (sameWorker ? targetSuites[0]?.tools_path : '') || '';
+}
+
+function reportCopySuiteRoot(suitePath) {
+    return getSuiteRootFromToolsPath(String(suitePath || '').replace(/\/+$/, ''));
+}
+
+function reportCopyTargetsSourceSuite() {
+    return $('report-copy-source-worker')?.value === $('report-copy-target-worker')?.value
+        && reportCopySuiteRoot($('report-copy-source-suite')?.value)
+            === reportCopySuiteRoot($('report-copy-target-suite')?.value);
 }
 
 async function loadReportCopySourceReports() {
@@ -130,6 +147,7 @@ async function loadReportCopySourceReports() {
     if (!select) return;
     select.disabled = true;
     select.innerHTML = '<option value="">正在加载报告...</option>';
+    updateReportCopySubmitState();
     if (!workerId || !suitePath) {
         select.innerHTML = '<option value="">请先选择来源套件</option>';
         updateReportCopySubmitState();
@@ -166,10 +184,16 @@ function updateReportCopySubmitState() {
     submit.disabled = _reportCopyRunning
         || !sourceWorker
         || !targetWorker
-        || sourceWorker === targetWorker
+        || reportCopyTargetsSourceSuite()
+        || $('report-copy-source-suite')?.disabled
+        || $('report-copy-source-report')?.disabled
+        || $('report-copy-target-suite')?.disabled
         || !$('report-copy-source-suite')?.value
         || !$('report-copy-source-report')?.value
         || !$('report-copy-target-suite')?.value;
+    submit.title = reportCopyTargetsSourceSuite()
+        ? '同一主机内请选择不同的来源套件和目标套件'
+        : '';
 }
 
 window.updateReportCopyTargetPath = function updateReportCopyTargetPath() {
@@ -230,14 +254,14 @@ window.openReportCopyModal = async function openReportCopyModal() {
         _reportCopyWorkers = (payload.workers || []).filter(
             worker => ['online', 'busy'].includes(worker.status)
         );
-        if (_reportCopyWorkers.length < 2) {
-            throw new Error('至少需要两台在线 Worker 才能跨主机拷贝');
+        if (!_reportCopyWorkers.length) {
+            throw new Error('暂无在线 Worker 可供拷贝报告');
         }
         const currentWorkerId = $('suite-worker-select')?.value || workspaceLocalWorkerId();
         const sourceWorkerId = _reportCopyWorkers.some(worker => worker.id === currentWorkerId)
             ? currentWorkerId
             : _reportCopyWorkers[0].id;
-        const targetWorkerId = _reportCopyWorkers.find(worker => worker.id !== sourceWorkerId)?.id || '';
+        const targetWorkerId = _reportCopyWorkers.find(worker => worker.id !== sourceWorkerId)?.id || sourceWorkerId;
         fillReportCopyWorkerSelect($('report-copy-source-worker'), sourceWorkerId);
         fillReportCopyWorkerSelect($('report-copy-target-worker'), targetWorkerId);
         await window.onReportCopySourceWorkerChange();
@@ -295,12 +319,12 @@ window.submitReportCopy = async function submitReportCopy() {
     const reportName = $('report-copy-source-report')?.value || '';
     const targetWorkerId = $('report-copy-target-worker')?.value || '';
     const targetSuitePath = $('report-copy-target-suite')?.value || '';
-    if (sourceWorkerId === targetWorkerId) {
-        setReportCopyStatus('来源主机和目标主机不能相同', 'error');
+    if (!sourceWorkerId || !targetWorkerId || !sourceSuitePath || !reportName || !targetSuitePath) {
+        setReportCopyStatus('请选择完整的报告来源和拷贝目标', 'error');
         return;
     }
-    if (!sourceSuitePath || !reportName || !targetSuitePath) {
-        setReportCopyStatus('请选择完整的报告来源和拷贝目标', 'error');
+    if (reportCopyTargetsSourceSuite()) {
+        setReportCopyStatus('同一主机内请选择不同的来源套件和目标套件', 'error');
         return;
     }
 
@@ -336,7 +360,7 @@ window.submitReportCopy = async function submitReportCopy() {
         const destination = result.destination
             || `${getSuiteRootFromToolsPath(targetSuitePath)}/results/${reportName}`;
         setReportCopyStatus(`拷贝完成：${destination}`, 'success');
-        showToast('跨主机测试报告拷贝完成', 'success');
+        showToast('测试报告拷贝完成', 'success');
         if (typeof notifyOperationResult === 'function') {
             notifyOperationResult('测试报告拷贝完成', destination, 'success', 'report-copy', {
                 worker_id: targetWorkerId,

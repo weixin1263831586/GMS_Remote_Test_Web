@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import json
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -14,6 +14,7 @@ from features.auth import (
     require_human_principal,
     require_resource_owner,
 )
+from foundation.error_model import ApiError
 
 from .api import _authenticate, _require_cluster_enabled, service
 from .config import configured_max_bytes
@@ -224,8 +225,12 @@ async def create_report_copy(
     """Export one results/<timestamp> directory for a cross-Worker copy."""
     require_human_principal(request)
     local_worker_id = service().config.local_worker_id
-    if body.source_worker_id == body.target_worker_id:
-        raise HTTPException(400, "source and target Workers must be different")
+    source_path = PurePosixPath(body.source_suite_path)
+    target_path = PurePosixPath(body.target_suite_path)
+    source_root = source_path.parent if source_path.name == "tools" else source_path
+    target_root = target_path.parent if target_path.name == "tools" else target_path
+    if body.source_worker_id == body.target_worker_id and source_root == target_root:
+        raise ApiError.malformed_request("同一主机内请选择不同的来源套件和目标套件")
     _require_cluster_enabled(
         remote=(
             body.source_worker_id != local_worker_id

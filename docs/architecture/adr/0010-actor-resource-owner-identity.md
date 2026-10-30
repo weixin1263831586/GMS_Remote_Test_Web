@@ -41,6 +41,9 @@ Build 任务 owner 记为 `agent:agt_A`；轮换为 token B（`agent:agt_B`）�
 4. 人类 principal 的 `id == resource_owner_id`（dataclass 默认自填），行为不变。
 5. 数据库里的归属列（`owner_user_id` / `owner_id` 等）继续存**账号 id**；Agent 的
    合成 id 只出现在审计字段，不进归属列。
+6. APK 分析任务的保留数量上限按 `resource_owner_id` 分别计算；管理员与普通
+   账号使用相同规则，其他账号的任务不占用本账号额度。达到上限时仅轮换本账号
+   最旧的非分析中任务；分析中的任务及其他账号的结果保持不动。
 
 ## 后果
 

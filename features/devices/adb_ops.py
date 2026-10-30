@@ -87,8 +87,8 @@ def _wait_for_adb_online(
     """
     start_time = time.time()
     while time.time() - start_time < wait_timeout:
-        state_output, _state_code = run_adb(device_id, 'get-state', 10)
-        if state_output.strip().lower() == 'device':
+        state_output, state_code = run_adb(device_id, 'get-state', 10)
+        if state_code == 0 and state_output.strip().lower() == 'device':
             return True, round(time.time() - start_time, 1)
         time.sleep(poll_interval)
     return False, round(wait_timeout, 1)
@@ -104,6 +104,8 @@ def reboot_with_runner(
 ) -> RebootResult:
     output, code = run_adb(device_id, 'reboot', 5)
     if code != 0:
+        # A failed probe cannot establish whether reboot was delivered: SSH,
+        # ADB and authorization failures can make both commands fail alike.
         return RebootResult(False, output=output)
     if not wait_for_online:
         return RebootResult(True, output=output)

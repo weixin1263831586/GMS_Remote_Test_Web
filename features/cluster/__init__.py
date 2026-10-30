@@ -8,6 +8,7 @@ from .api import service as get_cluster_service
 from .config import ClusterConfig
 from .execution_spec import build_argv_from_spec
 from .job_control_api import cancel_job
+from .job_requests import request_fingerprint
 from .local_bridge import start_local_bridge, stop_local_bridge
 from .models import ClusterDeviceAction
 from .report_index import index_cluster_report
@@ -93,6 +94,7 @@ __all__ = [
     "index_cluster_report",
     "page_router",
     "register_cluster_port",
+    "request_fingerprint",
     "require_cluster_enabled",
     "require_worker_session",
     "router",

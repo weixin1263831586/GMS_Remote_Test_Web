@@ -437,9 +437,9 @@ class EvidenceStore:
         evidence id is expected; resolving the alias server-side saves a
         wasted round trip (2026-09-24 brief run). Multiple snapshots of the
         same issue can register the same attachment id: the newest row wins.
-        ``snapshot_id`` scopes the lookup to one snapshot — created_at has
-        second resolution, so same-second rows from different snapshots are
-        otherwise ordered by the random artifact id (non-deterministic).
+        ``snapshot_id`` scopes the lookup to one snapshot. Otherwise use the
+        same creation order as latest_snapshot_for_issue(), including ties;
+        late artifact registration in an older snapshot must not win.
         """
         with self._lock, self._connect() as conn:
             if snapshot_id:
@@ -447,7 +447,7 @@ class EvidenceStore:
                     """
                     SELECT * FROM redmine_evidence_artifacts
                     WHERE attachment_id = ? AND snapshot_id = ?
-                    ORDER BY created_at DESC, artifact_id DESC
+                    ORDER BY created_at DESC, rowid DESC
                     LIMIT 1
                     """,
                     (str(attachment_id or ""), str(snapshot_id)),
@@ -455,9 +455,12 @@ class EvidenceStore:
             else:
                 row = conn.execute(
                     """
-                    SELECT * FROM redmine_evidence_artifacts
-                    WHERE attachment_id = ?
-                    ORDER BY created_at DESC, artifact_id DESC
+                    SELECT a.* FROM redmine_evidence_artifacts AS a
+                    JOIN redmine_evidence_snapshots AS s
+                      ON s.snapshot_id = a.snapshot_id
+                    WHERE a.attachment_id = ?
+                    ORDER BY s.created_at DESC, s.rowid DESC,
+                             a.created_at DESC, a.rowid DESC
                     LIMIT 1
                     """,
                     (str(attachment_id or ""),),

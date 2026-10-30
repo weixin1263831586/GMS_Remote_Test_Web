@@ -7,8 +7,46 @@ HTTP 层只负责调用与消息呈现。
 
 from __future__ import annotations
 
+import asyncio
+import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
+
+from .session_registry import finish_run_state, monitor_run_is_current
+
+
+def superseded_plan_result(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Keep any queued job receipt without reviving an obsolete run."""
+    return {
+        "success": False,
+        "error": "该轮运行已取消或被新计划替换；若测试已启动，请在测试界面处理。",
+        "data": (payload or {}).get("data") or {},
+    }
+
+
+async def execute_plan_start(
+    session: dict[str, Any], request: Any, plan: dict[str, Any], monitor_token: str,
+    *, pre_actions: Callable[..., Awaitable[dict[str, Any]]],
+    start_test: Callable[..., Awaitable[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Only the current run may advance after a delayed startup step."""
+    try:
+        result = await pre_actions(session, plan, request)
+        if not monitor_run_is_current(session, monitor_token):
+            return superseded_plan_result()
+        if not result.get("success"):
+            finish_run_state(session, "error")
+            return result
+        result = await start_test(session, request, plan)
+        if not monitor_run_is_current(session, monitor_token):
+            return superseded_plan_result(result)
+        if not result.get("success"):
+            finish_run_state(session, "error")
+        return result
+    except (asyncio.CancelledError, Exception) as exc:
+        if monitor_run_is_current(session, monitor_token):
+            finish_run_state(session, "cancelled" if isinstance(exc, asyncio.CancelledError) else "error")
+        raise
 
 
 async def submit_pending_plan_once(
@@ -30,10 +68,12 @@ async def submit_pending_plan_once(
         return None, "该计划正在提交中，请勿重复确认。"
     if state == "submitted":
         return None, "该计划已提交执行，请勿重复确认；当前运行进度见会话状态。"
+    if not plan.get("operation_id"):
+        plan["operation_id"] = str(uuid.uuid4())
     plan["submit_state"] = "submitting"
     try:
         result = await execute(plan)
-    except Exception:
+    except (asyncio.CancelledError, Exception):
         plan["submit_state"] = "failed"
         raise
     if result.get("success"):

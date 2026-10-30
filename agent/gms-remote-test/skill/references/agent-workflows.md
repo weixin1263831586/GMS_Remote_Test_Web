@@ -192,8 +192,18 @@ For repeated app debugging prefer a finite grant (ADR 0018):
 1. Request `gms_rt_debug_session_request(worker_id=..., device=...,
    package=..., apk_file=...)` after the baseline build finishes. Default
    duration is 60 minutes; request only the typed operations the task needs.
+   `apk_file` is a readable file on the **Agent host**, not a device path.
+   For an already installed app such as Play Store, omit `apk_file` and use
+   `installed=true` with `operations=["launch","tap","swipe","text","keyevent"]`.
+   CLI: `gms-rt-debug-session-request <worker_id> <device> com.android.vending
+   --installed --operations launch,tap,swipe,text,keyevent`. Controller reads
+   and verifies the installed APK over audited SSH; this mode cannot grant
+   installation. Do not pull APKs through a separate raw ADB connection or
+   change ADB server settings to bypass the selected Worker.
 2. Present the returned approval URL once. The human reviews the Agent,
    Worker, serial, package, verified signers, operations and duration.
+   Installed-app sessions also show the observed APK hash; approval rechecks
+   the installed signers before any UI operation is allowed.
 3. Poll `gms_rt_debug_session_status(session_id=...)` until active and not
    busy. Approval starts the first APK installation when install is allowed.
 4. Use `gms_rt_debug_action` for launch/stop/tap/swipe/text/keyevent, and

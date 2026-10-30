@@ -10,7 +10,7 @@ _gms_rt_command_names() {
 _gms_rt_command_usage() {
     case "$1" in
         gms-rt-apk-deploy) printf '%s' 'gms-rt-apk-deploy <worker_id> <device> <apk_file> [--no-replace] [--debug-session ID]' ;;
-        gms-rt-debug-session-request) printf '%s' 'gms-rt-debug-session-request <worker_id> <device> <package> <apk_file> [--minutes N] [--operations install,launch,stop,tap,swipe,text,keyevent]' ;;
+        gms-rt-debug-session-request) printf '%s' 'gms-rt-debug-session-request <worker_id> <device> <package> <apk_file|--installed> [--minutes N] [--operations install,launch,stop,tap,swipe,text,keyevent]' ;;
         gms-rt-debug-session-status|gms-rt-debug-session-revoke) printf '%s' "$1 <session_id>" ;;
         gms-rt-debug-action) printf '%s' 'gms-rt-debug-action <session_id> <action> [--activity CLASS] [--x N] [--y N] [--end-x N] [--end-y N] [--duration-ms N] [--text VALUE] [--key KEY]' ;;
         gms-rt-apk-deployment-status) printf '%s' 'gms-rt-apk-deployment-status <request_id>' ;;

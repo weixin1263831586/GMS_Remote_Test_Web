@@ -15,7 +15,7 @@ from features.assistant.executor import _json_body, executor
 from features.assistant.payloads import display_record as _display_record
 from features.assistant.payloads import jsonable as _jsonable
 from features.assistant.payloads import session_payload as _session_payload
-from features.assistant.plan_submission import submit_pending_plan_once
+from features.assistant.plan_submission import execute_plan_start, submit_pending_plan_once, superseded_plan_result
 from features.assistant.response import (
     WEBAPP_PAGES,
     generate_capability_overview,
@@ -38,10 +38,10 @@ from features.assistant.session_registry import (
     cleanup_sessions as _cleanup_sessions,
 )
 from features.assistant.session_registry import (
-    clear_session_anchor as _clear_session_anchor,
+    expired_session_payload as _expired_session_payload,
 )
 from features.assistant.session_registry import (
-    expired_session_payload as _expired_session_payload,
+    finish_run_state as _finish_run_state,
 )
 from features.assistant.session_registry import (
     get_or_create_session as _get_or_create_session,
@@ -756,6 +756,7 @@ async def _run_failure_analysis_pipeline(
 async def _start_test_with_plan(session: dict[str, Any], request_shim: AgentRequestShim, plan: dict[str, Any], retry_timestamp: str = "") -> dict[str, Any]:
     from features.test_execution import TestStartRequest, start_test
 
+    active_run = session.get("active_run")
     req_data = dict(plan.get("request") or {})
     if retry_timestamp:
         req_data["retry_dir"] = retry_timestamp
@@ -770,6 +771,8 @@ async def _start_test_with_plan(session: dict[str, Any], request_shim: AgentRequ
     req = TestStartRequest(**req_data)
     response = await start_test(request_shim, help=False, req=req)
     payload = _json_body(response)
+    if session.get("active_run") is not active_run:
+        return superseded_plan_result(payload)
     if payload.get("success"):
         correlation = payload.get("data") or {}
         _append_step(
@@ -855,18 +858,6 @@ async def _run_pre_actions(
             _append_step(session, "连接 WiFi 失败", "error", payload.get("error") or payload.get("message", ""), payload)
             return payload
     return {"success": True}
-
-
-def _finish_run_state(session: dict[str, Any], status: str) -> None:
-    """统一收敛一轮运行的终态：状态、运行对象与恢复锚点一起处理。
-
-    终态此前散落在监控循环与执行入口的多处分支，错误分支漏清
-    ``active_run`` 会让 UI 残留已失败的运行计划；调用方仍须先通过
-    ``_monitor_run_is_current`` 判定自己仍是当前轮。
-    """
-    session["status"] = status
-    session["active_run"] = None
-    _clear_session_anchor(session)
 
 
 async def _monitor_agent_run(
@@ -1058,7 +1049,8 @@ async def _monitor_agent_run(
             else:
                 _append_message(session, "assistant", f"测试完成，未检测到失败报告。最近报告：{latest_report_timestamp or '未找到'}")
 
-            _finish_run_state(session, "done")
+            if _monitor_run_is_current(session, monitor_token):
+                _finish_run_state(session, "done")
             return
     except asyncio.CancelledError:
         if _monitor_run_is_current(session, monitor_token):
@@ -1091,12 +1083,14 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
     # 每轮监控的唯一 token：旧任务的取消回调据此识别自己已过期，不再
     # 覆盖新一轮的 active_run / 恢复锚点（外部评审报告项）。
     monitor_token = str(uuid.uuid4())
+    if not plan.get("operation_id"):
+        plan["operation_id"] = str(uuid.uuid4())
     session["status"] = "running"
     session["active_run"] = {
         "plan": plan,
         # 计划的唯一操作 ID：重复确认/重试链路的可追溯键；旧会话中的
         # 计划可能没有该字段，这里补齐兜底。
-        "operation_id": str(plan.get("operation_id") or uuid.uuid4()),
+        "operation_id": plan["operation_id"],
         "started_at": _now_iso(),
         "baseline_report_timestamp": latest_existing_report.get("timestamp") if latest_existing_report else None,
         "worker_id": req.get("worker_id") or _local_worker_id(),
@@ -1105,14 +1099,11 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
     _save_session_anchor(session)
     request_shim = AgentRequestShim(request)
 
-    pre_result = await _run_pre_actions(session, plan, request_shim)
-    if not pre_result.get("success"):
-        _finish_run_state(session, "error")
-        return pre_result
-
-    payload = await _start_test_with_plan(session, request_shim, plan)
+    payload = await execute_plan_start(
+        session, request_shim, plan, monitor_token,
+        pre_actions=_run_pre_actions, start_test=_start_test_with_plan,
+    )
     if not payload.get("success"):
-        _finish_run_state(session, "error")
         return payload
 
     session["status"] = "monitoring"

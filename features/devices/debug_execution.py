@@ -16,6 +16,29 @@ FIELDS = {"launch": {"activity"}, "stop": set(), "tap": {"x", "y"},
 REQUIRED = {"tap": {"x", "y"}, "swipe": {"x", "y", "end_x", "end_y"},
             "text": {"text"}, "keyevent": {"key"}}
 KEYS = frozenset({"BACK", "ENTER", "DEL", "TAB", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT", "DPAD_CENTER"})
+# Complete dumps may contain both focus aliases. Every record must agree;
+# an unparseable system/null window must never be skipped in favor of an app.
+FOCUS_FIELD_RE = re.compile(r"^\s*m(?:CurrentFocus|FocusedWindow)\s*=\s*([^\r\n]*)", re.MULTILINE)
+FOCUS_WINDOW_RE = re.compile(r"Window\{[^\s{}]+\s+u(\d+)\s+([A-Za-z0-9_.]+)/[^{}\r\n]*\}")
+DISPLAY_ID_RE = re.compile(r"\bmDisplayId\s*=\s*(-?\d+)\b|^\s*Display\s+#(-?\d+)\b", re.MULTILINE)
+INPUT_DISPLAY_ID = 0
+
+
+def focused_window(output):
+    """Return one unambiguous main-display focus; otherwise fail closed."""
+    display_ids = {int(match[1] or match[2]) for match in DISPLAY_ID_RE.finditer(output)}
+    if display_ids - {INPUT_DISPLAY_ID}:
+        return None
+    records = FOCUS_FIELD_RE.findall(output)
+    if not records:
+        return None
+    identities = set()
+    for record in records:
+        match = FOCUS_WINDOW_RE.fullmatch(record.strip())
+        if match is None:
+            return None
+        identities.add((int(match[1]), match[2]))
+    return identities.pop() if len(identities) == 1 else None
 
 
 def validate(body):
@@ -60,10 +83,9 @@ def perform(ssh, session, body, check):
     elif body.action == "stop":
         output = shell(["am", "force-stop", "--user", "0", package])
     else:
-        focus = shell(["dumpsys", "window", "windows"])
-        current = re.search(r"mCurrentFocus=Window\{[^\n]*?\bu(\d+)\s+([A-Za-z0-9_.]+)/", focus)
-        if not current or current[1] != "0" or current[2] != package:
-            raise ApiError.conflict("前台窗口不属于获批应用（user 0），请先启动应用或人工处理系统弹窗")
+        focus = shell(["dumpsys", "window"])
+        if focused_window(focus) != (0, package):
+            raise ApiError.conflict("无法确认主显示屏的前台窗口属于获批应用（user 0）；请启动应用、人工关闭系统弹窗，或切回单显示屏后重试")
         if body.action == "tap":
             argv = ["input", "tap", str(body.x), str(body.y)]
         elif body.action == "swipe":
@@ -73,5 +95,5 @@ def perform(ssh, session, body, check):
             argv = ["input", "text", body.text.replace(" ", "%s")]
         else:
             argv = ["input", "keyevent", "KEYCODE_" + body.key]
-        output = shell(argv)
+        output = shell(["input", "-d", str(INPUT_DISPLAY_ID), *argv[1:]])
     return {"action": body.action, "package": package, "output": output[:1500]}

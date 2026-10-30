@@ -35,6 +35,15 @@ def store():
         return _stores[root]
 
 
+def _reject_duplicate_session(payload):
+    current = store().active_for_target(
+        payload["owner_id"], payload["worker_id"], payload["serial"], payload["package"])
+    if current:
+        raise ApiError.conflict(
+            f"该设备/应用已存在{('审批中' if current['status'] == 'approving' else '有效')}的调试会话 "
+            f"{current['id']}，请先撤销（gms-rt-debug-session-revoke {current['id']}）或等待到期后再申请")
+
+
 def check_identity(session):
     record = deployment.auth_service.active_agent_metadata(session["actor_id"])
     if not record or record["owner_user_id"] != session["owner_id"]:
@@ -57,10 +66,37 @@ def read(request, session_id, permission="devices.read"):
     return session
 
 
-async def prepare(request, worker_id, device, package, minutes, operations, upload):
+async def prepare(request, worker_id, device, package, minutes, operations, upload, *, installed=False):
     user = deployment.authorize(request, "devices.use_leased")
     if getattr(request.state, "auth_method", "") != "agent_token" or not user.actor_id.startswith("agent:"):
         raise ApiError.forbidden("请由需要调试的 Agent 身份申请会话，再由用户批准")
+    if installed:
+        if upload is not None or "install" in operations:
+            raise ApiError.invalid_semantics("已安装应用调试不能上传 APK 或申请 install；安装调试请使用本地 APK")
+        _, serial, _ = deployment.target(request, worker_id, device, "devices.use_leased")
+        payload = {"id": uuid.uuid4().hex, "owner_id": user.resource_owner_id, "actor_id": user.actor_id,
+                   "worker_id": worker_id, "serial": serial, "package": package}
+        check_identity(payload)
+
+        def observe():
+            def check():
+                check_identity(payload)
+                deployment.target(request, worker_id, serial, "devices.use_leased")
+
+            with deployment.connection(worker_id) as ssh:
+                return debug_identity.installed_identity(ssh, serial, package, check)
+
+        identity = await asyncio.to_thread(observe)
+        if identity is None:
+            raise ApiError.not_found("指定应用未在设备用户 0 中安装")
+        payload.update({**identity, "baseline_source": "installed", "baseline_deployment_id": "",
+                        "baseline_sha256": identity["sha256"], "duration_minutes": minutes,
+                        "operations": sorted(operations), "created_at": time.time(), "expires_at": time.time() + 300})
+        check_identity(payload)
+        _reject_duplicate_session(payload)
+        return store().create(payload)
+    if upload is None:
+        raise ApiError.invalid_semantics("请上传 Agent 本机可读的 APK，或使用 installed=true 调试已安装应用")
     item = await deployment.prepare(request, worker_id, device, True, upload)
     directory = deployment.store().root / item["id"]
     try:
@@ -73,6 +109,7 @@ async def prepare(request, worker_id, device, package, minutes, operations, uplo
                    "baseline_deployment_id": item["id"], "baseline_sha256": item["sha256"],
                    "created_at": time.time(), "expires_at": time.time() + 300}
         check_identity(payload)
+        _reject_duplicate_session(payload)
         return store().create(payload)
     except Exception:
         deployment.store().discard_before_execution(item["id"], user.resource_owner_id)
@@ -87,8 +124,13 @@ def approve(request, session_id):
     session = read(request, session_id, "devices.use_leased")
     check_identity(session)
     deployment.target(request, session["worker_id"], session["serial"], "devices.use_leased")
-    baseline = deployment.store().get(session["baseline_deployment_id"], session["owner_id"])
-    check_apk(session, baseline)
+    baseline = None
+    if session.get("baseline_source") == "installed":
+        if "install" in session["operations"]:
+            raise ApiError.forbidden("已安装应用会话不允许安装 APK")
+    else:
+        baseline = deployment.store().get(session["baseline_deployment_id"], session["owner_id"])
+        check_apk(session, baseline)
     repository = get_cluster_service().repository
     config = deployment.ssh_config(session["worker_id"])
     grants = store()
@@ -121,7 +163,11 @@ def approve(request, session_id):
         if source:
             repository.claims.release(source)
         grants.reset_approval(session_id, session["owner_id"])
-        raise ApiError.conflict(str(exc)) from exc
+        message = str(exc)
+        if "already claimed" in message:
+            message = ("设备正被同一账号的另一条有效调试会话占用，请先在页面上撤销旧会话"
+                       "（或让申请该会话的 Agent 执行 gms-rt-debug-session-revoke），再批准新会话")
+        raise ApiError.conflict(message) from exc
     except Exception:
         if source:
             repository.claims.release(source)
@@ -209,6 +255,8 @@ def start_install(session, payload, config):
 
 async def prepare_install(request, session_id, worker_id, device, replace_existing, upload):
     session = read(request, session_id, "devices.use_leased")
+    if "install" not in session["operations"]:
+        raise ApiError.forbidden("该调试会话未授权安装 APK")
     user, serial, _ = deployment.target(request, worker_id, device, "devices.use_leased")
     if user.actor_id != session["actor_id"]:
         raise ApiError.forbidden("请由申请该会话的 Agent 上传调试 APK")

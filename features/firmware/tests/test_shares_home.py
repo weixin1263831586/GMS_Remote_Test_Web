@@ -340,6 +340,61 @@ class FirmwareShareHomeTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(payload["data"]["path"], "/C:/Users/hcq")
 
+    def test_browse_defaults_never_use_client_return_host_or_username(self):
+        base = {
+            "local_server": "windows-user@192.0.2.66",
+            "ubuntu_host": "192.0.2.233", "ubuntu_user": "worker-user",
+        }
+        cases = [
+            ({}, {}, ("192.0.2.233", "worker-user", "")),
+            ({"firmware_shares": {"default_host": "build-user@192.0.2.206", "default_path": "/home/build"}},
+             {}, ("192.0.2.206", "build-user", "/home/build")),
+            ({"firmware_shares": {
+                "default_remote": "remote-user@192.0.2.207:/home/remote",
+                "default_host": "other-user@192.0.2.208", "default_user": "other-user", "default_path": "/home/other",
+            }}, {}, ("192.0.2.207", "remote-user", "/home/remote")),
+            ({"firmware_shares": {
+                "default_remote": "192.0.2.207:/home/remote", "default_host": "other-user@192.0.2.208",
+            }}, {}, ("192.0.2.207", "worker-user", "/home/remote")),
+            ({}, {"host": "192.0.2.209", "user": "chosen-user", "path": "/home/chosen"},
+             ("192.0.2.209", "chosen-user", "/home/chosen")),
+            ({}, {"remote": "chosen-user@192.0.2.209:/home/chosen"},
+             ("192.0.2.209", "chosen-user", "/home/chosen")),
+        ]
+        for overrides, body, expected in cases:
+            with self.subTest(expected=expected):
+                config = {**base, **overrides}
+
+                class FakeRequest:
+                    async def json(self, response_body=body):
+                        return response_body
+
+                with patch.object(runtime, "config_manager", SimpleNamespace(load_config=lambda config=config: config)), patch(
+                    "features.firmware.shares_api._list_remote_dir", return_value={"files": []},
+                ) as listing:
+                    response = asyncio.run(shares_api.browse_firmware_share_remote(FakeRequest()))
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(listing.call_args.args[:3], expected)
+
+    def test_client_return_address_alone_does_not_authorize_a_default_host(self):
+        class FakeRequest:
+            async def json(self):
+                return {}
+
+        with patch.object(runtime, "config_manager", SimpleNamespace(load_config=lambda: {
+            "local_server": "windows-user@192.0.2.66", "ubuntu_user": "worker-user",
+        })), patch("features.firmware.shares_api._list_remote_dir") as listing:
+            response = asyncio.run(shares_api.browse_firmware_share_remote(FakeRequest()))
+        self.assertEqual(response.status_code, 400)
+        listing.assert_not_called()
+
+    def test_default_credentials_do_not_reuse_the_browser_clients_username(self):
+        with patch.object(runtime, "config_manager", SimpleNamespace()):
+            creds = shares_api._host_credentials("192.0.2.233", None, {
+                "local_server": "windows-user@192.0.2.66", "ubuntu_user": "worker-user",
+            })
+        self.assertEqual(creds["username"], "worker-user")
+
 
 if __name__ == "__main__":
     unittest.main()

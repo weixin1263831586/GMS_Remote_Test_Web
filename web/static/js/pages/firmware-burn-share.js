@@ -11,8 +11,7 @@ function firmwareShareSetValidation(message, type = 'info') {
     el.textContent = message || '';
 }
 
-function firmwareShareDefaults() {
-    const config = state.config || {};
+function firmwareShareDefaults(config = state.config || {}) {
     const share = config.firmware_shares || {};
     const configuredRemote = String(share.default_remote || '').trim();
     const match = configuredRemote.match(/^(?:([^@:/]+)@)?([^:]+):(\/.*)$/);
@@ -20,7 +19,8 @@ function firmwareShareDefaults() {
         const user = match[1] || share.default_user || config.ubuntu_user || '';
         return {user, host: match[2], path: match[3], remote: configuredRemote};
     }
-    const connection = String(share.default_host || config.local_server || '').trim();
+    // local_server is the browser client's return address, not a firmware host.
+    const connection = String(share.default_host || config.ubuntu_host || '').trim();
     const at = connection.lastIndexOf('@');
     const user = String(
         share.default_user
@@ -50,9 +50,17 @@ function shareFirmware() {
 }
 
 async function browseRemoteFileForFirmwareShare() {
-    const defaults = firmwareShareDefaults();
+    let defaults;
+    try {
+        // The shell's /api/config/client payload intentionally omits server
+        // topology. Resolve it only for this explicit, privileged browse action.
+        defaults = firmwareShareDefaults(await firmwareShareApi('/api/config/read'));
+    } catch (error) {
+        showToast(`读取共享固件主机配置失败：${error.message}`, 'error');
+        return;
+    }
     if (!defaults.host || !defaults.user) {
-        showToast('请在 config.json 的 firmware_shares 或 local_server 中配置共享固件主机', 'warning');
+        showToast('请先配置共享固件主机或测试主机的地址和登录用户', 'warning');
         return;
     }
     state.fileBrowser.mode = 'firmware-share';

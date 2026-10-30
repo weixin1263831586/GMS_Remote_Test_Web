@@ -14,7 +14,7 @@ class DebugReviewBrowserTests(RuntimeUiHarness):
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         path = "/api/devices/debug-sessions/" + "a" * 32
-        state = {"status": "pending"}
+        state = {"status": "pending", "baseline_source": "upload"}
         mutations = []
         page.on("request", lambda request: mutations.append(request.url) if request.method == "POST" else None)
         with patch("features.devices.debug_api.service.read"):
@@ -34,19 +34,24 @@ class DebugReviewBrowserTests(RuntimeUiHarness):
             payload = {"success": True, "session": {
                 "actor_id": '<script>window.injected=true</script>', "worker_id": "worker", "serial": "SERIAL",
                 "package": "com.example.app", "signers": ["a" * 64], "baseline_sha256": "b" * 64,
-                "operations": ["install", "launch", "tap"], "duration_minutes": 60,
+                "baseline_source": state["baseline_source"],
+                "operations": ["launch", "tap"] if state["baseline_source"] == "installed" else ["install", "launch", "tap"],
+                "duration_minutes": 60,
                 "expires_at": time.time() + 3600, "status": state["status"], "busy": "",
             }, "operations": []}
             route.fulfill(content_type="application/json", body=json.dumps(payload))
 
         page.route("**" + path + "**", handle)
         try:
-            for _ in range(2):
+            for source in ("upload", "installed"):
+                state["baseline_source"] = source
                 page.goto(self.base_url + path + "/review")
                 page.wait_for_function("!document.getElementById('approve').disabled")
                 self.assertEqual(mutations, [])
                 self.assertEqual(page.locator("#details script").count(), 0)
                 self.assertFalse(page.evaluate("Boolean(window.injected)"))
+                expected = '已安装 APK SHA256' if source == 'installed' else '首次 APK SHA256'
+                self.assertIn(expected, page.locator("#details").inner_text())
                 page.goto("about:blank")
             page.goto(self.base_url + path + "/review")
             page.wait_for_function("!document.getElementById('approve').disabled")

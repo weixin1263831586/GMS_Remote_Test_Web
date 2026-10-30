@@ -183,7 +183,9 @@ _resolve_ssh_host() {
     done
 
     if [ "$host" = "$(_server_host_from_url "$SERVER_URL")" ] && command -v jq &> /dev/null; then
-        local api_config=$(api_call "/config/read" 2>/dev/null)
+        # Configuration discovery is optional: its permission/network failure
+        # must not override the exit status of the actual device command.
+        local api_config=$(GMS_RT_STATUS_FILE='' api_call "/config/read" 2>/dev/null)
         if [ -n "$api_config" ]; then
             local api_host=$(echo "$api_config" | jq -r '.ubuntu_host // empty' 2>/dev/null)
             local api_user=$(echo "$api_config" | jq -r '.ubuntu_user // empty' 2>/dev/null)

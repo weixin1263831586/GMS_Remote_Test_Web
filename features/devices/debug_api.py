@@ -44,14 +44,18 @@ async def prepare_session(
     request: Request, worker_id: str = Form(..., min_length=1, max_length=128),
     device: str = Form(..., min_length=1, max_length=256), package: str = Form(..., pattern=PACKAGE, max_length=255),
     duration_minutes: int = Form(default=60, ge=15, le=120),
-    operations: str = Form(default="install,launch,stop,tap,swipe,text,keyevent", max_length=100),
-    apk_file: UploadFile = File(...),
+    operations: str | None = Form(default=None, max_length=100),
+    apk_file: UploadFile | None = File(default=None), installed: bool = Form(default=False),
 ):
-    """Request a grant bound to the calling Agent and a verified baseline APK."""
+    """Bind a grant to an uploaded APK or the verified installed app."""
+    defaults = "launch,stop,tap,swipe,text,keyevent"
+    if operations is None:
+        operations = defaults if installed else "install," + defaults
     allowed = set(operations.split(","))
     if not allowed or not allowed <= service.OPERATIONS:
         raise ApiError.invalid_semantics("调试操作列表包含不支持的操作")
-    session = await service.prepare(request, worker_id, device, package, duration_minutes, allowed, apk_file)
+    session = await service.prepare(request, worker_id, device, package, duration_minutes, allowed, apk_file,
+                                    installed=installed)
     return {"success": True, "session": describe(request, session)}
 
 

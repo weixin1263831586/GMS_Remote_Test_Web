@@ -62,7 +62,7 @@ JADX_PATH = os.path.join(PROJECT_ROOT, 'tools', 'jadx', 'bin', 'jadx')
 APK_UPLOAD_DIR = os.path.join(str(settings.data_root), 'apk_uploads')
 APK_MAX_FILE_SIZE = 500 * 1024 * 1024
 APK_MAX_SOURCE_FILE_SIZE = 2 * 1024 * 1024
-APK_MAX_TASKS = 50
+APK_MAX_TASKS = 50  # Retained APK analysis tasks per resource-owner account.
 JADX_TIMEOUT = 600
 # 固件/工具 SCP 传输的单调时钟 deadline（秒）：卡死的传输按 504 收口，
 # 不得永挂。可用 GMS_FIRMWARE_TRANSFER_TIMEOUT 按网络情况调整。
