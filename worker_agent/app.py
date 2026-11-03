@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import getpass
 import hashlib
+import importlib.util
 import ipaddress
 import json
 import logging
@@ -19,6 +20,7 @@ from pathlib import Path
 from urllib.parse import quote, urlencode
 
 from foundation.network_quality import probe_tcp_quality
+from foundation.tradefed_progress import parse_progress_line
 from foundation.transport_contract import TransportOperationError
 
 from .adb_proxy import (
@@ -214,7 +216,17 @@ class WorkerAgent:
         adb_proxy = adb_proxy_capability_status()
         process_inventory = process_inventory_capability_status()
         tradefed_families = tradefed_launcher_families(self.config.suite_roots)
-        capabilities = {"adb": shutil.which("adb") is not None,
+        try:
+            has_pyusb = importlib.util.find_spec("usb.core") is not None
+        except ModuleNotFoundError:
+            has_pyusb = False
+        has_adb = shutil.which("adb") is not None
+        capabilities = {"execution_options_v1": True,
+                        "module_progress_v1": True,
+                        "suite_cache_sha256_v1": True,
+                        "aoa_record_input_v1": has_adb,
+                        "aoa_usb_hid_v1": has_pyusb,
+                        "adb": has_adb,
                         "fastboot": shutil.which("fastboot") is not None,
                         "tradefed": bool(tradefed_families),
                         "cts": "cts" in tradefed_families,
@@ -246,6 +258,8 @@ class WorkerAgent:
                 "vts": False,
                 "sts": False,
                 "device_inspection": False,
+                "aoa_record_input_v1": False,
+                "aoa_usb_hid_v1": False,
                 "usbip_client": False,
                 "usbip_preflight": False,
                 "aapt2": False,
@@ -549,6 +563,13 @@ class WorkerAgent:
             self._ack_command(command["id"], "completed", result)
         except Exception as exc:
             logger.exception("command %s failed", command.get("id"))
+            if command.get('command_type') == 'start_test' and (command.get('payload', {}).get('execution_spec') or {}).get('preparations'):
+                try:
+                    events = self.runtime.preparation_failure_events(command)
+                    if events:
+                        self.client.events(command['job_id'], command['attempt_id'], events)
+                except Exception:
+                    logger.debug('Preparation failure telemetry could not be uploaded', exc_info=True)
             self.runtime.save_command(command["id"], "failed", error=str(exc))
             if release_after_command:
                 self.runtime.release_fencing(command)
@@ -1216,6 +1237,7 @@ class WorkerAgent:
                 text = handle.read(int(os.getenv("GMS_WORKER_LOG_BATCH_CHARS", str(256 * 1024))))
                 new_offsets[log_name] = handle.tell()
             for line in text.splitlines():
+                progress = parse_progress_line(line)
                 events.append({"sequence": sequence, "event_type": "log",
                                "source": log_name.removesuffix(".log"),
                                "level": "error" if log_name == "stderr.log" else "info",
@@ -1229,6 +1251,9 @@ class WorkerAgent:
                                    ),
                                    "worker_id": self.config.worker_id,
                                }})
+                if progress:
+                    events[-1]['event_type'] = 'module_progress'
+                    events[-1]['payload']['progress'] = progress
                 sequence += 1
         if events:
             self.client.events(row["job_id"], row["attempt_id"], events)

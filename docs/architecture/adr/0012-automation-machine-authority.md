@@ -1,6 +1,7 @@
 # 0012. 后台编排机器授权与 ATS 执行链身份
 
 - 状态: 已接受
+- 补充：人类预授权的定时计划与有界重试派生见 [ADR 0020](0020-scheduled-test-plans-and-bounded-retries.md)；其他执行权限边界继续生效。
 - 日期: 2026-09-17
 - 相关: ADR 0006（Agent Service 边界）、ADR 0010（Actor/ResourceOwner 身份）
 

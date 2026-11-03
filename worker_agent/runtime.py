@@ -547,6 +547,14 @@ class WorkerRuntime:
         )
         work_dir = self.config.data_root / "jobs" / job_segment / attempt_segment
         work_dir.mkdir(parents=True, exist_ok=True)
+        if isinstance(spec, dict) and spec.get('preparations'):
+            from .test_preparation import prepare_test_devices
+
+            bound = [str(item).removeprefix(self.config.worker_id + ':') for item in payload.get('devices') or []]
+            if not spec.get('test_type') or bound != spec.get('devices'):
+                raise ValueError('Preparation devices must match the fenced job devices')
+            with (work_dir / 'stdout.log').open('a', encoding='utf-8') as preparation_log:
+                prepare_test_devices(spec, preparation_log)
         env = os.environ.copy()
         # 与 Controller 共用白名单再过滤一次。正常流量已在入队前
         # 校验，这里防御伪造/回放的 command payload——BASH_ENV 等键一旦
@@ -602,6 +610,25 @@ class WorkerRuntime:
                 self._processes.pop(worker_job_id, None)
             raise
         return {"worker_job_id": worker_job_id, "pid": process.pid, "work_dir": str(work_dir)}
+
+    def preparation_failure_events(self, command: dict) -> list[dict]:
+        from foundation.tradefed_progress import parse_progress_line
+
+        job_id = _validated_job_path_segment(command.get('job_id') or command['id'], 'job_id')
+        attempt = _validated_job_path_segment(command.get('attempt_id') or '1', 'attempt_id')
+        path = self.config.data_root / 'jobs' / job_id / attempt / 'stdout.log'
+        if not path.is_file():
+            return []
+        events = []
+        with path.open(encoding='utf-8', errors='replace') as handle:
+            for line in handle:
+                progress = parse_progress_line(line)
+                if progress and progress.get('kind') == 'preparation':
+                    events.append({'sequence': len(events), 'event_type': 'module_progress', 'source': 'preparation',
+                                   'message': line[:4096], 'payload': {'progress': progress}})
+                if len(events) >= 200:
+                    break
+        return events
 
     def stop_process(self, worker_job_id: str) -> dict[str, Any]:
         with self.connect() as conn:

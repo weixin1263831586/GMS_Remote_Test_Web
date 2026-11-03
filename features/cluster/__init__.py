@@ -1,5 +1,6 @@
 """Multi-host test cluster controller."""
 
+
 from foundation import cluster_port
 
 from .admission import worker_admission_state
@@ -16,6 +17,12 @@ from .repository import ClusterRepository
 from .service import ClusterService
 from .state_machine import ACTIVE_CLUSTER_JOB_STATUSES
 from .worker_auth import authenticate_worker, worker_tokens
+
+
+def run_artifact_retention():
+    from .artifact_retention import run_enabled_retention
+
+    return run_enabled_retention(get_cluster_service().repository)
 
 
 async def run_worker_command(*args, **kwargs):
@@ -57,6 +64,10 @@ def _port_authenticate_worker(*args, **kwargs):
     return authenticate_worker(*args, **kwargs)
 
 
+async def _port_device_action_request(request, payload):
+    return await device_action(ClusterDeviceAction(**payload), request)
+
+
 # Register this feature with the foundation access port so consumers that
 # must not import cluster (devices / reports / system / test_execution /
 # users) share one seam. The wrappers resolve names per call, honoring test
@@ -69,6 +80,7 @@ def register_cluster_port() -> None:
     consumers keep their documented single-host fallback.
     """
     cluster_port.configure_cluster_access(
+        device_action_request=_port_device_action_request,
         service_provider=_port_cluster_service,
         cancel_job=_port_cancel_job,
         worker_tokens=_port_worker_tokens,
@@ -98,6 +110,7 @@ __all__ = [
     "require_cluster_enabled",
     "require_worker_session",
     "router",
+    "run_artifact_retention",
     "run_worker_command",
     "start_local_bridge",
     "stop_local_bridge",

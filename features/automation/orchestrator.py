@@ -14,6 +14,8 @@ from features.automation.executors import AutomationExecutor
 from features.automation.models import (
     RUN_STATUS_ANALYSIS_FAILED,
     RUN_STATUS_ANALYZING,
+    RUN_STATUS_AOA_FAILED,
+    RUN_STATUS_AOA_RECOVERING,
     RUN_STATUS_ARTIFACT_MISSING,
     RUN_STATUS_ARTIFACT_READY,
     RUN_STATUS_CANCELLED,
@@ -38,6 +40,7 @@ from features.automation.models import (
     utc_now_iso,
 )
 from features.automation.repository import AutomationStore
+from features.automation.run_history import report_snapshot
 
 
 logger = logging.getLogger(__name__)
@@ -207,7 +210,40 @@ class AutomationOrchestrator:
                 **flash_updates,
             )
         if status == RUN_STATUS_FLASH_VERIFIED:
+            # AOA 恢复（ADR 0022）：plan.aoa.mode 配置为 user_build_recovery 时，
+            # 烧写完成后先模拟 UI 打开 USB 调试再进入测试。开关判定与命令
+            # 解析都在 executor.aoa_recover 内，orchestrator 只管状态迁移；
+            # 自定义执行器未实现 AOA 钩子时按未启用处理（与 release_resources
+            # 等可选钩子同款容错）。
+            aoa_enabled = getattr(self.executor, "aoa_enabled", None)
+            if callable(aoa_enabled) and aoa_enabled(run):
+                return self._transition(
+                    run, RUN_STATUS_AOA_RECOVERING, "Starting AOA recovery")
             return self._transition(run, RUN_STATUS_TESTING, "Starting GMS test")
+        if status == RUN_STATUS_AOA_RECOVERING:
+            result = self.executor.aoa_recover(run)
+            if not result.get("success"):
+                return self._fail(run, RUN_STATUS_AOA_FAILED,
+                                  result.get("error", "AOA recovery failed"), result)
+            if result.get("running"):
+                return self._stay(run, "AOA recovery is still running", result,
+                                  aoa_command_id=result.get("command_id",
+                                                            run.get("aoa_command_id", "")))
+            # 命令执行成功 ≠ 恢复成功：adb_state 存在且不是 device
+            # （offline/unauthorized/no devices 等）说明 USB 调试没回来，
+            # 直接判失败，不带病进入测试。
+            aoa_result = result.get("aoa_result") or {}
+            adb_state = str(aoa_result.get("adb_state") or "")
+            if adb_state and adb_state != "device":
+                return self._fail(run, RUN_STATUS_AOA_FAILED,
+                                  f"ADB did not come back after AOA recovery: "
+                                  f"{adb_state}", result)
+            # 直接进入测试：回 flash_verified 会被 aoa_enabled 再次拉回
+            # AOA 阶段（死循环）；烧写校验已在进入 AOA 前完成。
+            return self._transition(
+                run, RUN_STATUS_TESTING, "AOA recovery completed, starting GMS test", result,
+                aoa_command_id=result.get("command_id", run.get("aoa_command_id", "")),
+            )
         if status == RUN_STATUS_TESTING:
             result = self.executor.start_test(run)
             if not result.get("success"):
@@ -245,6 +281,7 @@ class AutomationOrchestrator:
                 result,
                 report_timestamp=result.get("report_timestamp", ""),
                 report_id=result.get("report_id", run.get("report_id", "")),
+                test_summary_json=self._report_snapshot(run, result.get('report') or {}, collected=True),
             )
         if status == RUN_STATUS_ANALYZING:
             result = self.executor.analyze_report(run)
@@ -261,6 +298,7 @@ class AutomationOrchestrator:
                 "Report analysis completed",
                 result,
                 result_json=self._merged_result_json(run, {"analysis": result}),
+                test_summary_json=self._report_snapshot(run, result),
             )
         if status == RUN_STATUS_REPORTING:
             result = self.executor.report_result(run)
@@ -317,6 +355,22 @@ class AutomationOrchestrator:
             )
         finally:
             self.store.release_claim(run_id, self.claim_owner)
+
+    @staticmethod
+    def _report_snapshot(run: dict[str, Any], payload: dict[str, Any], *, collected: bool = False) -> str:
+        try:
+            summary = json.loads(run.get('test_summary_json') or '{}')
+        except (ValueError, TypeError):
+            summary = {}
+        if not isinstance(summary, dict):
+            summary = {}
+        summary.update(report_snapshot(payload))
+        if collected:
+            folder = payload.get('source_timestamp')
+            if isinstance(folder, str):
+                summary['retry_dir'] = folder
+            summary['retry_worker_id'] = str(payload.get('worker_id') or '')
+        return json.dumps(summary, ensure_ascii=False, separators=(',', ':'))
 
     @staticmethod
     def _merged_result_json(run: dict[str, Any], addition: dict[str, Any]) -> str:

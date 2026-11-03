@@ -34,6 +34,7 @@ _run_worker_command: LateBoundCallable | None = None
 _require_worker_session: LateBoundCallable | None = None
 _require_cluster_enabled: LateBoundCallable | None = None
 _authenticate_worker: LateBoundCallable | None = None
+_device_action_request: LateBoundCallable | None = None
 
 
 def configure_cluster_access(
@@ -45,6 +46,7 @@ def configure_cluster_access(
     require_worker_session: LateBoundCallable | None = _UNSET,
     require_cluster_enabled: LateBoundCallable | None = _UNSET,
     authenticate_worker: LateBoundCallable | None = _UNSET,
+    device_action_request: LateBoundCallable | None = _UNSET,
 ) -> None:
     """Register or clear the cluster access callables.
 
@@ -55,6 +57,7 @@ def configure_cluster_access(
     global _cluster_service_provider, _cancel_job, _worker_tokens
     global _run_worker_command, _require_worker_session
     global _require_cluster_enabled, _authenticate_worker
+    global _device_action_request
     if service_provider is not _UNSET:
         _cluster_service_provider = service_provider
     if cancel_job is not _UNSET:
@@ -69,6 +72,15 @@ def configure_cluster_access(
         _require_cluster_enabled = require_cluster_enabled
     if authenticate_worker is not _UNSET:
         _authenticate_worker = authenticate_worker
+    if device_action_request is not _UNSET:
+        _device_action_request = device_action_request
+
+
+def submit_device_action(request: Any, payload: dict) -> Any:
+    """Submit through the configured device ownership and execution boundary."""
+    if _device_action_request is None:
+        raise RuntimeError('cluster device actions are not configured')
+    return _device_action_request(request, payload)
 
 
 def get_cluster_service() -> Any:

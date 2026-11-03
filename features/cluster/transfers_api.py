@@ -14,6 +14,11 @@ from features.auth import (
     require_human_principal,
     require_resource_owner,
 )
+from features.reports import (
+    can_access_report,
+    test_report_db,
+    tradefed_result_folder_name,
+)
 from foundation.error_model import ApiError
 
 from .api import _authenticate, _require_cluster_enabled, service
@@ -36,6 +41,53 @@ def _firmware_root() -> Path:
 
 def _report_copy_local_root() -> Path:
     return service().repository.db_path.parent / "report-copy-local"
+
+
+def _require_report_copy_access(
+    request: Request,
+    source_worker_id: str,
+    source_suite_path: str,
+    report_name: str,
+) -> None:
+    """校验报告复制请求的来源报告归属（features/reports/access.py 同一边界）。
+
+    普通账号只能复制自己名下报告：平台报告按 ADR 0010 以 account
+    ``owner_id`` 分区（列表/下载/删除均如此），复制入口此前仅校验登录与
+    套件存在性，多账号共享同一 Worker 套件目录时可能凭已知目录名读走
+    他人报告。这里按 ``worker + suite_path + 报告目录名`` 在报告索引内做
+    归属匹配——report_name 是秒级 Tradefed 时间戳，不同 Worker 同套件
+    同秒运行会产生同名目录，必须绑定来源 Worker 才能排除借用他机索引
+    记录过闸的边界。未收录的报告 fail-closed 拒绝（经 report-copy 导入的
+    报告目前不会回写索引，需重新索引后才可再导出；遗留索引行缺
+    worker_id 时同样拒绝，重新索引即恢复）。admin 不受限。
+    """
+    principal = require_human_principal(request)
+
+    suite_root = str(source_suite_path or "").replace("\\", "/").rstrip("/")
+    if suite_root.endswith("/tools"):
+        suite_root = suite_root[: -len("/tools")]
+    reports = test_report_db.get_reports(
+        limit=500,
+        owner_id=None if principal.role == "admin" else principal.resource_owner_id,
+        include_all=principal.role == "admin",
+        worker_id=source_worker_id,
+    )
+    for report in reports:
+        if not can_access_report(request, report):
+            continue
+        report_suite = str(report.get("suite_path") or "").replace("\\", "/").rstrip("/")
+        if report_suite.endswith("/tools"):
+            report_suite = report_suite[: -len("/tools")]
+        if report_suite != suite_root:
+            continue
+        if report_name in {
+            str(report.get("report_name") or ""),
+            tradefed_result_folder_name(
+                report.get("source_timestamp"), report.get("timestamp")
+            ),
+        }:
+            return
+    raise ApiError.not_found("来源报告不存在或无权访问")
 
 
 def _online_worker(worker_id: str) -> dict:
@@ -249,6 +301,12 @@ async def create_report_copy(
         _online_worker(body.target_worker_id)
     _known_suite(body.source_worker_id, body.source_suite_path)
     _known_suite(body.target_worker_id, body.target_suite_path)
+    # 报告归属边界（features/reports/access.py 同一规则）：来源报告必须
+    # 属于当前账号（admin 不受限），防止多账号共享 Worker 套件目录时
+    # 凭已知目录名读走他人报告。
+    _require_report_copy_access(
+        request, body.source_worker_id, body.source_suite_path, body.report_name,
+    )
 
     owner_id = principal_owner_id(request)
     metadata = {
@@ -312,29 +370,45 @@ async def import_report_copy(transfer_id: str, request: Request):
         raise HTTPException(409, transfer.get("error") or "report export is not complete")
 
     metadata = transfer.get("metadata") or {}
-    target_worker_id = str(metadata.get("target_worker_id") or "")
-    target_suite_path = str(metadata.get("target_suite_path") or "")
-    _known_suite(target_worker_id, target_suite_path)
-    local_worker_id = service().config.local_worker_id
-
-    existing_command_id = str(metadata.get("target_command_id") or "")
-    if existing_command_id:
-        command = service().repository.get_command(existing_command_id)
-        if command:
-            return {
-                "success": True,
-                "copy_id": transfer_id,
-                "status": command.get("status", "accepted"),
-                "command_id": existing_command_id,
-                "result": command.get("result") or {},
-                "deduplicated": True,
-            }
+    # 已完成导入的幂等回显优先于归属检查：报告在导出后被删除/重新索引
+    # 时，Transfer 属主仍可查询既成事实的导入结果（跨账号已被
+    # _require_transfer_access 挡在 404）。
     if metadata.get("import_status") == "completed":
         return {
             "success": True,
             "copy_id": transfer_id,
             "status": "completed",
             "result": metadata.get("import_result") or {},
+            "deduplicated": True,
+        }
+    target_worker_id = str(metadata.get("target_worker_id") or "")
+    target_suite_path = str(metadata.get("target_suite_path") or "")
+    _known_suite(target_worker_id, target_suite_path)
+    # 导入侧同样校验来源报告归属： Transfer 元数据可被同账号继续使用，
+    # 但换账号（或篡改请求头）重新触发导入时必须重新过归属检查。
+    _require_report_copy_access(
+        request,
+        str(metadata.get("source_worker_id") or ""),
+        str(metadata.get("source_suite_path") or ""),
+        str(metadata.get("report_name") or ""),
+    )
+    local_worker_id = service().config.local_worker_id
+
+    existing_command_id = str(metadata.get("target_command_id") or "")
+    existing_command = (
+        service().repository.get_command(existing_command_id)
+        if existing_command_id
+        else None
+    )
+    if existing_command and existing_command.get("status") not in {"failed", "cancelled"}:
+        # 在途或其它终态命令：幂等透传当前状态（数据库命令是权威状态源），
+        # 防止并发请求重复派发；failed/cancelled 允许走下面的重试新 attempt。
+        return {
+            "success": True,
+            "copy_id": transfer_id,
+            "status": existing_command.get("status", "accepted"),
+            "command_id": existing_command_id,
+            "result": existing_command.get("result") or {},
             "deduplicated": True,
         }
 
@@ -363,9 +437,21 @@ async def import_report_copy(transfer_id: str, request: Request):
 
     _online_worker(target_worker_id)
     owner_id = str(transfer.get("owner_id") or "")
+    # 同一 Transfer 的远端导入在数据库层按 operation_id 原子去重
+    # （repository_commands.create_command：BEGIN IMMEDIATE 内查重并返回既有
+    # 命令）：并发请求与“命令已建、Transfer 元数据未更新”的崩溃窗口都
+    # 收敛到同一条 report_import 命令，消除重复派发。
+    operation_id = f"report-import:{transfer_id}"
+    if existing_command:
+        # 上一条命令已 failed 的重试：Worker 端 import_suite_report 以
+        # “staging 提取 + 末尾单次 rename 发布”保证失败不残留目标目录，
+        # 重试不破坏无覆盖语义；operation_id 追加上条命令 id，使并发重试
+        # 也收敛到同一条新命令。
+        operation_id = f"{operation_id}:{existing_command_id}"
     command = service().repository.create_command({
         "worker_id": target_worker_id,
         "command_type": "report_import",
+        "operation_id": operation_id,
         "payload": {
             "transfer_id": transfer_id,
             "target_suite_path": target_suite_path,
@@ -375,6 +461,16 @@ async def import_report_copy(transfer_id: str, request: Request):
             "owner_id": owner_id,
         },
     })
+    if str(metadata.get("target_command_id") or "") == command["id"]:
+        # 命中既有命令（并发败者或元数据滞后于命令创建）：直接回当前状态。
+        return {
+            "success": True,
+            "copy_id": transfer_id,
+            "status": command.get("status", "accepted"),
+            "command_id": command["id"],
+            "result": command.get("result") or {},
+            "deduplicated": True,
+        }
     updated_metadata = {
         **metadata,
         "import_status": "accepted",
@@ -387,7 +483,9 @@ async def import_report_copy(transfer_id: str, request: Request):
     return {
         "success": True,
         "copy_id": transfer_id,
-        "status": "accepted",
+        # 自愈路径可能命中已完成/在途的既有命令：回显数据库权威状态而非
+        # 写死 accepted。
+        "status": command.get("status", "accepted"),
         "command_id": command["id"],
     }
 

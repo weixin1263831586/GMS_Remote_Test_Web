@@ -33,6 +33,8 @@ function switchWorkflowPane(pane, {persist = true, load = true} = {}) {
         loadRuns().catch(err => toast(err.message));
     }
     if (target === 'build') loadBuildJobs().catch(err => toast(err.message));
+    if (target === 'plans') loadTestPlans().catch(err => toast(err.message));
+    if (target === 'resources') loadResourceCatalog().catch(err => toast(err.message));
 }
 
 function collectTestPlan() {
@@ -54,9 +56,42 @@ function collectTestPlan() {
         test_suite: qs('automation-test-suite').value,
         test_module: qs('automation-test-module').value.trim(),
         worker_id: selectedWorkerId(),
+        shard_count: Number(qs('automation-shard-count').value),
+        queue_timeout_seconds: Number(qs('automation-queue-timeout').value),
+        execution_timeout_seconds: Number(qs('automation-execution-timeout').value),
+        output_idle_timeout_seconds: Number(qs('automation-idle-timeout').value),
+        preparations: [...atsPreparationOrder],
+        retry_policy: {
+            max_retries: Number(qs('automation-max-retries').value),
+            delay_seconds: Number(qs('automation-retry-delay').value),
+        },
     };
     const build = currentFlashMode() === 'skip' ? null : collectBuildPlan();
+    plan.device_selector = {...plan.device_selector, min_count: Number(qs('automation-selector-count').value)};
+    for (const key of ['product', 'variant', 'build_id', 'android_version', 'board', 'serial_prefix']) {
+        plan.device_selector[key] = qs(`automation-selector-${key}`).value.trim();
+    }
     if (build) plan.build = build;
     else delete plan.build;
     return plan;
+}
+
+function changePreparation(input) {
+    atsPreparationOrder = atsPreparationOrder.filter(action => action !== input.value);
+    if (input.checked) atsPreparationOrder.push(input.value);
+    renderPreparationOrder();
+    invalidateRunPreflight();
+}
+
+function movePreparation(index, delta) {
+    const next = index + delta;
+    if (next < 0 || next >= atsPreparationOrder.length) return;
+    [atsPreparationOrder[index], atsPreparationOrder[next]] = [atsPreparationOrder[next], atsPreparationOrder[index]];
+    renderPreparationOrder();
+    invalidateRunPreflight();
+}
+
+function renderPreparationOrder() {
+    const labels = {stay_awake: '充电时常亮', animations_off: '关闭系统动画', wifi_on: '启用 Wi-Fi'};
+    qs('automation-preparation-order').innerHTML = atsPreparationOrder.map((action, index) => `<div>${index + 1}. ${esc(labels[action] || action)} <button type="button" data-click="movePreparation" data-a0="${index}" data-a1="-1" ${index ? '' : 'disabled'}>上移</button><button type="button" data-click="movePreparation" data-a0="${index}" data-a1="1" ${index === atsPreparationOrder.length - 1 ? 'disabled' : ''}>下移</button></div>`).join('');
 }

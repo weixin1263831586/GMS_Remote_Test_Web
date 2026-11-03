@@ -1,5 +1,6 @@
 from importlib import import_module
 
+from .aoa_service import profile_store
 from .locks import DeviceLockManager, device_lock_manager
 from .manager import device_manager
 from .models import (
@@ -120,6 +121,7 @@ __all__ = [
     "pair_code_for_worker",
     "parse_adb_device_states",
     "parse_usbip_port_entries",
+    "profile_store",
     "query_usbipd_busid_instance_ids",
     "query_usbipd_device_states",
     "reconcile_cluster_usbip_command",

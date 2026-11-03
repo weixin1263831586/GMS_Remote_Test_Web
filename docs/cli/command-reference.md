@@ -44,7 +44,7 @@
 | `gms-rt-config-read` | Read the Controller configuration visible to the current principal |  |
 | `gms-rt-config-update` | Update one Controller configuration key | gms-rt-config-update <key> <value> |
 | `gms-rt-debug-action` | Run a typed app or UI operation within an approved debugging grant | gms-rt-debug-action <session_id> <action> [--activity CLASS] [--x N] [--y N] [--end-x N] [--end-y N] [--duration-ms N] [--text VALUE] [--key KEY] |
-| `gms-rt-debug-session-request` | Request a finite app-scoped debugging grant for one Agent and device | gms-rt-debug-session-request <worker_id> <device> <package> <apk_file> [--minutes N] [--operations install,launch,stop,tap,swipe,text,keyevent] |
+| `gms-rt-debug-session-request` | Request a finite app-scoped debugging grant for one Agent and device | gms-rt-debug-session-request <worker_id> <device> <package> <apk_file\|--installed> [--minutes N] [--operations install,launch,stop,tap,swipe,text,keyevent] |
 | `gms-rt-debug-session-revoke` | Revoke this Agent debugging grant |  |
 | `gms-rt-debug-session-status` | Read one debugging grant and its recent operations |  |
 | `gms-rt-desktop-validate` | Validate SSH access to a desktop host | gms-rt-desktop-validate <user@ip> |

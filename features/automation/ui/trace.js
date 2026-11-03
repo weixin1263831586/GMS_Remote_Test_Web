@@ -76,7 +76,15 @@ async function loadTrace(runId) {
             traceField('烧写命令', data.flash_command_id),
         ].join('') || '<div class="muted">（无固件产物）</div>';
 
+        const configuration = data.test_configuration || {};
         qs('trace-test').innerHTML = [
+            traceField('测试类型', configuration.test_type),
+            traceField('测试套件', configuration.test_suite),
+            traceField('模块', configuration.test_module),
+            traceField('用例重试目录', configuration.retry_dir),
+            traceField('重跑来源', data.retry_of_run_id),
+            traceField('自动重试轮次 / 上限', `${data.retry_index || 0} / ${data.retry_limit || 0}`),
+            traceField('计划批次', data.plan_batch_id),
             traceField('Trace ID', data.trace_id),
             traceField('状态版本', data.state_version),
             traceField('恢复次数', data.recovery_count),
@@ -88,6 +96,7 @@ async function loadTrace(runId) {
 
         const summary = data.result_summary || {};
         const reportRows = [
+            `<div class="trace-key">用例结果</div><div class="trace-val">${renderTestOutcome(data)}</div>`,
             traceField('报告时间', compactTime(data.report_timestamp)),
             traceField('报告 ID', data.report_id),
             ...Object.entries(summary).slice(0, 8).map(([k, v]) => traceField(k, typeof v === 'object' ? JSON.stringify(v) : v)),

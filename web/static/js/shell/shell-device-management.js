@@ -16,7 +16,22 @@
                 ? 'cluster' : 'single';
         }
 
+        function showDevicesManagementLoadError(error) {
+            const tbody = document.getElementById('devices-table-body');
+            if (tbody && currentPage === 'devices') {
+                tbody.innerHTML = `<tr><td colspan="10">设备列表加载失败：${escapeHtml(error.message || '请刷新重试')}</td></tr>`;
+            }
+        }
+
         async function loadDevicesManagement() {
+            // Initial server context can replace the default scope without a
+            // workspace-change event. Resolve it before choosing the inventory.
+            try {
+                await (window.GmsWorkspace?.ready || Promise.resolve());
+            } catch (error) {
+                showDevicesManagementLoadError(error);
+                throw error;
+            }
             const requestedScope = requestedDevicesManagementScope();
             if (devicesManagementLoadPromise) {
                 if (devicesManagementLoadScope === requestedScope) {
@@ -65,6 +80,12 @@
                 const statusData = statusResp && statusResp.ok ? await statusResp.json() : {};
                 const localWorkerId = statusData.local_worker_id || workspaceLocalWorkerId();
                 const clusterMode = Boolean(includeCluster && statusData.enabled);
+                if (includeCluster && !clusterMode) {
+                    throw new Error('集群服务不可用，请检查服务状态后刷新');
+                }
+                if (includeCluster && !clusterResp?.ok) {
+                    throw new Error('集群设备列表读取失败，请刷新重试');
+                }
                 const scopeHint = document.getElementById('devices-scope-hint');
                 // 为本地设备补全 worker_id，使按主机分组时本地和远端设备都能正确归类
                 loadedDevices.forEach(d => {
@@ -182,6 +203,10 @@
                 allDevices = loadedDevices;
                 devicesManagementClusterMode = clusterMode;
                 state.deviceGroupsLoaded = true;
+                // AOA 自动恢复区块跟随设备清单刷新（Worker/设备下拉与懒加载）。
+                if (typeof aoaSyncDeviceSources === 'function') {
+                    aoaSyncDeviceSources(allDevices);
+                }
                 displayDevicesManagement(filteredDevicesForView());
                 if (clusterMode || state.deviceGroups.length > 0) {
                     setupMgmtGroupDelegation();
@@ -197,6 +222,10 @@
                 }
             } catch (e) {
                 console.error('[Devices] Error loading devices:', e);
+                if (requestedDevicesManagementScope() === requestedScope && currentPage === 'devices') {
+                    showDevicesManagementLoadError(e);
+                }
+                throw e;
             }
         }
 
@@ -308,12 +337,14 @@
                     reserved: ['#ab47bc', '● 已预留'],
                     external_busy: ['var(--danger-color)', '● 外部占用'],
                     fastboot: ['#42a5f5', '● Fastboot'],
+                    usb_only: ['var(--warning-color)', '● USB / AOA'],
                     unauthorized: ['var(--danger-color)', '● 未授权'],
                     offline: ['var(--text-secondary)', '○ 离线'],
                     unknown: ['var(--text-secondary)', '○ 未知']
                 }[device.cluster_state];
                 const localStatus = {
                     fastboot: ['#42a5f5', '● Fastboot'],
+                    usb_only: ['var(--warning-color)', '● USB / AOA'],
                     unauthorized: ['var(--danger-color)', '● 未授权'],
                     offline: ['var(--text-secondary)', '○ 离线']
                 }[device.status];
@@ -352,13 +383,18 @@
                 const isFastboot = device.protocol === 'fastboot'
                     || device.status === 'fastboot'
                     || device.cluster_state === 'fastboot';
+                const isUsbOnly = device.protocol === 'usb_only'
+                    || device.status === 'usb_only'
+                    || device.cluster_state === 'usb_only';
+                const hasNoAdb = isFastboot || isUsbOnly;
                 const clusterWorkerAttr = escapeIconAttr(device.worker_id || '');
                 const clusterFullId = actionDeviceId.startsWith(`${device.worker_id || ''}:`)
                     ? actionDeviceId
                     : `${device.worker_id || ''}:${actionDeviceId}`;
                 const clusterFullIdAttr = escapeIconAttr(clusterFullId);
                 const clusterInspectable = !device.claimed
-                    && !['offline', 'unknown', 'unauthorized', 'fastboot'].includes(device.cluster_state);
+                    && !['offline', 'unknown', 'unauthorized', 'fastboot', 'usb_only']
+                        .includes(device.cluster_state);
                 const clusterMutable = device.cluster_state === 'available';
                 const localClaimed = !isClusterRemote && Boolean(device.locked_by);
                 const localClaimedByOther = localClaimed && !device.locked_by_self;
@@ -368,9 +404,9 @@
                     && !(clusterInspectable && device.cluster_device_inspection) ? ' disabled' : '';
                 const remoteControlDisabled = isClusterRemote
                     && !(clusterMutable && device.cluster_device_inspection) ? ' disabled' : '';
-                const adbShellDisabled = Boolean(shellDisabled || (!isClusterRemote && (isFastboot || localClaimed)));
-                const adbInspectionDisabled = Boolean(remoteInspectionDisabled || (!isClusterRemote && (isFastboot || localClaimedByOther)));
-                const adbControlDisabled = Boolean(remoteControlDisabled || (!isClusterRemote && (isFastboot || localClaimedByOther)));
+                const adbShellDisabled = Boolean(shellDisabled || (!isClusterRemote && (hasNoAdb || localClaimed)));
+                const adbInspectionDisabled = Boolean(remoteInspectionDisabled || (!isClusterRemote && (hasNoAdb || localClaimedByOther)));
+                const adbControlDisabled = Boolean(remoteControlDisabled || (!isClusterRemote && (hasNoAdb || localClaimedByOther)));
                 const shellStyle = adbShellDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
                 const remoteInspectionStyle = adbInspectionDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
                 const remoteControlStyle = adbControlDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
@@ -384,14 +420,17 @@
                     : 'Worker Agent 版本过旧或未上报 device_inspection 能力';
                 const localShellTitle = isFastboot
                     ? 'Fastboot 状态下不可使用 adb shell'
+                    : isUsbOnly ? 'USB 调试未连接，仅可在 AOA 工作台执行恢复'
                     : localClaimed ? '设备已被测试或平台操作占用，释放后可打开 ADB Shell'
                     : '打开 adb shell';
                 const localInspectionTitle = isFastboot
                     ? 'Fastboot 状态下不可读取 ADB 设备信息'
+                    : isUsbOnly ? 'USB 调试未连接，仅可在 AOA 工作台执行恢复'
                     : localClaimedByOther ? '设备已被其他用户或任务占用'
                     : '查看设备信息：configs 配置资源 / packages 已装包 / features 特性 / 系统属性';
                 const localControlTitle = isFastboot
                     ? 'Fastboot 状态下不可使用 UI 操控'
+                    : isUsbOnly ? 'USB 调试未连接，仅可在 AOA 工作台执行恢复'
                     : localClaimedByOther ? '设备已被其他用户或任务占用'
                     : '智能 UI 操控：截图 + 布局元素 + 点按';
                 const shellButton = isClusterRemote

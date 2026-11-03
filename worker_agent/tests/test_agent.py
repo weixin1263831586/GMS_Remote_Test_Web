@@ -38,6 +38,8 @@ def test_registration_only_advertises_novnc_when_both_ports_are_ready(tmp_path):
 
     assert capabilities["adb"] is True
     assert capabilities["adb_proxy_logs"] is True
+    assert "aoa_record_input_v1" in capabilities
+    assert "aoa_usb_hid_v1" in capabilities
     assert "novnc_port" not in capabilities
 
 

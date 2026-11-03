@@ -1,8 +1,8 @@
 // Automation page state chunk; loaded by page.html in dependency order.
 const AUTOMATION_WORKFLOW_STORAGE_KEY = 'gms_automation_workflow_pane';
 const AUTOMATION_STATUS_STORAGE_KEY = 'gms_automation_status_filter';
-const AUTOMATION_WORKFLOW_PANES = new Set(['overview', 'create', 'runs', 'build', 'events', 'reports']);
-const AUTOMATION_STATUS_FILTERS = new Set(['', 'queued', 'testing', 'completed']);
+const AUTOMATION_WORKFLOW_PANES = new Set(['overview', 'create', 'runs', 'plans', 'resources', 'build', 'events', 'reports']);
+const AUTOMATION_STATUS_FILTERS = new Set(['', 'queued', 'running', 'testing', 'completed', 'failed', 'cancelled']);
 
 function restoreAutomationViewValue(queryKey, storageKey, allowed, fallback) {
     let value = new URLSearchParams(window.location.search).get(queryKey) || '';
@@ -45,6 +45,28 @@ let selectedRunTrace = null;
 let buildLogRaw = '';
 let lastPreflightSignature = '';
 let lastPreflightData = null;
+let atsTestPlans = [];
+let atsPlanDraft = [];
+let atsEditingPlan = null;
+let atsPlanRequest = 0;
+let atsPreparationOrder = [];
+const atsResourceFingerprints = Object.create(null);
+const atsResourceCommands = Object.create(null);
+let atsRetentionPreview = [];
+let atsHistoryRequest = 0;
+const atsHistoryViews = {};
+for (const view of ['runs', 'reports']) {
+    let stored = {};
+    try { stored = JSON.parse(window.sessionStorage.getItem(`gms_automation_history_${view}`) || '{}') || {}; } catch (_) {}
+    atsHistoryViews[view] = {
+        query: String(stored.query || '').slice(0, 256),
+        profile_id: String(stored.profile_id || '').slice(0, 256),
+        worker_id: String(stored.worker_id || '').slice(0, 256),
+        outcome: ['passed', 'failed', 'incomplete', 'unknown'].includes(stored.outcome) ? stored.outcome : '',
+        limit: [25, 50, 100].includes(stored.limit) ? stored.limit : 25,
+        cursors: [''], index: 0, nextCursor: '', hasMore: false,
+    };
+}
 
 function isLocalAutomationWorker(workerId) {
     return !workerId || workerId === atsLocalWorkerId;
@@ -87,6 +109,7 @@ const STATUS_LABELS_ZH = {
     external_busy: '外部占用', unauthorized: '未授权', unknown: '未知',
     fastboot: 'Fastboot',
     created: '已创建', queued: '排队', running: '运行中',
+    stopping: '停止后续中',
     jenkins_queued: '构建排队',
     jenkins_building: '编译中', artifact_ready: '固件就绪',
     waiting_device: '等待设备', device_locked: '设备已锁',

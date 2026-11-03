@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import os
 import uuid
 from collections.abc import Awaitable, Callable
@@ -20,9 +21,11 @@ from features.automation.gerrit_trigger import (
 )
 from features.automation.models import TERMINAL_STATUSES, AutomationRunCreateRequest
 from features.automation.orchestrator import AutomationOrchestrator
+from features.automation.plan_models import RetryPolicy
 from features.automation.profiles import load_profiles, upsert_profile
 from features.automation.repository import AutomationStore
 from foundation.secrets import decrypt_secret, encrypt_secret
+from foundation.test_execution_options import matches_device_selector, validate_execution_options
 
 
 GerritQuery = Callable[[str, str, int], Awaitable[list[dict[str, Any]]]]
@@ -109,6 +112,20 @@ class AutomationService:
         created_by: str = "",
         principal: CurrentUser | None = None,
     ) -> dict[str, Any]:
+        run_data, encrypted_secrets = self.prepare_run(request, created_by=created_by, principal=principal)
+        run = self.store.create_run(run_data, encrypted_secrets=encrypted_secrets)
+        self.store.append_event(
+            run['id'], run['status'], 'info', 'Automation run queued',
+            {'profile_id': run['profile_id']},
+            event_type='run.created', operation_id=f"{run['id']}:create",
+            from_status='', to_status=run['status'],
+        )
+        return run
+
+    def prepare_run(
+        self, request: dict[str, Any], *, created_by: str = '', principal: CurrentUser | None = None,
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        """Validate and seal a run without scheduling or reserving any resources."""
         # 深拷贝后再移除密码，避免修改调用方请求。
         # API bodies are usually disposable, but programmatic callers reuse
         # these dictionaries after validation errors and for audit logging.
@@ -120,6 +137,8 @@ class AutomationService:
             if isinstance(build, dict):
                 build_password = build_password or str(build.pop('server_password', '') or '')
         plan = test_plan if isinstance(test_plan, dict) else {}
+        retry_policy = RetryPolicy.model_validate(plan.get('retry_policy') or {})
+        validate_execution_options(plan)
         build_plan = plan.get('build') if isinstance(plan.get('build'), dict) else {}
         flash_plan = plan.get('flash') if isinstance(plan.get('flash'), dict) else {}
         has_build = bool(build_plan.get('provider') or build_plan.get('server_id') or build_plan.get('template_id'))
@@ -138,25 +157,21 @@ class AutomationService:
         create_request = AutomationRunCreateRequest(**body)
         run_data = create_request.to_run_dict(self.new_run_id())
         run_data["created_by"] = str(created_by or "")
+        run_data['created_by_username'] = principal.username if principal else ''
         run_data["granted_capabilities"] = ",".join(granted_capabilities)
+        run_data['retry_limit'] = str(retry_policy.max_retries)
         encrypted_secrets = {}
         if build_password:
             encrypted_secrets["build_server_password"] = encrypt_secret(build_password)
-        run = self.store.create_run(run_data, encrypted_secrets=encrypted_secrets)
-        self.store.append_event(
-            run['id'], run['status'], 'info', 'Automation run queued',
-            {'profile_id': run['profile_id']},
-            event_type='run.created', operation_id=f"{run['id']}:create",
-            from_status='',
-            to_status=run['status'],
-        )
-        return run
+        return run_data, encrypted_secrets
 
     def preflight(self, request: dict[str, Any], *, principal: CurrentUser | None = None) -> dict[str, Any]:
         """Validate a proposed run without creating it (ADR 0012: same capability compiler as create)."""
         body = copy.deepcopy(request or {})
         body.pop('build_server_password', None)
         plan = body.get('test_plan') if isinstance(body.get('test_plan'), dict) else {}
+        RetryPolicy.model_validate(plan.get('retry_policy') or {})
+        validate_execution_options(plan)
         if not str(plan.get('test_type') or '').strip():
             raise ValueError('test_plan.test_type is required')
         build = plan.get('build') if isinstance(plan.get('build'), dict) else {}
@@ -252,6 +267,8 @@ class AutomationService:
             plan.get('device_selector'), dict
         ) else {}
         minimum = max(1, int(selector.get('min_count') or 1))
+        if plan.get('shard_count', 0) > (len(body.get('devices') or []) or minimum):
+            raise ValueError('Shard count exceeds the selected or requested device count')
         flash = plan.get('flash') if isinstance(plan.get('flash'), dict) else {}
         requires_local_usb = flash.get('mode') != 'skip'
         full_suite = not (
@@ -285,12 +302,25 @@ class AutomationService:
                 ),
                 reverse=True,
             ):
+                constrained = any(selector.get(key) for key in ('product', 'variant', 'build_id', 'android_version', 'board', 'serial_prefix'))
+                advanced = bool(plan.get('preparations') or plan.get('shard_count'))
+                if advanced:
+                    suite_worker = next((item for item in cluster.list_workers() if item.get('id') == suite.get('worker_id')), {})
+                    if not (suite_worker.get('capabilities') or {}).get('execution_options_v1'):
+                        last_error = 'No matching Worker supports preparations or explicit sharding; update the Worker Agent'
+                        continue
+                if constrained:
+                    matches = [device for device in cluster.repository.list_devices(suite.get('worker_id', ''))
+                               if device.get('state') == 'available' and matches_device_selector(device, selector)]
+                    if len(matches) < minimum:
+                        continue
                 try:
                     candidate, _ = cluster.select_worker(
                         suite.get('suite_key', ''),
                         minimum,
                         require_agent=True,
                         excluded_transports={'adb_proxy'} if requires_local_usb else None,
+                        **({'worker_id': suite.get('worker_id', '')} if constrained or advanced else {}),
                     )
                 except ValueError as exc:
                     last_error = str(exc)
@@ -315,6 +345,8 @@ class AutomationService:
             )
             if not worker:
                 raise ValueError(f'Worker {worker_id} is not online')
+            if (plan.get('preparations') or plan.get('shard_count')) and not (worker.get('capabilities') or {}).get('execution_options_v1'):
+                raise ValueError('Update the Worker Agent before using preparations or explicit sharding')
             if not cluster.has_command_agent(worker_id):
                 raise ValueError(f'Worker {worker_id} has no durable command Agent')
             # Same admission source as the cluster UI and scheduler
@@ -368,6 +400,14 @@ class AutomationService:
         inventory = {
             item['id']: item for item in cluster.repository.list_devices(worker_id)
         }
+        mismatched = [device_id for device_id in requested_devices if device_id in inventory
+                      and not matches_device_selector(inventory[device_id], selector)]
+        if mismatched:
+            raise ValueError('Selected devices do not match the device conditions: ' + ', '.join(mismatched))
+        matching_count = sum(item.get('state') == 'available' and matches_device_selector(item, selector)
+                             for item in inventory.values())
+        if not requested_devices and matching_count < minimum:
+            raise ValueError(f'Only {matching_count} idle devices match the conditions; {minimum} required')
         if requested_devices:
             unavailable = [
                 device_id for device_id in requested_devices
@@ -430,6 +470,7 @@ class AutomationService:
                     not requires_local_usb
                     or str(item.get('transport') or '').lower() != 'adb_proxy'
                 )
+                and matches_device_selector(item, selector)
                 for item in inventory.values()
             ),
         }
@@ -453,6 +494,9 @@ class AutomationService:
         if run is None:
             raise AutomationNotFoundError('Automation run not found')
         return run
+
+    def list_run_page(self, *, limit: int = 50, **filters: Any):
+        return self.store.list_run_page(limit=limit, **filters)
 
     def list_events(self, run_id: str):
         self.get_run(run_id)
@@ -487,6 +531,12 @@ class AutomationService:
         run_data['devices_json'] = old['devices_json']
         run_data['test_plan_json'] = old['test_plan_json']
         run_data['created_by'] = old.get('created_by', '')
+        run_data['created_by_username'] = old.get('created_by_username', '')
+        run_data['worker_id'] = old.get('worker_id', '')
+        run_data['retry_of_run_id'] = old['id']
+        run_data['retry_limit'] = str(RetryPolicy.model_validate(
+            json.loads(old['test_plan_json']).get('retry_policy') or {}
+        ).max_retries)
         # Retry 继承原 run 的能力快照，不重新按当前角色放大（ADR 0012）。
         run_data['granted_capabilities'] = str(old.get('granted_capabilities', '') or '')
         retry_password = self.get_build_password(run_id)
@@ -505,6 +555,11 @@ class AutomationService:
 
     def worker_tick(self, executor_name: str = 'stub'):
         return self.orchestrator(executor_name).advance_next()
+
+    def schedule_tick(self):
+        from .planning import AutomationPlanner
+
+        return AutomationPlanner(self).tick()
 
     @staticmethod
     def _require_owner_id(owner_id: str) -> str:

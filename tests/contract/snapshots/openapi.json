@@ -1033,6 +1033,25 @@
           "action": {
             "$ref": "#/components/schemas/DeviceAction"
           },
+          "aoa_commands": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Aoa Commands",
+            "type": "array"
+          },
+          "aoa_record": {
+            "additionalProperties": true,
+            "title": "Aoa Record",
+            "type": "object"
+          },
+          "automation_run_id": {
+            "default": "",
+            "maxLength": 128,
+            "title": "Automation Run Id",
+            "type": "string"
+          },
           "devices": {
             "items": {
               "type": "string"
@@ -1093,6 +1112,13 @@
             "maxLength": 64,
             "title": "Type Filter",
             "type": "string"
+          },
+          "wait_adb_seconds": {
+            "default": 0,
+            "maximum": 600.0,
+            "minimum": 0.0,
+            "title": "Wait Adb Seconds",
+            "type": "integer"
           },
           "with_effective": {
             "default": false,
@@ -1220,6 +1246,12 @@
             "default": "",
             "maxLength": 255,
             "title": "Filename",
+            "type": "string"
+          },
+          "sha256": {
+            "default": "",
+            "pattern": "^(?:[a-f0-9]{64})?$",
+            "title": "Sha256",
             "type": "string"
           },
           "size_bytes": {
@@ -1633,6 +1665,10 @@
           "override_enable_verity",
           "override_reboot",
           "wifi",
+          "aoa_probe",
+          "aoa_sequence",
+          "aoa_record",
+          "aoa_record_input",
           "tap",
           "scrcpy_start",
           "screenshot",
@@ -1731,6 +1767,13 @@
             "title": "Devices",
             "type": "array"
           },
+          "execution_timeout_seconds": {
+            "default": 0,
+            "maximum": 604800.0,
+            "minimum": 0.0,
+            "title": "Execution Timeout Seconds",
+            "type": "integer"
+          },
           "local_server": {
             "default": "",
             "maxLength": 256,
@@ -1748,11 +1791,40 @@
             "title": "No Retry",
             "type": "boolean"
           },
+          "output_idle_timeout_seconds": {
+            "default": 0,
+            "maximum": 86400.0,
+            "minimum": 0.0,
+            "title": "Output Idle Timeout Seconds",
+            "type": "integer"
+          },
+          "preparations": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Preparations",
+            "type": "array"
+          },
+          "queue_timeout_seconds": {
+            "default": 0,
+            "maximum": 604800.0,
+            "minimum": 0.0,
+            "title": "Queue Timeout Seconds",
+            "type": "integer"
+          },
           "retry_dir": {
             "default": "",
             "maxLength": 512,
             "title": "Retry Dir",
             "type": "string"
+          },
+          "shard_count": {
+            "default": 0,
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Shard Count",
+            "type": "integer"
           },
           "suite_path": {
             "maxLength": 4096,
@@ -1967,6 +2039,170 @@
         "title": "NotificationReadRequest",
         "type": "object"
       },
+      "PinRequest": {
+        "properties": {
+          "pinned": {
+            "title": "Pinned",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pinned"
+        ],
+        "title": "PinRequest",
+        "type": "object"
+      },
+      "PlanBulkRequest": {
+        "properties": {
+          "changes": {
+            "additionalProperties": true,
+            "title": "Changes",
+            "type": "object"
+          },
+          "selections": {
+            "items": {
+              "$ref": "#/components/schemas/PlanSelection"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Selections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "selections",
+          "changes"
+        ],
+        "title": "PlanBulkRequest",
+        "type": "object"
+      },
+      "PlanEnabledRequest": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled",
+          "version"
+        ],
+        "title": "PlanEnabledRequest",
+        "type": "object"
+      },
+      "PlanSchedule": {
+        "additionalProperties": false,
+        "properties": {
+          "interval_minutes": {
+            "default": 1440,
+            "maximum": 10080.0,
+            "minimum": 5.0,
+            "title": "Interval Minutes",
+            "type": "integer"
+          },
+          "kind": {
+            "default": "manual",
+            "enum": [
+              "manual",
+              "interval",
+              "daily",
+              "weekly"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "time": {
+            "default": "02:00",
+            "title": "Time",
+            "type": "string"
+          },
+          "timezone": {
+            "default": "Asia/Shanghai",
+            "maxLength": 64,
+            "title": "Timezone",
+            "type": "string"
+          },
+          "weekdays": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 7,
+            "title": "Weekdays",
+            "type": "array"
+          }
+        },
+        "title": "PlanSchedule",
+        "type": "object"
+      },
+      "PlanSelection": {
+        "properties": {
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ],
+        "title": "PlanSelection",
+        "type": "object"
+      },
+      "PlanSettingsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Labels",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/PlanSchedule"
+          },
+          "stop_on_failure": {
+            "default": true,
+            "title": "Stop On Failure",
+            "type": "boolean"
+          },
+          "version": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "PlanSettingsRequest",
+        "type": "object"
+      },
       "ReportCopyCreate": {
         "properties": {
           "report_name": {
@@ -2079,6 +2315,76 @@
           "test_name"
         ],
         "title": "ReportDiagnosisRequest",
+        "type": "object"
+      },
+      "RetentionApplyRequest": {
+        "properties": {
+          "selections": {
+            "items": {
+              "$ref": "#/components/schemas/RetentionSelection"
+            },
+            "maxItems": 25,
+            "minItems": 1,
+            "title": "Selections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "selections"
+        ],
+        "title": "RetentionApplyRequest",
+        "type": "object"
+      },
+      "RetentionPolicyRequest": {
+        "properties": {
+          "archive_days": {
+            "default": 7,
+            "maximum": 3650.0,
+            "minimum": 1.0,
+            "title": "Archive Days",
+            "type": "integer"
+          },
+          "delete_days": {
+            "default": 30,
+            "maximum": 3650.0,
+            "minimum": 0.0,
+            "title": "Delete Days",
+            "type": "integer"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "title": "RetentionPolicyRequest",
+        "type": "object"
+      },
+      "RetentionSelection": {
+        "properties": {
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "operation": {
+            "pattern": "^(archive|delete)$",
+            "title": "Operation",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sha256",
+          "operation"
+        ],
+        "title": "RetentionSelection",
         "type": "object"
       },
       "RunningWorkerJob": {
@@ -2382,6 +2688,60 @@
         "title": "TestParseArgsRequest",
         "type": "object"
       },
+      "TestPlanRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Labels",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "runs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Runs",
+            "type": "array"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/PlanSchedule"
+          },
+          "stop_on_failure": {
+            "default": true,
+            "title": "Stop On Failure",
+            "type": "boolean"
+          },
+          "version": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "runs"
+        ],
+        "title": "TestPlanRequest",
+        "type": "object"
+      },
       "TestStartRequest": {
         "properties": {
           "automation_run_id": {
@@ -2416,6 +2776,13 @@
             "title": "Devices",
             "type": "array"
           },
+          "execution_timeout_seconds": {
+            "default": 0,
+            "maximum": 604800.0,
+            "minimum": 0.0,
+            "title": "Execution Timeout Seconds",
+            "type": "integer"
+          },
           "gerrit_change_id": {
             "default": "",
             "title": "Gerrit Change Id",
@@ -2431,6 +2798,28 @@
             "title": "Local Server",
             "type": "string"
           },
+          "output_idle_timeout_seconds": {
+            "default": 0,
+            "maximum": 86400.0,
+            "minimum": 0.0,
+            "title": "Output Idle Timeout Seconds",
+            "type": "integer"
+          },
+          "preparations": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Preparations",
+            "type": "array"
+          },
+          "queue_timeout_seconds": {
+            "default": 0,
+            "maximum": 604800.0,
+            "minimum": 0.0,
+            "title": "Queue Timeout Seconds",
+            "type": "integer"
+          },
           "redmine_issue_id": {
             "default": "",
             "title": "Redmine Issue Id",
@@ -2440,6 +2829,13 @@
             "default": "",
             "title": "Retry Dir",
             "type": "string"
+          },
+          "shard_count": {
+            "default": 0,
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Shard Count",
+            "type": "integer"
           },
           "test_case": {
             "default": "",
@@ -5115,6 +5511,430 @@
         "summary": "Handle Gerrit Webhook"
       }
     },
+    "/api/automation/plans": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Plans"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Plan"
+      }
+    },
+    "/api/automation/plans/bulk-settings": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanBulkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Test Plans"
+      }
+    },
+    "/api/automation/plans/import": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Test Plan"
+      }
+    },
+    "/api/automation/plans/{plan_id}": {
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "title": "Plan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Plan"
+      }
+    },
+    "/api/automation/plans/{plan_id}/batches": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "title": "Plan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Plan Batches"
+      }
+    },
+    "/api/automation/plans/{plan_id}/enabled": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "title": "Plan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanEnabledRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Plan Enabled"
+      }
+    },
+    "/api/automation/plans/{plan_id}/export": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "title": "Plan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Test Plan"
+      }
+    },
+    "/api/automation/plans/{plan_id}/run": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "title": "Plan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Plan"
+      }
+    },
+    "/api/automation/plans/{plan_id}/settings": {
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "title": "Plan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Plan Settings"
+      }
+    },
+    "/api/automation/plans/{plan_id}/stop": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "title": "Plan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Plan Batch"
+      }
+    },
     "/api/automation/profiles": {
       "get": {
         "parameters": [
@@ -5306,6 +6126,66 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "profile_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Profile Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Outcome",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reports_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Reports Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Cursor",
+              "type": "string"
             }
           }
         ],
@@ -5510,6 +6390,42 @@
           }
         },
         "summary": "Get Automation Run Events"
+      }
+    },
+    "/api/automation/runs/{run_id}/progress": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Automation Run Progress"
       }
     },
     "/api/automation/runs/{run_id}/retry": {
@@ -7761,6 +8677,149 @@
         ]
       }
     },
+    "/api/cluster/retention/apply": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetentionApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Retention",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/retention/artifacts/{artifact_id}/pin": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pin Artifact",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/retention/policy": {
+      "put": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetentionPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Retention Policy",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/retention/preview": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Preview Retention",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
     "/api/cluster/status": {
       "get": {
         "responses": {
@@ -7909,6 +8968,45 @@
           }
         },
         "summary": "Download Controller Suite Archive",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
+    "/api/cluster/suite-library/{filename}/fingerprint": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fingerprint Suite Archive",
         "tags": [
           "cluster"
         ]
@@ -11514,6 +12612,475 @@
           }
         },
         "summary": "Auto Group Devices"
+      }
+    },
+    "/api/devices/aoa/probe": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Probe"
+      }
+    },
+    "/api/devices/aoa/profiles": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Profiles"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Profile"
+      }
+    },
+    "/api/devices/aoa/profiles/from-recording": {
+      "post": {
+        "description": "把录制结果保存为 Profile（同机型 user 固件回放用）。",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Profile From Recording"
+      }
+    },
+    "/api/devices/aoa/profiles/{profile_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Profile"
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Profile"
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Profile"
+      }
+    },
+    "/api/devices/aoa/record": {
+      "post": {
+        "description": "在 userdebug 设备上录制 AOA 恢复旅程（ADR 0022）。\n\n流程：录制机（userdebug，ADB 可用）按 steps 导航——uiautomator 定位\n真实元素（多语言匹配）、实测标定触摸映射后换算 AOA 逻辑坐标\n（360×640）、逐点执行并记录等价 AOA 命令（含 sleep pacing）；可选先\n写 settings 跳过开机向导。返回的 ``commands`` 即可直接存为 Profile，\n供同机型 user 固件回放。",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record"
+      }
+    },
+    "/api/devices/aoa/record/input": {
+      "post": {
+        "description": "Execute one interactive recorder input and return its AOA command.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Input"
+      }
+    },
+    "/api/devices/aoa/record/presets": {
+      "get": {
+        "description": "下发录制预设旅程（Web 端下拉的单一真值来源）。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Record Presets"
+      }
+    },
+    "/api/devices/aoa/record/stream/{serial}/start": {
+      "post": {
+        "description": "启动录制机实时投屏会话（复用已有会话）。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "serial",
+            "required": true,
+            "schema": {
+              "title": "Serial",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Record Stream"
+      }
+    },
+    "/api/devices/aoa/record/stream/{serial}/stop": {
+      "post": {
+        "description": "停止该设备的投屏会话（前端关闭投屏时调用）。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "serial",
+            "required": true,
+            "schema": {
+              "title": "Serial",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Record Stream"
+      }
+    },
+    "/api/devices/aoa/recover": {
+      "post": {
+        "description": "执行 Profile（或内联 commands）并等待 ADB 恢复。",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Recover"
       }
     },
     "/api/devices/bootloader-lock": {

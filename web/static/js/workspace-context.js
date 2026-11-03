@@ -2,7 +2,7 @@
     'use strict';
 
     const DEFAULT_CONTEXT = Object.freeze({
-        scope_mode: 'single', worker_id: 'ats-worker-controller', device_ids: [],
+        scope_mode: null, worker_id: '', device_ids: [],
         suite_key: '', suite_path: '', cluster_job_id: '', attempt_id: '',
         automation_run_id: '', report_id: '', report_timestamp: '', artifact_id: '',
         gerrit_change_id: '', gerrit_patchset: '', redmine_issue_id: '', origin_page: 'test'
@@ -26,16 +26,22 @@
     // "worker:serial" 前缀与本身就含 ":" 的 serial（ip:5555 等）。
     const knownWorkerIds = new Set();
     let context = {...DEFAULT_CONTEXT};
+    let initialized = false;
+    const pendingUpdates = [];
     let activePage = String(window.__targetPage || 'test');
     let resolveReady;
-    const ready = new Promise(resolve => { resolveReady = resolve; });
+    let rejectReady;
+    const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+    ready.catch(() => {});
     let resolveClusterStatusReady;
     const clusterStatusReady = new Promise(resolve => { resolveClusterStatusReady = resolve; });
     let initializePromise = null;
 
     function normalize(raw) {
         const next = {...DEFAULT_CONTEXT, ...(raw || {})};
-        next.scope_mode = next.scope_mode === 'cluster' ? 'cluster' : 'single';
+        if (!['single', 'cluster'].includes(next.scope_mode)) {
+            throw new Error('工作区模式尚未确认，请刷新后重试');
+        }
         const requestedWorker = String(raw?.worker_id || '');
         next.worker_id = requestedWorker || localWorkerId;
         next.device_ids = Array.from(new Set((Array.isArray(next.device_ids) ? next.device_ids : [])
@@ -68,6 +74,7 @@
     }
 
     function postToFrame(page, type = 'workspace-context') {
+        if (!initialized) return;
         const frame = frameForPage(page);
         if (!frame?.contentWindow) return;
         frame.contentWindow.postMessage({type, context: snapshot()}, window.location.origin);
@@ -143,6 +150,10 @@
     }
 
     function update(patch, options = {}) {
+        if (!initialized) {
+            pendingUpdates.push({patch: {...patch}, options: {...options}});
+            return snapshot();
+        }
         const previous = snapshot();
         const next = normalize({...context, ...(patch || {})});
         const changed = Object.keys(DEFAULT_CONTEXT).some(key =>
@@ -205,12 +216,7 @@
     async function initializeFromServer() {
         let clusterStatus = null;
         if (window.state?.authRequired && !window.state?.authReady) {
-            resolveClusterStatusReady(clusterStatus);
-            revision += 1;
-            resolveReady(snapshot());
-            window.dispatchEvent(new CustomEvent('gms:workspace-context-ready', {detail: {context: snapshot()}}));
-            broadcast();
-            return snapshot();
+            await new Promise(resolve => window.addEventListener('gms:auth-ready', resolve, {once: true}));
         }
         try {
             const [response, clusterResponse] = await Promise.all([
@@ -236,16 +242,24 @@
             if (!response.ok && response.status === 401 && typeof window.showAuthGate === 'function') {
                 window.showAuthGate(false);
             }
+            if (!response.ok) throw new Error(`读取已保存的工作区模式失败 (HTTP ${response.status})`);
             const payload = await response.json();
-            if (response.ok && payload?.data?.context) context = normalize(payload.data.context);
+            if (!payload?.data?.context) throw new Error('服务端未返回已保存的工作区模式');
+            context = normalize(payload.data.context);
         } catch (error) {
-            console.debug('[WorkspaceContext] load failed; using local default:', error);
+            rejectReady(error);
+            const label = document.getElementById('cluster-mode-label');
+            if (label) label.textContent = '模式读取失败，请刷新';
+            console.error('[WorkspaceContext] Mode unavailable; device requests remain blocked:', error);
+            throw error;
         } finally {
             resolveClusterStatusReady(clusterStatus);
         }
+        initialized = true;
         revision += 1;
+        for (const item of pendingUpdates.splice(0)) update(item.patch, item.options);
         resolveReady(snapshot());
-        window.dispatchEvent(new CustomEvent('gms:workspace-context-ready', {detail: {context: snapshot()}}));
+        window.dispatchEvent(new CustomEvent('gms:workspace-context-ready', {detail: {context: snapshot(), clusterStatus}}));
         broadcast();
         return snapshot();
     }
@@ -281,6 +295,7 @@
 
     window.GmsWorkspace = Object.freeze({
         ready, get: snapshot, update, navigate, postToFrame,
+        get initialized() { return initialized; },
         initialize, setActivePage, loadClusterStatus,
         loadClusterWorkers, loadInitialTestData,
         localWorkerId: () => localWorkerId,
@@ -294,8 +309,8 @@
         }
     });
     if (window.state?.authReady) {
-        initialize();
+        initialize().catch(() => {});
     } else {
-        window.addEventListener('gms:auth-ready', initialize, {once: true});
+        window.addEventListener('gms:auth-ready', () => initialize().catch(() => {}), {once: true});
     }
 })();

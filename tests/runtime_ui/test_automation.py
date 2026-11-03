@@ -398,7 +398,7 @@ class RuntimeAutomationTests(RuntimeUiHarness):
             )
             self.assertEqual(
                 page.locator(".workflow-tab").all_text_contents(),
-                ["概览", "创建运行", "运行监控", "构建日志", "事件诊断", "测试报告"],
+                ["概览", "创建运行", "运行监控", "测试计划", "资源与存储", "构建日志", "事件诊断", "测试报告"],
             )
             page.wait_for_function("!document.querySelector('#build-workspace-refresh').disabled")
             page.evaluate("document.querySelector('#build-workspace-refresh').click()")

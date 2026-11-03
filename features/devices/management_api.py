@@ -16,6 +16,7 @@ from foundation.networking import is_local_host
 
 from . import runtime
 from .locks import device_lock_manager
+from .management_inventory import local_management_inventory
 from .manager import device_manager, has_blocked_adb_process
 from .support import SSHConnection
 from .usbip_transaction import USBIP_PORT_COMMAND
@@ -338,7 +339,11 @@ def _build_devices_management_payload(
                     proxy_source.get("source_serial", "")
                     if proxy_source else ""
                 ),
-                "status": "fastboot" if protocol == "fastboot" else "online",
+                "status": (
+                    "fastboot" if protocol == "fastboot"
+                    else "usb_only" if protocol == "usb_only"
+                    else "online"
+                ),
                 "protocol": protocol,
                 "locked_by": lock_info.get("username", ""),
                 "locked_username": lock_info.get("username", ""),
@@ -473,6 +478,15 @@ async def devices_management(request: Request):
         config = runtime.config_manager.load_config()
         client_id = runtime.get_client_id_from_request(request)
         if is_local_host(runtime.config_manager.get_ubuntu_host(config)):
+            inventory = await asyncio.to_thread(local_management_inventory)
+            if inventory is not None:
+                device_ids, properties, protocols, observed_at = inventory
+                payload = await asyncio.to_thread(
+                    _build_devices_management_payload, device_ids, properties,
+                    config, client_id, _mgmt_username(request), protocols,
+                )
+                payload.update({'success': True, 'source': 'worker-heartbeat', 'observed_at': observed_at})
+                return response(payload)
             adb_blocked = await asyncio.to_thread(has_blocked_adb_process)
             adb_result = CommandResult(stdout="", stderr="", code=0)
             if not adb_blocked:

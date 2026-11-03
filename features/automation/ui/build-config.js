@@ -153,6 +153,19 @@ function renderSelectedProfileSummary(profile) {
 
 function applySelectedProfile() {
     const profile = selectedProfile();
+    qs('automation-max-retries').value = profile.test_plan?.retry_policy?.max_retries ?? 0;
+    qs('automation-retry-delay').value = profile.test_plan?.retry_policy?.delay_seconds ?? 60;
+    for (const [id, key] of Object.entries({'automation-shard-count': 'shard_count', 'automation-queue-timeout': 'queue_timeout_seconds', 'automation-execution-timeout': 'execution_timeout_seconds', 'automation-idle-timeout': 'output_idle_timeout_seconds'})) {
+        qs(id).value = profile.test_plan?.[key] || 0;
+    }
+    qs('automation-preparations').querySelectorAll('input').forEach(input => {
+        input.checked = (profile.test_plan?.preparations || []).includes(input.value);
+    });
+    atsPreparationOrder = [...(profile.test_plan?.preparations || [])];
+    renderPreparationOrder();
+    const selector = profile.device_selector || profile.test_plan?.device_selector || {};
+    qs('automation-selector-count').value = selector.min_count || 1;
+    for (const key of ['product', 'variant', 'build_id', 'android_version', 'board', 'serial_prefix']) qs(`automation-selector-${key}`).value = selector[key] || '';
     renderSelectedProfileSummary(profile);
     if (!profile.id) {
         syncArtifactMode();
@@ -444,6 +457,10 @@ function runFormSignature() {
         '#automation-device-list input[type="checkbox"]:checked'
     )).map(input => input.value);
     return JSON.stringify({
+        executionOptions: ['automation-shard-count', 'automation-queue-timeout', 'automation-execution-timeout', 'automation-idle-timeout', 'automation-selector-count', ...['product', 'variant', 'build_id', 'android_version', 'board', 'serial_prefix'].map(key => 'automation-selector-' + key)].map(id => qs(id)?.value),
+        preparations: atsPreparationOrder,
+        maxRetries: qs('automation-max-retries')?.value || '0',
+        retryDelay: qs('automation-retry-delay')?.value || '60',
         profile: qs('automation-profile')?.value || '',
         flash: currentFlashMode(), artifact: qs('automation-artifact')?.value.trim() || '',
         server: qs('build-server')?.value || '', template: qs('build-template')?.value || '',

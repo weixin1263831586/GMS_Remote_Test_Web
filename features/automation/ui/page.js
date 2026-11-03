@@ -73,6 +73,7 @@ async function dryRunProfile() {
 function setStatusFilter(status, {persist = true, load = true} = {}) {
     const target = AUTOMATION_STATUS_FILTERS.has(status) ? status : '';
     atsStatus = target;
+    resetRunHistoryPage('runs');
     document.querySelectorAll('.subtabs .tab').forEach(btn => btn.classList.toggle('active', btn.dataset.status === target));
     if (persist) {
         try { window.sessionStorage.setItem(AUTOMATION_STATUS_STORAGE_KEY, target); } catch (_error) {}
@@ -88,6 +89,7 @@ function setStatusFilter(status, {persist = true, load = true} = {}) {
 // 避免刷新时先触发错误面板的额外请求或覆盖已保存筛选。
 switchWorkflowPane(activeWorkflowPane, {persist: false, load: false});
 setStatusFilter(atsStatus, {persist: false, load: false});
+restoreRunHistoryControls();
 
 async function loadWorkerStatus() {
     try {
@@ -117,6 +119,8 @@ async function loadAll(silent = false) {
         await loadTestSuitesForAutomation();
         await Promise.all([loadDevices(false), loadProfiles()]);
         await Promise.all([loadRuns(), loadBuildJobs(), loadWorkerStatus()]);
+        if (activeWorkflowPane === 'plans') await loadTestPlans();
+        if (activeWorkflowPane === 'resources') await loadResourceCatalog();
         await applyAutomationWorkspaceContext(atsWorkspaceContext);
         if (!silent) toast('已刷新');
     } catch (err) { toast(err.message); }
@@ -147,6 +151,11 @@ async function refreshAutomationActivityOnce() {
     try {
         await loadWorkerStatus();
         if (activeWorkflowPane === 'overview') await loadDashboard();
+        if (activeWorkflowPane === 'plans') await loadTestPlans();
+        if (activeWorkflowPane === 'resources') {
+            await loadResourceCatalog();
+            await refreshResourceCommands();
+        }
         if (activeWorkflowPane === 'runs' || activeWorkflowPane === 'reports') await loadRuns();
         if (activeWorkflowPane === 'build') {
             await loadBuildJobs();

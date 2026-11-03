@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request
@@ -18,6 +19,7 @@ from foundation.device_action_spec import (
     elevated_device_actions,
     read_only_device_actions,
 )
+from foundation.error_model import ApiError, record_internal_error
 
 from .api import _require_cluster_enabled, service
 from .models import ClusterDeviceAction
@@ -25,6 +27,7 @@ from .operation_claims import device_action_claim_payload
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # 派生集合：真值在 device_action_spec.DeviceActionSpec 中，这里只为
@@ -66,6 +69,31 @@ def _require_machine_reservation(
     return reservation
 
 
+async def _wait_for_command(
+    repository, action, command: dict, *, deduplicated: bool = False
+) -> dict:
+    """短轮询一条 Worker 命令到终态；超时则返回 accepted 交由调用方续查。"""
+    wait_steps = device_action_wait_steps(action)
+    flag = {"deduplicated": True} if deduplicated else {}
+    for _ in range(wait_steps):
+        await asyncio.sleep(0.1)
+        current = repository.get_command(command["id"])
+        if current and current["status"] in {"completed", "failed", "cancelled"}:
+            if current["status"] != "completed":
+                raise HTTPException(
+                    502, current.get("error") or "worker device action failed"
+                )
+            result = current.get("result") or {}
+            if action == "screenshot" and result.get("image"):
+                repository.compact_command_result(command["id"], {
+                    "serial": result.get("serial", ""),
+                    "image_bytes": len(result["image"]),
+                    "transient_result": True,
+                })
+            return {"success": True, **result, "command_id": command["id"], **flag}
+    return {"success": True, "accepted": True, "command_id": command["id"], **flag}
+
+
 @router.post("/devices/actions")
 async def device_action(body: ClusterDeviceAction, request: Request):
     if body.action in ELEVATED_DEVICE_ACTIONS:
@@ -78,7 +106,9 @@ async def device_action(body: ClusterDeviceAction, request: Request):
         raise HTTPException(409, "worker is not online")
     known = {item["id"]: item for item in repository.list_devices(body.worker_id)}
     is_read_only = body.action in READ_ONLY_DEVICE_ACTIONS
-    action_payload = body.model_dump(exclude={"worker_id", "devices"})
+    # automation_run_id 只用于派生幂等 operation_id，不进入 Worker payload。
+    action_payload = body.model_dump(
+        exclude={"worker_id", "devices", "automation_run_id"})
     if body.action == "wifi":
         wifi = config_manager.load_config().get("wifi") or {}
         action_payload["ssid"] = body.ssid or str(wifi.get("ssid") or "")
@@ -94,8 +124,14 @@ async def device_action(body: ClusterDeviceAction, request: Request):
         if not device:
             raise HTTPException(409, f"device is not available on worker: {value}")
         state = device.get("state")
-        if state in {"offline", "unknown"}:
+        is_aoa_recovery = str(body.action.value) in {"aoa_probe", "aoa_sequence"}
+        if state in {"offline", "unknown"} and not is_aoa_recovery:
             raise HTTPException(409, f"device is offline: {value}")
+        if state == "usb_only" and not is_aoa_recovery:
+            raise HTTPException(
+                409,
+                f"device has no ADB connection; only AOA recovery is available: {value}",
+            )
         if state == "external_busy" and not is_read_only:
             raise HTTPException(409, f"device is busy with a manual Tradefed test: {value}")
         if (
@@ -132,7 +168,21 @@ async def device_action(body: ClusterDeviceAction, request: Request):
         # inside their run's active reservation.
         if getattr(request.state, "auth_method", None) == "machine_authority":
             _require_machine_reservation(request, body.worker_id, requested)
-    operation_id = f"device-action-{uuid.uuid4().hex}"
+    automation_run_id = str(body.automation_run_id or "").strip()
+    if automation_run_id:
+        # 幂等重放键（ADR 0022）：automation 发起的 device_action 用
+        # run 维度确定性 operation_id，配合 repository.create_command 的
+        # BEGIN IMMEDIATE 去重，使“派发成功但响应丢失”的重试收敛到
+        # 既有命令；并发双发由数据库唯一索引兜底。
+        operation_id = f"automation:{automation_run_id}:{body.action.value}"
+        existing = repository.get_command_by_operation(body.worker_id, operation_id)
+        if existing is not None:
+            # 重放命中：直接跟随既有命令（可能仍在执行或已完成），
+            # 不再重复 claim/派发，避免整段重放 AOA 点击序列。
+            return await _wait_for_command(
+                repository, body.action, existing, deduplicated=True)
+    else:
+        operation_id = f"device-action-{uuid.uuid4().hex}"
     claim_source = f"operation:{operation_id}"
     if not is_read_only:
         action_payload.update(device_action_claim_payload(
@@ -157,6 +207,18 @@ async def device_action(body: ClusterDeviceAction, request: Request):
                 execute_device_action, body.action, requested, action_payload
             )
             return {"success": True, **result}
+        except (ValueError, RuntimeError) as exc:
+            # Worker 侧已分类的输入/操作错误使用 502，与远端命令路径一致。
+            raise ApiError.upstream_failure(
+                str(exc) or "Worker device action failed", service="worker") from exc
+        except Exception as exc:
+            message = record_internal_error(
+                logger,
+                "Worker device action failed",
+                "local Worker device action raised an unexpected exception",
+                context={"worker_id": body.worker_id, "action": body.action.value},
+            )
+            raise ApiError.upstream_failure(message, service="worker") from exc
         finally:
             # 借用 claim（reservation/job 所有）不在此 release——
             # release(claim_source) 对借用的 source_id 也无匹配行。
@@ -174,21 +236,4 @@ async def device_action(body: ClusterDeviceAction, request: Request):
             repository.claims.release(claim_source, status="failed")
         raise
 
-    wait_steps = device_action_wait_steps(body.action)
-    for _ in range(wait_steps):
-        await asyncio.sleep(0.1)
-        current = repository.get_command(command["id"])
-        if current and current["status"] in {"completed", "failed", "cancelled"}:
-            if current["status"] != "completed":
-                raise HTTPException(
-                    502, current.get("error") or "worker device action failed"
-                )
-            result = current.get("result") or {}
-            if body.action == "screenshot" and result.get("image"):
-                repository.compact_command_result(command["id"], {
-                    "serial": result.get("serial", ""),
-                    "image_bytes": len(result["image"]),
-                    "transient_result": True,
-                })
-            return {"success": True, **result, "command_id": command["id"]}
-    return {"success": True, "accepted": True, "command_id": command["id"]}
+    return await _wait_for_command(repository, body.action, command)

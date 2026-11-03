@@ -98,6 +98,9 @@ class ClusterRepository(
             repository_schema.migrate_device_lease_unique_constraint(conn)
             repository_schema.migrate_recovery_observability(conn)
             repository_schema.create_indexes(conn)
+            from .artifact_retention import initialize_retention_schema
+
+            initialize_retention_schema(conn)
 
     @staticmethod
     def _decode(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -599,6 +602,20 @@ class ClusterRepository(
             row = conn.execute("SELECT * FROM cluster_job_artifacts WHERE attempt_id=? AND filename=?",
                                (data["attempt_id"], data["filename"])).fetchone()
         return dict(row)
+
+    def recent_job_progress(self, job_id: str, attempt_id: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute('''SELECT sequence,payload_json,created_at FROM cluster_job_events
+                WHERE job_id=? AND attempt_id=? AND event_type='module_progress'
+                ORDER BY sequence DESC LIMIT 1000''', (job_id, attempt_id)).fetchall()
+        return [{**dict(row), 'payload': json.loads(row['payload_json'])} for row in reversed(rows)]
+
+    def job_last_output_at(self, job_id: str, attempt_id: str) -> str:
+        with self.connect() as conn:
+            row = conn.execute('''SELECT created_at FROM cluster_job_events
+                WHERE job_id=? AND attempt_id=? AND source IN ('stdout','stderr')
+                ORDER BY sequence DESC LIMIT 1''', (job_id, attempt_id)).fetchone()
+        return str(row['created_at']) if row else ''
 
     def list_artifacts(self, job_id: str) -> list[dict[str, Any]]:
         with self.connect() as conn:

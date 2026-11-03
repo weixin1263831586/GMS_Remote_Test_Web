@@ -39,9 +39,9 @@ def _reject_duplicate_session(payload):
     current = store().active_for_target(
         payload["owner_id"], payload["worker_id"], payload["serial"], payload["package"])
     if current:
-        raise ApiError.conflict(
-            f"该设备/应用已存在{('审批中' if current['status'] == 'approving' else '有效')}的调试会话 "
-            f"{current['id']}，请先撤销（gms-rt-debug-session-revoke {current['id']}）或等待到期后再申请")
+        # 消息文案由 DebugStore.duplicate_message 单点维护：并发窗口内
+        # 事务闸门抛出的消息与这里保持一致。
+        raise ApiError.conflict(store().duplicate_message(current))
 
 
 def check_identity(session):

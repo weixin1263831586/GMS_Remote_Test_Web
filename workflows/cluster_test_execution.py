@@ -149,6 +149,8 @@ def start_cluster_test(request: Any, client_id: str):
             "gerrit_change_id": request.gerrit_change_id,
             "gerrit_patchset": request.gerrit_patchset,
             "redmine_issue_id": request.redmine_issue_id,
+            **{key: getattr(request, key) for key in ('shard_count', 'preparations', 'queue_timeout_seconds',
+                'execution_timeout_seconds', 'output_idle_timeout_seconds') if getattr(request, key, None)},
         })
         try:
             with repository.job_request_guard(owner_id, request.automation_run_id):
@@ -248,6 +250,10 @@ def _start_cluster_test_guarded(
     # argv 只能从 ExecutionSpec 派生：这里与 API 路径共用同一个 builder，
     # 避免 workflow 与 features.cluster.execution_spec 出现两套拼装逻辑
     # （spec 校验更新后 workflow 被遗忘、Automation 绕过校验）。
+    if (getattr(request, 'preparations', None) or getattr(request, 'shard_count', 0)) and not (
+        (repository.get_worker(request.worker_id) or {}).get('capabilities') or {}
+    ).get('execution_options_v1'):
+        return ApiError.conflict('Update the Worker Agent before using preparations or explicit sharding').to_response()
     execution_spec = {
         "test_type": (request.test_type or selected_suite["suite_type"]).lower(),
         "suite_path": tools_path,
@@ -258,6 +264,8 @@ def _start_cluster_test_guarded(
         "local_server": request.local_server,
         "no_retry": False,
         "copy_remote": False,
+        **{key: getattr(request, key) for key in ('shard_count', 'preparations', 'queue_timeout_seconds',
+            'execution_timeout_seconds', 'output_idle_timeout_seconds') if getattr(request, key, None)},
     }
     try:
         cmd_parts = build_argv_from_spec(execution_spec)

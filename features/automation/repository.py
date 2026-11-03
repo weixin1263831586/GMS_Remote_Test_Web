@@ -14,6 +14,11 @@ from features.automation.models import (
     utc_now_iso,
     validate_run_transition,
 )
+from features.automation.run_history import (
+    decorate_run_summary,
+    encode_run_cursor,
+    history_predicate,
+)
 
 
 RUN_COLUMNS = [
@@ -23,10 +28,12 @@ RUN_COLUMNS = [
     "status", "current_stage", "jenkins_job", "jenkins_queue_url", "jenkins_build_number",
     "jenkins_build_url", "artifact_url", "artifact_path", "build_artifact_id",
     "worker_id", "device_reservation_id", "flash_stage_id", "flash_command_id",
+    "aoa_command_id",
     "cluster_job_id", "attempt_id", "devices_json", "test_plan_json",
     "report_timestamp", "report_id", "result_json", "error",
     "created_at", "updated_at", "started_at", "finished_at", "lease_owner",
-    "lease_expires_at", "granted_capabilities",
+    "lease_expires_at", "granted_capabilities", "retry_of_run_id", "test_summary_json",
+    "retry_root_run_id", "retry_index", "retry_limit", "not_before", "followup_state", "plan_id", "plan_batch_id", "created_by_username",
 ]
 
 RUN_SUMMARY_COLUMNS = [
@@ -37,7 +44,8 @@ RUN_SUMMARY_COLUMNS = [
     "artifact_path", "build_artifact_id", "worker_id", "device_reservation_id",
     "flash_command_id", "cluster_job_id", "attempt_id", "devices_json",
     "report_timestamp", "report_id", "error",
-    "created_at", "updated_at", "started_at", "finished_at",
+    "created_at", "updated_at", "started_at", "finished_at", "retry_of_run_id", "test_summary_json",
+    "retry_root_run_id", "retry_index", "retry_limit", "not_before", "plan_id", "plan_batch_id",
 ]
 
 
@@ -109,6 +117,7 @@ class AutomationStore:
                     device_reservation_id TEXT NOT NULL DEFAULT '',
                     flash_stage_id TEXT NOT NULL DEFAULT '',
                     flash_command_id TEXT NOT NULL DEFAULT '',
+                    aoa_command_id TEXT NOT NULL DEFAULT '',
                     cluster_job_id TEXT NOT NULL DEFAULT '',
                     attempt_id TEXT NOT NULL DEFAULT '',
                     devices_json TEXT NOT NULL,
@@ -134,6 +143,7 @@ class AutomationStore:
                 "device_reservation_id": "TEXT NOT NULL DEFAULT ''",
                 "flash_stage_id": "TEXT NOT NULL DEFAULT ''",
                 "flash_command_id": "TEXT NOT NULL DEFAULT ''",
+                "aoa_command_id": "TEXT NOT NULL DEFAULT ''",
                 "cluster_job_id": "TEXT NOT NULL DEFAULT ''",
                 "attempt_id": "TEXT NOT NULL DEFAULT ''",
                 "report_id": "TEXT NOT NULL DEFAULT ''",
@@ -144,9 +154,23 @@ class AutomationStore:
                 "recovery_count": "INTEGER NOT NULL DEFAULT 0",
                 "last_recovered_at": "TEXT NOT NULL DEFAULT ''",
                 "granted_capabilities": "TEXT NOT NULL DEFAULT ''",
+                "retry_of_run_id": "TEXT NOT NULL DEFAULT ''",
+                "test_summary_json": "TEXT NOT NULL DEFAULT '{}'",
+                "retry_root_run_id": "TEXT NOT NULL DEFAULT ''",
+                "retry_index": "INTEGER NOT NULL DEFAULT 0",
+                "retry_limit": "INTEGER NOT NULL DEFAULT 0",
+                "not_before": "TEXT NOT NULL DEFAULT ''",
+                "followup_state": "TEXT NOT NULL DEFAULT ''",
+                "plan_id": "TEXT NOT NULL DEFAULT ''",
+                "plan_batch_id": "TEXT NOT NULL DEFAULT ''",
+                "created_by_username": "TEXT NOT NULL DEFAULT ''",
             }.items():
                 self._ensure_column(conn, "automation_runs", column, definition)
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_runs_source_key ON automation_runs(source_key) WHERE source_key != ''")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_automation_runs_history ON automation_runs(created_by, created_at DESC, id DESC)")
+            from .plan_store import initialize_plan_schema
+
+            initialize_plan_schema(conn)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS automation_run_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -297,6 +321,28 @@ class AutomationStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_run_page(self, *, limit: int = 50, **filters: Any) -> dict[str, Any]:
+        """Filter before limiting; cursor order stays stable when new runs arrive."""
+        limit = max(1, min(int(limit), 500))
+        where_sql, params = history_predicate(**filters)
+        plan = "CASE WHEN json_valid(test_plan_json) THEN test_plan_json ELSE '{}' END"
+        columns = ', '.join(RUN_SUMMARY_COLUMNS)
+        columns += ', ' + ', '.join(
+            f"json_extract({plan}, '$.{key}') AS {key}"
+            for key in ('test_type', 'test_suite', 'test_module')
+        )
+        with self._connect() as conn:
+            rows = conn.execute(
+                f'SELECT {columns} FROM automation_runs{where_sql} '
+                'ORDER BY created_at DESC, id DESC LIMIT ?', [*params, limit + 1],
+            ).fetchall()
+        has_more = len(rows) > limit
+        items = [decorate_run_summary(dict(row)) for row in rows[:limit]]
+        return {
+            'items': items, 'has_more': has_more,
+            'next_cursor': encode_run_cursor(items[-1]) if has_more else '',
+        }
+
     def update_run(self, run_id: str, **updates: Any) -> dict[str, Any]:
         # test seam: exercised only by tests (production path is update_run_if_status).
         allowed = set(RUN_COLUMNS) - {
@@ -353,10 +399,11 @@ class AutomationStore:
                 f"""
                 SELECT id,lease_owner FROM automation_runs
                 WHERE status NOT IN ({placeholders})
+                  AND (not_before='' OR not_before <= ?)
                   AND (lease_owner='' OR lease_expires_at='' OR lease_expires_at < ?)
                 ORDER BY updated_at ASC, created_at ASC, id ASC LIMIT 1
                 """,
-                [*terminal, now],
+                [*terminal, now, now],
             ).fetchone()
             if row is None:
                 return None
@@ -397,9 +444,10 @@ class AutomationStore:
                 """UPDATE automation_runs SET lease_owner=?,lease_expires_at=?,
                           recovery_count=recovery_count+?,
                           last_recovered_at=CASE WHEN ? THEN ? ELSE last_recovered_at END
-                   WHERE id=? AND (lease_owner='' OR lease_owner=? OR lease_expires_at='' OR lease_expires_at < ?)""",
+                   WHERE id=? AND (lease_owner='' OR lease_owner=? OR lease_expires_at='' OR lease_expires_at < ?)
+                     AND (not_before='' OR not_before <= ?)""",
                 (owner, self._lease_expiry(lease_seconds), 1 if recovered else 0,
-                 1 if recovered else 0, now, run_id, owner, now),
+                 1 if recovered else 0, now, run_id, owner, now, now),
             )
         if cursor.rowcount == 1 and recovered:
             self.append_event(

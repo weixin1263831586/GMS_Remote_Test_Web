@@ -1,3 +1,4 @@
+from .access import can_access_report, filter_accessible_reports
 from .analysis_agent import ReportAnalysisAgent
 from .analyzer import ReportAnalyzer
 from .api import diagnose_report_failure
@@ -21,7 +22,9 @@ __all__ = [
     "ReportDiagnosisRequest",
     "TestReportManager",
     "XMLReportParser",
+    "can_access_report",
     "diagnose_report_failure",
+    "filter_accessible_reports",
     "report_client_display_id",
     "report_name_from_result_dir",
     "resolve_redmine_knowledge_service",

@@ -271,6 +271,10 @@ def _create_job(body: ClusterJobCreate, request: Request, receipt: dict):
             worker_id=data["worker_id"],
         )
         data["argv"] = build_argv_from_spec(data["execution_spec"])
+        if (data['execution_spec'].get('preparations') or data['execution_spec'].get('shard_count')) and not (
+            (service().repository.get_worker(data['worker_id']) or {}).get('capabilities') or {}
+        ).get('execution_options_v1'):
+            raise ApiError.conflict('Update the Worker Agent before using preparations or explicit sharding')
     else:
         (
             data["argv"],

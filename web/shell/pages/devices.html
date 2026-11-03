@@ -1,20 +1,25 @@
 <div class="container page-content" id="page-devices">
-            <div style="position: relative; margin-bottom: 6px;">
+            <div style="position: relative; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 30px;">
                 <div class="section-title" style="margin: 0;">📱 设备管理</div>
-                <div class="device-group-toolbar" style="position: absolute; top: -4px; right: 0;">
-                    <button class="btn-xxs" data-click="openCreateGroupModal" title="新建分组">➕ 新建分组</button>
-                    <select class="btn-xxs" data-change="autoGroupAndReset" data-r0="value" title="按属性自动分组">
-                        <option value="">⊞ 自动分组…</option>
-                        <option value="worker" data-cluster-mode-only>按主机分组</option>
-                        <option value="model">按设备型号</option>
-                        <option value="android_version">按Android版本</option>
-                        <option value="soc">按SOC系列</option>
-                    </select>
-                    <select class="btn-xxs" id="device-group-filter" data-change="onGroupFilterChange" title="按组筛选" style="width:150px;max-width:160px;box-sizing:border-box;">
-                        <option value="">全部设备</option>
-                    </select>
+                <div id="devices-view-tabs" role="tablist" aria-label="设备管理视图" style="display: flex; align-items: center; gap: 8px;">
+                    <div class="device-group-toolbar" id="device-group-toolbar" style="display: flex; align-items: center; gap: 6px;">
+                        <button class="btn-xxs" data-click="openCreateGroupModal" title="新建分组">➕ 新建分组</button>
+                        <select class="btn-xxs" data-change="autoGroupAndReset" data-r0="value" title="按属性自动分组">
+                            <option value="">⊞ 自动分组…</option>
+                            <option value="worker" data-cluster-mode-only>按主机分组</option>
+                            <option value="model">按设备型号</option>
+                            <option value="android_version">按Android版本</option>
+                            <option value="soc">按SOC系列</option>
+                        </select>
+                        <select class="btn-xxs" id="device-group-filter" data-change="onGroupFilterChange" title="按组筛选" style="width:150px;max-width:160px;box-sizing:border-box;">
+                            <option value="">全部设备</option>
+                        </select>
+                    </div>
+                    <button id="devices-list-tab" class="btn-xs active" type="button" role="tab" aria-selected="true" data-click="aoaViewToggle" data-a0="false">设备列表</button>
+                    <button id="aoa-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="aoaViewToggle" data-a0="true">🔁 AOA 自动恢复</button>
                 </div>
             </div>
+            <div id="devices-main-view">
             <div id="devices-scope-hint" style="color:var(--text-secondary);font-size:12px;"></div>
 
             <!-- 设备统计卡片 -->
@@ -85,5 +90,116 @@
                         </tr>
                     </tbody>
                 </table>
+            </div>
+            </div>
+
+            <!-- 三列 AOA 工作台：投屏操作 → 录制/配置 → 等价命令。 -->
+            <div id="aoa-panel" hidden>
+                <div class="aoa-workbench-header">
+                    <div>
+                        <div class="aoa-workbench-title">🔁 AOA 自动恢复</div>
+                        <div class="aoa-muted">在 userdebug 设备上操作并录制，保存后可在同机型 user 固件上通过 USB AOAv2 回放，无 ADB 依赖。</div>
+                    </div>
+                    <span id="aoa-run-status" class="aoa-status-pill">待机</span>
+                </div>
+
+                <div class="aoa-workbench-grid">
+                    <section class="aoa-column aoa-screen-column" aria-labelledby="aoa-screen-heading">
+                        <div class="aoa-column-heading">
+                            <div><strong id="aoa-screen-heading">① 设备投屏</strong><span>录制机 UI 操作</span></div>
+                            <div class="aoa-screen-actions">
+                                <button class="btn-xxs" id="aoa-toggle-live" type="button" data-click="aoaToggleLiveScreen" data-aoa-screen-action>▶ 实时投屏</button>
+                                <button class="btn-xxs" type="button" data-click="aoaRefreshScreen" data-aoa-screen-action>刷新</button>
+                            </div>
+                        </div>
+                        <div class="aoa-device-selectors">
+                            <label>Worker<select id="aoa-record-worker" class="btn-xxs" data-change="aoaRecorderWorkerChanged"></select></label>
+                            <label>录制设备<select id="aoa-record-device" class="btn-xxs" data-change="aoaRecorderDeviceChanged"></select></label>
+                        </div>
+                        <div id="aoa-screen-status" class="aoa-screen-status">选择录制设备后将自动连接实时投屏</div>
+                        <div id="aoa-screen-stage" class="aoa-screen-stage">
+                            <canvas id="aoa-screen-canvas" class="aoa-screen-canvas" hidden></canvas>
+                            <img id="aoa-screen-image" alt="" draggable="false" hidden>
+                            <div id="aoa-screen-empty" class="aoa-screen-empty">
+                                <strong>选择录制设备后将自动连接实时投屏</strong>
+                                <span>画面约 30fps；点按/拖动即录制 AOA 命令</span>
+                                <span class="aoa-screen-hint">流不可用时自动回退截图模式（约 1 秒刷新）</span>
+                            </div>
+                            <div id="aoa-gesture-line" class="aoa-gesture-line" hidden></div>
+                        </div>
+                        <div class="aoa-screen-toolbar">
+                            <button class="btn-xxs" type="button" data-click="aoaSendKey" data-r0="dataset.key" data-key="back" data-aoa-screen-action>← Back</button>
+                            <button class="btn-xxs" type="button" data-click="aoaSendKey" data-r0="dataset.key" data-key="home" data-aoa-screen-action>⌂ Home</button>
+                            <button class="btn-xxs" type="button" data-click="aoaSendKey" data-r0="dataset.key" data-key="wake" data-aoa-screen-action>⏻ Wake</button>
+                            <button class="btn-xxs" type="button" data-click="aoaCalibrateTouch" data-aoa-screen-action>触摸标定</button>
+                        </div>
+                        <div class="aoa-text-input">
+                            <input id="aoa-input-text" type="text" maxlength="128" placeholder="输入英文、数字或 @ - _ . +">
+                            <button class="btn-xxs" type="button" data-click="aoaSendText" data-aoa-screen-action>输入</button>
+                        </div>
+                        <div class="aoa-muted">单击投屏执行点按；按住约 0.7 秒为长按；拖动执行滑动。标定会切换一次 USB 模式并点击屏幕中心，仅在安全页面操作。</div>
+                    </section>
+
+                    <section class="aoa-column" aria-labelledby="aoa-config-heading">
+                        <div class="aoa-column-heading">
+                            <div><strong id="aoa-config-heading">② AOA 录制 / 配置</strong><span id="aoa-record-state">尚未录制</span></div>
+                            <div class="aoa-inline-actions">
+                                <button id="aoa-record-start" class="btn-xxs btn-primary" type="button" data-click="aoaRecordingStart">开始录制</button>
+                                <button id="aoa-record-stop" class="btn-xxs" type="button" data-click="aoaRecordingStop" disabled>停止</button>
+                            </div>
+                        </div>
+                        <div class="aoa-form-grid">
+                            <label>配置名称<input id="aoa-profile-name" type="text" maxlength="120" placeholder="例如：RK3562 Android 16 开启 USB 调试"></label>
+                            <label>ADB 等待(秒)<input id="aoa-replay-wait" type="number" min="1" max="600" value="60"></label>
+                        </div>
+                        <div class="aoa-inline-actions aoa-save-row">
+                            <button class="btn-xs btn-primary" type="button" data-click="aoaSaveRecording">保存当前命令</button>
+                            <button class="btn-xs" type="button" data-click="aoaLoadSelectedProfile">载入选中配置</button>
+                        </div>
+                        <label class="aoa-field">已保存配置
+                            <select id="aoa-replay-profile" class="btn-xxs" data-change="aoaProfileSelectionChanged"></select>
+                        </label>
+                        <div id="aoa-profile-summary" class="aoa-profile-summary">暂无配置</div>
+                        <div class="aoa-inline-actions">
+                            <button class="btn-xxs" type="button" data-click="aoaProfileDeleteSelected">删除配置</button>
+                        </div>
+
+                        <div class="aoa-divider"></div>
+                        <div class="aoa-subheading">目标设备回放</div>
+                        <div class="aoa-device-selectors">
+                            <label>Worker<select id="aoa-replay-worker" class="btn-xxs" data-change="aoaReplayWorkerChanged"></select></label>
+                            <label>目标设备<select id="aoa-replay-device" class="btn-xxs"></select></label>
+                        </div>
+                        <div class="aoa-inline-actions aoa-replay-actions">
+                            <button class="btn-xs" type="button" data-click="aoaProbeStart" data-aoa-run>探测 AOA</button>
+                            <button class="btn-xs btn-primary" type="button" data-click="aoaReplaySelected" data-aoa-run>回放选中配置</button>
+                        </div>
+                        <div class="aoa-muted">回放期间 ADB 会断开；若恢复后显示 unauthorized，请在设备上确认“允许 USB 调试”。</div>
+                        <div id="aoa-result" class="aoa-result" hidden></div>
+                    </section>
+
+                    <section class="aoa-column aoa-command-column" aria-labelledby="aoa-command-heading">
+                        <div class="aoa-column-heading">
+                            <div><strong id="aoa-command-heading">③ UI 操作对应命令</strong><span><b id="aoa-command-count">0</b> / 64 条</span></div>
+                            <div class="aoa-inline-actions">
+                                <button class="btn-xxs" type="button" data-click="aoaCommandUndo">撤销</button>
+                                <button class="btn-xxs" type="button" data-click="aoaCommandsClear">清空</button>
+                            </div>
+                        </div>
+                        <ol id="aoa-command-list" class="aoa-command-list">
+                            <li class="aoa-command-empty">开始录制后，在左侧操作设备 UI</li>
+                        </ol>
+                        <div class="aoa-command-add">
+                            <input id="aoa-command-input" type="text" placeholder="例如：sleep 1000 / key TAB ENTER">
+                            <button class="btn-xxs" type="button" data-click="aoaCommandAdd">添加</button>
+                        </div>
+                        <div class="aoa-inline-actions aoa-command-file-actions">
+                            <button class="btn-xxs" type="button" data-click="aoaCommandsImport">导入</button>
+                            <button class="btn-xxs" type="button" data-click="aoaCommandsExport">导出 JSON</button>
+                        </div>
+                        <input id="aoa-command-file" type="file" accept="application/json,.json" hidden>
+                        <div id="aoa-calibration-status" class="aoa-calibration-status">触摸映射：未标定，使用显示分辨率按轴换算</div>
+                    </section>
+                </div>
             </div>
         </div>
