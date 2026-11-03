@@ -22,12 +22,14 @@ class ClusterPortConfigureSemanticsTests(unittest.TestCase):
             cluster_port._cluster_service_provider,
             cluster_port._cancel_job,
             cluster_port._worker_tokens,
+            cluster_port._device_action_request,
         )
         self.addCleanup(
             cluster_port.configure_cluster_access,
             service_provider=saved[0],
             cancel_job=saved[1],
             worker_tokens=saved[2],
+            device_action_request=saved[3],
         )
 
     def test_omitted_arguments_keep_current_registration(self):
@@ -51,6 +53,16 @@ class ClusterPortConfigureSemanticsTests(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
             cluster_port.get_cluster_service()
+
+    def test_device_action_request_is_late_bound(self):
+        submit = MagicMock(return_value="pending")
+        cluster_port.configure_cluster_access(device_action_request=submit)
+
+        self.assertEqual(
+            cluster_port.submit_device_action("request", {"action": "aoa_probe"}),
+            "pending",
+        )
+        submit.assert_called_once_with("request", {"action": "aoa_probe"})
 
 
 class AutomationPortConfigureSemanticsTests(unittest.TestCase):

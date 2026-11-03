@@ -12,6 +12,8 @@ from __future__ import annotations
 import os
 import re
 
+from foundation.test_execution_options import validate_execution_options
+
 
 _VALID_TEST_TYPES = {"cts", "gsi", "gts", "gts-root", "sts", "vts", "apts"}
 _SUITE_TEST_TYPES = {
@@ -81,6 +83,10 @@ def canonicalize_execution_spec(
         )
     canonical["suite_path"] = suite_path
     canonical["devices"] = leased_serials
+    try:
+        canonical.update(validate_execution_options(canonical, device_count=len(leased_serials)))
+    except ValueError as exc:
+        raise ExecutionSpecError(400, str(exc)) from exc
     return canonical
 
 
@@ -126,8 +132,13 @@ def build_argv_from_spec(spec: dict) -> list[str]:
     if not serials:
         raise ExecutionSpecError(400, "execution_spec requires at least one device")
     device_args: list[str] = []
-    if len(serials) > 1:
-        device_args.extend(["--shard-count", str(len(serials))])
+    try:
+        options = validate_execution_options(spec, device_count=len(serials))
+    except ValueError as exc:
+        raise ExecutionSpecError(400, str(exc)) from exc
+    shard_count = options['shard_count'] or len(serials)
+    if shard_count > 1:
+        device_args.extend(["--shard-count", str(shard_count)])
     for serial in serials:
         device_args.extend(["-s", serial])
     cmd_parts.extend(["--device-args", " ".join(device_args), "--test-suite", suite_path])

@@ -389,6 +389,49 @@ class ClusterApiHardeningTests(ClusterApiHardeningFixture, unittest.TestCase):
         self.assertTrue(response.json()["accepted"])
         self.assertNotIn("devices.use_leased", response.text)
 
+    def test_aoa_recovery_accepts_adb_offline_but_recording_does_not(self):
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1", "running_jobs": [], "suites": [],
+            "devices": [{"serial": "ABC", "state": "offline", "transport": "local_usb"}],
+        })
+        with patch("features.cluster.device_actions_api.device_action_wait_steps", return_value=0):
+            recovered = self.client.post("/api/cluster/devices/actions", json={
+                "worker_id": "worker-246", "devices": ["ABC"],
+                "action": "aoa_sequence", "aoa_commands": ["home"],
+            })
+        self.assertEqual(recovered.status_code, 200, recovered.text)
+        command = self.repo.get_command(recovered.json()["command_id"])
+        self.assertTrue(command["payload"]["lease_tokens"])
+        recording = self.client.post("/api/cluster/devices/actions", json={
+            "worker_id": "worker-246", "devices": ["ABC"], "action": "aoa_record_input",
+            "aoa_record": {"action": "home"},
+        })
+        self.assertEqual(recording.status_code, 409)
+
+    def test_automation_replay_deduplicates_remote_command(self):
+        """automation_run_id 重放：收敛到既有命令，不二次派发。"""
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1", "running_jobs": [], "suites": [],
+            "devices": [{"serial": "ABC", "state": "offline", "transport": "local_usb"}],
+        })
+        payload = {
+            "worker_id": "worker-246", "devices": ["ABC"],
+            "action": "aoa_sequence", "aoa_commands": ["home"],
+            "automation_run_id": "run-aoa-1",
+        }
+        with patch("features.cluster.device_actions_api.device_action_wait_steps", return_value=0):
+            first = self.client.post("/api/cluster/devices/actions", json=payload)
+            second = self.client.post("/api/cluster/devices/actions", json=payload)
+
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(first.json()["command_id"], second.json()["command_id"])
+        self.assertTrue(second.json()["deduplicated"])
+        command = self.repo.get_command(first.json()["command_id"])
+        self.assertEqual(command["operation_id"], "automation:run-aoa-1:aoa_sequence")
+        # 幂等键只用于 Controller 侧去重，不进入 Worker 执行 payload。
+        self.assertNotIn("automation_run_id", command["payload"])
+
     def test_adb_proxy_device_rejects_fastboot_and_flashing_actions(self):
         self.repo.heartbeat("worker-246", {
             "agent_version": "1",

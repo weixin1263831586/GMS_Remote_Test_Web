@@ -2,11 +2,60 @@ import threading
 import time
 from unittest.mock import patch
 
+import pytest
+
+from worker_agent import device_actions
 from worker_agent.device_actions import (
     _DEVICE_DETAILS_CACHE,
     _details_refresh_at,
+    _probe_usb_only_devices,
 )
 from worker_agent.inventory import probe_devices
+
+
+@pytest.fixture(autouse=True)
+def _isolate_host_usb_inventory(monkeypatch):
+    """Inventory unit tests must never depend on or enumerate the host's USB."""
+    monkeypatch.setattr(device_actions, "_probe_usb_only_devices", lambda _known: [])
+
+
+def test_usb_only_android_device_remains_available_for_aoa(tmp_path):
+    device = tmp_path / "1-6"
+    interface = tmp_path / "1-6:1.0"
+    device.mkdir()
+    interface.mkdir()
+    (device / "serial").write_text("USB-OFF-1\n")
+    (device / "idVendor").write_text("2207\n")
+    (device / "idProduct").write_text("0006\n")
+    (interface / "bInterfaceClass").write_text("ff\n")
+
+    devices = _probe_usb_only_devices(set(), tmp_path)
+
+    assert devices == [{
+        "serial": "USB-OFF-1",
+        "transport": "local_usb",
+        "state": "usb_only",
+        "properties": {
+            "usb": "1-6",
+            "usb_vendor_id": "2207",
+            "usb_product_id": "0006",
+            "aoa_recovery_candidate": "true",
+        },
+    }]
+    assert _probe_usb_only_devices({"USB-OFF-1"}, tmp_path) == []
+
+
+def test_usb_only_inventory_ignores_non_android_usb_device(tmp_path):
+    device = tmp_path / "2-1"
+    interface = tmp_path / "2-1:1.0"
+    device.mkdir()
+    interface.mkdir()
+    (device / "serial").write_text("STORAGE-1\n")
+    (device / "idVendor").write_text("abcd\n")
+    (device / "idProduct").write_text("1234\n")
+    (interface / "bInterfaceClass").write_text("08\n")
+
+    assert _probe_usb_only_devices(set(), tmp_path) == []
 
 
 def test_detailed_probe_serves_from_cache_and_enriches_in_background():
@@ -31,6 +80,9 @@ def test_detailed_probe_serves_from_cache_and_enriches_in_background():
             return (
                 "__MODEL__\nLiving Room Box\n"
                 "__ANDROID__\n14\n"
+                "__VARIANT__\nrk3588_box\n"
+                "__BUILD_ID__\nAP2A\n"
+                "__BOARD__\nrk3588\n"
                 "__BATTERY__\n  level: 82\n"
                 "__SOC__\nRK3588S\n"
             )
@@ -71,6 +123,9 @@ def test_detailed_probe_serves_from_cache_and_enriches_in_background():
             devices = probe_devices(include_details=True)
         assert devices[0]["properties"]["soc_model"] == "RK3588S"
         assert devices[0]["properties"]["battery_level"] == "82"
+        assert devices[0]["properties"]["variant"] == "rk3588_box"
+        assert devices[0]["properties"]["build_id"] == "AP2A"
+        assert devices[0]["properties"]["board"] == "rk3588"
     finally:
         _DEVICE_DETAILS_CACHE.pop("ABC", None)
         _details_refresh_at.pop("ABC", None)

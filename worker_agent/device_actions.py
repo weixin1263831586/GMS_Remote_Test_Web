@@ -89,12 +89,18 @@ def _probe_device_details_uncached(
         "adb", "-s", serial, "shell",
         "echo __MODEL__; getprop ro.product.model; "
         "echo __ANDROID__; getprop ro.build.version.release; "
+        "echo __VARIANT__; getprop ro.product.device; "
+        "echo __BUILD_ID__; getprop ro.build.id; "
+        "echo __BOARD__; getprop ro.product.board; "
         "echo __BATTERY__; dumpsys battery | grep '^  level:' | head -n 1; "
         "echo __SOC__; getprop ro.soc.model",
     ], timeout=3, env=_adb_environment(adb_server_socket))
     markers = {
         "__MODEL__": "model",
         "__ANDROID__": "android_version",
+        "__VARIANT__": "variant",
+        "__BUILD_ID__": "build_id",
+        "__BOARD__": "board",
         "__BATTERY__": "battery_level",
         "__SOC__": "soc_model",
     }
@@ -207,6 +213,57 @@ def _probe_device_details(
     return {}
 
 
+def _probe_usb_only_devices(
+    known_serials: set[str],
+    sysfs_root: Path = Path("/sys/bus/usb/devices"),
+) -> list[dict[str, Any]]:
+    """Discover Android-class USB devices that are not currently in ADB.
+
+    AOA exists specifically for the USB-debugging-off state, so an ADB-only
+    inventory would make the target disappear before recovery can start.
+    Limit discovery to devices with a serial and a vendor-specific interface;
+    ordinary hubs, keyboards and storage devices are not exposed.
+    """
+    discovered: list[dict[str, Any]] = []
+    try:
+        candidates = list(sysfs_root.iterdir())
+    except OSError:
+        return discovered
+    for device_path in candidates:
+        if ":" in device_path.name or "-" not in device_path.name:
+            continue
+        try:
+            serial = (device_path / "serial").read_text().strip()
+            vendor = (device_path / "idVendor").read_text().strip().lower()
+            product = (device_path / "idProduct").read_text().strip().lower()
+        except OSError:
+            continue
+        if not serial or serial in known_serials:
+            continue
+        try:
+            vendor_specific = any(
+                (interface / "bInterfaceClass").read_text().strip().lower() == "ff"
+                for interface in sysfs_root.glob(f"{device_path.name}:*")
+                if (interface / "bInterfaceClass").is_file()
+            )
+        except OSError:
+            vendor_specific = False
+        if not vendor_specific and vendor not in {"18d1", "2207"}:
+            continue
+        discovered.append({
+            "serial": serial,
+            "transport": "local_usb",
+            "state": "usb_only",
+            "properties": {
+                "usb": device_path.name,
+                "usb_vendor_id": vendor,
+                "usb_product_id": product,
+                "aoa_recovery_candidate": "true",
+            },
+        })
+    return discovered
+
+
 def probe_devices(
     include_details: bool = False,
     adb_server_socket: str | None = None,
@@ -273,6 +330,10 @@ def probe_devices(
         if serial and serial not in known:
             devices.append({"serial": serial, "transport": "local_usb",
                             "state": "fastboot", "properties": {}})
+            known.add(serial)
+    # USB 调试关闭的 Android 设备不会出现在 ``adb devices``，但必须继续
+    # 出现在 Worker 心跳里，才能从 Web 选择它并发起无 ADB 的 AOA 回放。
+    devices.extend(_probe_usb_only_devices(known))
     return devices
 
 
@@ -442,6 +503,42 @@ def execute_device_action(action: str, device_ids: list[str], options: dict[str,
                     "bounds": attrs.get("bounds", ""), "interactions": interactions,
                     "enabled": attrs.get("enabled", "true") == "true"})
         return {"serial": serial, "source": "worker-uiautomator", "elements": elements}
+    if action in ("aoa_probe", "aoa_sequence", "aoa_record", "aoa_record_input"):
+        # AOA 走 Worker 本地 USB（libusb），无需 ADB：user build 烧写后
+        # ADB 关闭时的 UI 注入通道。命令序列白名单校验在 aoa_profile。
+        # aoa_record 例外：在 userdebug 设备（ADB 可用）上经 ADB 录制。
+        if len(serials) != 1:
+            raise ValueError(f"{action} requires exactly one device")
+        from .aoa_actions import (
+            AoaError,
+            probe_aoa,
+            record_aoa_input,
+            record_aoa_profile,
+            run_aoa_sequence,
+        )
+
+        try:
+            if action == "aoa_probe":
+                return probe_aoa(serials[0])
+            if action == "aoa_record":
+                options_payload = options.get("aoa_record") or {}
+                return record_aoa_profile(
+                    serials[0],
+                    list(options_payload.get("steps") or []),
+                    setup_wizard=bool(options_payload.get("setup_wizard")),
+                    tv=bool(options_payload.get("tv")),
+                    calibrate_touch=options_payload.get("calibrate_touch", False),
+                )
+            if action == "aoa_record_input":
+                return record_aoa_input(
+                    serials[0], dict(options.get("aoa_record") or {}))
+            return run_aoa_sequence(
+                serials[0],
+                [str(item) for item in options.get("aoa_commands") or []],
+                int(options.get("wait_adb_seconds") or 0),
+            )
+        except AoaError as exc:
+            raise RuntimeError(str(exc)) from exc
     if action == "tap":
         if len(serials) != 1 or options.get("x") is None or options.get("y") is None:
             raise ValueError("tap requires one device and coordinates")

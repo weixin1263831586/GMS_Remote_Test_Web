@@ -21,6 +21,11 @@ class TestStartRequest(BaseModel):
     gerrit_change_id: str = ""
     gerrit_patchset: str = ""
     redmine_issue_id: str = ""
+    shard_count: int = Field(default=0, ge=0, le=32, strict=True)
+    preparations: list[str] = Field(default_factory=list, max_length=8)
+    queue_timeout_seconds: int = Field(default=0, ge=0, le=604800, strict=True)
+    execution_timeout_seconds: int = Field(default=0, ge=0, le=604800, strict=True)
+    output_idle_timeout_seconds: int = Field(default=0, ge=0, le=86400, strict=True)
 
 
 class TestParseArgsRequest(BaseModel):

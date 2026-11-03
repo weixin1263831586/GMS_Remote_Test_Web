@@ -32,10 +32,13 @@ from foundation.config_paths import automation_profiles_path
 from foundation.error_model import ApiError
 from foundation.responses import error_response
 
+from .plan_api import router as plans_router
 from .profiles import mask_profile_secrets
+from .run_history import decorate_run_summary, run_configuration
 
 
 router = APIRouter(prefix='/api/automation')
+router.include_router(plans_router)
 page_router = APIRouter()
 
 
@@ -115,7 +118,7 @@ def automation_ui_asset(ui_asset: str):
         'page.js', 'state.js', 'workflow.js', 'devices.js',
         'build-config.js', 'build-jobs.js', 'events.js', 'runs.js',
         'run-launch.js', 'run-actions.js', 'runs-payload.js', 'trace.js',
-        'patch-utils.js', 'view-restore.js',
+        'patch-utils.js', 'view-restore.js', 'plans.js', 'resources.js',
     }:
         # 与 redmine/gerrit 资产路由同语义（foundation.error_model 统一
         # envelope），不用裸 HTTPException。
@@ -230,17 +233,27 @@ async def list_automation_runs(
     request: Request,
     status: str = Query(''),
     limit: int = Query(50, ge=1, le=500),
+    query: str = '',
+    profile_id: str = '',
+    worker_id: str = '',
+    outcome: str = '',
+    reports_only: bool = False,
+    cursor: str = '',
 ):
     owner, see_all = _request_owner(request)
+    if len(query) > 256 or len(profile_id) > 256 or len(worker_id) > 256:
+        raise ApiError.malformed_request('Run filter exceeds 256 characters')
+    try:
+        page = automation_service.list_run_page(
+            status=status, limit=limit, created_by='' if see_all else owner,
+            query=query.strip(), profile_id=profile_id, worker_id=worker_id,
+            outcome=outcome, reports_only=reports_only, cursor=cursor,
+        )
+    except ValueError as exc:
+        raise ApiError.malformed_request(str(exc)) from exc
     return {
         'success': True,
-        'data': {
-            'items': automation_service.list_run_summaries(
-                status=status,
-                limit=limit,
-                created_by='' if see_all else owner,
-            )
-        },
+        'data': page,
     }
 
 
@@ -397,6 +410,15 @@ async def get_automation_run_trace(
             'last_recovered_at': run.get('last_recovered_at', ''),
             'profile_id': run['profile_id'],
             'status': run['status'],
+            'retry_of_run_id': run.get('retry_of_run_id') or '',
+            'retry_root_run_id': run.get('retry_root_run_id') or '',
+            'retry_index': run.get('retry_index') or 0,
+            'retry_limit': run.get('retry_limit') or 0,
+            'plan_batch_id': run.get('plan_batch_id') or '',
+            'test_summary': decorate_run_summary({
+                'test_summary_json': run.get('test_summary_json') or '{}',
+            })['test_summary'],
+            'test_configuration': run_configuration(run),
             'build_job_id': build_job_id,
             'build_job': build_job,
             'artifact_path': run.get('artifact_path') or '',
@@ -419,6 +441,21 @@ async def get_automation_run_trace(
             'result_summary': result_summary,
         },
     }
+
+
+@router.get('/runs/{run_id}/progress')
+def get_automation_run_progress(run_id: str, request: Request):
+    from .telemetry import run_progress
+
+    try:
+        run = _owned_run(run_id, request)
+    except AutomationNotFoundError as exc:
+        raise ApiError.not_found('Automation run not found') from exc
+    try:
+        cluster = get_cluster_service()
+    except RuntimeError as exc:
+        raise ApiError.dependency_unavailable('Cluster telemetry is unavailable') from exc
+    return {'success': True, 'data': run_progress(run, cluster)}
 
 
 @router.post('/runs/{run_id}/cancel')

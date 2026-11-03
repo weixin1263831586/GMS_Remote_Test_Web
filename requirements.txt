@@ -33,3 +33,7 @@ pyudev==0.24.4
 pyserial==3.5
 tomli==2.4.1; python_version < "3.11"
 tomli-w==1.2.0
+# pyusb：AOA（Android Open Accessory 2.0）执行器的 libusb 绑定，
+# 用于 user build 烧写后无 ADB 状态下的 UI 注入（46.txt；仅
+# worker_agent/aoa_actions.py 使用，运行时缺失时优雅降级为 AoaError）。
+pyusb==1.3.1

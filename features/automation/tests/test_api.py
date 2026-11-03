@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -16,6 +17,29 @@ from features.automation.profiles import save_profiles
 from features.automation.repository import AutomationStore
 from features.automation.service import AutomationService
 from tests.contract.snapshot_tools import read_page_bundle, read_shell_bundle
+
+
+@contextmanager
+def cluster_port_snapshot():
+    """create_app() 会向 foundation.cluster_port 注册进程级 provider。
+
+    不恢复快照会把真实 cluster 服务泄漏给同进程后续测试（如 devices
+    心跳分支读到真库），造成跨套件顺序依赖；这里在装配后还原注册态。
+    """
+    import foundation.cluster_port as port
+
+    names = (
+        '_cluster_service_provider', '_cancel_job', '_worker_tokens',
+        '_run_worker_command', '_require_worker_session',
+        '_require_cluster_enabled', '_authenticate_worker',
+        '_device_action_request',
+    )
+    saved = {name: getattr(port, name) for name in names}
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            setattr(port, name, value)
 
 
 def build_service(
@@ -242,7 +266,8 @@ class AutomationApiTests(unittest.TestCase):
 
     def test_router_is_registered(self):
         from tests.contract.snapshot_tools import flatten_app_routes
-        paths = {route.path for route in flatten_app_routes(create_app())}
+        with cluster_port_snapshot():
+            paths = {route.path for route in flatten_app_routes(create_app())}
         self.assertIn('/api/automation/runs', paths)
         self.assertIn('/api/automation/runs/preflight', paths)
         self.assertIn('/automation', paths)

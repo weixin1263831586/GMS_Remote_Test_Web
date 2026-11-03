@@ -63,6 +63,22 @@ _DEVICE_ACTION_SPECS: tuple[DeviceActionSpec, ...] = (
                      terminal_notification=True, inspection=True),
     # ---- 网络等配置类 ----
     DeviceActionSpec(action="wifi"),
+    # ---- AOA（无 ADB 的 UI 注入，user build 烧写后恢复 USB 调试）----
+    # aoa_probe 只读探测 AOAv2 协议版本；aoa_sequence 执行 HID 输入序列
+    # （可选等待 ADB 恢复，由 entries 携带 wait_adb_seconds）。两者都要求
+    # 本地 USB 通道；等待 ADB 需要更长窗口。
+    DeviceActionSpec(action="aoa_probe", read_only=True, forbidden_on_adb_proxy=True,
+                     wait_steps=350),
+    DeviceActionSpec(action="aoa_sequence", forbidden_on_adb_proxy=True,
+                     wait_steps=3200),
+    # aoa_record：在 userdebug 设备（ADB 可用）上录制 AOA 恢复旅程——
+    # uiautomator 定位真实元素、换算 AOA 逻辑坐标并产出等价命令序列。
+    DeviceActionSpec(action="aoa_record", forbidden_on_adb_proxy=True,
+                     wait_steps=3200),
+    # Web 交互录制：在 userdebug 录制机上执行一个 ADB 输入并返回等价
+    # AOA 命令。每步都经过设备 claim/fencing，不开放任意 shell。
+    DeviceActionSpec(action="aoa_record_input", forbidden_on_adb_proxy=True,
+                     wait_steps=500),
     # ---- UI 交互（即时返回，不通知）----
     DeviceActionSpec(action="tap"),
     DeviceActionSpec(action="scrcpy_start"),

@@ -1,0 +1,159 @@
+.aoa-workbench-header {
+    align-items: center;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.aoa-workbench-title { font-size: 15px; font-weight: 700; }
+.aoa-muted { color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+.aoa-status-pill {
+    background: color-mix(in srgb, var(--primary-color) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary-color) 35%, var(--border-color));
+    border-radius: 999px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    padding: 4px 9px;
+    white-space: nowrap;
+}
+
+.aoa-workbench-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: minmax(310px, 1.12fr) minmax(300px, .94fr) minmax(280px, .94fr);
+    min-height: 640px;
+}
+
+.aoa-column {
+    background: var(--light-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    min-width: 0;
+    padding: 10px;
+}
+
+.aoa-column-heading {
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    min-height: 36px;
+    padding-bottom: 8px;
+}
+.aoa-column-heading strong { display: block; font-size: 12px; }
+.aoa-column-heading span { color: var(--text-secondary); font-size: 10px; }
+.aoa-inline-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; }
+
+.aoa-device-selectors, .aoa-form-grid {
+    display: grid;
+    gap: 7px;
+    grid-template-columns: 1fr 1fr;
+}
+.aoa-column label, .aoa-field {
+    color: var(--text-secondary);
+    display: grid;
+    font-size: 10px;
+    gap: 3px;
+}
+.aoa-column select, .aoa-column input { box-sizing: border-box; min-width: 0; width: 100%; }
+.aoa-screen-status { color: var(--text-secondary); font-size: 11px; min-height: 16px; }
+.aoa-screen-stage {
+    align-items: center;
+    background: #111;
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    display: flex;
+    flex: 1;
+    justify-content: center;
+    min-height: 390px;
+    overflow: hidden;
+    position: relative;
+    touch-action: none;
+    user-select: none;
+}.aoa-screen-stage img, .aoa-screen-stage canvas.aoa-screen-canvas {
+    cursor: crosshair;
+    display: block;
+    height: auto;
+    max-height: 520px;
+    max-width: 100%;
+    object-fit: contain;
+    width: auto;
+}
+/* display:block 会覆盖 [hidden] 的 UA 隐藏样式：显式声明，保证投屏
+   区 img/canvas 的 hidden 切换（截图↔实时流↔空态）真正生效。 */
+.aoa-screen-stage img[hidden], .aoa-screen-stage canvas[hidden] {
+    display: none;
+}
+/* display:flex 同样覆盖 [hidden] 的 UA 隐藏样式：不显式声明则空态文案
+   与实时画面并排显示，把投屏挤到左侧（实机截图复现）。 */
+.aoa-screen-empty[hidden] { display: none; }
+.aoa-screen-actions { display: flex; gap: 4px; }
+.aoa-screen-empty {
+    align-items: center;
+    color: #aeb4bf;
+    display: flex;
+    flex-direction: column;
+    font-size: 12px;
+    gap: 6px;
+    padding: 20px;
+    text-align: center;
+}
+.aoa-screen-empty strong { color: #d6dae2; font-size: 13px; }
+.aoa-screen-empty .aoa-screen-hint { color: #7d838e; font-size: 11px; }
+.aoa-screen-empty { color: #aeb4bf; font-size: 12px; padding: 20px; text-align: center; }
+.aoa-gesture-line {
+    background: #42a5f5;
+    height: 2px;
+    left: 0;
+    pointer-events: none;
+    position: absolute;
+    top: 0;
+    transform-origin: 0 50%;
+    z-index: 2;
+}
+.aoa-screen-toolbar { display: grid; gap: 5px; grid-template-columns: repeat(4, 1fr); }
+.aoa-text-input, .aoa-command-add { display: grid; gap: 6px; grid-template-columns: 1fr auto; }
+.aoa-save-row, .aoa-replay-actions { margin-top: 1px; }
+.aoa-divider { border-top: 1px solid var(--border-color); margin: 2px 0; }
+.aoa-subheading { font-size: 11px; font-weight: 700; }
+.aoa-profile-summary, .aoa-result, .aoa-calibration-status {
+    background: var(--darker-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.5;
+    padding: 7px;
+}
+.aoa-result { color: var(--text-primary); }
+.aoa-command-list {
+    background: var(--darker-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    flex: 1;
+    list-style-position: inside;
+    margin: 0;
+    max-height: 500px;
+    min-height: 360px;
+    overflow: auto;
+    padding: 5px;
+}
+.aoa-command-list li { border-bottom: 1px solid var(--border-color); padding: 6px 4px; }
+.aoa-command-list code { font-size: 11px; overflow-wrap: anywhere; }
+.aoa-command-row { align-items: center; display: flex; gap: 6px; justify-content: space-between; }
+.aoa-command-empty { color: var(--text-secondary); font-size: 11px; list-style: none; text-align: center; }
+.aoa-command-file-actions { justify-content: flex-end; }
+
+@media (max-width: 1180px) {
+    .aoa-workbench-grid { grid-template-columns: minmax(300px, 1fr) minmax(300px, 1fr); }
+    .aoa-command-column { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+    .aoa-workbench-grid { grid-template-columns: 1fr; }
+    .aoa-command-column { grid-column: auto; }
+    .aoa-device-selectors, .aoa-form-grid { grid-template-columns: 1fr; }
+}

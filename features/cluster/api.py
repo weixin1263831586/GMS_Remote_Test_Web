@@ -712,6 +712,8 @@ def cluster_suite_download(
     worker = service().repository.get_worker(body.worker_id)
     if not worker or worker.get("status") not in {"online", "busy"}:
         raise HTTPException(409, "worker is not online")
+    if body.sha256 and not (worker.get('capabilities') or {}).get('suite_cache_sha256_v1'):
+        raise ApiError.conflict('Update the Worker Agent before using verified suite caching')
     # 套件库内的压缩包若残缺（如下载中断的 ZIP），直接拒绝下发，
     # 避免向 Worker 传输数 GB 后才在解压阶段失败。
     filename = str(body.filename or "")
@@ -731,7 +733,7 @@ def cluster_suite_download(
     owner_id = _command_owner_id(request, _admin)
     command = service().repository.create_command({
         "worker_id": body.worker_id, "command_type": "suite_action",
-        "payload": {"action": "download_url", "url": body.url,
+        "payload": {"action": "download_url", "url": body.url, "sha256": body.sha256,
                     "filename": body.filename, "size_bytes": body.size_bytes,
                     "owner_id": owner_id},
     })
@@ -837,6 +839,7 @@ def _mount_subrouters() -> None:
     from .devices_api import router as devices_router
     from .job_control_api import router as job_control_router
     from .jobs_api import router as jobs_router
+    from .retention_api import router as retention_router
     from .suite_library_api import router as suite_library_router
     from .transfers_api import router as transfers_router
     from .worker_settings_api import router as worker_settings_router
@@ -851,6 +854,7 @@ def _mount_subrouters() -> None:
     router.include_router(job_control_router)
     router.include_router(suite_library_router)
     router.include_router(worker_settings_router)
+    router.include_router(retention_router)
 
 
 _mount_subrouters()

@@ -25,3 +25,6 @@
 | 0017 | [One approval for APK transmission and installation](0017-reviewed-apk-deployment.md) | Accepted | — | — |
 | 0018 | [Finite app-scoped Agent debugging sessions](0018-scoped-debug-sessions.md) | Accepted | — | — |
 | 0019 | [对话 Agent 会话持久化与崩溃恢复](0019-agent-session-persistence-recovery.md) | Accepted | — | — |
+| 0020 | [人类预授权的测试计划与有界失败用例重试](0020-scheduled-test-plans-and-bounded-retries.md) | Accepted（补充 0012 的预授权派生规则） | — | — |
+| 0021 | [ATS 执行选项、观测与证据保留](0021-ats-execution-options-and-evidence-retention.md) | Accepted | — | — |
+| 0022 | [Web AOA 交互录制与无 ADB USB 恢复](0022-web-aoa-recording-and-usb-recovery.md) | Accepted | — | — |

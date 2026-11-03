@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import mimetypes
 import os
 import re
@@ -63,10 +64,24 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
         if target_root is None:
             raise ValueError("no configured suite root exists")
         destination = target_root / filename
+        expected_sha256 = str(payload.get('sha256') or '').lower()
+        if expected_sha256 and not re.fullmatch(r'[a-f0-9]{64}', expected_sha256):
+            raise ValueError('Invalid suite SHA-256')
+        if destination.is_symlink():
+            raise ValueError('Suite cache destination must not be a symlink')
+        if expected_sha256 and destination.is_file():
+            cached = hashlib.sha256()
+            with destination.open('rb') as handle:
+                for block in iter(lambda: handle.read(1024 * 1024), b''):
+                    cached.update(block)
+            if cached.hexdigest() == expected_sha256:
+                return {'archive_path': str(destination), 'file_size': destination.stat().st_size,
+                        'sha256': expected_sha256, 'cache_hit': True, 'message': f'cache hit: {filename}'}
         # uuid 后缀：并发下载同一文件名时互不覆盖对方的 .part 临时文件。
         temporary = target_root / f".{filename}.{uuid.uuid4().hex}.part"
         max_bytes = int(os.getenv("GMS_WORKER_SUITE_DOWNLOAD_MAX_BYTES", str(80 * 1024 ** 3)))
         downloaded = 0
+        checksum = hashlib.sha256()
         last_reported = 0
         try:
             headers = {"User-Agent": "GMS-Worker/0.1"}
@@ -138,6 +153,7 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
                     if downloaded > max_bytes:
                         raise ValueError("suite download exceeds configured size limit")
                     output.write(block)
+                    checksum.update(block)
                     if progress_callback and downloaded - last_reported >= 16 * 1024 * 1024:
                         headers = getattr(response, "headers", {})
                         total = int(payload.get("size_bytes") or headers.get("Content-Length") or 0)
@@ -148,11 +164,13 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
                     raise ValueError(
                         f"suite download incomplete: received {downloaded} of {expected_bytes} bytes"
                     )
+            if expected_sha256 and checksum.hexdigest() != expected_sha256:
+                raise ValueError('Suite SHA-256 mismatch; the previous cache entry was preserved')
             temporary.replace(destination)
         except Exception:
             temporary.unlink(missing_ok=True)
             raise
-        return {"archive_path": str(destination), "file_size": downloaded,
+        return {"archive_path": str(destination), "file_size": downloaded, 'sha256': checksum.hexdigest(), 'cache_hit': False,
                 "message": f"downloaded {filename}"}
     if action == "extract":
         archive = Path(str(payload.get("archive_path") or "")).expanduser().resolve()

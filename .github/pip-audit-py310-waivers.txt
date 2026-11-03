@@ -1,10 +1,18 @@
 # Pillow 12.3.0 已知告警豁免清单 —— 仅用于 dependency-audit 的 Python 3.10 审计腿。
 #
-# 背景：pip-audit 对 Pillow 12.3.0 报告的 37 个已知告警，修复版本全部是
+# 背景：pip-audit 对 Pillow 12.3.0 报告的已知告警，修复版本全部是
 # 13.0.0，而 13.0.0 requires-python>=3.11（官方已放弃 3.10）；项目运行
 # 基线仍为 3.10，3.10 分支不存在可用的修复版本。处置方式为"显式接受
 # 风险"而非掩盖：CI 对 3.10 解析单独跑完整审计，仅下列 ID 被豁免，
 # 12.3.0 上出现清单之外的任何新告警仍然失败门禁。
+#
+# 2026-10-31 追加 PYSEC-2026-4327 / PYSEC-2026-4332（46.txt 审核意见）：
+# 影响分析——Pillow 在运行面仅用于 Redmine 证据图片的元数据读取与 OCR
+# （features/redmine/evidence_images.py、analysis_attachments.py，解码
+# 来源为登录用户拉取的 Redmine 附件，非匿名网络输入），且已有显式像素
+# 上限（OCR_MAX_IMAGE_PIXELS）、OCR 超时与异常降级（derived_status=
+# missing）防护；两者修复版本同为 13.0.0，3.10 无修复版，故按同一
+# "显式接受风险"口径豁免，随 Python 3.11 迁移一并退出。
 #
 # 维护规则：
 # - 每行一个公告 ID，'#' 开头为注释；增删 ID 必须在提交说明里给出理由。
@@ -47,3 +55,5 @@ CVE-2026-112900
 CVE-2026-112901
 CVE-2026-114501
 GHSA-78g4-xqwv-q3g8
+PYSEC-2026-4327
+PYSEC-2026-4332

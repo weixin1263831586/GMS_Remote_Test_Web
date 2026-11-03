@@ -256,3 +256,117 @@ class AutomationOrchestratorTests(unittest.TestCase):
             self.assertEqual(run["status"], RUN_STATUS_WAITING_DEVICE)
             self.assertEqual(run["jenkins_build_number"], "1")
             self.assertEqual(run["artifact_url"], "stub://jenkins/GMS_BUILD/1/update.img")
+
+    def test_aoa_recovery_stage_runs_between_flash_and_testing(self):
+        from features.automation.executors import StubAutomationExecutor
+        from features.automation.models import (
+            RUN_STATUS_AOA_FAILED,
+            RUN_STATUS_AOA_RECOVERING,
+            RUN_STATUS_TESTING,
+            AutomationRunCreateRequest,
+        )
+        from features.automation.orchestrator import AutomationOrchestrator
+        from features.automation.repository import AutomationStore
+
+        class AoaExecutor(StubAutomationExecutor):
+            def __init__(self, fail=False):
+                super().__init__()
+                self._fail = fail
+                self.calls = 0
+
+            def aoa_enabled(self, run):
+                return True
+
+            def aoa_recover(self, run):
+                self.calls += 1
+                if self._fail:
+                    return {"success": False, "error": "AOA probe rejected the sequence"}
+                return {"success": True, "running": False, "command_id": "cmd-aoa-1"}
+
+        plan = {"test_type": "CTS", "aoa": {"mode": "user_build_recovery",
+                                            "commands": ["wake", "home"]}}
+        with TemporaryDirectory() as tmp:
+            store = AutomationStore(Path(tmp) / "automation.sqlite3")
+            data = AutomationRunCreateRequest(
+                artifact_path="/tmp/update.img", devices=["ABC123"], test_plan=plan,
+            ).to_run_dict("run_aoa")
+            data["status"] = data["current_stage"] = "flash_verified"
+            store.create_run(data)
+
+            orchestrator = AutomationOrchestrator(store, AoaExecutor())
+            self.assertEqual(
+                orchestrator.advance_run("run_aoa")["status"], RUN_STATUS_AOA_RECOVERING)
+            # 成功后直接进入测试：不得回 flash_verified（会被 aoa_enabled
+            # 再次拉回 AOA 阶段形成死循环）。
+            self.assertEqual(orchestrator.advance_run("run_aoa")["status"], RUN_STATUS_TESTING)
+
+            # 重新进入 AOA 阶段并注入执行失败 → 终态 aoa_failed。
+            store.update_run("run_aoa", status="flash_verified", current_stage="flash_verified")
+            orchestrator.advance_run("run_aoa")  # flash_verified → aoa_recovering
+            self.assertEqual(store.get_run("run_aoa")["status"], RUN_STATUS_AOA_RECOVERING)
+            failing = AutomationOrchestrator(store, AoaExecutor(fail=True))
+            failing.advance_run("run_aoa")
+            self.assertEqual(store.get_run("run_aoa")["status"], RUN_STATUS_AOA_FAILED)
+
+    def test_aoa_recovery_fails_when_adb_does_not_return(self):
+        """命令成功但 adb_state 非 device：判 aoa_failed，不带病进测试。"""
+        from features.automation.executors import StubAutomationExecutor
+        from features.automation.models import (
+            RUN_STATUS_AOA_FAILED,
+            RUN_STATUS_AOA_RECOVERING,
+            RUN_STATUS_TESTING,
+            AutomationRunCreateRequest,
+        )
+        from features.automation.orchestrator import AutomationOrchestrator
+        from features.automation.repository import AutomationStore
+
+        class AoaStateExecutor(StubAutomationExecutor):
+            def __init__(self, adb_state):
+                super().__init__()
+                self._adb_state = adb_state
+
+            def aoa_enabled(self, run):
+                return True
+
+            def aoa_recover(self, run):
+                return {"success": True, "running": False, "command_id": "cmd-aoa-1",
+                        "aoa_result": {"success": True, "adb_state": self._adb_state}}
+
+        plan = {"test_type": "CTS", "aoa": {"mode": "user_build_recovery",
+                                            "commands": ["wake", "home"]}}
+        with TemporaryDirectory() as tmp:
+            store = AutomationStore(Path(tmp) / "automation.sqlite3")
+            data = AutomationRunCreateRequest(
+                artifact_path="/tmp/update.img", devices=["ABC123"], test_plan=plan,
+            ).to_run_dict("run_aoa")
+            data["status"] = data["current_stage"] = RUN_STATUS_AOA_RECOVERING
+            store.create_run(data)
+
+            stuck = AutomationOrchestrator(store, AoaStateExecutor("offline"))
+            stuck.advance_run("run_aoa")
+            self.assertEqual(store.get_run("run_aoa")["status"], RUN_STATUS_AOA_FAILED)
+
+            store.update_run("run_aoa", status=RUN_STATUS_AOA_RECOVERING,
+                             current_stage=RUN_STATUS_AOA_RECOVERING)
+            healthy = AutomationOrchestrator(store, AoaStateExecutor("device"))
+            self.assertEqual(
+                healthy.advance_run("run_aoa")["status"], RUN_STATUS_TESTING)
+
+    def test_aoa_recovery_skipped_without_plan_config(self):
+        from features.automation.executors import StubAutomationExecutor
+        from features.automation.models import RUN_STATUS_TESTING, AutomationRunCreateRequest
+        from features.automation.orchestrator import AutomationOrchestrator
+        from features.automation.repository import AutomationStore
+
+        with TemporaryDirectory() as tmp:
+            store = AutomationStore(Path(tmp) / "automation.sqlite3")
+            data = AutomationRunCreateRequest(
+                artifact_path="/tmp/update.img", devices=["ABC123"],
+                test_plan={"test_type": "CTS"},
+            ).to_run_dict("run_plain")
+            data["status"] = data["current_stage"] = "flash_verified"
+            store.create_run(data)
+
+            result = AutomationOrchestrator(store, StubAutomationExecutor()).advance_run("run_plain")
+
+            self.assertEqual(result["status"], RUN_STATUS_TESTING)

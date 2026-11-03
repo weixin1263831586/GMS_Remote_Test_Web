@@ -174,6 +174,9 @@ def sweep_waiting_device_timeouts(
     timeout = cfg["waiting_device_timeout_seconds"]
     cancelled = 0
     for run in auto_svc.list_runs(status="waiting_device", limit=100):
+        from .execution_policy import run_options
+
+        timeout = run_options(run)['queue_timeout_seconds'] or cfg['waiting_device_timeout_seconds']
         # 从 waiting_device 状态进入事件开始计时，不受轮询刷新影响
         entered_at = ""
         try:
@@ -243,12 +246,15 @@ def sweep_active_stage_timeouts(
     )
     for stage, timeout, reason in stages:
         for run in auto_svc.list_runs(status=stage, limit=500):
+            from .execution_policy import run_options
+
+            effective_timeout = (run_options(run)['execution_timeout_seconds'] if stage == 'test_running' else 0) or timeout
             age = _stage_entry_age_seconds(auto_svc, run, stage)
-            if age is None or age <= timeout:
+            if age is None or age <= effective_timeout:
                 continue
             try:
                 auto_svc.orchestrator(cfg["executor"]).cancel_run(
-                    run["id"], reason=f"{reason} after {timeout}s", cleanup=True
+                    run["id"], reason=f"{reason} after {effective_timeout}s", cleanup=True
                 )
                 counts[stage] += 1
             except Exception:
@@ -305,6 +311,18 @@ def run_maintenance_sync(
         stage_timeouts = sweep_active_stage_timeouts(cfg, automation_service=auto_svc)
     except Exception:
         logger.exception("[AutomationWorker] active-stage timeout sweep failed")
+    from .execution_policy import enforce_extra_timeouts
+
+    try:
+        enforce_extra_timeouts(auto_svc, cfg)
+    except Exception:
+        logger.exception('[AutomationWorker] per-run timeout sweep failed')
+    from features.cluster import run_artifact_retention
+
+    try:
+        run_artifact_retention()
+    except Exception:
+        logger.exception('[AutomationWorker] artifact retention sweep failed')
 
     return {
         "polled_builds": polled_builds,
@@ -323,6 +341,12 @@ def advance_runs_sync(
     auto_svc = automation_service or _resolve_services()[0]
     if auto_svc is None:
         return {"advanced_runs": 0}
+    schedule_tick = getattr(auto_svc, 'schedule_tick', None)
+    if callable(schedule_tick):
+        try:
+            schedule_tick()
+        except Exception:
+            logger.exception('[AutomationWorker] plan scheduling failed')
     advanced_runs = 0
     cap = 25
     previous_signature: tuple[str, str] | None = None

@@ -17,6 +17,8 @@ RUN_STATUS_WAITING_DEVICE = "waiting_device"
 RUN_STATUS_DEVICE_LOCKED = "device_locked"
 RUN_STATUS_FLASHING = "flashing"
 RUN_STATUS_FLASH_VERIFIED = "flash_verified"
+# AOA 恢复（ADR 0022）：user build 烧写后模拟 UI 打开 USB 调试。
+RUN_STATUS_AOA_RECOVERING = "aoa_recovering"
 RUN_STATUS_TESTING = "testing"
 RUN_STATUS_TEST_RUNNING = "test_running"
 RUN_STATUS_REPORT_COLLECTING = "report_collecting"
@@ -28,6 +30,7 @@ RUN_STATUS_FAILED = "failed"
 RUN_STATUS_JENKINS_FAILED = "jenkins_failed"
 RUN_STATUS_ARTIFACT_MISSING = "artifact_missing"
 RUN_STATUS_FLASH_FAILED = "flash_failed"
+RUN_STATUS_AOA_FAILED = "aoa_failed"
 RUN_STATUS_TEST_FAILED = "test_failed"
 RUN_STATUS_ANALYSIS_FAILED = "analysis_failed"
 RUN_STATUS_REPORTING_FAILED = "reporting_failed"
@@ -39,6 +42,7 @@ TERMINAL_STATUSES = {
     RUN_STATUS_JENKINS_FAILED,
     RUN_STATUS_ARTIFACT_MISSING,
     RUN_STATUS_FLASH_FAILED,
+    RUN_STATUS_AOA_FAILED,
     RUN_STATUS_TEST_FAILED,
     RUN_STATUS_ANALYSIS_FAILED,
     RUN_STATUS_REPORTING_FAILED,
@@ -52,7 +56,10 @@ _RUN_FORWARD_TRANSITIONS = {
     RUN_STATUS_WAITING_DEVICE: {RUN_STATUS_DEVICE_LOCKED},
     RUN_STATUS_DEVICE_LOCKED: {RUN_STATUS_FLASHING},
     RUN_STATUS_FLASHING: {RUN_STATUS_FLASH_VERIFIED, RUN_STATUS_FLASH_FAILED},
-    RUN_STATUS_FLASH_VERIFIED: {RUN_STATUS_TESTING},
+    # AOA 恢复阶段：烧写完成后按 plan 配置进入；成功直接进入测试
+    # （不能回 flash_verified——aoa_enabled 仍为真会造成来回震荡）。
+    RUN_STATUS_FLASH_VERIFIED: {RUN_STATUS_AOA_RECOVERING, RUN_STATUS_TESTING},
+    RUN_STATUS_AOA_RECOVERING: {RUN_STATUS_TESTING, RUN_STATUS_AOA_FAILED},
     RUN_STATUS_TESTING: {RUN_STATUS_TEST_RUNNING, RUN_STATUS_TEST_FAILED},
     RUN_STATUS_TEST_RUNNING: {RUN_STATUS_REPORT_COLLECTING, RUN_STATUS_TEST_FAILED},
     RUN_STATUS_REPORT_COLLECTING: {RUN_STATUS_ANALYZING, RUN_STATUS_TEST_FAILED},
@@ -126,6 +133,7 @@ class AutomationRunCreateRequest(BaseModel):
             "gerrit_subject": self.gerrit_subject,
             "owner": self.owner,
             "created_by": "",
+            "created_by_username": "",
             "status": RUN_STATUS_QUEUED,
             "current_stage": RUN_STATUS_QUEUED,
             "jenkins_job": self.jenkins_job,
@@ -146,6 +154,15 @@ class AutomationRunCreateRequest(BaseModel):
             "report_timestamp": "",
             "report_id": "",
             "result_json": "{}",
+            "test_summary_json": "{}",
+            "retry_of_run_id": "",
+            "retry_root_run_id": "",
+            "retry_index": "0",
+            "retry_limit": "0",
+            "not_before": "",
+            "followup_state": "",
+            "plan_id": "",
+            "plan_batch_id": "",
             "error": "",
             "created_at": now,
             "updated_at": now,

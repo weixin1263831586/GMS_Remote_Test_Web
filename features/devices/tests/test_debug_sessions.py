@@ -275,6 +275,71 @@ def test_approve_binds_finite_grant_and_first_install_once(environment):
     assert len(debug_service.store().history(session["id"], owner.id)) == 1
 
 
+def test_duplicate_target_requests_are_rejected_even_when_pending(environment):
+    client, *_ = environment
+    request_session(client)
+    response = client.post("/api/devices/debug-sessions", data={
+        "worker_id": "worker", "device": "SERIAL", "package": "com.example.app",
+    }, files={"apk_file": ("app.apk", baseline_bytes())})
+    assert response.status_code == 409, response.text
+    assert "待审批" in response.text
+
+
+def _pending_target_payload(owner, actor_id):
+    return {"id": uuid.uuid4().hex, "owner_id": owner.id, "actor_id": actor_id,
+            "worker_id": "worker", "serial": "SERIAL", "package": "com.example.app",
+            "duration_minutes": 60, "operations": ["stop"], "baseline_source": "installed",
+            "baseline_deployment_id": "", "baseline_sha256": "b" * 64,
+            "signers": IDENTITY["signers"], "version_code": "1", "version_name": "",
+            "created_at": time.time(), "expires_at": time.time() + 300}
+
+
+def test_second_approval_of_same_target_is_blocked_by_store_gate(environment):
+    client, repository, _, owner, _, agent = environment
+    repository.acquire_device_operation_claim("worker", ["worker:SERIAL"], owner_id=owner.id,
+                                             source_type="cluster-reservation",
+                                             source_id="reserved", ttl_seconds=3600)
+    store = debug_service.store()
+    # 第一条走正常申请；第二条直插 SQL 模拟“并发申请窗口”产生的存量
+    # 重复待审批会话（store.create 现已拒绝同目标第二条）。
+    first = store.create(_pending_target_payload(owner, agent.id))
+    legacy = _pending_target_payload(owner, agent.id)
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT INTO debug_sessions (id,owner_id,actor_id,status,expires_at,payload) "
+            "VALUES (?,?,?,'pending',?,?)",
+            (legacy["id"], owner.id, agent.id, legacy["expires_at"], json.dumps(legacy)))
+    with patch.object(debug_service, "execute_install"):
+        assert client.post("/api/devices/debug-sessions/" + first["id"] + "/approve",
+                           headers={"x-test-principal": "session"}).status_code == 200
+    response = client.post("/api/devices/debug-sessions/" + legacy["id"] + "/approve",
+                           headers={"x-test-principal": "session"})
+    assert response.status_code == 409, response.text
+    # 失败会话回退待审批、不持有租约；同目标活跃会话唯一。
+    assert store.get(legacy["id"], owner.id)["status"] == "pending"
+    assert repository.claims.active_claim("worker:SERIAL")["source_id"] == "reserved"
+    with store.connect() as conn:
+        active = conn.execute(
+            "SELECT count(*) FROM debug_sessions WHERE status='active'").fetchone()[0]
+    assert active == 1
+
+
+def test_duplicate_target_creation_is_serialized_across_processes(tmp_path):
+    DebugStore(tmp_path)
+
+    def create(_index):
+        payload = _pending_target_payload(
+            SimpleNamespace(id="owner"), "agent:a")
+        try:
+            return DebugStore(tmp_path).create(payload)
+        except ApiError:
+            return None
+
+    with ThreadPoolExecutor(4) as pool:
+        created = [item for item in pool.map(create, range(4)) if item]
+    assert len(created) == 1
+
+
 def test_repeated_installs_need_no_new_human_approval(environment):
     client, _, _, owner, *_ = environment
     session = approve(client, request_session(client))

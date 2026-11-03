@@ -178,6 +178,8 @@ class DeviceOperationsTests(unittest.TestCase):
                 side_effect=run_local,
             ),
             patch.object(management_api, "is_local_host", return_value=True),
+            # 隔离心跳优先分支：本测试专测本机 adb/fastboot 探针合并路径。
+            patch.object(management_api, "local_management_inventory", return_value=None),
             patch.object(management_api, "has_blocked_adb_process", return_value=False),
             patch.object(
                 management_api.device_manager,

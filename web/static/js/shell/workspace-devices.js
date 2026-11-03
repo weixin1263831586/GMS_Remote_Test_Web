@@ -142,7 +142,8 @@ function isLocalWorkspaceWorker(workerId) {
 
 function workspaceWorkerId() {
     const context = window.GmsWorkspace?.get?.() || {};
-    if (!state.clusterStatus?.enabled || context.scope_mode !== 'cluster') return workspaceLocalWorkerId();
+    if (!context.scope_mode) return '';
+    if (context.scope_mode !== 'cluster') return workspaceLocalWorkerId();
     return context.worker_id || workspaceLocalWorkerId();
 }
 
@@ -235,11 +236,12 @@ function clearActiveTestContext() {
 }
 
 async function toggleClusterMode() {
+    await (window.GmsWorkspace?.ready || Promise.resolve());
     const row = document.getElementById('cluster-mode-toggle-row');
     if (row) { row.style.pointerEvents = 'none'; row.style.opacity = '0.6'; }
     try {
         const infrastructureEnabled = Boolean(state.clusterStatus?.enabled);
-        const wasEnabled = infrastructureEnabled && window.GmsWorkspace?.get?.().scope_mode === 'cluster';
+        const wasEnabled = window.GmsWorkspace?.get?.().scope_mode === 'cluster';
         if (!wasEnabled && !infrastructureEnabled) {
             throw new Error('集群基础设施未启用，请先在服务端 configs/local/cluster.json 启用集群能力');
         }
@@ -295,21 +297,19 @@ async function initializeClusterMode() {
     if (_initializeClusterModeInFlight) return _initializeClusterModeInFlight;
     _initializeClusterModeInFlight = (async () => {
         try {
-            const [status, context] = await Promise.all([
+            const [status] = await Promise.all([
                 window.GmsWorkspace.loadClusterStatus(),
-                window.GmsWorkspace?.ready || Promise.resolve({scope_mode: 'single', worker_id: workspaceLocalWorkerId()})
+                window.GmsWorkspace?.ready || Promise.resolve()
             ]);
+            const context = window.GmsWorkspace.get();
             state.clusterStatus = status;
-            const enabled = Boolean(status.enabled && context.scope_mode === 'cluster');
-            applyClusterMode(enabled);
-            if (!enabled && context.scope_mode === 'cluster') {
-                window.GmsWorkspace?.update({scope_mode: 'single', worker_id: workspaceLocalWorkerId(), device_ids: []},
-                    {source: 'cluster-unavailable'});
-            }
-            return enabled;
+            const selectedCluster = context.scope_mode === 'cluster';
+            applyClusterMode(selectedCluster);
+            return Boolean(status.enabled && selectedCluster);
         } catch (error) {
-            debugLog('[Cluster] Status unavailable, preserving single-host UI:', error);
-            applyClusterMode(false);
+            debugLog('[Cluster] Status unavailable; preserving the saved workspace mode:', error);
+            const scope = window.GmsWorkspace?.get?.().scope_mode;
+            if (scope) applyClusterMode(scope === 'cluster');
             return false;
         } finally {
             _clusterModeInitialized = true;
@@ -319,10 +319,18 @@ async function initializeClusterMode() {
     return _initializeClusterModeInFlight;
 }
 
+window.addEventListener('gms:workspace-context-ready', event => {
+    if (event.detail?.clusterStatus) state.clusterStatus = event.detail.clusterStatus;
+    applyClusterMode(event.detail?.context?.scope_mode === 'cluster');
+    if (typeof currentPage !== 'undefined' && currentPage === 'devices') {
+        loadDevicesManagement().catch(error => debugLog('[Devices] Initial scope load failed:', error));
+    }
+});
+
 window.addEventListener('gms:workspace-context', event => {
     const context = event.detail?.context || {};
     const previous = event.detail?.previous || {};
-    const enabled = Boolean(state.clusterStatus?.enabled && context.scope_mode === 'cluster');
+    const enabled = context.scope_mode === 'cluster';
     const workerId = enabled ? (context.worker_id || workspaceLocalWorkerId()) : workspaceLocalWorkerId();
     applyClusterMode(enabled);
     syncWorkspaceWorkerSelectors(workerId);
@@ -593,6 +601,7 @@ function fetchDevicesForWorker(workerId, forceRefresh, source) {
 }
 
 async function loadDevices(forceRefresh = false, options = {}) {
+    await (window.GmsWorkspace?.ready || Promise.resolve());
     const workerId = workspaceWorkerId();
     const generation = ++deviceRefreshGeneration;
     const silent = Boolean(options && options.silent);
@@ -738,6 +747,7 @@ let _loadSuitesPromise = null;
 let testSuitesWorkerId = '';
 
 async function loadTestSuites(forceRefresh = false) {
+    await (window.GmsWorkspace?.ready || Promise.resolve());
     const requestedWorker = workspaceWorkerId();
     // 如果有正在进行的请求，等待它完成
     if (_loadSuitesPromise) {

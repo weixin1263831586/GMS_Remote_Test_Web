@@ -5,12 +5,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
 from features.auth import (
     CurrentUser,
     require_authenticated_user_when_auth_required,
+    require_human_principal,
 )
 from foundation.archives import is_complete_archive_file
 
@@ -19,6 +20,14 @@ from .local_bridge import _suite_roots
 
 
 router = APIRouter()
+
+
+@router.post('/suite-library/{filename}/fingerprint')
+def fingerprint_suite_archive(filename: str, request: Request):
+    from .suite_fingerprints import fingerprint
+
+    require_human_principal(request)
+    return {'success': True, 'data': fingerprint(_archive(filename))}
 
 
 def controller_suite_archives() -> list[Path]:

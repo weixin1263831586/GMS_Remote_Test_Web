@@ -6,7 +6,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -88,6 +88,39 @@ class ReportCopyApiTests(unittest.TestCase):
 
         app.include_router(cluster_api.router)
         self.client = TestClient(app)
+        # 报告复制入口按 features/reports 索引校验来源报告归属：默认桩
+        # 模拟 repository.get_reports 的 worker 过滤语义（本地与远端来源
+        # 套件各一条属于当前账号的报告），专测归属的用例再覆写。
+        self.reports_index = MagicMock()
+
+        def fake_get_reports(*_args, worker_id=None, **_kwargs):
+            return [
+                item for item in [
+                    {
+                        "owner_id": "owner-id",
+                        "worker_id": self.source_worker,
+                        "suite_path": self.source_tools,
+                        "report_name": REPORT_NAME,
+                        "source_timestamp": REPORT_NAME,
+                        "timestamp": REPORT_NAME,
+                    },
+                    {
+                        "owner_id": "owner-id",
+                        "worker_id": self.local_worker,
+                        "suite_path": str(self.local_tools),
+                        "report_name": REPORT_NAME,
+                        "source_timestamp": REPORT_NAME,
+                        "timestamp": REPORT_NAME,
+                    },
+                ]
+                if worker_id in (None, item["worker_id"])
+            ]
+
+        self.reports_index.get_reports.side_effect = fake_get_reports
+        self.reports_patcher = patch(
+            "features.cluster.transfers_api.test_report_db", self.reports_index
+        )
+        self.reports_patcher.start()
         token_file = self.root / "cluster-tokens.json"
         token_file.write_text(json.dumps({
             "worker_tokens": {
@@ -102,6 +135,7 @@ class ReportCopyApiTests(unittest.TestCase):
 
     def tearDown(self):
         self.token_env.stop()
+        self.reports_patcher.stop()
         self.client.close()
         cluster_api.cluster_service = self.previous_service
         self.temp.cleanup()
@@ -302,6 +336,126 @@ class ReportCopyApiTests(unittest.TestCase):
         )
         self.assertEqual(downloaded.status_code, 200, downloaded.text)
         self.assertEqual(downloaded.content, archive.read_bytes())
+
+    def test_report_copy_requires_report_ownership(self):
+        # 他人账号的来源报告：创建与导入都必须拒绝（目录名可被枚举）。
+        self.reports_index.get_reports.side_effect = lambda *_args, **_kwargs: [{
+            "owner_id": "someone-else", "worker_id": self.source_worker,
+            "suite_path": self.source_tools,
+            "report_name": REPORT_NAME, "source_timestamp": REPORT_NAME,
+            "timestamp": REPORT_NAME,
+        }]
+        created = self.client.post("/api/cluster/suites/report-copies", json={
+            "source_worker_id": self.source_worker,
+            "source_suite_path": self.source_tools,
+            "report_name": REPORT_NAME,
+            "target_worker_id": self.target_worker,
+            "target_suite_path": self.target_tools,
+        })
+        self.assertEqual(created.status_code, 404, created.text)
+
+        # 同账号同名报告登记在另一台 Worker：不得借它机索引记录过闸
+        # （report_name 是秒级时间戳，可能撞名）。
+        def other_worker_index(*_args, worker_id=None, **_kwargs):
+            if worker_id == self.source_worker:
+                return []
+            return [{
+                "owner_id": "owner-id", "worker_id": self.local_worker,
+                "suite_path": self.source_tools,
+                "report_name": REPORT_NAME,
+                "source_timestamp": REPORT_NAME, "timestamp": REPORT_NAME,
+            }]
+
+        self.reports_index.get_reports.side_effect = other_worker_index
+        hijacked = self.client.post("/api/cluster/suites/report-copies", json={
+            "source_worker_id": self.source_worker,
+            "source_suite_path": self.source_tools,
+            "report_name": REPORT_NAME,
+            "target_worker_id": self.target_worker,
+            "target_suite_path": self.target_tools,
+        })
+        self.assertEqual(hijacked.status_code, 404, hijacked.text)
+
+        self.reports_index.get_reports.side_effect = lambda *_args, **_kwargs: [{
+            "owner_id": "owner-id", "worker_id": self.source_worker,
+            "suite_path": self.source_tools,
+            "report_name": REPORT_NAME, "source_timestamp": REPORT_NAME,
+            "timestamp": REPORT_NAME,
+        }]
+        transfer = self._create_copy(self.target_worker, self.target_tools)
+        self._complete_copy_transfer(transfer["copy_id"])
+        self.reports_index.get_reports.side_effect = lambda *_args, **_kwargs: []
+        imported = self.client.post(
+            f"/api/cluster/suites/report-copies/{transfer['copy_id']}/import"
+        )
+        self.assertEqual(imported.status_code, 404, imported.text)
+
+        # 报告索引被清空后，已完成的导入仍可幂等回显（归属检查之前返回）。
+        self.reports_index.get_reports.side_effect = lambda *_args, **_kwargs: [{
+            "owner_id": "owner-id", "worker_id": self.source_worker,
+            "suite_path": self.source_tools,
+            "report_name": REPORT_NAME, "source_timestamp": REPORT_NAME,
+            "timestamp": REPORT_NAME,
+        }]
+        self.repo.update_transfer(transfer["copy_id"], metadata_json=json.dumps(
+            {**self.repo.get_transfer(transfer["copy_id"])["metadata"],
+             "import_status": "completed", "import_result": {"ok": True}},
+            separators=(",", ":")))
+        repoll = self.client.post(
+            f"/api/cluster/suites/report-copies/{transfer['copy_id']}/import"
+        )
+        self.assertEqual(repoll.status_code, 200, repoll.text)
+        self.assertEqual(repoll.json()["status"], "completed")
+
+    def test_remote_import_dedupes_by_operation_id_and_failed_allows_retry(self):
+        created = self._create_copy(self.target_worker, self.target_tools)
+        transfer_id = created["copy_id"]
+        self._complete_copy_transfer(transfer_id)
+
+        first = self.client.post(
+            f"/api/cluster/suites/report-copies/{transfer_id}/import")
+        self.assertEqual(first.status_code, 200, first.text)
+        command_id = first.json()["command_id"]
+        command = self.repo.get_command(command_id)
+        self.assertEqual(command["operation_id"], f"report-import:{transfer_id}")
+
+        # 元数据丢失 target_command_id 的崩溃窗口：create_command 按
+        # operation_id 原子去重，仍收敛到同一条命令。
+        metadata = self.repo.get_transfer(transfer_id)["metadata"]
+        metadata.pop("target_command_id", None)
+        self.repo.update_transfer(
+            transfer_id, metadata_json=json.dumps(metadata, separators=(",", ":")))
+        replayed = self.client.post(
+            f"/api/cluster/suites/report-copies/{transfer_id}/import")
+        self.assertEqual(replayed.status_code, 200, replayed.text)
+        # create_command 按 operation_id 原子去重：收敛到同一条命令，
+        # 不产生第二个 report_import 派发。
+        self.assertEqual(replayed.json()["command_id"], command_id)
+
+        # 正常重复请求：幂等透传当前状态，不新建命令。
+        repeated = self.client.post(
+            f"/api/cluster/suites/report-copies/{transfer_id}/import")
+        self.assertEqual(repeated.status_code, 200, repeated.text)
+        self.assertEqual(repeated.json()["command_id"], command_id)
+        self.assertTrue(repeated.json()["deduplicated"])
+
+        # 命令 failed 后允许重试：新 attempt 的 operation_id 绑定旧命令。
+        self.repo.ack_command(self.target_worker, command_id,
+                              {"status": "failed", "error": "worker offline"})
+        retry = self.client.post(
+            f"/api/cluster/suites/report-copies/{transfer_id}/import")
+        self.assertEqual(retry.status_code, 200, retry.text)
+        retry_command_id = retry.json()["command_id"]
+        self.assertNotEqual(retry_command_id, command_id)
+        retry_command = self.repo.get_command(retry_command_id)
+        self.assertEqual(
+            retry_command["operation_id"],
+            f"report-import:{transfer_id}:{command_id}",
+        )
+        followed = self.client.post(
+            f"/api/cluster/suites/report-copies/{transfer_id}/import")
+        self.assertEqual(followed.status_code, 200, followed.text)
+        self.assertEqual(followed.json()["command_id"], retry_command_id)
 
     def test_report_copy_rejects_same_suite_and_unknown_target_suite(self):
         same_worker = self.client.post("/api/cluster/suites/report-copies", json={

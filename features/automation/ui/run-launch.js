@@ -112,6 +112,7 @@ async function createRun() {
             `设备：${formatDevices(preflight.devices || devices) === '-' ? '按 Profile 自动选择' : formatDevices(preflight.devices || devices)}`,
             `固件：${preflight.artifact_configured ? '使用已有固件' : preflight.build_configured ? '自动编译' : '不使用固件'}`,
             flashText,
+            `失败用例自动重试上限：${payload.test_plan.retry_policy?.max_retries || 0} 次（不重复构建或烧写）`,
             '',
             '确认创建持久化 ATS Run 并启动一条龙流程？',
         ].join('\n');

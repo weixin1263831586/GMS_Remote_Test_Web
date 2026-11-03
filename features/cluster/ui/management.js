@@ -60,5 +60,6 @@ function render(){
   return `<tr><td title="${esc(job.id)}">${esc(job.id.slice(0,16))}</td><td>${esc(job.client_display_id||'-')}</td><td>${esc(job.assigned_worker_id)}</td><td>${badge(job.status)}</td><td>${esc((job.leases||[]).map(item=>item.serial).join(', '))}</td><td>${esc(created)}</td><td>${action}</td></tr>`;
  }).join('')||'<tr><td colspan="7" class="empty">暂无集群任务</td></tr>';
  renderJobForm();
+
  if(!activeDeployments.size)renderLibrary();
 }

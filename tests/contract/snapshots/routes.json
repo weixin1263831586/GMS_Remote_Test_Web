@@ -315,6 +315,72 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/automation/plans"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/automation/plans"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/automation/plans/bulk-settings"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/automation/plans/import"
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "path": "/api/automation/plans/{plan_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/automation/plans/{plan_id}/batches"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/automation/plans/{plan_id}/enabled"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/automation/plans/{plan_id}/export"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/automation/plans/{plan_id}/run"
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "path": "/api/automation/plans/{plan_id}/settings"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/automation/plans/{plan_id}/stop"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/automation/profiles"
   },
   {
@@ -370,6 +436,12 @@
       "GET"
     ],
     "path": "/api/automation/runs/{run_id}/events"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/automation/runs/{run_id}/progress"
   },
   {
     "methods": [
@@ -667,6 +739,30 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/retention/apply"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/retention/artifacts/{artifact_id}/pin"
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "path": "/api/cluster/retention/policy"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/cluster/retention/preview"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/cluster/status"
@@ -688,6 +784,12 @@
       "GET"
     ],
     "path": "/api/cluster/suite-library/{filename}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/cluster/suite-library/{filename}/fingerprint"
   },
   {
     "methods": [
@@ -1174,6 +1276,90 @@
       "POST"
     ],
     "path": "/api/device-groups/auto"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/aoa/probe"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/devices/aoa/profiles"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/aoa/profiles"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/aoa/profiles/from-recording"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/devices/aoa/profiles/{profile_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/devices/aoa/profiles/{profile_id}"
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "path": "/api/devices/aoa/profiles/{profile_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/aoa/record"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/aoa/record/input"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/devices/aoa/record/presets"
+  },
+  {
+    "methods": [
+      "WEBSOCKET"
+    ],
+    "path": "/api/devices/aoa/record/stream/{serial}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/aoa/record/stream/{serial}/start"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/aoa/record/stream/{serial}/stop"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/aoa/recover"
   },
   {
     "methods": [

@@ -304,6 +304,12 @@ router.include_router(ui_control_router)
 router.include_router(deployment_router)
 router.include_router(debug_router)
 
+# AOA 自动恢复（user build 烧写后重新打开 USB 调试，ADR 0022）。
+from .aoa_api import router as aoa_router  # noqa: E402
+
+
+router.include_router(aoa_router)
+
 
 # ==================== 设备分组：按属性自动分组 ====================
 

@@ -124,6 +124,11 @@ class ExecutionSpec(BaseModel):
     local_server: str = Field(default="", max_length=256)
     no_retry: bool = False
     copy_remote: bool = False
+    shard_count: int = Field(default=0, ge=0, le=32, strict=True)
+    preparations: list[str] = Field(default_factory=list, max_length=8)
+    queue_timeout_seconds: int = Field(default=0, ge=0, le=604800, strict=True)
+    execution_timeout_seconds: int = Field(default=0, ge=0, le=604800, strict=True)
+    output_idle_timeout_seconds: int = Field(default=0, ge=0, le=86400, strict=True)
 
 
 class ClusterJobCreate(BaseModel):
@@ -162,10 +167,23 @@ class ClusterDeviceAction(BaseModel):
     effective_limit: int = Field(default=0, ge=0, le=5000)
     target_package: str = Field(default="android", max_length=255)
     entries: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
+    # aoa_sequence：内联 AOA 命令序列（官方 AoaTargetPreparer action 语法）
+    # 与执行后等待 ADB 恢复的秒数；aoa_probe 忽略两者。
+    aoa_commands: list[str] = Field(default_factory=list, max_length=64)
+    wait_adb_seconds: int = Field(default=0, ge=0, le=600)
+    # aoa_record：userdebug 设备上的录制参数（steps/setup_wizard/tv）。
+    aoa_record: dict[str, Any] = Field(default_factory=dict)
+    # 自动化重放幂等键（ADR 0022）：非空时远程 Worker 命令按
+    # ``automation:{run_id}:{action}`` 派生 operation_id 在数据库层原子
+    # 去重，“派发成功但响应丢失”后的重放收敛到同一条命令而不重放
+    # USB 调试开关点击。空值保持每请求一条新命令的既有语义；该字段
+    # 只参与 Controller 侧去重，不进入 Worker 执行 payload。
+    automation_run_id: str = Field(default="", max_length=128)
 
 
 class ClusterSuiteDownload(BaseModel):
     worker_id: str
+    sha256: str = Field(default='', pattern=r'^(?:[a-f0-9]{64})?$')
     url: str = Field(min_length=8, max_length=4096)
     filename: str = Field(default="", max_length=255)
     size_bytes: int = Field(default=0, ge=0)

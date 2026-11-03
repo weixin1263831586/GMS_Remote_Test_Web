@@ -52,3 +52,4 @@ main{padding:0}
 .dash-tab:focus-visible{outline:0;background:rgb(79 140 255 / 12%)}
 .dash-tab.active::after{content:"";position:absolute;right:0;bottom:-1px;left:0;height:2px;background:var(--blue)}
 .dash-tab-pane{margin:0 16px}
+

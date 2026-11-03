@@ -15,6 +15,8 @@
         <button type="button" role="tab" aria-selected="true" class="workflow-tab active" data-workflow="overview" data-click="switchWorkflowPane" data-a0="overview">概览</button>
         <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="create" data-click="switchWorkflowPane" data-a0="create">创建运行</button>
         <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="runs" data-click="switchWorkflowPane" data-a0="runs">运行监控</button>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="plans" data-click="switchWorkflowPane" data-a0="plans">测试计划</button>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="resources" data-click="switchWorkflowPane" data-a0="resources">资源与存储</button>
         <span class="workflow-divider" aria-hidden="true"></span>
         <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="build" data-click="switchWorkflowPane" data-a0="build">构建日志</button>
         <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="events" data-click="switchWorkflowPane" data-a0="events">事件诊断</button>
@@ -216,8 +218,35 @@
                     <label>测试模块
                         <input id="automation-test-module" data-input="invalidateRunPreflight">
                     </label>
+                    <div class="history-filters">
+                        <label>失败用例自动重试上限<input id="automation-max-retries" type="number" min="0" max="5" value="0" data-input="invalidateRunPreflight"></label>
+                        <label>重试间隔（秒）<input id="automation-retry-delay" type="number" min="10" max="3600" value="60" data-input="invalidateRunPreflight"></label>
+                    </div>
+                    <p class="history-help">0 表示关闭；仅重试已归档报告中的失败用例，保持同一 Worker 和套件，不重复构建或烧写。执行异常、未知结果和取消不会自动重试。</p>
                     <details class="advanced-test-options">
                         <summary>高级测试参数（可选）</summary>
+                        <div class="plan-options" id="automation-preparations">
+                            <label><input type="checkbox" value="stay_awake" data-change="changePreparation" data-r0="el">充电时常亮</label>
+                            <label><input type="checkbox" value="animations_off" data-change="changePreparation" data-r0="el">关闭系统动画</label>
+                            <label><input type="checkbox" value="wifi_on" data-change="changePreparation" data-r0="el">启用 Wi-Fi（已有网络）</label>
+                        </div>
+                        <div id="automation-preparation-order" class="history-help"></div>
+                        <div class="history-filters">
+                            <label>分片数（0 跟随设备）<input id="automation-shard-count" type="number" min="0" max="32" value="0" data-input="invalidateRunPreflight"></label>
+                            <label>排队超时（秒，0 使用默认）<input id="automation-queue-timeout" type="number" min="0" max="604800" value="0" data-input="invalidateRunPreflight"></label>
+                            <label>测试执行超时（秒，0 使用默认）<input id="automation-execution-timeout" type="number" min="0" max="604800" value="0" data-input="invalidateRunPreflight"></label>
+                            <label>无输出超时（秒，0 关闭）<input id="automation-idle-timeout" type="number" min="0" max="86400" value="0" data-input="invalidateRunPreflight"></label>
+                        </div>
+                        <p class="history-help">超时非零值至少 60 秒；准备动作按勾选顺序在执行测试前进行。分片由同一 Worker 的 Tradefed 统一分配和汇总。</p>
+                        <div class="history-filters">
+                            <label>自动选择设备数量<input id="automation-selector-count" type="number" min="1" max="32" value="1" data-input="invalidateRunPreflight"></label>
+                            <label>产品<input id="automation-selector-product" maxlength="128" data-input="invalidateRunPreflight"></label>
+                            <label>设备变体<input id="automation-selector-variant" maxlength="128" data-input="invalidateRunPreflight"></label>
+                            <label>构建版本<input id="automation-selector-build_id" maxlength="128" data-input="invalidateRunPreflight"></label>
+                            <label>Android 版本<input id="automation-selector-android_version" maxlength="128" data-input="invalidateRunPreflight"></label>
+                            <label>板型包含<input id="automation-selector-board" maxlength="128" data-input="invalidateRunPreflight"></label>
+                            <label>序列号前缀<input id="automation-selector-serial_prefix" maxlength="128" data-input="invalidateRunPreflight"></label>
+                        </div>
                         <label>附加 test_plan JSON
                             <textarea id="automation-test-plan" placeholder='{"retry": false}' data-input="invalidateRunPreflight"></textarea>
                         </label>
@@ -240,10 +269,44 @@
                     <div class="launch-actions">
                         <button type="button" id="automation-preflight-run" data-click="preflightRunOnly">运行预检</button>
                         <button type="button" id="automation-create-run" class="primary create-run-button" data-click="createRun">预检并启动一条龙流程</button>
+                        <button type="button" data-click="addCurrentRunToPlan">加入测试计划草稿</button>
                     </div>
                 </div>
             </section>
         </div>
+    </section>
+
+    <section id="workflow-pane-plans" class="workflow-pane" aria-hidden="true">
+        <section class="panel stage-panel">
+            <div class="panel-header stage-header">
+                <div class="stage-title-block"><span class="stage-nav-label">测试计划</span><span class="panel-description">按顺序执行多套件；自动调度需后台 Worker 运行</span></div>
+                <button type="button" data-click="loadTestPlans">刷新计划</button>
+            </div>
+            <div class="stage-pane plan-workspace">
+                <form id="test-plan-form" data-submit="saveTestPlan" data-prevent>
+                    <label>计划标签（逗号分隔）<input id="test-plan-labels" maxlength="1000" placeholder="rk3576, Android15, nightly"></label>
+                    <div class="history-filters">
+                        <label class="history-search">计划名称<input id="test-plan-name" maxlength="100" required placeholder="例如 RK3576 每夜兼容性回归"></label>
+                        <label>执行方式<select id="test-plan-kind" data-change="syncTestPlanSchedule"><option value="manual">手动执行</option><option value="interval">固定间隔</option><option value="daily">每日</option><option value="weekly">每周</option></select></label>
+                        <label>时区<input id="test-plan-timezone" value="Asia/Shanghai" maxlength="64" required></label>
+                        <label id="test-plan-interval-field" hidden>间隔（分钟）<input id="test-plan-interval" type="number" min="5" max="10080" value="1440"></label>
+                        <label id="test-plan-time-field" hidden>当地时间<input id="test-plan-time" type="time" value="02:00"></label>
+                    </div>
+                    <div id="test-plan-weekdays" class="plan-weekdays" hidden>
+                        <span>星期</span><label><input type="checkbox" value="0" checked>一</label><label><input type="checkbox" value="1">二</label><label><input type="checkbox" value="2">三</label><label><input type="checkbox" value="3">四</label><label><input type="checkbox" value="4">五</label><label><input type="checkbox" value="5">六</label><label><input type="checkbox" value="6">日</label>
+                    </div>
+                    <div class="plan-options"><label><input id="test-plan-enabled" type="checkbox">启用自动调度</label><label><input id="test-plan-stop-on-failure" type="checkbox" checked>失败或结果待确认时停止后续步骤</label></div>
+                    <p id="test-plan-draft-description" class="history-help">在“创建运行”配置一套测试后点击“加入测试计划草稿”，重复添加形成顺序；草稿仅保存在当前页面，刷新会清空。</p>
+                    <ol id="test-plan-draft" class="plan-draft"></ol>
+                    <div class="history-filter-actions"><button type="button" data-click="switchWorkflowPane" data-a0="create">配置下一步测试</button><button type="submit" id="test-plan-save" class="primary">保存测试计划</button><button type="button" data-click="clearTestPlanDraft">新建 / 清空草稿</button></div>
+                    <p class="history-help">同一计划不重叠执行；服务恢复后只处理一次到期执行，不补跑全部漏掉的周期。每一步沿用保存时的配置和权限，并重新检查账号权限与资源。</p>
+                </form>
+                <div class="history-filters"><label>按标签筛选<input id="test-plan-label-filter" maxlength="64" data-keydown="loadTestPlans" data-key="Enter" placeholder="精确标签"></label><button type="button" data-click="loadTestPlans">筛选</button><button type="button" data-click="bulkPauseTestPlans">批量暂停所选</button><button type="button" data-click="bulkScheduleTestPlans">批量应用当前调度</button></div>
+                <details class="plan-import"><summary>导入计划（JSON，导入后保持暂停）</summary><textarea id="test-plan-import" rows="5" placeholder="粘贴导出的计划 JSON"></textarea><button type="button" data-click="importTestPlan">导入为新计划</button></details>
+                <div id="test-plan-list" class="run-list"><div class="empty-state">暂无测试计划</div></div>
+                <div id="test-plan-batches" class="run-list" aria-live="polite"></div>
+            </div>
+        </section>
     </section>
 
     <section id="workflow-pane-runs" class="workflow-pane" aria-hidden="true">
@@ -264,12 +327,46 @@
                     <span class="subtabs-label">状态</span>
                     <button type="button" class="tab active" data-status="" data-click="setStatusFilter" data-a0="">全部</button>
                     <button type="button" class="tab" data-status="queued" data-click="setStatusFilter" data-a0="queued">排队中</button>
+                    <button type="button" class="tab" data-status="running" data-click="setStatusFilter" data-a0="running">进行中</button>
                     <button type="button" class="tab" data-status="testing" data-click="setStatusFilter" data-a0="testing">测试中</button>
                     <button type="button" class="tab" data-status="completed" data-click="setStatusFilter" data-a0="completed">已完成</button>
+                    <button type="button" class="tab" data-status="failed" data-click="setStatusFilter" data-a0="failed">执行失败</button>
+                    <button type="button" class="tab" data-status="cancelled" data-click="setStatusFilter" data-a0="cancelled">已取消</button>
                 </div>
+                <form class="history-filters" data-submit="applyRunHistoryFilters" data-a0="runs" data-prevent>
+                    <label class="history-search">搜索运行<input id="history-query-runs" type="search" maxlength="256" placeholder="项目、设备、Worker、固件或运行 ID"></label>
+                    <label>运行配置<input id="history-profile_id-runs" maxlength="256" placeholder="精确 Profile ID"></label>
+                    <label>Worker<input id="history-worker_id-runs" maxlength="256" placeholder="精确 Worker ID"></label>
+                    <label>用例结果<select id="history-outcome-runs"><option value="">全部结果</option><option value="passed">用例通过</option><option value="failed">用例失败</option><option value="incomplete">统计不完整</option><option value="unknown">结果待确认</option></select></label>
+                    <div class="history-filter-actions"><button type="submit" class="primary">筛选</button><button type="button" data-click="clearRunHistoryFilters" data-a0="runs">清空</button></div>
+                </form>
+                <p class="history-help">执行完成不代表用例全部通过；无可靠统计的历史记录显示“结果待确认”。</p>
                 <div id="automation-runs" class="run-list">
                     <div class="empty-state">加载中...</div>
                 </div>
+                <nav class="history-pager" aria-label="运行记录分页">
+                    <span id="history-page-runs" aria-live="polite">第 1 页</span>
+                    <label>每页<select id="history-limit-runs" data-change="applyRunHistoryFilters" data-a0="runs"><option value="25">25 条</option><option value="50">50 条</option><option value="100">100 条</option></select></label>
+                    <button type="button" id="history-first-runs" data-click="changeRunHistoryPage" data-a0="runs" data-a1="0" disabled>返回首页</button>
+                    <button type="button" id="history-previous-runs" data-click="changeRunHistoryPage" data-a0="runs" data-a1="-1" disabled>上一页</button>
+                    <button type="button" id="history-next-runs" data-click="changeRunHistoryPage" data-a0="runs" data-a1="1" disabled>下一页</button>
+                </nav>
+            </div>
+        </section>
+    </section>
+
+    <section id="workflow-pane-resources" class="workflow-pane" aria-hidden="true">
+        <section class="panel stage-panel">
+            <div class="panel-header stage-header"><span>资源与存储</span><button type="button" data-click="loadResourceCatalog">刷新资源与预览</button></div>
+            <div class="stage-pane resource-workspace">
+                <section><h3>套件版本与缓存预热</h3><p class="history-help">先计算 SHA-256，再下发到指定 Worker。校验一致时复用已有缓存；新下载校验失败会保留原缓存。下发需要管理员权限。</p>
+                    <label>目标 Worker<select id="resource-worker"></select></label><div id="resource-catalog" class="run-list">加载中…</div><div id="resource-transfers" aria-live="polite"></div>
+                </section>
+                <section><h3>日志保留策略</h3><p class="history-help">只处理本人已终止任务的 stdout/stderr。测试报告、XML、原始结果包和已固定保留的产物会保留。每轮最多处理 25 项；自动策略每小时最多处理 5 项。</p>
+                    <form data-submit="saveRetentionPolicy" data-prevent><div class="history-filters"><label>归档年龄（天）<input id="retention-archive-days" type="number" min="1" max="3650" value="7"></label><label>删除归档日志年龄（天，0 禁止删除）<input id="retention-delete-days" type="number" min="0" max="3650" value="30"></label></div><label class="plan-options"><input type="checkbox" id="retention-enabled">启用每小时自动归档与过期日志清理</label><button type="submit">保存策略</button></form>
+                    <div class="history-filters"><button type="button" data-click="loadRetentionPreview">刷新清理预览</button><button type="button" data-click="applySelectedRetention">执行勾选的归档 / 清理</button><span id="retention-size" class="muted"></span></div>
+                    <div id="retention-preview"></div>
+                </section>
             </div>
         </section>
     </section>
@@ -339,6 +436,7 @@
                         <button type="button" data-click="downloadEventLog">下载</button>
                     </div>
                 </div>
+                <details class="live-progress" open><summary>模块与准备进度（日志观测，最终结果以归档报告为准）</summary><div id="automation-live-progress" aria-live="polite">尚无模块进度</div></details>
                 <div id="automation-events" class="events log-console muted">选择一条运行查看 Controller、Worker 与 Cluster Job 时间线。</div>
             </div>
         </section>
@@ -358,11 +456,25 @@
             <div class="report-layout">
                 <div class="report-copy">
                     <strong>已生成报告</strong>
-                    <span class="muted">按运行更新时间排列，可进入报告管理，也可直接复用已收集报告执行分析。</span>
+                    <span class="muted">按运行创建时间倒序排列，可进入报告管理，也可直接复用已收集报告执行分析。</span>
                 </div>
+                <form class="history-filters" data-submit="applyRunHistoryFilters" data-a0="reports" data-prevent>
+                    <label class="history-search">搜索运行<input id="history-query-reports" type="search" maxlength="256" placeholder="项目、设备、Worker、固件或运行 ID"></label>
+                    <label>运行配置<input id="history-profile_id-reports" maxlength="256" placeholder="精确 Profile ID"></label>
+                    <label>Worker<input id="history-worker_id-reports" maxlength="256" placeholder="精确 Worker ID"></label>
+                    <label>用例结果<select id="history-outcome-reports"><option value="">全部结果</option><option value="passed">用例通过</option><option value="failed">用例失败</option><option value="incomplete">统计不完整</option><option value="unknown">结果待确认</option></select></label>
+                    <div class="history-filter-actions"><button type="submit" class="primary">筛选</button><button type="button" data-click="clearRunHistoryFilters" data-a0="reports">清空</button></div>
+                </form>
                 <div id="automation-runs-report" class="run-list report-run-list">
                     <div class="empty-state">加载中...</div>
                 </div>
+                <nav class="history-pager" aria-label="报告运行分页">
+                    <span id="history-page-reports" aria-live="polite">第 1 页</span>
+                    <label>每页<select id="history-limit-reports" data-change="applyRunHistoryFilters" data-a0="reports"><option value="25">25 条</option><option value="50">50 条</option><option value="100">100 条</option></select></label>
+                    <button type="button" id="history-first-reports" data-click="changeRunHistoryPage" data-a0="reports" data-a1="0" disabled>返回首页</button>
+                    <button type="button" id="history-previous-reports" data-click="changeRunHistoryPage" data-a0="reports" data-a1="-1" disabled>上一页</button>
+                    <button type="button" id="history-next-reports" data-click="changeRunHistoryPage" data-a0="reports" data-a1="1" disabled>下一页</button>
+                </nav>
             </div>
         </section>
     </section>
@@ -414,6 +526,8 @@
     <script src="/automation/build-jobs.js"></script>
     <script src="/automation/run-launch.js"></script>
     <script src="/automation/run-actions.js"></script>
+    <script src="/automation/plans.js"></script>
+    <script src="/automation/resources.js"></script>
     <script src="/automation/trace.js"></script>
     <script src="/automation/page.js"></script>
 </body>

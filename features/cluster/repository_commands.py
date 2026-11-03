@@ -25,6 +25,17 @@ class ClusterCommandRepositoryMixin:
                 "SELECT * FROM cluster_commands WHERE id=?", (command_id,)
             ).fetchone())
 
+    def get_command_by_operation(
+        self, worker_id: str, operation_id: str
+    ) -> dict[str, Any] | None:
+        """按 (worker_id, operation_id) 查既有命令（幂等重放的先读路径）。"""
+        with self.connect() as conn:
+            return self._decode(conn.execute(
+                """SELECT * FROM cluster_commands
+                   WHERE worker_id=? AND operation_id=?""",
+                (worker_id, operation_id),
+            ).fetchone())
+
     def prune_terminal_command_events(
         self, retention_hours: int = 24, limit: int = 500
     ) -> int:

@@ -2,7 +2,9 @@
 
 async function loadEvents(runId) {
     selectedRunId = runId;
-    const run = atsRuns.find(r => r.id === runId);
+    const run = atsRuns.find(r => r.id === runId)
+        || await api(`/api/automation/runs/${encodeURIComponent(runId)}`);
+    if (selectedRunId !== runId) return;
     window.GmsEmbeddedWorkspace?.update({
         automation_run_id: runId,
         worker_id: run ? (run.worker_id || selectedWorkerId()) : selectedWorkerId(),
@@ -24,9 +26,14 @@ async function loadEvents(runId) {
         api(`/api/automation/runs/${encodeURIComponent(runId)}/timeline`),
         api(`/api/automation/runs/${encodeURIComponent(runId)}/trace`).catch(() => null),
     ]);
+    if (selectedRunId !== runId) return;
     atsTimelineEvents = data.items || [];
     selectedRunTrace = trace;
     await renderRunLogLinks(trace);
+    try {
+        const progress = await api(`/api/automation/runs/${encodeURIComponent(runId)}/progress`);
+        if (selectedRunId === runId) renderLiveProgress(progress);
+    } catch (_) { qs('automation-live-progress').textContent = '模块进度暂不可用，可查看原始日志。'; }
     renderEventLog();
     switchWorkflowPane('events');
 }
@@ -36,6 +43,13 @@ function eventLevelClass(event) {
     if (level.includes('error') || level.includes('fail')) return 'error';
     if (level.includes('warn')) return 'warning';
     return 'info';
+}
+
+function renderLiveProgress(progress) {
+    const preparationNames = {stay_awake: '充电时常亮', animations_off: '关闭动画', wifi_on: '启用 Wi-Fi'};
+    const preparations = (progress.preparations || []).map(item => `<div>${esc(preparationNames[item.action] || item.action)} · ${esc(item.device)} · ${esc(statusLabel(item.state))}</div>`).join('');
+    const modules = (progress.modules || []).map(item => `<tr><td>${esc(item.module)}</td><td>${esc(item.abi || '-')}</td><td>${esc(statusLabel(item.state))}</td><td>${esc(item.passed ?? '-')}</td><td>${esc(item.failed ?? '-')}</td><td>${esc(item.observed_seconds ?? '-')} 秒</td><td>${esc(compactTime(item.last_reported_at))}</td></tr>`).join('');
+    qs('automation-live-progress').innerHTML = preparations + (modules ? `<table><thead><tr><th>模块</th><th>ABI</th><th>状态</th><th>通过</th><th>失败</th><th>观测耗时</th><th>最近上报</th></tr></thead><tbody>${modules}</tbody></table>` : '<div class="muted">尚未观测到模块事件；不据此判断测试通过或失败。</div>');
 }
 
 function eventLogLine(event) {

@@ -23,9 +23,18 @@ async function tickWorker(executor) {
 
 async function retryRun(runId) {
     try {
+        const message = '将使用原配置重新执行整条流水线，包含已配置的构建、烧写和测试。新运行会保留来源记录。是否继续？';
+        const confirmed = typeof window.parent.showConfirmDialog === 'function'
+            ? await window.parent.showConfirmDialog('重跑流水线', message)
+            : window.confirm(message);
+        if (!confirmed) return;
         const run = await api(`/api/automation/runs/${encodeURIComponent(runId)}/retry`, {method: 'POST'});
-        toast(`已创建重试 ${run.id}`);
+        resetRunHistoryPage('runs');
+        setStatusFilter('', {load: false});
+        switchWorkflowPane('runs', {load: false});
+        toast(`已创建流水线重跑 ${run.id}`);
         await loadRuns();
+        await loadEvents(run.id);
     } catch (err) { toast(err.message); }
 }
 
