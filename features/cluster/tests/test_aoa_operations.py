@@ -12,6 +12,13 @@ from .api_hardening_fixture import ClusterApiHardeningFixture
 
 
 class AoaOperationsTests(ClusterApiHardeningFixture, unittest.TestCase):
+    def test_worker_without_per_command_support_is_rejected(self):
+        response = self.client.post("/api/cluster/devices/actions", json={
+            "worker_id": "worker-246", "devices": ["ABC"], "action": "aoa_sequence",
+            "aoa_commands": ["click 180 525"], "aoa_hid_session_mode": "per_command"})
+        assert response.status_code == 409
+        assert "按单条方式" in response.json()["error"]
+
     def test_old_worker_cannot_silently_ignore_pointer_mode(self):
         worker = self.repo.get_worker("worker-246")
         with patch.object(self.repo, "get_worker", return_value={**worker, "capabilities": {"aoa_identity_fencing_v1": True}}):

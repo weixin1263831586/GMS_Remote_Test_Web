@@ -31,6 +31,11 @@ class RecoveryExecutorMixin:
             return "Worker AOA safety contract is outdated; update the Worker before flashing"
         if capabilities.get("aoa_hid_modes_v1") is not True:
             return "Worker does not support explicit AOA HID modes; update it before flashing"
+        from .executors import _run_test_plan
+
+        options = profile_hid_options((_run_test_plan(run).get("aoa") or {}).get("metadata"))
+        if options["aoa_hid_session_mode"] == "per_command" and capabilities.get("aoa_per_command_v1") is not True:
+            return "Worker does not support per-command AOA playback; update it before flashing"
         if (capabilities.get("aoa_usb_hid_v1") is not True
                 or capabilities.get("aoa_record_input_v1") is not True):
             return "Worker AOA recovery requires pyusb and ADB before flashing"

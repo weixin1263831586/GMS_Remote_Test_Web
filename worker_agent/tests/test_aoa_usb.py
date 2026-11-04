@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from foundation.aoa_profile import AOA_TOUCH_CALIBRATION_VERSION
 from worker_agent import aoa_actions
 from worker_agent.aoa_usb import bind_usb, find_bound_device
 
@@ -84,7 +85,7 @@ def test_adb_same_serial_on_wrong_port_does_not_count_as_recovered(monkeypatch):
 def test_changed_display_invalidates_calibration_before_input(monkeypatch, changed):
     from worker_agent import aoa_calibration
 
-    context = {"version": 2, "model": "model", "release": "16", "display": [800, 1280], "rotation": 0}
+    context = {"version": AOA_TOUCH_CALIBRATION_VERSION, "model": "model", "release": "16", "display": [800, 1280], "rotation": 0}
     current = {**context, changed: {"display": [1280, 800], "rotation": 1, "model": "other"}[changed]}
     monkeypatch.setattr(aoa_actions, "_display_size", lambda _: (800, 1280))
     monkeypatch.setattr(aoa_calibration, "display_context", lambda *_: current)

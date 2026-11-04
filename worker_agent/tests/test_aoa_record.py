@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from foundation.aoa_profile import (
+    AOA_TOUCH_CALIBRATION_VERSION,
     PRESET_JOURNEYS,
     parse_profile_commands,
     parse_record_input_action,
@@ -19,8 +20,8 @@ def test_coordinate_mapping_matches_hid_descriptor():
     assert real_to_aoa_point(0, 0, 1920, 1080) == (0, 0)
     assert real_to_aoa_point(1920, 1080, 1920, 1080) == (360, 640)
     assert real_to_aoa_point(960, 540, 1920, 1080) == (180, 320)
-    # 1000px < 1080px：线性映射到 593（未越界不 clamp）。
-    assert real_to_aoa_point(960, 1000, 1920, 1080) == (180, 593)
+    # 1000px < 1080px：AOSP 分母 max+1 映射到 594（未越界不 clamp）。
+    assert real_to_aoa_point(960, 1000, 1920, 1080) == (180, 594)
     # 越界才 clamp 到描述符上限。
     assert real_to_aoa_point(1920, 1200, 1920, 1080) == (360, 640)
     with pytest.raises(ValueError):
@@ -34,7 +35,7 @@ def test_interactive_record_input_validation():
     swipe = parse_record_input_action({
         "action": "swipe", "x1": 10, "y1": 20, "x2": 30, "y2": 40,
         "duration_ms": 350, "scale_x": 2.2, "scale_y": 2.2,
-        "calibration_context": {"version": 2, "model": "model", "release": "16", "display": [800, 1280], "rotation": 0},
+        "calibration_context": {"version": AOA_TOUCH_CALIBRATION_VERSION, "model": "model", "release": "16", "display": [800, 1280], "rotation": 0},
     })
     assert swipe["duration_ms"] == 350 and swipe["scale_y"] == 2.2
     for invalid in [
@@ -269,7 +270,7 @@ def test_interactive_record_receipt_excludes_inline_screenshot(monkeypatch):
 @pytest.mark.parametrize("field,value", [("rotation", []), ("rotation", {}), ("rotation", True),
     ("version", True), ("display", [True, 1280]), ("model", "")])
 def test_malformed_calibration_context_is_a_validation_error(field, value):
-    context = {"version": 2, "model": "model", "display": [800, 1280], "rotation": 0}
+    context = {"version": AOA_TOUCH_CALIBRATION_VERSION, "model": "model", "display": [800, 1280], "rotation": 0}
     context[field] = value
     with pytest.raises(ValueError, match="calibration_context"):
         parse_record_input_action({"action": "tap", "x": 1, "y": 2, "scale_x": 2.2, "scale_y": 2.2,

@@ -4,13 +4,14 @@
 // 本文件不修改 Test Workspace 的 worker/device 选择。
 'use strict';
 
-const AOA_TOUCH_CALIBRATION_VERSION = 2;
+const AOA_TOUCH_CALIBRATION_VERSION = 3;
 
 const aoaPanelState = {
     profiles: [], devices: [], commands: [], loaded: false, loading: false,
     running: false, recording: false, editingProfileId: '', screenRefreshId: 0,
     calibration: null, pointer: null, autoConnectDone: false,
     profileMetadata: {},
+    hidSettingsProfileId: '',
     playbackControlId: '', playbackPaused: false, playbackActive: false,
     playbackCommandId: '', playbackWorker: '', playbackPending: '', playbackInputDone: false,
     playbackStates: [], playbackIndex: 0, commandDebug: null, commandEdit: null, commandsProfileId: '',
@@ -21,6 +22,7 @@ function aoaEl(id) { return document.getElementById(id); }
 function aoaHidMetadata() {
     return {...aoaPanelState.profileMetadata,
         hid_touch_mode: aoaEl('aoa-hid-touch-mode')?.value || 'pointer',
+        hid_session_mode: aoaEl('aoa-hid-session-mode')?.value || 'continuous',
         hid_settle_seconds: Number(aoaEl('aoa-hid-settle')?.value || 2)};
 }
 
@@ -29,24 +31,49 @@ function aoaLoadHidMetadata(metadata = {}) {
     const inferred = context?.version === 2 ? context.hid_touch_mode || 'direct' : 'pointer';
     const mode = metadata.hid_touch_mode || metadata.calibration?.hid_touch_mode || inferred;
     const settle = metadata.hid_settle_seconds ?? 2;
+    const sessionMode = metadata.hid_session_mode || 'continuous';
     if (!['pointer', 'direct'].includes(mode) || typeof settle !== 'number'
-            || !Number.isFinite(settle) || settle < 0 || settle > 10) {
+            || !Number.isFinite(settle) || settle < 0 || settle > 10
+            || !['continuous', 'per_command'].includes(sessionMode)) {
         throw new Error('AOA 输入模式或稳定等待无效，请检查配置');
     }
     aoaPanelState.profileMetadata = {...metadata};
+    aoaPanelState.hidSettingsProfileId = '';
     aoaEl('aoa-hid-touch-mode').value = mode;
     aoaEl('aoa-hid-settle').value = String(settle);
+    aoaEl('aoa-hid-session-mode').value = sessionMode;
     if (aoaPanelState.calibration?.context?.hid_touch_mode !== aoaEl('aoa-hid-touch-mode').value) {
         aoaPanelState.calibration = null; aoaRenderCalibration();
     }
 }
 
 function aoaHidModeChanged() {
+    aoaHidOptionEdited('aoa-hid-touch-mode');
     aoaPanelState.calibration = null;
     aoaPanelState.profileMetadata = aoaHidMetadata();
     delete aoaPanelState.profileMetadata.calibration;
     aoaRenderCalibration();
     aoaSetStatus('输入模式已改变；请在该模式下重新标定和验证坐标');
+}
+
+function aoaHidOptionEdited(field) {
+    const profile = aoaSelectedProfile();
+    const value = aoaEl(field).value;
+    if (profile && aoaPanelState.commandsProfileId !== profile.id
+            && aoaPanelState.hidSettingsProfileId !== profile.id) {
+        aoaLoadHidMetadata(profile.metadata || {});
+        aoaEl(field).value = value;
+    }
+    aoaPanelState.hidSettingsProfileId = profile?.id || '';
+}
+
+function aoaHidSettleChanged() { aoaHidOptionEdited('aoa-hid-settle'); }
+
+function aoaSessionModeChanged() {
+    aoaHidOptionEdited('aoa-hid-session-mode');
+    aoaSetStatus(aoaEl('aoa-hid-session-mode').value === 'per_command'
+        ? '按单条方式回放：每个输入动作结束后恢复 USB，速度较慢'
+        : '连续回放：整段保持 USB/HID 连接');
 }
 
 function aoaMessage(error) {
@@ -82,11 +109,12 @@ async function aoaApi(path, options = {}) {
     }
 }
 
-async function aoaAwaitCommand(payload, {onProgress = aoaApplyPlaybackEvent, trackPlayback = true} = {}) {
+async function aoaAwaitCommand(payload, {onProgress = aoaApplyPlaybackEvent, trackPlayback = true, debugSequence = 0} = {}) {
     if (!payload?.accepted) return payload;
     const commandId = payload.command_id;
     if (!commandId) throw new Error('Worker 已接受操作但未返回 command_id');
     let eventCursor = -1;
+    let debugCompleted = false;
     const deadline = Date.now() + (Number(payload.operation_timeout_seconds) || 960) * 1000;
     while (Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -98,6 +126,8 @@ async function aoaAwaitCommand(payload, {onProgress = aoaApplyPlaybackEvent, tra
             (events.events || []).forEach(event => {
                 if (event.sequence > eventCursor) eventCursor = event.sequence;
                 if (event.event_type !== 'progress') return;
+                if (debugSequence && Number(event.payload?.debug_sequence) !== debugSequence) return;
+                if (debugSequence && event.payload?.phase === 'completed') debugCompleted = true;
                 onProgress(event.payload || {});
             });
         } catch (error) { /* 事件通道暂不可用：继续等终态 */ }
@@ -112,7 +142,11 @@ async function aoaAwaitCommand(payload, {onProgress = aoaApplyPlaybackEvent, tra
             throw new Error(`${error.message}（命令 ${commandId}；请核对原操作状态）`);
         }
         const command = status.command || {};
+        if (debugSequence && debugCompleted && ['running', 'completed'].includes(command.status)) {
+            return {success: true, commands_executed: 1, hid_session_kept: command.status === 'running'};
+        }
         if (command.status === 'completed') {
+            if (debugSequence) throw new Error('调试连接已结束，此条命令未收到执行成功回执；请核对设备状态');
             const result = command.result || {};
             const completed = Number(result.commands_executed);
             if (trackPlayback && Number.isFinite(completed)) {
@@ -143,6 +177,7 @@ function aoaSetStatus(text, type = '') {
 }
 
 function aoaSetBusy(running, text = '') {
+    running = running || aoaDebugState.ending;
     aoaPanelState.running = running;
     document.querySelectorAll('#aoa-panel [data-aoa-run], #aoa-panel [data-aoa-screen-action], #aoa-panel select, #aoa-panel [data-aoa-edit], #aoa-command-list button, #aoa-command-list input, #aoa-command-input, #aoa-record-start, #aoa-record-stop, #aoa-profile-name, #aoa-replay-wait')
         .forEach(node => { node.disabled = running; });
@@ -150,6 +185,7 @@ function aoaSetBusy(running, text = '') {
     if (aoaEl('aoa-record-start')) aoaEl('aoa-record-start').disabled = running || aoaPanelState.recording;
     if (aoaEl('aoa-record-stop')) aoaEl('aoa-record-stop').disabled = running || !aoaPanelState.recording;
     aoaPlaybackButtonState();
+    aoaDebugButtonState();
 }
 
 function aoaDeviceWorker(device) {
@@ -166,9 +202,13 @@ function aoaDeviceLabel(device) {
     return `${aoaDeviceSerial(device)}${suffix ? ` · ${suffix}` : ''}`;
 }
 
-function aoaReplaceOptions(select, entries, emptyLabel) {
+function aoaReplaceOptions(select, entries, emptyLabel, keepMissing = false) {
     if (!select) return;
     const previous = select.value;
+    if (keepMissing && previous && !entries.some(entry => entry.value === previous)) {
+        const label = select.selectedOptions[0]?.dataset.label || previous;
+        entries = [{value: previous, label, missing: true}, ...entries];
+    }
     select.replaceChildren();
     if (!entries.length) {
         const option = document.createElement('option');
@@ -180,7 +220,8 @@ function aoaReplaceOptions(select, entries, emptyLabel) {
     entries.forEach(entry => {
         const option = document.createElement('option');
         option.value = entry.value;
-        option.textContent = entry.label;
+        option.textContent = entry.label + (entry.missing ? '（暂未枚举）' : '');
+        option.dataset.label = entry.label;
         select.append(option);
     });
     if (entries.some(entry => entry.value === previous)) select.value = previous;
@@ -197,16 +238,16 @@ function aoaUsableDevices(workerId, recorder = false) {
     });
 }
 
-function aoaFillDeviceSelect(selectId, workerId, recorder = false) {
+function aoaFillDeviceSelect(selectId, workerId, recorder = false, keepMissing = false) {
     const devices = aoaUsableDevices(workerId, recorder);
     aoaReplaceOptions(aoaEl(selectId), devices.map(device => ({
         value: aoaDeviceSerial(device), label: aoaDeviceLabel(device),
-    })), recorder ? '（无 ADB 可用录制设备）' : '（该 Worker 无本地 USB 设备）');
+    })), recorder ? '（无 ADB 可用录制设备）' : '（该 Worker 无本地 USB 设备）', keepMissing);
 }
 
 function aoaSyncDeviceOptions() {
     aoaFillDeviceSelect('aoa-record-device', aoaEl('aoa-record-worker')?.value || '', true);
-    aoaFillDeviceSelect('aoa-replay-device', aoaEl('aoa-replay-worker')?.value || '', false);
+    if (!aoaDebugSyncTarget()) aoaFillDeviceSelect('aoa-replay-device', aoaEl('aoa-replay-worker')?.value || '', false, true);
 }
 
 // 设备管理清单刷新后的只读同步入口。
@@ -218,7 +259,7 @@ function aoaSyncDeviceSources(devices) {
         .map(aoaDeviceWorker).filter(Boolean))];
     const entries = workers.map(worker => ({value: worker, label: worker}));
     aoaReplaceOptions(aoaEl('aoa-record-worker'), entries, '（无可用 Worker）');
-    aoaReplaceOptions(aoaEl('aoa-replay-worker'), entries, '（无可用 Worker）');
+    aoaReplaceOptions(aoaEl('aoa-replay-worker'), entries, '（无可用 Worker）', true);
     aoaSyncDeviceOptions();
 
 }
@@ -229,6 +270,7 @@ function aoaRecorderWorkerChanged() {
 }
 
 function aoaReplayWorkerChanged() {
+    if (aoaDebugSyncTarget()) return;
     aoaFillDeviceSelect('aoa-replay-device', aoaEl('aoa-replay-worker')?.value || '', false);
 }
 
@@ -468,10 +510,8 @@ function aoaUpdateCommandDebug(state) {
     const badge = row.querySelector('.aoa-command-state');
     if (badge) {
         badge.hidden = false; badge.dataset.state = state;
-        badge.textContent = state === 'running' ? '执行中' : state === 'completed' ? '已执行' : '执行失败';
+        badge.textContent = state === 'running' ? '执行中' : state === 'completed' ? '已执行' : state === 'cancelled' ? '已停止' : '执行失败';
     }
-    const button = row.querySelector('.aoa-command-execute');
-    if (button) button.textContent = state === 'running' ? '执行中…' : '执行';
     const progress = aoaEl('aoa-playback-progress');
     if (progress) {
         progress.hidden = false;
@@ -480,46 +520,6 @@ function aoaUpdateCommandDebug(state) {
     }
 }
 
-async function aoaCommandExecute(index) {
-    if (aoaPanelState.running || aoaPanelState.playbackActive || !Number.isInteger(index)) return;
-    if (!aoaCommandEditFinish()) return;
-    const command = aoaPanelState.commands[index];
-    if (typeof command !== 'string' || !command.trim()) return;
-    const worker = aoaEl('aoa-replay-worker')?.value;
-    const device = aoaEl('aoa-replay-device')?.value;
-    if (!worker || !device) {
-        aoaSetStatus('请先选择目标 Worker 和目标设备，再执行单条命令', 'warning');
-        showToast('请先选择目标 Worker 和目标设备，再执行单条命令', 'warning'); return;
-    }
-    aoaPanelState.commandDebug = {index, command, device, state: 'running'};
-    aoaSetBusy(true, `正在执行第 ${index + 1} 条：${command}`);
-    aoaUpdateCommandDebug('running');
-    try {
-        let result = await aoaApi('/api/cluster/devices/actions', {method: 'POST', body: {
-            worker_id: worker, devices: [device], action: 'aoa_sequence',
-            aoa_commands: [command], wait_adb_seconds: 0,
-            aoa_hid_touch_mode: aoaHidMetadata().hid_touch_mode,
-            aoa_hid_settle_seconds: aoaHidMetadata().hid_settle_seconds,
-        }});
-        result = await aoaAwaitCommand(result, {trackPlayback: false, onProgress: event => {
-            if (event.phase === 'running' || event.phase === 'failed') aoaUpdateCommandDebug(event.phase);
-        }});
-        if (result.success !== true || result.commands_executed !== 1 || result.native_mode_restored === false) {
-            throw new Error(result.error || (result.native_mode_restored === false
-                ? '命令已发送，但设备未恢复原生 USB 模式' : '未收到单条命令执行成功的完整回执'));
-        }
-        aoaUpdateCommandDebug('completed');
-        aoaShowResult(`单条执行完成 · 第 ${index + 1} 条 · ${device} · ${command}`, result);
-        aoaSetStatus(`第 ${index + 1} 条执行完成：${command}`, 'success');
-        if (result.cleanup_errors?.length) showToast('命令已执行，USB 清理出现异常，请检查设备状态', 'warning');
-    } catch (error) {
-        aoaUpdateCommandDebug('failed');
-        aoaShowResult(`单条执行失败 · 第 ${index + 1} 条 · ${device}`, {error: error.message});
-        aoaSetStatus(`第 ${index + 1} 条执行失败：${error.message}`, 'error');
-    } finally {
-        aoaSetBusy(false);
-    }
-}
 
 function aoaAppendCommand(command, addPace = true) {
     if (aoaPanelState.playbackActive) return;
@@ -638,139 +638,7 @@ async function aoaImportFileChanged(event) {
     } catch (error) { showToast(`导入失败：${error.message}`, 'warning'); }
 }
 
-function aoaRecorderTarget() {
-    const workerId = aoaEl('aoa-record-worker')?.value || '';
-    const device = aoaEl('aoa-record-device')?.value || '';
-    if (!workerId || !device) throw new Error('请选择录制 Worker 和设备');
-    return {workerId, device};
-}
-
-async function aoaRefreshScreen() {
-    // 实时投屏激活期间画面由流自更新：截图刷新（手动按钮/回退轮询残留）
-    // 一律跳过，避免「正在获取…/已连接」状态在实时状态上反复跳动。
-    if (window.aoaLiveScreen?.isActive()) return;
-    let target;
-    try { target = aoaRecorderTarget(); }
-    catch (error) { showToast(error.message, 'warning'); return; }
-    const refreshId = ++aoaPanelState.screenRefreshId;
-    const status = aoaEl('aoa-screen-status');
-    if (status) status.textContent = '正在获取设备截图…';
-    try {
-        const result = await executeClusterCommandAndWait({
-            worker_id: target.workerId, devices: [target.device], action: 'screenshot',
-        }, () => refreshId === aoaPanelState.screenRefreshId && aoaViewIsOpen());
-        if (refreshId !== aoaPanelState.screenRefreshId) return;
-        if (!result?.image) throw new Error(result?.error || '截图为空');
-        const image = aoaEl('aoa-screen-image'); image.src = result.image; image.hidden = false;
-        aoaEl('aoa-screen-empty').hidden = true;
-        if (status) status.textContent = `已连接 ${target.device} · 单击、长按或拖动操作`;
-    } catch (error) {
-        if (refreshId !== aoaPanelState.screenRefreshId) return;
-        aoaEl('aoa-screen-image').hidden = true;
-        const empty = aoaEl('aoa-screen-empty'); empty.hidden = false;
-        empty.textContent = '无法获取画面。AOA 回放或 USB 调试关闭后，ADB 截图会暂时不可用。';
-        if (status) status.textContent = `截图失败：${error.message}`;
-    }
-}
-
-async function aoaExecuteRecorderInput(input, {refresh = true, pace = true} = {}) {
-    if (aoaPanelState.running) return null;
-    let target;
-    try { target = aoaRecorderTarget(); }
-    catch (error) { showToast(error.message, 'warning'); return null; }
-    const payload = {...input, hid_touch_mode: aoaHidMetadata().hid_touch_mode};
-    if (input.action !== 'calibrate' && aoaPanelState.calibration?.measured) {
-        payload.scale_x = aoaPanelState.calibration.scale_x;
-        payload.scale_y = aoaPanelState.calibration.scale_y;
-        payload.calibration_context = aoaPanelState.calibration.context;
-    }
-    aoaSetBusy(true, `执行 ${input.action}…`);
-    try {
-        let result = await aoaApi('/api/devices/aoa/record/input', {
-            method: 'POST', body: {worker_id: target.workerId, device: target.device, input: payload},
-        });
-        result = await aoaAwaitCommand(result);
-        if (result?.success === false) throw new Error(result.error || `${input.action} 执行失败`);
-        if (target.workerId !== aoaEl('aoa-record-worker')?.value || target.device !== aoaEl('aoa-record-device')?.value) {
-            throw new Error('设备选择已改变，请核对原设备的操作结果');
-        }
-        if (aoaPanelState.recording && result?.command) aoaAppendCommand(result.command, pace);
-        if (result?.touch_calibration) {
-            aoaPanelState.calibration = result.touch_calibration;
-            const key = `gms-aoa-calibration:${target.workerId}:${target.device}`;
-            try { localStorage.setItem(key, JSON.stringify(result.touch_calibration)); } catch (_) { /* storage unavailable */ }
-            aoaRenderCalibration();
-        }
-        aoaSetStatus(aoaPanelState.recording ? '录制中' : '操作完成', 'success');
-        // 实时投屏激活时画面自更新，跳过截图刷新（省一条命令+轮询）。
-        if (refresh && !aoaLiveInputSurfaceActive()) {
-            setTimeout(() => aoaRefreshScreen(), 500);
-        }
-        return result;
-    } catch (error) {
-        if (/recalibrat|calibration_context|display configuration/i.test(error.message)) {
-            aoaPanelState.calibration = null;
-            try { localStorage.removeItem(`gms-aoa-calibration:${target.workerId}:${target.device}`); } catch (_) { /* storage unavailable */ }
-            aoaRenderCalibration();
-        }
-        aoaSetStatus(`操作失败：${error.message}`, 'error');
-        showToast(`AOA 录制操作失败：${error.message}`, 'warning');
-        return null;
-    } finally { aoaSetBusy(false); }
-}
-
-function aoaLiveTarget() {
-    const workerId = aoaEl('aoa-record-worker')?.value || '';
-    const device = aoaEl('aoa-record-device')?.value || '';
-    if (!workerId || !device) return null;
-    return {workerId, device};
-}
-
-async function aoaToggleLiveScreen() {
-    if (window.aoaLiveScreen?.isActive()) {
-        window.aoaLiveScreen.stop();
-        aoaEl('aoa-toggle-live')?.setAttribute('data-live', 'off');
-        aoaSetStatus('实时投屏已关闭');
-        return;
-    }
-    const target = aoaLiveTarget();
-    if (!target) { showToast('请选择录制 Worker 和设备', 'warning'); return; }
-    await window.aoaLiveScreen.start(target.device, target.workerId);
-    const on = window.aoaLiveScreen.isActive();
-    aoaEl('aoa-toggle-live')?.setAttribute('data-live', on ? 'on' : 'off');
-}
-
-function aoaLiveInputSurfaceActive() {
-    return Boolean(window.aoaLiveScreen?.isActive());
-}
-
-function aoaSendKey(key) { return aoaExecuteRecorderInput({action: key}); }
-
-function aoaSendText() {
-    const node = aoaEl('aoa-input-text'); const text = node?.value || '';
-    if (!text) return;
-    return aoaExecuteRecorderInput({action: 'write', text}).then(result => {
-        if (result) node.value = '';
-    });
-}
-
-async function aoaCalibrateTouch() {
-    const ok = await showConfirmDialog(
-        'AOA 触摸标定',
-        '标定会把录制机短暂切入 AOAv2 模式并点击屏幕中心。请先停在点击中心无副作用的页面，是否继续？');
-    if (!ok) return;
-    const result = await aoaExecuteRecorderInput({action: 'calibrate'}, {refresh: true, pace: false});
-    if (result?.touch_calibration?.measured) showToast('AOA 触摸映射标定成功', 'success');
-}
-
-function aoaRenderCalibration() {
-    const node = aoaEl('aoa-calibration-status'); if (!node) return;
-    const calibration = aoaPanelState.calibration;
-    node.textContent = calibration?.measured
-        ? `触摸映射：已实测（X ${calibration.scale_x} / Y ${calibration.scale_y} 像素每逻辑单位）`
-        : '触摸映射：未标定，使用显示分辨率按轴换算';
-}
-
+// 录制器执行/投屏交互/触摸标定：见 aoa-recorder.js（体积 ratchet 拆分）。
 function aoaPointFromPointer(event) {
     // 实时投屏激活时以 canvas 为点击面，否则截图 img。
     const liveActive = Boolean(window.aoaLiveScreen?.isActive());
@@ -902,7 +770,7 @@ async function aoaReplaySelected(profileId = '') {
     const commands = [...(aoaPanelState.commandsProfileId === profile.id
         ? aoaPanelState.commands : profile.commands || [])].map(command => String(command).trim()).filter(Boolean);
     if (!commands.length) { showToast('当前命令列表为空，请先添加命令', 'warning'); return; }
-    const hidMetadata = aoaPanelState.commandsProfileId === profile.id
+    const hidMetadata = (aoaPanelState.commandsProfileId === profile.id || aoaPanelState.hidSettingsProfileId === profile.id)
         ? aoaHidMetadata() : profile.metadata || {};
     const ok = await showConfirmDialog('AOA 回放',
         `将在 ${device} 上通过 USB 回放“${profile.name}”（${commands.length} 条），期间设备会短暂断开 ADB。继续？`);
@@ -981,10 +849,13 @@ async function aoaViewToggle(show) {
     if (visible) {
         if (typeof stopDevicesAutoRefresh === 'function') stopDevicesAutoRefresh();
         await aoaLoadPanel();
-        // 清单同步只更新选择器；投屏由用户操作启动。
+        // 清单同步后按当前选中设备联动：默认自动连接实时投屏（无选中
+        // 设备则只显示空态提示），与切换设备时的自动续流行为一致。
         if (typeof loadDevicesManagement === 'function') await loadDevicesManagement();
         if (typeof stopDevicesAutoRefresh === 'function') stopDevicesAutoRefresh();
+        aoaRecorderDeviceChanged();
     } else {
+        if (aoaDebugState.id) await aoaDebugEnd();
         aoaPanelState.screenRefreshId += 1;
         // 离开 AOA 页签：停止实时投屏与截图轮询。
         if (window.aoaLiveScreen) {

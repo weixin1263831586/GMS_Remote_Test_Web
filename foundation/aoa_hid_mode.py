@@ -3,6 +3,13 @@ from __future__ import annotations
 
 import math
 
+from foundation.aoa_calibration import (
+    MAPPING_POLICY_DIRECT_STANDARD,
+    MAPPING_POLICY_DIRECT_UNVERIFIED,
+    MAPPING_POLICY_POINTER_CALIBRATED,
+    validate_mapping_policy,
+)
+
 
 # Original pointer descriptor. Keep its bytes unchanged for calibrated legacy
 # profiles; the direct touchscreen descriptor lives in aoa_profile.
@@ -34,14 +41,32 @@ def profile_hid_options(metadata: dict | None) -> dict:
     context = {} if context is None else context
     if not isinstance(context, dict):
         raise ValueError("AOA calibration context must be an object")
-    # Version 2 was introduced with direct touch before mode selection existed.
-    inferred = context.get("hid_touch_mode", "direct") if context.get("version") == 2 else "pointer"
+    version = context.get("version")
+    if version is None:
+        version = 0
+    if isinstance(version, bool) or not isinstance(version, int) or version < 0:
+        raise ValueError("AOA calibration context version must be a non-negative integer")
+    # Missing/null versions belong to unversioned legacy metadata. Version 2+
+    # was introduced with direct touch before mode selection existed.
+    inferred = context.get("hid_touch_mode", "direct") if version >= 2 else "pointer"
     inferred = calibration.get("hid_touch_mode", inferred)
     mode = validate_touch_mode(metadata.get("hid_touch_mode", inferred))
+    # mapping_policy（ADR 0026）：estimated/pointer_calibrated/
+    # direct_unverified/direct_standard/unsupported；未声明为空串——执行侧
+    # 对 direct 触摸按 direct_unverified 估算、pointer 按 per-axis 兼容。
+    policy = validate_mapping_policy(metadata.get("mapping_policy"))
+    if policy and mode == "pointer" and policy in (MAPPING_POLICY_DIRECT_STANDARD, MAPPING_POLICY_DIRECT_UNVERIFIED):
+        raise ValueError("mapping policy direct_* requires hid_touch_mode direct")
+    if policy == MAPPING_POLICY_POINTER_CALIBRATED and mode == "direct":
+        raise ValueError("mapping policy pointer_calibrated requires hid_touch_mode direct")
     settle = metadata.get("hid_settle_seconds", 2)
     if isinstance(settle, bool) or not isinstance(settle, (int, float)) or not math.isfinite(settle) or not 0 <= settle <= 10:
         raise ValueError("AOA HID settle seconds must be 0..10")
-    return {"aoa_hid_touch_mode": mode, "aoa_hid_settle_seconds": settle}
+    session_mode = metadata.get("hid_session_mode", "continuous")
+    if session_mode not in ("continuous", "per_command"):
+        raise ValueError("AOA HID session mode must be continuous or per_command")
+    return {"aoa_hid_touch_mode": mode, "aoa_hid_settle_seconds": settle,
+            "aoa_hid_session_mode": session_mode, "aoa_mapping_policy": policy}
 
 
 def hid_registrations(mode: str):

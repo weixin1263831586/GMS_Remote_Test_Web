@@ -303,6 +303,50 @@ class ClusterCommandRepositoryMixin:
                 self._attach_command_to_job_conn(conn, job_id, command, newly_created=True)
         return self.get_command(command_id) or {}
 
+    def enqueue_aoa_debug_command(self, command_id, owner_id, request_id, text):
+        from foundation.error_model import ApiError
+
+        with self._lock, self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM cluster_commands WHERE id=?", (command_id,)).fetchone()
+            payload = json.loads(row["payload_json"]) if row else {}
+            if not payload.get("aoa_debug_session_id") or payload.get("owner_id") != owner_id:
+                raise ApiError.not_found("AOA debug session not found")
+            queue = payload.get("aoa_debug_queue") or []
+            for entry in queue:
+                if entry["request_id"] == request_id:
+                    if entry["command"] != text:
+                        raise ApiError.conflict("debug request id is bound to another command")
+                    return entry["sequence"]
+            if (row["status"] not in {"accepted", "running"} or payload.get("aoa_debug_closed")
+                    or payload.get("aoa_control_action") == "cancel"):
+                raise ApiError.conflict("调试连接已结束，请结束调试后重新连接")
+            if len(queue) >= 256:
+                raise ApiError.conflict("调试会话已达到 256 条上限，请结束调试后重新连接")
+            sequence = len(queue) + 1
+            queue.append({"sequence": sequence, "request_id": request_id, "command": text})
+            payload["aoa_debug_queue"] = queue
+            conn.execute("UPDATE cluster_commands SET payload_json=?,updated_at=? WHERE id=?",
+                         (json.dumps(payload, separators=(",", ":")), _utc_now(), command_id))
+            return sequence
+
+    def read_aoa_debug_command(self, command_id, cursor, *, close=False):
+        # Closing and enqueueing share a write lock: no accepted input can fall
+        # between the idle timeout's last poll and marking the session closed.
+        with self._lock, self.connect() as conn:
+            if close:
+                conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT payload_json FROM cluster_commands WHERE id=?", (command_id,)).fetchone()
+            if not row:
+                raise RuntimeError("AOA debug operation disappeared")
+            payload = json.loads(row["payload_json"])
+            entry = next((item for item in payload.get("aoa_debug_queue", []) if item["sequence"] > cursor), None)
+            if close and entry is None:
+                payload["aoa_debug_closed"] = True
+                conn.execute("UPDATE cluster_commands SET payload_json=? WHERE id=?",
+                             (json.dumps(payload, separators=(",", ":")), command_id))
+            return entry
+
     def request_aoa_playback_control(self, worker_id, control_id, owner_id, action):
         if action not in {"pause", "resume", "cancel"}:
             raise ValueError("invalid AOA playback control")

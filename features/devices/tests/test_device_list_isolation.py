@@ -89,6 +89,12 @@ class DeviceListIsolationTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(devices_api.reconnect, "reconcile_observed_usbip_devices"),
                 patch.object(devices_api.reconnect, "filter_suppressed_usbip_devices", side_effect=lambda devices: devices),
                 patch.object(devices_api, "known_usbip_sources", return_value={}),
+            # 隔离本地心跳 usb_only 清单（cluster_port/生产配置全局，
+            # 跨 feature 测试环境会被污染）。
+            patch.object(devices_api, "local_usb_only_inventory", return_value={}),
+                # 隔离本地心跳 usb_only 清单（cluster_port/生产配置全局，
+                # 跨 feature 测试环境会被污染）。
+                patch.object(devices_api, "local_usb_only_inventory", return_value={}),
                 patch.object(devices_api, "_prune_inactive_usbip_sources", return_value={}),
             ):
                 with global_state.device_cache_lock:
@@ -170,6 +176,9 @@ class DeviceListIsolationTests(unittest.IsolatedAsyncioTestCase):
                 side_effect=lambda devices: list(devices),
             ),
             patch.object(devices_api, "known_usbip_sources", return_value={}),
+            # 隔离本地心跳 usb_only 清单（cluster_port/生产配置全局，
+            # 跨 feature 测试环境会被污染）。
+            patch.object(devices_api, "local_usb_only_inventory", return_value={}),
             patch.object(devices_api, "_prune_inactive_usbip_sources", return_value={}),
         ):
             first = await devices_api.get_connected_devices(
@@ -241,6 +250,12 @@ class DeviceListIsolationTests(unittest.IsolatedAsyncioTestCase):
                     side_effect=lambda devices: list(devices),
                 ),
                 patch.object(devices_api, "known_usbip_sources", return_value={}),
+            # 隔离本地心跳 usb_only 清单（cluster_port/生产配置全局，
+            # 跨 feature 测试环境会被污染）。
+            patch.object(devices_api, "local_usb_only_inventory", return_value={}),
+                # 隔离本地心跳 usb_only 清单（cluster_port/生产配置全局，
+                # 跨 feature 测试环境会被污染）。
+                patch.object(devices_api, "local_usb_only_inventory", return_value={}),
                 patch.object(devices_api, "_prune_inactive_usbip_sources", return_value={}),
             ):
                 adb_response = await devices_api.get_connected_devices(

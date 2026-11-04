@@ -7,6 +7,38 @@ from tests.runtime_ui.harness import RuntimeUiHarness, expect
 
 
 class RuntimeShellLoadingTests(RuntimeUiHarness):
+    def test_slow_aoa_recorder_loads_before_workbench_initialization(self):
+        page = self.new_page()
+        held, errors, mutations = [], [], []
+        page.on('pageerror', lambda error: errors.append(str(error)))
+        page.on('request', lambda request: mutations.append(request.url)
+                if request.method == 'POST' and ('/api/devices/aoa/' in request.url
+                    or '/api/cluster/devices/actions' in request.url) else None)
+        page.route('**/static/js/shell/aoa-recorder.js?*', lambda route: held.append(route))
+        page.route('**/api/devices/aoa/**', lambda route: route.fulfill(
+            status=200, content_type='application/json', body='{"success":true,"profiles":[]}'))
+        try:
+            page.goto(self.base_url, wait_until='commit')
+            page.wait_for_function("document.readyState === 'interactive' && typeof aoaDebugButtonState === 'function'")
+            self.assertEqual(len(held), 1)
+            self.assertEqual(page.evaluate('typeof aoaInitializeWorkbench'), 'undefined')
+            self.assert_no_page_errors(errors)
+            held.pop().continue_()
+            page.wait_for_load_state('domcontentloaded')
+            self.assertEqual(page.locator('#aoa-command-file').get_attribute('data-aoa-initialized'), '1')
+            expect(page.locator('#aoa-calibration-status')).to_contain_text('触摸映射')
+            page.evaluate("switchPage('devices')")
+            for _ in range(2):
+                page.evaluate('aoaViewToggle(true)')
+                expect(page.locator('#aoa-panel')).to_be_visible()
+                page.evaluate('aoaViewToggle(false)')
+            self.assert_no_page_errors(errors)
+            self.assertEqual(mutations, [])
+        finally:
+            for route in held:
+                route.abort()
+            page.close()
+
     def test_slow_shell_chunk_does_not_block_document_parsing(self):
         page = self.new_page()
         held, errors = [], []

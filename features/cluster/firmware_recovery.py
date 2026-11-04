@@ -48,9 +48,11 @@ def freeze_firmware_recovery(request, repository, worker_id: str, devices: list[
     commands = list(profile["commands"])
     try:
         parse_profile_commands(commands)
-        profile_hid_options(profile.get("metadata"))
+        options = profile_hid_options(profile.get("metadata"))
     except ValueError as exc:
         raise ApiError.invalid_semantics(str(exc)) from exc
+    if options["aoa_hid_session_mode"] == "per_command" and caps.get("aoa_per_command_v1") is not True:
+        raise ApiError.conflict("Worker 不支持按单条方式回放，请更新 Worker 后再烧写")
     return {
         "profile_id": profile["id"], "profile_name": profile["name"],
         "profile_revision": profile.get("revision", ""),
@@ -60,7 +62,31 @@ def freeze_firmware_recovery(request, repository, worker_id: str, devices: list[
         "metadata": profile.get("metadata") or {},
         "wait_adb_seconds": max(1, int(profile.get("wait_adb_seconds") or 60)),
         "boot_wait_seconds": wait, "usb_port_path": port,
+        # 标定记录随快照冻结（ADR 0026 流程：userdebug 标定 → 刷 user
+        # build → 匹配标定记录 → AOA HID 恢复）：烧写后设备无 ADB,无法
+        # 现场查询环境,必须在刷前把已验证 TouchMapping 一并冻结进快照。
+        # 无匹配记录时显式标记 unverified,回放结果不得当作已验证坐标。
+        "touch_mapping": _match_calibration_snapshot(
+            request, profile, options["aoa_hid_touch_mode"]),
     }
+
+
+def _match_calibration_snapshot(request, profile: dict, hid_touch_mode: str) -> dict | None:
+    """冻结烧写前可复用的已验证标定记录；无匹配返回 None(unverified)。"""
+    from features.devices import calibration_store
+
+    metadata = profile.get("calibration_context") or {}
+    context = {
+        "model": metadata.get("model") or profile.get("model") or "",
+        "release": metadata.get("release") or profile.get("release") or "",
+        "display": metadata.get("display") or profile.get("display") or [0, 0],
+        "rotation": metadata.get("rotation"),
+        "hid_touch_mode": hid_touch_mode,
+    }
+    if not context["model"] or not context["display"][0]:
+        return None
+    record = calibration_store().find_matching(principal_owner_id(request), context)
+    return record["mapping"] if record else None
 
 
 def prepare_local_firmware_recovery(request, client_id: str, devices: list[str],
@@ -133,6 +159,11 @@ async def run_local_firmware_recovery(prepared: dict, on_event=None) -> dict:
                "post_flash_recovery": snapshot, "lease_tokens": prepared["lease_tokens"],
                "owner_id": prepared["owner_id"], "release_claim_on_terminal": False,
                "claim_source_id": prepared["claim_source_id"]}
+    # 冻结在快照里的标定记录（可能为 None）：Worker 端 None → 按 unverified
+    # 估算执行并在结果里如实标记；记录存在 → 坐标经映射动态转换。
+    payload["aoa_touch_mapping"] = snapshot.get("touch_mapping")
+    payload["aoa_mapping_policy"] = (
+        (snapshot.get("touch_mapping") or {}).get("mapping_policy") or "direct_unverified")
     fenced_local_payload(repository, payload)
     payload["request_sha256"] = request_digest(
         prepared["worker_id"], payload["devices"], payload, prepared["owner_id"])

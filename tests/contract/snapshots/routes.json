@@ -1279,6 +1279,30 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/devices/aoa/calibrations"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/aoa/calibrations"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/aoa/calibrations/match"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/devices/aoa/calibrations/{calibration_id}"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/devices/aoa/playback/{control_id}/control"

@@ -13,6 +13,7 @@ from features.auth import (
     principal_actor_id,
     require_authenticated_user,
     require_elevated_admin_when_auth_required,
+    require_human_principal,
 )
 from foundation.aoa_profile import MAX_AOA_OPERATION_SECONDS, MAX_AOA_PAUSE_SECONDS
 from foundation.config import config_manager
@@ -120,6 +121,8 @@ async def _wait_for_command(
 ) -> dict:
     """短轮询一条 Worker 命令到终态；超时则返回 accepted 交由调用方续查。"""
     flag = {"deduplicated": True} if deduplicated else {}
+    if (command.get("payload") or {}).get("aoa_debug_session_id"):
+        flag["debug_sequence"] = 1
     if action == "aoa_sequence":
         return {"success": True, "accepted": True, "command_id": command["id"],
                 "operation_timeout_seconds": MAX_AOA_OPERATION_SECONDS + (
@@ -220,7 +223,17 @@ async def device_action(body: ClusterDeviceAction, request: Request):
             _require_machine_reservation(request, body.worker_id, requested)
     automation_run_id = str(body.automation_run_id or "").strip()
     digest = request_digest(body.worker_id, requested, action_payload, owner_id)
-    if automation_run_id:
+    if body.aoa_debug_session_id:
+        require_human_principal(request)
+        from .aoa_debug import prepare_debug_request
+
+        operation_id, response = prepare_debug_request(
+            repository, body, action_payload, requested, owner_id, is_local=is_local)
+        if response is not None:
+            return response
+    elif body.aoa_debug_request_id or body.aoa_debug_command:
+        raise ApiError.invalid_semantics("AOA debug fields require a debug session id")
+    elif automation_run_id:
         reservation = repository.get_reservation_by_source(automation_run_id)
         if (not reservation or reservation.get("owner_id") != owner_id
                 or reservation.get("worker_id") != body.worker_id
@@ -245,6 +258,9 @@ async def device_action(body: ClusterDeviceAction, request: Request):
         operation_id = f"device-action-{uuid.uuid4().hex}"
     action_payload["request_sha256"] = digest
     action_payload["skip_if_adb_online"] = bool(automation_run_id) and body.action == "aoa_sequence"
+    if (not is_local and body.action == "aoa_sequence" and body.aoa_hid_session_mode == "per_command"
+            and (worker.get("capabilities") or {}).get("aoa_per_command_v1") is not True):
+        raise ApiError.conflict("Worker 不支持按单条方式回放，请更新 Worker")
     if (not is_local and body.action == "aoa_sequence"
             and (worker.get("capabilities") or {}).get("aoa_hid_modes_v1") is not True):
         raise ApiError.conflict("Worker 不支持 AOA 输入模式选择，请更新 Worker 后再回放")

@@ -25,6 +25,7 @@ from functools import partial
 from typing import Any
 
 from foundation import aoa_profile
+from foundation.aoa_calibration import TouchMapping
 
 from .adb_suppression import begin_suppression as _begin_adb_suppression
 from .aoa_session import AoaSession, device_gone, register_hids
@@ -62,6 +63,16 @@ def _usb():
         return usb.core, usb.util
     except ImportError as exc:  # pragma: no cover - 依赖缺失路径
         raise AoaError("Worker 缺少 pyusb 依赖，无法执行 AOA 操作") from exc
+
+
+def auto_touch_allowed_by_policy(policy: str) -> bool:
+    """该 mapping_policy 是否允许自动触摸（Worker 侧判定，失败关闭）。"""
+    from foundation.aoa_calibration import auto_touch_allowed
+
+    try:
+        return auto_touch_allowed(policy)
+    except ValueError:
+        return False
 
 
 def _accessory_mode(usb_core, device) -> bool:
@@ -564,6 +575,110 @@ def _parse_probe_cooked_point(dump: str, probe_x: int, probe_y: int) -> tuple[fl
     return None
 
 
+# 多点仿射标定的采样点数（ADR 0026：五点布局，四角内缩 + 中心）。
+CALIBRATION_PROBE_COUNT = 5
+
+
+def calibration_probe_points() -> list[tuple[int, int]]:
+    """五点 HID 探针布局：四角 25%/75% 内缩 + 中心（aoa_calibration 单一真值）。"""
+    from foundation.aoa_calibration import five_point_calibration_points
+
+    return five_point_calibration_points(
+        aoa_profile.AOA_TOUCH_MAX_X, aoa_profile.AOA_TOUCH_MAX_Y)
+
+
+def _calibrate_touch_affine(
+    serial: str,
+    display_w: int,
+    display_h: int,
+    sleep: Callable[[float], None],
+    touch_mode: str = "pointer",
+) -> TouchMapping | None:
+    """多点仿射标定：五个 HID 探针实测 cooked 坐标，拟合 HID→屏幕仿射。
+
+    升级单点比例标定（ADR 0026）：≥3 个不共线采样点覆盖缩放/偏移/
+    轴间耦合（旋转类），保留每点残差并输出 RMS/最大误差；最大误差超过
+    ``MAX_CALIBRATION_ERROR_PX``（8px）时 policy 自动降为 unverified。
+    任何失败返回 None（调用方退回单点/按轴），设备状态尽力恢复。
+
+    探针触摸仍落在普通界面上（非专用标定界面）：点位避开边缘 25% 内缩，
+    单击不含长按，清理阶段 BACK 关闭可能弹出的菜单——与单点标定相同
+    的“明确用户动作才触发”边界。
+    """
+    from foundation.aoa_calibration import mapping_from_samples
+
+    probes = calibration_probe_points()
+    usb_core, usb_util = _usb()
+    device = None
+    probe_down_sent = False
+    try:
+        # 熄屏时 InputReader 会丢弃外接触摸：先亮屏解锁（与单点标定一致）。
+        _adb_run(serial, "shell", "input", "keyevent", "224")
+        _adb_run(serial, "shell", "wm", "dismiss-keyguard")
+        sleep(1.0)
+        device = _configure_accessory(usb_core, serial)
+        _detach_kernel_drivers(device)
+        _register_all_hid(device, touch_mode)
+        sleep(CONFIGURE_DELAY_SECONDS)
+        samples: list[tuple[tuple[float, float], tuple[float, float]]] = []
+        for probe_x, probe_y in probes:
+            result = _transfer(
+                device, aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT,
+                aoa_profile.AOA_HID_TOUCH_SCREEN, 0,
+                aoa_profile.touch_report(True, probe_x, probe_y))
+            if result == DEVICE_NOT_FOUND:
+                raise AoaError("probe touch: device vanished")
+            probe_down_sent = True
+            sleep(1.2)
+            dump = _adb_run(serial, "shell", "dumpsys", "input",
+                            timeout=30).stdout or ""
+            cooked = _parse_probe_cooked_point(dump, probe_x, probe_y)
+            result = _transfer(
+                device, aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT,
+                aoa_profile.AOA_HID_TOUCH_SCREEN, 0,
+                aoa_profile.touch_report(False, probe_x, probe_y))
+            if result == DEVICE_NOT_FOUND:
+                raise AoaError("probe release: device vanished")
+            if cooked is None:
+                logger.warning(
+                    "AOA affine calibration: cooked point not found for probe "
+                    "(%d, %d) on %s", probe_x, probe_y, serial)
+                return None
+            samples.append(((float(probe_x), float(probe_y)), cooked))
+            sleep(0.4)
+        mapping = mapping_from_samples(
+            touch_mode, samples, display_pixels=(int(display_w), int(display_h)))
+        logger.info(
+            "AOA affine calibration on %s: policy=%s rms=%.2fpx max=%.2fpx",
+            serial, mapping.effective_policy, mapping.rms_error_px,
+            mapping.max_error_px)
+        return mapping
+    except Exception as exc:
+        logger.warning("AOA affine calibration failed on %s: %s", serial, exc)
+        return None
+    finally:
+        errors = cleanup_diagnostics()
+        steps = []
+        if probe_down_sent and device is not None:
+            last_x, last_y = probes[-1]
+            steps += [
+                ("release_touch", lambda: _transfer(device, aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT,
+                    aoa_profile.AOA_HID_TOUCH_SCREEN, 0, aoa_profile.touch_report(False, last_x, last_y))),
+                ("dismiss_probe_menu", lambda: _adb_run(serial, "shell", "input", "keyevent", "4")),
+            ]
+        if device is not None:
+            steps += [(f"unregister_hid_{hid}", lambda hid=hid: _transfer(
+                device, aoa_profile.AOA_ACCESSORY_UNREGISTER_HID, hid, 0))
+                for hid, _ in reversed(aoa_profile.AOA_HID_REGISTRATIONS)]
+            steps += [("reset_usb", lambda: _reset_usb(device)),
+                      ("dispose_usb", lambda: usb_util.dispose_resources(device))]
+        steps += [("restore_native_mode", lambda: _ensure_native_mode(usb_core, serial)),
+                  ("verify_adb_state", lambda: _wait_adb_state(serial, 20).get("adb_recovered") is True)]
+        cleanup_steps(steps, errors)
+        if errors:
+            logger.warning("AOA affine calibration cleanup on %s: %s", serial, errors)
+
+
 def record_aoa_profile(
     serial: str,
     steps: list,
@@ -839,26 +954,53 @@ def record_aoa_input(serial: str, raw_action: dict) -> dict[str, Any]:
             raise ValueError("display configuration changed; recalibrate before recording input")
 
     if action["action"] == "calibrate":
-        calibration = _calibrate_touch_mapping(serial, display_w, display_h, time.sleep, touch_mode)
+        # 多点仿射标定（ADR 0026）：五点实测 + 误差验证；失败退回
+        # 单点比例（旧行为，unverified），再失败退回按轴 AOSP 估算
+        # （estimated）。无法实测时明确标记，不能当成 verified。
+        from foundation import aoa_calibration
+
+        mapping = _calibrate_touch_affine(serial, display_w, display_h, time.sleep, touch_mode)
         errors = list(cleanup_diagnostics())
         if errors:
-            calibration = None
-        if calibration is not None:
-            scale_x, scale_y = calibration
+            mapping = None
+        single_point = False
+        if mapping is None:
+            legacy = _calibrate_touch_mapping(serial, display_w, display_h, time.sleep, touch_mode)
+            if list(cleanup_diagnostics()):
+                legacy = None
+            if legacy is not None:
+                scale_x, scale_y = legacy
+                single_point = True
+                mapping = TouchMapping(
+                    hid_touch_mode=touch_mode,
+                    matrix=(scale_x, 0.0, 0.0, scale_y),
+                    offset=(0.0, 0.0),
+                    mapping_policy=aoa_calibration.MAPPING_POLICY_DIRECT_UNVERIFIED,
+                    display_pixels=(int(display_w), int(display_h)),
+                )
+            else:
+                scale_x = display_w / aoa_profile.AOA_TOUCH_MAX_X
+                scale_y = display_h / aoa_profile.AOA_TOUCH_MAX_Y
+                mapping = aoa_calibration.per_axis_mapping(
+                    display_w, display_h, touch_mode)
+        else:
+            scale_x = display_w / aoa_profile.AOA_TOUCH_MAX_X
+            scale_y = display_h / aoa_profile.AOA_TOUCH_MAX_Y
         return {
             "serial": serial,
-            "success": calibration is not None,
+            "success": not single_point,
             "action": "calibrate",
             "cleanup_errors": errors,
             "display": [display_w, display_h],
             "touch_calibration": {
-                "measured": calibration is not None,
+                "measured": True,
                 "context": context,
+                "mapping": mapping.to_dict(),
                 "scale_x": round(scale_x, 4),
                 "scale_y": round(scale_y, 4),
             },
-            **({"error": "touch calibration failed; using per-axis mapping"}
-               if calibration is None else {}),
+            **({"error": "affine calibration failed; single-point probe used"}
+               if single_point else {}),
         }
 
     def logical(x: int, y: int) -> tuple[int, int]:
@@ -934,10 +1076,15 @@ def run_aoa_sequence(
     on_control_event: Callable[[dict[str, Any]], None] | None = None,
     on_event: Callable[[dict[str, Any]], None] | None = None,
     control_source: Callable[[], dict] | None = None,
+    debug_command_source: Callable | None = None,
     suppress_adb_daemon: bool = False,
     suppress_adb_daemon_gate: Callable[[], bool] | None = None,
     touch_mode: str = "pointer",
     hid_settle_seconds: float = 2,
+    session_mode: str = "continuous",
+    touch_mapping: dict | None = None,
+    mapping_policy: str = "",
+    _deadline: float | None = None,
 ) -> dict[str, Any]:
     """执行一条 AOA 命令序列，随后可选等待 ADB 恢复。
 
@@ -959,10 +1106,50 @@ def run_aoa_sequence(
     异常按“不抑制”处理（fail-open：误杀代价高于放弃抑制）。
     """
     commands = [str(item).strip() for item in commands if str(item).strip()]
-    parsed = aoa_profile.parse_profile_commands(commands)
+    from foundation import aoa_calibration
     from foundation.aoa_hid_mode import profile_hid_options
 
-    profile_hid_options({"hid_touch_mode": touch_mode, "hid_settle_seconds": hid_settle_seconds})
+    profile_hid_options({"hid_touch_mode": touch_mode, "hid_settle_seconds": hid_settle_seconds,
+                         "hid_session_mode": session_mode})
+    # 触摸映射（ADR 0026 执行时动态转换）：Controller 下发的已验证标定
+    # 记录经 parse 校验；无法提供时按轴估算兜底并标记 unverified——两种
+    # 情况都把 policy 写进结果，禁止把估算当成功验证。
+    target_mapping = None
+    if touch_mapping is not None:
+        try:
+            target_mapping = aoa_calibration.TouchMapping.from_dict(touch_mapping)
+        except ValueError as exc:
+            raise AoaError(f"invalid AOA touch mapping from Controller: {exc}") from exc
+        if target_mapping.hid_touch_mode != touch_mode:
+            raise AoaError(
+                "AOA touch mapping belongs to another HID mode "
+                f"({target_mapping.hid_touch_mode} != {touch_mode})")
+    effective_policy = (
+        str(mapping_policy or (target_mapping.effective_policy if target_mapping else ""))
+        or ("direct_unverified" if touch_mode == "direct" else "estimated"))
+    if target_mapping is None and commands and not auto_touch_allowed_by_policy(effective_policy):
+        raise AoaError(
+            f"AOA mapping policy {effective_policy} forbids automatic touch input; "
+            "calibrate this device first")
+    if target_mapping is not None:
+        commands = aoa_calibration.convert_commands(
+            commands, target_mapping, target_mapping)
+    parsed = aoa_profile.parse_profile_commands(commands)
+    if debug_command_source and (session_mode != "continuous" or wait_adb_seconds):
+        raise AoaError("persistent debug requires continuous HID and no final ADB wait")
+    if session_mode == "per_command":
+        from .aoa_step_sessions import run_step_sessions
+
+        def run_one(text, deadline, report):
+            return run_aoa_sequence(serial, [text], sleep=sleep, on_event=report,
+                suppress_adb_daemon=suppress_adb_daemon, suppress_adb_daemon_gate=suppress_adb_daemon_gate,
+                touch_mode=touch_mode, hid_settle_seconds=hid_settle_seconds,
+                touch_mapping=touch_mapping, mapping_policy=mapping_policy, _deadline=deadline)
+
+        return run_step_sessions(serial, commands, parsed, run_one=run_one, wait_adb=_wait_adb_state,
+            validate=validate_binding, error_type=AoaError, sleep=sleep, wait_adb_seconds=wait_adb_seconds,
+            on_event=on_event, on_progress=on_progress, control_id=control_id, control_source=control_source,
+            on_control_event=on_control_event, touch_mode=touch_mode, hid_settle_seconds=hid_settle_seconds)
     usb_core, usb_util = _usb()
     # clamp 环境变量上界：放大会话时长会越过抑制 flag 的 TTL 推导
     # （FLAG_TTL_SECONDS 假设最坏会话 ≤ MAX_AOA_OPERATION_SECONDS），
@@ -970,6 +1157,11 @@ def run_aoa_sequence(
     action_delay = min(max(float(
         __import__("os").environ.get("GMS_WORKER_AOA_ACTION_DELAY", str(ACTION_DELAY_SECONDS))), 0.0), 10.0)
     deadline = time.monotonic() + aoa_profile.MAX_TOTAL_RUNTIME_MS / 1000 + 30
+    hard_deadline = time.monotonic() + 900
+    if debug_command_source:
+        deadline = hard_deadline
+    if _deadline is not None:
+        deadline = min(deadline, _deadline)
     executed = 0
     device = None
     registered: set[int] = set()
@@ -986,7 +1178,10 @@ def run_aoa_sequence(
     def report_event(phase, index, text=""):
         if on_event:
             try:
-                on_event({"phase": phase, "index": index, "total": len(parsed), "command": text})
+                event = {"phase": phase, "index": index, "total": max(index, len(parsed)), "command": text}
+                if debug_command_source:
+                    event["debug_sequence"] = index
+                on_event(event)
             except Exception:
                 logger.warning("AOA progress event failed", exc_info=True)
 
@@ -1055,18 +1250,39 @@ def run_aoa_sequence(
             reports_sent += 1
             sleep(pause)
 
-        for position, command in enumerate(parsed, start=1):
+        def debug_validate():
+            validate_binding()
+            if time.monotonic() >= hard_deadline:
+                raise AoaError("AOA debug session reached its 15 minute limit; end debug before reconnecting")
+
+        def debug_tick():
+            debug_validate()
+            if control_id:
+                from .aoa_control import wait_if_paused
+
+                wait_if_paused(control_id, index=position, total=max(position, len(parsed)),
+                    sleep=sleep, on_event=report_control, on_tick=debug_validate, read_source=control_source)
+            debug_validate()
+
+        steps = ((index, command, commands[index - 1]) for index, command in enumerate(parsed, 1))
+        if debug_command_source:
+            from .aoa_debug_session import debug_steps
+
+            steps = debug_steps(debug_command_source, parsed, tick=debug_tick, sleep=sleep,
+                                clock=time.monotonic, error_type=AoaError)
+        for position, command, original in steps:
             if control_id:
                 from .aoa_control import wait_if_paused as _gate
 
-                deadline += _gate(
+                pause_duration = _gate(
                     control_id, index=position, total=len(parsed),
                     sleep=sleep, on_event=report_control,
-                    on_tick=validate_binding, read_source=control_source)
+                    on_tick=debug_validate if debug_command_source else validate_binding, read_source=control_source)
+                if not debug_command_source:
+                    deadline += pause_duration
             validate_binding()
             if time.monotonic() > deadline:
                 raise AoaError("AOA playback time budget exceeded; reconcile required")
-            original = commands[position - 1] if position <= len(commands) else ""
             reports_sent = 0
             report_event("running", position, str(original))
             try:
@@ -1081,9 +1297,12 @@ def run_aoa_sequence(
                     if not rebuilt:
                         break
                     if control_id:
-                        deadline += _gate(
+                        pause_duration = _gate(
                             control_id, index=position, total=len(parsed), sleep=sleep,
-                            on_event=report_control, on_tick=validate_binding, read_source=control_source)
+                            on_event=report_control, on_tick=debug_validate if debug_command_source else validate_binding,
+                            read_source=control_source)
+                        if not debug_command_source:
+                            deadline += pause_duration
                     report_event("running", position, str(original))
                 if command.kind in ("wake", "home", "back"):
                     flag = {"wake": aoa_profile.AOA_SYSTEM_WAKE,
@@ -1184,6 +1403,10 @@ def run_aoa_sequence(
         "commands_total": len(parsed),
         "hid_touch_mode": touch_mode,
         "hid_settle_seconds": hid_settle_seconds,
+        "hid_session_mode": "continuous",
+        "mapping_policy": effective_policy,
+        "touch_mapping_verified": bool(
+            target_mapping is not None and target_mapping.verified),
         "commands_executed": executed,
         "cleanup_errors": cleanup_errors,
         "reconcile_required": bool(cleanup_errors),

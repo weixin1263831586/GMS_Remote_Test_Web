@@ -272,7 +272,9 @@ class DeviceListLoaderMergeTests(unittest.IsolatedAsyncioTestCase):
                 side_effect=lambda devices: list(devices),
             ),
             patch.object(devices_api, "known_usbip_sources", return_value={}),
-            patch.object(devices_api, "_prune_inactive_usbip_sources", return_value={}),
+            # 隔离本批新增的主路径依赖：本地心跳 usb_only 清单来自
+            # cluster_port/生产配置全局，跨 feature 测试环境会被污染。
+            patch.object(devices_api, "local_usb_only_inventory", return_value={}),            patch.object(devices_api, "_prune_inactive_usbip_sources", return_value={}),
         ):
             response = await devices_api.get_connected_devices(
                 _request("alice"),

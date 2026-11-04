@@ -394,7 +394,7 @@ def aoa_capabilities() -> dict[str, bool]:
     return {"aoa_record_input_v1": shutil.which("adb") is not None,
             "aoa_usb_hid_v1": has_pyusb, "aoa_identity_fencing_v1": True,
             "aoa_playback_control_v1": True, "firmware_aoa_recovery_v1": True,
-            "aoa_hid_modes_v1": True}
+            "aoa_hid_modes_v1": True, "aoa_per_command_v1": True}
 
 
 def execute_device_action(
@@ -601,15 +601,22 @@ def execute_device_action(
                     on_event=progress_event_callback,
                     control_id=str(options.get("playback_control_id") or ""),
                     control_source=options.get("_aoa_control_source"),
+                    debug_command_source=options.get("_aoa_debug_source"),
                     suppress_adb_daemon=bool(options.get("suppress_adb_daemon")),
                     suppress_adb_daemon_gate=options.get("suppress_adb_daemon_gate"),
                     touch_mode=options.get("aoa_hid_touch_mode", "pointer"),
                     hid_settle_seconds=options.get("aoa_hid_settle_seconds", 2),
+                    session_mode=options.get("aoa_hid_session_mode", "continuous"),
+                    touch_mapping=options.get("aoa_touch_mapping"),
+                    mapping_policy=str(options.get("aoa_mapping_policy") or ""),
                 )
         except AoaError as exc:
             details = getattr(exc, "cleanup_errors", [])
             message = str(exc) + (f"; cleanup diagnostics: {details}" if details else "")
-            raise RuntimeError(message) from exc
+            error = RuntimeError(message)
+            error.cancelled = getattr(exc, "cancelled", False)
+            error.cleanup_errors = details
+            raise error from exc
     if action == "tap":
         if len(serials) != 1 or options.get("x") is None or options.get("y") is None:
             raise ValueError("tap requires one device and coordinates")

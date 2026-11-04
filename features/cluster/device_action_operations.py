@@ -86,6 +86,10 @@ def execute_local_operation(repository, command: dict, execute) -> None:
     payload = command["payload"]
     try:
         payload = fenced_local_payload(repository, payload)
+        if payload.get("aoa_debug_session_id"):
+            from .aoa_debug import debug_command_source
+
+            payload = {**payload, "_aoa_debug_source": debug_command_source(repository, command["id"])}
         report, report_event = (_local_aoa_progress_reporter(repository, command)
                                 if payload.get("action") == "aoa_sequence" else (None, None))
         if payload.get("playback_control_id"):
@@ -106,7 +110,8 @@ def execute_local_operation(repository, command: dict, execute) -> None:
     except Exception as exc:
         repository.ack_command(command["worker_id"], command["id"], {
             "status": "cancelled" if getattr(exc, "cancelled", False) else "failed", "error": str(exc),
-            "result": {"success": False, "reconcile_required": not getattr(exc, "cancelled", False)},
+            "result": {"success": False, "reconcile_required": bool(getattr(exc, "cleanup_errors", []))
+                       or not getattr(exc, "cancelled", False), "cleanup_errors": getattr(exc, "cleanup_errors", [])},
         })
     finally:
         if payload.get("release_claim_on_terminal"):

@@ -1051,6 +1051,35 @@
             "title": "Aoa Commands",
             "type": "array"
           },
+          "aoa_debug_command": {
+            "default": "",
+            "maxLength": 1024,
+            "title": "Aoa Debug Command",
+            "type": "string"
+          },
+          "aoa_debug_request_id": {
+            "default": "",
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_-]*$",
+            "title": "Aoa Debug Request Id",
+            "type": "string"
+          },
+          "aoa_debug_session_id": {
+            "default": "",
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_-]*$",
+            "title": "Aoa Debug Session Id",
+            "type": "string"
+          },
+          "aoa_hid_session_mode": {
+            "default": "continuous",
+            "enum": [
+              "continuous",
+              "per_command"
+            ],
+            "title": "Aoa Hid Session Mode",
+            "type": "string"
+          },
           "aoa_hid_settle_seconds": {
             "default": 2,
             "maximum": 10.0,
@@ -12651,6 +12680,131 @@
           }
         },
         "summary": "Auto Group Devices"
+      }
+    },
+    "/api/devices/aoa/calibrations": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Calibrations"
+      },
+      "post": {
+        "description": "保存一次触摸标定（Worker 标定结果的 mapping 持久化到 aoa_calibrations）。",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Calibration"
+      }
+    },
+    "/api/devices/aoa/calibrations/match": {
+      "post": {
+        "description": "按设备环境键查询可复用的已验证标定（无匹配返回 matched=false）。",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Match Calibration"
+      }
+    },
+    "/api/devices/aoa/calibrations/{calibration_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "calibration_id",
+            "required": true,
+            "schema": {
+              "title": "Calibration Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Calibration"
       }
     },
     "/api/devices/aoa/playback/{control_id}/control": {
