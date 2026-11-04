@@ -19,11 +19,16 @@ from features.auth import (
 from features.devices import resume_usbip_reconnect as _resume_usbip_reconnect
 from features.test_execution import get_default_suites_path
 from features.users import get_client_username_from_request
+from foundation.cluster_port import (
+    release_local_firmware_recovery,
+    validate_local_firmware_recovery,
+)
 from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response, success_response
 from foundation.uploads import upload_temp_root
 
 from . import chunk_uploads, runtime
+from .aoa_recovery import prepare_recovery, recover_after_burn
 from .api_helpers import (
     adb_proxy_devices as _adb_proxy_devices,
 )
@@ -341,6 +346,7 @@ async def burn_firmware(
     merged_firmware = None
     burn_lock_path = None
     burn_succeeded = False
+    aoa_recovery = None
     locked_devices: list[str] = []
     usbip_flash_routes: list[dict] = []
     usbip_reconnect_after_finish = False
@@ -456,6 +462,7 @@ async def burn_firmware(
                 )
 
         config = runtime.config_manager.load_config()
+        aoa_recovery = prepare_recovery(request, form, client_id, devices, config)
         async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
                 # SSH 建连失败属远端基础设施故障（502）。
@@ -674,6 +681,8 @@ async def burn_firmware(
                 )
                 if usbip_route_error:
                     return error_response(usbip_route_error, status_code=409)
+                if aoa_recovery and usbip_flash_routes:
+                    return ApiError.conflict("USB/IP 源端烧写暂不支持自动接续 AOA").to_response()
 
                 protocols = await asyncio.to_thread(
                     _device_flash_protocols,
@@ -953,6 +962,7 @@ async def burn_firmware(
                             "log": "多设备固件任务将按设备安全执行并逐台校验（upgrade_tool 不支持并发选择）",
                             "log_type": "info",
                         })
+                validate_local_firmware_recovery(aoa_recovery)
                 results, batch_error = await _run_local_firmware_batch(
                     ssh=ssh,
                     devices=devices,
@@ -963,6 +973,15 @@ async def burn_firmware(
                     client_id=client_id,
                 )
                 if batch_error is None:
+                    burn_succeeded = True
+                    if aoa_recovery:
+                        recovery = await recover_after_burn(aoa_recovery, client_id, results)
+                        if not recovery["success"]:
+                            return ApiError.upstream_failure(
+                                recovery["error"], service="aoa",
+                                details={"flash_success": True, "results": results},
+                                next_actions=["检查设备当前页面，在 AOA 工作台单独调试；无需重新烧写固件"],
+                            ).to_response()
                     if client_id in runtime.global_state.websocket_connections:
                         with contextlib.suppress(Exception):
                             await runtime.safe_websocket_send(client_id, {
@@ -970,7 +989,7 @@ async def burn_firmware(
                             })
                             await runtime.safe_websocket_send(client_id, {
                                 "type": "log_update",
-                                "log": "Firmware burn complete!",
+                                "log": "固件烧写、AOA 回放及 ADB 验证完成" if aoa_recovery else "Firmware burn complete!",
                                 "log_type": "success",
                             })
                             await runtime.safe_websocket_send(client_id, {
@@ -1023,6 +1042,8 @@ async def burn_firmware(
                 message = record_internal_error(logger, "烧写固件", "Firmware burn error")
                 runtime.store_notification(client_id, "Firmware burn error", message[:300], "error", "firmware", {"devices": devices, "firmware": firmware_name})
                 return ApiError.internal(message).to_response()
+    except ApiError as api_error:
+        return api_error.to_response()
     except Exception:
         message = record_internal_error(logger, "烧写固件", "Error in burn_firmware")
         return ApiError.internal(message).to_response()
@@ -1060,5 +1081,7 @@ async def burn_firmware(
         if burn_succeeded and merged_firmware:
             chunk_uploads.remove_staged_upload(merged_firmware)
         if locked_devices and client_id:
+            with contextlib.suppress(Exception):
+                release_local_firmware_recovery(aoa_recovery)
             with contextlib.suppress(Exception):
                 await runtime.release_firmware_devices(client_id, locked_devices)

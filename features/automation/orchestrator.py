@@ -22,12 +22,14 @@ from features.automation.models import (
     RUN_STATUS_COMPLETED,
     RUN_STATUS_DEVICE_LOCKED,
     RUN_STATUS_FAILED,
+    RUN_STATUS_FLASH_COMPLETED,
     RUN_STATUS_FLASH_FAILED,
     RUN_STATUS_FLASH_VERIFIED,
     RUN_STATUS_FLASHING,
     RUN_STATUS_JENKINS_BUILDING,
     RUN_STATUS_JENKINS_FAILED,
     RUN_STATUS_JENKINS_QUEUED,
+    RUN_STATUS_POST_FLASH_VERIFYING,
     RUN_STATUS_QUEUED,
     RUN_STATUS_REPORT_COLLECTING,
     RUN_STATUS_REPORTING,
@@ -181,7 +183,7 @@ class AutomationOrchestrator:
                         run, f"Waiting for devices: {result.get('error', '')}", result
                     )
                 return self._fail(run, RUN_STATUS_FAILED, result.get("error", "device selection failed"), result)
-            devices = [{"serial": item.get("serial", "")} for item in result.get("devices") or []]
+            devices = [dict(item) for item in result.get("devices") or []]
             return self._transition(
                 run,
                 RUN_STATUS_DEVICE_LOCKED,
@@ -206,20 +208,28 @@ class AutomationOrchestrator:
                     run, "Firmware flash is still running", result, **flash_updates
                 )
             return self._transition(
-                run, RUN_STATUS_FLASH_VERIFIED, "Firmware flash completed", result,
+                run, RUN_STATUS_FLASH_COMPLETED, "Firmware flash completed", result,
                 **flash_updates,
             )
-        if status == RUN_STATUS_FLASH_VERIFIED:
-            # AOA 恢复（ADR 0022）：plan.aoa.mode 配置为 user_build_recovery 时，
-            # 烧写完成后先模拟 UI 打开 USB 调试再进入测试。开关判定与命令
-            # 解析都在 executor.aoa_recover 内，orchestrator 只管状态迁移；
-            # 自定义执行器未实现 AOA 钩子时按未启用处理（与 release_resources
-            # 等可选钩子同款容错）。
+        if status in {RUN_STATUS_FLASH_COMPLETED, RUN_STATUS_FLASH_VERIFIED}:
+            previous = json.loads(run.get("result_json") or "{}")
+            if status == RUN_STATUS_FLASH_VERIFIED and previous.get("post_flash", {}).get("verified") is True:
+                return self._transition(run, RUN_STATUS_TESTING, "Starting GMS test")
             aoa_enabled = getattr(self.executor, "aoa_enabled", None)
             if callable(aoa_enabled) and aoa_enabled(run):
-                return self._transition(
-                    run, RUN_STATUS_AOA_RECOVERING, "Starting AOA recovery")
-            return self._transition(run, RUN_STATUS_TESTING, "Starting GMS test")
+                return self._transition(run, RUN_STATUS_AOA_RECOVERING, "Starting AOA recovery")
+            return self._transition(run, RUN_STATUS_POST_FLASH_VERIFYING, "Verifying flashed firmware")
+        if status == RUN_STATUS_POST_FLASH_VERIFYING:
+            result = self.executor.verify_post_flash(run)
+            if result.get("running"):
+                return self._stay(run, "Waiting for post-flash verification", result)
+            if result.get("success") is not True or result.get("verified") is not True:
+                return self._fail(run, RUN_STATUS_FLASH_FAILED,
+                                  result.get("error", "post-flash verification failed"), result)
+            return self._transition(
+                run, RUN_STATUS_FLASH_VERIFIED, "Firmware identity verified", result,
+                result_json=self._merged_result_json(run, {"post_flash": result}),
+            )
         if status == RUN_STATUS_AOA_RECOVERING:
             result = self.executor.aoa_recover(run)
             if not result.get("success"):
@@ -229,19 +239,17 @@ class AutomationOrchestrator:
                 return self._stay(run, "AOA recovery is still running", result,
                                   aoa_command_id=result.get("command_id",
                                                             run.get("aoa_command_id", "")))
-            # 命令执行成功 ≠ 恢复成功：adb_state 存在且不是 device
-            # （offline/unauthorized/no devices 等）说明 USB 调试没回来，
-            # 直接判失败，不带病进入测试。
-            aoa_result = result.get("aoa_result") or {}
-            adb_state = str(aoa_result.get("adb_state") or "")
-            if adb_state and adb_state != "device":
+            aoa_result = result.get("aoa_result")
+            if not isinstance(aoa_result, dict):
+                aoa_result = {}
+            if (aoa_result.get("success") is not True
+                    or aoa_result.get("adb_recovered") is not True
+                    or aoa_result.get("adb_state") != "device"):
                 return self._fail(run, RUN_STATUS_AOA_FAILED,
-                                  f"ADB did not come back after AOA recovery: "
-                                  f"{adb_state}", result)
-            # 直接进入测试：回 flash_verified 会被 aoa_enabled 再次拉回
-            # AOA 阶段（死循环）；烧写校验已在进入 AOA 前完成。
+                                  "AOA recovery did not verify ADB online",
+                                  {**result, "reconcile_required": True})
             return self._transition(
-                run, RUN_STATUS_TESTING, "AOA recovery completed, starting GMS test", result,
+                run, RUN_STATUS_POST_FLASH_VERIFYING, "AOA recovery completed, verifying firmware", result,
                 aoa_command_id=result.get("command_id", run.get("aoa_command_id", "")),
             )
         if status == RUN_STATUS_TESTING:
@@ -387,6 +395,10 @@ class AutomationOrchestrator:
         current = self.store.get_run(run["id"])
         if current and current["status"] in TERMINAL_STATUSES:
             return current
+        updates["result_json"] = self._merged_result_json(
+            {**run, "result_json": updates.get("result_json", run.get("result_json"))},
+            {"stage_started_at": utc_now_iso()},
+        )
         update_payload = {"status": status, "current_stage": status, **updates}
         if run["started_at"] == "" and status != RUN_STATUS_QUEUED:
             update_payload["started_at"] = utc_now_iso()
@@ -432,7 +444,7 @@ class AutomationOrchestrator:
         if current and current["status"] in TERMINAL_STATUSES:
             return current
         release = getattr(self.executor, "release_resources", None)
-        if callable(release):
+        if callable(release) and not (payload or {}).get("reconcile_required"):
             try:
                 release(run)
             except Exception:

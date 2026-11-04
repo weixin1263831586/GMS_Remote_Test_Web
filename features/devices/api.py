@@ -32,6 +32,7 @@ from .debug_api import router as debug_router
 from .deployment_api import router as deployment_router
 from .locks import device_lock_manager
 from .management_api import _prune_inactive_usbip_sources, known_usbip_sources
+from .management_inventory import local_usb_only_inventory
 from .manager import device_manager
 from .operations_api import (
     connect_wifi as connect_wifi,
@@ -119,6 +120,7 @@ async def get_connected_devices(
         and now - cache_timestamp < runtime.device_cache_ttl
     )
 
+    usb_only_inventory = await asyncio.to_thread(local_usb_only_inventory)
     # 共享缓存仅保存主机和设备事实，用户状态按请求合并。
     if cache_fresh:
         inventory = cached_inventory
@@ -162,8 +164,8 @@ async def get_connected_devices(
                     })
                 inventory.append(observed)
         elif cached_inventory:
-            logger.warning("[Device] ADB scan returned no devices; keeping cached device list")
-            inventory = list(cached_inventory)
+            logger.warning("[Device] ADB scan returned no devices; cached devices require confirmation")
+            inventory = [{**item, "status": "unknown", "stale": True} for item in cached_inventory]
         else:
             inventory = []
 
@@ -197,6 +199,15 @@ async def get_connected_devices(
                 "transport": "local_usb",
             }
         inventory = list(inventory_by_id.values())
+
+    # A fresh owning-Worker USB-only observation must supersede an old ADB
+    # label. Fastboot/Loader remain explicit modes rather than HID candidates.
+    by_id = {item['device_id']: item for item in inventory}
+    for serial, observed in usb_only_inventory.items():
+        previous = by_id.get(serial, {})
+        if previous.get('status') not in {'fastboot', 'loader'}:
+            by_id[serial] = dict(observed)
+    inventory = list(by_id.values())
 
     adb_devices = [
         item["device_id"]
@@ -242,6 +253,8 @@ async def get_connected_devices(
             "transport": observed.get("transport") or "local_usb",
             "locked": False,
         }
+        if observed.get("stale"):
+            device_info["stale"] = True
         for key in (
             "adb_proxy_source_worker_id",
             "adb_proxy_source_address",
@@ -281,7 +294,7 @@ async def get_connected_devices(
                 key: device_info[key]
                 for key in (
                     "device_id", "status", "protocol", "transport",
-                    "source", "is_usbip", "adb_proxy_source_worker_id",
+                    "source", "is_usbip", "stale", "adb_proxy_source_worker_id",
                     "adb_proxy_source_address", "adb_proxy_source_serial",
                 )
                 if key in device_info
@@ -292,7 +305,8 @@ async def get_connected_devices(
     with runtime.global_state.device_cache_lock:
         runtime.global_state.device_cache = {
             "devices": cache_records,
-            "timestamp": cache_timestamp if cache_fresh else now,
+            "timestamp": (0 if any(item.get("stale") or item.get("protocol") == "usb_only"
+                                   for item in cache_records) else cache_timestamp if cache_fresh else now),
         }
 
     return JSONResponse(content=devices_with_status)
@@ -304,7 +318,7 @@ router.include_router(ui_control_router)
 router.include_router(deployment_router)
 router.include_router(debug_router)
 
-# AOA 自动恢复（user build 烧写后重新打开 USB 调试，ADR 0022）。
+# AOA 工作台（user build 烧写后重新打开 USB 调试，ADR 0022）。
 from .aoa_api import router as aoa_router  # noqa: E402
 
 

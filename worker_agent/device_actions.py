@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import importlib.util
 import logging
 import os
 import re
@@ -18,6 +19,7 @@ import subprocess
 import threading
 import time
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +27,7 @@ from foundation.native_tools import resolve_native_tool
 from foundation.security import has_control_chars, quote_device_shell_arg
 from foundation.transport_contract import execute_external_transport
 
+from .adb_suppression import adb_daemon_suppressed as _adb_daemon_suppressed
 from .config import WorkerConfig
 from .fastboot_workflow import FastbootPreparer, subprocess_runner, vendor_partition
 
@@ -124,6 +127,11 @@ def _enrich_details_worker() -> None:
     from concurrent.futures import ThreadPoolExecutor
 
     while not _details_enrich_stop.is_set():
+        if _adb_daemon_suppressed():
+            # AOA 会话期不跑 adb 详情探测（守护进程被抑制，见
+            # adb_suppression）；缓存保持原值，会话结束自动恢复刷新。
+            _details_enrich_stop.wait(2.0)
+            continue
         now = time.monotonic()
         # 淘汰长期未出现在 probe_devices 清单中的设备。
         for serial in [
@@ -277,12 +285,20 @@ def probe_devices(
             proxy_imports = imported_devices()
         except (OSError, RuntimeError, ValueError):
             proxy_imports = {}
+    adb_suppressed = _adb_daemon_suppressed()
     devices = []
     adb_env = _adb_environment(adb_server_socket)
-    for line in _run(
-        ["adb", "devices", "-l"],
-        env=adb_env,
-    ).splitlines()[1:]:
+    # AOA 会话独占主机 adb 守护进程（见 adb_suppression）：此窗口内跳过
+    # adb 枚举，fastboot / usb_only 清单照常探测——否则 adb daemon 会与
+    # accessory 模式下的 pyusb 抢设备（reset 风暴打死回放中的设备）。
+    if adb_suppressed and not adb_server_socket:
+        lines: list[str] = []
+    else:
+        lines = _run(
+            ["adb", "devices", "-l"],
+            env=adb_env,
+        ).splitlines()[1:]
+    for line in lines:
         parts = line.split()
         if len(parts) < 2 or parts[1] not in {"device", "offline", "unauthorized"}:
             continue
@@ -369,8 +385,31 @@ def execute_usbip_action(
         timeout=180 if action == "attach" else 60,
     )
 
-def execute_device_action(action: str, device_ids: list[str], options: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Execute one strictly allow-listed Android device operation."""
+def aoa_capabilities() -> dict[str, bool]:
+    """Advertise the same AOA runtime contract on Workers and the local bridge."""
+    try:
+        has_pyusb = importlib.util.find_spec("usb.core") is not None
+    except (ModuleNotFoundError, ValueError):
+        has_pyusb = False
+    return {"aoa_record_input_v1": shutil.which("adb") is not None,
+            "aoa_usb_hid_v1": has_pyusb, "aoa_identity_fencing_v1": True,
+            "aoa_playback_control_v1": True, "firmware_aoa_recovery_v1": True,
+            "aoa_hid_modes_v1": True}
+
+
+def execute_device_action(
+    action: str,
+    device_ids: list[str],
+    options: dict[str, Any] | None = None,
+    *,
+    progress_callback: Callable[[int, int, str], None] | None = None,
+    progress_event_callback: Callable[[dict], None] | None = None,
+) -> dict[str, Any]:
+    """Execute one strictly allow-listed Android device operation.
+
+    ``progress_callback(index, total, command_text)`` 仅 aoa_sequence
+    支持：长旅程回放时逐条上报进度，Worker 侧转成 command events。
+    """
     from foundation.device_action_spec import (
         adb_proxy_forbidden_device_actions as _proxy_forbidden_builder,
     )
@@ -380,6 +419,13 @@ def execute_device_action(action: str, device_ids: list[str], options: dict[str,
     _proxy_forbidden = _proxy_forbidden_builder()
     _inspection_actions = _inspection_builder()
 
+    options = options or {}
+    if action == "aoa_sequence" and options.get("post_flash_recovery"):
+        from .firmware_recovery import recovery_options, wait_for_boot
+
+        options = {**options, **recovery_options(options["post_flash_recovery"])}
+        wait_for_boot(options["post_flash_recovery"], device_ids,
+                      options.get("_validate_fencing"), probe_devices, progress_event_callback)
     attached = {item["serial"]: item for item in probe_devices()}
     serials = []
     for device_id in device_ids:
@@ -394,7 +440,11 @@ def execute_device_action(action: str, device_ids: list[str], options: dict[str,
                 f"ADB Proxy remote device has no local USB/Fastboot channel: {serial}"
             )
         serials.append(serial)
-    options = options or {}
+    if callable(options.get("_validate_fencing")):
+        options["_validate_fencing"]()
+    expected_port = str(options.get("usb_port_path") or "")
+    if expected_port and any((attached[s].get("properties") or {}).get("usb") != expected_port for s in serials):
+        raise ValueError("physical USB identity differs from the reserved device")
     if action in _inspection_actions:
         if len(serials) != 1:
             raise ValueError(f"{action} requires exactly one device")
@@ -516,29 +566,50 @@ def execute_device_action(action: str, device_ids: list[str], options: dict[str,
             record_aoa_profile,
             run_aoa_sequence,
         )
+        from .aoa_usb import bind_usb
 
         try:
-            if action == "aoa_probe":
-                return probe_aoa(serials[0])
-            if action == "aoa_record":
-                options_payload = options.get("aoa_record") or {}
-                return record_aoa_profile(
+            with bind_usb(expected_port or str((attached[serials[0]].get("properties") or {}).get("usb") or ""),
+                          options.get("_validate_fencing")):
+                if action == "aoa_probe":
+                    return probe_aoa(serials[0])
+                if action == "aoa_record":
+                    options_payload = options.get("aoa_record") or {}
+                    return record_aoa_profile(
+                        serials[0],
+                        list(options_payload.get("steps") or []),
+                        setup_wizard=bool(options_payload.get("setup_wizard")),
+                        tv=bool(options_payload.get("tv")),
+                        calibrate_touch=options_payload.get("calibrate_touch", False),
+                        touch_mode=options_payload.get("hid_touch_mode", "pointer"),
+                    )
+                if action == "aoa_record_input":
+                    return record_aoa_input(
+                        serials[0], dict(options.get("aoa_record") or {}))
+                if options.get("skip_if_adb_online"):
+                    from .aoa_actions import _wait_adb_state
+
+                    online = _wait_adb_state(serials[0], 0)
+                    if online.get("adb_recovered") is True:
+                        return {"success": True, "skipped": True, **online}
+
+                return run_aoa_sequence(
                     serials[0],
-                    list(options_payload.get("steps") or []),
-                    setup_wizard=bool(options_payload.get("setup_wizard")),
-                    tv=bool(options_payload.get("tv")),
-                    calibrate_touch=options_payload.get("calibrate_touch", False),
+                    [str(item) for item in options.get("aoa_commands") or []],
+                    int(options.get("wait_adb_seconds") or 0),
+                    on_progress=progress_callback if progress_event_callback is None else None,
+                    on_event=progress_event_callback,
+                    control_id=str(options.get("playback_control_id") or ""),
+                    control_source=options.get("_aoa_control_source"),
+                    suppress_adb_daemon=bool(options.get("suppress_adb_daemon")),
+                    suppress_adb_daemon_gate=options.get("suppress_adb_daemon_gate"),
+                    touch_mode=options.get("aoa_hid_touch_mode", "pointer"),
+                    hid_settle_seconds=options.get("aoa_hid_settle_seconds", 2),
                 )
-            if action == "aoa_record_input":
-                return record_aoa_input(
-                    serials[0], dict(options.get("aoa_record") or {}))
-            return run_aoa_sequence(
-                serials[0],
-                [str(item) for item in options.get("aoa_commands") or []],
-                int(options.get("wait_adb_seconds") or 0),
-            )
         except AoaError as exc:
-            raise RuntimeError(str(exc)) from exc
+            details = getattr(exc, "cleanup_errors", [])
+            message = str(exc) + (f"; cleanup diagnostics: {details}" if details else "")
+            raise RuntimeError(message) from exc
     if action == "tap":
         if len(serials) != 1 or options.get("x") is None or options.get("y") is None:
             raise ValueError("tap requires one device and coordinates")

@@ -7,6 +7,11 @@ from typing import Any
 
 
 class ClusterClaimRepositoryMixin:
+    def force_release_local_aoa_operation(self, device_key: str, local_worker_id: str) -> tuple[bool, str]:
+        from .claim_release import force_release_local_aoa_operation
+
+        return force_release_local_aoa_operation(self, device_key, local_worker_id)
+
     def resolve_worker_device(
         self, worker_id: str, value: str
     ) -> dict[str, Any] | None:
@@ -41,11 +46,17 @@ class ClusterClaimRepositoryMixin:
             except json.JSONDecodeError:
                 properties = {}
             transport = str(row["transport"] or "")
+            port_worker = device_key.split(":", 1)[0]
+            port_properties = properties
             if transport == "adb_proxy":
                 source_worker = str(properties.get("adb_proxy_source_worker_id") or "")
                 source_serial = str(properties.get("adb_proxy_source_serial") or "")
                 if source_worker and source_serial:
                     alias_keys.append(f"{source_worker}:{source_serial}")
+                    source = conn.execute("SELECT properties_json FROM cluster_worker_devices WHERE id=?",
+                                          (f"{source_worker}:{source_serial}",)).fetchone()
+                    port_properties = json.loads(source["properties_json"] or "{}") if source else {}
+                    port_worker = source_worker
             else:
                 source_serial = device_key.split(":", 1)[1] if ":" in device_key else ""
                 proxy_rows = conn.execute(
@@ -64,6 +75,9 @@ class ClusterClaimRepositoryMixin:
                         == source_serial
                     ):
                         alias_keys.append(str(proxy_row["id"]))
+            port = str(port_properties.get("usb") or "")
+            if port:
+                alias_keys.append(f"{port_worker}:@usb:{port}")
         return list(dict.fromkeys(alias_keys))
 
     def _claim_devices(

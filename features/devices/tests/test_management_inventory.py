@@ -54,6 +54,31 @@ def test_usb_only_aoa_target_is_preserved_but_not_reported_as_adb(cluster):
     assert protocols['USB-OFF'] == 'usb_only'
 
 
+def test_workspace_usb_only_inventory_uses_fresh_local_worker_facts(cluster, monkeypatch):
+    from features.devices import runtime
+
+    monkeypatch.setattr(runtime.get_runtime(), 'config_manager', SimpleNamespace(
+        load_config=lambda: {'ubuntu_host': '127.0.0.1'}))
+    cluster.repository.list_devices.return_value.append({
+        'worker_id': 'local', 'serial': 'USB-OFF', 'state': 'usb_only', 'properties': {},
+    })
+    observed = management_inventory.local_usb_only_inventory()
+    assert set(observed) == {'USB-OFF'}
+    assert observed['USB-OFF']['protocol'] == observed['USB-OFF']['status'] == 'usb_only'
+    cluster.repository.get_worker.return_value = {'status': 'offline'}
+    assert management_inventory.local_usb_only_inventory() == {}
+
+
+def test_workspace_does_not_mix_controller_usb_with_remote_legacy_adb_host(cluster, monkeypatch):
+    from features.devices import runtime
+
+    monkeypatch.setattr(runtime.get_runtime(), 'config_manager', SimpleNamespace(
+        load_config=lambda: {'ubuntu_host': '192.0.2.10'}))
+    monkeypatch.setattr(management_inventory, 'is_local_host', lambda _: False)
+    assert management_inventory.local_usb_only_inventory() == {}
+    cluster.repository.list_devices.assert_not_called()
+
+
 @pytest.mark.parametrize('worker', [None, {'status': 'offline'},
                                   {'status': 'online', 'last_heartbeat_at': 'bad'},
                                   {'status': 'online', 'last_heartbeat_at':

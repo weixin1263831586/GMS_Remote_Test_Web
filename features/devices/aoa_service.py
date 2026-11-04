@@ -1,4 +1,4 @@
-"""AOA 自动恢复：Profile 存储、校验与操作编排（ADR 0022）。
+"""AOA 工作台：Profile 存储、校验与操作编排（ADR 0022）。
 
 Profile 是针对不同 Android 版本/产品形态（手机触屏、TV/STB 遥控）预设的
 AOA 命令序列，例如 user build 烧写后"进入设置 → 开发者选项 → 打开 USB
@@ -47,7 +47,12 @@ class AoaProfileStore:
                 created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
                 UNIQUE(owner_id, name)
             )""")
-        conn.execute('PRAGMA user_version = 1')
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(aoa_profiles)")}
+        if "metadata" not in columns:
+            conn.execute("ALTER TABLE aoa_profiles ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'")
+        if "revision" not in columns:
+            conn.execute("ALTER TABLE aoa_profiles ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
+        conn.execute('PRAGMA user_version = 2')
 
     def connect(self):
         conn = sqlite3.connect(self.db, timeout=10)
@@ -64,6 +69,7 @@ class AoaProfileStore:
         return {
             "id": row["id"], "owner_id": row["owner_id"], "name": row["name"],
             "description": row["description"],
+            "metadata": json.loads(row["metadata"] or "{}"), "revision": row["revision"],
             "commands": json.loads(row["commands"]),
             "wait_adb_seconds": int(row["wait_adb_seconds"]),
             "created_at": row["created_at"], "updated_at": row["updated_at"],
@@ -97,28 +103,38 @@ class AoaProfileStore:
         parsed = aoa_profile.parse_profile_commands(commands)
         return [{"kind": item.kind} for item in parsed]
 
+    @staticmethod
+    def _metadata_json(metadata: dict) -> str:
+        if not isinstance(metadata, dict):
+            raise ApiError.invalid_semantics("AOA metadata must be an object")
+        encoded = json.dumps(metadata, ensure_ascii=False, separators=(",", ":"))
+        if len(encoded.encode()) > 8192:
+            raise ApiError.invalid_semantics("AOA metadata exceeds 8192 bytes")
+        return encoded
+
     def create_profile(self, owner_id: str, name: str, description: str,
-                       commands: list[str], wait_adb_seconds: int = 0) -> dict[str, Any]:
+                       commands: list[str], wait_adb_seconds: int = 0, *, metadata: dict | None = None) -> dict[str, Any]:
         commands = [str(item or "").strip() for item in commands or [] if str(item or "").strip()]
         self.validate_commands(commands)
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         profile_id = uuid.uuid4().hex
+        metadata_json = self._metadata_json(metadata if metadata is not None else {})
         with self._lock, self.connect() as conn:
             try:
                 conn.execute(
                     "INSERT INTO aoa_profiles (id,owner_id,name,description,commands,"
-                    "wait_adb_seconds,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                    "wait_adb_seconds,created_at,updated_at,metadata) VALUES (?,?,?,?,?,?,?,?,?)",
                     (profile_id, owner_id, name, description,
                      json.dumps(commands, ensure_ascii=False),
                      max(0, min(int(wait_adb_seconds or 0), 600)),
-                     now, now))
+                     now, now, metadata_json))
             except sqlite3.IntegrityError as exc:
                 raise ApiError.conflict(f"同名 AOA Profile 已存在: {name}") from exc
         return self.get_profile(profile_id, owner_id)
 
     def update_profile(self, profile_id: str, owner_id: str, *, name: str | None = None,
                        description: str | None = None, commands: list[str] | None = None,
-                       wait_adb_seconds: int | None = None) -> dict[str, Any]:
+                       wait_adb_seconds: int | None = None, metadata: dict | None = None) -> dict[str, Any]:
         current = self.get_profile(profile_id, owner_id)
         updates: dict[str, Any] = {}
         if name is not None and name != current["name"]:
@@ -131,13 +147,15 @@ class AoaProfileStore:
             updates["commands"] = json.dumps(cleaned, ensure_ascii=False)
         if wait_adb_seconds is not None:
             updates["wait_adb_seconds"] = max(0, min(int(wait_adb_seconds), 600))
+        if metadata is not None:
+            updates["metadata"] = self._metadata_json(metadata)
         if not updates:
             return current
         updates["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         assignments = ", ".join(f"{key}=?" for key in updates)
         with self._lock, self.connect() as conn:
             conn.execute(
-                f"UPDATE aoa_profiles SET {assignments} WHERE id=? AND owner_id=?",
+                f"UPDATE aoa_profiles SET {assignments}, revision=revision+1 WHERE id=? AND owner_id=?",
                 [*updates.values(), profile_id, owner_id])
         return self.get_profile(profile_id, owner_id)
 

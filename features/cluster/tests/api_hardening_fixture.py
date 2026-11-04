@@ -25,7 +25,7 @@ class ClusterApiHardeningFixture:
             "address": "172.16.14.246",
             "agent_version": "1",
             "max_jobs": 1,
-            "capabilities": {"adb": True},
+            "capabilities": {"adb": True, "aoa_identity_fencing_v1": True, "aoa_hid_modes_v1": True},
         })
         self.repo.heartbeat("worker-246", {
             "agent_version": "1",
@@ -36,6 +36,8 @@ class ClusterApiHardeningFixture:
         self.previous_service = cluster_api.cluster_service
         cluster_api.cluster_service = ClusterService(self.repo)
         app = FastAPI()
+        from foundation.error_model import register_api_error_handler
+        register_api_error_handler(app)
 
         @app.middleware("http")
         async def admin_identity(request: Request, call_next):

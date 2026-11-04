@@ -1,4 +1,4 @@
-"""AOA 自动恢复 API：Profile CRUD + probe/run-profile/recover-adb。
+"""AOA 工作台 API：Profile CRUD + probe/run-profile/recover-adb。
 
 挂载在 devices 路由（features/cluster/api.py 聚合注册）：
 - ``POST /api/devices/aoa/profiles``             创建 Profile
@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisco
 
 from features.auth import principal_owner_id, require_human_principal, validate_websocket_request
 from foundation import aoa_profile, cluster_port
+from foundation.aoa_hid_mode import profile_hid_options
 from foundation.cluster_port import get_local_worker_id
 from foundation.error_model import ApiError
 
@@ -78,7 +79,7 @@ def create_profile(request: Request, body: dict[str, Any]):
     profile = store.create_profile(
         principal_owner_id(request), str(body["name"]).strip(),
         str(body.get("description") or ""), [str(item) for item in commands],
-        _int_or_422(body, "wait_adb_seconds"))
+        _int_or_422(body, "wait_adb_seconds"), metadata=body.get("metadata"))
     return {"success": True, "profile": profile}
 
 
@@ -116,7 +117,8 @@ def update_profile(request: Request, profile_id: str, body: dict[str, Any]):
         commands=[str(item) for item in commands] if commands is not None else None,
         wait_adb_seconds=(
             _int_or_422(body, "wait_adb_seconds")
-            if body.get("wait_adb_seconds") is not None else None))
+            if body.get("wait_adb_seconds") is not None else None),
+        metadata=body.get("metadata"))
     return {"success": True, "profile": profile}
 
 
@@ -145,22 +147,30 @@ async def recover(request: Request, body: dict[str, Any]):
     _payload(body, "worker_id", "device")
     commands = body.get("commands")
     wait_adb_seconds = _int_or_422(body, "wait_adb_seconds")
+    metadata = body.get("metadata") or {}
     if body.get("profile_id"):
         profile = profile_store().get_profile(
             str(body["profile_id"]), principal_owner_id(request))
         commands = profile["commands"]
+        metadata = profile.get("metadata") or {}
         wait_adb_seconds = wait_adb_seconds or int(profile["wait_adb_seconds"] or 0)
     if not commands:
         raise ApiError.malformed_request("profile_id or commands is required")
     commands = [str(item) for item in commands]
     # 执行前校验语法与上限，避免长等待后 Worker 端才失败。
     _validate_commands_or_422(commands)
+    try:
+        hid_options = profile_hid_options(metadata)
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ApiError.invalid_semantics(str(exc)) from exc
     return await cluster_port.submit_device_action(request, {
         "worker_id": str(body["worker_id"]),
         "devices": [str(body["device"])],
         "action": "aoa_sequence",
         "aoa_commands": commands,
+        **hid_options,
         "wait_adb_seconds": max(wait_adb_seconds, 1),
+        "playback_control_id": str(body.get("playback_control_id") or ""),
     })
 
 
@@ -211,6 +221,8 @@ async def record(request: Request, body: dict[str, Any]):
             "setup_wizard": bool(body.get("setup_wizard")),
             "tv": bool(body.get("tv")),
             "calibrate_touch": calibration,
+            **({"hid_touch_mode": profile_hid_options(body["metadata"])["aoa_hid_touch_mode"]}
+               if body.get("metadata") else {}),
         },
     })
 
@@ -225,10 +237,6 @@ async def record_input(request: Request, body: dict[str, Any]):
         normalized = aoa_profile.parse_record_input_action(raw_input)
     except ValueError as exc:
         raise ApiError.invalid_semantics(str(exc)) from exc
-    # 平台控制标志：输入执行后 Worker 顺带回传最新截图，前端合并刷新
-    # 投屏（parser 不放行该字段，客户端注入无效）。省掉第二条截图命令
-    # ——交互录制延时的主因。
-    normalized["with_screenshot"] = True
     return await cluster_port.submit_device_action(request, {
         "worker_id": str(body["worker_id"]),
         "devices": [str(body["device"])],
@@ -255,7 +263,7 @@ def create_profile_from_recording(request: Request, body: dict[str, Any]):
             or f"recorded from {body.get('model') or 'device'} "
                f"(Android {body.get('release') or '?'})"),
         [str(item) for item in commands],
-        _int_or_422(body, "wait_adb_seconds"))
+        _int_or_422(body, "wait_adb_seconds"), metadata=body.get("metadata"))
     return {"success": True, "profile": profile}
 
 
@@ -364,3 +372,18 @@ async def record_stream_ws(websocket: WebSocket, serial: str):
         if pump_task is not None:
             pump_task.cancel()
         session.unsubscribe(sub)
+
+
+@router.post("/playback/{control_id}/control")
+async def playback_control(request: Request, control_id: str, body: dict[str, Any]):
+    """Control only the caller's persisted playback through its target Worker."""
+    require_human_principal(request)
+    action = str(body.get("action") or "").strip()
+    if action not in {"pause", "resume", "cancel"}:
+        raise ApiError.invalid_semantics("action must be pause, resume or cancel")
+    if not control_id or len(control_id) > 64:
+        raise ApiError.not_found("playback control handle not found")
+    worker_id = str(body.get("worker_id") or "").strip()
+    if not worker_id:
+        raise ApiError.malformed_request("worker_id is required")
+    return await cluster_port.control_aoa_playback(control_id, worker_id, principal_owner_id(request), action)

@@ -22,6 +22,9 @@ class AutomationExecutor(Protocol):
     def flash(self, run: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
+    def verify_post_flash(self, run: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
     def start_test(self, run: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -82,6 +85,9 @@ class StubAutomationExecutor:
 
     def flash(self, run: dict[str, Any]) -> dict[str, Any]:
         return self._result("flash", {"artifact_path": run.get("artifact_path", "")})
+
+    def verify_post_flash(self, run: dict[str, Any]) -> dict[str, Any]:
+        return self._result("verify_post_flash", {"verified": True})
 
     def start_test(self, run: dict[str, Any]) -> dict[str, Any]:
         return self._result(

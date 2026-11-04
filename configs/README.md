@@ -10,7 +10,10 @@ configs/
 │   ├── runtime.example.json
 │   ├── cluster.example.json
 │   ├── build_servers.example.json
-│   └── automation_profiles.example.json
+│   ├── automation_profiles.example.json
+│   └── aoa/                        # AOA 开机向导与 USB 调试模板
+│       ├── README.md
+│       └── rk3576-ss17-wizard-to-usb-debug.json
 ├── local/                          # 忽略：本机部署配置，JSON 权限 0600
 │   ├── config.json                 # 应用集成和静态默认值，密码引用环境变量
 │   ├── environment.json            # 非敏感进程环境变量、密钥文件路径
@@ -41,6 +44,10 @@ data/                               # 全部忽略；只放可再生运行数据
 避免改变加密身份。不要把这些文件复制进示例。
 
 ## 初始化与加载
+
+AOA 命令模板位于 [`examples/aoa/`](examples/aoa/README.md)。模板需要通过
+AOA Profile API 保存为当前账号配置后，才能在 AOA 工作台和固件烧写弹框中选择；
+文件放入模板目录不会自动导入或执行。
 
 生产安装器会准备本机配置。开发者可以按需复制模板：
 

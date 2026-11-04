@@ -8,6 +8,37 @@ async function burnFirmware() {
 
     // Show firmware configuration modal
     ModalManager.open('firmware-modal');
+    await loadFirmwareAoaProfiles();
+}
+
+let firmwareAoaLoadRevision = 0;
+
+function toggleFirmwareAoa() {
+    const enabled = document.getElementById('firmware-aoa-enabled').checked;
+    document.getElementById('firmware-aoa-profile').disabled = !enabled;
+    document.getElementById('firmware-aoa-boot-wait').disabled = !enabled;
+}
+
+async function loadFirmwareAoaProfiles() {
+    const revision = ++firmwareAoaLoadRevision;
+    const select = document.getElementById('firmware-aoa-profile');
+    const previous = select.value;
+    const hint = document.getElementById('firmware-aoa-hint');
+    select.replaceChildren(new Option('正在加载配置…', ''));
+    try {
+        const response = await apiCall('/api/devices/aoa/profiles');
+        if (revision !== firmwareAoaLoadRevision) return;
+        const profiles = response.profiles || [];
+        select.replaceChildren(new Option(profiles.length ? '请选择已验证的 AOA 配置' : '暂无配置，请先在 AOA 工作台保存', ''));
+        profiles.forEach(profile => select.add(new Option(`${profile.name}（${profile.commands.length} 条，ADB 等待 ${profile.wait_adb_seconds || 60}s）`, profile.id)));
+        if (profiles.some(profile => profile.id === previous)) select.value = previous;
+        hint.textContent = '选择已在同机型验证的开机向导和 USB 调试配置。烧写后等待启动、回放配置并验证 ADB；授权弹窗可能需要在设备上确认。启用后一次选择一台本地 USB 设备。';
+    } catch (error) {
+        if (revision !== firmwareAoaLoadRevision) return;
+        select.replaceChildren(new Option('配置加载失败，请重新打开弹框重试', ''));
+        hint.textContent = `AOA 配置加载失败：${error.message}`;
+    }
+    toggleFirmwareAoa();
 }
 
 function closeFirmwareModal() {
@@ -104,6 +135,20 @@ async function submitFirmwareBurn() {
         showToast('请重新选择要烧写的设备', 'warning');
         return;
     }
+    const aoaEnabled = document.getElementById('firmware-aoa-enabled').checked;
+    const aoaProfile = document.getElementById('firmware-aoa-profile').value;
+    const bootWaitText = document.getElementById('firmware-aoa-boot-wait').value.trim();
+    const bootWait = Number(bootWaitText);
+    if (aoaEnabled && (devices.length !== 1 || !aoaProfile || !bootWaitText || !Number.isInteger(bootWait) || bootWait < 0 || bootWait > 600)) {
+        showToast('启用 AOA 时请选择一台设备、一个已验证的配置，并填写 0..600 秒的启动等待', 'warning');
+        return;
+    }
+    const appendAoaOptions = (form) => {
+        if (aoaEnabled) {
+            form.append('aoa_profile_id', aoaProfile);
+            form.append('aoa_boot_wait_seconds', String(bootWait));
+        }
+    };
     // 声明在 try 外：catch 中也要能移除刷新拦截。
     const warnBeforeRefresh = (e) => {
         e.preventDefault();
@@ -137,6 +182,7 @@ async function submitFirmwareBurn() {
             form.append('worker_id', workerId);
             form.append('devices', devices.join(','));
             form.append('firmware_file', selectedFirmwareFile, selectedFirmwareFile.name);
+            appendAoaOptions(form);
             const staged = await apiCall('/api/cluster/firmware/stage', 'POST', form);
             addWorkerLog(workerId, `固件已暂存，Worker 命令: ${staged.command_id}`, 'success');
             addWorkerLog(workerId, `远端固件烧写开始: ${devices.join(', ')}（Worker: ${workerId}）`, 'info');
@@ -147,7 +193,7 @@ async function submitFirmwareBurn() {
                 const command = status.command;
                 if (command.status === 'completed') {
                     addWorkerLog(workerId, `远端固件烧写完成: ${command.result?.device || devices[0]}`, 'success');
-                    showToast('远端固件烧写完成', 'success');
+                    showToast(aoaEnabled ? '固件烧写、AOA 回放及 ADB 验证完成' : '远端固件烧写完成', 'success');
                     break;
                 }
                 if (['failed', 'cancelled'].includes(command.status)) {
@@ -241,6 +287,7 @@ async function submitFirmwareBurn() {
                 const finalizeForm = new FormData();
                 finalizeForm.append('finalize_upload', '1');
                 finalizeForm.append('upload_id', uploadId);
+                appendAoaOptions(finalizeForm);
                 notifyOperationResult('固件烧写已启动', '固件暂存完成，烧写任务已开始', 'info', 'firmware-burn');
                 uploadResult = await apiCall(
                     `/api/burn/firmware?devices=${encodeURIComponent(devices.join(','))}`,
@@ -251,6 +298,7 @@ async function submitFirmwareBurn() {
         } else {
             const formData = new FormData();
             formData.append('firmware_path', firmwarePath);
+            appendAoaOptions(formData);
             lockDevicesInUI(devices);
             // 使用XMLHttpRequest提交服务器路径烧写请求
             uploadResult = await new Promise((resolve, reject) => {
@@ -265,7 +313,12 @@ async function submitFirmwareBurn() {
                             reject(new Error('Invalid response'));
                         }
                     } else {
-                        reject(new Error(`HTTP ${xhr.status}`));
+                        let detail = `HTTP ${xhr.status}`;
+                        try {
+                            const body = JSON.parse(xhr.responseText);
+                            detail = body.error || body.message || detail;
+                        } catch (_) { /* 保留 HTTP 状态 */ }
+                        reject(new Error(detail));
                     }
                 });
 

@@ -8,10 +8,17 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from foundation.aoa_profile import MAX_AOA_OPERATION_SECONDS
+
 from .state_machine import InvalidJobTransitionError
 
 
 logger = logging.getLogger(__name__)
+
+# A legal durable-local AOA/device operation finishes well inside the AOA
+# budget (sequence ≤ MAX_TOTAL_RUNTIME_MS + wait_adb). A local row still
+# "running" after this window is an orphan from a Controller restart.
+STALE_LOCAL_DEVICE_ACTION_SECONDS = MAX_AOA_OPERATION_SECONDS + 120
 
 
 def _utc_now() -> str:
@@ -235,9 +242,25 @@ class ClusterCommandRepositoryMixin:
                 ).fetchone()
                 if existing is not None:
                     command = self._decode(existing) or {}
+                    if data.get("command_type") == "device_action":
+                        from .device_action_operations import require_same_request
+
+                        incoming = data.get("payload") or {}
+                        require_same_request(command, incoming.get("owner_id", ""), incoming.get("request_sha256", ""))
                     if attach_to_job:
                         self._attach_command_to_job_conn(conn, job_id, command)
                     return command
+            playback_id = (data.get("payload") or {}).get("playback_control_id")
+            if playback_id:
+                bound = conn.execute(
+                    """SELECT 1 FROM cluster_commands WHERE worker_id=?
+                       AND json_extract(payload_json,'$.playback_control_id')=? LIMIT 1""",
+                    (data["worker_id"], playback_id),
+                ).fetchone()
+                if bound:
+                    from foundation.error_model import ApiError
+
+                    raise ApiError.conflict("playback control handle is already bound to an operation")
             job = conn.execute(
                 "SELECT trace_id FROM cluster_jobs WHERE id=?", (job_id,)
             ).fetchone() if job_id else None
@@ -252,12 +275,12 @@ class ClusterCommandRepositoryMixin:
                     (id,worker_id,command_type,job_id,attempt_id,dispatch_token,
                      payload_json,operation_id,trace_id,status,result_json,error,created_at,
                      delivered_at,acknowledged_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,'queued','{}','',?,'','',?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,'{}','',?,'','',?)
             """, (
                 command_id, data["worker_id"], data["command_type"], job_id,
                 attempt_id, token,
                 json.dumps(data.get("payload", {}), separators=(",", ":")),
-                operation_id, trace_id, now, now,
+                operation_id, trace_id, data.get("initial_status", "queued"), now, now,
             ))
             self._append_timeline_conn(
                 conn,
@@ -269,8 +292,8 @@ class ClusterCommandRepositoryMixin:
                 event_type="command.queued",
                 source="controller",
                 from_state="",
-                to_state="queued",
-                message=f"Queued Worker command {data['command_type']}",
+                to_state=data.get("initial_status", "queued"),
+                message=f"Persisted Worker command {data['command_type']}",
                 payload={"command_id": command_id, "command_type": data["command_type"]},
             )
             if attach_to_job:
@@ -279,6 +302,103 @@ class ClusterCommandRepositoryMixin:
                 ).fetchone()) or {}
                 self._attach_command_to_job_conn(conn, job_id, command, newly_created=True)
         return self.get_command(command_id) or {}
+
+    def request_aoa_playback_control(self, worker_id, control_id, owner_id, action):
+        if action not in {"pause", "resume", "cancel"}:
+            raise ValueError("invalid AOA playback control")
+        with self._lock, self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """SELECT * FROM cluster_commands WHERE worker_id=? AND command_type='device_action'
+                   AND json_extract(payload_json,'$.playback_control_id')=?
+                   AND json_extract(payload_json,'$.owner_id')=?
+                   AND json_extract(payload_json,'$.action')='aoa_sequence'
+                   AND status IN ('queued','delivered','accepted','running')
+                   ORDER BY created_at DESC LIMIT 1""", (worker_id, control_id, owner_id),
+            ).fetchone()
+            if row is None:
+                return None, 0
+            payload = json.loads(row["payload_json"])
+            if payload.get("aoa_control_action") == "cancel":
+                action = "cancel"
+            revision = int(payload.get("aoa_control_revision") or 0) + 1
+            payload.update(aoa_control_action=action, aoa_control_revision=revision)
+            conn.execute("UPDATE cluster_commands SET payload_json=?,updated_at=? WHERE id=?",
+                         (json.dumps(payload, separators=(",", ":")), _utc_now(), row["id"]))
+            command = self._decode(row)
+            command["payload"] = payload
+            return command, revision
+
+    def fail_stale_local_device_actions(
+        self, max_age_seconds: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fail durable-local device_action commands orphaned by a restart.
+
+        本机（durable_local）device_action 在 Controller 线程内执行：行
+        状态直接 running 且 delivered_at/acknowledged_at 恒为空——远端
+        Worker 命令一经 poll 必带 delivered_at。Controller 进程在执行中
+        途重启会杀死执行线程，行与 claim（operation:<id>）一起卡死到
+        claim TTL。超过 AOA 预算窗口仍 accepted/running 的本地行按重启
+        孤儿处理：置 failed 并释放其 claim；存活中的合法本地操作必然在
+        预算内完成（序列 ≤ MAX_TOTAL_RUNTIME_MS + wait_adb），重启后进
+        程内也不再有线程在跑，不存在误杀窗口。accepted 行只由
+        durable_local 派发产生（远程行 delivered_at 非空被排除），涵盖
+        “start_local_command/线程启动失败”的派发即孤儿场景。
+        """
+        threshold = int(max_age_seconds or STALE_LOCAL_DEVICE_ACTION_SECONDS)
+        now = _utc_now()
+        failed: list[dict[str, Any]] = []
+        with self._lock, self.connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM cluster_commands
+                   WHERE command_type='device_action'
+                   AND status IN ('accepted','running')
+                   AND delivered_at='' AND acknowledged_at=''
+                   AND datetime(updated_at) <= datetime('now', ?)""",
+                (f"-{threshold} seconds",),
+            ).fetchall()
+            for row in rows:
+                try:
+                    payload = json.loads(row["payload_json"] or "{}")
+                except (TypeError, ValueError):
+                    payload = {}
+                if not payload.get("release_claim_on_terminal"):
+                    # 本地执行回执的识别签名：缺字段的一律不动（例如
+                    # 远端路径理论上不会带空 delivered_at，但保守起见）。
+                    continue
+                message = (
+                    "local device_action interrupted by a Controller restart; "
+                    "fencing claim released, replay the operation if needed"
+                )
+                claimed = conn.execute(
+                    """UPDATE cluster_commands SET status='failed',error=?,
+                       updated_at=? WHERE id=? AND status IN ('accepted','running')""",
+                    (message, now, row["id"]),
+                )
+                if claimed.rowcount != 1:
+                    # 另一进程（Web/Worker/CLI watchdog 同库并发）已处置：
+                    # 不重复记账、不重复释放 claim，避免重复告警与失真返回。
+                    continue
+                failed.append({
+                    "command_id": row["id"],
+                    "claim_source_id": str(payload.get("claim_source_id") or ""),
+                    "operation_id": str(row["operation_id"] or ""),
+                })
+        for item in failed:
+            if item["claim_source_id"]:
+                self.claims.release(item["claim_source_id"], status="failed")
+            logger.warning(
+                "failed stale local device_action %s (operation %s)",
+                item["command_id"], item["operation_id"],
+            )
+        return failed
+
+    def start_local_command(self, command_id: str) -> bool:
+        with self._lock, self.connect() as conn:
+            return conn.execute(
+                "UPDATE cluster_commands SET status='running',updated_at=? WHERE id=? AND status='accepted'",
+                (_utc_now(), command_id),
+            ).rowcount == 1
 
     def append_command_events(
         self, worker_id: str, command_id: str, events: list[dict[str, Any]]

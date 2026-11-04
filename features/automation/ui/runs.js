@@ -72,8 +72,8 @@ async function loadRuns() {
                 <button type="button" data-click="loadTrace" data-a0="${esc(run.id)}" data-stop>链路</button>
                 ${TERMINAL_STATUSES.has(run.status)
                     ? `<button type="button" data-click="retryRun" data-a0="${esc(run.id)}" data-stop title="使用原配置重新执行整条流水线，包含已配置的构建和烧写">重跑流水线</button>`
-                    : run.status === 'flashing'
-                    ? '<button type="button" class="danger" disabled title="刷机过程中断电或终止可能损坏设备">刷机中不可取消</button>'
+                    : ['flashing', 'aoa_recovering'].includes(run.status)
+                    ? '<button type="button" class="danger" disabled title="设备操作完成前不能安全中止">设备操作中不可取消</button>'
                     : `<button type="button" class="danger" data-click="cancelRun" data-a0="${esc(run.id)}" data-stop>取消</button>`}
             </div>
         </article>

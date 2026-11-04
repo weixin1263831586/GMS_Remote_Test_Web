@@ -40,7 +40,7 @@ AOA_HID_TOUCH_SCREEN = 3
 AOA_HID_KEYBOARD = 1
 AOA_HID_SYSTEM = 2
 
-# 触摸类型位（report 首字节的低 2 位：in-range + touch）
+# 触摸首字节：低 2 位为 in-range/tip switch，其余 6 位为 Contact ID（单指固定 0）。
 AOA_TOUCH_UP = 0b00
 AOA_TOUCH_DOWN = 0b11
 
@@ -52,21 +52,26 @@ AOA_SYSTEM_BACK = 0b100
 # 触摸屏 HID 逻辑分辨率（描述符 Logical Maximum，AoaDevice.touch 里 clamp）
 AOA_TOUCH_MAX_X = 360
 AOA_TOUCH_MAX_Y = 640
+AOA_TOUCH_CALIBRATION_VERSION = 2
 
 TOUCH_SCREEN_HID_DESCRIPTOR = bytes([
     0x05, 0x0D,        # Usage Page (Digitizer)
     0x09, 0x04,        # Usage (Touch Screen)
-    0xA1, 0x00,        # Collection (Physical)
+    0xA1, 0x01,        # Collection (Application): direct touchscreen, not a pointer
+    0x09, 0x22,        #   Usage (Finger)
+    0xA1, 0x02,        #   Collection (Logical)
     0x09, 0x32,        #   Usage (In Range)
-    0x09, 0x33,        #   Usage (Touch)
+    0x09, 0x42,        #   Usage (Tip Switch)
     0x15, 0x00,        #   Logical Minimum (0)
     0x25, 0x01,        #   Logical Maximum (1)
     0x75, 0x01,        #   Report Size (1)
     0x95, 0x02,        #   Report Count (2)
     0x81, 0x02,        #   Input (Data, Variable, Absolute)
-    0x75, 0x01,        #   Report Size (1)
-    0x95, 0x06,        #   Report Count (6) - padding
-    0x81, 0x01,        #   Input (Constant)
+    0x09, 0x51,        #   Usage (Contact Identifier): selects Linux hid-multitouch
+    0x25, 0x3F,        #   Logical Maximum (63)
+    0x75, 0x06,        #   Report Size (6)
+    0x95, 0x01,        #   Report Count (1)
+    0x81, 0x02,        #   Input (Data, Variable, Absolute), single contact ID 0
     0x05, 0x01,        #   Usage Page (Generic)
     0x09, 0x30,        #   Usage (X)
     0x15, 0x00,        #   Logical Minimum (0)
@@ -80,7 +85,8 @@ TOUCH_SCREEN_HID_DESCRIPTOR = bytes([
     0x75, 0x10,        #   Report Size (16)
     0x95, 0x01,        #   Report Count (1)
     0x81, 0x02,        #   Input (Data, Variable, Absolute)
-    0xC0,              # End Collection
+    0xC0,              #   End Finger Collection
+    0xC0,              # End Touch Screen Application
 ])
 
 # 101-key 键盘：8-bit modifier + 8-bit keycode（单键报告）
@@ -174,9 +180,11 @@ _KEY_TOKEN_RE = re.compile(r"(?:(\d+)\*)?([a-zA-Z0-9@\-_.]+)")
 _WRITE_RE = re.compile(r"[a-zA-Z0-9@\-_. ]+")
 
 # ---- 安全上限（ADR 0022：限制步骤数/时长/按键）----
-MAX_PROFILE_COMMANDS = 64
+MAX_PROFILE_COMMANDS = 256
 MAX_SLEEP_MS = 10_000
 MAX_TOTAL_RUNTIME_MS = 300_000
+MAX_AOA_OPERATION_SECONDS = 960
+MAX_AOA_PAUSE_SECONDS = 600
 MAX_WRITE_LENGTH = 128
 
 
@@ -193,6 +201,19 @@ class AoaCommand:
     text: str = ""
     keys: tuple[tuple[int, int], ...] = ()   # (modifier, usage) 序列
     sleep_ms: int = 0
+
+
+def required_hid_channels(commands: list[AoaCommand]) -> frozenset[int]:
+    """Freeze only the input devices this sequence needs before sending any input."""
+    channels = set()
+    for command in commands:
+        if command.kind in {'click', 'longClick', 'swipe'}:
+            channels.add(AOA_HID_TOUCH_SCREEN)
+        elif command.kind in {'key', 'write'}:
+            channels.add(AOA_HID_KEYBOARD)
+        elif command.kind in {'wake', 'home', 'back'}:
+            channels.add(AOA_HID_SYSTEM)
+    return frozenset(channels)
 
 
 def parse_profile_commands(commands: list[str] | tuple[str, ...]) -> list[AoaCommand]:
@@ -253,6 +274,13 @@ def parse_profile_commands(commands: list[str] | tuple[str, ...]) -> list[AoaCom
             parsed.append(AoaCommand(kind=head, sleep_ms=milliseconds))
         else:
             raise ValueError(f"invalid AOA action: {text}")
+        command = parsed[-1]
+        if command.kind in {"click", "longClick", "swipe"}:
+            points = [(command.x1, command.y1)]
+            if command.kind == "swipe":
+                points.append((command.x2, command.y2))
+            if any(not (0 <= x <= AOA_TOUCH_MAX_X and 0 <= y <= AOA_TOUCH_MAX_Y) for x, y in points):
+                raise ValueError(f"AOA coordinates outside 0..{AOA_TOUCH_MAX_X}, 0..{AOA_TOUCH_MAX_Y}: {text}")
         total_runtime_ms += _estimate_runtime_ms(parsed[-1])
     if not parsed:
         raise ValueError("AOA profile is empty")
@@ -366,7 +394,7 @@ def command_runtime_seconds(commands: list[AoaCommand]) -> int:
 RECORD_ACTIONS = frozenset({
     "click", "longClick", "scroll_down", "scroll_up", "back", "home", "wake",
 })
-MAX_RECORD_STEPS = 64
+MAX_RECORD_STEPS = 256
 MAX_SCROLL_ATTEMPTS = 8
 MAX_CLICKS = 32
 
@@ -396,7 +424,7 @@ def parse_record_input_action(raw: dict) -> dict:
             raise ValueError(f"record input {name} must be an integer")
         try:
             parsed = int(value)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(f"record input {name} must be an integer") from exc
         if not minimum <= parsed <= maximum:
             raise ValueError(
@@ -427,6 +455,8 @@ def parse_record_input_action(raw: dict) -> dict:
     for name in ("scale_x", "scale_y"):
         if raw.get(name) is None:
             continue
+        if isinstance(raw[name], bool):
+            raise ValueError(f"record input {name} must be numeric")
         try:
             scale = float(raw[name])
         except (TypeError, ValueError) as exc:
@@ -434,6 +464,32 @@ def parse_record_input_action(raw: dict) -> dict:
         if not 0.05 <= scale <= 100:
             raise ValueError(f"record input {name} is out of range")
         normalized[name] = scale
+    context = raw.get("calibration_context")
+    if "scale_x" in normalized or "scale_y" in normalized:
+        if ("scale_x" not in normalized or "scale_y" not in normalized
+                or not isinstance(context, dict) or type(context.get("version")) is not int
+                or context.get("version") != AOA_TOUCH_CALIBRATION_VERSION
+                or not isinstance(context.get("model"), str)
+                or not context["model"].strip() or len(context["model"]) > 256
+                or type(context.get("rotation")) is not int
+                or context["rotation"] not in range(4)
+                or not isinstance(context.get("display"), list)
+                or len(context["display"]) != 2
+                or any(type(n) is not int or not 1 <= n <= 10000 for n in context["display"])):
+            raise ValueError("touch scales require a versioned calibration_context; recalibrate the display")
+        normalized["calibration_context"] = {
+            "version": AOA_TOUCH_CALIBRATION_VERSION, "model": context["model"], "release": str(context.get("release") or "")[:64],
+            "display": context["display"], "rotation": context["rotation"],
+            "hid_touch_mode": context.get("hid_touch_mode", "direct"),
+        }
+    if raw.get("hid_touch_mode") is not None or normalized.get("calibration_context"):
+        from .aoa_hid_mode import validate_touch_mode
+
+        expected_mode = (normalized.get("calibration_context") or {}).get("hid_touch_mode", "pointer")
+        mode = validate_touch_mode(raw.get("hid_touch_mode", expected_mode))
+        if normalized.get("calibration_context") and expected_mode != mode:
+            raise ValueError("touch calibration belongs to another HID mode; recalibrate the display")
+        normalized["hid_touch_mode"] = mode
     return normalized
 
 

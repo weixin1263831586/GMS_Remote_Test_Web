@@ -45,7 +45,12 @@ ALLOWED_FEATURE_WORKER_IMPORTS: dict[str, set[str]] = {
         "worker_agent.process_inventory",
     },
     "features/cluster/device_actions_api.py": {
+        # 同主机桥接面（同 deployment_api.py 先例）：AOA 回放派发前
+        # 判定本机是否可抑制 adb daemon（ Tradefed 任务/ADB Proxy 导入
+        # 检查，见 _local_aoa_adb_suppression_allowed）。
+        "worker_agent.adb_proxy",
         "worker_agent.inventory",
+        "worker_agent.process_inventory",
     },
     "features/cluster/transfer_ingest_api.py": {
         "worker_agent.android_inspection",

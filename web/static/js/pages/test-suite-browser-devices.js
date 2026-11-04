@@ -57,9 +57,7 @@ function renderDevices() {
         const deviceId = typeof device === 'string' ? device : device.device_id;
         const isLocked = typeof device === 'object' && device.locked;
         const lockedBy = typeof device === 'object' ? device.locked_by : '';
-        const status = typeof device === 'object'
-            ? (device.status || device.state || 'online')
-            : 'online';
+        const status = workspaceDeviceStatus(device);
         const selectable = isSelectableWorkspaceDevice(device);
         const transport = typeof device === 'object'
             ? (device.transport || 'local_usb')
@@ -118,7 +116,7 @@ function buildDeviceItemEl({
     deviceId,
     isLocked,
     lockedBy,
-    status = 'online',
+    status = 'unknown',
     selectable = true,
     transport = 'local_usb',
     adbProxySourceWorkerId = '',
@@ -149,7 +147,11 @@ function buildDeviceItemEl({
         ? 'Fastboot/Fastbootd 设备可用于 GSI 烧写和重启'
         : status === 'loader'
         ? 'Loader/MaskROM 烧写模式设备，可直接选中重新烧写固件'
-        : selectable ? '点击选择设备' : `设备当前处于 ${status} 状态`;
+        : status === 'usb_only'
+        ? '仅检测到 USB 连接，ADB 未连接；USB-HID/AOA 能力待验证，可在 AOA 工作台探测'
+        : status === 'unknown'
+        ? '设备状态待确认，请刷新设备列表后重试'
+        : selectable ? 'ADB 已连接；测试就绪状态仍需执行前检查' : `设备当前处于 ${status} 状态`;
 
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
@@ -184,7 +186,12 @@ function buildDeviceItemEl({
         ? 'Loader'
         : statusLower === 'unauthorized'
         ? '未授权'
-        : isLocked ? '已分配' : selectable ? '可用' : status;
+        : statusLower === 'usb_only'
+        ? 'USB-HID / AOA（待验证）'
+        : isLocked ? '已分配'
+        : ['online', 'available'].includes(statusLower) ? 'ADB 已连接'
+        : statusLower === 'offline' || statusLower === 'absent' ? '已断开'
+        : '状态待确认';
     statusEl.textContent = isLocked && displayStatus !== '已分配'
         ? `${displayStatus} · 已占用`
         : displayStatus;
@@ -554,6 +561,8 @@ async function collectDeviceInfo() {
     if (!validateDeviceSelection()) return;
 
     const button = document.getElementById('btn-device-info');
+    const workerId = selectedClusterWorker();
+    const requestScope = workspaceWorkerId();
 
     // 禁用按钮，防止重复点击
     if (button) {
@@ -563,12 +572,19 @@ async function collectDeviceInfo() {
     }
 
     try {
-        const workerId = selectedClusterWorker();
         const result = await apiCall(workerId ? '/api/cluster/devices/actions' : '/api/devices/info', 'POST',
             workerId ? {worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'get_properties'}
                      : {devices: Array.from(state.selectedDevices)});
-        addWorkerLog(workerId, '设备信息: ' + JSON.stringify(result, null, 2), 'info');
+        const partial = (result.data?.results || []).some(item => item.complete === false);
+        addWorkerLog(workerId, `${partial ? '设备信息（部分字段缺失）' : '设备信息'}: ` + JSON.stringify(result, null, 2), partial ? 'warning' : 'info');
     } catch (error) {
+        const deviceId = error.details?.device;
+        const status = {absent: 'offline', offline: 'offline', unauthorized: 'unauthorized', unknown: 'unknown'}[error.details?.adb_state];
+        if (deviceId && status && workspaceWorkerId() === requestScope) {
+            state.devices = state.devices.map(device => typeof device === 'object' && device.device_id === deviceId
+                ? {...device, status, state: status, stale: status === 'unknown'} : device);
+            renderDevices();
+        }
         addLogEntry('获取设备信息失败: ' + error.message, 'error');
     } finally {
         // 恢复按钮状态

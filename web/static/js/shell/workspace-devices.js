@@ -473,16 +473,28 @@ async function refreshTestStatusForWorker(workerId) {
 let deviceRefreshGeneration = 0;
 const deviceRefreshFlights = new Map();
 
+function workspaceDeviceStatus(device) {
+    if (typeof device === 'string') return 'online';
+    if (device?.stale) return 'unknown';
+    const status = String(device?.status || device?.state || 'unknown').toLowerCase();
+    if (['online', 'available', 'device'].includes(status)) {
+        if (device.protocol === 'usb_only') return 'usb_only';
+        if (device.protocol === 'fastboot') return 'fastboot';
+        if (device.protocol === 'rockusb-loader') return 'loader';
+    }
+    return status === 'device' ? 'online' : status;
+}
+
 function isSelectableTestDevice(device) {
     if (typeof device === 'string') return true;
-    const status = device.status || device.state || 'online';
+    const status = workspaceDeviceStatus(device);
     return !device.locked && ['online', 'available'].includes(status);
 }
 
 function isSelectableBootloaderDevice(device) {
     if (typeof device === 'string') return true;
     if (device.transport === 'adb_proxy') return false;
-    const status = device.status || device.state || 'online';
+    const status = workspaceDeviceStatus(device);
     if (status === 'fastboot') {
         return !device.locked && !device.cluster_worker_id;
     }
@@ -491,7 +503,7 @@ function isSelectableBootloaderDevice(device) {
 
 function isSelectableWorkspaceDevice(device) {
     if (typeof device === 'string') return true;
-    const status = device.status || device.state || 'online';
+    const status = workspaceDeviceStatus(device);
     if (status === 'fastboot' || status === 'loader') {
         // 当前 GSI 直刷 Fastbootd 仅由本机 /api/burn/gsi 支持；
         // 远端 Worker 仍需从 available 状态发起。
@@ -504,7 +516,7 @@ function isSelectableWorkspaceDevice(device) {
 function isSelectableBurnStateDevice(device) {
     if (typeof device === 'string') return true;
     if (device.transport === 'adb_proxy') return false;
-    const status = device.status || device.state || 'online';
+    const status = workspaceDeviceStatus(device);
     // Fastboot 设备烧写前由后端 fastboot reboot 回 ADB 再进 Loader；
     // Loader/MaskROM 设备直接进入 upgrade_tool uf。
     return ['fastboot', 'loader'].includes(status)
@@ -516,7 +528,7 @@ function isSelectableRebootDevice(device) {
     if (isSelectableTestDevice(device)) return true;
     // 停在 Fastboot/Fastbootd 的设备也支持重启：本机走 fastboot reboot；
     // 远端 Worker 设备仍需回到 ADB 状态后发起。
-    const status = device.status || device.state || 'online';
+    const status = workspaceDeviceStatus(device);
     return status === 'fastboot' && !device.locked && !device.cluster_worker_id;
 }
 

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from worker_agent.inventory import probe_devices
+from worker_agent.inventory import aoa_capabilities, probe_devices
 from worker_agent.process_inventory import discover_tradefed_processes
 from worker_agent.suite_actions import tradefed_launcher_families
 from worker_agent.suite_detection import suite_details
@@ -152,6 +152,7 @@ class LocalWorkerBridge:
             "max_jobs": normalize_max_jobs(os.getenv("GMS_LOCAL_WORKER_MAX_JOBS", str(self.config.default_max_jobs))),
             "capabilities": {
                 "adb": True, "fastboot": True,
+                **aoa_capabilities(),
                 "tradefed": bool(families),
                 "cts": "cts" in families, "gts": "gts" in families,
                 "vts": "vts" in families, "sts": "sts" in families,

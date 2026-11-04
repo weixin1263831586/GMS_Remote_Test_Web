@@ -203,7 +203,7 @@
                 allDevices = loadedDevices;
                 devicesManagementClusterMode = clusterMode;
                 state.deviceGroupsLoaded = true;
-                // AOA 自动恢复区块跟随设备清单刷新（Worker/设备下拉与懒加载）。
+                // AOA 工作台区块跟随设备清单刷新（Worker/设备下拉与懒加载）。
                 if (typeof aoaSyncDeviceSources === 'function') {
                     aoaSyncDeviceSources(allDevices);
                 }

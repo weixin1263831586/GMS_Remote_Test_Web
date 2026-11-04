@@ -48,6 +48,7 @@ class ClusterService:
                     self.repository.fail_abandoned_worker_lost_jobs(
                         self.config.worker_lost_fail_seconds
                     )
+                    self.repository.fail_stale_local_device_actions()
                 except Exception:
                     # The next pass retries; never terminate the watchdog on a
                     # transient SQLite or clock parsing failure. Log (rate

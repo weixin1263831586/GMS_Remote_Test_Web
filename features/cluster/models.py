@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from foundation.aoa_profile import MAX_PROFILE_COMMANDS
 from foundation.device_action_spec import DeviceAction
 
 from .config import ClusterConfig
@@ -168,9 +169,14 @@ class ClusterDeviceAction(BaseModel):
     target_package: str = Field(default="android", max_length=255)
     entries: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
     # aoa_sequence：内联 AOA 命令序列（官方 AoaTargetPreparer action 语法）
-    # 与执行后等待 ADB 恢复的秒数；aoa_probe 忽略两者。
-    aoa_commands: list[str] = Field(default_factory=list, max_length=64)
+    # 与执行后等待 ADB 恢复的秒数；aoa_probe 忽略两者。上限与 profile
+    # 存储层（foundation.aoa_profile.MAX_PROFILE_COMMANDS）保持一致，
+    # 避免 recover 在 Controller 侧被 pydantic 拦成 500。
+    aoa_commands: list[str] = Field(
+        default_factory=list, max_length=MAX_PROFILE_COMMANDS)
     wait_adb_seconds: int = Field(default=0, ge=0, le=600)
+    aoa_hid_touch_mode: Literal["pointer", "direct"] = "pointer"
+    aoa_hid_settle_seconds: float = Field(default=2, ge=0, le=10)
     # aoa_record：userdebug 设备上的录制参数（steps/setup_wizard/tv）。
     aoa_record: dict[str, Any] = Field(default_factory=dict)
     # 自动化重放幂等键（ADR 0022）：非空时远程 Worker 命令按
@@ -179,6 +185,10 @@ class ClusterDeviceAction(BaseModel):
     # USB 调试开关点击。空值保持每请求一条新命令的既有语义；该字段
     # 只参与 Controller 侧去重，不进入 Worker 执行 payload。
     automation_run_id: str = Field(default="", max_length=128)
+    usb_port_path: str = Field(default="", max_length=128, pattern=r"^(?:[0-9]+-[0-9]+(?:\.[0-9]+)*)?$")
+    # aoa_sequence 回放过程控制句柄（前端生成的一次性 id）：随命令下发，
+    # 运行中经 /devices/aoa/playback/{id}/control 暂停/继续/终止。
+    playback_control_id: str = Field(default="", max_length=64)
 
 
 class ClusterSuiteDownload(BaseModel):

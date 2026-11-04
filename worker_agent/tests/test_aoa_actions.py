@@ -54,19 +54,20 @@ def test_invalid_actions_rejected():
             parse_profile_commands([bad])
 
 
-def test_click_coordinates_are_clamped_not_rejected():
-    # 官方 AoaDevice.touch 对越界坐标做 clamp（360x640），不拒绝动作。
-    parsed = parse_profile_commands(["click 400 700"])
-    assert parsed[0].kind == "click"
-    report = touch_report(True, parsed[0].x1, parsed[0].y1)
-    assert report == bytes([0b11, 0x68, 0x01, 0x80, 0x02])
+@pytest.mark.parametrize("command", ["click 400 700", "longClick 361 0", "swipe 0 0 100 0 641"])
+def test_profile_coordinates_outside_hid_range_are_rejected(command):
+    with pytest.raises(ValueError, match="coordinates outside"):
+        parse_profile_commands([command])
 
 
 def test_budget_limits():
     with pytest.raises(ValueError):
         parse_profile_commands([])
+    assert len(parse_profile_commands(["wake"] * 200)) == 200
     with pytest.raises(ValueError):
-        parse_profile_commands([f"click {i} {i}" for i in range(65)])
+        parse_profile_commands(["wake"] * 251)      # 超总时长预算
+    with pytest.raises(ValueError):
+        parse_profile_commands([f"click {i%360} {i%640}" for i in range(256)])
     with pytest.raises(ValueError):
         parse_profile_commands(["sleep 10000"] * 35)  # 总时长超 300s
 
@@ -238,7 +239,7 @@ def test_calibration_failure_still_releases_probe(monkeypatch):
     monkeypatch.setattr(aoa_actions, "_usb", lambda: (FakeUsbCore, FakeUsbUtil))
     monkeypatch.setattr(aoa_actions, "_configure_accessory", lambda _c, _s: FakeDevice())
     monkeypatch.setattr(aoa_actions, "_detach_kernel_drivers", lambda _d: None)
-    monkeypatch.setattr(aoa_actions, "_register_all_hid", lambda _d: None)
+    monkeypatch.setattr(aoa_actions, "_register_all_hid", lambda _d, touch_mode="pointer": None)
     monkeypatch.setattr(aoa_actions, "_transfer", fake_transfer)
     monkeypatch.setattr(aoa_actions, "_open_device", lambda _c, _s: None)
     monkeypatch.setattr(
@@ -266,7 +267,7 @@ def test_record_uses_measured_calibration(monkeypatch):
     monkeypatch.setattr(aoa_actions, "_adb_run",
                         lambda _serial, *args, **kw: FakeCompleted())
     monkeypatch.setattr(aoa_actions, "_calibrate_touch_mapping",
-                        lambda serial, w, h, sleep: (2.2, 2.2))
+                        lambda serial, w, h, sleep, touch_mode="pointer": (2.2, 2.2))
     monkeypatch.setattr(
         aoa_actions, "_dump_elements",
         lambda _serial, _sleep=None: (
@@ -304,6 +305,7 @@ def test_run_sequence_mocked_hid(monkeypatch):
             return False
 
         def reset(self):
+            type(self).idProduct = 0x1234
             state["reset"] = state.get("reset", 0) + 1
 
         def ctrl_transfer(self, request_type, request, value, index, data, timeout):
@@ -357,12 +359,119 @@ def test_run_sequence_mocked_hid(monkeypatch):
     assert touch_events[0][0] == 0b11 and touch_events[-1][0] == 0b00
 
 
+def test_run_sequence_reports_progress_per_command(monkeypatch):
+    """每条命令（含 sleep）执行后回调 (index, total, 原文本)，序号从 1 起。"""
+    state = {"accessory": False, "registered": [], "events": [], "transfers": []}
+
+    class FakeDevice:
+        idVendor = 0x18D1  # noqa: N815
+        idProduct = 0x2D00  # noqa: N815
+        serial_number = "progress-device"
+        bNumInterfaces = 0  # noqa: N815
+
+        @staticmethod
+        def is_kernel_driver_active(_interface):
+            return False
+
+        def reset(self):
+            pass
+
+        def ctrl_transfer(self, request_type, request, value, index, data, timeout):
+            if request == aoa_profile.AOA_ACCESSORY_GET_PROTOCOL:
+                return b"\x02\x00"
+            if request == aoa_profile.AOA_ACCESSORY_SEND_STRING:
+                return len(data)
+            if request == aoa_profile.AOA_ACCESSORY_START:
+                state["accessory"] = True
+                return 0
+            if request in (aoa_profile.AOA_ACCESSORY_REGISTER_HID,
+                           aoa_profile.AOA_ACCESSORY_SET_HID_REPORT_DESC,
+                           aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT,
+                           aoa_profile.AOA_ACCESSORY_UNREGISTER_HID):
+                return len(data) if isinstance(data, (bytes, bytearray)) else 0
+            raise AssertionError(f"unexpected request {request}")
+
+    class FakeCore:
+        class USBError(Exception):
+            pass
+
+        @staticmethod
+        def find(custom_match=None, find_all=False):
+            return iter([FakeDevice()])
+
+    monkeypatch.setattr(aoa_actions, "_usb", lambda: (FakeCore(), None))
+    monkeypatch.setattr(aoa_actions, "_wait_adb_state",
+                        lambda serial, timeout: {"adb_state": "none", "adb_recovered": False})
+    commands = ["wake", "sleep 800", "click 10 20"]
+    progress: list[tuple[int, int, str]] = []
+    result = aoa_actions.run_aoa_sequence(
+        "progress-device", commands, sleep=lambda _seconds: None,
+        on_progress=lambda index, total, text: progress.append((index, total, text)),
+    )
+    assert result["commands_executed"] == 3
+    assert [item[0] for item in progress] == [1, 2, 3]
+    assert all(item[1] == 3 for item in progress)
+    assert [item[2] for item in progress] == commands
+
+
+def test_run_sequence_progress_callback_error_does_not_abort(monkeypatch):
+    """进度回调异常只告警，不得中断命令序列执行。"""
+
+    class FakeDevice:
+        idVendor = 0x18D1  # noqa: N815
+        idProduct = 0x2D00  # noqa: N815
+        serial_number = "progress-error-device"
+        bNumInterfaces = 0  # noqa: N815
+
+        @staticmethod
+        def is_kernel_driver_active(_interface):
+            return False
+
+        def reset(self):
+            pass
+
+        def ctrl_transfer(self, request_type, request, value, index, data, timeout):
+            if request == aoa_profile.AOA_ACCESSORY_GET_PROTOCOL:
+                return b"\x02\x00"
+            if request == aoa_profile.AOA_ACCESSORY_SEND_STRING:
+                return len(data)
+            if request in (aoa_profile.AOA_ACCESSORY_START,
+                           aoa_profile.AOA_ACCESSORY_REGISTER_HID,
+                           aoa_profile.AOA_ACCESSORY_SET_HID_REPORT_DESC,
+                           aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT,
+                           aoa_profile.AOA_ACCESSORY_UNREGISTER_HID):
+                return len(data) if isinstance(data, (bytes, bytearray)) else 0
+            raise AssertionError(f"unexpected request {request}")
+
+    class FakeCore:
+        class USBError(Exception):
+            pass
+
+        @staticmethod
+        def find(custom_match=None, find_all=False):
+            return iter([FakeDevice()])
+
+    monkeypatch.setattr(aoa_actions, "_usb", lambda: (FakeCore(), None))
+    monkeypatch.setattr(aoa_actions, "_wait_adb_state",
+                        lambda serial, timeout: {"adb_state": "none", "adb_recovered": False})
+
+    def boom(_index, _total, _text):
+        raise RuntimeError("callback exploded")
+
+    result = aoa_actions.run_aoa_sequence(
+        "progress-error-device", ["home", "home"], sleep=lambda _s: None,
+        on_progress=boom,
+    )
+    assert result["success"] is True
+    assert result["commands_executed"] == 2
+
+
 def _stall_device_factory(state, stall_channels):
     """构造带部分 HID 通道 STALL 的假设备（模拟 RK3588 gadget 行为）。"""
 
     class FakeDevice:
         idVendor = 0x18D1  # noqa: N815
-        idProduct = 0x2D00  # noqa: N815
+        idProduct = 0x1234 if state.get("reset") else 0x2D00  # noqa: N815
         serial_number = "partial-hid-device"
         bNumInterfaces = 0  # noqa: N815
 
@@ -371,6 +480,7 @@ def _stall_device_factory(state, stall_channels):
             return False
 
         def reset(self):
+            type(self).idProduct = 0x1234
             state["reset"] = state.get("reset", 0) + 1
 
         def ctrl_transfer(self, request_type, request, value, index, data, timeout):
@@ -420,9 +530,10 @@ def test_run_sequence_tolerates_partial_hid_stall(monkeypatch):
     result = aoa_actions.run_aoa_sequence(
         "partial-hid-device", ["wake"], wait_adb_seconds=0, sleep=lambda _s: None)
     assert result["success"] is True
-    # 触摸通道(3)被 STALL 跳过；键盘(1)/系统(2)正常注册
-    assert sorted(state["registered"]) == [1, 2]
-    assert [hid for hid, _ in state["events"]] == [aoa_profile.AOA_HID_SYSTEM]
+    # wake 只需系统通道；不注册无关的触摸和键盘设备。
+    assert state["registered"] == [2]
+    assert state["events"][0][0] == aoa_profile.AOA_HID_SYSTEM
+    assert all(hid != aoa_profile.AOA_HID_TOUCH_SCREEN for hid, _ in state["events"])
 
 
 def test_run_sequence_rejects_unsupported_channel(monkeypatch):
@@ -470,6 +581,48 @@ def test_adb_state_does_not_retain_disconnected_device(monkeypatch):
     result = aoa_actions._wait_adb_state("s1", 2)
     assert result["adb_state"] == "absent"
     assert result["adb_recovered"] is False
+
+
+def test_adb_state_accepts_usb_port_with_and_without_prefix(monkeypatch):
+    """platform-tools 版本差异：端口字段可能是 ``usb:1-6`` 或裸 ``1-6``。
+
+    本机 adb 1.0.41 输出裸端口，老版本带 ``usb:`` 前缀；绑定端口正确时
+    两种都必须判 device，不得误报 identity_mismatch（RK3576 实测回归）。
+    """
+    from types import SimpleNamespace
+
+    from worker_agent.aoa_usb import bind_usb
+
+    monkeypatch.setattr(aoa_actions.time, "sleep", lambda _: None)
+    monkeypatch.setattr(aoa_actions.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        stdout="List of devices attached\ns1 device 1-6 product:p transport_id:9\n",
+        returncode=0))
+
+    with bind_usb("1-6"):
+        ticks = iter([0, 1])
+        monkeypatch.setattr(aoa_actions.time, "monotonic", lambda: next(ticks))
+        result = aoa_actions._wait_adb_state("s1", 5)
+    assert result["adb_recovered"] is True
+    assert result["adb_state"] == "device"
+
+    with bind_usb("1-6"):
+        ticks = iter([0, 1])
+        monkeypatch.setattr(aoa_actions.time, "monotonic", lambda: next(ticks))
+        monkeypatch.setattr(aoa_actions.subprocess, "run", lambda *a, **k: SimpleNamespace(
+            stdout="List of devices attached\ns1 device usb:1-6 product:p transport_id:9\n",
+            returncode=0))
+        result = aoa_actions._wait_adb_state("s1", 5)
+    assert result["adb_recovered"] is True
+
+    with bind_usb("1-6"):
+        ticks = iter([0, 1])
+        monkeypatch.setattr(aoa_actions.time, "monotonic", lambda: next(ticks))
+        monkeypatch.setattr(aoa_actions.subprocess, "run", lambda *a, **k: SimpleNamespace(
+            stdout="List of devices attached\ns1 device 2-1 product:p transport_id:9\n",
+            returncode=0))
+        result = aoa_actions._wait_adb_state("s1", 1)
+    assert result["adb_recovered"] is False
+    assert result["adb_state"] == "identity_mismatch"
 
 
 def test_long_click_runtime_includes_hold_and_pacing():
@@ -522,7 +675,7 @@ def test_register_retries_transient_stall_before_touch(monkeypatch):
         "partial-hid-device", ["click 100 100"], sleep=lambda _: None)
     assert result["success"]
     assert len(attempts) == 2
-    assert len(state["events"]) == 2  # one DOWN and one UP, no duplicate click
+    assert sum(hid == 3 and data[0] == 0b11 for hid, data in state["events"]) == 1
 
 
 def test_touch_registration_avoids_zero_hid_id(monkeypatch):
@@ -532,5 +685,122 @@ def test_touch_registration_avoids_zero_hid_id(monkeypatch):
         "partial-hid-device", ["click 100 100"], sleep=lambda _: None)
     assert result["success"]
     assert 0 not in state["registered"]
-    assert state["events"] == [(3, touch_report(True, 100, 100)),
+    assert state["events"][:2] == [(3, touch_report(True, 100, 100)),
                                (3, touch_report(False, 100, 100))]
+
+
+def _gate_probe_usb(monkeypatch):
+    """run_aoa_sequence 抑制门控测试共用的最小 USB 桩。"""
+    state = {"accessory": False, "registered": [], "events": [], "transfers": []}
+
+    class FakeDevice:
+        idVendor = 0x18D1  # noqa: N815
+        idProduct = 0x2D00  # noqa: N815
+        serial_number = "gate-device"
+        bNumInterfaces = 0  # noqa: N815
+
+        @staticmethod
+        def is_kernel_driver_active(_interface):
+            return False
+
+        def reset(self):
+            pass
+
+        def ctrl_transfer(self, request_type, request, value, index, data, timeout):
+            if request == aoa_profile.AOA_ACCESSORY_GET_PROTOCOL:
+                return b"\x02\x00"
+            if request == aoa_profile.AOA_ACCESSORY_SEND_STRING:
+                return len(data)
+            if request == aoa_profile.AOA_ACCESSORY_START:
+                state["accessory"] = True
+                return 0
+            if request in (aoa_profile.AOA_ACCESSORY_REGISTER_HID,
+                           aoa_profile.AOA_ACCESSORY_SET_HID_REPORT_DESC,
+                           aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT,
+                           aoa_profile.AOA_ACCESSORY_UNREGISTER_HID):
+                return len(data) if isinstance(data, (bytes, bytearray)) else 0
+            raise AssertionError(f"unexpected request {request}")
+
+    class FakeCore:
+        class USBError(Exception):
+            pass
+
+        @staticmethod
+        def find(custom_match=None, find_all=False):
+            return iter([FakeDevice()])
+
+    monkeypatch.setattr(aoa_actions, "_usb", lambda: (FakeCore(), None))
+    monkeypatch.setattr(aoa_actions, "_wait_adb_state",
+                        lambda serial, timeout: {"adb_state": "device", "adb_recovered": True})
+    return state
+
+
+def test_suppression_gate_overrides_static_bool_at_arm_time(monkeypatch):
+    """门控在武装瞬间求值：True 才抑制，False 覆盖静态布尔（不杀 adb）。"""
+    _gate_probe_usb(monkeypatch)
+    sessions = []
+
+    class FakeSession:
+        def __init__(self, label):
+            self.label = label
+
+        def end(self):
+            sessions.append(self.label)
+
+    begins = []
+    monkeypatch.setattr(aoa_actions, "_begin_adb_suppression",
+                        lambda: begins.append(1) or FakeSession("s"))
+
+    gate_results = iter([True])
+    result = aoa_actions.run_aoa_sequence(
+        "gate-device", ["wake", "click 10 20"], sleep=lambda _s: None,
+        suppress_adb_daemon=True,
+        suppress_adb_daemon_gate=lambda: next(gate_results),
+    )
+    assert result["success"] is True
+    assert len(begins) == 1 and sessions == ["s"]
+
+    begins.clear()
+    result = aoa_actions.run_aoa_sequence(
+        "gate-device", ["wake", "click 10 20"], sleep=lambda _s: None,
+        suppress_adb_daemon=True,
+        suppress_adb_daemon_gate=lambda: False,
+    )
+    assert result["success"] is True
+    assert begins == [] and sessions == ["s"]
+
+
+def test_suppression_gate_exception_is_fail_open(monkeypatch):
+    """门控自身异常按不抑制处理：误杀无关 adb 的代价高于放弃抑制。"""
+    _gate_probe_usb(monkeypatch)
+    begins = []
+    monkeypatch.setattr(aoa_actions, "_begin_adb_suppression",
+                        lambda: begins.append(1))
+
+    def broken_gate():
+        raise RuntimeError("job inventory unavailable")
+
+    result = aoa_actions.run_aoa_sequence(
+        "gate-device", ["wake", "click 10 20"], sleep=lambda _s: None,
+        suppress_adb_daemon=True,
+        suppress_adb_daemon_gate=broken_gate,
+    )
+    assert result["success"] is True
+    assert begins == []
+
+
+def test_static_bool_false_skips_gate_evaluation(monkeypatch):
+    """静态布尔为假（快路径预过滤）时门控不求值、不抑制。"""
+    _gate_probe_usb(monkeypatch)
+    begins = []
+    gate_calls = []
+    monkeypatch.setattr(aoa_actions, "_begin_adb_suppression",
+                        lambda: begins.append(1))
+
+    result = aoa_actions.run_aoa_sequence(
+        "gate-device", ["wake", "click 10 20"], sleep=lambda _s: None,
+        suppress_adb_daemon=False,
+        suppress_adb_daemon_gate=lambda: gate_calls.append(1) or True,
+    )
+    assert result["success"] is True
+    assert begins == [] and gate_calls == []

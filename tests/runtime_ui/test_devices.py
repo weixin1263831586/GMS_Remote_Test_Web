@@ -132,7 +132,7 @@ class RuntimeDevicesTests(RuntimeUiHarness):
             page.route("**/api/adb-forward/**", handle_device_request)
             page.evaluate(
                 """
-                state.devices = [{device_id: 'D1'}];
+                state.devices = [{device_id: 'D1', status: 'online'}];
                 state.selectedDevices = new Set(['D1']);
                 state.adbForwardRunning = false;
                 state.usbipConnected = false;

@@ -200,7 +200,7 @@ def test_interactive_record_input_uses_device_action_boundary(environment, monke
         "worker_id": "ats-worker-controller",
         "devices": ["ser-1"],
         "action": "aoa_record_input",
-        "aoa_record": {"action": "tap", "x": 400, "y": 600, "with_screenshot": True},
+        "aoa_record": {"action": "tap", "x": 400, "y": 600},
     }
 
 
@@ -234,3 +234,26 @@ def test_record_preserves_deferred_calibration(environment, monkeypatch):
         "calibrate_touch": "after"})
     assert response.status_code == 200
     assert captured["aoa_record"]["calibrate_touch"] == "after"
+
+
+def test_profile_revision_and_calibration_metadata_are_persisted(tmp_path):
+    store = aoa_service.AoaProfileStore(tmp_path)
+    metadata = {"calibration": {"context": {"version": 1, "model": "model", "display": [800, 1280], "rotation": 0}}}
+    created = store.create_profile("owner", "p", "", ["home"], metadata=metadata)
+    updated = store.update_profile(created["id"], "owner", commands=["back"])
+    assert updated["revision"] == created["revision"] + 1
+    assert aoa_service.AoaProfileStore(tmp_path).get_profile(created["id"], "owner")["metadata"] == metadata
+
+
+def test_playback_control_port_uses_authenticated_owner(environment, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from foundation import cluster_port
+
+    monkeypatch.setattr("features.devices.aoa_api.require_human_principal", lambda _: None)
+    monkeypatch.setattr("features.devices.aoa_api.principal_owner_id", lambda _: "owner-1")
+    control = AsyncMock(return_value={"success": True, "accepted": True})
+    monkeypatch.setattr(cluster_port, "control_aoa_playback", control)
+    response = environment.post("/api/devices/aoa/playback/pb-owned/control", json={"worker_id": "worker-a", "action": "pause"})
+    assert response.status_code == 200
+    control.assert_awaited_once_with("pb-owned", "worker-a", "owner-1", "pause")

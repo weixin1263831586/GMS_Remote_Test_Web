@@ -15,11 +15,19 @@
 !/configs/examples/build_servers.example.json
 !/configs/examples/automation_profiles.example.json
 !/configs/examples/cluster.example.json
+!/configs/examples/aoa/
+/configs/examples/aoa/*
+!/configs/examples/aoa/README.md
+!/configs/examples/aoa/rk3576-ss17-wizard-to-usb-debug.json
 !/configs/README.md
 !/configs/AGENTS.md
 ```
 
 因此 `configs/config.json`、`configs/local/*`、`configs/secrets/*` 等真实配置都是本机数据，不进入版本库。完整布局见 `configs/README.md`。
+
+AOA 开机向导与 USB 调试命令模板统一位于
+[`configs/examples/aoa/`](../../configs/examples/aoa/README.md)，按文件白名单纳入版本管理。
+模板通过 Profile API 保存为当前账号配置后使用，不作为进程运行配置自动加载。
 
 ## 模板与回退链
 
