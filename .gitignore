@@ -8,6 +8,10 @@
 !/configs/examples/build_servers.example.json
 !/configs/examples/automation_profiles.example.json
 !/configs/examples/cluster.example.json
+!/configs/examples/aoa/
+/configs/examples/aoa/*
+!/configs/examples/aoa/README.md
+!/configs/examples/aoa/rk3576-ss17-wizard-to-usb-debug.json
 !/configs/README.md
 !/configs/AGENTS.md
 

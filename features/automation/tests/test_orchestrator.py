@@ -138,7 +138,7 @@ class AutomationOrchestratorTests(unittest.TestCase):
             ).to_run_dict("run_1"))
             orchestrator = AutomationOrchestrator(store, StubAutomationExecutor())
 
-            for _ in range(10):
+            for _ in range(14):
                 orchestrator.advance_run("run_1")
 
             run = store.get_run("run_1")
@@ -281,7 +281,8 @@ class AutomationOrchestratorTests(unittest.TestCase):
                 self.calls += 1
                 if self._fail:
                     return {"success": False, "error": "AOA probe rejected the sequence"}
-                return {"success": True, "running": False, "command_id": "cmd-aoa-1"}
+                return {"success": True, "running": False, "command_id": "cmd-aoa-1",
+                        "aoa_result": {"success": True, "adb_recovered": True, "adb_state": "device"}}
 
         plan = {"test_type": "CTS", "aoa": {"mode": "user_build_recovery",
                                             "commands": ["wake", "home"]}}
@@ -296,12 +297,12 @@ class AutomationOrchestratorTests(unittest.TestCase):
             orchestrator = AutomationOrchestrator(store, AoaExecutor())
             self.assertEqual(
                 orchestrator.advance_run("run_aoa")["status"], RUN_STATUS_AOA_RECOVERING)
-            # 成功后直接进入测试：不得回 flash_verified（会被 aoa_enabled
-            # 再次拉回 AOA 阶段形成死循环）。
+            self.assertEqual(orchestrator.advance_run("run_aoa")["status"], "post_flash_verifying")
+            self.assertEqual(orchestrator.advance_run("run_aoa")["status"], "flash_verified")
             self.assertEqual(orchestrator.advance_run("run_aoa")["status"], RUN_STATUS_TESTING)
 
             # 重新进入 AOA 阶段并注入执行失败 → 终态 aoa_failed。
-            store.update_run("run_aoa", status="flash_verified", current_stage="flash_verified")
+            store.update_run("run_aoa", status="flash_verified", current_stage="flash_verified", result_json="{}")
             orchestrator.advance_run("run_aoa")  # flash_verified → aoa_recovering
             self.assertEqual(store.get_run("run_aoa")["status"], RUN_STATUS_AOA_RECOVERING)
             failing = AutomationOrchestrator(store, AoaExecutor(fail=True))
@@ -314,7 +315,6 @@ class AutomationOrchestratorTests(unittest.TestCase):
         from features.automation.models import (
             RUN_STATUS_AOA_FAILED,
             RUN_STATUS_AOA_RECOVERING,
-            RUN_STATUS_TESTING,
             AutomationRunCreateRequest,
         )
         from features.automation.orchestrator import AutomationOrchestrator
@@ -330,7 +330,7 @@ class AutomationOrchestratorTests(unittest.TestCase):
 
             def aoa_recover(self, run):
                 return {"success": True, "running": False, "command_id": "cmd-aoa-1",
-                        "aoa_result": {"success": True, "adb_state": self._adb_state}}
+                        "aoa_result": {"success": True, "adb_recovered": self._adb_state == "device", "adb_state": self._adb_state}}
 
         plan = {"test_type": "CTS", "aoa": {"mode": "user_build_recovery",
                                             "commands": ["wake", "home"]}}
@@ -350,11 +350,11 @@ class AutomationOrchestratorTests(unittest.TestCase):
                              current_stage=RUN_STATUS_AOA_RECOVERING)
             healthy = AutomationOrchestrator(store, AoaStateExecutor("device"))
             self.assertEqual(
-                healthy.advance_run("run_aoa")["status"], RUN_STATUS_TESTING)
+                healthy.advance_run("run_aoa")["status"], "post_flash_verifying")
 
     def test_aoa_recovery_skipped_without_plan_config(self):
         from features.automation.executors import StubAutomationExecutor
-        from features.automation.models import RUN_STATUS_TESTING, AutomationRunCreateRequest
+        from features.automation.models import AutomationRunCreateRequest
         from features.automation.orchestrator import AutomationOrchestrator
         from features.automation.repository import AutomationStore
 
@@ -369,4 +369,4 @@ class AutomationOrchestratorTests(unittest.TestCase):
 
             result = AutomationOrchestrator(store, StubAutomationExecutor()).advance_run("run_plain")
 
-            self.assertEqual(result["status"], RUN_STATUS_TESTING)
+            self.assertEqual(result["status"], "post_flash_verifying")

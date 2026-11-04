@@ -10,6 +10,7 @@ inventory.py 拆分后仅保留稳定导入面：
 from __future__ import annotations
 
 from .device_actions import (  # noqa: F401 - re-export 保持既有导入路径稳定
+    aoa_capabilities,
     browse_directory,
     copy_image_into,
     execute_device_action,

@@ -20,6 +20,7 @@ from features.automation.executor_contract import (
     StubAutomationExecutor as StubAutomationExecutor,
 )
 from features.automation.jenkins_client import JenkinsClient
+from features.automation.recovery_executor import RecoveryExecutorMixin
 from foundation.test_execution_options import matches_device_selector, validate_execution_options
 
 
@@ -128,7 +129,7 @@ def _jenkins_config_from_run(run: dict[str, Any], fallback: dict[str, Any]) -> d
     return config
 
 
-class HttpAutomationExecutor:
+class HttpAutomationExecutor(RecoveryExecutorMixin):
     """Executor that reuses this service's existing HTTP APIs.
 
     This is intentionally opt-in from the worker API because it can flash devices
@@ -348,9 +349,7 @@ class HttpAutomationExecutor:
                     "success": True,
                     "worker_id": existing["worker_id"],
                     "reservation_id": existing["id"],
-                    "devices": [
-                        {"serial": item["id"]} for item in existing["devices"]
-                    ],
+                    "devices": self.snapshot_devices(cluster.repository, existing["worker_id"], existing["devices"], run),
                     "recovered": True,
                 }
 
@@ -447,9 +446,7 @@ class HttpAutomationExecutor:
                 "success": True,
                 "worker_id": worker_id,
                 "reservation_id": reservation["id"],
-                "devices": [
-                    {"serial": item["id"]} for item in reservation["devices"]
-                ],
+                "devices": self.snapshot_devices(cluster.repository, worker_id, reservation["devices"], run),
             }
         except ValueError as exc:
             return {"success": False, "retry": True, "error": str(exc)}
@@ -521,28 +518,15 @@ class HttpAutomationExecutor:
             if status != "completed":
                 return {"success": False, "command_id": command_id,
                         "error": command.get("error") or f"cluster flash {status or 'unknown'}"}
-            verify = flash_plan.get("verify") if isinstance(flash_plan.get("verify"), dict) else {}
-            checked = self._verify_cluster_post_flash(run, worker_id, devices, verify)
-            if not checked.get("success") and checked.get("retry"):
-                timeout = max(60, int(verify.get("retries") or 30) * int(verify.get("retry_delay") or 10))
-                acknowledged = str(command.get("acknowledged_at") or command.get("updated_at") or "")
-                try:
-                    from datetime import datetime, timezone
-
-                    started = datetime.fromisoformat(acknowledged.replace("Z", "+00:00"))
-                    age = (datetime.now(timezone.utc) - started).total_seconds()
-                except (TypeError, ValueError):
-                    age = 0
-                if age < timeout:
-                    return {"success": True, "running": True, "command_id": command_id,
-                            "stage_id": recovered_stage_id, **checked}
-            if not checked.get("success"):
-                return {"success": False, "command_id": command_id,
-                        "error": checked.get("error") or "post-flash verification failed",
-                        "verification": checked}
+            flash_result = command.get("result") or {}
+            if flash_result.get("success") is False:
+                return {"success": False, "error": flash_result.get("error") or "firmware flash failed"}
             return {"success": True, "running": False, "command_id": command_id,
-                    "stage_id": recovered_stage_id,
-                    "flash_result": command.get("result") or {}, "verification": checked}
+                    "stage_id": recovered_stage_id, "flash_result": flash_result}
+
+        recovery_error = self.recovery_preflash_error(cluster, worker_id, run)
+        if recovery_error:
+            return {"success": False, "error": recovery_error}
 
         build_plan = _run_build_plan(run)
         is_ssh_build = bool(build_plan.get("provider") == "ssh" or build_plan.get("server_id"))
@@ -610,127 +594,6 @@ class HttpAutomationExecutor:
                 "stage_id": stage_id, "deduplicated": bool(
                     result.get("response", {}).get("deduplicated")
                 )}
-
-    def aoa_enabled(self, run: dict[str, Any]) -> bool:
-        """AOA 恢复阶段开关：plan.aoa.mode == user_build_recovery 时启用。"""
-        try:
-            plan = _run_test_plan(run)
-        except Exception:
-            return False
-        recovery = plan.get("aoa") if isinstance(plan.get("aoa"), dict) else {}
-        return recovery.get("mode") == "user_build_recovery"
-
-    def aoa_recover(self, run: dict[str, Any]) -> dict[str, Any]:
-        """AOA 恢复阶段（ADR 0022）：user build 烧写后模拟 UI 打开 USB 调试。
-
-        通过既有 device_action 通道派发 ``aoa_sequence``，payload 携带
-        ``automation_run_id``：远程 Worker 路径由 Controller 按
-        ``automation:{run_id}:aoa_sequence`` 派生 operation_id 做数据库层
-        去重，派发成功但响应丢失后的重试收敛到同一条命令，不会重放
-        USB 调试开关点击（run 侧仍以 ``aoa_command_id`` 持久化为准）。
-        本机同步路径不建命令、一次派发一次执行，无该去重锚点。
-        命令序列来自 plan 的 ``aoa.recovery.commands``（或 Profile 名），
-        语法在 Controller 侧先经 aoa_profile 校验。
-        """
-        plan = _run_test_plan(run)
-        recovery = plan.get("aoa") if isinstance(plan.get("aoa"), dict) else {}
-        if not recovery or recovery.get("mode") in {None, "", "off"}:
-            return {"success": True, "skipped": True}
-        devices = _run_devices(run)
-        if len(devices) != 1:
-            return {"success": False, "error": "AOA recovery requires exactly one device"}
-        worker_id = str(run.get("worker_id") or "")
-        commands = [str(item) for item in recovery.get("commands") or []]
-        profile_name = str(recovery.get("profile") or "")
-        if not commands and profile_name:
-            try:
-                from features.devices import profile_store
-
-                profiles = profile_store().list_profiles(
-                    str(run.get("created_by") or run.get("owner") or ""),
-                    include_all=False,
-                )
-                match = next((p for p in profiles if p["name"] == profile_name), None)
-                if match is None:
-                    return {"success": False, "error": f"AOA profile not found: {profile_name}"}
-                commands = [str(item) for item in match["commands"]]
-            except Exception as exc:
-                return {"success": False, "error": f"failed to load AOA profile: {exc}"}
-        if not commands:
-            return {"success": False, "error": "AOA recovery has no commands configured"}
-        try:
-            from foundation import aoa_profile
-
-            aoa_profile.parse_profile_commands(commands)
-        except ValueError as exc:
-            return {"success": False, "error": str(exc)}
-        wait_adb_seconds = int(recovery.get("wait_adb_seconds") or 0)
-
-        command_id = str(run.get("aoa_command_id") or "")
-        if command_id:
-            try:
-                polled = self._json_response(self.session.get(
-                    self._url(f"/api/cluster/commands/{command_id}"),
-                    headers=self._auth_headers(run), timeout=30
-                ))
-            except Exception as exc:
-                return {"success": True, "running": True, "command_id": command_id,
-                        "poll_error": str(exc)}
-            command = polled.get("response", {}).get("command") or polled.get("command") or {}
-            status = str(command.get("status") or "")
-            if status in {"queued", "delivered", "accepted", "running"}:
-                return {"success": True, "running": True, "command_id": command_id,
-                        "command_status": status}
-            if status != "completed":
-                return {"success": False, "command_id": command_id,
-                        "error": command.get("error") or f"AOA recovery {status or 'unknown'}"}
-            aoa_result = command.get("result") or {}
-            if aoa_result.get("success") is False:
-                return {
-                    "success": False,
-                    "command_id": command_id,
-                    "error": aoa_result.get("error") or "AOA recovery result failed",
-                    "aoa_result": aoa_result,
-                }
-            return {"success": True, "running": False, "command_id": command_id,
-                    "aoa_result": aoa_result}
-
-        try:
-            # /api/cluster/devices/actions 是 ClusterDeviceAction JSON 端点：
-            # machine principal（ADR 0012）只能操作本 run 预约内的设备，
-            # 设备租约由端点内的 claim 流程保证。
-            response = self.session.post(
-                self._url("/api/cluster/devices/actions"),
-                json={
-                    "worker_id": worker_id,
-                    "devices": list(devices),
-                    "action": "aoa_sequence",
-                    "aoa_commands": commands,
-                    "wait_adb_seconds": max(wait_adb_seconds, 1),
-                    # 幂等重放键：远程路径按 run+action 派生确定性
-                    # operation_id，响应丢失后的重试不再整段重放点击序列。
-                    "automation_run_id": str(run.get("id") or ""),
-                },
-                headers=self._auth_headers(run),
-                timeout=300,
-            )
-            result = self._json_response(response)
-        except Exception as exc:
-            return {"success": False, "error": f"failed to dispatch AOA recovery: {exc}"}
-        command_id = str(
-            result.get("response", {}).get("command_id") or result.get("command_id") or "")
-        if not result.get("success"):
-            return result
-        response_payload = result.get("response") or {}
-        if not command_id and not response_payload.get("accepted"):
-            # Controller-local Worker actions complete synchronously and do
-            # not create a durable command. Preserve the actual AOA/ADB result
-            # instead of rejecting a successful local recovery.
-            return {"success": True, "running": False, "aoa_result": response_payload}
-        if not command_id:
-            return {"success": False, "error": "AOA recovery did not return a command id"}
-        return {"success": True, "running": True, "command_id": command_id,
-                "deduplicated": bool(result.get("response", {}).get("deduplicated"))}
 
     def _stage_ssh_build_artifact(self, run: dict[str, Any], artifact_path: str) -> dict[str, Any]:
         """Stream an approved SSH build artifact onto the Controller."""
@@ -864,7 +727,8 @@ class HttpAutomationExecutor:
         try:
             response = self.session.post(
                 self._url("/api/cluster/devices/actions"),
-                json={"worker_id": worker_id, "devices": devices, "action": "props"},
+                json={"worker_id": worker_id, "devices": devices, "action": "props",
+                      "usb_port_path": str((json.loads(run.get("devices_json") or "[]")[0]).get("usb_port_path") or "")},
                 headers=self._auth_headers(run),
                 timeout=45,
             )
@@ -1049,10 +913,10 @@ class HttpAutomationExecutor:
 
     def cancel(self, run: dict[str, Any]) -> dict[str, Any]:
         status = str(run.get("status") or "")
-        if status == "flashing":
+        if status in {"flashing", "aoa_recovering"}:
             return {
                 "success": False,
-                "error": "Firmware flashing cannot be interrupted safely; wait for the flash command to finish",
+                "error": "Device recovery cannot be interrupted safely; wait for the active command to finish",
             }
         if status in {"testing", "test_running"}:
             cluster_job_id = str(

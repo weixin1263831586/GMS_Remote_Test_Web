@@ -8,6 +8,7 @@ import subprocess
 import threading
 from typing import Any
 
+from foundation.error_model import ApiError
 from foundation.networking import is_local_host
 from foundation.security import is_safe_device_id
 
@@ -23,6 +24,27 @@ from .utils import DeviceUtils
 
 logger = logging.getLogger(__name__)
 _local_adb_devices_lock = threading.Lock()
+
+
+def _device_info_error(device_id, result, stage, *, adb_state="unknown"):
+    text = f"{result.stdout}\n{result.stderr}".lower()
+    if not result.timed_out and result.code != 127:
+        for marker, state in (("unauthorized", "unauthorized"), ("offline", "offline"),
+                              ("not found", "absent"), ("no devices", "absent")):
+            if marker in text:
+                adb_state = state
+                break
+    details = {"device": device_id, "adb_state": adb_state}
+    actions = ({"action": "检查设备 USB 连接、USB 调试与授权状态，然后刷新设备列表"},)
+    if result.timed_out:
+        return ApiError.dependency_timeout(f"设备 {stage} 超时", details=details, next_actions=actions)
+    if result.code == 127:
+        return ApiError.dependency_unavailable("执行主机的 ADB 工具不可用", details=details, next_actions=actions)
+    if adb_state in {"unauthorized", "offline", "absent"}:
+        labels = {"unauthorized": "ADB 未授权", "offline": "ADB 离线", "absent": "ADB 未连接"}
+        return ApiError.conflict(f"设备{labels[adb_state]}，无法读取设备信息", details=details, next_actions=actions)
+    return ApiError.upstream_failure(f"设备{stage}失败，未获取到有效信息",
+                                     service="adb", details=details, next_actions=actions)
 
 
 def _require_safe_device_id(device_id: str) -> None:
@@ -306,13 +328,19 @@ class DeviceManager:
         if ssh is None:
             ssh = self.ssh_manager.get_connection(config)
             if not ssh:
-                return {}
+                raise ApiError.upstream_failure("无法连接设备执行主机", service="ssh",
+                                                details={"device": device_id, "adb_state": "unknown"})
             created_ssh = True
         else:
             created_ssh = False
 
         try:
             info = {}
+
+            state = self.ssh_manager.execute_command(
+                ssh, shlex.join(["adb", "-s", device_id, "get-state"]), timeout=10)
+            if state.timed_out or state.code != 0 or state.stdout.strip() != "device":
+                raise _device_info_error(device_id, state, "ADB 状态检查")
 
             # 属性名到输出键名的映射
             prop_map = {
@@ -332,34 +360,34 @@ class DeviceManager:
             }
 
             # 使用 getprop 不带参数输出所有属性（key=value 格式），按 key 解析更健壮
-            getprop_cmd = f"adb -s {device_id} shell getprop"
+            getprop_cmd = shlex.join(["adb", "-s", device_id, "shell", "getprop"])
 
-            try:
-                getprop_result = self.ssh_manager.execute_command(
-                    ssh,
-                    getprop_cmd,
-                    timeout=15
-                )
-                # 解析 getprop 输出: [ro.serialno]: [value]
-                for line in getprop_result.stdout.strip().split('\n'):
-                    m = re.match(r'\[([\w.]+)\]:\s*\[(.*)\]', line)
-                    if m:
-                        prop_name, value = m.group(1), m.group(2)
-                        if prop_name in prop_map:
-                            info[prop_map[prop_name]] = value or "未知"
-                # 补充未获取到的属性
-                for key in prop_map.values():
-                    if key not in info:
-                        info[key] = "未知"
-            except Exception:
-                for key in prop_map.values():
-                    info[key] = "未知"
+            getprop_result = self.ssh_manager.execute_command(ssh, getprop_cmd, timeout=15)
+            if getprop_result.timed_out or getprop_result.code != 0:
+                raise _device_info_error(device_id, getprop_result, "属性读取")
+            for line in getprop_result.stdout.strip().split('\n'):
+                m = re.match(r'\[([\w.]+)\]:\s*\[(.*)\]', line)
+                if m:
+                    prop_name, value = m.group(1), m.group(2)
+                    if prop_name in prop_map:
+                        info[prop_map[prop_name]] = value or "未知"
+            if not any(str(value).strip().lower() not in {"", "未知", "unknown", "n/a"}
+                       for value in info.values()):
+                raise _device_info_error(device_id, getprop_result, "属性读取", adb_state="device")
+            for key in prop_map.values():
+                info.setdefault(key, "未知")
 
             return info
 
-        except Exception as e:
-            logger.error(f"[Device] Error getting device info: {e}")
-            return {}
+        except ApiError:
+            raise
+        except (TimeoutError, subprocess.TimeoutExpired) as exc:
+            raise ApiError.dependency_timeout(
+                "读取设备信息超时", details={"device": device_id, "adb_state": "unknown"}) from exc
+        except Exception as exc:
+            raise ApiError.upstream_failure(
+                "读取设备信息失败", service="adb",
+                details={"device": device_id, "adb_state": "unknown"}) from exc
         finally:
             if created_ssh and ssh:
                 self.ssh_manager.return_connection(ssh)

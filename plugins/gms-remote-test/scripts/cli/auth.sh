@@ -516,13 +516,17 @@ gms-rt-approval-create() {
     while [ "$#" -gt 0 ]; do
         case "$1" in
             -h|--help)
-                printf 'Usage: gms-rt-approval-create --tool <tool> --device <serial>[,<serial>...]\n'
+                printf 'Usage: gms-rt-approval-create --tool <gms_rt_burn_firmware|gms_rt_shell_exec>\n'
+                printf '       --device <serial>[,<serial>...]\n'
                 printf '       [--command <command> | --firmware-sha256 <sha256>\n'
                 printf '        [--wipe-data true|false] [--burn-mode auto|uf]]\n'
                 printf '\n'
                 printf 'Mint a one-shot approval token (5-minute TTL) bound to the exact\n'
                 printf 'tool + device + command. Requires a HUMAN session: the server rejects\n'
                 printf 'agent service tokens here (agent_forbidden).\n'
+                printf '\n'
+                printf '<tool> is the MCP tool identifier (underscores), NOT the CLI\n'
+                printf 'command name: use gms_rt_burn_firmware / gms_rt_shell_exec.\n'
                 printf '\n'
                 printf 'In an interactive human terminal this command selects a human\n'
                 printf 'session automatically, reuses it, or prompts for login if expired.\n'
@@ -553,7 +557,7 @@ gms-rt-approval-create() {
         shift
     done
     [ -n "$tool" ] && [ -n "$device" ] || {
-        error "Usage: gms-rt-approval-create --tool <tool> --device <serial>[,<serial>...] [--command <command>|--firmware-sha256 <sha256> [--wipe-data true|false] [--burn-mode auto|uf]]"
+        error "Usage: gms-rt-approval-create --tool <gms_rt_burn_firmware|gms_rt_shell_exec> --device <serial>[,<serial>...] [--command <command>|--firmware-sha256 <sha256> [--wipe-data true|false] [--burn-mode auto|uf]]"
         return "$GMS_RT_EXIT_USAGE"
     }
     check_jq || return "$GMS_RT_EXIT_OPERATION"

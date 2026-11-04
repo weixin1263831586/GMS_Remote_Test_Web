@@ -78,30 +78,37 @@ function workspaceDeviceSerial(value) {
     return !isLocalAutomationWorker(worker) && text.startsWith(`${worker}:`)
         ? text.slice(worker.length + 1) : text;
 }
-// 14 段流水线阶段（顺序即推进顺序）
+// 流水线阶段（顺序即推进顺序）
 const PIPELINE_STAGES = [
     'queued', 'jenkins_queued', 'jenkins_building', 'artifact_ready',
-    'waiting_device', 'device_locked', 'flashing', 'flash_verified',
+    'waiting_device', 'device_locked', 'flashing', 'flash_completed',
+    'aoa_recovering', 'post_flash_verifying', 'flash_verified',
     'testing', 'test_running', 'report_collecting', 'analyzing', 'reporting', 'completed',
 ];
 const STAGE_LABELS_ZH = {
     queued: '排队', jenkins_queued: '构建排队', jenkins_building: '编译中',
     artifact_ready: '固件就绪', waiting_device: '等待设备', device_locked: '设备已锁',
-    flashing: '刷机中', flash_verified: '刷机校验', testing: '启动测试', test_running: '测试中',
+    flashing: '刷机中', flash_completed: '刷机完成', aoa_recovering: '恢复 USB 调试',
+    post_flash_verifying: '固件校验中', flash_verified: '固件已校验', testing: '启动测试', test_running: '测试中',
     report_collecting: '收集报告', analyzing: '分析中', reporting: '上报中', completed: '完成',
 };
 const TERMINAL_STATUSES = new Set([
     'completed', 'cancelled', 'failed', 'jenkins_failed', 'artifact_missing',
-    'flash_failed', 'test_failed', 'analysis_failed', 'reporting_failed',
+    'flash_failed', 'aoa_failed', 'test_failed', 'analysis_failed', 'reporting_failed',
 ]);
 const FAILURE_STATUSES = new Set([
-    'failed', 'jenkins_failed', 'artifact_missing', 'flash_failed',
+    'failed', 'jenkins_failed', 'artifact_missing', 'flash_failed', 'aoa_failed',
     'test_failed', 'analysis_failed', 'reporting_failed',
 ]);
 // 失败状态 → 对应失败阶段的索引（用于进度条标红定位）
 const FAILURE_STAGE_INDEX = {
-    jenkins_failed: 2, artifact_missing: 3, flash_failed: 6,
-    test_failed: 9, analysis_failed: 11, reporting_failed: 12,
+    jenkins_failed: PIPELINE_STAGES.indexOf('jenkins_building'),
+    artifact_missing: PIPELINE_STAGES.indexOf('artifact_ready'),
+    flash_failed: PIPELINE_STAGES.indexOf('post_flash_verifying'),
+    aoa_failed: PIPELINE_STAGES.indexOf('aoa_recovering'),
+    test_failed: PIPELINE_STAGES.indexOf('test_running'),
+    analysis_failed: PIPELINE_STAGES.indexOf('analyzing'),
+    reporting_failed: PIPELINE_STAGES.indexOf('reporting'),
 };
 const STATUS_LABELS_ZH = {
     online: '在线', offline: '离线', busy: '忙碌', draining: '停止派发',
@@ -113,12 +120,13 @@ const STATUS_LABELS_ZH = {
     jenkins_queued: '构建排队',
     jenkins_building: '编译中', artifact_ready: '固件就绪',
     waiting_device: '等待设备', device_locked: '设备已锁',
-    flashing: '刷机中', flash_verified: '刷机校验',
+    flashing: '刷机中', flash_completed: '刷机完成', aoa_recovering: '恢复 USB 调试',
+    post_flash_verifying: '固件校验中', flash_verified: '固件已校验',
     testing: '启动测试', test_running: '测试中',
     report_collecting: '收集报告', analyzing: '分析中',
     reporting: '上报中', completed: '完成', cancelled: '已取消',
     failed: '失败', jenkins_failed: '构建失败',
-    artifact_missing: '固件缺失', flash_failed: '刷机失败',
+    artifact_missing: '固件缺失', flash_failed: '刷机失败', aoa_failed: 'USB 调试恢复失败',
     test_failed: '测试失败', analysis_failed: '分析失败',
     reporting_failed: '上报失败',
 };

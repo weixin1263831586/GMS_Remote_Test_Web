@@ -28,3 +28,5 @@
 | 0020 | [人类预授权的测试计划与有界失败用例重试](0020-scheduled-test-plans-and-bounded-retries.md) | Accepted（补充 0012 的预授权派生规则） | — | — |
 | 0021 | [ATS 执行选项、观测与证据保留](0021-ats-execution-options-and-evidence-retention.md) | Accepted | — | — |
 | 0022 | [Web AOA 交互录制与无 ADB USB 恢复](0022-web-aoa-recording-and-usb-recovery.md) | Accepted | — | — |
+| 0023 | [AOA 直接触摸屏与稳定的 HID 设备集合](0023-aoa-direct-touchscreen-and-stable-hid-set.md) | Accepted | — | — |
+| 0024 | [AOA 指针兼容与显式输入模式](0024-aoa-pointer-compatibility-and-input-modes.md) | Accepted（补充 0023） | — | — |

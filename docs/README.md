@@ -10,6 +10,7 @@
 | 部署 | [deployment/quick-install.md](deployment/quick-install.md) | 快速安装、生产部署、配置体系、Worker 部署、升级排障 |
 | USB/IP | [usbip/overview.md](usbip/overview.md) | 设备接入选型、固件烧写流程、ADB Proxy 对比、故障排除 |
 | 设备 | [devices/bootloader-oem-commands.md](devices/bootloader-oem-commands.md) | Bootloader 锁定/解锁与 GSI 烧写的 oem 命令选型矩阵、vendor 版本判据、失败兜底与恢复 |
+| AOA | [AOA 工作台：原理、实现与系统架构](aoa-mechanism-and-architecture.md) | AOAv2/HID 原理、架构与时序、录制投屏、标定、命令编辑调试、持久回放、权限与 USB 身份、刷机后恢复、故障查 |
 | Agent | [agent/overview.md](agent/overview.md) | Agent Runtime 定位、安装 enrollment、安全模型、Profile 管理 |
 | CLI | [cli/gms-rt.md](cli/gms-rt.md) | gms-rt 命令设计原则、[命令参考](cli/command-reference.md)（生成文档）、工作流示例 |
 | 安全 | [security.md](security.md) | 认证双轨、scope/elevation、审批 Token、执行边界、秘密管理 |

@@ -307,6 +307,17 @@ class WorkerRuntime:
                     "superseded by a newer device fencing generation",
                 )
 
+    def check_current_fencing(self, command: dict[str, Any]) -> None:
+        """Check without renewing or resurrecting an old lease."""
+        with self.connect() as conn:
+            for token in (command.get("payload") or {}).get("lease_tokens") or []:
+                row = conn.execute("SELECT * FROM device_fences WHERE device_id=?",
+                                   (token["device_id"],)).fetchone()
+                if (row is None or row["generation"] != token["generation"]
+                        or row["lease_id"] != token["lease_id"]
+                        or row["attempt_id"] != token["attempt_id"]):
+                    raise ValueError("device fencing changed during AOA; reconcile required")
+
     def release_fencing(self, command: dict[str, Any]) -> int:
         """Release only fences owned by the command's exact lease tokens."""
         tokens = (command.get("payload") or {}).get("lease_tokens") or []
@@ -406,12 +417,14 @@ class WorkerRuntime:
             ).fetchall()
             conn.executemany(
                 """UPDATE commands SET status='failed',error=?,
+                   result_json='{"success":false,"reconcile_required":true}',
                    controller_synced=0,updated_at=CURRENT_TIMESTAMP
                    WHERE id=? AND status='running'""",
                 [(error, row["id"]) for row in rows],
             )
         return [
-            {"id": row["id"], "status": "failed", "result": {}, "error": error}
+            {"id": row["id"], "status": "failed",
+             "result": {"success": False, "reconcile_required": True}, "error": error}
             for row in rows
         ]
 

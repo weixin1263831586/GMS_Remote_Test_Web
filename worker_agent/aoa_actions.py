@@ -8,23 +8,27 @@
 关键行为（与官方一致）：
 - 非配件模式时发送 accessory 信息串 + ACCESSORY_START，等待重枚举，
   最多重试 5 次；
-- 注册 3 个 HID（触摸屏/键盘/系统键）后再执行动作，结束时注销；
-- 发送事件遇 ``DEVICE_NOT_FOUND(-4)`` 时重建连接并重发一次；
+- 按整段命令需要注册触摸屏/键盘/系统键，执行期间保持设备集合稳定；
+- 在完整命令之间检查 USB 重枚举并重建 HID；手势中断不自动重发；
 - 全程控制传输 bmRequestType=0x40（vendor OUT），串号跨重枚举保持。
 """
 
 from __future__ import annotations
 
-import base64
 import logging
 import os
 import re
 import subprocess
 import time
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 from foundation import aoa_profile
+
+from .adb_suppression import begin_suppression as _begin_adb_suppression
+from .aoa_session import AoaSession, device_gone, register_hids
+from .aoa_usb import bound_port, cleanup_diagnostics, cleanup_steps, find_bound_device, validate_binding
 
 
 logger = logging.getLogger(__name__)
@@ -75,14 +79,24 @@ def _open_device(usb_core, serial: str):
             # 未授权/无法读描述符的设备跳过；accessory 模式下可读。
             return False
 
-    matches = iter(usb_core.find(custom_match=match, find_all=True))
-    device = next(matches, None)
-    if next(matches, None) is not None:
-        raise AoaError(f"ambiguous USB serial on this worker: {serial}")
-    return device
+    def find_serial():
+        matches = iter(usb_core.find(custom_match=match, find_all=True))
+        device = next(matches, None)
+        if next(matches, None) is not None:
+            raise AoaError(f"ambiguous USB serial on this worker: {serial}")
+        return device
+
+    return find_bound_device(usb_core, serial, find_serial)
+
+
+
+def _reset_usb(device) -> None:
+    validate_binding()
+    device.reset()
 
 
 def _detach_kernel_drivers(device) -> None:
+    validate_binding()
     try:
         configuration = device.get_active_configuration()
     except Exception:
@@ -130,14 +144,29 @@ def _wait_adb_state(serial: str, timeout_seconds: int) -> dict[str, Any]:
     last_state = "absent"
     while True:
         completed = subprocess.run(
-            ["adb", "devices"], capture_output=True, text=True, timeout=15, check=False)
+            ["adb", "devices", "-l"], capture_output=True, text=True, timeout=15, check=False)
         last_state = "absent"
+        matches = 0
         for line in (completed.stdout or "").splitlines()[1:]:
             parts = line.split()
             if len(parts) >= 2 and parts[0] == serial:
+                matches += 1
                 last_state = parts[1]
+                # 端口字段格式随 platform-tools 版本不同：老版本输出
+                # ``usb:1-6``，本机 1.0.41 输出裸 ``1-6``。两种都认，
+                # 否则正确的物理端口被误判为 identity_mismatch。
+                bound = bound_port()
+                if bound and not any(item in {f"usb:{bound}", bound}
+                                     for item in parts[2:]):
+                    last_state = "identity_mismatch"
+        if matches > 1:
+            last_state = "ambiguous"
+        if getattr(completed, "returncode", 0) != 0:
+            last_state = "probe_failed"
+        validate_binding()
         if last_state == "device":
-            return {"adb_state": "device", "adb_recovered": True}
+            return {"adb_state": "device", "adb_recovered": True,
+                    "usb_port_path": bound_port()}
         if time.monotonic() >= deadline:
             return {
                 "adb_state": last_state,
@@ -152,13 +181,14 @@ def _wait_adb_state(serial: str, timeout_seconds: int) -> dict[str, Any]:
 
 
 def _transfer(device, request: int, value: int, index: int, data: bytes = b"") -> int:
+    validate_binding()
     try:
         return int(device.ctrl_transfer(
             aoa_profile.AOA_REQUEST_OUTPUT, request, value, index, data,
             timeout=USB_TRANSFER_TIMEOUT_MS,
         ))
     except Exception as exc:  # pyusb 把 libusb 错误包装成 USBError
-        if "not found" in str(exc).lower() or getattr(exc, "backend_error_code", None) == -4:
+        if "not found" in str(exc).lower() or device_gone(exc):
             return DEVICE_NOT_FOUND
         raise AoaError(f"AOA control transfer failed (request {request}): {exc}") from exc
 
@@ -207,6 +237,7 @@ def _configure_accessory(usb_core, serial: str, timeout_seconds: int = 20):
 
 
 def _adb_run(serial: str, *args: str, timeout: int = 15) -> subprocess.CompletedProcess:
+    validate_binding()
     return subprocess.run(
         ["adb", "-s", serial, *args], capture_output=True, text=True,
         timeout=timeout, check=False)
@@ -386,9 +417,11 @@ def _visible_texts_summary(nodes: list[dict], limit: int = 12) -> list[str]:
     return texts
 
 
-def _register_all_hid(device) -> None:
+def _register_all_hid(device, touch_mode: str = "pointer") -> None:
     """注册全部 AOA HID 通道（标定与回放共用的注册序列）。"""
-    for hid_id, descriptor in aoa_profile.AOA_HID_REGISTRATIONS:
+    from foundation.aoa_hid_mode import hid_registrations
+
+    for hid_id, descriptor in hid_registrations(touch_mode):
         result = _transfer(
             device, aoa_profile.AOA_ACCESSORY_REGISTER_HID, hid_id, len(descriptor))
         if result == DEVICE_NOT_FOUND:
@@ -403,24 +436,27 @@ def _register_all_hid(device) -> None:
 def _ensure_native_mode(usb_core, serial: str) -> bool:
     """确认设备已退出 accessory 模式；残留时以驱动卸载+复位强推。
 
-    实机 8e4d 验证：host 侧 ``device.reset()`` 后设备可能仍以 accessory
+    实机 8e4d 验证：host 侧 ``_reset_usb(device)`` 后设备可能仍以 accessory
     PID（18d1:2D0x）枚举，需先 detach 全部内核驱动再复位才可靠恢复原生
     PID；accessory 模式残留会干扰后续 adb 手势与设备管理。
     """
     for _attempt in range(2):
         device = _open_device(usb_core, serial)
-        if device is None or not _accessory_mode(usb_core, device):
+        if device is not None and not _accessory_mode(usb_core, device):
             return True
+        if device is None:
+            time.sleep(1)
+            continue
         try:
             _detach_kernel_drivers(device)
-            device.reset()
+            _reset_usb(device)
         except Exception:
             logger.warning("AOA native-mode reset failed for %s", serial)
         # 复位后重枚举需要时间：过短会在旧枚举句柄上误判 accessory 残留
         # （实机 RK3576：lsusb 已显示原生 PID，检查仍撞上缓存句柄）。
         time.sleep(3.5)
     device = _open_device(usb_core, serial)
-    if device is not None and _accessory_mode(usb_core, device):
+    if device is None or _accessory_mode(usb_core, device):
         logger.warning("AOA device %s still in accessory mode after reset", serial)
         return False
     return True
@@ -431,6 +467,7 @@ def _calibrate_touch_mapping(
     display_w: int,
     display_h: int,
     sleep: Callable[[float], None],
+    touch_mode: str = "pointer",
 ) -> tuple[float, float] | None:
     """实测设备的触摸坐标映射（raw→cooked 比例）。
 
@@ -452,7 +489,7 @@ def _calibrate_touch_mapping(
         sleep(1.0)
         device = _configure_accessory(usb_core, serial)
         _detach_kernel_drivers(device)
-        _register_all_hid(device)
+        _register_all_hid(device, touch_mode)
         sleep(CONFIGURE_DELAY_SECONDS)
         result = _transfer(
             device, aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT,
@@ -485,35 +522,25 @@ def _calibrate_touch_mapping(
         logger.warning("AOA touch calibration failed on %s: %s", serial, exc)
         return None
     finally:
-        # 探针异常路径也必须尝试抬起：DOWN 成功而 UP 失败会留下"幽灵
-        # 手指"，设备上后续滑动手势全部失效（实机 8e4d 验证）。长按等
-        # 于一次长按，落在桌面/列表上会弹上下文菜单，BACK 尽力清掉。
+        errors = cleanup_diagnostics()
+        steps = []
         if probe_down_sent and device is not None:
-            try:
-                _transfer(device, aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT,
-                          aoa_profile.AOA_HID_TOUCH_SCREEN, 0,
-                          aoa_profile.touch_report(False, probe_x, probe_y))
-            except Exception:
-                pass
-            _adb_run(serial, "shell", "input", "keyevent", "4")
-        # 恢复原生模式，让后续录制步骤在正常 ADB 下进行。
+            steps += [
+                ("release_touch", lambda: _transfer(device, aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT,
+                    aoa_profile.AOA_HID_TOUCH_SCREEN, 0, aoa_profile.touch_report(False, probe_x, probe_y))),
+                ("dismiss_probe_menu", lambda: _adb_run(serial, "shell", "input", "keyevent", "4")),
+            ]
         if device is not None:
-            try:
-                for hid_id, _descriptor in reversed(aoa_profile.AOA_HID_REGISTRATIONS):
-                    try:
-                        _transfer(device, aoa_profile.AOA_ACCESSORY_UNREGISTER_HID,
-                                  hid_id, 0)
-                    except AoaError:
-                        continue
-                device.reset()
-            except Exception:
-                logger.warning("AOA calibration USB reset failed for %s", serial)
-            try:
-                usb_util.dispose_resources(device)
-            except Exception:
-                pass
-            _ensure_native_mode(usb_core, serial)
-        _wait_adb_state(serial, 20)
+            steps += [(f"unregister_hid_{hid}", lambda hid=hid: _transfer(
+                device, aoa_profile.AOA_ACCESSORY_UNREGISTER_HID, hid, 0))
+                for hid, _ in reversed(aoa_profile.AOA_HID_REGISTRATIONS)]
+            steps += [("reset_usb", lambda: _reset_usb(device)),
+                      ("dispose_usb", lambda: usb_util.dispose_resources(device))]
+        steps += [("restore_native_mode", lambda: _ensure_native_mode(usb_core, serial)),
+                  ("verify_adb_state", lambda: _wait_adb_state(serial, 20).get("adb_recovered") is True)]
+        cleanup_steps(steps, errors)
+        if errors:
+            logger.warning("AOA calibration cleanup diagnostics on %s: %s", serial, errors)
 
 
 def _parse_probe_cooked_point(dump: str, probe_x: int, probe_y: int) -> tuple[float, float] | None:
@@ -544,6 +571,7 @@ def record_aoa_profile(
     setup_wizard: bool = False,
     tv: bool = False,
     calibrate_touch: bool | str = False,
+    touch_mode: str = "pointer",
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
     """在 userdebug 设备（ADB 可用）上录制 AOA 恢复旅程。
@@ -585,7 +613,7 @@ def record_aoa_profile(
     # 屏幕坐标，导航本身无误差，只影响存进 Profile 的 AOA 逻辑坐标）。
     calibrate_after = calibrate_touch == "after"
     calibration = (
-        _calibrate_touch_mapping(serial, display_w, display_h, sleep)
+        _calibrate_touch_mapping(serial, display_w, display_h, sleep, touch_mode)
         if calibrate_touch and not calibrate_after else None
     )
     if calibration is not None:
@@ -617,17 +645,13 @@ def record_aoa_profile(
     # 设置应用可能带后台残留状态（上次录制停在的子页面）：点图标会恢复
     # 而非重新进入顶层列表，导航必败（实机 8e4d 验证）。录制前置强制
     # 重置设置进程并拉起根页面（大屏双栏设置自身持久化"上次页面"，
-    # force-stop 后仍会恢复详情页，必须显式回到根）；另关闭动画三种
+    # force-stop 后仍会恢复详情页，必须显式回到根）。
     # 缩放（RK3576 启动器动画导致 uiautomator 长期拿不到 idle 状态，
     # 录制机专属前置；回放侧 user 固件不受影响，坐标为最终布局位置）。
     _adb_run(serial, "shell", "am", "force-stop", "com.android.settings")
     _adb_run(serial, "shell", "am", "start", "-a", "android.settings.SETTINGS")
     sleep(1.5)
     _adb_run(serial, "shell", "input", "keyevent", "3")
-    for _ns, _key in (("global", "window_animation_scale"),
-                      ("global", "transition_animation_scale"),
-                      ("global", "animator_duration_scale")):
-        _adb_run(serial, "shell", "settings", "put", _ns, _key, "0")
     sleep(0.8)
     commands.append("wake")
 
@@ -733,7 +757,7 @@ def record_aoa_profile(
     if calibrate_after:
         # 标定放最后（accessory 切换会让 uiautomator idle 永久失效，
         # 见函数头注释）；成功则把已录命令按实测比例重缩放。
-        post = _calibrate_touch_mapping(serial, display_w, display_h, sleep)
+        post = _calibrate_touch_mapping(serial, display_w, display_h, sleep, touch_mode)
         if post is not None:
             post_x, post_y = post
             commands = [
@@ -751,12 +775,14 @@ def record_aoa_profile(
     aoa_profile.parse_profile_commands(commands)
     return {
         "serial": serial,
-        "success": True,
+        "success": not cleanup_diagnostics(),
+        "cleanup_errors": list(cleanup_diagnostics()),
         "display": [display_w, display_h],
         "model": model,
         "release": release,
         "touch_calibration": {
             "measured": calibration is not None,
+            "hid_touch_mode": touch_mode,
             "scale_x": round(scale_x, 4),
             "scale_y": round(scale_y, 4),
         },
@@ -794,46 +820,40 @@ def _rescale_aoa_command(command: str, old_x: float, old_y: float,
     return command
 
 
-def _screenshot_data_url(serial: str) -> str | None:
-    """当前画面截图（exec-out screencap 二进制安全读取），失败返回 None。
-
-    交互式录制把截图合并进每次输入的响应：省掉前端第二条 screenshot
-    命令（额外 claim + 500ms 定时器 + 独立轮询）——这是投屏操作延时
-    的主因。exec-out 输出是 PNG 字节流，必须 bytes 模式读取。
-    """
-    try:
-        completed = subprocess.run(
-            ["adb", "-s", serial, "exec-out", "screencap", "-p"],
-            capture_output=True, timeout=15, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if completed.returncode != 0 or not completed.stdout:
-        return None
-    return ("data:image/png;base64,"
-            + base64.b64encode(completed.stdout).decode("ascii"))
-
-
 def record_aoa_input(serial: str, raw_action: dict) -> dict[str, Any]:
     """Execute one allow-listed ADB input and return its AOAv2 command."""
     action = aoa_profile.parse_record_input_action(raw_action)
-    with_screenshot = raw_action.get("with_screenshot") is True
+    touch_mode = action.get("hid_touch_mode", "pointer")
     display_w, display_h = _display_size(serial)
     scale_x = float(action.get("scale_x") or (
         display_w / aoa_profile.AOA_TOUCH_MAX_X))
     scale_y = float(action.get("scale_y") or (
         display_h / aoa_profile.AOA_TOUCH_MAX_Y))
 
+    context = None
+    if action["action"] == "calibrate" or action.get("calibration_context"):
+        from .aoa_calibration import display_context
+
+        context = display_context(serial, display_w, display_h, _adb_run, touch_mode)
+        if action.get("calibration_context") and action["calibration_context"] != context:
+            raise ValueError("display configuration changed; recalibrate before recording input")
+
     if action["action"] == "calibrate":
-        calibration = _calibrate_touch_mapping(serial, display_w, display_h, time.sleep)
+        calibration = _calibrate_touch_mapping(serial, display_w, display_h, time.sleep, touch_mode)
+        errors = list(cleanup_diagnostics())
+        if errors:
+            calibration = None
         if calibration is not None:
             scale_x, scale_y = calibration
         return {
             "serial": serial,
             "success": calibration is not None,
             "action": "calibrate",
+            "cleanup_errors": errors,
             "display": [display_w, display_h],
             "touch_calibration": {
                 "measured": calibration is not None,
+                "context": context,
                 "scale_x": round(scale_x, 4),
                 "scale_y": round(scale_y, 4),
             },
@@ -895,16 +915,11 @@ def record_aoa_input(serial: str, raw_action: dict) -> dict[str, Any]:
         "display": [display_w, display_h],
         "touch_calibration": {
             "measured": "scale_x" in action and "scale_y" in action,
+            "context": context,
             "scale_x": round(scale_x, 4),
             "scale_y": round(scale_y, 4),
         },
     }
-    # 交互式录制（API 层注入 with_screenshot）：输入执行后顺带回传最新
-    # 截图，前端零额外命令即可刷新投屏。截图失败不阻塞输入结果。
-    if with_screenshot:
-        image = _screenshot_data_url(serial)
-        if image:
-            result["image"] = image
     return result
 
 
@@ -914,64 +929,111 @@ def run_aoa_sequence(
     wait_adb_seconds: int = 0,
     *,
     sleep: Callable[[float], None] = time.sleep,
+    on_progress: Callable[[int, int, str], None] | None = None,
+    control_id: str = "",
+    on_control_event: Callable[[dict[str, Any]], None] | None = None,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
+    control_source: Callable[[], dict] | None = None,
+    suppress_adb_daemon: bool = False,
+    suppress_adb_daemon_gate: Callable[[], bool] | None = None,
+    touch_mode: str = "pointer",
+    hid_settle_seconds: float = 2,
 ) -> dict[str, Any]:
     """执行一条 AOA 命令序列，随后可选等待 ADB 恢复。
 
     ``sleep`` 参数供测试注入，避免真实等待。
+    ``on_progress(index, total, command_text)`` 在每条命令执行完后回调
+    （index 从 1 起，含 sleep），供 Worker 上报命令过程事件；回调异常
+    只告警不中断执行。
+    ``control_id`` 非空时启用暂停/继续/终止控制（worker_agent.aoa_control）：
+    每条命令执行前过控制门；暂停时长自动加回时间预算；用户终止抛
+    AoaPlaybackCancelledError，走异常路径完成 USB 清理并收敛命令为 failed。
+    ``suppress_adb_daemon`` 由派发方在无 Tradefed 任务/ADB Proxy 导入时
+    置真：AOA 会话期抑制主机 adb 守护进程（复合 2D0x accessory 的 adb
+    接口会让 daemon 与 pyusb 抢设备，实机 RK3576 复现 reset 风暴），
+    会话在 finally 的 USB 清理完成后结束，随后才恢复 daemon 供
+    ``_wait_adb_state`` 观察恢复状态。``suppress_adb_daemon_gate`` 提供时
+    在武装前一刻求值并覆盖静态布尔：烧写恢复路径在 flash 后还有最长
+    数分钟的 boot 等待，期间的并发 Tradefed 任务/ADB Proxy 导入必须
+    在武装瞬间重新检查，否则会误杀无关任务的 adb server。门控自身
+    异常按“不抑制”处理（fail-open：误杀代价高于放弃抑制）。
     """
+    commands = [str(item).strip() for item in commands if str(item).strip()]
     parsed = aoa_profile.parse_profile_commands(commands)
+    from foundation.aoa_hid_mode import profile_hid_options
+
+    profile_hid_options({"hid_touch_mode": touch_mode, "hid_settle_seconds": hid_settle_seconds})
     usb_core, usb_util = _usb()
-    action_delay = float(
-        __import__("os").environ.get("GMS_WORKER_AOA_ACTION_DELAY", str(ACTION_DELAY_SECONDS)))
+    # clamp 环境变量上界：放大会话时长会越过抑制 flag 的 TTL 推导
+    # （FLAG_TTL_SECONDS 假设最坏会话 ≤ MAX_AOA_OPERATION_SECONDS），
+    # 让其他进程把活会话误判为 stale、抑制中途失效。
+    action_delay = min(max(float(
+        __import__("os").environ.get("GMS_WORKER_AOA_ACTION_DELAY", str(ACTION_DELAY_SECONDS))), 0.0), 10.0)
+    deadline = time.monotonic() + aoa_profile.MAX_TOTAL_RUNTIME_MS / 1000 + 30
     executed = 0
     device = None
     registered: set[int] = set()
 
-    def register_all(dev) -> set[int]:
-        """注册全部 HID 通道；被设备拒绝的通道跳过（尽力而为）。
+    register_all = partial(register_hids, transfer=_transfer, serial=serial, sleep=sleep,
+                           error_type=AoaError, required_channels=aoa_profile.required_hid_channels(parsed),
+                           touch_mode=touch_mode, settle_seconds=hid_settle_seconds)
+    session = None
+    reports_sent = 0
 
-        重枚举后首个控制请求可能短暂 STALL。注册在发送用户输入前有限重试，
-        不把暂态错误直接解释为不支持触摸；输入事件本身不盲重试。
-        """
-        channels: set[int] = set()
-        for hid_id, descriptor in aoa_profile.AOA_HID_REGISTRATIONS:
-            for attempt in range(3):
-                try:
-                    result = _transfer(
-                        dev, aoa_profile.AOA_ACCESSORY_REGISTER_HID,
-                        hid_id, len(descriptor))
-                    break
-                except AoaError as exc:
-                    logger.warning("AOA HID registration %s attempt %s on %s: %s",
-                                   hid_id, attempt + 1, serial, exc)
-                    if attempt < 2:
-                        sleep(CONFIGURE_DELAY_SECONDS)
-            else:
-                continue
-            if result == DEVICE_NOT_FOUND:
-                raise AoaError(f"device disappeared while registering HID {hid_id}")
+    position = 0
+    original = ""
+
+    def report_event(phase, index, text=""):
+        if on_event:
             try:
-                result = _transfer(
-                    dev, aoa_profile.AOA_ACCESSORY_SET_HID_REPORT_DESC,
-                    hid_id, 0, descriptor)
-            except AoaError as exc:
-                logger.warning("AOA HID descriptor for channel %s rejected by %s: %s",
-                               hid_id, serial, exc)
-                continue
-            if result == DEVICE_NOT_FOUND:
-                raise AoaError(f"device disappeared while loading HID {hid_id} descriptor")
-            channels.add(hid_id)
-        return channels
+                on_event({"phase": phase, "index": index, "total": len(parsed), "command": text})
+            except Exception:
+                logger.warning("AOA progress event failed", exc_info=True)
 
+    def report_control(event):
+        report_event(event["event_type"], event["index"])
+        if on_control_event:
+            on_control_event(event)
+
+    execution_error = None
+    # 在第一次 accessory 协商之前打开 adb 抑制会话：USB 开着调试的设备
+    # 进 accessory 后枚举为 18d1:2D0x 复合设备（含 adb 接口），主机 adb
+    # daemon 会与 pyusb 抢 interface（实机 dmesg：usbfs claim 报错 +
+    # xhci reset 风暴 + device vanished）。会话在 finally 的 USB 清理
+    # 之后结束，此后才允许 daemon 重启供 _wait_adb_state 观察。
+    # 门控在此刻（而非派发时刻）求值：等待/清理期间环境可能变化，
+    # 有并发任务时必须放弃抑制而不是误杀 adb server。
+    suppress_now = suppress_adb_daemon
+    if suppress_adb_daemon and suppress_adb_daemon_gate is not None:
+        try:
+            suppress_now = bool(suppress_adb_daemon_gate())
+        except Exception:
+            logger.warning("adb suppression gate raised; suppression disabled", exc_info=True)
+            suppress_now = False
+    adb_session = (
+        _begin_adb_suppression() if suppress_now else None
+    )
     try:
+        if control_id:
+            from .aoa_control import register
+
+            register(control_id)
         device = _configure_accessory(usb_core, serial)
         _detach_kernel_drivers(device)
         sleep(CONFIGURE_DELAY_SECONDS)
         registered = register_all(device)
         sleep(CONFIGURE_DELAY_SECONDS)
+        session = AoaSession(device, registered,
+            find=lambda: _open_device(usb_core, serial),
+            configure=lambda **kwargs: _configure_accessory(usb_core, serial, **kwargs),
+            detach=_detach_kernel_drivers, register=register_all,
+            dispose=lambda old: usb_util.dispose_resources(old), sleep=sleep, error_type=AoaError,
+            clock=time.monotonic)
 
         def send_hid(hid_id: int, data: bytes, pause: float) -> None:
-            nonlocal device, registered
+            nonlocal reports_sent
+            if time.monotonic() > deadline:
+                raise AoaError("AOA playback time budget exceeded; reconcile required")
             if hid_id not in registered:
                 raise AoaError(
                     f"AOA HID channel {hid_id} is not supported by device {serial} "
@@ -984,100 +1046,153 @@ def run_aoa_sequence(
                     f"AOA HID event on channel {hid_id} rejected by device {serial}: {exc}"
                 ) from exc
             if result == DEVICE_NOT_FOUND:
-                # 官方 resetConnection：重枚举后重发一次。
-                logger.warning("AOA device %s vanished mid-sequence; reconnecting", serial)
-                device = _configure_accessory(usb_core, serial)
-                _detach_kernel_drivers(device)
-                registered = register_all(device)
-                sleep(CONFIGURE_DELAY_SECONDS)
-                if hid_id not in registered:
-                    raise AoaError(
-                        f"AOA HID channel {hid_id} is not supported by device {serial} "
-                        "after re-enumeration")
-                result = _transfer(
-                    device, aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT, hid_id, 0, data)
-                if result == DEVICE_NOT_FOUND:
-                    raise AoaError(f"device vanished again while sending HID event to {serial}")
+                raise AoaError(
+                    f"device vanished while sending HID to {serial}; step {position}/{len(parsed)}, "
+                    f"report {reports_sent + 1}, {reports_sent} reports sent; "
+                    "reconcile required, input was not replayed")
             if result < 0:
                 raise AoaError(f"AOA HID event failed: {result}")
+            reports_sent += 1
             sleep(pause)
 
-        for command in parsed:
-            if command.kind == "sleep":
-                sleep(min(command.sleep_ms, aoa_profile.MAX_SLEEP_MS) / 1000)
-                executed += 1
-                continue
-            if command.kind in ("wake", "home", "back"):
-                flag = {"wake": aoa_profile.AOA_SYSTEM_WAKE,
-                        "home": aoa_profile.AOA_SYSTEM_HOME,
-                        "back": aoa_profile.AOA_SYSTEM_BACK}[command.kind]
-                send_hid(aoa_profile.AOA_HID_SYSTEM,
-                         aoa_profile.system_report(flag), action_delay)
-                executed += 1
-                continue
-            if command.kind in ("click", "longClick"):
-                hold = 1.0 if command.kind == "longClick" else 0.0
-                if hold:
-                    send_hid(aoa_profile.AOA_HID_TOUCH_SCREEN,
-                             aoa_profile.touch_report(True, command.x1, command.y1), hold)
-                else:
-                    send_hid(aoa_profile.AOA_HID_TOUCH_SCREEN,
-                             aoa_profile.touch_report(True, command.x1, command.y1),
-                             STEP_DELAY_SECONDS)
-                send_hid(aoa_profile.AOA_HID_TOUCH_SCREEN,
-                         aoa_profile.touch_report(False, command.x1, command.y1), action_delay)
-                executed += 1
-                continue
-            if command.kind == "swipe":
-                for touch_down, x, y in aoa_profile.swipe_points(
-                        command.x1, command.y1, command.x2, command.y2, command.duration_ms):
-                    send_hid(aoa_profile.AOA_HID_TOUCH_SCREEN,
-                             aoa_profile.touch_report(touch_down, x, y),
-                             STEP_DELAY_SECONDS if touch_down else action_delay)
-                executed += 1
-                continue
-            if command.kind == "write":
-                for report in aoa_profile.text_to_key_reports(command.text):
-                    send_hid(aoa_profile.AOA_HID_KEYBOARD, report, STEP_DELAY_SECONDS)
-                    send_hid(aoa_profile.AOA_HID_KEYBOARD, b"\x00\x00", STEP_DELAY_SECONDS)
-                sleep(action_delay)
-                executed += 1
-                continue
-            if command.kind == "key":
-                for modifier, usage in command.keys:
-                    send_hid(aoa_profile.AOA_HID_KEYBOARD,
-                             aoa_profile.key_report(modifier, usage), STEP_DELAY_SECONDS)
-                    send_hid(aoa_profile.AOA_HID_KEYBOARD, b"\x00\x00", STEP_DELAY_SECONDS)
-                sleep(action_delay)
-                executed += 1
-    finally:
-        # 异常路径同样必须注销 HID 并复位；否则设备会残留在 accessory
-        # 模式，后续 ADB、设备管理和再次回放都会失效。
-        if device is not None:
-            for hid_id, _descriptor in reversed(aoa_profile.AOA_HID_REGISTRATIONS):
-                try:
-                    _transfer(
-                        device, aoa_profile.AOA_ACCESSORY_UNREGISTER_HID, hid_id, 0)
-                except AoaError:
-                    continue
+        for position, command in enumerate(parsed, start=1):
+            if control_id:
+                from .aoa_control import wait_if_paused as _gate
+
+                deadline += _gate(
+                    control_id, index=position, total=len(parsed),
+                    sleep=sleep, on_event=report_control,
+                    on_tick=validate_binding, read_source=control_source)
+            validate_binding()
+            if time.monotonic() > deadline:
+                raise AoaError("AOA playback time budget exceeded; reconcile required")
+            original = commands[position - 1] if position <= len(commands) else ""
+            reports_sent = 0
+            report_event("running", position, str(original))
             try:
-                device.reset()
-            except Exception:
-                logger.warning("AOA USB reset failed for %s", serial)
-        try:
-            usb_util.dispose_resources(device)
-        except Exception:
-            pass
+                if command.kind == "sleep":
+                    sleep(min(command.sleep_ms, aoa_profile.MAX_SLEEP_MS) / 1000)
+                    executed += 1
+                    continue
+                while True:
+                    rebuilt = session.prepare(deadline,
+                        lambda index=position, text=original: report_event("reconnecting", index, str(text)))
+                    device, registered = session.device, session.registered
+                    if not rebuilt:
+                        break
+                    if control_id:
+                        deadline += _gate(
+                            control_id, index=position, total=len(parsed), sleep=sleep,
+                            on_event=report_control, on_tick=validate_binding, read_source=control_source)
+                    report_event("running", position, str(original))
+                if command.kind in ("wake", "home", "back"):
+                    flag = {"wake": aoa_profile.AOA_SYSTEM_WAKE,
+                            "home": aoa_profile.AOA_SYSTEM_HOME,
+                            "back": aoa_profile.AOA_SYSTEM_BACK}[command.kind]
+                    send_hid(aoa_profile.AOA_HID_SYSTEM,
+                             aoa_profile.system_report(flag), action_delay)
+                    executed += 1
+                    continue
+                if command.kind in ("click", "longClick"):
+                    hold = 1.0 if command.kind == "longClick" else 0.0
+                    if hold:
+                        send_hid(aoa_profile.AOA_HID_TOUCH_SCREEN,
+                                 aoa_profile.touch_report(True, command.x1, command.y1), hold)
+                    else:
+                        send_hid(aoa_profile.AOA_HID_TOUCH_SCREEN,
+                                 aoa_profile.touch_report(True, command.x1, command.y1),
+                                 STEP_DELAY_SECONDS)
+                    send_hid(aoa_profile.AOA_HID_TOUCH_SCREEN,
+                             aoa_profile.touch_report(False, command.x1, command.y1), action_delay)
+                    executed += 1
+                    continue
+                if command.kind == "swipe":
+                    for touch_down, x, y in aoa_profile.swipe_points(
+                            command.x1, command.y1, command.x2, command.y2, command.duration_ms):
+                        send_hid(aoa_profile.AOA_HID_TOUCH_SCREEN,
+                                 aoa_profile.touch_report(touch_down, x, y),
+                                 STEP_DELAY_SECONDS if touch_down else action_delay)
+                    executed += 1
+                    continue
+                if command.kind == "write":
+                    for report in aoa_profile.text_to_key_reports(command.text):
+                        send_hid(aoa_profile.AOA_HID_KEYBOARD, report, STEP_DELAY_SECONDS)
+                        send_hid(aoa_profile.AOA_HID_KEYBOARD, b"\x00\x00", STEP_DELAY_SECONDS)
+                    sleep(action_delay)
+                    executed += 1
+                    continue
+                if command.kind == "key":
+                    for modifier, usage in command.keys:
+                        send_hid(aoa_profile.AOA_HID_KEYBOARD,
+                                 aoa_profile.key_report(modifier, usage), STEP_DELAY_SECONDS)
+                        send_hid(aoa_profile.AOA_HID_KEYBOARD, b"\x00\x00", STEP_DELAY_SECONDS)
+                    sleep(action_delay)
+                    executed += 1
+            finally:
+                if executed >= position:
+                    report_event("completed", position, str(original))
+                if on_progress is not None:
+                    try:
+                        on_progress(position, len(parsed), str(original))
+                    except Exception:
+                        logger.warning("AOA progress callback failed at %s on %s",
+                                       position, serial, exc_info=True)
+    except Exception as exc:
+        execution_error = exc
+        report_event("cancelled" if getattr(exc, "cancelled", False) else "failed", position, str(original))
+        raise
+    finally:
+        cleanup_errors = cleanup_diagnostics()
+        if session is not None:
+            device, registered = session.device, session.registered
+        if device is not None:
+            steps = [
+                ("release_touch", lambda: _transfer(device, aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT,
+                    aoa_profile.AOA_HID_TOUCH_SCREEN, 0, aoa_profile.touch_report(False, 0, 0))),
+                ("release_keyboard", lambda: _transfer(device, aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT,
+                    aoa_profile.AOA_HID_KEYBOARD, 0, b"\x00\x00")),
+                ("release_system", lambda: _transfer(device, aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT,
+                    aoa_profile.AOA_HID_SYSTEM, 0, b"\x00")),
+            ]
+            channel_steps = {"release_touch": aoa_profile.AOA_HID_TOUCH_SCREEN,
+                             "release_keyboard": aoa_profile.AOA_HID_KEYBOARD,
+                             "release_system": aoa_profile.AOA_HID_SYSTEM}
+            steps = [(name, cleanup) for name, cleanup in steps if channel_steps[name] in registered]
+            steps += [(f"unregister_hid_{hid}", lambda hid=hid: _transfer(
+                device, aoa_profile.AOA_ACCESSORY_UNREGISTER_HID, hid, 0))
+                for hid in registered]
+            steps += [("reset_usb", lambda: _reset_usb(device)),
+                      ("dispose_usb", lambda: usb_util.dispose_resources(device)),
+                      ("restore_native_mode", lambda: _ensure_native_mode(usb_core, serial))]
+            cleanup_steps(steps, cleanup_errors)
+        if control_id:
+            from .aoa_control import unregister as _unregister_control
+
+            _unregister_control(control_id)
+        if cleanup_errors:
+            logger.warning("AOA cleanup diagnostics for %s: %s", serial, cleanup_errors)
+            if execution_error is not None:
+                execution_error.cleanup_errors = cleanup_errors
+        if adb_session is not None:
+            # USB 清理（含 restore_native_mode）完成后才恢复 adb daemon：
+            # _wait_adb_state 在本函数尾部运行，正好观察到重启后的 adb。
+            adb_session.end()
 
     result: dict[str, Any] = {
         "serial": serial,
         "success": True,
         "commands_total": len(parsed),
+        "hid_touch_mode": touch_mode,
+        "hid_settle_seconds": hid_settle_seconds,
         "commands_executed": executed,
+        "cleanup_errors": cleanup_errors,
+        "reconcile_required": bool(cleanup_errors),
+        "native_mode_restored": not any(e["step"] == "restore_native_mode" for e in cleanup_errors),
+        "usb_reconnections": session.rebuilds if session else 0,
     }
     if wait_adb_seconds:
         result.update(_wait_adb_state(serial, int(wait_adb_seconds)))
         # AOA 执行成功但 ADB 未恢复：对编排器仍算"序列成功"，
         # 但把恢复状态如实带回，由上层决定是否进入测试。
-        result["success"] = result.get("adb_recovered", False)
+        result["success"] = result.get("adb_recovered", False) and result["native_mode_restored"]
     return result

@@ -480,6 +480,7 @@ def test_restart_fails_interrupted_background_command_but_preserves_managed_job(
 
     assert [item["id"] for item in interrupted] == ["cmd-flash"]
     assert runtime.previous_command("cmd-flash")["status"] == "failed"
+    assert runtime.previous_command("cmd-flash")["result"]["reconcile_required"] is True
     assert runtime.previous_command("cmd-test")["status"] == "running"
 
 
@@ -1229,3 +1230,22 @@ def test_usbip_preflight_probes_authorized_peer_at_pinned_ip(tmp_path):
 
     assert agent.runtime.previous_command("cmd-preflight-ok")["status"] == "completed"
     probe.assert_called_once_with("10.1.2.3", 3240)
+
+
+def test_remote_playback_controls_keep_original_execution_and_ignore_stale_pause(tmp_path):
+    from worker_agent import aoa_control
+
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.runtime.save_command("original-playback", "running", {})
+    control_id = "remote-pause-test"
+    try:
+        with patch.object(agent, "_ack_command"):
+            for suffix, action, revision in [("pause", "pause", 1), ("resume", "resume", 2), ("stale", "pause", 1)]:
+                agent.handle({"id": f"control-{suffix}", "command_type": "aoa_playback_control", "payload": {
+                    "control_id": control_id, "target_command_id": "original-playback",
+                    "action": action, "revision": revision,
+                }})
+        assert aoa_control.status(control_id)["paused"] is False
+        assert agent.runtime.previous_command("original-playback")["status"] == "running"
+    finally:
+        aoa_control.unregister(control_id)

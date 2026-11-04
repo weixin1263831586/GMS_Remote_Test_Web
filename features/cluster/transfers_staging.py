@@ -34,6 +34,7 @@ from features.auth import (
 )
 
 from .config import configured_max_bytes
+from .firmware_recovery import freeze_firmware_recovery
 from .transfer_support import operation_claim_for_request, worker_device
 
 
@@ -54,6 +55,8 @@ async def stage_worker_firmware(
     devices: str = Form(...),
     reservation_id: str = Form(default=""),
     automation_run_id: str = Form(default=""),
+    aoa_profile_id: str = Form(default=""),
+    aoa_boot_wait_seconds: int = Form(default=60),
     firmware_file: UploadFile = File(...),
 ):
     # ADR 0012: a machine capability principal holding firmware.stage may
@@ -70,6 +73,9 @@ async def stage_worker_firmware(
         automation_run_id,
         require_local_usb=True,
     )
+    recovery = freeze_firmware_recovery(
+        request, _shared().service().repository, worker_id, [device_id],
+        aoa_profile_id, aoa_boot_wait_seconds)
     if automation_run_id:
         existing = _shared().service().repository.find_correlated_command(
             worker_id, "flash_firmware", "automation_run_id", automation_run_id
@@ -124,6 +130,7 @@ async def stage_worker_firmware(
                 "devices": [device_id],
                 "reservation_id": reservation_id,
                 "automation_run_id": automation_run_id,
+                **({"aoa_recovery": recovery} if recovery else {}),
                 **claim_payload,
             },
         })

@@ -19,6 +19,7 @@ from foundation.security import sanitize_device_ids
 from foundation.security_audit import security_audit_logger
 
 from . import reconnect, runtime
+from .claim_release import force_release_device_lock
 from .locks import device_lock_manager
 from .management_api import (
     known_usbip_device_ids,
@@ -90,7 +91,7 @@ async def force_release_device_locks(
 
     results = []
     for device_id in device_ids:
-        success, message = device_lock_manager.force_unlock_device(device_id)
+        success, message = force_release_device_lock(device_id)
         results.append(
             {
                 "device_id": device_id,
@@ -112,6 +113,11 @@ async def force_release_device_locks(
         "devices": device_ids,
         "results": results,
     })
+    if not all(item["success"] for item in results):
+        envelope = ApiError.conflict("；".join(
+            str(item["message"] or "释放失败") for item in results if not item["success"]
+        )).envelope()
+        return JSONResponse(content={**envelope, "results": results}, status_code=409)
     return JSONResponse(
         content={
             "success": all(item["success"] for item in results),

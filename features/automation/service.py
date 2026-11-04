@@ -153,6 +153,9 @@ class AutomationService:
         granted_capabilities = automation_granted_capabilities(
             principal, plan
         )
+        from .aoa_snapshot import freeze_recovery
+
+        freeze_recovery(plan, str(created_by or (principal.resource_owner_id if principal else "")))
         self._prepare_cluster_plan(body, plan)
         create_request = AutomationRunCreateRequest(**body)
         run_data = create_request.to_run_dict(self.new_run_id())
@@ -188,6 +191,9 @@ class AutomationService:
             raise ValueError('Firmware artifact or build configuration is required')
         # ADR 0012: 与 create 同一 compiler；不可持有→ValueError→路由 409。
         granted_capabilities = automation_granted_capabilities(principal, plan)
+        from .aoa_snapshot import freeze_recovery
+
+        freeze_recovery(plan, principal.resource_owner_id if principal else "")
         cluster = self._prepare_cluster_plan(body, plan)
         return {
             'ready': True,

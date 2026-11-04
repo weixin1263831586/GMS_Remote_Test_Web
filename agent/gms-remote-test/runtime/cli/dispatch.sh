@@ -27,7 +27,7 @@ _gms_rt_command_usage() {
         gms-rt-agent-tokens) printf '%s' 'gms-rt-agent-tokens' ;;
         gms-rt-agent-enroll-code) printf '%s' 'gms-rt-agent-enroll-code --name <NAME> [--scopes s1,s2] [--workers w1,w2|*] [--devices d1,d2|*] [--expires-days N] [--ttl-minutes N]' ;;
         gms-rt-agent-token-revoke) printf '%s' 'gms-rt-agent-token-revoke <TOKEN_ID>' ;;
-        gms-rt-approval-create) printf '%s' 'gms-rt-approval-create --tool <tool> --device <serial>[,<serial>...] [--command <command>|--firmware-sha256 <sha256> [--wipe-data true|false] [--burn-mode auto|uf]]' ;;
+        gms-rt-approval-create) printf '%s' 'gms-rt-approval-create --tool <gms_rt_burn_firmware|gms_rt_shell_exec> --device <serial>[,<serial>...] [--command <command>|--firmware-sha256 <sha256> [--wipe-data true|false] [--burn-mode auto|uf]]' ;;
         gms-rt-burn-firmware) printf '%s' 'gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--approval-token TOKEN] [--wait-online[=SECONDS]]' ;;
         gms-rt-burn-gsi) printf '%s' 'gms-rt-burn-gsi <gsi_path> <devices> [wipe_data] [--wait-online[=SECONDS]]' ;;
         gms-rt-burn-serial) printf '%s' 'gms-rt-burn-serial <device_id> <serial>' ;;

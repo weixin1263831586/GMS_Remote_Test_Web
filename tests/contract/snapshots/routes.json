@@ -1281,6 +1281,12 @@
     "methods": [
       "POST"
     ],
+    "path": "/api/devices/aoa/playback/{control_id}/control"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
     "path": "/api/devices/aoa/probe"
   },
   {

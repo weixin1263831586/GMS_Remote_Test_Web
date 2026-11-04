@@ -412,13 +412,14 @@ class ClusterApiHardeningTests(ClusterApiHardeningFixture, unittest.TestCase):
         """automation_run_id 重放：收敛到既有命令，不二次派发。"""
         self.repo.heartbeat("worker-246", {
             "agent_version": "1", "running_jobs": [], "suites": [],
-            "devices": [{"serial": "ABC", "state": "offline", "transport": "local_usb"}],
+            "devices": [{"serial": "ABC", "state": "available", "transport": "local_usb"}],
         })
         payload = {
             "worker_id": "worker-246", "devices": ["ABC"],
             "action": "aoa_sequence", "aoa_commands": ["home"],
             "automation_run_id": "run-aoa-1",
         }
+        self.repo.reserve_devices("worker-246", ["worker-246:ABC"], owner_id="admin-id", source_id="run-aoa-1")
         with patch("features.cluster.device_actions_api.device_action_wait_steps", return_value=0):
             first = self.client.post("/api/cluster/devices/actions", json=payload)
             second = self.client.post("/api/cluster/devices/actions", json=payload)

@@ -30,6 +30,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 
@@ -137,12 +138,29 @@ class ApiError(Exception):
         return cls(code='DEPENDENCY_TIMEOUT', message=message, **kwargs)
 
 
+def format_validation_errors(errors: list[dict[str, Any]]) -> str:
+    """Return bounded field diagnostics without reflecting submitted values."""
+    parts = []
+    for err in errors[:5]:
+        loc = '.'.join(str(item) for item in err.get('loc', ()) if item != 'body')
+        parts.append(f"{loc}: {err.get('msg', 'invalid')}")
+    return '; '.join(parts) if parts else 'invalid request'
+
+
 def register_api_error_handler(app: FastAPI) -> None:
     """把 ApiError 兜底处理器挂到应用上（create_app 统一调用一次）。"""
 
     @app.exception_handler(ApiError)
     async def _api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
         return exc.to_response()
+
+    @app.exception_handler(RequestValidationError)
+    async def _request_validation_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """Keep FastAPI's validation status and expose the shared error envelope."""
+        return ApiError.invalid_semantics(format_validation_errors(exc.errors())).to_response()
+
 
 
 def internal_error_message(action: str) -> str:

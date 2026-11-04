@@ -346,7 +346,7 @@
             }
             const confirmed = await showConfirmDialog(
                 '释放设备',
-                `确定要强制释放设备 ${serialNo} 的占用锁吗？`
+                `确定要强制释放设备 ${serialNo} 的占用锁吗？正在进行或暂停的本机 AOA 回放将终止，并释放相关 USB 端口锁。`
             );
             if (!confirmed) return;
             const granted = await requestElevatedAccess(
@@ -355,12 +355,12 @@
             if (!granted) return;
 
             try {
-                await apiCall(
+                const result = await apiCall(
                     '/api/devices/force-release',
                     'POST',
                     { device_id: serialNo }
                 );
-                showToast('设备占用锁已释放', 'success');
+                showToast(result.results?.find(item => item.device_id === serialNo)?.message || '设备占用锁已释放', 'success');
                 await loadDevicesManagement();
                 if (typeof refreshDevices === 'function') {
                     refreshDevices();

@@ -20,14 +20,13 @@ from worker_agent.fastboot_workflow import (
 )
 
 from . import runtime
-from .manager import device_manager
+from .info_service import read_device_info
 from .models import DeviceActionRequest, DeviceLockRequest, VerifiedBootState
 from .support import (
     AsyncSSHConnection,
     device_claim_conflict_response,
     device_fencing_owner_id,
     device_mutation_guard,
-    get_device_properties_optimized,
 )
 
 
@@ -342,51 +341,14 @@ async def get_device_info(req: DeviceActionRequest, request: Request):
             return conflict
 
         async with AsyncSSHConnection() as ssh:
-            def get_single_device_info(device_id: str) -> dict:
-                device_info = {"device": device_id, "properties": {}}
-                base_info = device_manager.get_device_info(device_id, ssh)
-                field_mapping = {
-                    "serial_no": "Serial Number",
-                    "model": "Model",
-                    "android_version": "Android Version",
-                    "fingerprint": "Fingerprint",
-                    "build_type": "Build Type",
-                    "build_tags": "Build Tags",
-                    "build_date": "Build Date",
-                    "sdk_version": "SDK Version",
-                    "security_patch": "Security Patch",
-                }
-                for key, label in field_mapping.items():
-                    if key in base_info:
-                        device_info["properties"][label] = base_info[key]
-
-                extra_props = get_device_properties_optimized(device_id, ssh)
-                prop_mapping = {
-                    "boot_state": ("Boot State", lambda x: x if x else "Unknown"),
-                    "api_level": (
-                        "API Level",
-                        lambda x: x.split("[")[-1].replace("]", "")
-                        if "[" in x else (x or "Unknown"),
-                    ),
-                    "mali_version": ("Mali Version", lambda x: x or "Unknown"),
-                    "mem_total": ("Total Memory", lambda x: f"{x} KB" if x else "Unknown"),
-                    "mem_free": ("Free Memory", lambda x: f"{x} KB" if x else "Unknown"),
-                    "timezone": ("Timezone", lambda x: x or "Unknown"),
-                    "locale": ("Language", lambda x: x or "Unknown"),
-                    "data_partition": (
-                        "DATA Partition",
-                        lambda x: x.split()[-1] if x and "userdata" in x else "Unknown",
-                    ),
-                }
-                for key, (label, formatter) in prop_mapping.items():
-                    if key in extra_props:
-                        device_info["properties"][label] = formatter(extra_props[key])
-                return device_info
-
             results = []
             for device_id in devices:
-                results.append(await asyncio.to_thread(get_single_device_info, device_id))
-            return _api_success({"results": results}, "Device info retrieved")
+                results.append(await asyncio.to_thread(read_device_info, device_id, ssh))
+            partial = any(not item["complete"] for item in results)
+            return _api_success({"results": results},
+                                "设备信息部分读取成功" if partial else "Device info retrieved")
+    except ApiError as exc:
+        return exc.to_response()
     except HTTPException:
         raise
     except Exception:

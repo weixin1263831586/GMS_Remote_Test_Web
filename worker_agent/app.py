@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import getpass
 import hashlib
-import importlib.util
 import ipaddress
 import json
 import logging
@@ -38,6 +37,7 @@ from .client import ControllerClient
 from .command_events import CommandEventUploader
 from .config import WorkerConfig
 from .inventory import (
+    aoa_capabilities,
     browse_directory,
     copy_image_into,
     execute_device_action,
@@ -66,6 +66,16 @@ AGENT_VERSION = "0.5.1"
 
 VNC_PORT = 5900
 NOVNC_PORT = 6080
+
+
+def _adb_proxy_imports_active() -> bool:
+    """本机是否有 ADB Proxy 导入设备（抑制 adb daemon 会切断它们）。"""
+    try:
+        from .adb_proxy import imported_devices
+
+        return bool(imported_devices())
+    except (OSError, RuntimeError, ValueError):
+        return False
 
 # 与 suite_actions 下载防护同款的自指段：CGNAT（含云元数据服务）。
 _USBIP_CGNAT = ipaddress.ip_network("100.64.0.0/10")
@@ -216,16 +226,12 @@ class WorkerAgent:
         adb_proxy = adb_proxy_capability_status()
         process_inventory = process_inventory_capability_status()
         tradefed_families = tradefed_launcher_families(self.config.suite_roots)
-        try:
-            has_pyusb = importlib.util.find_spec("usb.core") is not None
-        except ModuleNotFoundError:
-            has_pyusb = False
-        has_adb = shutil.which("adb") is not None
+        aoa_status = aoa_capabilities()
+        has_adb = aoa_status["aoa_record_input_v1"]
         capabilities = {"execution_options_v1": True,
                         "module_progress_v1": True,
                         "suite_cache_sha256_v1": True,
-                        "aoa_record_input_v1": has_adb,
-                        "aoa_usb_hid_v1": has_pyusb,
+                        **aoa_status,
                         "adb": has_adb,
                         "fastboot": shutil.which("fastboot") is not None,
                         "tradefed": bool(tradefed_families),
@@ -260,6 +266,10 @@ class WorkerAgent:
                 "device_inspection": False,
                 "aoa_record_input_v1": False,
                 "aoa_usb_hid_v1": False,
+                "aoa_identity_fencing_v1": False,
+                "aoa_playback_control_v1": False,
+                "aoa_hid_modes_v1": False,
+                "firmware_aoa_recovery_v1": False,
                 "usbip_client": False,
                 "usbip_preflight": False,
                 "aapt2": False,
@@ -497,6 +507,22 @@ class WorkerAgent:
                 return
             elif kind == "stop_test":
                 result = self.runtime.stop_process(command.get("payload", {}).get("worker_job_id", ""))
+            elif kind == "aoa_playback_control":
+                # AOA 回放过程控制（远端 Worker 路径）：改写执行线程
+                # 进程内的控制注册表，毫秒级生效；本机 Worker 由
+                # Controller 直接调用 aoa_control.request，不经此命令。
+                from . import aoa_control
+
+                payload = command.get("payload", {})
+                control_id = str(payload.get("control_id") or "")
+                if not control_id:
+                    raise ValueError("aoa_playback_control requires control_id")
+                target = self.runtime.previous_command(str(payload.get("target_command_id") or ""))
+                if target and target["status"] in {"completed", "failed", "cancelled"}:
+                    result = {"finished": True}
+                else:
+                    result = aoa_control.request(control_id, str(payload.get("action") or ""),
+                                                 revision=payload.get("revision"))
             elif kind == "restart_vnc":
                 result = restart_local_vnc()
             elif kind == "check_vpn":
@@ -588,8 +614,49 @@ class WorkerAgent:
             kind = command["command_type"]
             if kind == "device_action":
                 payload = command.get("payload", {})
-                result = execute_device_action(
-                    payload.get("action", ""), payload.get("devices", []), payload)
+                payload = {**payload, "_validate_fencing": lambda: self.runtime.check_current_fencing(command)}
+                if str(payload.get("action") or "") == "aoa_sequence":
+                    # AOA 会话期抑制主机 adb daemon 的前置：本机无
+                    # Tradefed 任务（含外部进程）且无 ADB Proxy 导入。
+                    # 杀 adb server 换来 pyusb 独占 USB（18d1:2D0x
+                    # accessory 的 adb 接口会与 daemon 抢设备，实机
+                    # RK3576 复现 reset 风暴）；条件不满足时保持现状。
+                    running = self.runtime.running_jobs()
+                    payload["suppress_adb_daemon"] = (
+                        not running
+                        and not bool(discover_tradefed_processes(running))
+                        and not _adb_proxy_imports_active()
+                    )
+                    # AOA 长旅程回放逐条上报进度（复用烧写日志的
+                    # command events 通道）：浏览器拉取后可高亮执行到
+                    # 哪一步。回调只入队，HTTP 上传在独立线程。
+                    uploader = CommandEventUploader(
+                        lambda batch: self.client.command_events(command["id"], batch))
+
+                    event_sequence = 0
+
+                    def _report_aoa_event(event: dict) -> None:
+                        nonlocal event_sequence
+                        event_sequence += 1
+                        text = str(event.get("command") or "")
+                        uploader.submit({
+                            "sequence": event_sequence, "event_type": "progress", "source": "aoa", "level": "info",
+                            "message": f"{event.get('index')}/{event.get('total')} {event.get('phase')} {text}"[:500],
+                            "payload": {**event, "command": text[:1000]},
+                        })
+
+                    def _report_aoa_progress(index: int, total: int, text: str) -> None:
+                        _report_aoa_event({"phase": "completed", "index": index, "total": total, "command": text})
+
+                    try:
+                        result = execute_device_action(
+                            payload.get("action", ""), payload.get("devices", []),
+                            payload, progress_callback=_report_aoa_progress, progress_event_callback=_report_aoa_event)
+                    finally:
+                        uploader.flush()
+                else:
+                    result = execute_device_action(
+                        payload.get("action", ""), payload.get("devices", []), payload)
             else:
                 result = self._connect_vpn_result(command)
             self.runtime.save_command(command["id"], "completed", result)
@@ -598,10 +665,13 @@ class WorkerAgent:
             self._ack_command(command["id"], "completed", result)
         except Exception as exc:
             logger.exception("slow command %s failed", command.get("id"))
-            self.runtime.save_command(command["id"], "failed", error=str(exc))
+            result = ({"success": False, "reconcile_required": True}
+                      if (command.get("payload") or {}).get("action") == "aoa_sequence" else {})
+            status = "cancelled" if getattr(exc, "cancelled", False) else "failed"
+            self.runtime.save_command(command["id"], status, result, error=str(exc))
             if release_after:
                 self.runtime.release_fencing(command)
-            self._ack_command(command["id"], "failed", error=str(exc))
+            self._ack_command(command["id"], status, result, error=str(exc))
 
     def run_adb_proxy_command(self, command: dict):
         """后台执行 adb_proxy 命令（target_connect 最长 120s）。
@@ -1199,14 +1269,47 @@ class WorkerAgent:
                     "payload": {},
                 })
 
+            recovery = payload.get("aoa_recovery")
+            if recovery:
+                from .firmware_recovery import validate_preflash
+
+                if not payload.get("lease_tokens"):
+                    raise ValueError("firmware AOA recovery requires active device fencing")
+                validate_preflash(recovery, payload.get("devices", []),
+                                  lambda: self.runtime.check_current_fencing(command), probe_devices)
             result = (flash_gsi(self.config, downloaded.get("system"), downloaded.get("vendor"), payload.get("devices", []),
                                 on_output=_report_flash_output)
                       if command["command_type"] == "flash_gsi" else
                       flash_firmware(self.config, downloaded["firmware"], payload.get("devices", []),
                                      on_output=_report_flash_output))
+            if recovery and result.get("success"):
+                from .firmware_recovery import recover_after_flash
+
+                running = self.runtime.running_jobs()
+
+                def _suppression_gate() -> bool:
+                    # 抑制武装瞬间重新检查：等待期间可能新起 Tradefed
+                    # 任务或导入 ADB Proxy，此时必须放弃抑制。
+                    live = self.runtime.running_jobs()
+                    return (not live
+                            and not bool(discover_tradefed_processes(live))
+                            and not _adb_proxy_imports_active())
+
+                # 恢复路径传门控而非静态判定：flash 后还有最长数分钟
+                # boot 等待，武装瞬间必须重查并发任务。外层布尔仅作
+                # 快路径预过滤（为假时门控不评估、不抑制）。
+                result = recover_after_flash(
+                    result, recovery, payload.get("devices", []),
+                    lambda: self.runtime.check_current_fencing(command), execute_device_action,
+                    lambda event: _report_flash_output(
+                        f"AOA {event.get('phase', '')} {event.get('index', 0)}/{event.get('total', 0)} "
+                        f"{event.get('command', '')}", False),
+                    suppress_adb_daemon=(not running and not discover_tradefed_processes(running)
+                                         and not _adb_proxy_imports_active()),
+                    suppress_adb_daemon_gate=_suppression_gate)
             uploader.flush()  # 收尾：有界等待排空剩余事件
             status = "completed" if result.get("success") else "failed"
-            error = "" if status == "completed" else result.get("output", "firmware flash failed")
+            error = "" if status == "completed" else result.get("error") or result.get("output", "firmware flash failed")
             self.runtime.save_command(command["id"], status, result, error)
             self._ack_command(command["id"], status, result, error)
         except Exception as exc:

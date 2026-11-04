@@ -1,13 +1,24 @@
 """Multi-host test cluster controller."""
 
 
+from pydantic import ValidationError
+
 from foundation import cluster_port
+from foundation.error_model import ApiError, format_validation_errors
 
 from .admission import worker_admission_state
+from .aoa_playback import control_aoa_playback
 from .api import configure_cluster, device_action, page_router, router
 from .api import service as get_cluster_service
 from .config import ClusterConfig
 from .execution_spec import build_argv_from_spec
+from .firmware_recovery import (
+    freeze_firmware_recovery,
+    prepare_local_firmware_recovery,
+    release_local_firmware_recovery,
+    run_local_firmware_recovery,
+    validate_local_firmware_recovery,
+)
 from .job_control_api import cancel_job
 from .job_requests import request_fingerprint
 from .local_bridge import start_local_bridge, stop_local_bridge
@@ -46,6 +57,10 @@ def require_worker_session(*args, **kwargs):
     return _require_worker_session(*args, **kwargs)
 
 
+def _port_aoa_playback_control(*args, **kwargs):
+    return control_aoa_playback(*args, **kwargs)
+
+
 def _port_cluster_service():
     return get_cluster_service()
 
@@ -65,7 +80,27 @@ def _port_authenticate_worker(*args, **kwargs):
 
 
 async def _port_device_action_request(request, payload):
-    return await device_action(ClusterDeviceAction(**payload), request)
+    try:
+        body = ClusterDeviceAction(**payload)
+    except ValidationError as exc:
+        raise ApiError.invalid_semantics(format_validation_errors(exc.errors())) from exc
+    return await device_action(body, request)
+
+
+def _port_prepare_local_firmware_recovery(*args, **kwargs):
+    return prepare_local_firmware_recovery(*args, **kwargs)
+
+
+def _port_run_local_firmware_recovery(*args, **kwargs):
+    return run_local_firmware_recovery(*args, **kwargs)
+
+
+def _port_validate_local_firmware_recovery(*args, **kwargs):
+    return validate_local_firmware_recovery(*args, **kwargs)
+
+
+def _port_release_local_firmware_recovery(*args, **kwargs):
+    return release_local_firmware_recovery(*args, **kwargs)
 
 
 # Register this feature with the foundation access port so consumers that
@@ -81,6 +116,11 @@ def register_cluster_port() -> None:
     """
     cluster_port.configure_cluster_access(
         device_action_request=_port_device_action_request,
+        aoa_playback_control=_port_aoa_playback_control,
+        prepare_local_firmware_recovery=_port_prepare_local_firmware_recovery,
+        run_local_firmware_recovery=_port_run_local_firmware_recovery,
+        validate_local_firmware_recovery=_port_validate_local_firmware_recovery,
+        release_local_firmware_recovery=_port_release_local_firmware_recovery,
         service_provider=_port_cluster_service,
         cancel_job=_port_cancel_job,
         worker_tokens=_port_worker_tokens,
@@ -101,19 +141,25 @@ __all__ = [
     "build_argv_from_spec",
     "cancel_job",
     "configure_cluster",
+    "control_aoa_playback",
     "device_action",
+    "freeze_firmware_recovery",
     "get_cluster_service",
     "index_cluster_report",
     "page_router",
+    "prepare_local_firmware_recovery",
     "register_cluster_port",
+    "release_local_firmware_recovery",
     "request_fingerprint",
     "require_cluster_enabled",
     "require_worker_session",
     "router",
     "run_artifact_retention",
+    "run_local_firmware_recovery",
     "run_worker_command",
     "start_local_bridge",
     "stop_local_bridge",
+    "validate_local_firmware_recovery",
     "worker_admission_state",
     "worker_tokens",
 ]

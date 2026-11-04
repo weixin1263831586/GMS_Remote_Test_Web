@@ -394,6 +394,33 @@ class DeviceClaimRegistry:
             finally:
                 self._close(conn)
 
+    def release_operation_if_current(self, device_key: str, lease_id: str,
+                                     generation: int, source_id: str) -> bool:
+        """Revoke an exact operation and its aliases without touching a successor."""
+        now = _now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                self._expire(conn, now)
+                row = conn.execute(
+                    """SELECT * FROM device_claims WHERE device_key=? AND id=?
+                       AND generation=? AND source_id=? AND status='active'""",
+                    (device_key, lease_id, generation, source_id),
+                ).fetchone()
+                if row is None:
+                    conn.rollback()
+                    return False
+                conn.execute(
+                    """UPDATE device_claims SET status='cancelled',released_at=?
+                       WHERE source_id=? AND owner_id=? AND worker_id=? AND status='active'""",
+                    (now, source_id, row["owner_id"], row["worker_id"]),
+                )
+                conn.commit()
+                return True
+            finally:
+                self._close(conn)
+
     def force_release(self, device_key: str) -> dict[str, Any] | None:
         now = _now()
         with self._lock:

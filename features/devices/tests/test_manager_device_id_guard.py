@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import MagicMock
 
 from features.devices.manager import DeviceManager
+from foundation.command_result import CommandResult
 
 
 class DeviceIdGuardTests(unittest.TestCase):
@@ -20,6 +21,8 @@ class DeviceIdGuardTests(unittest.TestCase):
 
     def test_safe_ids_reach_the_ssh_channel(self):
         ssh_manager = MagicMock()
+        ssh_manager.execute_command.side_effect = lambda _ssh, command, **_kwargs: CommandResult(
+            stdout="device" if command.endswith("get-state") else "[ro.product.model]: [Test Box]")
         manager = DeviceManager(ssh_manager=ssh_manager, config_manager=MagicMock(load_config=lambda: {}))
         ssh = MagicMock()
         manager.get_device_info("R58M1234567", ssh=ssh)

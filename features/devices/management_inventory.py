@@ -5,6 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from foundation.cluster_port import get_cluster_service
+from foundation.networking import is_local_host
+
+from . import runtime
 
 
 def local_management_inventory() -> tuple[list[str], dict, dict, str] | None:
@@ -46,3 +49,20 @@ def local_management_inventory() -> tuple[list[str], dict, dict, str] | None:
     if not devices:
         return None
     return devices, properties, protocols, observed_at
+
+
+def local_usb_only_inventory() -> dict[str, dict]:
+    """Use the owning Worker's USB-only facts, never another execution host's USB."""
+    config_manager = runtime.config_manager
+    if config_manager is None:
+        return {}
+    config = config_manager.load_config()
+    if not is_local_host(config.get('ubuntu_host', '')):
+        return {}
+    snapshot = local_management_inventory()
+    if snapshot is None:
+        return {}
+    devices, _properties, protocols, _observed = snapshot
+    return {serial: {'device_id': serial, 'status': 'usb_only', 'protocol': 'usb_only',
+                     'transport': 'local_usb'}
+            for serial in devices if protocols.get(serial) == 'usb_only'}

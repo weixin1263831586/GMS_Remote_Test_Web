@@ -34,6 +34,7 @@ def test_interactive_record_input_validation():
     swipe = parse_record_input_action({
         "action": "swipe", "x1": 10, "y1": 20, "x2": 30, "y2": 40,
         "duration_ms": 350, "scale_x": 2.2, "scale_y": 2.2,
+        "calibration_context": {"version": 2, "model": "model", "release": "16", "display": [800, 1280], "rotation": 0},
     })
     assert swipe["duration_ms"] == 350 and swipe["scale_y"] == 2.2
     for invalid in [
@@ -91,7 +92,7 @@ def test_record_steps_validation():
         [{"action": "click", "find": {"text": "x"}, "clicks": 99}],
         [{"action": "click", "find": {"text": "x"}, "scroll_x": 1.5}],
         [{"action": "click", "find": {"text": "x"}, "scroll_x": "abc"}],
-        [{"action": "wake"}] * 65,                          # 步数上限
+        [{"action": "wake"}] * 257,                         # 步数上限（256）
         ["not-a-dict"],
     ]:
         with pytest.raises(ValueError):
@@ -257,10 +258,19 @@ def test_rescale_swipe_preserves_duration_and_rescales_both_points():
     ) == "swipe 50 100 500 100 200"
 
 
-def test_interactive_record_includes_requested_screenshot(monkeypatch):
+def test_interactive_record_receipt_excludes_inline_screenshot(monkeypatch):
     monkeypatch.setattr(aoa_actions, "_display_size", lambda _: (720, 1280))
     monkeypatch.setattr(aoa_actions, "_adb_run", lambda *a, **k: _completed(0, ""))
-    monkeypatch.setattr(aoa_actions, "_screenshot_data_url", lambda _: "data:image/png;base64,test")
     result = aoa_actions.record_aoa_input(
         "serial", {"action": "home", "with_screenshot": True})
-    assert result["image"] == "data:image/png;base64,test"
+    assert "image" not in result
+
+
+@pytest.mark.parametrize("field,value", [("rotation", []), ("rotation", {}), ("rotation", True),
+    ("version", True), ("display", [True, 1280]), ("model", "")])
+def test_malformed_calibration_context_is_a_validation_error(field, value):
+    context = {"version": 2, "model": "model", "display": [800, 1280], "rotation": 0}
+    context[field] = value
+    with pytest.raises(ValueError, match="calibration_context"):
+        parse_record_input_action({"action": "tap", "x": 1, "y": 2, "scale_x": 2.2, "scale_y": 2.2,
+                                   "calibration_context": context})

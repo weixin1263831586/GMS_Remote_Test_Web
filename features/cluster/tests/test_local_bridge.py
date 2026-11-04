@@ -188,3 +188,12 @@ class LocalBridgeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_bridge_reports_shared_aoa_runtime_capabilities(self):
+        from features.cluster.local_bridge import LocalWorkerBridge
+
+        capabilities = {"aoa_identity_fencing_v1": True, "aoa_usb_hid_v1": False, "aoa_record_input_v1": True}
+        bridge = LocalWorkerBridge(self.repo, ClusterConfig(enabled=False))
+        with patch("features.cluster.local_bridge.aoa_capabilities", return_value=capabilities):
+            registered = bridge._registration()["capabilities"]
+        self.assertEqual({key: registered[key] for key in capabilities}, capabilities)

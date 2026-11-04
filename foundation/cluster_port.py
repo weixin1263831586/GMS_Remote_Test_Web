@@ -35,6 +35,11 @@ _require_worker_session: LateBoundCallable | None = None
 _require_cluster_enabled: LateBoundCallable | None = None
 _authenticate_worker: LateBoundCallable | None = None
 _device_action_request: LateBoundCallable | None = None
+_aoa_playback_control: LateBoundCallable | None = None
+_prepare_local_firmware_recovery: LateBoundCallable | None = None
+_run_local_firmware_recovery: LateBoundCallable | None = None
+_validate_local_firmware_recovery: LateBoundCallable | None = None
+_release_local_firmware_recovery: LateBoundCallable | None = None
 
 
 def configure_cluster_access(
@@ -47,6 +52,11 @@ def configure_cluster_access(
     require_cluster_enabled: LateBoundCallable | None = _UNSET,
     authenticate_worker: LateBoundCallable | None = _UNSET,
     device_action_request: LateBoundCallable | None = _UNSET,
+    aoa_playback_control: LateBoundCallable | None = _UNSET,
+    prepare_local_firmware_recovery: LateBoundCallable | None = _UNSET,
+    run_local_firmware_recovery: LateBoundCallable | None = _UNSET,
+    validate_local_firmware_recovery: LateBoundCallable | None = _UNSET,
+    release_local_firmware_recovery: LateBoundCallable | None = _UNSET,
 ) -> None:
     """Register or clear the cluster access callables.
 
@@ -57,7 +67,9 @@ def configure_cluster_access(
     global _cluster_service_provider, _cancel_job, _worker_tokens
     global _run_worker_command, _require_worker_session
     global _require_cluster_enabled, _authenticate_worker
-    global _device_action_request
+    global _device_action_request, _aoa_playback_control
+    global _prepare_local_firmware_recovery, _run_local_firmware_recovery
+    global _validate_local_firmware_recovery, _release_local_firmware_recovery
     if service_provider is not _UNSET:
         _cluster_service_provider = service_provider
     if cancel_job is not _UNSET:
@@ -74,6 +86,23 @@ def configure_cluster_access(
         _authenticate_worker = authenticate_worker
     if device_action_request is not _UNSET:
         _device_action_request = device_action_request
+    if aoa_playback_control is not _UNSET:
+        _aoa_playback_control = aoa_playback_control
+    if prepare_local_firmware_recovery is not _UNSET:
+        _prepare_local_firmware_recovery = prepare_local_firmware_recovery
+    if run_local_firmware_recovery is not _UNSET:
+        _run_local_firmware_recovery = run_local_firmware_recovery
+    if validate_local_firmware_recovery is not _UNSET:
+        _validate_local_firmware_recovery = validate_local_firmware_recovery
+    if release_local_firmware_recovery is not _UNSET:
+        _release_local_firmware_recovery = release_local_firmware_recovery
+
+
+def control_aoa_playback(*args: Any, **kwargs: Any) -> Any:
+    """Control an existing playback through the registered ownership boundary."""
+    if _aoa_playback_control is None:
+        raise RuntimeError("AOA playback control is not configured")
+    return _aoa_playback_control(*args, **kwargs)
 
 
 def submit_device_action(request: Any, payload: dict) -> Any:
@@ -151,3 +180,31 @@ def authenticate_worker(*args: Any, **kwargs: Any) -> Any:
     if _authenticate_worker is None:
         raise RuntimeError("cluster worker authentication is not configured")
     return _authenticate_worker(*args, **kwargs)
+
+
+def prepare_local_firmware_recovery(*args: Any, **kwargs: Any) -> Any:
+    """Prepare a burn+AOA continuation via the registered cluster boundary."""
+    if _prepare_local_firmware_recovery is None:
+        raise RuntimeError("local firmware recovery is not configured")
+    return _prepare_local_firmware_recovery(*args, **kwargs)
+
+
+def run_local_firmware_recovery(*args: Any, **kwargs: Any) -> Any:
+    """Run a burn+AOA continuation via the registered cluster boundary."""
+    if _run_local_firmware_recovery is None:
+        raise RuntimeError("local firmware recovery is not configured")
+    return _run_local_firmware_recovery(*args, **kwargs)
+
+
+def validate_local_firmware_recovery(*args: Any, **kwargs: Any) -> Any:
+    """Validate staged recovery identity via the registered cluster boundary."""
+    if _validate_local_firmware_recovery is None:
+        raise RuntimeError("local firmware recovery is not configured")
+    return _validate_local_firmware_recovery(*args, **kwargs)
+
+
+def release_local_firmware_recovery(*args: Any, **kwargs: Any) -> Any:
+    """Release a finished recovery via the registered cluster boundary."""
+    if _release_local_firmware_recovery is None:
+        raise RuntimeError("local firmware recovery is not configured")
+    return _release_local_firmware_recovery(*args, **kwargs)
