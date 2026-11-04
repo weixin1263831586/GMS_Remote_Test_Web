@@ -27,3 +27,5 @@ def test_shell_runtime_scripts_are_deferred_in_dependency_order():
     assert deferred.index("/static/js/shell/shell-main.js") < deferred.index("/static/js/navigation.js")
     assert deferred.index("/static/js/state.js") < deferred.index("/static/js/api.js")
     assert deferred.index("/static/js/api.js") < deferred.index("/static/js/navigation.js")
+    for dependency in ("aoa-playback.js", "aoa-debug.js", "aoa-recorder.js"):
+        assert deferred.index(f"/static/js/shell/{dependency}") < deferred.index("/static/js/shell/shell-aoa.js")

@@ -52,12 +52,28 @@ def local_management_inventory() -> tuple[list[str], dict, dict, str] | None:
 
 
 def local_usb_only_inventory() -> dict[str, dict]:
-    """Use the owning Worker's USB-only facts, never another execution host's USB."""
+    """Use the owning Worker's USB-only facts, never another execution host's USB.
+
+    配置读取走 devices runtime 注入的 ``config_manager``，按能力降级：
+    ``get_ubuntu_host``（生产 ConfigManager，含兜底）→ ``load_config``
+    → ``get_runtime_config``。任何配置异常都按 "非 owning Worker" 处理
+    返回空：本函数位于设备列表主路径（api.get_connected_devices），
+    不得让辅助 inventory 拖垮整条接口。
+    """
     config_manager = runtime.config_manager
     if config_manager is None:
         return {}
-    config = config_manager.load_config()
-    if not is_local_host(config.get('ubuntu_host', '')):
+    try:
+        host_reader = getattr(config_manager, "get_ubuntu_host", None)
+        if callable(host_reader):
+            ubuntu_host = host_reader()
+        elif hasattr(config_manager, "load_config"):
+            ubuntu_host = str((config_manager.load_config() or {}).get("ubuntu_host", "") or "")
+        else:
+            ubuntu_host = str((config_manager.get_runtime_config() or {}).get("ubuntu_host", "") or "")
+        if not is_local_host(ubuntu_host):
+            return {}
+    except Exception:
         return {}
     snapshot = local_management_inventory()
     if snapshot is None:

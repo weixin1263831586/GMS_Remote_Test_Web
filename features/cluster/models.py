@@ -177,6 +177,10 @@ class ClusterDeviceAction(BaseModel):
     wait_adb_seconds: int = Field(default=0, ge=0, le=600)
     aoa_hid_touch_mode: Literal["pointer", "direct"] = "pointer"
     aoa_hid_settle_seconds: float = Field(default=2, ge=0, le=10)
+    aoa_hid_session_mode: Literal["continuous", "per_command"] = "continuous"
+    aoa_debug_session_id: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
+    aoa_debug_request_id: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
+    aoa_debug_command: str = Field(default="", max_length=1024)
     # aoa_record：userdebug 设备上的录制参数（steps/setup_wizard/tv）。
     aoa_record: dict[str, Any] = Field(default_factory=dict)
     # 自动化重放幂等键（ADR 0022）：非空时远程 Worker 命令按

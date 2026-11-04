@@ -22,11 +22,13 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisco
 
 from features.auth import principal_owner_id, require_human_principal, validate_websocket_request
 from foundation import aoa_profile, cluster_port
+from foundation.aoa_calibration import TouchMapping
 from foundation.aoa_hid_mode import profile_hid_options
 from foundation.cluster_port import get_local_worker_id
 from foundation.error_model import ApiError
 
 from . import scrcpy_stream
+from .aoa_calibrations import calibration_store
 from .aoa_service import profile_store
 from .operation_claims import acquire_device_operation_claim, release_device_operation_claim
 
@@ -129,6 +131,58 @@ def delete_profile(request: Request, profile_id: str):
     return {"success": True}
 
 
+# ==================== 触摸标定记录（ADR 0026：持久化 + 复用匹配） ====================
+
+
+@router.post("/calibrations")
+def save_calibration(request: Request, body: dict[str, Any]):
+    """保存一次触摸标定（Worker 标定结果的 mapping 持久化到 aoa_calibrations）。"""
+    require_human_principal(request)
+    mapping = body.get("mapping")
+    if not isinstance(mapping, dict):
+        raise ApiError.malformed_request("mapping is required")
+    try:
+        parsed = TouchMapping.from_dict(mapping)
+    except ValueError as exc:
+        raise ApiError.invalid_semantics(str(exc)) from exc
+    label = str(body.get("label") or "")[:256]
+    record = calibration_store().save_calibration(
+        principal_owner_id(request), parsed, label)
+    return {"success": True, "calibration": record}
+
+
+@router.get("/calibrations")
+def list_calibrations(request: Request):
+    user = require_human_principal(request)
+    include_all = user.role == "admin" and request.query_params.get("all") == "1"
+    return {"success": True,
+            "calibrations": calibration_store().list_calibrations(
+                principal_owner_id(request), include_all)}
+
+
+@router.delete("/calibrations/{calibration_id}")
+def delete_calibration(request: Request, calibration_id: str):
+    require_human_principal(request)
+    calibration_store().delete_calibration(calibration_id, principal_owner_id(request))
+    return {"success": True}
+
+
+@router.post("/calibrations/match")
+def match_calibration(request: Request, body: dict[str, Any]):
+    """按设备环境键查询可复用的已验证标定（无匹配返回 matched=false）。"""
+    require_human_principal(request)
+    context = body.get("context")
+    if not isinstance(context, dict):
+        raise ApiError.malformed_request("context is required")
+    record = calibration_store().find_matching(principal_owner_id(request), context)
+    if record is None:
+        return {"success": True, "matched": False,
+                "fallback": {"mapping_policy": "direct_unverified",
+                             "detail": "no verified calibration for this device "
+                                       "environment; per-axis estimate applies"}}
+    return {"success": True, "matched": True, "calibration": record}
+
+
 @router.post("/probe")
 async def probe(request: Request, body: dict[str, Any]):
     require_human_principal(request)
@@ -163,7 +217,7 @@ async def recover(request: Request, body: dict[str, Any]):
         hid_options = profile_hid_options(metadata)
     except (ValueError, TypeError, AttributeError) as exc:
         raise ApiError.invalid_semantics(str(exc)) from exc
-    return await cluster_port.submit_device_action(request, {
+    payload = {
         "worker_id": str(body["worker_id"]),
         "devices": [str(body["device"])],
         "action": "aoa_sequence",
@@ -171,7 +225,25 @@ async def recover(request: Request, body: dict[str, Any]):
         **hid_options,
         "wait_adb_seconds": max(wait_adb_seconds, 1),
         "playback_control_id": str(body.get("playback_control_id") or ""),
-    })
+    }
+    # 标定记录复用（ADR 0026）：请求可带设备环境键（model/release/
+    # display/rotation），Controller 匹配本账号已验证的标定记录并随命令
+    # 下发——Worker 据此做坐标动态转换；无匹配时明确标记 unverified，
+    # 不假定按轴估算必然正确。
+    device_context = body.get("device_context")
+    if isinstance(device_context, dict) and device_context.get("model"):
+        device_context["hid_touch_mode"] = hid_options["aoa_hid_touch_mode"]
+        record = calibration_store().find_matching(
+            principal_owner_id(request), device_context)
+        if record is not None:
+            payload["aoa_touch_mapping"] = record["mapping"]
+            payload["aoa_mapping_policy"] = record["mapping_policy"]
+        else:
+            payload["aoa_mapping_policy"] = (
+                "direct_unverified"
+                if hid_options["aoa_hid_touch_mode"] == "direct"
+                else "estimated")
+    return await cluster_port.submit_device_action(request, payload)
 
 
 @router.get("/record/presets")

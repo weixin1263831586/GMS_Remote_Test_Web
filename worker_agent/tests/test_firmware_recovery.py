@@ -27,10 +27,11 @@ def device(port="1-6", state="usb_only", serial="ABC"):
 
 def test_post_flash_recovery_keeps_frozen_hid_mode_and_settle_time():
     frozen = snapshot()
-    frozen["metadata"] = {"hid_touch_mode": "direct", "hid_settle_seconds": 4}
+    frozen["metadata"] = {"hid_touch_mode": "direct", "hid_settle_seconds": 4, "hid_session_mode": "per_command"}
     options = recovery_options(frozen)
     assert options["aoa_hid_touch_mode"] == "direct"
     assert options["aoa_hid_settle_seconds"] == 4
+    assert options["aoa_hid_session_mode"] == "per_command"
     assert options["aoa_commands"] == frozen["commands"]
 
 

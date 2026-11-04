@@ -52,7 +52,9 @@ AOA_SYSTEM_BACK = 0b100
 # 触摸屏 HID 逻辑分辨率（描述符 Logical Maximum，AoaDevice.touch 里 clamp）
 AOA_TOUCH_MAX_X = 360
 AOA_TOUCH_MAX_Y = 640
-AOA_TOUCH_CALIBRATION_VERSION = 2
+# 版本 3：多点仿射标定 + AOSP 按轴分母 max-min+1（361/641）。version 2 是
+# 直接触摸+单点比例；两者同属 direct 时代（aoa_hid_mode 按版本 >=2 推断）。
+AOA_TOUCH_CALIBRATION_VERSION = 3
 
 TOUCH_SCREEN_HID_DESCRIPTOR = bytes([
     0x05, 0x0D,        # Usage Page (Digitizer)
@@ -494,11 +496,18 @@ def parse_record_input_action(raw: dict) -> dict:
 
 
 def real_to_aoa_point(x: int, y: int, display_width: int, display_height: int) -> tuple[int, int]:
-    """真实显示坐标 → AOA 触摸 HID 逻辑坐标（360×640 线性映射）。"""
+    """真实显示坐标 → AOA 触摸 HID 逻辑坐标（AOSP 按轴映射的逆变换）。
+
+    官方 InputReader 触摸映射分母为 ``max - min + 1``
+    （source.android.com touch-devices），HID Logical Maximum 360/640 时
+    反向换算用 ``W/361``、``H/641``。这只是估算初始值：设备端分类、
+    显示绑定或统一缩放都会使实际映射偏离按轴假设，必须经标定验证
+    （``foundation.aoa_calibration``）。
+    """
     if display_width <= 0 or display_height <= 0:
         raise ValueError("display size must be positive")
-    logical_x = round(int(x) * AOA_TOUCH_MAX_X / int(display_width))
-    logical_y = round(int(y) * AOA_TOUCH_MAX_Y / int(display_height))
+    logical_x = round(int(x) * (AOA_TOUCH_MAX_X + 1) / int(display_width))
+    logical_y = round(int(y) * (AOA_TOUCH_MAX_Y + 1) / int(display_height))
     return (
         min(max(logical_x, 0), AOA_TOUCH_MAX_X),
         min(max(logical_y, 0), AOA_TOUCH_MAX_Y),

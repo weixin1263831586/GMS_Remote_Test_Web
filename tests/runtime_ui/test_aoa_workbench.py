@@ -79,6 +79,13 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
 
         page.route("**/api/devices/aoa/**", aoa_api)
         page.route("**/api/cluster/devices/actions", cluster_action)
+        # 库存端点必须钉死：宿主机插着真机时真实 /api/devices/management
+        # 的异步应答会在测试注入设备后覆盖下拉选项（aoaSyncDeviceSources
+        # 跟随设备清单刷新），导致 select_option 找不到注入的设备。
+        page.route("**/api/devices/management*", lambda route: json_response(
+            route, {"success": True, "devices": [], "groups": []}))
+        page.route("**/api/cluster/devices*", lambda route: json_response(
+            route, {"success": True, "devices": []}))
         try:
             self.goto_shell(page)
             page.evaluate("switchPage('devices')")
@@ -333,7 +340,12 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
             return json_response(route, {'success': True})
 
         def submit(route):
-            requests.append(route.request.post_data_json)
+            body = route.request.post_data_json
+            if body.get('action') == 'screenshot':
+                # 默认自动实时投屏在测试环境建立流失败后回退的截图轮询：
+                # 后台会话请求，不属于本用例守护的“单命令精确目标”不变量。
+                return json_response(route, {'success': True, 'image': ''})
+            requests.append(body)
             return json_response(route, {'success': True, 'accepted': True, 'command_id': 'cmd-debug'})
 
         def events(route):
@@ -419,6 +431,10 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
             if route.request.method == 'GET':
                 return json_response(route, {'success': True, 'profiles': [profile]})
             body = route.request.post_data_json
+            if '/record/stream/' in path and path.endswith('/start'):
+                # 默认自动实时投屏（面板打开/设备同步后自动连接）发出的
+                # 会话型控制写：不属于本用例守护的“编辑/回放不落库”不变量。
+                return json_response(route, {'success': True, 'stream': 'started'})
             writes.append({'path': path, 'body': body})
             if path.endswith('/recover'):
                 return json_response(route, {'success': True, 'commands_executed': 2,

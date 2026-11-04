@@ -10,9 +10,10 @@
 - gadget quirk：AOA 会话收尾复位后部分平台会自动重枚举回配件 PID；
   ``_ensure_native_mode`` 可靠拉回原生 PID，且 USB 复位不影响应用层
   弹窗（对话框是应用窗口）。
-- 标定换算：AOA 触摸为 360×640 逻辑坐标；未标定时用
-  ``real_to_aoa_point`` 分辨率线性映射，实测标定后用单一 uniform
-  scale（real ÷ scale = logical）精度更高（RK3576: 3.3241）。
+- 标定换算：AOA 触摸为 360×640 逻辑坐标；未标定时用 AOSP 按轴映射
+  （分母 max-min+1，见 ``real_to_aoa_point``），实测标定后用单一 uniform
+  scale（real ÷ scale = logical）精度更高（RK3576: 3.3241），
+  多点仿射标定见 foundation/aoa_calibration（ADR 0026）。
 
 Profile 复用按固件分组（model + Android 版本 + 分辨率/fingerprint），
 命名约定 ``<model>-<android>-<width>x<height>-usb-debug-on``，不按

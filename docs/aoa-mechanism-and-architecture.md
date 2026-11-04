@@ -203,35 +203,56 @@ sequenceDiagram
 `sleep 800`，供回放留出界面切换时间。它不代表页面一定能在 800ms 内完成加载。
 
 浏览器先按显示元素的实际矩形，把指针位置换算成画面像素；Worker 再换算成
-360×640 HID 逻辑坐标。默认关系如下，结果按边界取整、限制：
+360×640 HID 逻辑坐标。默认按 AOSP 触摸映射公式（分母为 Logical Maximum + 1）
+取逆换算，结果按边界取整、限制：
 
 ```text
-scale_x = 显示宽度 / 360
-scale_y = 显示高度 / 640
+scale_x = 显示宽度 / 361
+scale_y = 显示高度 / 641
 logical_x = round(pixel_x / scale_x)
 logical_y = round(pixel_y / scale_y)
 ```
 
 canvas 和截图元素保留实际宽高比；留黑边属于投屏容器，不应当作画面坐标。
-默认比例换算不是自动适配所有 OEM 输入映射的保证。
+默认比例换算不是自动适配所有 OEM 输入映射的保证，只能作为
+`direct_unverified` 初始坐标。
 
 ### 4.3 实测标定
 
-“触摸标定”会通过 AOA 发送探测点击，再结合 ADB 输入信息计算 X/Y 比例，因此会
+“触摸标定”会通过 AOA 发送探测点击，再结合 ADB 输入信息计算映射，因此会
 真实点击设备并切换 USB 模式。应在安全页面由操作者明确触发。
 
-标定上下文包括版本、型号、Android 版本、显示尺寸、旋转方向和 HID 模式，当前版本为 2。
-已有 version 2 且无模式字段的标定按直接触摸处理；新标定明确区分 pointer/direct。
+多点仿射标定（ADR 0026）：五个探针点（四角 25%/75% 内缩 + 中心）实测
+InputReader cooked 坐标，最小二乘拟合 HID→屏幕仿射（覆盖缩放、偏移与轴间
+耦合），保留每点残差并输出 RMS/最大误差；最大误差超过 8px 判定失败。失败时
+退回单点比例，再退回按轴估算，每级都在结果里标注真实的 mapping_policy
+（`direct_standard` / `direct_unverified` / `pointer_calibrated` /
+`estimated` / `unsupported`），不能把估算当成已验证。
+
+标定上下文包括版本、型号、Android 版本、显示尺寸、旋转方向和 HID 模式，当前版本为 3。
+已有 version 2+ 且无模式字段的标定按直接触摸处理；新标定明确区分 pointer/direct。
 旧版指针设备映射缓存不再沿用，需重新标定。录制输入复用实测标定时，Worker
 核对上下文；发生变化会拒绝沿用，页面清除失效缓存并提示重新标定。
-Web 缓存按 Worker/设备分区，保存配置时可把标定写入 `metadata.calibration`。
+Web 缓存按 Worker/设备分区，保存配置时可把标定写入 `metadata.calibration`；
+Controller 侧另有 `aoa_calibrations` 持久化表（owner 隔离），按
+model + Android 版本 + 显示 + 旋转 + HID 模式 匹配复用，环境任一变化都要求
+重新标定。
 
 配置 metadata 是保留标定和适用性信息的容器，不能当作回放时自动识别页面、自动
 验证目标机型或完成视觉闭环的保证。现有校准上下文检查主要用于录制输入路径。
 
 `metadata.hid_touch_mode` 为 `pointer`（兼容鼠标）或 `direct`（直接触摸），
 `metadata.hid_settle_seconds` 为注册后等待时间。回放结果返回本次使用的模式与等待值。
+`metadata.hid_session_mode` 默认为 `continuous`，整段保留 HID；显式设为
+`per_command` 时每个输入后清理 USB，等待命令在原生 USB 状态下执行。
 旧鼠标坐标如 `click 180 525` 不应直接替换成在直接触摸模式调试的 `click 180 580`。
+
+“单条调试保持 HID 连接”使用同一个持久回执和设备锁接收用户逐条输入，首次按
+完整命令列表冻结 HID 通道，以便在与连续回放相同的 Mouse 条目环境中验证坐标。
+点击“结束调试”、离开 AOA 页签、空闲 2 分钟或累计满 15 分钟后清理；仅支持本机
+Worker。网络故障不自动重发命令，进程中断后的 running 回执不重新执行。
+生命周期细节见 [ADR 0025](architecture/adr/0025-aoa-debug-session-lifecycle.md) 与
+[单条调试说明](aoa-playback-controls.md#单条命令调试)。
 
 ## 5. 命令语法与运行约束
 

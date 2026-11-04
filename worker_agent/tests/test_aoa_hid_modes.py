@@ -9,9 +9,36 @@ from .test_aoa_actions import _stall_usb
 
 
 def test_old_profiles_default_to_pointer_and_version_two_calibration_stays_direct():
-    assert profile_hid_options({}) == {"aoa_hid_touch_mode": "pointer", "aoa_hid_settle_seconds": 2}
+    assert profile_hid_options({}) == {"aoa_hid_touch_mode": "pointer", "aoa_hid_settle_seconds": 2,
+                                       "aoa_hid_session_mode": "continuous", "aoa_mapping_policy": ""}
     assert profile_hid_options({"calibration": {"context": {"version": 2}}})["aoa_hid_touch_mode"] == "direct"
     assert profile_hid_options({"hid_touch_mode": "pointer", "calibration": {"context": {"version": 2}}})["aoa_hid_touch_mode"] == "pointer"
+
+
+@pytest.mark.parametrize("metadata", [None, {}, {"calibration": None}, {"calibration": {}},
+    {"calibration": {"context": None}}, {"calibration": {"context": {}}},
+    {"calibration": {"context": {"version": None}}},
+    {"calibration": {"context": {"version": 1}}}])
+def test_unversioned_calibration_preserves_legacy_pointer_mode(metadata):
+    assert profile_hid_options(metadata)["aoa_hid_touch_mode"] == "pointer"
+
+
+@pytest.mark.parametrize("version", [None, 0, 1, 2, 3])
+@pytest.mark.parametrize("mode", ["pointer", "direct"])
+def test_explicit_mode_does_not_require_calibration_version(version, mode):
+    metadata = {"hid_touch_mode": mode, "calibration": {"context": {"version": version}}}
+    assert profile_hid_options(metadata)["aoa_hid_touch_mode"] == mode
+
+
+@pytest.mark.parametrize("version", ["2", 2.0, True, -1, [], {}])
+def test_invalid_calibration_version_is_a_validation_error(version):
+    with pytest.raises(ValueError, match="context version"):
+        profile_hid_options({"calibration": {"context": {"version": version}}})
+
+
+@pytest.mark.parametrize("version", [2, 3])
+def test_versioned_direct_calibration_keeps_its_mode(version):
+    assert profile_hid_options({"calibration": {"context": {"version": version}}})["aoa_hid_touch_mode"] == "direct"
 
 
 @pytest.mark.parametrize("metadata", [
@@ -64,5 +91,6 @@ def test_cross_mode_touch_calibration_is_rejected():
     with pytest.raises(ValueError, match="another HID mode"):
         aoa_profile.parse_record_input_action({"action": "tap", "x": 10, "y": 10,
             "hid_touch_mode": "pointer", "scale_x": 3.3, "scale_y": 3,
-            "calibration_context": {"version": 2, "model": "RK", "display": [1200, 1920],
+            "calibration_context": {"version": aoa_profile.AOA_TOUCH_CALIBRATION_VERSION,
+                                    "model": "RK", "display": [1200, 1920],
                                     "rotation": 0, "hid_touch_mode": "direct"}})
