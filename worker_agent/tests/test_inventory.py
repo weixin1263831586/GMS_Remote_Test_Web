@@ -17,6 +17,10 @@ from worker_agent.inventory import probe_devices
 def _isolate_host_usb_inventory(monkeypatch):
     """Inventory unit tests must never depend on or enumerate the host's USB."""
     monkeypatch.setattr(device_actions, "_probe_usb_only_devices", lambda _known: [])
+    # 探测逻辑单测与宿主机的 AOA 会话状态解耦：活 Worker 会话期间
+    # （及标志 TTL 未过期时）adb 抑制会让 probe 跳过 adb 分支，
+    # patch 的 _run 序列错位 → 偶发失败。本文件只测解析/枚举逻辑。
+    monkeypatch.setattr(device_actions, "_adb_daemon_suppressed", lambda: False)
 
 
 def test_usb_only_android_device_remains_available_for_aoa(tmp_path):
@@ -147,6 +151,48 @@ def test_lightweight_probe_skips_detail_shell_call():
 
     assert devices[0]["properties"]["model"] == "Box"
     assert runner.call_count == 2
+
+
+def test_probe_normalizes_bare_usb_port_from_platform_tools_35():
+    # platform-tools 35 的 `adb devices -l` 把物理端口打印成裸位置字段
+    # （`1-7`），不再带 `usb:` 前缀；端口缺失会让烧写后 AOA 恢复冻结报
+    # 409（无法确认物理端口）。
+    with patch(
+        "worker_agent.device_actions._run",
+        side_effect=[
+            "List of devices attached\nRK3576GMS1 device 1-7 product:ssi model:Box\n",
+            "",
+        ],
+    ):
+        devices = probe_devices()
+
+    assert devices[0]["properties"]["usb"] == "1-7"
+
+
+def test_probe_keeps_legacy_usb_prefix_port():
+    with patch(
+        "worker_agent.device_actions._run",
+        side_effect=[
+            "List of devices attached\nABC device usb:1-6 product:rk model:Box\n",
+            "",
+        ],
+    ):
+        devices = probe_devices()
+
+    assert devices[0]["properties"]["usb"] == "1-6"
+
+
+def test_probe_ignores_colonless_non_port_token():
+    with patch(
+        "worker_agent.device_actions._run",
+        side_effect=[
+            "List of devices attached\nABC device caveat product:rk model:Box\n",
+            "",
+        ],
+    ):
+        devices = probe_devices()
+
+    assert "usb" not in devices[0]["properties"]
 
 
 def test_probe_keeps_fastbootd_device_visible():

@@ -37,6 +37,7 @@ from foundation.aoa_profile import AOA_TOUCH_MAX_X, AOA_TOUCH_MAX_Y
 MAPPING_POLICY_ESTIMATED = "estimated"
 MAPPING_POLICY_POINTER_CALIBRATED = "pointer_calibrated"
 MAPPING_POLICY_DIRECT_UNVERIFIED = "direct_unverified"
+MAPPING_POLICY_DIRECT_CALIBRATED = "direct_calibrated"
 MAPPING_POLICY_DIRECT_STANDARD = "direct_standard"
 MAPPING_POLICY_UNSUPPORTED = "unsupported"
 
@@ -44,6 +45,7 @@ MAPPING_POLICIES: tuple[str, ...] = (
     MAPPING_POLICY_ESTIMATED,
     MAPPING_POLICY_POINTER_CALIBRATED,
     MAPPING_POLICY_DIRECT_UNVERIFIED,
+    MAPPING_POLICY_DIRECT_CALIBRATED,
     MAPPING_POLICY_DIRECT_STANDARD,
     MAPPING_POLICY_UNSUPPORTED,
 )
@@ -76,7 +78,7 @@ def policy_for(hid_touch_mode: str, verified: bool) -> str:
     if not verified:
         return MAPPING_POLICY_UNSUPPORTED
     if hid_touch_mode == "direct":
-        return MAPPING_POLICY_DIRECT_STANDARD
+        return MAPPING_POLICY_DIRECT_CALIBRATED
     return MAPPING_POLICY_POINTER_CALIBRATED
 
 
@@ -161,7 +163,10 @@ def fit_affine(samples: list[tuple[tuple[float, float], tuple[float, float]]]
 def _finite_number(value, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"AOA calibration {name} must be a finite number")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"AOA calibration {name} must be a finite number") from exc
     if not math.isfinite(number):
         raise ValueError(f"AOA calibration {name} must be a finite number")
     return number
@@ -188,6 +193,14 @@ class TouchMapping:
     max_error_px: float = 0.0
     context: dict = field(default_factory=dict)
     display_pixels: tuple[int, int] = (0, 0)
+
+    def __post_init__(self):
+        a, b, c, d = self.matrix
+        determinant = a * d - b * c
+        if (not all(math.isfinite(v) for v in (*self.matrix, *self.offset))
+                or not math.isfinite(determinant)
+                or abs(determinant) < _INVERTIBLE_DETERMINANT_MIN):
+            raise ValueError("AOA calibration matrix is not invertible")
 
     # ---- 正向/逆向换算 ----
 
@@ -216,7 +229,7 @@ class TouchMapping:
     def to_dict(self) -> dict:
         return {
             "hid_touch_mode": self.hid_touch_mode,
-            "mapping_policy": self.mapping_policy,
+            "mapping_policy": self.effective_policy,
             "matrix": [round(value, 8) for value in self.matrix],
             "offset": [round(value, 8) for value in self.offset],
             "display_pixels": list(self.display_pixels),
@@ -235,21 +248,19 @@ class TouchMapping:
         if mode not in ("pointer", "direct"):
             raise ValueError("AOA touch mapping requires hid_touch_mode pointer or direct")
         matrix_raw = data.get("matrix")
-        if (not isinstance(matrix_raw, list) or len(matrix_raw) != 4
-                or any(isinstance(v, bool) or not isinstance(v, (int, float))
-                       or not math.isfinite(float(v)) for v in matrix_raw)):
+        if not isinstance(matrix_raw, list) or len(matrix_raw) != 4:
             raise ValueError("AOA touch mapping matrix must be four finite numbers")
+        matrix = tuple(_finite_number(v, "matrix") for v in matrix_raw)
         offset_raw = data.get("offset", [0.0, 0.0])
-        if (not isinstance(offset_raw, list) or len(offset_raw) != 2
-                or any(isinstance(v, bool) or not isinstance(v, (int, float))
-                       or not math.isfinite(float(v)) for v in offset_raw)):
+        if not isinstance(offset_raw, list) or len(offset_raw) != 2:
             raise ValueError("AOA touch mapping offset must be two finite numbers")
+        offset = tuple(_finite_number(v, "offset") for v in offset_raw)
         display_raw = data.get("display_pixels", [0, 0])
         if (not isinstance(display_raw, list) or len(display_raw) != 2
                 or any(type(v) is not int or v < 0 or v > 10000 for v in display_raw)):
             raise ValueError("AOA touch mapping display_pixels must be two integers")
         samples_raw = data.get("samples", [])
-        if not isinstance(samples_raw, list):
+        if not isinstance(samples_raw, list) or len(samples_raw) > 32 or any(not isinstance(s, dict) for s in samples_raw):
             raise ValueError("AOA touch mapping samples must be a list")
         context = data.get("context", {})
         if not isinstance(context, dict):
@@ -260,8 +271,8 @@ class TouchMapping:
             raise ValueError("AOA touch mapping errors must be non-negative")
         mapping = cls(
             hid_touch_mode=mode,
-            matrix=tuple(float(v) for v in matrix_raw),  # type: ignore[arg-type]
-            offset=(float(offset_raw[0]), float(offset_raw[1])),
+            matrix=matrix,  # type: ignore[arg-type]
+            offset=offset,  # type: ignore[arg-type]
             mapping_policy=validate_mapping_policy(data.get("mapping_policy")),
             samples=tuple(dict(sample) for sample in samples_raw
                           if isinstance(sample, dict)),
@@ -270,7 +281,42 @@ class TouchMapping:
             context=context,
             display_pixels=(display_raw[0], display_raw[1]),
         )
+        if mapping.samples:
+            errors = mapping.sample_errors()
+            rms = math.sqrt(sum(e * e for e in errors) / len(errors))
+            if abs(max(errors) - max_error) > 0.15 or abs(rms - mapping.rms_error_px) > 0.15:
+                raise ValueError("AOA calibration sample errors do not match the matrix")
+        if mapping.context.get("display") is not None and list(mapping.display_pixels) != mapping.context["display"]:
+            raise ValueError("AOA calibration display context does not match display_pixels")
+        if mapping.context.get("hid_touch_mode", mode) != mode:
+            raise ValueError("AOA calibration context belongs to another HID mode")
+        if mapping.mapping_policy == MAPPING_POLICY_DIRECT_STANDARD:
+            # A fitted affine matrix is a device correction, not evidence of
+            # standard InputReader classification/display routing.
+            raise ValueError("direct_standard requires device compatibility verification; use direct_calibrated")
+        if mapping.mapping_policy in (MAPPING_POLICY_DIRECT_CALIBRATED, MAPPING_POLICY_POINTER_CALIBRATED) and not mapping.verified:
+            raise ValueError("calibrated mapping requires independent validation samples")
         return mapping
+
+    def sample_errors(self) -> list[float]:
+        errors = []
+        width, height = self.display_pixels
+        for sample in self.samples:
+            if not isinstance(sample, dict):
+                raise ValueError("AOA calibration sample must be an object")
+            hid, cooked = sample.get("hid"), sample.get("cooked")
+            if (not isinstance(hid, (list, tuple)) or len(hid) != 2
+                    or not isinstance(cooked, (list, tuple)) or len(cooked) != 2):
+                raise ValueError("AOA calibration sample requires hid and cooked points")
+            u, v = (_finite_number(n, "sample hid") for n in hid)
+            x, y = (_finite_number(n, "sample cooked") for n in cooked)
+            if not (0 <= u <= AOA_TOUCH_MAX_X and 0 <= v <= AOA_TOUCH_MAX_Y):
+                raise ValueError("AOA calibration sample HID point is out of range")
+            if width > 0 and height > 0 and not (-8 <= x <= width + 8 and -8 <= y <= height + 8):
+                raise ValueError("AOA calibration sample is outside the display")
+            px, py = self.hid_to_screen(u, v)
+            errors.append(math.hypot(px - x, py - y))
+        return errors
 
     # ---- 派生结论 ----
 
@@ -279,9 +325,20 @@ class TouchMapping:
         """映射误差在验收门槛内，且策略不是 unsupported。"""
         if self.mapping_policy == MAPPING_POLICY_UNSUPPORTED:
             return False
-        if self.samples:
-            return self.max_error_px <= MAX_CALIBRATION_ERROR_PX
-        return False
+        try:
+            training = [s for s in self.samples if not s.get("validation", False)]
+            validation = [s for s in self.samples if s.get("validation") is True]
+            if len(training) < 3 or len(validation) < 2 or min(self.display_pixels) <= 0:
+                return False
+            fit_affine([(tuple(s["hid"]), tuple(s["cooked"])) for s in training])
+            training_points = {tuple(s["hid"]) for s in training}
+            if len({tuple(s["hid"]) for s in validation}) < 2:
+                return False
+            if any(tuple(s["hid"]) in training_points for s in validation):
+                return False
+            return max(self.sample_errors()) <= MAX_CALIBRATION_ERROR_PX
+        except (ValueError, TypeError, KeyError):
+            return False
 
     @property
     def effective_policy(self) -> str:
@@ -292,22 +349,24 @@ def mapping_from_samples(hid_touch_mode: str,
                          samples: list[tuple[tuple[float, float], tuple[float, float]]],
                          context: dict | None = None,
                          display_pixels: tuple[int, int] = (0, 0),
+                         validation_samples: list | None = None,
                          ) -> TouchMapping:
     """从实测采样构造 TouchMapping：拟合、计算残差、推导 policy。"""
     matrix, offset = fit_affine(samples)
     a, b, c, d = matrix
     tx, ty = offset
     errors = []
-    for (u, v), (x, y) in samples:
+    all_samples = samples + list(validation_samples or [])
+    for (u, v), (x, y) in all_samples:
         px, py = a * u + b * v + tx, c * u + d * v + ty
         errors.append(math.hypot(px - x, py - y))
     max_error = max(errors)
-    verified = max_error <= MAX_CALIBRATION_ERROR_PX
+    verified = max_error <= MAX_CALIBRATION_ERROR_PX and len(validation_samples or []) >= 2
     rms = math.sqrt(sum(error * error for error in errors) / len(errors))
     sample_records = [
         {"hid": [int(u), int(v)], "cooked": [round(float(x), 2), round(float(y), 2)],
-         "error_px": round(error, 2)}
-        for ((u, v), (x, y)), error in zip(samples, errors)
+         "error_px": round(error, 2), "validation": index >= len(samples)}
+        for index, (((u, v), (x, y)), error) in enumerate(zip(all_samples, errors))
     ]
     return TouchMapping(
         hid_touch_mode=hid_touch_mode,
@@ -337,7 +396,9 @@ def per_axis_mapping(display_width: int, display_height: int,
 
     validate_touch_mode(hid_touch_mode)
     policy = validate_mapping_policy(mapping_policy) or MAPPING_POLICY_DIRECT_UNVERIFIED
-    if policy in (MAPPING_POLICY_DIRECT_STANDARD, MAPPING_POLICY_POINTER_CALIBRATED,
+    if hid_touch_mode == "pointer" and policy == MAPPING_POLICY_DIRECT_UNVERIFIED:
+        policy = MAPPING_POLICY_ESTIMATED
+    if policy in (MAPPING_POLICY_DIRECT_STANDARD, MAPPING_POLICY_DIRECT_CALIBRATED, MAPPING_POLICY_POINTER_CALIBRATED,
                   MAPPING_POLICY_UNSUPPORTED):
         raise ValueError("per-axis estimate cannot claim a verified mapping policy")
     return TouchMapping(
@@ -355,7 +416,13 @@ def per_axis_mapping(display_width: int, display_height: int,
 def convert_point(source: TouchMapping, target: TouchMapping, u: int, v: int) -> tuple[int, int]:
     """源设备的逻辑坐标 → 参考像素 → 目标设备的逻辑坐标。"""
     pixel_x, pixel_y = source.hid_to_screen(u, v)
-    return target.screen_to_hid(pixel_x, pixel_y)
+    sw, sh = source.display_pixels
+    tw, th = target.display_pixels
+    if min(sw, sh, tw, th) <= 0:
+        raise ValueError("missing display dimensions for AOA reprojection")
+    if source.context.get("rotation", 0) != target.context.get("rotation", 0):
+        raise ValueError("AOA reprojection requires matching display rotation")
+    return target.screen_to_hid(pixel_x * tw / sw, pixel_y * th / sh)
 
 
 def convert_commands(commands: list[str], source: TouchMapping,
@@ -397,13 +464,46 @@ def context_matches(record_context: dict, query: dict) -> bool:
     Android 版本、显示配置、旋转或输入模式任一变化都可能改变映射
     （ADR 0026 Consequences），不满足条件时必须重新标定而不是复用。
     """
-    for key in ("model", "release", "rotation", "hid_touch_mode"):
-        if str(record_context.get(key) or "") != str(query.get(key) or ""):
+    for key in ("model", "release", "rotation", "hid_touch_mode", "fingerprint", "density", "kernel", "display_route"):
+        if str(record_context.get(key, "")) != str(query.get(key, "")):
             return False
     record_display = record_context.get("display")
     query_display = query.get("display")
     if not (isinstance(record_display, list) and len(record_display) == 2
             and isinstance(query_display, list) and len(query_display) == 2
-            and [int(v) for v in record_display] == [int(v) for v in query_display]):
+            and all(type(v) is int and 0 < v <= 10000 for v in (*record_display, *query_display))
+            and record_display == query_display):
         return False
     return True
+
+
+def mapping_options(options: dict) -> dict:
+    """Validate the bounded mapping envelope at Controller and Worker boundaries."""
+    import json
+
+    mode = options.get("aoa_hid_touch_mode", "pointer")
+    result = {}
+    for key in ("aoa_touch_mapping", "aoa_source_touch_mapping"):
+        raw = options.get(key)
+        if raw is None:
+            continue
+        if len(json.dumps(raw, allow_nan=False).encode()) > 65536:
+            raise ValueError("AOA touch mapping exceeds 65536 bytes")
+        mapping = TouchMapping.from_dict(raw)
+        if mapping.hid_touch_mode != mode:
+            raise ValueError("AOA touch mapping belongs to another HID mode")
+        result[key] = mapping.to_dict()
+    policy = validate_mapping_policy(options.get("aoa_mapping_policy"))
+    if policy == MAPPING_POLICY_DIRECT_STANDARD:
+        raise ValueError("direct_standard requires device compatibility verification")
+    if policy.startswith("direct_") and mode != "direct":
+        raise ValueError("direct mapping policy requires direct HID mode")
+    if policy == MAPPING_POLICY_POINTER_CALIBRATED and mode != "pointer":
+        raise ValueError("pointer_calibrated requires pointer HID mode")
+    target = result.get("aoa_touch_mapping")
+    if target and policy and target["mapping_policy"] != policy:
+        raise ValueError("AOA mapping policy does not match target mapping")
+    if policy in (MAPPING_POLICY_DIRECT_CALIBRATED, MAPPING_POLICY_POINTER_CALIBRATED) and target is None:
+        raise ValueError("calibrated mapping policy requires a target mapping")
+    result["aoa_mapping_policy"] = policy or (target or {}).get("mapping_policy", "")
+    return result

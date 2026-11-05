@@ -200,7 +200,12 @@
     }
 
     async function loadInitialTestData(clusterModeReady) {
-        await Promise.all([clusterModeReady, ready]);
+        try {
+            await Promise.all([clusterModeReady, ready]);
+        } catch (error) {
+            debugLog('工作区初始化失败，设备请求保持阻止:', error);
+            return [];
+        }
         return Promise.allSettled([
             window.loadClusterWorkers(),
             window.loadDevices(false),

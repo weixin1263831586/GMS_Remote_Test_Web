@@ -35,6 +35,22 @@ def test_post_flash_recovery_keeps_frozen_hid_mode_and_settle_time():
     assert options["aoa_commands"] == frozen["commands"]
 
 
+def test_post_flash_mapping_reaches_execution_without_adb_metadata_queries():
+    from tests.aoa_fixtures import verified_mapping
+
+    mapping = verified_mapping().to_dict()
+    frozen = snapshot()
+    frozen["metadata"] = {"hid_touch_mode": "direct"}
+    frozen["mapping_options"] = {"aoa_touch_mapping": mapping, "aoa_source_touch_mapping": mapping,
+                                 "aoa_mapping_policy": "direct_calibrated"}
+    execute = Mock(return_value={"success": True, "adb_recovered": True})
+    result = recover_after_flash({"success": True}, frozen, ["w:ABC"], Mock(), execute)
+    assert result["stage"] == "ADB_READY"
+    options = execute.call_args.args[2]
+    assert options["aoa_touch_mapping"] == mapping
+    assert options["aoa_source_touch_mapping"] == mapping
+
+
 def test_recovery_requires_authorized_adb_not_just_successful_input():
     execute = Mock(return_value={"success": True, "adb_recovered": False, "adb_state": "unauthorized"})
     result = recover_after_flash({"success": True}, snapshot(), ["w:ABC"], Mock(), execute)

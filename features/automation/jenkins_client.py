@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import re
 from typing import Any
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlparse
 
 import requests
+
+from foundation.outbound import same_http_origin
 
 
 class JenkinsClient:
@@ -57,7 +59,21 @@ class JenkinsClient:
         }
 
     def get_queue_item(self, queue_url: str) -> dict[str, Any]:
-        response = self.session.get(urljoin(queue_url.rstrip("/") + "/", "api/json"), timeout=20)
+        try:
+            queue_url = urljoin(self.base_url, str(queue_url or "").strip())
+            configured_path = urlparse(self.base_url).path.rstrip('/')
+            parsed = urlparse(queue_url)
+        except ValueError:
+            return {"success": False, "error": "Invalid Jenkins queue URL"}
+        if (not same_http_origin(self.base_url, queue_url)
+                or parsed.username or parsed.password or parsed.query or parsed.fragment
+                or not re.fullmatch(re.escape(configured_path) + r'/queue/item/\d+/?', parsed.path)):
+            return {"success": False, "error": "Jenkins queue URL is outside the configured queue endpoint"}
+        # Jenkins Location is response data. Never send this session's API
+        # credentials to another origin or follow redirects while polling it.
+        response = self.session.get(queue_url.rstrip('/') + '/api/json', timeout=20, allow_redirects=False)
+        if 300 <= response.status_code < 400:
+            return {"success": False, "error": "Jenkins queue polling redirect is not allowed"}
         response.raise_for_status()
         data = response.json()
         executable = data.get("executable") or {}

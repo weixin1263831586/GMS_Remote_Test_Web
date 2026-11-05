@@ -220,14 +220,17 @@ canvas 和截图元素保留实际宽高比；留黑边属于投屏容器，不�
 ### 4.3 实测标定
 
 “触摸标定”会通过 AOA 发送探测点击，再结合 ADB 输入信息计算映射，因此会
-真实点击设备并切换 USB 模式。应在安全页面由操作者明确触发。
+真实点击设备并切换 USB 模式。由操作者明确触发，并先打开专用安全标定应用。
+录制机需安装 [AOA Calibration](../worker_agent/calibration_app/README.md)。
+应用缺失/启动失败时不发送探针，不再在 Settings 页面降级点击。
 
 多点仿射标定（ADR 0026）：五个探针点（四角 25%/75% 内缩 + 中心）实测
 InputReader cooked 坐标，最小二乘拟合 HID→屏幕仿射（覆盖缩放、偏移与轴间
-耦合），保留每点残差并输出 RMS/最大误差；最大误差超过 8px 判定失败。失败时
-退回单点比例，再退回按轴估算，每级都在结果里标注真实的 mapping_policy
-（`direct_standard` / `direct_unverified` / `pointer_calibrated` /
-`estimated` / `unsupported`），不能把估算当成已验证。
+耦合），另测两个独立点，保留每点残差并输出 RMS/最大误差；最大误差超过 8px
+判定失败。失败时 `success=false`；纯估算为 `measured=false`。direct 实测修正
+使用 `direct_calibrated`，pointer 使用 `pointer_calibrated`；不能仅因拟合成功
+提升为 `direct_standard`。旧记录缺少独立验证点时需要重标。
+边界与策略详见 [ADR 0027](architecture/adr/0027-aoa-validated-mapping-boundaries.md)。
 
 标定上下文包括版本、型号、Android 版本、显示尺寸、旋转方向和 HID 模式，当前版本为 3。
 已有 version 2+ 且无模式字段的标定按直接触摸处理；新标定明确区分 pointer/direct。
@@ -235,11 +238,14 @@ InputReader cooked 坐标，最小二乘拟合 HID→屏幕仿射（覆盖缩放
 核对上下文；发生变化会拒绝沿用，页面清除失效缓存并提示重新标定。
 Web 缓存按 Worker/设备分区，保存配置时可把标定写入 `metadata.calibration`；
 Controller 侧另有 `aoa_calibrations` 持久化表（owner 隔离），按
-model + Android 版本 + 显示 + 旋转 + HID 模式 匹配复用，环境任一变化都要求
-重新标定。
+model + Android 版本 + 指纹 + 密度 + 显示 + 旋转 + HID 模式 + 内核 + 显示路由
+匹配复用；信息缺失或变化时不自动复用。保存状态和记录 ID 在页面显示，保存
+失败有明确提示。目标环境由 Worker 清单提供，源 Profile 不能代替目标证据。
 
 配置 metadata 是保留标定和适用性信息的容器，不能当作回放时自动识别页面、自动
-验证目标机型或完成视觉闭环的保证。现有校准上下文检查主要用于录制输入路径。
+验证目标机型或完成视觉闭环的保证。跨分辨率时先将源像素按目标/源宽高归一化，
+再反解目标 HID 坐标；不同旋转拒绝转换。Controller 请求模型完整传递两套映射，
+Worker 连续、单条回放和调试只转换一次，本机及远程烧写恢复均使用冻结的映射。
 
 `metadata.hid_touch_mode` 为 `pointer`（兼容鼠标）或 `direct`（直接触摸），
 `metadata.hid_settle_seconds` 为注册后等待时间。回放结果返回本次使用的模式与等待值。

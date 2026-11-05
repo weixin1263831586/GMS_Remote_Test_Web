@@ -114,9 +114,9 @@
                         </div>
                         <div class="aoa-device-selectors">
                             <label>Worker<select id="aoa-record-worker" class="btn-xxs" data-change="aoaRecorderWorkerChanged"></select></label>
-                            <label>录制设备<select id="aoa-record-device" class="btn-xxs" data-change="aoaRecorderDeviceChanged"></select></label>
+                            <label>录制设备<select id="aoa-record-device" class="btn-xxs" data-change="aoaRecorderDeviceSelected"></select></label>
                         </div>
-                        <div id="aoa-screen-status" class="aoa-screen-status">选择录制设备后将自动连接实时投屏</div>
+                        <div id="aoa-screen-status" class="aoa-screen-status">选择录制设备后点「▶ 实时投屏」连接</div>
                         <div id="aoa-screen-stage" class="aoa-screen-stage">
                             <canvas id="aoa-screen-canvas" class="aoa-screen-canvas" hidden></canvas>
                             <img id="aoa-screen-image" alt="" draggable="false" hidden>
@@ -152,8 +152,8 @@
                             <div class="aoa-form-grid">
                                 <label class="aoa-field-wide">配置名称<input id="aoa-profile-name" type="text" maxlength="120" placeholder="例如：RK3562 Android 16 开启 USB 调试"></label>
                                 <label>输入模式<select id="aoa-hid-touch-mode" class="btn-xxs" data-change="aoaHidModeChanged">
-                                    <option value="pointer">兼容鼠标（保留旧坐标及指针）</option>
-                                    <option value="direct">直接触摸（需按此模式标定）</option>
+                                    <option value="direct" selected>直接触摸（标准映射优先）</option>
+                                    <option value="pointer">兼容鼠标（旧配置兼容）</option>
                                 </select></label>
                                 <label>输入稳定等待(秒)<input id="aoa-hid-settle" type="number" min="0" max="10" step="0.5" value="2" data-change="aoaHidSettleChanged" data-aoa-edit></label>
                                 <label class="aoa-field-wide">回放方式<select id="aoa-hid-session-mode" class="btn-xxs" data-change="aoaSessionModeChanged">

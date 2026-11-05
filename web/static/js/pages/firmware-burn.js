@@ -8,7 +8,56 @@ async function burnFirmware() {
 
     // Show firmware configuration modal
     ModalManager.open('firmware-modal');
+    renderFirmwareTargetDevices();
+    hookFirmwareFileMetaInput();
+    updateFirmwareFileMeta();
     await loadFirmwareAoaProfiles();
+}
+
+// 弹框内回显烧写目标（serial + 型号），避免回到设备列表逐一核对。
+function renderFirmwareTargetDevices() {
+    const target = document.getElementById('firmware-target-devices');
+    if (!target) return;
+    const devices = selectedBurnableDeviceIds();
+    target.replaceChildren();
+    if (!devices.length) {
+        target.textContent = '未选择';
+        return;
+    }
+    devices.forEach(id => {
+        const device = state.devices.find(d =>
+            (typeof d === 'string' ? d : d.device_id || d.serial_no) === id);
+        const model = device?.model || device?.properties?.model || '';
+        const chip = document.createElement('span');
+        chip.className = 'firmware-target-chip';
+        chip.textContent = model ? `${id}（${model}）` : id;
+        target.appendChild(chip);
+    });
+}
+
+// 本机文件显示名称+大小；服务器路径说明跳过浏览器上传，防止误判。
+function updateFirmwareFileMeta() {
+    const meta = document.getElementById('firmware-file-meta');
+    if (!meta) return;
+    const path = document.getElementById('firmware-path').value.trim();
+    if (!path) {
+        // 占位行常驻（高度恒定）但空文本不显示，避免选中固件后弹框跳动。
+        meta.classList.add('is-empty');
+        meta.textContent = '';
+        return;
+    }
+    const file = document.getElementById('firmware-file-input')?.files?.[0] || null;
+    meta.classList.remove('is-empty');
+    meta.textContent = file
+        ? `${file.name}（${formatBytes(file.size)}）· 同名支持续传`
+        : `服务器路径 ${path} · 无需浏览器上传`;
+}
+
+function hookFirmwareFileMetaInput() {
+    const pathInput = document.getElementById('firmware-path');
+    if (!pathInput || pathInput.dataset.metaHook) return;
+    pathInput.addEventListener('input', updateFirmwareFileMeta);
+    pathInput.dataset.metaHook = '1';
 }
 
 let firmwareAoaLoadRevision = 0;
@@ -17,6 +66,7 @@ function toggleFirmwareAoa() {
     const enabled = document.getElementById('firmware-aoa-enabled').checked;
     document.getElementById('firmware-aoa-profile').disabled = !enabled;
     document.getElementById('firmware-aoa-boot-wait').disabled = !enabled;
+    document.getElementById('firmware-aoa-options').classList.toggle('is-disabled', !enabled);
 }
 
 async function loadFirmwareAoaProfiles() {
@@ -32,7 +82,7 @@ async function loadFirmwareAoaProfiles() {
         select.replaceChildren(new Option(profiles.length ? '请选择已验证的 AOA 配置' : '暂无配置，请先在 AOA 工作台保存', ''));
         profiles.forEach(profile => select.add(new Option(`${profile.name}（${profile.commands.length} 条，ADB 等待 ${profile.wait_adb_seconds || 60}s）`, profile.id)));
         if (profiles.some(profile => profile.id === previous)) select.value = previous;
-        hint.textContent = '选择已在同机型验证的开机向导和 USB 调试配置。烧写后等待启动、回放配置并验证 ADB；授权弹窗可能需要在设备上确认。启用后一次选择一台本地 USB 设备。';
+        hint.textContent = '选择已在同机型验证的配置；回放完成后自动验证 ADB。';
     } catch (error) {
         if (revision !== firmwareAoaLoadRevision) return;
         select.replaceChildren(new Option('配置加载失败，请重新打开弹框重试', ''));
@@ -89,6 +139,7 @@ function browseLocalFileForFirmware() {
             const target = document.getElementById('firmware-path');
             if (target) {
                 target.value = file.name;  // 只显示文件名
+                updateFirmwareFileMeta();
                 const savedName = sessionStorage.getItem('firmwareUploadFileName');
                 const savedSize = parseInt(sessionStorage.getItem('firmwareUploadFileSize') || '0');
                 const savedLastModified = parseInt(sessionStorage.getItem('firmwareUploadLastModified') || '-1');
@@ -346,6 +397,14 @@ async function submitFirmwareBurn() {
             // 路径 XHR 分支）同样回滚前端乐观锁定。
             unlockDevicesInUI(devices);
             addLogEntry(`固件烧写失败: ${result.error}`, 'error');
+        } else {
+            // 本地烧写请求在烧写+AOA 恢复（含 ADB 验证）全部结束后才返回：
+            // 返回即设备已回到可用状态，立即刷新设备列表并解除乐观锁定，
+            // 无需等待周期性自动刷新。
+            unlockDevicesInUI(devices);
+            addLogEntry(aoaEnabled ? '固件烧写与 AOA 恢复完成，已刷新设备列表'
+                                   : '固件烧写完成，已刷新设备列表', 'success');
+            await refreshDevicesAfterBurn();
         }
     } catch (error) {
         // 网络层异常（后端不可达等）后端无法自行通知，保留本地通知。

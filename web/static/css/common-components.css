@@ -1167,6 +1167,77 @@ body.modal-open {
     overflow-wrap: anywhere;
 }
 
+/* 中性说明文案：与 .modal-info-text(警告)区分，用于帮助/上下文提示 */
+.modal-hint-text {
+    padding: 8px 10px;
+    background: rgba(127, 127, 127, 0.08);
+    border-left: 3px solid var(--border-light);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin-top: 10px;
+    overflow-wrap: anywhere;
+}
+
+/* 烧写弹框：目标设备回显 */
+.firmware-target-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px;
+    background: rgba(127, 127, 127, 0.08);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-family: monospace;
+    overflow-wrap: anywhere;
+}
+
+.firmware-target-chip {
+    white-space: nowrap;
+}
+
+/* 烧写弹框：固件文件元信息。占位行常驻 + 单行省略，保证选择固件
+   前后弹框尺寸稳定，不因内容出现/换行而跳动。 */
+.firmware-file-meta {
+    min-height: 18px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin-top: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.firmware-file-meta.is-empty {
+    color: var(--text-muted);
+}
+
+/* 烧写弹框：固件 / AOA 分组框 */
+.modal-fieldset {
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px 12px 8px;
+    margin-top: 10px;
+}
+
+.modal-fieldset-title {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+/* 烧写弹框：AOA 恢复选项分组 */
+.firmware-aoa-options {
+    margin-top: 4px;
+}
+
+.firmware-aoa-options.is-disabled {
+    opacity: 0.55;
+}
+
 .modal-ssh-info {
     padding: 10px;
     background: rgba(52, 152, 219, 0.1);

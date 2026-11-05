@@ -59,6 +59,20 @@ class FirmwareRecoveryTests(ClusterApiHardeningFixture, unittest.TestCase):
         assert error.exception.status_code == 409
         assert not self.repo.claims.list_active()
 
+    def test_freeze_uses_target_environment_and_rejects_source_as_target(self):
+        from tests.aoa_fixtures import verified_mapping
+
+        mapping = verified_mapping().to_dict()
+        self.caps["aoa_affine_mapping_v2"] = True
+        self.profile["metadata"] = {"hid_touch_mode": "direct", "calibration": {"mapping": mapping}}
+        with self.assertRaises(ApiError):
+            self.freeze()  # The source Profile cannot supply missing target evidence.
+        self.repo.heartbeat("worker-246", {"devices": [{"serial": "ABC", "state": "available",
+            "transport": "local_usb", "properties": {"usb": "1-6", "aoa_context": mapping["context"]}}]})
+        frozen = self.freeze()
+        assert frozen["mapping_options"]["aoa_touch_mapping"] == mapping
+        assert frozen["target_context"]["fingerprint"] == "build-a"
+
     def test_agent_burn_approval_does_not_authorize_hid(self):
         for role, identity in (("agent_service", "agent-1"), ("admin", "automation:run-1")):
             self.request.state.current_user = CurrentUser(id=identity, username="agent", role=role)

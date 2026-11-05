@@ -593,6 +593,7 @@ def _calibrate_touch_affine(
     display_h: int,
     sleep: Callable[[float], None],
     touch_mode: str = "pointer",
+    context: dict | None = None,
 ) -> TouchMapping | None:
     """多点仿射标定：五个 HID 探针实测 cooked 坐标，拟合 HID→屏幕仿射。
 
@@ -601,13 +602,15 @@ def _calibrate_touch_affine(
     ``MAX_CALIBRATION_ERROR_PX``（8px）时 policy 自动降为 unverified。
     任何失败返回 None（调用方退回单点/按轴），设备状态尽力恢复。
 
-    探针触摸仍落在普通界面上（非专用标定界面）：点位避开边缘 25% 内缩，
-    单击不含长按，清理阶段 BACK 关闭可能弹出的菜单——与单点标定相同
-    的“明确用户动作才触发”边界。
+    探针只在专用安全 Activity 中执行；五点拟合后额外测量两个独立点。
+    Activity 不可用时不进行 USB/HID 注入，也不在普通页面降级探测。
     """
     from foundation.aoa_calibration import mapping_from_samples
 
-    probes = calibration_probe_points()
+    from .aoa_calibration import open_calibration_surface
+
+    validation_probes = [(120, 213), (240, 427)]
+    probes = calibration_probe_points() + validation_probes
     usb_core, usb_util = _usb()
     device = None
     probe_down_sent = False
@@ -615,6 +618,7 @@ def _calibrate_touch_affine(
         # 熄屏时 InputReader 会丢弃外接触摸：先亮屏解锁（与单点标定一致）。
         _adb_run(serial, "shell", "input", "keyevent", "224")
         _adb_run(serial, "shell", "wm", "dismiss-keyguard")
+        open_calibration_surface(serial, _adb_run)
         sleep(1.0)
         device = _configure_accessory(usb_core, serial)
         _detach_kernel_drivers(device)
@@ -647,7 +651,9 @@ def _calibrate_touch_affine(
             samples.append(((float(probe_x), float(probe_y)), cooked))
             sleep(0.4)
         mapping = mapping_from_samples(
-            touch_mode, samples, display_pixels=(int(display_w), int(display_h)))
+            touch_mode, samples[:CALIBRATION_PROBE_COUNT], context=context,
+            validation_samples=samples[CALIBRATION_PROBE_COUNT:],
+            display_pixels=(int(display_w), int(display_h)))
         logger.info(
             "AOA affine calibration on %s: policy=%s rms=%.2fpx max=%.2fpx",
             serial, mapping.effective_policy, mapping.rms_error_px,
@@ -716,8 +722,8 @@ def record_aoa_profile(
     # 触摸标定：部分设备的 InputReader 对 POINTER 触摸用统一比例缩放
     # （X 轴比例同时作用于 Y，实机 8e4d：800x1280 屏两轴都乘 ~2.216），
     # 与 real_to_aoa_point 的按轴独立换算不一致，直接换算的 Y 坐标会
-    # 系统性偏大。用探针触摸实测真实映射后反解，失败则退回按轴换算。
-    # 标定会把设备切入 accessory 模式并在屏幕中心注入一次触摸，只能由
+    # 系统性偏大。用探针触摸实测真实映射后反解，验证失败时停止录制。
+    # 标定会把设备切入 accessory 模式并在专用安全界面注入触摸，只能由
     # 明确的用户动作触发。脚本录制默认使用按轴映射，避免单元测试、页面
     # 初始化或普通预设录制意外碰触真机。
     #
@@ -727,20 +733,38 @@ def record_aoa_profile(
     # 标定成功后按实测比例重缩放已录命令（执行时用 uiautomator 真实
     # 屏幕坐标，导航本身无误差，只影响存进 Profile 的 AOA 逻辑坐标）。
     calibrate_after = calibrate_touch == "after"
-    calibration = (
-        _calibrate_touch_mapping(serial, display_w, display_h, sleep, touch_mode)
-        if calibrate_touch and not calibrate_after else None
-    )
-    if calibration is not None:
-        scale_x, scale_y = calibration
-        logger.info("AOA record touch calibration on %s: raw->cooked scale (%.4f, %.4f)",
-                    serial, scale_x, scale_y)
+    calibration_context = None
+    touch_mapping: TouchMapping | None = None
+    if calibrate_touch:
+        try:
+            from .aoa_calibration import display_context
+
+            calibration_context = display_context(
+                serial, display_w, display_h, _adb_run, touch_mode)
+        except Exception as exc:
+            logger.warning("AOA record calibration context unavailable on %s: %s", serial, exc)
+    if calibrate_touch and not calibrate_after:
+        touch_mapping = _calibrate_touch_affine(
+            serial, display_w, display_h, sleep, touch_mode,
+            context=calibration_context)
+        if touch_mapping is None or not touch_mapping.verified:
+            raise AoaError("AOA 标定未通过独立验证，请确认安全标定应用和 USB 状态")
+    if touch_mapping is not None:
+        # The affine mapping is the source of truth; scale values are retained
+        # only for compatibility with old clients displaying calibration status.
+        scale_x = display_w / (aoa_profile.AOA_TOUCH_MAX_X + (touch_mode == "direct"))
+        scale_y = display_h / (aoa_profile.AOA_TOUCH_MAX_Y + (touch_mode == "direct"))
+        logger.info("AOA record affine calibration on %s: policy=%s rms=%.2fpx max=%.2fpx",
+                    serial, touch_mapping.effective_policy,
+                    touch_mapping.rms_error_px, touch_mapping.max_error_px)
     else:
         # 回退：与 real_to_aoa_point 等价的按轴换算（scale 为 logical→pixel）。
-        scale_x = display_w / aoa_profile.AOA_TOUCH_MAX_X
-        scale_y = display_h / aoa_profile.AOA_TOUCH_MAX_Y
+        scale_x = display_w / (aoa_profile.AOA_TOUCH_MAX_X + (touch_mode == "direct"))
+        scale_y = display_h / (aoa_profile.AOA_TOUCH_MAX_Y + (touch_mode == "direct"))
 
     def logical(point: tuple[int, int]) -> tuple[int, int]:
+        if touch_mapping is not None:
+            return touch_mapping.screen_to_hid(*point)
         return (max(0, min(aoa_profile.AOA_TOUCH_MAX_X, round(point[0] / scale_x))),
                 max(0, min(aoa_profile.AOA_TOUCH_MAX_Y, round(point[1] / scale_y))))
 
@@ -872,20 +896,25 @@ def record_aoa_profile(
     if calibrate_after:
         # 标定放最后（accessory 切换会让 uiautomator idle 永久失效，
         # 见函数头注释）；成功则把已录命令按实测比例重缩放。
-        post = _calibrate_touch_mapping(serial, display_w, display_h, sleep, touch_mode)
-        if post is not None:
-            post_x, post_y = post
-            commands = [
-                _rescale_aoa_command(cmd, scale_x, scale_y, post_x, post_y)
-                for cmd in commands
-            ]
-            calibration = post
-            scale_x, scale_y = post_x, post_y
-            logger.info("AOA record post-calibration on %s: rescaled commands "
-                        "to (%.4f, %.4f)", serial, post_x, post_y)
-        else:
-            logger.warning("AOA record post-calibration failed on %s; "
-                           "keeping per-axis mapping", serial)
+        post_mapping = _calibrate_touch_affine(
+            serial, display_w, display_h, sleep, touch_mode,
+            context=calibration_context)
+        if post_mapping is not None:
+            from foundation.aoa_calibration import convert_commands
+
+            commands = convert_commands(
+                commands,
+                TouchMapping(touch_mode, (scale_x, 0.0, 0.0, scale_y), (0.0, 0.0),
+                             display_pixels=(display_w, display_h)),
+                post_mapping,
+            )
+            touch_mapping = post_mapping
+            scale_x = display_w / aoa_profile.AOA_TOUCH_MAX_X
+            scale_y = display_h / aoa_profile.AOA_TOUCH_MAX_Y
+            logger.info("AOA record post affine calibration on %s: policy=%s",
+                        serial, post_mapping.effective_policy)
+        if post_mapping is None or not post_mapping.verified:
+            raise AoaError("AOA 标定未通过独立验证；已录命令尚未标定")
 
     aoa_profile.parse_profile_commands(commands)
     return {
@@ -896,10 +925,12 @@ def record_aoa_profile(
         "model": model,
         "release": release,
         "touch_calibration": {
-            "measured": calibration is not None,
+            "measured": touch_mapping is not None,
+            "context": touch_mapping.context if touch_mapping is not None else calibration_context,
             "hid_touch_mode": touch_mode,
             "scale_x": round(scale_x, 4),
             "scale_y": round(scale_y, 4),
+            **({"mapping": touch_mapping.to_dict()} if touch_mapping is not None else {}),
         },
         "commands": commands,
         "steps": executed,
@@ -940,70 +971,70 @@ def record_aoa_input(serial: str, raw_action: dict) -> dict[str, Any]:
     action = aoa_profile.parse_record_input_action(raw_action)
     touch_mode = action.get("hid_touch_mode", "pointer")
     display_w, display_h = _display_size(serial)
+    touch_mapping = None
+    if action.get("touch_mapping") is not None:
+        try:
+            touch_mapping = TouchMapping.from_dict(action["touch_mapping"])
+        except ValueError as exc:
+            raise AoaError(f"invalid AOA touch mapping: {exc}") from exc
+        if touch_mapping.hid_touch_mode != touch_mode:
+            raise AoaError(
+                "AOA touch mapping belongs to another HID mode "
+                f"({touch_mapping.hid_touch_mode} != {touch_mode})")
     scale_x = float(action.get("scale_x") or (
-        display_w / aoa_profile.AOA_TOUCH_MAX_X))
+        display_w / (aoa_profile.AOA_TOUCH_MAX_X + (touch_mode == "direct"))))
     scale_y = float(action.get("scale_y") or (
-        display_h / aoa_profile.AOA_TOUCH_MAX_Y))
+        display_h / (aoa_profile.AOA_TOUCH_MAX_Y + (touch_mode == "direct"))))
 
     context = None
     if action["action"] == "calibrate" or action.get("calibration_context"):
         from .aoa_calibration import display_context
 
         context = display_context(serial, display_w, display_h, _adb_run, touch_mode)
-        if action.get("calibration_context") and action["calibration_context"] != context:
+        from foundation.aoa_calibration import context_matches
+
+        if action.get("calibration_context") and not context_matches(action["calibration_context"], context):
             raise ValueError("display configuration changed; recalibrate before recording input")
 
     if action["action"] == "calibrate":
-        # 多点仿射标定（ADR 0026）：五点实测 + 误差验证；失败退回
-        # 单点比例（旧行为，unverified），再失败退回按轴 AOSP 估算
-        # （estimated）。无法实测时明确标记，不能当成 verified。
+        # ADR 0027: only independent verification can publish a measured map.
+        # Estimates are returned as unsuccessful, unmeasured diagnostics.
         from foundation import aoa_calibration
 
-        mapping = _calibrate_touch_affine(serial, display_w, display_h, time.sleep, touch_mode)
+        mapping = _calibrate_touch_affine(
+            serial, display_w, display_h, time.sleep, touch_mode, context=context)
         errors = list(cleanup_diagnostics())
         if errors:
             mapping = None
-        single_point = False
+        measured = mapping is not None
         if mapping is None:
-            legacy = _calibrate_touch_mapping(serial, display_w, display_h, time.sleep, touch_mode)
-            if list(cleanup_diagnostics()):
-                legacy = None
-            if legacy is not None:
-                scale_x, scale_y = legacy
-                single_point = True
-                mapping = TouchMapping(
-                    hid_touch_mode=touch_mode,
-                    matrix=(scale_x, 0.0, 0.0, scale_y),
-                    offset=(0.0, 0.0),
-                    mapping_policy=aoa_calibration.MAPPING_POLICY_DIRECT_UNVERIFIED,
-                    display_pixels=(int(display_w), int(display_h)),
-                )
-            else:
-                scale_x = display_w / aoa_profile.AOA_TOUCH_MAX_X
-                scale_y = display_h / aoa_profile.AOA_TOUCH_MAX_Y
-                mapping = aoa_calibration.per_axis_mapping(
-                    display_w, display_h, touch_mode)
-        else:
-            scale_x = display_w / aoa_profile.AOA_TOUCH_MAX_X
-            scale_y = display_h / aoa_profile.AOA_TOUCH_MAX_Y
+            from dataclasses import replace
+
+            mapping = replace(aoa_calibration.per_axis_mapping(
+                display_w, display_h, touch_mode,
+                mapping_policy="direct_unverified" if touch_mode == "direct" else "estimated"), context=context)
+        scale_x, scale_y = mapping.matrix[0], mapping.matrix[3]
         return {
             "serial": serial,
-            "success": not single_point,
+            "success": measured and mapping.verified and not errors,
             "action": "calibrate",
             "cleanup_errors": errors,
             "display": [display_w, display_h],
             "touch_calibration": {
-                "measured": True,
+                "measured": measured,
+                "verified": mapping.verified,
                 "context": context,
                 "mapping": mapping.to_dict(),
                 "scale_x": round(scale_x, 4),
                 "scale_y": round(scale_y, 4),
             },
-            **({"error": "affine calibration failed; single-point probe used"}
-               if single_point else {}),
+            **({"error": "AOA 标定失败：请检查安全标定应用、独立验证点及 USB 状态"}
+               if not measured or not mapping.verified or errors else {}),
         }
 
     def logical(x: int, y: int) -> tuple[int, int]:
+        if touch_mapping is not None:
+            return touch_mapping.screen_to_hid(x, y)
         return (
             max(0, min(aoa_profile.AOA_TOUCH_MAX_X, round(x / scale_x))),
             max(0, min(aoa_profile.AOA_TOUCH_MAX_Y, round(y / scale_y))),
@@ -1062,6 +1093,11 @@ def record_aoa_input(serial: str, raw_action: dict) -> dict[str, Any]:
             "scale_y": round(scale_y, 4),
         },
     }
+    if touch_mapping is not None:
+        result["touch_calibration"].update({
+            "measured": True,
+            "mapping": touch_mapping.to_dict(),
+        })
     return result
 
 
@@ -1083,6 +1119,7 @@ def run_aoa_sequence(
     hid_settle_seconds: float = 2,
     session_mode: str = "continuous",
     touch_mapping: dict | None = None,
+    source_touch_mapping: dict | None = None,
     mapping_policy: str = "",
     _deadline: float | None = None,
 ) -> dict[str, Any]:
@@ -1111,6 +1148,12 @@ def run_aoa_sequence(
 
     profile_hid_options({"hid_touch_mode": touch_mode, "hid_settle_seconds": hid_settle_seconds,
                          "hid_session_mode": session_mode})
+    try:
+        aoa_calibration.mapping_options({"aoa_hid_touch_mode": touch_mode,
+            "aoa_touch_mapping": touch_mapping, "aoa_source_touch_mapping": source_touch_mapping,
+            "aoa_mapping_policy": mapping_policy})
+    except ValueError as exc:
+        raise AoaError(str(exc)) from exc
     # 触摸映射（ADR 0026 执行时动态转换）：Controller 下发的已验证标定
     # 记录经 parse 校验；无法提供时按轴估算兜底并标记 unverified——两种
     # 情况都把 policy 写进结果，禁止把估算当成功验证。
@@ -1124,16 +1167,26 @@ def run_aoa_sequence(
             raise AoaError(
                 "AOA touch mapping belongs to another HID mode "
                 f"({target_mapping.hid_touch_mode} != {touch_mode})")
+    source_mapping = None
+    if source_touch_mapping is not None:
+        try:
+            source_mapping = aoa_calibration.TouchMapping.from_dict(source_touch_mapping)
+        except ValueError as exc:
+            raise AoaError(f"invalid source AOA touch mapping: {exc}") from exc
+        if source_mapping.hid_touch_mode != touch_mode:
+            raise AoaError(
+                "source AOA touch mapping belongs to another HID mode "
+                f"({source_mapping.hid_touch_mode} != {touch_mode})")
     effective_policy = (
         str(mapping_policy or (target_mapping.effective_policy if target_mapping else ""))
         or ("direct_unverified" if touch_mode == "direct" else "estimated"))
-    if target_mapping is None and commands and not auto_touch_allowed_by_policy(effective_policy):
+    if any(c.kind in {"click", "longClick", "swipe"} for c in aoa_profile.parse_profile_commands(commands)) and not auto_touch_allowed_by_policy(effective_policy):
         raise AoaError(
             f"AOA mapping policy {effective_policy} forbids automatic touch input; "
             "calibrate this device first")
     if target_mapping is not None:
         commands = aoa_calibration.convert_commands(
-            commands, target_mapping, target_mapping)
+            commands, source_mapping or target_mapping, target_mapping)
     parsed = aoa_profile.parse_profile_commands(commands)
     if debug_command_source and (session_mode != "continuous" or wait_adb_seconds):
         raise AoaError("persistent debug requires continuous HID and no final ADB wait")
@@ -1144,7 +1197,8 @@ def run_aoa_sequence(
             return run_aoa_sequence(serial, [text], sleep=sleep, on_event=report,
                 suppress_adb_daemon=suppress_adb_daemon, suppress_adb_daemon_gate=suppress_adb_daemon_gate,
                 touch_mode=touch_mode, hid_settle_seconds=hid_settle_seconds,
-                touch_mapping=touch_mapping, mapping_policy=mapping_policy, _deadline=deadline)
+                touch_mapping=touch_mapping, source_touch_mapping=touch_mapping,
+                mapping_policy=mapping_policy, _deadline=deadline)
 
         return run_step_sessions(serial, commands, parsed, run_one=run_one, wait_adb=_wait_adb_state,
             validate=validate_binding, error_type=AoaError, sleep=sleep, wait_adb_seconds=wait_adb_seconds,
@@ -1268,8 +1322,14 @@ def run_aoa_sequence(
         if debug_command_source:
             from .aoa_debug_session import debug_steps
 
+            def transform_debug(text):
+                if any(c.kind in {"click", "longClick", "swipe"} for c in aoa_profile.parse_profile_commands([text])) and not auto_touch_allowed_by_policy(effective_policy):
+                    raise AoaError("unsupported mapping forbids automatic touch input")
+                return (aoa_calibration.convert_commands([text], source_mapping or target_mapping, target_mapping)[0]
+                        if target_mapping else text)
+
             steps = debug_steps(debug_command_source, parsed, tick=debug_tick, sleep=sleep,
-                                clock=time.monotonic, error_type=AoaError)
+                                clock=time.monotonic, error_type=AoaError, transform=transform_debug)
         for position, command, original in steps:
             if control_id:
                 from .aoa_control import wait_if_paused as _gate

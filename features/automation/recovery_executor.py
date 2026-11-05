@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from foundation.aoa_calibration import mapping_options
 from foundation.aoa_hid_mode import profile_hid_options
 from foundation.aoa_profile import MAX_AOA_OPERATION_SECONDS
 
@@ -17,7 +18,35 @@ class RecoveryExecutorMixin:
             for item in devices]
         if self.aoa_enabled(run) and any(not d["usb_port_path"] for d in snapshots):
             raise ValueError("AOA recovery requires a physical USB port before flashing")
+        if self.aoa_enabled(run):
+            from features.devices import replay_mapping_options
+
+            from .executors import _run_test_plan
+
+            recovery = _run_test_plan(run)["aoa"]
+            metadata = recovery.get("metadata") or {}
+            mode = profile_hid_options(metadata)["aoa_hid_touch_mode"]
+            owner = str(run.get("created_by") or run.get("owner") or "")
+            for snapshot in snapshots:
+                properties = inventory.get(snapshot["serial"], {}).get("properties") or {}
+                context = properties.get("aoa_context") or {}
+                mappings = replay_mapping_options(metadata, context, owner, mode)
+                if mappings["aoa_mapping_policy"] == "unsupported":
+                    raise ValueError("AOA recovery requires a verified mapping for the target environment before flashing")
+                snapshot["aoa_mapping_options"] = mappings
         return snapshots
+
+    @staticmethod
+    def recovery_mapping_options(recovery: dict, identity: dict) -> dict:
+        metadata = recovery.get("metadata") or {}
+        frozen = identity.get("aoa_mapping_options") or {}
+        calibration = metadata.get("calibration") or {}
+        if calibration.get("mapping") and not frozen.get("aoa_source_touch_mapping"):
+            raise ValueError("AOA mapping snapshot is missing; create a new run before flashing")
+        mappings = mapping_options({**profile_hid_options(metadata), **frozen})
+        if mappings["aoa_mapping_policy"] == "unsupported":
+            raise ValueError("AOA recovery target mapping is unsupported")
+        return mappings
 
     def recovery_preflash_error(self, cluster, worker_id: str, run: dict) -> str:
         if not self.aoa_enabled(run):
@@ -33,7 +62,15 @@ class RecoveryExecutorMixin:
             return "Worker does not support explicit AOA HID modes; update it before flashing"
         from .executors import _run_test_plan
 
-        options = profile_hid_options((_run_test_plan(run).get("aoa") or {}).get("metadata"))
+        recovery = _run_test_plan(run).get("aoa") or {}
+        options = profile_hid_options(recovery.get("metadata"))
+        try:
+            mappings = [self.recovery_mapping_options(recovery, item) for item in devices]
+        except ValueError as exc:
+            return str(exc)
+        if (any(item.get("aoa_touch_mapping") or item.get("aoa_source_touch_mapping") for item in mappings)
+                and capabilities.get("aoa_affine_mapping_v2") is not True):
+            return "Worker AOA mapping protocol is outdated; update it before flashing"
         if options["aoa_hid_session_mode"] == "per_command" and capabilities.get("aoa_per_command_v1") is not True:
             return "Worker does not support per-command AOA playback; update it before flashing"
         if (capabilities.get("aoa_usb_hid_v1") is not True
@@ -97,6 +134,7 @@ class RecoveryExecutorMixin:
             from foundation import aoa_profile
 
             aoa_profile.parse_profile_commands(commands)
+            mappings = self.recovery_mapping_options(recovery, identity)
         except ValueError as exc:
             return {"success": False, "error": str(exc)}
         wait_adb_seconds = int(recovery.get("wait_adb_seconds") or 0)
@@ -155,6 +193,7 @@ class RecoveryExecutorMixin:
                     "action": "aoa_sequence",
                     "aoa_commands": commands,
                     **profile_hid_options(recovery.get("metadata")),
+                    **mappings,
                     "wait_adb_seconds": max(wait_adb_seconds, 1),
                     "usb_port_path": str((json.loads(run.get("devices_json") or "[]")[0]).get("usb_port_path") or ""),
                     # 幂等重放键：远程路径按 run+action 派生确定性

@@ -83,7 +83,7 @@ def safe_upload_token(value: str) -> str:
 
     raw = str(value or "").strip()
     cleaned = re.sub(r"[^A-Za-z0-9_.-]", "_", raw)[:96] or "default"
-    if cleaned != raw:
+    if cleaned != raw or cleaned in {'.', '..'}:
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
         return f"{cleaned}_{digest}"
     return cleaned
@@ -110,8 +110,13 @@ def copy_fileobj_to_path(
     parent_dir = os.path.dirname(destination)
     if parent_dir:
         os.makedirs(parent_dir, exist_ok=True)
+    temporary = None
     try:
-        with open(destination, 'wb') as target:
+        # Publish only complete uploads. A size/read failure must not truncate
+        # or remove an existing file, and symlink destinations are replaced.
+        with tempfile.NamedTemporaryFile(mode='wb', dir=parent_dir or '.',
+                prefix='.gms-upload-', delete=False) as target:
+            temporary = target.name
             while chunk := source.read(chunk_size):
                 bytes_written += len(chunk)
                 if max_size is not None and bytes_written > max_size:
@@ -119,9 +124,11 @@ def copy_fileobj_to_path(
                         f'文件过大，最大支持 {max_size // (1024 * 1024)}MB'
                     )
                 target.write(chunk)
+        os.replace(temporary, destination)
     except BaseException:
-        with suppress(FileNotFoundError):
-            os.remove(destination)
+        if temporary is not None:
+            with suppress(FileNotFoundError):
+                os.remove(temporary)
         raise
     return bytes_written
 

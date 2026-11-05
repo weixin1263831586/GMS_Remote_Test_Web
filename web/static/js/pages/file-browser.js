@@ -629,6 +629,8 @@ function confirmFileSelection() {
         fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
         if (targetInput) {
             targetInput.value = fullPath;
+            // 通知烧写弹框刷新固件元信息（服务器路径提示）。
+            targetInput.dispatchEvent(new Event('input', { bubbles: true }));
             const localFirmwareInput = document.getElementById('firmware-file-input');
             if (localFirmwareInput) {
                 localFirmwareInput.value = '';

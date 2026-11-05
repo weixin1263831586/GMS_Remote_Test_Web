@@ -71,8 +71,8 @@ class AoaCalibrationStore:
         display = "|".join(str(value) for value in
                            (context.get("display") or mapping.display_pixels or [0, 0]))
         return "|".join(str(context.get(key) or "") for key in
-                        ("model", "release", "rotation", "hid_touch_mode")
-                        ) + f"|{display}"
+                        ("model", "release", "fingerprint", "density",
+                         "rotation", "hid_touch_mode", "kernel", "display_route")) + f"|{display}"
 
     @staticmethod
     def _decode(row) -> dict[str, Any]:
@@ -90,6 +90,17 @@ class AoaCalibrationStore:
         """保存一条标定记录（同 owner + 匹配键的旧记录被替换）。"""
         if not isinstance(owner_id, str) or not owner_id.strip():
             raise ApiError.invalid_semantics("AOA calibration requires an owner")
+        try:
+            mapping = TouchMapping.from_dict(mapping.to_dict())
+            context = mapping.context
+            if (not context.get("model") or not context.get("release")
+                    or type(context.get("rotation")) is not int
+                    or context["rotation"] not in range(4)
+                    or context.get("hid_touch_mode") != mapping.hid_touch_mode
+                    or context.get("display") != list(mapping.display_pixels)):
+                raise ValueError("AOA calibration requires a complete, consistent device context")
+        except ValueError as exc:
+            raise ApiError.invalid_semantics(str(exc)) from exc
         if label and len(label) > 256:
             raise ApiError.invalid_semantics("AOA calibration label exceeds 256 characters")
         key = self.match_key(mapping)
@@ -110,7 +121,10 @@ class AoaCalibrationStore:
                  mapping.effective_policy, 1 if mapping.verified else 0,
                  json.dumps(list(mapping.display_pixels)),
                  json.dumps(payload, ensure_ascii=False), now))
-        return self.get_calibration(calibration_id, owner_id)
+            # Capture this write's receipt before another process can replace
+            # the same owner's matching record after the transaction commits.
+            row = conn.execute("SELECT * FROM aoa_calibrations WHERE id=?", (calibration_id,)).fetchone()
+        return self._decode(row)
 
     def list_calibrations(self, owner_id: str, include_all: bool = False) -> list[dict[str, Any]]:
         where = "" if include_all else "WHERE owner_id=?"
@@ -151,10 +165,13 @@ class AoaCalibrationStore:
                 " ORDER BY created_at DESC, id", (owner_id,)).fetchall()
         for row in rows:
             record = self._decode(row)
-            mapping = TouchMapping.from_dict(record["mapping"])
+            try:
+                mapping = TouchMapping.from_dict(record["mapping"])
+            except ValueError:
+                continue  # Old or incomplete records require fresh verification.
             if record["hid_touch_mode"] != query_touch_mode:
                 continue
-            if mapping.mapping_policy == "unsupported":
+            if not mapping.verified:
                 continue
             if context_matches(mapping.context, query_context):
                 return record

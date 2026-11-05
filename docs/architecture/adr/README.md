@@ -30,3 +30,6 @@
 | 0022 | [Web AOA 交互录制与无 ADB USB 恢复](0022-web-aoa-recording-and-usb-recovery.md) | Accepted | — | — |
 | 0023 | [AOA 直接触摸屏与稳定的 HID 设备集合](0023-aoa-direct-touchscreen-and-stable-hid-set.md) | Accepted | — | — |
 | 0024 | [AOA 指针兼容与显式输入模式](0024-aoa-pointer-compatibility-and-input-modes.md) | Accepted（补充 0023） | — | — |
+| 0025 | [AOA 持久调试会话生命周期](0025-aoa-debug-session-lifecycle.md) | Accepted | — | — |
+| 0026 | [AOA 多点仿射标定与映射策略](0026-aoa-multi-point-affine-calibration-and-mapping-policy.md) | Accepted（验证规则由 0027 取代） | — | 0027（部分） |
+| 0027 | [AOA 映射验证与跨边界传递](0027-aoa-validated-mapping-boundaries.md) | Accepted | 0026（部分） | — |

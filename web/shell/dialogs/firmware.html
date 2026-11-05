@@ -5,35 +5,45 @@
                 <button type="button" class="modal-close" aria-label="关闭" data-click="closeFirmwareModal">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="modal-form-row">
-                    <label>固件文件:</label>
-                    <div class="input-with-btn">
-                        <input type="text" id="firmware-path" placeholder="选择本机文件或输入服务器固件路径" />
-                        <button class="btn-small" data-click="browseLocalFileForFirmware">本机</button>
-                        <button class="btn-small" data-click="browseRemoteFileForFirmware">服务器</button>
+                <div class="modal-fieldset">
+                    <div class="modal-form-row">
+                        <label>目标设备:</label>
+                        <div class="firmware-target-list" id="firmware-target-devices">未选择</div>
+                    </div>
+                    <div class="modal-form-row">
+                        <label>固件文件:</label>
+                        <div class="input-with-btn">
+                            <input type="text" id="firmware-path" placeholder="选择本机文件或输入服务器固件路径" />
+                            <button class="btn-small" data-click="browseLocalFileForFirmware">本机</button>
+                            <button class="btn-small" data-click="browseRemoteFileForFirmware">服务器</button>
+                        </div>
+                    </div>
+                    <div class="firmware-file-meta is-empty" id="firmware-file-meta"></div>
+                </div>
+                <div class="modal-fieldset">
+                    <div class="modal-fieldset-title">烧写后恢复（AOA）</div>
+                    <div class="modal-form-row">
+                        <label><input type="checkbox" id="firmware-aoa-enabled" data-change="toggleFirmwareAoa" />
+                            自动完成开机向导并开启 USB 调试</label>
+                    </div>
+                    <div class="firmware-aoa-options is-disabled" id="firmware-aoa-options">
+                        <div class="modal-form-row">
+                            <label for="firmware-aoa-profile">AOA 配置:</label>
+                            <select id="firmware-aoa-profile" disabled aria-describedby="firmware-aoa-hint">
+                                <option value="">正在加载配置…</option>
+                            </select>
+                        </div>
+                        <div class="modal-form-row">
+                            <label for="firmware-aoa-boot-wait">启动等待(秒):</label>
+                            <input id="firmware-aoa-boot-wait" type="number" min="0" max="600" step="1" value="60" disabled />
+                        </div>
+                    </div>
+                    <div class="modal-hint-text" id="firmware-aoa-hint" role="status">
+                        一次一台本地 USB 设备；开机后自动回放并验证 ADB。
                     </div>
                 </div>
-                <div class="modal-form-row">
-                    <label for="firmware-aoa-enabled">烧写后恢复:</label>
-                    <label><input type="checkbox" id="firmware-aoa-enabled" data-change="toggleFirmwareAoa" />
-                        通过 AOA 完成开机向导并开启 USB 调试</label>
-                </div>
-                <div class="modal-form-row">
-                    <label for="firmware-aoa-profile">AOA 配置:</label>
-                    <select id="firmware-aoa-profile" disabled aria-describedby="firmware-aoa-hint">
-                        <option value="">正在加载配置…</option>
-                    </select>
-                </div>
-                <div class="modal-form-row">
-                    <label for="firmware-aoa-boot-wait">启动等待(秒):</label>
-                    <input id="firmware-aoa-boot-wait" type="number" min="0" max="600" step="1" value="60" disabled />
-                </div>
-                <div class="modal-info-text" id="firmware-aoa-hint" role="status">
-                    请先在设备管理的 AOA 工作台保存并验证同机型配置。启用后一次选择一台本地 USB 设备。
-                    烧写完成后等待启动、回放配置并验证 ADB；授权弹窗可能需要在设备上确认。
-                </div>
                 <div class="modal-info-text">
-                    ⚠️ 注意：烧写固件会重启设备并进入 fastboot 模式，请确保已选择正确的设备。
+                    ⚠️ 烧写将重启设备进入刷机模式并清除数据，请确认目标设备。
                 </div>
                 <div class="modal-buttons">
                     <button class="btn-xxs" data-click="closeFirmwareModal">取消</button>
