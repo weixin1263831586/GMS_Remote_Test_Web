@@ -23,6 +23,18 @@ TERMINAL_MAX_BATCH_BYTES = 64 * 1024
 TERMINAL_IDLE_SECONDS = 0.02
 
 
+def _submit_output(websocket, event_loop, payload: dict):
+    if event_loop.is_closed() or not event_loop.is_running():
+        raise ConnectionError("terminal event loop is unavailable")
+    coroutine = websocket.send_json(payload)
+    try:
+        return asyncio.run_coroutine_threadsafe(coroutine, event_loop)
+    except RuntimeError as exc:
+        # The loop can close between the availability check and submission.
+        coroutine.close()
+        raise ConnectionError("terminal event loop closed during output") from exc
+
+
 def _read_available(channel) -> tuple[bytes, bool]:
     chunks = []
     total = 0
@@ -60,14 +72,12 @@ def start_terminal_output_pump(
         def send_payload(data: str) -> None:
             if not data:
                 return
-            future = asyncio.run_coroutine_threadsafe(
-                websocket.send_json({
-                    "type": "terminal_data",
-                    "data": data,
-                }),
-                event_loop,
-            )
-            future.result(timeout=5)
+            future = _submit_output(websocket, event_loop, {"type": "terminal_data", "data": data})
+            try:
+                future.result(timeout=5)
+            except BaseException:
+                future.cancel()
+                raise
 
         try:
             while True:
@@ -138,13 +148,9 @@ def start_terminal_output_pump(
                 close_terminal_session_resources(session)
             if notify_disconnect and ended_by_backend and session:
                 try:
-                    asyncio.run_coroutine_threadsafe(
-                        websocket.send_json({
-                            "type": "terminal_error",
-                            "error": "连接已断开",
-                        }),
-                        event_loop,
-                    )
+                    _submit_output(websocket, event_loop, {
+                        "type": "terminal_error", "error": "连接已断开",
+                    })
                 except (WebSocketDisconnect, ConnectionError, KeyError):
                     pass
 

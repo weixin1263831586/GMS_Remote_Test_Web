@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 
 from foundation.aoa_calibration import (
+    MAPPING_POLICY_DIRECT_CALIBRATED,
     MAPPING_POLICY_DIRECT_STANDARD,
     MAPPING_POLICY_DIRECT_UNVERIFIED,
     MAPPING_POLICY_POINTER_CALIBRATED,
@@ -55,10 +56,10 @@ def profile_hid_options(metadata: dict | None) -> dict:
     # direct_unverified/direct_standard/unsupported；未声明为空串——执行侧
     # 对 direct 触摸按 direct_unverified 估算、pointer 按 per-axis 兼容。
     policy = validate_mapping_policy(metadata.get("mapping_policy"))
-    if policy and mode == "pointer" and policy in (MAPPING_POLICY_DIRECT_STANDARD, MAPPING_POLICY_DIRECT_UNVERIFIED):
+    if policy and mode == "pointer" and policy in (MAPPING_POLICY_DIRECT_STANDARD, MAPPING_POLICY_DIRECT_CALIBRATED, MAPPING_POLICY_DIRECT_UNVERIFIED):
         raise ValueError("mapping policy direct_* requires hid_touch_mode direct")
     if policy == MAPPING_POLICY_POINTER_CALIBRATED and mode == "direct":
-        raise ValueError("mapping policy pointer_calibrated requires hid_touch_mode direct")
+        raise ValueError("mapping policy pointer_calibrated requires hid_touch_mode pointer")
     settle = metadata.get("hid_settle_seconds", 2)
     if isinstance(settle, bool) or not isinstance(settle, (int, float)) or not math.isfinite(settle) or not 0 <= settle <= 10:
         raise ValueError("AOA HID settle seconds must be 0..10")

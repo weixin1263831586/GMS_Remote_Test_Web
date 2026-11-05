@@ -1,4 +1,5 @@
 import json
+import os
 import ssl
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -181,7 +182,9 @@ class GerritConfigTests(unittest.TestCase):
         self.assertEqual(personal["name"], "爱丽丝")
         self.assertEqual(personal["department"], "Platform")
 
+    @patch.dict('os.environ')
     def test_feature_gerrit_config_save_preserves_other_runtime_sections(self):
+        os.environ.pop('GMS_DATA_ROOT', None)
         from features.gerrit.settings import GerritConfig
 
         with TemporaryDirectory() as tmp:

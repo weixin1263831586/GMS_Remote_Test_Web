@@ -270,6 +270,7 @@ class WorkerAgent:
                 "aoa_playback_control_v1": False,
                 "aoa_hid_modes_v1": False,
                 "aoa_per_command_v1": False,
+                "aoa_affine_mapping_v2": False,
                 "firmware_aoa_recovery_v1": False,
                 "usbip_client": False,
                 "usbip_preflight": False,

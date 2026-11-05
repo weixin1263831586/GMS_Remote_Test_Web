@@ -1,4 +1,5 @@
 import json
+import os
 import unittest
 from importlib import import_module
 from pathlib import Path
@@ -64,7 +65,9 @@ class RedmineDashboardConfigTests(unittest.TestCase):
             self.assertEqual(manager.load_redmine_credentials()["password"], "pass-1")
             self.assertEqual(manager.load_redmine_api_key(), "api-key-2")
 
+    @patch.dict('os.environ')
     def test_save_redmine_stats_config_writes_runtime_override(self):
+        os.environ.pop('GMS_DATA_ROOT', None)
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "core").mkdir()
@@ -148,7 +151,9 @@ class RedmineDashboardConfigTests(unittest.TestCase):
         ])
         self.assertEqual(issue_url_text(issues, "https://redmine.rock-chips.com/"), "\n".join(urls))
 
+    @patch.dict('os.environ')
     def test_save_redmine_dashboard_config_writes_runtime_profiles(self):
+        os.environ.pop('GMS_DATA_ROOT', None)
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "core").mkdir()
@@ -569,7 +574,9 @@ class RedmineDashboardConfigTests(unittest.TestCase):
 
         self.assertEqual(cfg["chart_date_ranges"], {"personal_daily": {"start": "2026-06-01", "end": "2026-06-13"}})
 
+    @patch.dict('os.environ')
     def test_gerrit_dashboard_runtime_save_preserves_other_runtime_config(self):
+        os.environ.pop('GMS_DATA_ROOT', None)
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "core").mkdir()

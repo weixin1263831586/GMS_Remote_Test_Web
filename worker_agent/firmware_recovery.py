@@ -5,6 +5,7 @@ import hashlib
 import json
 import time
 
+from foundation.aoa_calibration import mapping_options
 from foundation.aoa_hid_mode import profile_hid_options
 from foundation.aoa_profile import parse_profile_commands
 
@@ -23,8 +24,13 @@ def recovery_options(snapshot: dict) -> dict:
         # 与 boot_wait_seconds 同款上界：可信快照之外的数据不得把
         # 命令线程卡在 _wait_adb_state 任意久。
         raise ValueError("AOA recovery wait_adb_seconds out of range")
+    hid_options = profile_hid_options(snapshot.get("metadata"))
+    mappings = snapshot.get("mapping_options") or {
+        "aoa_touch_mapping": snapshot.get("touch_mapping"),
+        "aoa_source_touch_mapping": ((snapshot.get("metadata") or {}).get("calibration") or {}).get("mapping"),
+    }
     return {"aoa_commands": commands, "usb_port_path": snapshot["usb_port_path"],
-            **profile_hid_options(snapshot.get("metadata")),
+            **hid_options, **mapping_options({**hid_options, **mappings}),
             "wait_adb_seconds": wait_adb_seconds,
             "aoa_metadata": snapshot.get("metadata") or {},
             "post_flash_recovery": snapshot}

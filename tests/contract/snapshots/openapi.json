@@ -1096,10 +1096,40 @@
             "title": "Aoa Hid Touch Mode",
             "type": "string"
           },
+          "aoa_mapping_policy": {
+            "default": "",
+            "maxLength": 32,
+            "title": "Aoa Mapping Policy",
+            "type": "string"
+          },
           "aoa_record": {
             "additionalProperties": true,
             "title": "Aoa Record",
             "type": "object"
+          },
+          "aoa_source_touch_mapping": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aoa Source Touch Mapping"
+          },
+          "aoa_touch_mapping": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aoa Touch Mapping"
           },
           "automation_run_id": {
             "default": "",

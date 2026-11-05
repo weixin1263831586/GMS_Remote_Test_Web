@@ -9,7 +9,7 @@ const AOA_TOUCH_CALIBRATION_VERSION = 3;
 const aoaPanelState = {
     profiles: [], devices: [], commands: [], loaded: false, loading: false,
     running: false, recording: false, editingProfileId: '', screenRefreshId: 0,
-    calibration: null, pointer: null, autoConnectDone: false,
+    calibration: null, pointer: null, liveTargetKey: '',
     profileMetadata: {},
     hidSettingsProfileId: '',
     playbackControlId: '', playbackPaused: false, playbackActive: false,
@@ -21,14 +21,15 @@ function aoaEl(id) { return document.getElementById(id); }
 
 function aoaHidMetadata() {
     return {...aoaPanelState.profileMetadata,
-        hid_touch_mode: aoaEl('aoa-hid-touch-mode')?.value || 'pointer',
+        hid_touch_mode: aoaEl('aoa-hid-touch-mode')?.value || 'direct',
         hid_session_mode: aoaEl('aoa-hid-session-mode')?.value || 'continuous',
         hid_settle_seconds: Number(aoaEl('aoa-hid-settle')?.value || 2)};
 }
 
 function aoaLoadHidMetadata(metadata = {}) {
     const context = metadata.calibration?.context;
-    const inferred = context?.version === 2 ? context.hid_touch_mode || 'direct' : 'pointer';
+    const inferred = Number.isInteger(context?.version) && context.version >= 2
+        ? context.hid_touch_mode || 'direct' : 'pointer';
     const mode = metadata.hid_touch_mode || metadata.calibration?.hid_touch_mode || inferred;
     const settle = metadata.hid_settle_seconds ?? 2;
     const sessionMode = metadata.hid_session_mode || 'continuous';
@@ -202,6 +203,29 @@ function aoaDeviceLabel(device) {
     return `${aoaDeviceSerial(device)}${suffix ? ` · ${suffix}` : ''}`;
 }
 
+function aoaDeviceContext(serial, workerId) {
+    const device = aoaPanelState.devices.find(item =>
+        aoaDeviceSerial(item) === String(serial) && aoaDeviceWorker(item) === String(workerId));
+    if (!device) return null;
+    const properties = {...(device.properties || {}), ...(device.aoa_context || device.properties?.aoa_context || {})};
+    const model = device.model || properties.model || '';
+    const release = device.android_version || device.release || properties.android_version
+        || properties.release || '';
+    const rawDisplay = device.display || device.display_pixels || properties.display
+        || properties.display_pixels;
+    const display = Array.isArray(rawDisplay) && rawDisplay.length === 2
+        ? rawDisplay.map(Number) : null;
+    const rotation = Number.isInteger(device.rotation) ? device.rotation
+        : Number.isInteger(properties.rotation) ? properties.rotation : null;
+    if (!model || !release || !display || display.some(value => !Number.isInteger(value) || value <= 0)
+            || !Number.isInteger(rotation) || rotation < 0 || rotation > 3) return null;
+    return {model: String(model), release: String(release), display, rotation,
+        fingerprint: properties.fingerprint || device.fingerprint || '',
+        density: properties.density ?? device.density ?? null,
+        kernel: properties.kernel || device.kernel || '',
+        display_route: properties.display_route || device.display_route || ''};
+}
+
 function aoaReplaceOptions(select, entries, emptyLabel, keepMissing = false) {
     if (!select) return;
     const previous = select.value;
@@ -274,7 +298,12 @@ function aoaReplayWorkerChanged() {
     aoaFillDeviceSelect('aoa-replay-device', aoaEl('aoa-replay-worker')?.value || '', false);
 }
 
-function aoaRecorderDeviceChanged() {
+// 用户在录制设备下拉里明确选择设备：这是唯一的自动连接实时投屏入口。
+function aoaRecorderDeviceSelected() {
+    aoaRecorderDeviceChanged({autoLive: true});
+}
+
+function aoaRecorderDeviceChanged(options = {}) {
     aoaPanelState.calibration = null;
     const key = `gms-aoa-calibration:${aoaEl('aoa-record-worker')?.value || ''}:${aoaEl('aoa-record-device')?.value || ''}`;
     try {
@@ -285,13 +314,12 @@ function aoaRecorderDeviceChanged() {
         }
     } catch (_) { /* storage unavailable */ }
     aoaRenderCalibration();
-    // 切换设备：实时投屏会话属于旧设备，必须停止；随后自动续上新画面
-    // （之前在实时投屏 → 自动对新设备重启流，失败内部回退截图轮询；
-    //  截图模式 → 自动拉一帧），不再要求手动点“刷新”。
-    if (window.aoaLiveScreen?.isActive()) {
-        window.aoaLiveScreen.stop();
-        aoaEl('aoa-toggle-live')?.setAttribute('data-live', 'off');
-    }
+    // 只读联动（打开页签/清单同步/切换 Worker）不得发起变更请求：目标
+    // 未变化时保持现有投屏不中断；目标变化时仅停止旧会话，等待用户在
+    // 下拉里明确选择设备后再自动重连（前端初始化/默认值路径零变更写）。
+    const targetKey = `${aoaEl('aoa-record-worker')?.value || ''}:${aoaEl('aoa-record-device')?.value || ''}`;
+    const targetChanged = targetKey !== aoaPanelState.liveTargetKey;
+    aoaPanelState.liveTargetKey = targetKey;
     const image = aoaEl('aoa-screen-image');
     if (image) { image.hidden = true; image.removeAttribute('src'); }
     const canvas = aoaEl('aoa-screen-canvas');
@@ -300,21 +328,43 @@ function aoaRecorderDeviceChanged() {
     if (empty) { empty.hidden = true; }
     const target = aoaLiveTarget();
     if (!target) {
+        if (window.aoaLiveScreen?.isActive()) {
+            window.aoaLiveScreen.stop();
+            aoaEl('aoa-toggle-live')?.setAttribute('data-live', 'off');
+        }
         if (empty) empty.hidden = false;
         const status = aoaEl('aoa-screen-status');
-        if (status) status.textContent = '选择录制设备后将自动连接实时投屏';
+        if (status) status.textContent = '选择录制设备后点「▶ 实时投屏」连接';
         aoaRenderCalibration();
         return;
     }
-    // 一律自动优先实时流（scrcpy）：成功即画面实时更新；设备不支持/流
-    // 失败时 aoaLiveScreen.start 内部自动回退截图轮询。「▶」按钮仅作为
-    // 手动停止/重开投屏的开关。
+    if (options.autoLive) {
+        // 用户明确选择设备：自动优先实时流（scrcpy）；流失败由
+        // aoaLiveScreen.start 内部回退截图轮询。「▶」按钮仅作为开关。
+        if (window.aoaLiveScreen?.isActive()) {
+            window.aoaLiveScreen.stop();
+        }
+        const status = aoaEl('aoa-screen-status');
+        if (status) status.textContent = `正在连接 ${target.device} 实时投屏…`;
+        window.aoaLiveScreen.start(target.device, target.workerId).then(() => {
+            aoaEl('aoa-toggle-live')?.setAttribute(
+                'data-live', window.aoaLiveScreen.isActive() ? 'on' : 'off');
+        });
+        aoaRenderCalibration();
+        return;
+    }
+    if (!targetChanged && window.aoaLiveScreen?.isActive()) {
+        // 打开页签等只读重入且目标未变：不打断进行中的会话。
+        aoaRenderCalibration();
+        return;
+    }
+    if (targetChanged && window.aoaLiveScreen?.isActive()) {
+        window.aoaLiveScreen.stop();
+        aoaEl('aoa-toggle-live')?.setAttribute('data-live', 'off');
+    }
     const status = aoaEl('aoa-screen-status');
-    if (status) status.textContent = `正在连接 ${target.device} 实时投屏…`;
-    window.aoaLiveScreen.start(target.device, target.workerId).then(() => {
-        aoaEl('aoa-toggle-live')?.setAttribute(
-            'data-live', window.aoaLiveScreen.isActive() ? 'on' : 'off');
-    });
+    if (status) status.textContent = `点「▶ 实时投屏」连接 ${target.device}`;
+    aoaEl('aoa-toggle-live')?.setAttribute('data-live', 'off');
     aoaRenderCalibration();
 }
 
@@ -795,10 +845,12 @@ async function aoaReplaySelected(profileId = '') {
     aoaPanelState.playbackPaused = false;
     aoaPanelState.playbackWorker = worker;
     aoaSetBusy(true, `回放中：${profile.name}`);
+    const deviceContext = aoaDeviceContext(device, worker);
     try {
         let result = await aoaApi('/api/devices/aoa/recover', {method: 'POST', body: {
             worker_id: worker, device, commands,
             metadata: hidMetadata,
+            ...(deviceContext ? {device_context: deviceContext} : {}),
             wait_adb_seconds: Number(aoaEl('aoa-replay-wait')?.value) || profile.wait_adb_seconds || 60,
             playback_control_id: aoaPanelState.playbackControlId,
         }});
@@ -849,8 +901,8 @@ async function aoaViewToggle(show) {
     if (visible) {
         if (typeof stopDevicesAutoRefresh === 'function') stopDevicesAutoRefresh();
         await aoaLoadPanel();
-        // 清单同步后按当前选中设备联动：默认自动连接实时投屏（无选中
-        // 设备则只显示空态提示），与切换设备时的自动续流行为一致。
+        // 只读联动：刷新下拉与画面状态，不自动发起投屏（变更请求仅跟随
+        // 用户明确选择设备或「▶ 实时投屏」开关，零初始化写）。
         if (typeof loadDevicesManagement === 'function') await loadDevicesManagement();
         if (typeof stopDevicesAutoRefresh === 'function') stopDevicesAutoRefresh();
         aoaRecorderDeviceChanged();

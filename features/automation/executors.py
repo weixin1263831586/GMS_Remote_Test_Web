@@ -121,8 +121,21 @@ def _validated_controller_artifact(value: str) -> Path:
 
 
 def _jenkins_config_from_run(run: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
+    from foundation.outbound import same_http_origin
+
     jenkins = _run_jenkins_plan(run)
     config = dict(fallback or {})
+    target_changed = 'base_url' in jenkins and (
+        not same_http_origin(str(jenkins['base_url']), str(config.get('base_url') or ''))
+        or urlparse(str(jenkins['base_url'])).path.rstrip('/')
+        != urlparse(str(config.get('base_url') or '')).path.rstrip('/'))
+    account_changed = 'username' in jenkins and jenkins['username'] != config.get('username')
+    if target_changed or account_changed:
+        for key in ('username', 'api_token', 'token'):
+            config.pop(key, None)
+    if 'api_token' in jenkins or 'token' in jenkins:
+        config.pop('api_token', None)
+        config.pop('token', None)
     for key in ("base_url", "username", "api_token", "token", "verify_ssl", "crumb"):
         if key in jenkins:
             config[key] = jenkins[key]
@@ -434,6 +447,8 @@ class HttpAutomationExecutor(RecoveryExecutorMixin):
                     }
                 normalized = candidates[:minimum]
 
+            snapshots = self.snapshot_devices(
+                cluster.repository, worker_id, [{"id": device_id} for device_id in dict.fromkeys(normalized)], run)
             reservation = cluster.repository.reserve_devices(
                 worker_id,
                 normalized,
@@ -446,7 +461,7 @@ class HttpAutomationExecutor(RecoveryExecutorMixin):
                 "success": True,
                 "worker_id": worker_id,
                 "reservation_id": reservation["id"],
-                "devices": self.snapshot_devices(cluster.repository, worker_id, reservation["devices"], run),
+                "devices": snapshots,
             }
         except ValueError as exc:
             return {"success": False, "retry": True, "error": str(exc)}

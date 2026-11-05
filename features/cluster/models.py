@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from foundation.aoa_profile import MAX_PROFILE_COMMANDS
 from foundation.device_action_spec import DeviceAction
@@ -178,6 +178,9 @@ class ClusterDeviceAction(BaseModel):
     aoa_hid_touch_mode: Literal["pointer", "direct"] = "pointer"
     aoa_hid_settle_seconds: float = Field(default=2, ge=0, le=10)
     aoa_hid_session_mode: Literal["continuous", "per_command"] = "continuous"
+    aoa_touch_mapping: dict[str, Any] | None = None
+    aoa_source_touch_mapping: dict[str, Any] | None = None
+    aoa_mapping_policy: str = Field(default="", max_length=32)
     aoa_debug_session_id: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
     aoa_debug_request_id: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
     aoa_debug_command: str = Field(default="", max_length=1024)
@@ -193,6 +196,16 @@ class ClusterDeviceAction(BaseModel):
     # aoa_sequence 回放过程控制句柄（前端生成的一次性 id）：随命令下发，
     # 运行中经 /devices/aoa/playback/{id}/control 暂停/继续/终止。
     playback_control_id: str = Field(default="", max_length=64)
+
+    @model_validator(mode="after")
+    def validate_aoa_mapping(self):
+        from foundation.aoa_calibration import mapping_options
+
+        normalized = mapping_options(self.model_dump(include={
+            "aoa_touch_mapping", "aoa_source_touch_mapping", "aoa_mapping_policy", "aoa_hid_touch_mode"}))
+        for key, value in normalized.items():
+            setattr(self, key, value)
+        return self
 
 
 class ClusterSuiteDownload(BaseModel):

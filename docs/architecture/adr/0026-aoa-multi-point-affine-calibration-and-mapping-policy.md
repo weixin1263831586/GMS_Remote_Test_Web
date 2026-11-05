@@ -4,6 +4,9 @@
 - Date: 2026-11-04
 - Related: [ADR 0022](0022-web-aoa-recording-and-usb-recovery.md), [ADR 0023](0023-aoa-direct-touchscreen-and-stable-hid-set.md), [ADR 0024](0024-aoa-pointer-compatibility-and-input-modes.md)
 
+> 验证、策略提升与降级规则已由 [ADR 0027](0027-aoa-validated-mapping-boundaries.md)
+> 取代：采用独立验证点和专用安全页面，拟合成功不再自动提升为 direct_standard。
+
 ## Context
 
 不同设备的 `wm size` / `wm density` / 屏幕尺寸不同，逐台手动标定不可扩展。

@@ -44,6 +44,8 @@ def local_management_inventory() -> tuple[list[str], dict, dict, str] | None:
             'model', 'android_version', 'battery_level', 'soc_model',
         )}
         properties[serial]['serial_no'] = serial
+        if props.get('aoa_context'):
+            properties[serial]['aoa_context'] = props['aoa_context']
         state = str(item.get('state') or '')
         protocols[serial] = state if state in {'fastboot', 'usb_only'} else 'adb'
     if not devices:

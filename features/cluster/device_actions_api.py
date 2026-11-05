@@ -258,6 +258,13 @@ async def device_action(body: ClusterDeviceAction, request: Request):
         operation_id = f"device-action-{uuid.uuid4().hex}"
     action_payload["request_sha256"] = digest
     action_payload["skip_if_adb_online"] = bool(automation_run_id) and body.action == "aoa_sequence"
+    needs_mapping = (body.aoa_touch_mapping is not None or body.aoa_source_touch_mapping is not None
+        or body.aoa_mapping_policy in {"unsupported", "direct_calibrated", "pointer_calibrated"}
+        or (body.action == "aoa_record_input" and (body.aoa_record.get("touch_mapping") is not None
+            or body.aoa_record.get("action") == "calibrate"))
+        or (body.action == "aoa_record" and bool(body.aoa_record.get("calibrate_touch"))))
+    if not is_local and needs_mapping and (worker.get("capabilities") or {}).get("aoa_affine_mapping_v2") is not True:
+        raise ApiError.conflict("Worker 标定映射协议过旧，请更新 Worker 后重试")
     if (not is_local and body.action == "aoa_sequence" and body.aoa_hid_session_mode == "per_command"
             and (worker.get("capabilities") or {}).get("aoa_per_command_v1") is not True):
         raise ApiError.conflict("Worker 不支持按单条方式回放，请更新 Worker")

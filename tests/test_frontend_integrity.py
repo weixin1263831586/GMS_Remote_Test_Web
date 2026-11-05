@@ -477,7 +477,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("formData.append('chunk_size', chunkSize)", chunks)
         self.assertIn("chunk-upload.js?v=20260910-elev-recovery", shell)
         self.assertNotIn("普通固件烧写需要 ADB 设备", firmware)
-        self.assertIn("firmware-burn.js?v=20260930-pages-split", shell)
+        self.assertRegex(shell, r'/static/js/pages/firmware-burn\.js\?v=[^"\s]+')
         # 提权过期（403 elevation_required）时：分片不再整块重试，
         # 烧录页弹出管理员提权后续传，elevation 状态检查失败不 fail-open。
         self.assertIn("chunkUploadHttpError", chunks)

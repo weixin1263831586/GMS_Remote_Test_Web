@@ -49,9 +49,14 @@ async function aoaExecuteRecorderInput(input, {refresh = true, pace = true} = {}
     catch (error) { showToast(error.message, 'warning'); return null; }
     const payload = {...input, hid_touch_mode: aoaHidMetadata().hid_touch_mode};
     if (input.action !== 'calibrate' && aoaPanelState.calibration?.measured) {
-        payload.scale_x = aoaPanelState.calibration.scale_x;
-        payload.scale_y = aoaPanelState.calibration.scale_y;
         payload.calibration_context = aoaPanelState.calibration.context;
+        if (aoaPanelState.calibration.mapping) {
+            payload.touch_mapping = aoaPanelState.calibration.mapping;
+        } else {
+            // Legacy single-point records remain supported until re-calibrated.
+            payload.scale_x = aoaPanelState.calibration.scale_x;
+            payload.scale_y = aoaPanelState.calibration.scale_y;
+        }
     }
     aoaSetBusy(true, `执行 ${input.action}…`);
     try {
@@ -71,12 +76,21 @@ async function aoaExecuteRecorderInput(input, {refresh = true, pace = true} = {}
             aoaRenderCalibration();
             // 标定成功时同步持久化到 Controller（aoa_calibrations 表，owner
             // 隔离）：跨页面/跨会话可复用，不再只依赖 localStorage 临时状态。
-            if (result.touch_calibration.mapping) {
-                aoaApi('/api/devices/aoa/calibrations', {
+            if (input.action === 'calibrate' && result.touch_calibration.mapping?.verified) {
+                try {
+                    const saved = await aoaApi('/api/devices/aoa/calibrations', {
                     method: 'POST',
                     body: {mapping: result.touch_calibration.mapping,
                            label: `${target.device} @ ${new Date().toISOString().slice(0, 19)}`},
-                }).catch(() => { /* 持久化失败不阻塞录制流程 */ });
+                    });
+                    aoaPanelState.calibration.record_id = saved.calibration.id;
+                    aoaRenderCalibration();
+                    showToast(`标定已保存：${saved.calibration.id}`, 'success');
+                } catch (error) {
+                    aoaPanelState.calibration.save_error = error.message;
+                    aoaRenderCalibration();
+                    showToast(`标定已实测，但保存失败：${error.message}。请重新保存标定。`, 'warning');
+                }
             }
         }
         aoaSetStatus(aoaPanelState.recording ? '录制中' : '操作完成', 'success');
@@ -111,6 +125,9 @@ async function aoaToggleLiveScreen() {
         aoaSetStatus('实时投屏已关闭');
         return;
     }
+    // 手动启动视为对当前目标的确认：同步 liveTargetKey，后续只读联动
+    // （重新打开页签）不会误判目标变化而中断会话。
+    aoaPanelState.liveTargetKey = `${aoaEl('aoa-record-worker')?.value || ''}:${aoaEl('aoa-record-device')?.value || ''}`;
     const target = aoaLiveTarget();
     if (!target) { showToast('请选择录制 Worker 和设备', 'warning'); return; }
     await window.aoaLiveScreen.start(target.device, target.workerId);
@@ -135,8 +152,8 @@ function aoaSendText() {
 async function aoaCalibrateTouch() {
     const ok = await showConfirmDialog(
         'AOA 触摸标定',
-        '标定会把录制机短暂切入 AOAv2 模式并发送五个探针触摸（四角与中心），'
-        + '用于拟合多点仿射映射。请先停在探针点击无副作用的页面，是否继续？');
+        '标定将打开设备上的 AOA Calibration 安全页面，切入 AOAv2 后发送五个拟合点和两个独立验证点。'
+        + '请先安装安全标定应用，是否继续？');
     if (!ok) return;
     const result = await aoaExecuteRecorderInput({action: 'calibrate'}, {refresh: true, pace: false});
     if (result?.touch_calibration?.measured) {
@@ -158,12 +175,15 @@ function aoaRenderCalibration() {
     const policy = calibration.mapping?.mapping_policy
         || calibration.mapping_policy || '';
     const policyLabel = {
-        direct_standard: '多点仿射已验证（免逐台标定）',
+        direct_standard: '标准映射兼容性记录',
+        direct_calibrated: '直接触摸实测修正（独立验证通过）',
         direct_unverified: '多点实测未达误差门槛/未验证',
         pointer_calibrated: '指针模式实测映射',
         estimated: '仅按轴估算',
         unsupported: '映射不可用，已禁止自动触摸',
     }[policy] || '';
     node.textContent = `触摸映射：已实测（X ${calibration.scale_x} / Y ${calibration.scale_y} 像素每逻辑单位）`
-        + (policyLabel ? ` · ${policyLabel}` : '');
+        + (policyLabel ? ` · ${policyLabel}` : '')
+        + (calibration.record_id ? ` · 已保存 ${calibration.record_id}` : '')
+        + (calibration.save_error ? ' · 保存失败，仅本页可用' : '');
 }

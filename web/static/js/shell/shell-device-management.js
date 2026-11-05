@@ -169,6 +169,7 @@
                                 cluster_device_inspection: Boolean(capabilities.device_inspection),
                                 model: properties.model || properties.product,
                                 android_version: properties.android_version,
+                                aoa_context: properties.aoa_context || null,
                                 battery_level: properties.battery_level,
                                 soc_model: properties.soc_model,
                                 claimed: Boolean(device.claimed),

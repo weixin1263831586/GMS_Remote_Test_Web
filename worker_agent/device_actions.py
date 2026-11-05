@@ -87,7 +87,7 @@ _adb_socket_for_enrich: list[str | None] = [None]
 
 def _probe_device_details_uncached(
     serial: str, adb_server_socket: str | None = None
-) -> dict[str, str]:
+) -> dict[str, Any]:
     output = _run([
         "adb", "-s", serial, "shell",
         "echo __MODEL__; getprop ro.product.model; "
@@ -96,7 +96,10 @@ def _probe_device_details_uncached(
         "echo __BUILD_ID__; getprop ro.build.id; "
         "echo __BOARD__; getprop ro.product.board; "
         "echo __BATTERY__; dumpsys battery | grep '^  level:' | head -n 1; "
-        "echo __SOC__; getprop ro.soc.model",
+        "echo __SOC__; getprop ro.soc.model; "
+        "echo __FINGERPRINT__; getprop ro.build.fingerprint; "
+        "echo __WM_SIZE__; wm size; echo __WM_DENSITY__; wm density; "
+        "echo __KERNEL__; uname -r; echo __INPUT__; dumpsys input",
     ], timeout=3, env=_adb_environment(adb_server_socket))
     markers = {
         "__MODEL__": "model",
@@ -107,18 +110,26 @@ def _probe_device_details_uncached(
         "__BATTERY__": "battery_level",
         "__SOC__": "soc_model",
     }
-    details: dict[str, str] = {}
+    details: dict[str, Any] = {}
     current = ""
     for line in output.splitlines():
         value = line.strip()
         if value in markers:
             current = markers[value]
             continue
+        if re.fullmatch(r"__[A-Z_]+__", value):
+            current = ""
+            continue
         if not current or not value or current in details:
             continue
         if current == "battery_level":
             value = value.partition(":")[2].strip() if ":" in value else value
         details[current] = value
+    from .aoa_calibration import inventory_context
+
+    context = inventory_context(output, details)
+    if context:
+        details["aoa_context"] = context
     return details
 
 
@@ -322,6 +333,11 @@ def probe_devices(
             key, separator, value = item.partition(":")
             if separator:
                 properties[key] = value
+            elif re.fullmatch(r"\d+-[\d.]+", item):
+                # platform-tools 35 的 `adb devices -l` 把物理端口打印为
+                # 裸位置字段（`1-6`），不再带 `usb:` 前缀。缺端口会让烧写
+                # 后 AOA 恢复冻结报 409（无法确认物理端口），必须归一化。
+                properties["usb"] = item
         if proxy_source:
             properties.update({
                 "adb_proxy_source_worker_id": proxy_source["source_worker_id"],
@@ -394,7 +410,8 @@ def aoa_capabilities() -> dict[str, bool]:
     return {"aoa_record_input_v1": shutil.which("adb") is not None,
             "aoa_usb_hid_v1": has_pyusb, "aoa_identity_fencing_v1": True,
             "aoa_playback_control_v1": True, "firmware_aoa_recovery_v1": True,
-            "aoa_hid_modes_v1": True, "aoa_per_command_v1": True}
+            "aoa_hid_modes_v1": True, "aoa_per_command_v1": True,
+            "aoa_affine_mapping_v2": True}
 
 
 def execute_device_action(
@@ -608,6 +625,7 @@ def execute_device_action(
                     hid_settle_seconds=options.get("aoa_hid_settle_seconds", 2),
                     session_mode=options.get("aoa_hid_session_mode", "continuous"),
                     touch_mapping=options.get("aoa_touch_mapping"),
+                    source_touch_mapping=options.get("aoa_source_touch_mapping"),
                     mapping_policy=str(options.get("aoa_mapping_policy") or ""),
                 )
         except AoaError as exc:

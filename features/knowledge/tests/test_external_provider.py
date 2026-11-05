@@ -664,6 +664,8 @@ class GoldenQueryCorpusTests(unittest.TestCase):
             cls._db_patch = patch.object(mod, "index_db_path", return_value=db)
             cls._db_patch.start()
             cls.addClassCleanup(cls._db_patch.stop)
+        if not mod.index_db_path().is_file():
+            raise unittest.SkipTest("android-internals-wiki 索引未部署；语料回归需要预建的只读索引")
 
     def _rows(self) -> list[dict]:
         path = _WIKI_CLONE / "knowledge-pack" / "golden-queries.yaml"

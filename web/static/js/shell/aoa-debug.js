@@ -68,11 +68,17 @@ async function aoaDebugExecute(command, worker, device, onProgress) {
         Object.assign(aoaDebugState, {id: `dbg-${crypto.randomUUID()}`, worker, device});
     }
     const metadata = aoaHidMetadata();
+    const mapping = metadata.calibration?.mapping;
     const body = {worker_id: worker, devices: [device], action: 'aoa_sequence',
         aoa_commands: aoaPanelState.commands.slice(), wait_adb_seconds: 0,
         aoa_hid_touch_mode: metadata.hid_touch_mode, aoa_hid_settle_seconds: metadata.hid_settle_seconds,
         aoa_hid_session_mode: 'continuous', playback_control_id: aoaDebugState.id,
         aoa_debug_session_id: aoaDebugState.id, aoa_debug_request_id: crypto.randomUUID(), aoa_debug_command: command};
+    if (mapping) {
+        body.aoa_touch_mapping = mapping;
+        body.aoa_source_touch_mapping = mapping;
+        body.aoa_mapping_policy = mapping.mapping_policy || 'direct_unverified';
+    }
     aoaDebugState.pending = body;
     aoaDebugButtonState();
     try {
@@ -159,6 +165,11 @@ async function aoaCommandExecute(index) {
             aoa_commands: [command], wait_adb_seconds: 0,
             aoa_hid_touch_mode: aoaHidMetadata().hid_touch_mode,
             aoa_hid_settle_seconds: aoaHidMetadata().hid_settle_seconds,
+            ...(aoaHidMetadata().calibration?.mapping ? {
+                aoa_touch_mapping: aoaHidMetadata().calibration.mapping,
+                aoa_source_touch_mapping: aoaHidMetadata().calibration.mapping,
+                aoa_mapping_policy: aoaHidMetadata().calibration.mapping.mapping_policy || 'direct_unverified',
+            } : {}),
         }});
         if (!keep) result = await aoaAwaitCommand(result, {trackPlayback: false, onProgress});
         if (result.success !== true || result.commands_executed !== 1 || result.native_mode_restored === false) {

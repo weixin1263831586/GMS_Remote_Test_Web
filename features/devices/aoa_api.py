@@ -29,6 +29,7 @@ from foundation.error_model import ApiError
 
 from . import scrcpy_stream
 from .aoa_calibrations import calibration_store
+from .aoa_mapping_service import replay_mapping_options
 from .aoa_service import profile_store
 from .operation_claims import acquire_device_operation_claim, release_device_operation_claim
 
@@ -226,23 +227,15 @@ async def recover(request: Request, body: dict[str, Any]):
         "wait_adb_seconds": max(wait_adb_seconds, 1),
         "playback_control_id": str(body.get("playback_control_id") or ""),
     }
-    # 标定记录复用（ADR 0026）：请求可带设备环境键（model/release/
-    # display/rotation），Controller 匹配本账号已验证的标定记录并随命令
-    # 下发——Worker 据此做坐标动态转换；无匹配时明确标记 unverified，
-    # 不假定按轴估算必然正确。
-    device_context = body.get("device_context")
-    if isinstance(device_context, dict) and device_context.get("model"):
-        device_context["hid_touch_mode"] = hid_options["aoa_hid_touch_mode"]
-        record = calibration_store().find_matching(
-            principal_owner_id(request), device_context)
-        if record is not None:
-            payload["aoa_touch_mapping"] = record["mapping"]
-            payload["aoa_mapping_policy"] = record["mapping_policy"]
-        else:
-            payload["aoa_mapping_policy"] = (
-                "direct_unverified"
-                if hid_options["aoa_hid_touch_mode"] == "direct"
-                else "estimated")
+    try:
+        payload.update(replay_mapping_options(metadata, body.get("device_context"),
+            principal_owner_id(request), hid_options["aoa_hid_touch_mode"]))
+    except (ValueError, TypeError) as exc:
+        raise ApiError.invalid_semantics(str(exc)) from exc
+    if (payload.get("aoa_mapping_policy") == "unsupported"
+            and any(c.kind in {"click", "longClick", "swipe"}
+                    for c in aoa_profile.parse_profile_commands(commands))):
+        raise ApiError.conflict("目标环境未匹配已验证映射，请采集目标设备环境并重新标定")
     return await cluster_port.submit_device_action(request, payload)
 
 

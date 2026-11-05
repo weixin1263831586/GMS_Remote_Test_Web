@@ -266,8 +266,13 @@ def test_record_uses_measured_calibration(monkeypatch):
     monkeypatch.setattr(aoa_actions, "_display_size", lambda _serial: (800, 1280))
     monkeypatch.setattr(aoa_actions, "_adb_run",
                         lambda _serial, *args, **kw: FakeCompleted())
-    monkeypatch.setattr(aoa_actions, "_calibrate_touch_mapping",
-                        lambda serial, w, h, sleep, touch_mode="pointer": (2.2, 2.2))
+    from foundation.aoa_calibration import five_point_calibration_points, mapping_from_samples
+
+    measured = mapping_from_samples("pointer",
+        [((x, y), (x * 2.2, y * 2.2)) for x, y in five_point_calibration_points(360, 640)],
+        display_pixels=(800, 1280),
+        validation_samples=[((120, 213), (264, 468.6)), ((240, 427), (528, 939.4))])
+    monkeypatch.setattr(aoa_actions, "_calibrate_touch_affine", lambda *a, **kw: measured)
     monkeypatch.setattr(
         aoa_actions, "_dump_elements",
         lambda _serial, _sleep=None: (
@@ -286,6 +291,39 @@ def test_record_uses_measured_calibration(monkeypatch):
     # 按轴换算（旧逻辑）会错成 (267, 570)——这正是实机上导航失效的原因。
     assert "click 267 570" not in result["commands"]
     assert "click 267 514" not in result["commands"]
+
+
+def test_record_uses_affine_mapping_for_profile_commands(monkeypatch):
+    """Profile recording must use the five-point affine mapping, not only scales."""
+    from foundation.aoa_calibration import five_point_calibration_points, mapping_from_samples
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = ""
+
+    context = {"version": 3, "model": "RK3576", "release": "16",
+               "display": [800, 1280], "rotation": 0, "hid_touch_mode": "direct"}
+    mapping = mapping_from_samples(
+        "direct",
+        [((x, y), (x * 2.2, y * 2.2 + 60))
+         for x, y in five_point_calibration_points(360, 640)],
+        context=context, display_pixels=(800, 1280),
+        validation_samples=[((120, 213), (264, 528.6)), ((240, 427), (528, 999.4))],
+    )
+    monkeypatch.setattr(aoa_actions, "_display_size", lambda _serial: (800, 1280))
+    monkeypatch.setattr(aoa_actions, "_adb_run",
+                        lambda _serial, *args, **kw: FakeCompleted())
+    monkeypatch.setattr(aoa_actions, "_calibrate_touch_affine",
+                        lambda *args, **kwargs: mapping)
+    monkeypatch.setattr(aoa_actions, "_dump_elements",
+                        lambda _serial, _sleep=None: (
+                            [{"text": "Chrome", "content_desc": "", "clickable": True,
+                              "center": [400, 700]}], {},))
+    result = aoa_actions.record_aoa_profile(
+        "serial", [{"action": "click", "wait_ms": 100, "find": {"text": "Chrome"}}],
+        calibrate_touch=True, touch_mode="direct", sleep=lambda _s: None)
+    assert "click 182 291" in result["commands"]
+    assert result["touch_calibration"]["mapping"]["context"] == context
 
 
 def test_run_sequence_mocked_hid(monkeypatch):

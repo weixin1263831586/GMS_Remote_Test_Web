@@ -467,6 +467,17 @@ def parse_record_input_action(raw: dict) -> dict:
             raise ValueError(f"record input {name} is out of range")
         normalized[name] = scale
     context = raw.get("calibration_context")
+    touch_mapping = raw.get("touch_mapping")
+    if touch_mapping is not None:
+        if not isinstance(touch_mapping, dict):
+            raise ValueError("record input touch_mapping must be an object")
+        # Import lazily: aoa_calibration imports this module for the HID limits.
+        from foundation.aoa_calibration import TouchMapping
+
+        try:
+            normalized["touch_mapping"] = TouchMapping.from_dict(touch_mapping).to_dict()
+        except ValueError as exc:
+            raise ValueError(f"record input touch_mapping is invalid: {exc}") from exc
     if "scale_x" in normalized or "scale_y" in normalized:
         if ("scale_x" not in normalized or "scale_y" not in normalized
                 or not isinstance(context, dict) or type(context.get("version")) is not int
@@ -481,8 +492,39 @@ def parse_record_input_action(raw: dict) -> dict:
             raise ValueError("touch scales require a versioned calibration_context; recalibrate the display")
         normalized["calibration_context"] = {
             "version": AOA_TOUCH_CALIBRATION_VERSION, "model": context["model"], "release": str(context.get("release") or "")[:64],
+            "fingerprint": str(context.get("fingerprint") or "")[:256],
+            "density": context.get("density"),
+            "kernel": str(context.get("kernel") or "")[:256],
+            "display_route": str(context.get("display_route") or "")[:256],
             "display": context["display"], "rotation": context["rotation"],
             "hid_touch_mode": context.get("hid_touch_mode", "direct"),
+        }
+    elif touch_mapping is not None:
+        mapping_context = normalized["touch_mapping"].get("context") or context
+        if not isinstance(mapping_context, dict):
+            raise ValueError("touch_mapping requires a calibration context")
+        if (type(mapping_context.get("version")) is not int
+                or mapping_context.get("version") != AOA_TOUCH_CALIBRATION_VERSION
+                or not isinstance(mapping_context.get("model"), str)
+                or not mapping_context["model"].strip()
+                or type(mapping_context.get("rotation")) is not int
+                or mapping_context["rotation"] not in range(4)
+                or not isinstance(mapping_context.get("display"), list)
+                or len(mapping_context["display"]) != 2
+                or any(type(n) is not int or not 1 <= n <= 10000
+                       for n in mapping_context["display"])):
+            raise ValueError("touch_mapping requires a versioned calibration_context; recalibrate the display")
+        normalized["calibration_context"] = {
+            "version": AOA_TOUCH_CALIBRATION_VERSION,
+            "model": mapping_context["model"],
+            "release": str(mapping_context.get("release") or "")[:64],
+            "fingerprint": str(mapping_context.get("fingerprint") or "")[:256],
+            "density": mapping_context.get("density"),
+            "kernel": str(mapping_context.get("kernel") or "")[:256],
+            "display_route": str(mapping_context.get("display_route") or "")[:256],
+            "display": mapping_context["display"],
+            "rotation": mapping_context["rotation"],
+            "hid_touch_mode": mapping_context.get("hid_touch_mode", "direct"),
         }
     if raw.get("hid_touch_mode") is not None or normalized.get("calibration_context"):
         from .aoa_hid_mode import validate_touch_mode

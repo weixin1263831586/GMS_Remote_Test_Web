@@ -4,6 +4,25 @@ from tests.runtime_ui.harness import RuntimeUiHarness
 
 
 class RuntimeDeviceManagementLoadingTests(RuntimeUiHarness):
+    def test_initial_test_page_handles_unavailable_workspace_without_device_requests(self):
+        page = self.new_page()
+        errors, inventory_requests = [], []
+        page.on('pageerror', lambda error: errors.append(str(error)))
+        page.on('request', lambda request: inventory_requests.append(request.url)
+                if request.url.split('?')[0].endswith((
+                    '/api/devices/list', '/api/devices/management', '/api/cluster/devices')) else None)
+        page.route('**/api/users/workspace-context',
+                   lambda route: route.fulfill(status=503, content_type='application/json', body='{}'))
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("document.getElementById('cluster-mode-label').textContent.includes('模式读取失败')")
+            page.evaluate('() => new Promise(resolve => setTimeout(resolve, 50))')
+            self.assertEqual(errors, [])
+            self.assertEqual(inventory_requests, [])
+            self.assertIsNone(page.evaluate('GmsWorkspace.get().scope_mode'))
+        finally:
+            page.close()
+
     def test_unavailable_cluster_keeps_saved_mode_and_target(self):
         page = self.new_page()
         try:

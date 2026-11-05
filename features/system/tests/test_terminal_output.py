@@ -1,5 +1,7 @@
 import asyncio
+import inspect
 import unittest
+from unittest.mock import Mock, patch
 
 from features.system.state import global_state
 from features.system.terminal_output import start_terminal_output_pump
@@ -44,6 +46,38 @@ class _SplitUtf8Channel(_Channel):
 
 
 class TerminalOutputTests(unittest.IsolatedAsyncioTestCase):
+    async def test_loop_closing_during_submission_closes_every_unscheduled_coroutine(self):
+        session_id = 'loop-closed'
+        channel = _Channel([b'pending'])
+        with global_state.terminal_lock:
+            global_state.terminal_ssh_sessions[session_id] = {'channel': channel, 'ssh': None, 'mode': 'local'}
+        with patch('features.system.terminal_output.asyncio.run_coroutine_threadsafe',
+                   side_effect=RuntimeError('Event loop is closed')) as submit:
+            thread = start_terminal_output_pump(session_id, _WebSocket(), asyncio.get_running_loop(),
+                                                thread_name='test-terminal-closed-loop', notify_disconnect=True)
+            await asyncio.to_thread(thread.join, 1)
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(channel.closed)
+        self.assertNotIn(session_id, global_state.terminal_ssh_sessions)
+        self.assertEqual(submit.call_count, 2)
+        for call in submit.call_args_list:
+            self.assertEqual(inspect.getcoroutinestate(call.args[0]), inspect.CORO_CLOSED)
+
+    async def test_send_timeout_cancels_pending_delivery_before_cleanup(self):
+        session_id = 'send-timeout'
+        channel = _Channel([b'pending'])
+        with global_state.terminal_lock:
+            global_state.terminal_ssh_sessions[session_id] = {'channel': channel, 'ssh': None, 'mode': 'local'}
+        future = Mock()
+        future.result.side_effect = TimeoutError('send stalled')
+        with patch('features.system.terminal_output._submit_output', return_value=future):
+            thread = start_terminal_output_pump(session_id, _WebSocket(), asyncio.get_running_loop(),
+                                                thread_name='test-terminal-send-timeout')
+            await asyncio.to_thread(thread.join, 1)
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(channel.closed)
+        future.cancel.assert_called_once_with()
+
     async def asyncTearDown(self):
         with global_state.terminal_lock:
             sessions = list(global_state.terminal_ssh_sessions.values())

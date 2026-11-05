@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from foundation.aoa_calibration import (
-    MAPPING_POLICY_DIRECT_STANDARD,
+    MAPPING_POLICY_DIRECT_CALIBRATED,
     MAPPING_POLICY_DIRECT_UNVERIFIED,
     MAPPING_POLICY_POINTER_CALIBRATED,
     MAPPING_POLICY_UNSUPPORTED,
@@ -91,11 +91,13 @@ def test_mapping_from_samples_reports_residuals_and_policy():
     samples = [((u, v), (u * scale, v * scale)) for u, v in hid_points]
     # 注入 1px 噪声到中心点。
     samples[2] = (samples[2][0], (samples[2][1][0] + 1.0, samples[2][1][1]))
-    mapping = mapping_from_samples("direct", samples, display_pixels=(800, 1280))
-    assert len(mapping.samples) == 5
+    mapping = mapping_from_samples("direct", samples, display_pixels=(800, 1280),
+        validation_samples=[((120, 213), (120 * scale, 213 * scale)),
+                            ((240, 427), (240 * scale, 427 * scale))])
+    assert len(mapping.samples) == 7
     assert mapping.max_error_px <= MAX_CALIBRATION_ERROR_PX
     assert mapping.verified
-    assert mapping.effective_policy == MAPPING_POLICY_DIRECT_STANDARD
+    assert mapping.effective_policy == MAPPING_POLICY_DIRECT_CALIBRATED
     assert mapping.rms_error_px > 0
 
 
@@ -110,7 +112,7 @@ def test_mapping_with_large_residual_is_not_verified():
 
 
 def test_policy_helpers():
-    assert policy_for("direct", True) == MAPPING_POLICY_DIRECT_STANDARD
+    assert policy_for("direct", True) == MAPPING_POLICY_DIRECT_CALIBRATED
     assert policy_for("pointer", True) == MAPPING_POLICY_POINTER_CALIBRATED
     assert policy_for("direct", False) == MAPPING_POLICY_UNSUPPORTED
     assert validate_mapping_policy(None) == ""
@@ -140,10 +142,8 @@ def test_touch_mapping_roundtrip_and_clamp():
     u, v = mapping.screen_to_hid(400, 640)
     assert 0 <= u <= 360 and 0 <= v <= 640
     # 非可逆矩阵不能反解。
-    degenerate = TouchMapping(hid_touch_mode="direct", matrix=(1.0, 0.0, 2.0, 0.0),
-                              offset=(0.0, 0.0))
     with pytest.raises(ValueError, match="invertible"):
-        degenerate.screen_to_hid(10, 10)
+        TouchMapping(hid_touch_mode="direct", matrix=(1.0, 0.0, 2.0, 0.0), offset=(0.0, 0.0))
 
 
 def test_touch_mapping_serialization_roundtrip():
@@ -188,7 +188,7 @@ def test_convert_commands_reprojects_touch_coordinates():
                           offset=(0.0, 0.0), display_pixels=(800, 1280))
     target = per_axis_mapping(1200, 1920)
     center = convert_point(source, target, 180, 320)
-    assert center == (round(180 * 2.216 * 361 / 1200), round(320 * 2.216 * 641 / 1920))
+    assert center == (round(180 * 2.216 * 361 / 800), round(320 * 2.216 * 641 / 1280))
     converted = convert_commands(
         ["click 180 320", "swipe 90 480 500 270 160", "wake", "key TAB", "sleep 100", "write abc"],
         source, target)

@@ -129,6 +129,8 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
         return page
 
     def install_api_mocks(self, page, requests):
+        workspace_context = {'scope_mode': 'single', 'worker_id': 'ats-worker-controller', 'device_ids': []}
+
         def fulfill_json(route, payload):
             route.fulfill(status=200, content_type='application/json', body=json.dumps(payload))
 
@@ -180,6 +182,10 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
                         'role': 'admin',
                     },
                 )
+            elif path.endswith('/api/users/workspace-context'):
+                if isinstance(body, dict):
+                    workspace_context.update(body)
+                fulfill_json(route, {'success': True, 'data': {'context': workspace_context}})
             elif path.endswith('/api/system/health'):
                 fulfill_json(route, {'success': True, 'status': 'healthy'})
             elif path.endswith('/api/system/docs'):

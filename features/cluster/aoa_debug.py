@@ -21,7 +21,8 @@ def prepare_debug_request(repository, body, payload, devices, owner_id, *, is_lo
         current = existing.get("payload") or {}
         if current.get("owner_id") != owner_id:
             raise ApiError.not_found("AOA debug session not found")
-        for key in ("aoa_hid_touch_mode", "aoa_hid_settle_seconds", "aoa_hid_session_mode"):
+        for key in ("aoa_hid_touch_mode", "aoa_hid_settle_seconds", "aoa_hid_session_mode",
+                    "aoa_touch_mapping", "aoa_source_touch_mapping", "aoa_mapping_policy"):
             if current.get(key) != payload.get(key):
                 raise ApiError.conflict("调试会话的输入模式已固定，请结束调试后重新连接")
         if current.get("devices") != devices:

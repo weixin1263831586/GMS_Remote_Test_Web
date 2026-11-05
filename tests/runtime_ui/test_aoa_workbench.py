@@ -432,8 +432,8 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
                 return json_response(route, {'success': True, 'profiles': [profile]})
             body = route.request.post_data_json
             if '/record/stream/' in path and path.endswith('/start'):
-                # 默认自动实时投屏（面板打开/设备同步后自动连接）发出的
-                # 会话型控制写：不属于本用例守护的“编辑/回放不落库”不变量。
+                # 用户明确选择设备后的自动实时投屏会话型控制写：不属于本
+                # 用例守护的“编辑/回放不落库”不变量。
                 return json_response(route, {'success': True, 'stream': 'started'})
             writes.append({'path': path, 'body': body})
             if path.endswith('/recover'):
