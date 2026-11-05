@@ -615,6 +615,12 @@
     "methods": [
       "POST"
     ],
+    "path": "/api/cluster/firmware/preflight"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
     "path": "/api/cluster/firmware/stage"
   },
   {
@@ -1303,6 +1309,30 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/devices/aoa/certifications"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/aoa/certifications"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/aoa/certifications/verify"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/devices/aoa/certifications/{certificate_id}"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/devices/aoa/playback/{control_id}/control"
@@ -1390,6 +1420,12 @@
       "POST"
     ],
     "path": "/api/devices/aoa/recover"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/aoa/templates/resolve"
   },
   {
     "methods": [

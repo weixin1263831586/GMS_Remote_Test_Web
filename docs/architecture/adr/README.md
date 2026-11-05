@@ -33,3 +33,5 @@
 | 0025 | [AOA 持久调试会话生命周期](0025-aoa-debug-session-lifecycle.md) | Accepted | — | — |
 | 0026 | [AOA 多点仿射标定与映射策略](0026-aoa-multi-point-affine-calibration-and-mapping-policy.md) | Accepted（验证规则由 0027 取代） | — | 0027（部分） |
 | 0027 | [AOA 映射验证与跨边界传递](0027-aoa-validated-mapping-boundaries.md) | Accepted | 0026（部分） | — |
+| 0028 | [AOA 固件绑定恢复与严格环境验证](0028-aoa-firmware-bound-recovery-and-strict-environment.md) | Accepted（补充 0027，标准路径由 0029 补充） | — | 0029（部分） |
+| 0029 | [AOA 设备类别认证与语义回放](0029-aoa-class-certification-and-semantic-playback.md) | Accepted | 0028（部分） | — |

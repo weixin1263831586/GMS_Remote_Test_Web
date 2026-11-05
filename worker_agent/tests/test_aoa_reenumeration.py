@@ -111,6 +111,45 @@ class UsbFixture:
                                                on_event=self.event, control_id=control_id)
 
 
+@pytest.mark.parametrize('still_accessory,wrong_port', [(False, False), (True, False), (False, True)])
+def test_final_native_usb_verification_resolves_reset_handle_error_without_replaying_input(monkeypatch, still_accessory, wrong_port):
+    usb = UsbFixture(monkeypatch)
+    reset = aoa_actions._reset_usb
+    waits = []
+
+    def stale_reset(device):
+        reset(device)
+        if still_accessory:
+            usb.current = usb.make_device(8, accessory=True)
+        if wrong_port:
+            usb.current.port_numbers = (7,)
+        raise OSError(2, 'Entity not found')
+
+    def adb_ready(serial, timeout):
+        waits.append((serial, timeout))
+        return {'adb_state': 'device', 'adb_recovered': True, 'usb_port_path': '1-6'}
+
+    monkeypatch.setattr(aoa_actions, '_reset_usb', stale_reset)
+    monkeypatch.setattr(aoa_actions, '_ensure_native_mode', lambda *_: False)
+    monkeypatch.setattr(aoa_actions, '_wait_adb_state', adb_ready)
+    with bind_usb('1-6', usb.validate):
+        result = aoa_actions.run_aoa_sequence('SERIAL', ['click 180 520'], wait_adb_seconds=60, sleep=usb.sleep)
+    assert waits == [('SERIAL', 60)]
+    assert result['commands_executed'] == 1
+    reports = [report for device in usb.devices for report in device.touch_reports]
+    assert reports == [aoa_profile.touch_report(True, 180, 520), aoa_profile.touch_report(False, 180, 520),
+                       aoa_profile.touch_report(False, 0, 0)]
+    assert sum(device.resets for device in usb.devices) == 1
+    restored = not still_accessory and not wrong_port
+    assert result['success'] is restored
+    assert result['native_mode_restored'] is restored
+    if not restored:
+        assert result['cleanup_errors'] and result['reconcile_required'] is True
+    else:
+        assert result['cleanup_errors'] == [] and result['reconcile_required'] is False
+        assert [item['step'] for item in result['cleanup_warnings']] == ['reset_usb', 'restore_native_mode']
+
+
 @pytest.mark.parametrize('transition', ['native', 'accessory', 'same-address'])
 def test_step_19_rebuilds_before_swipe_without_replaying_completed_clicks(monkeypatch, transition):
     usb = UsbFixture(monkeypatch, transition)
@@ -147,6 +186,45 @@ def test_disconnect_mid_swipe_reports_partial_input_and_never_retries(monkeypatc
     assert len(usb.original.touch_reports) == 18 + 5
     assert not any(e['phase'] == 'reconnecting' for e in usb.events)
     assert not any(device.touch_reports for device in usb.devices[1:])
+
+
+def test_usb_debug_disconnect_before_step_63_retains_last_input_and_no_false_completion(monkeypatch):
+    usb = UsbFixture(monkeypatch, transition=None)
+    progress = []
+    commands = ["sleep 1"] * 60 + ["click 320 320", "sleep 3000", "click 180 280",
+                                  "sleep 1000", "click 290 320"]
+    original_event = usb.event
+
+    def event(value):
+        original_event(value)
+        if value['phase'] == 'completed' and value['index'] == 61:
+            usb.original.alive = False
+            usb.current = None
+
+    with bind_usb('1-6'), pytest.raises(aoa_actions.AoaError, match='reconnect timed out') as caught:
+        aoa_actions.run_aoa_sequence('SERIAL', commands, sleep=usb.sleep, on_event=event,
+            on_progress=lambda index, *_: progress.append(index))
+    result = caught.value.aoa_result
+    assert result['commands_executed'] == 62
+    assert result['failed_index'] == 63 and result['failed_command'] == 'click 180 280'
+    assert result['failed_input_state'] == 'not_sent'
+    assert result['last_input_index'] == 61 and result['last_input_command'] == 'click 320 320'
+    assert progress == list(range(1, 63))
+    assert len(usb.original.touch_reports) == 2  # Only the step-61 down/up pair.
+    assert usb.events[-1]['phase'] == 'failed' and usb.events[-1]['failed_index'] == 63
+
+
+@pytest.mark.parametrize('fail_report', [1, 6])
+def test_even_first_failed_transfer_is_uncertain_and_never_retried(monkeypatch, fail_report):
+    usb = UsbFixture(monkeypatch, transition=None, fail_report=fail_report)
+    with pytest.raises(aoa_actions.AoaError) as caught:
+        usb.run()
+    result = caught.value.aoa_result
+    assert result['failed_index'] == 19
+    assert result['failed_input_state'] == 'uncertain'
+    assert result['failed_reports_sent'] == fail_report - 1
+    assert result['last_input_index'] == 17
+    assert result['last_input_command'] == 'click 180 520'
 
 
 def test_claim_revoked_during_reconnect_blocks_setup_and_usb_reset(monkeypatch):

@@ -158,8 +158,10 @@ async function aoaCommandExecute(index) {
         const onProgress = event => {
             if (event.phase === 'running' || event.phase === 'failed') aoaUpdateCommandDebug(event.phase);
         };
-        const keep = Boolean(aoaEl('aoa-debug-keep')?.checked || aoaDebugState.id);
-        let result = keep ? await aoaDebugExecute(command, worker, device, onProgress)
+        const semantic = Boolean(aoaHidMetadata().semantic_template);
+        const keep = !semantic && Boolean(aoaEl('aoa-debug-keep')?.checked || aoaDebugState.id);
+        let result = semantic ? await aoaExecuteSemanticStep(index, worker, device, command, onProgress)
+            : keep ? await aoaDebugExecute(command, worker, device, onProgress)
             : await aoaApi('/api/cluster/devices/actions', {method: 'POST', body: {
             worker_id: worker, devices: [device], action: 'aoa_sequence',
             aoa_commands: [command], wait_adb_seconds: 0,
@@ -171,7 +173,7 @@ async function aoaCommandExecute(index) {
                 aoa_mapping_policy: aoaHidMetadata().calibration.mapping.mapping_policy || 'direct_unverified',
             } : {}),
         }});
-        if (!keep) result = await aoaAwaitCommand(result, {trackPlayback: false, onProgress});
+        if (!keep && !semantic) result = await aoaAwaitCommand(result, {trackPlayback: false, onProgress});
         if (result.success !== true || result.commands_executed !== 1 || result.native_mode_restored === false) {
             throw new Error(result.error || (result.native_mode_restored === false
                 ? '命令已发送，但设备未恢复原生 USB 模式' : '未收到单条命令执行成功的完整回执'));

@@ -8,7 +8,30 @@ from features.auth import AGENT_ROLE, get_authenticated_user, is_machine_princip
 from features.devices import profile_store, usbip_source_host_for_device
 from foundation.aoa_hid_mode import profile_hid_options
 from foundation.aoa_profile import parse_profile_commands
+from foundation.aoa_recovery_policy import firmware_compatibility, require_verified_recovery, target_firmware_context
 from foundation.error_model import ApiError
+
+
+def preflight_firmware_recovery(request, cluster, worker_id, devices, profile_id, boot_wait_seconds=60):
+    """Read-only readiness check before any upload, claim or firmware command."""
+    worker_id = worker_id or cluster.config.local_worker_id
+    if not worker_id:
+        raise ApiError.dependency_unavailable("本机 Worker 尚未配置，无法核对 AOA 恢复条件")
+    if worker_id != cluster.config.local_worker_id:
+        worker = cluster.repository.get_worker(worker_id) or {}
+        if worker.get("status") not in {"online", "busy", "draining"}:
+            raise ApiError.conflict("目标 Worker 不在线，请刷新设备清单后重试")
+    try:
+        snapshot = freeze_firmware_recovery(request, cluster.repository, worker_id, devices, profile_id, boot_wait_seconds)
+    except ApiError as exc:
+        raise ApiError(exc.code, exc.message, details={"stage": "aoa_preflight", "profile_id": profile_id},
+            next_actions=({"action": "edit_aoa_profile", "profile_id": profile_id, "page": "devices", "view": "aoa"},
+                          {"action": "disable_aoa_recovery", "label": "关闭自动 AOA，仅烧写固件"})) from exc
+    return {"success": True, "ready": True, "worker_id": worker_id,
+            "profile_id": snapshot["profile_id"], "profile_name": snapshot["profile_name"],
+            "profile_revision": snapshot["profile_revision"],
+            "expected_firmware_sha256": (snapshot.get("firmware_compatibility") or {}).get("sha256", ""),
+            "mapping_policy": snapshot["mapping_options"]["aoa_mapping_policy"]}
 
 
 def freeze_firmware_recovery(request, repository, worker_id: str, devices: list[str],
@@ -62,14 +85,25 @@ def freeze_firmware_recovery(request, repository, worker_id: str, devices: list[
             context[key] = properties.get(key, (device or {}).get(key))
     context["release"] = context.get("release") or properties.get("android_version")
     try:
+        context = target_firmware_context(profile.get("metadata") or {}, commands, context)
         mappings = replay_mapping_options(profile.get("metadata") or {}, context,
-            principal_owner_id(request), options["aoa_hid_touch_mode"])
+            principal_owner_id(request), options["aoa_hid_touch_mode"], commands=commands)
+        require_verified_recovery(commands, mappings, profile.get("metadata") or {})
     except (ValueError, TypeError) as exc:
         raise ApiError.invalid_semantics(str(exc)) from exc
     if mappings["aoa_mapping_policy"] == "unsupported":
         raise ApiError.conflict("目标设备显示/固件环境未匹配已验证标定，请重新采集目标环境后再烧写")
     if mappings.get("aoa_touch_mapping") and caps.get("aoa_affine_mapping_v2") is not True:
         raise ApiError.conflict("Worker 标定映射协议过旧，请更新 Worker 后再烧写")
+    if mappings.get("aoa_semantic_plan") and caps.get("aoa_semantic_v1") is not True:
+        raise ApiError.conflict("Worker 不支持认证语义回放，请更新 Worker 后再烧写")
+    if mappings.get("aoa_semantic_plan"):
+        from foundation.aoa_semantics import require_capture_capability
+
+        try:
+            require_capture_capability(mappings, caps, device["serial"], port)
+        except ValueError as exc:
+            raise ApiError.conflict(str(exc)) from exc
     return {
         "profile_id": profile["id"], "profile_name": profile["name"],
         "profile_revision": profile.get("revision", ""),
@@ -84,6 +118,7 @@ def freeze_firmware_recovery(request, repository, worker_id: str, devices: list[
         # 现场查询环境,必须在刷前把已验证 TouchMapping 一并冻结进快照。
         # 无匹配记录时显式标记 unverified,回放结果不得当作已验证坐标。
         "target_context": context,
+        "firmware_compatibility": firmware_compatibility(profile.get("metadata") or {}, commands),
         "mapping_options": mappings,
         "touch_mapping": mappings.get("aoa_touch_mapping"),
     }
@@ -164,6 +199,9 @@ async def run_local_firmware_recovery(prepared: dict, on_event=None) -> dict:
     from foundation.aoa_calibration import mapping_options
 
     payload.update(mapping_options({**payload, **(snapshot.get("mapping_options") or {})}))
+    from features.devices import validate_owned_semantic
+
+    validate_owned_semantic(payload, prepared["owner_id"])
     fenced_local_payload(repository, payload)
     payload["request_sha256"] = request_digest(
         prepared["worker_id"], payload["devices"], payload, prepared["owner_id"])
@@ -202,6 +240,8 @@ async def run_local_firmware_recovery(prepared: dict, on_event=None) -> dict:
     result = current.get("result") or {}
     success = (current["status"] == "completed" and result.get("success") is True
                and result.get("adb_recovered") is True)
+    from foundation.aoa_recovery_status import recovery_failure_reason
+
     return {"success": success, "command_id": command["id"], "result": result,
-            "error": "" if success else current.get("error") or "ADB 尚未恢复或尚未授权",
+            "error": "" if success else recovery_failure_reason(result, current.get("error") or ""),
             "reconcile_required": not success}

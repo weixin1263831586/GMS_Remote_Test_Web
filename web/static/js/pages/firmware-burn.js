@@ -1,4 +1,5 @@
 // ==================== VNC & Remote Control ====================
+let firmwareBurnSubmitting = false;
 async function burnFirmware() {
     if (selectedBurnableDeviceIds().length === 0) {
         showToast('请先选择要烧写固件的设备', 'warning');
@@ -6,12 +7,12 @@ async function burnFirmware() {
     }
     if (!validateLocalUsbDeviceSelection('烧写固件')) return;
 
-    // Show firmware configuration modal
-    ModalManager.open('firmware-modal');
     renderFirmwareTargetDevices();
     hookFirmwareFileMetaInput();
     updateFirmwareFileMeta();
-    await loadFirmwareAoaProfiles();
+    const loading = loadFirmwareAoaProfiles();
+    ModalManager.open('firmware-modal');
+    await loading;
 }
 
 // 弹框内回显烧写目标（serial + 型号），避免回到设备列表逐一核对。
@@ -67,6 +68,12 @@ function toggleFirmwareAoa() {
     document.getElementById('firmware-aoa-profile').disabled = !enabled;
     document.getElementById('firmware-aoa-boot-wait').disabled = !enabled;
     document.getElementById('firmware-aoa-options').classList.toggle('is-disabled', !enabled);
+    const hint = document.getElementById('firmware-aoa-hint');
+    if (!enabled && hint.dataset.state === 'error') {
+        delete hint.dataset.state;
+        hint.removeAttribute('title');
+        hint.textContent = '已关闭自动 AOA，本次仅烧写固件。';
+    }
 }
 
 async function loadFirmwareAoaProfiles() {
@@ -74,7 +81,11 @@ async function loadFirmwareAoaProfiles() {
     const select = document.getElementById('firmware-aoa-profile');
     const previous = select.value;
     const hint = document.getElementById('firmware-aoa-hint');
+    delete hint.dataset.state;
+    hint.removeAttribute('title');
     select.replaceChildren(new Option('正在加载配置…', ''));
+    hint.textContent = '触摸配置须有实测标定及目标固件兼容声明；镜像不符时在烧写前停止，回放后验证 ADB。';
+    toggleFirmwareAoa();
     try {
         const response = await apiCall('/api/devices/aoa/profiles');
         if (revision !== firmwareAoaLoadRevision) return;
@@ -82,7 +93,6 @@ async function loadFirmwareAoaProfiles() {
         select.replaceChildren(new Option(profiles.length ? '请选择已验证的 AOA 配置' : '暂无配置，请先在 AOA 工作台保存', ''));
         profiles.forEach(profile => select.add(new Option(`${profile.name}（${profile.commands.length} 条，ADB 等待 ${profile.wait_adb_seconds || 60}s）`, profile.id)));
         if (profiles.some(profile => profile.id === previous)) select.value = previous;
-        hint.textContent = '选择已在同机型验证的配置；回放完成后自动验证 ADB。';
     } catch (error) {
         if (revision !== firmwareAoaLoadRevision) return;
         select.replaceChildren(new Option('配置加载失败，请重新打开弹框重试', ''));
@@ -172,6 +182,7 @@ async function browseRemoteFileForFirmware() {
 }
 
 async function submitFirmwareBurn() {
+    if (firmwareBurnSubmitting) return;
     const firmwarePath = document.getElementById('firmware-path').value.trim();
     if (!firmwarePath) {
         showToast('请选择固件文件', 'error');
@@ -194,6 +205,10 @@ async function submitFirmwareBurn() {
         showToast('启用 AOA 时请选择一台设备、一个已验证的配置，并填写 0..600 秒的启动等待', 'warning');
         return;
     }
+    const workerId = selectedClusterWorker();
+    if (workerId && (!selectedFirmwareFile || devices.length !== 1)) {
+        showToast('远端 Worker 烧写须选择一台设备和本机固件文件', 'warning'); return;
+    }
     const appendAoaOptions = (form) => {
         if (aoaEnabled) {
             form.append('aoa_profile_id', aoaProfile);
@@ -206,9 +221,25 @@ async function submitFirmwareBurn() {
         e.returnValue = '固件上传中，刷新会暂停浏览器上传；重新选择同一文件后可从已上传分片续传。确定要离开吗？';
         return e.returnValue;
     };
+    const submitButton = document.querySelector('#firmware-modal [data-click="submitFirmwareBurn"]');
+    firmwareBurnSubmitting = true;
+    submitButton.disabled = true;
+    let burnStarted = false;
     try {
+        if (aoaEnabled) await checkFirmwareAoaBeforeUpload(workerId, devices, aoaProfile, bootWait);
+        if (!ModalManager.isOpen('firmware-modal')) return;
         const granted = await requestElevatedAccess('烧写设备固件');
         if (!granted) return;
+        if (!ModalManager.isOpen('firmware-modal')) return;
+        if (workerId !== selectedClusterWorker() || JSON.stringify(devices) !== JSON.stringify(selectedBurnableDeviceIds())
+                || firmwarePath !== document.getElementById('firmware-path').value.trim()
+                || selectedFirmwareFile !== (document.getElementById('firmware-file-input')?.files?.[0] || null)
+                || aoaEnabled !== document.getElementById('firmware-aoa-enabled').checked
+                || (aoaEnabled && (aoaProfile !== document.getElementById('firmware-aoa-profile').value
+                    || bootWaitText !== document.getElementById('firmware-aoa-boot-wait').value.trim()))) {
+            throw new Error('检查期间设备、固件或 AOA 选项已改变，请核对后重试');
+        }
+        burnStarted = true;
         closeFirmwareModal();
         showToast('正在烧写固件...', 'info');
         addLogEntry(`开始烧写固件: ${firmwarePath}`, 'info');
@@ -220,14 +251,7 @@ async function submitFirmwareBurn() {
             }
         };
 
-        const workerId = selectedClusterWorker();
         if (workerId) {
-            if (!selectedFirmwareFile) {
-                throw new Error('远端 Worker 烧写必须选择本机固件文件，以便安全分发并校验 SHA-256');
-            }
-            if (devices.length !== 1) {
-                throw new Error('集群固件烧写一次只允许选择一台设备');
-            }
             lockDevicesInUI(devices);
             const form = new FormData();
             form.append('worker_id', workerId);
@@ -407,6 +431,10 @@ async function submitFirmwareBurn() {
             await refreshDevicesAfterBurn();
         }
     } catch (error) {
+        if (!burnStarted) {
+            firmwareAoaPreflightFailed(error);
+            return;
+        }
         // 网络层异常（后端不可达等）后端无法自行通知，保留本地通知。
         // Worker 命令已创建的失败由 Controller 终态通知负责，不重复回存。
         if (!error.clusterCommandDispatched) {
@@ -423,6 +451,9 @@ async function submitFirmwareBurn() {
         loadDevices(true).catch(refreshError => {
             console.error('[Firmware Burn] Failed to refresh devices after error:', refreshError);
         });
+    } finally {
+        firmwareBurnSubmitting = false;
+        submitButton.disabled = false;
     }
 }
 

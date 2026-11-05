@@ -587,6 +587,15 @@ async def burn_firmware(
                 # firmware bytes + wipe_data + burn_mode) and consumed
                 # exactly once. An approval minted for firmware A is
                 # rejected for firmware B; reuse fails on used_at.
+                if aoa_recovery and aoa_recovery["snapshot"].get("firmware_compatibility"):
+                    from foundation.aoa_recovery_policy import require_firmware_digest
+
+                    actual_digest = await _remote_sha256(ssh, remote_firmware)
+                    try:
+                        require_firmware_digest(aoa_recovery["snapshot"]["firmware_compatibility"], actual_digest)
+                    except ValueError as exc:
+                        raise ApiError.conflict(str(exc)) from exc
+
                 if agent_burn:
 
                     from features.auth import auth_service as _auth

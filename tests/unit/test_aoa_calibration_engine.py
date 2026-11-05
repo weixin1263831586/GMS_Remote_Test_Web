@@ -210,8 +210,9 @@ def test_convert_commands_rejects_malformed_input():
 
 
 def test_context_matches_requires_full_environment_equality():
-    record = {"model": "RK3576", "release": "16", "rotation": 0,
-              "hid_touch_mode": "direct", "display": [800, 1280]}
+    from tests.aoa_fixtures import verified_mapping
+
+    record = verified_mapping().context
     assert context_matches(record, dict(record))
     for key, value in (("model", "RK3562"), ("release", "15"), ("rotation", 1),
                        ("hid_touch_mode", "pointer"), ("display", [1200, 1920])):

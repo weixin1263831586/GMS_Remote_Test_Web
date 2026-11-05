@@ -384,6 +384,7 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
             expect(rows.locator('.aoa-command-execute')).to_have_count(3)
             command_list = page.locator('#aoa-command-list')
             list_top = command_list.bounding_box()['y']
+            page.locator('#aoa-debug-keep').uncheck()
             rows.nth(1).get_by_role('button', name='编辑第 2 条命令', exact=True).click()
             rows.nth(1).get_by_role('textbox', name='第 2 条命令内容').fill('click 200 600')
             # Execute commits the visible draft before dispatching a single command.
@@ -587,6 +588,10 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
 
     def test_screen_states_keep_columns_and_bottom_controls_in_place(self):
         page = self.new_page()
+        page.route('**/api/devices/management*', lambda route: json_response(
+            route, {'success': True, 'devices': [], 'groups': []}))
+        page.route('**/api/cluster/devices*', lambda route: json_response(
+            route, {'success': True, 'devices': []}))
 
         def layout():
             return page.evaluate("""() => {
@@ -594,7 +599,7 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
                     const r = document.querySelector(selector).getBoundingClientRect();
                     return {x: r.x, y: r.y, width: r.width, height: r.height, bottom: r.bottom};
                 };
-                return ['#aoa-panel', '.aoa-screen-column', '.aoa-workbench-grid > section:nth-child(2)',
+                return ['#aoa-panel', '.aoa-screen-column', '.aoa-config-column',
                     '.aoa-command-column', '#aoa-screen-stage', '.aoa-screen-toolbar', '.aoa-text-input']
                     .map(rect);
             }""")
@@ -623,6 +628,7 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
                 measured: true, scale_x: 2.2, scale_y: 2.2,
                 context: {version: 1, model: 'Box', display: [800, 1280], rotation: 0}
             }));""")
+            page.locator('#aoa-record-worker').select_option('worker-a')
             page.locator('#aoa-record-device').select_option('REC')
             expect(page.locator('#aoa-screen-status')).to_contain_text('正在连接')
             self.assertIsNone(page.evaluate('aoaPanelState.calibration'))

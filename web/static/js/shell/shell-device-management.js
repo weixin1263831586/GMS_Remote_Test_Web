@@ -1,5 +1,6 @@
         // ==================== 设备管理功能 ====================
         let devicesRefreshInterval = null;
+        let devicesEventRefreshTimer = null;
         let devicesManagementLoadPromise = null;
         let devicesManagementLoadScope = '';
         let devicesManagementClusterMode = false;
@@ -9,6 +10,17 @@
         function stopDevicesAutoRefresh() {
             if (devicesRefreshInterval) clearInterval(devicesRefreshInterval);
             devicesRefreshInterval = null;
+            clearTimeout(devicesEventRefreshTimer);
+            devicesEventRefreshTimer = null;
+        }
+
+        function scheduleDevicesManagementRefresh() {
+            if (currentPage !== 'devices' || document.hidden || devicesEventRefreshTimer) return;
+            devicesEventRefreshTimer = setTimeout(() => {
+                devicesEventRefreshTimer = null;
+                if (currentPage !== 'devices' || document.hidden) return;
+                loadDevicesManagement().catch(error => debugLog('[Devices] Event refresh failed:', error));
+            }, 250);
         }
 
         function requestedDevicesManagementScope() {
@@ -217,7 +229,7 @@
                 if (currentPage === 'devices' && !devicesRefreshInterval) {
                     devicesRefreshInterval = setInterval(() => {
                         if (currentPage === 'devices' && !document.hidden) {
-                            loadDevicesManagement();
+                            loadDevicesManagement().catch(error => debugLog('[Devices] Auto refresh failed:', error));
                         }
                     }, 10000);
                 }

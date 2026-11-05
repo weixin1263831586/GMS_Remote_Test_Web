@@ -1,5 +1,5 @@
 // ==================== Web AOA 三列工作台（设备管理页） ====================
-// 左：ADB 截图投屏与 UI 输入；中：录制/Profile/目标回放；右：AOA 命令轨道。
+// 左：ADB 截图投屏与 UI 输入；中：AOA 命令与注释；右：录制/Profile/目标回放。
 // 真正的输入和回放都经 Controller 的设备 claim/fencing → Worker 边界执行，
 // 本文件不修改 Test Workspace 的 worker/device 选择。
 'use strict';
@@ -14,7 +14,7 @@ const aoaPanelState = {
     hidSettingsProfileId: '',
     playbackControlId: '', playbackPaused: false, playbackActive: false,
     playbackCommandId: '', playbackWorker: '', playbackPending: '', playbackInputDone: false,
-    playbackStates: [], playbackIndex: 0, commandDebug: null, commandEdit: null, commandsProfileId: '',
+    playbackStates: [], playbackIndex: 0, commandDebug: null, commandEdit: null, commentEdit: null, commandsProfileId: '',
 };
 
 function aoaEl(id) { return document.getElementById(id); }
@@ -26,7 +26,8 @@ function aoaHidMetadata() {
         hid_settle_seconds: Number(aoaEl('aoa-hid-settle')?.value || 2)};
 }
 
-function aoaLoadHidMetadata(metadata = {}) {
+function aoaLoadHidMetadata(metadata = {}, commandCount = null) {
+    aoaValidateCommandComments(metadata, commandCount);
     const context = metadata.calibration?.context;
     const inferred = Number.isInteger(context?.version) && context.version >= 2
         ? context.hid_touch_mode || 'direct' : 'pointer';
@@ -39,6 +40,7 @@ function aoaLoadHidMetadata(metadata = {}) {
         throw new Error('AOA 输入模式或稳定等待无效，请检查配置');
     }
     aoaPanelState.profileMetadata = {...metadata};
+    aoaPanelState.commentEdit = null;
     aoaPanelState.hidSettingsProfileId = '';
     aoaEl('aoa-hid-touch-mode').value = mode;
     aoaEl('aoa-hid-settle').value = String(settle);
@@ -62,7 +64,10 @@ function aoaHidOptionEdited(field) {
     const value = aoaEl(field).value;
     if (profile && aoaPanelState.commandsProfileId !== profile.id
             && aoaPanelState.hidSettingsProfileId !== profile.id) {
+        const comments = aoaPanelState.profileMetadata.command_comments;
         aoaLoadHidMetadata(profile.metadata || {});
+        if (comments !== undefined) aoaPanelState.profileMetadata.command_comments = comments;
+        else delete aoaPanelState.profileMetadata.command_comments;
         aoaEl(field).value = value;
     }
     aoaPanelState.hidSettingsProfileId = profile?.id || '';
@@ -180,7 +185,7 @@ function aoaSetStatus(text, type = '') {
 function aoaSetBusy(running, text = '') {
     running = running || aoaDebugState.ending;
     aoaPanelState.running = running;
-    document.querySelectorAll('#aoa-panel [data-aoa-run], #aoa-panel [data-aoa-screen-action], #aoa-panel select, #aoa-panel [data-aoa-edit], #aoa-command-list button, #aoa-command-list input, #aoa-command-input, #aoa-record-start, #aoa-record-stop, #aoa-profile-name, #aoa-replay-wait')
+    document.querySelectorAll('#aoa-panel [data-aoa-run], #aoa-panel [data-aoa-screen-action], #aoa-panel select, #aoa-panel [data-aoa-edit], #aoa-command-list button, #aoa-command-list input, #aoa-command-list textarea, #aoa-command-input, #aoa-record-start, #aoa-record-stop, #aoa-profile-name, #aoa-replay-wait')
         .forEach(node => { node.disabled = running; });
     if (text) aoaSetStatus(text, running ? 'running' : '');
     if (aoaEl('aoa-record-start')) aoaEl('aoa-record-start').disabled = running || aoaPanelState.recording;
@@ -233,6 +238,11 @@ function aoaReplaceOptions(select, entries, emptyLabel, keepMissing = false) {
         const label = select.selectedOptions[0]?.dataset.label || previous;
         entries = [{value: previous, label, missing: true}, ...entries];
     }
+    if (entries.length && entries.length === select.options.length && entries.every((entry, index) => {
+        const option = select.options[index];
+        return option.value === entry.value && option.dataset.label === entry.label
+            && option.textContent === entry.label + (entry.missing ? '（暂未枚举）' : '');
+    })) return;
     select.replaceChildren();
     if (!entries.length) {
         const option = document.createElement('option');
@@ -270,7 +280,7 @@ function aoaFillDeviceSelect(selectId, workerId, recorder = false, keepMissing =
 }
 
 function aoaSyncDeviceOptions() {
-    aoaFillDeviceSelect('aoa-record-device', aoaEl('aoa-record-worker')?.value || '', true);
+    aoaFillDeviceSelect('aoa-record-device', aoaEl('aoa-record-worker')?.value || '', true, true);
     if (!aoaDebugSyncTarget()) aoaFillDeviceSelect('aoa-replay-device', aoaEl('aoa-replay-worker')?.value || '', false, true);
 }
 
@@ -282,7 +292,7 @@ function aoaSyncDeviceSources(devices) {
         .filter(device => device.transport !== 'adb_proxy')
         .map(aoaDeviceWorker).filter(Boolean))];
     const entries = workers.map(worker => ({value: worker, label: worker}));
-    aoaReplaceOptions(aoaEl('aoa-record-worker'), entries, '（无可用 Worker）');
+    aoaReplaceOptions(aoaEl('aoa-record-worker'), entries, '（无可用 Worker）', true);
     aoaReplaceOptions(aoaEl('aoa-replay-worker'), entries, '（无可用 Worker）', true);
     aoaSyncDeviceOptions();
 
@@ -320,13 +330,17 @@ function aoaRecorderDeviceChanged(options = {}) {
     const targetKey = `${aoaEl('aoa-record-worker')?.value || ''}:${aoaEl('aoa-record-device')?.value || ''}`;
     const targetChanged = targetKey !== aoaPanelState.liveTargetKey;
     aoaPanelState.liveTargetKey = targetKey;
+    const target = aoaLiveTarget();
+    if (target && !targetChanged && !options.autoLive && window.aoaLiveScreen?.isActive()) {
+        // Preserve the visible stream on read-only workbench re-entry.
+        return;
+    }
     const image = aoaEl('aoa-screen-image');
     if (image) { image.hidden = true; image.removeAttribute('src'); }
     const canvas = aoaEl('aoa-screen-canvas');
     if (canvas) { canvas.hidden = true; }
     const empty = aoaEl('aoa-screen-empty');
     if (empty) { empty.hidden = true; }
-    const target = aoaLiveTarget();
     if (!target) {
         if (window.aoaLiveScreen?.isActive()) {
             window.aoaLiveScreen.stop();
@@ -350,11 +364,6 @@ function aoaRecorderDeviceChanged(options = {}) {
             aoaEl('aoa-toggle-live')?.setAttribute(
                 'data-live', window.aoaLiveScreen.isActive() ? 'on' : 'off');
         });
-        aoaRenderCalibration();
-        return;
-    }
-    if (!targetChanged && window.aoaLiveScreen?.isActive()) {
-        // 打开页签等只读重入且目标未变：不打断进行中的会话。
         aoaRenderCalibration();
         return;
     }
@@ -409,6 +418,7 @@ function aoaProfileSelectionChanged() {
     node.textContent = profile
         ? `${profile.name} · ${(profile.commands || []).length} 条命令 · ADB 等待 ${profile.wait_adb_seconds || 0}s · 更新 ${(profile.updated_at || profile.created_at || '').replace('T', ' ').slice(0, 16)}`
         : '暂无配置';
+    node.title = node.textContent;
 }
 
 function aoaLoadSelectedProfile() {
@@ -416,6 +426,8 @@ function aoaLoadSelectedProfile() {
     const profile = aoaSelectedProfile();
     if (!profile) { showToast('请先选择一个 AOA 配置', 'warning'); return; }
     const commands = (profile.commands || []).map(command => String(command).trim()).filter(Boolean);
+    try { aoaValidateCommandComments(profile.metadata || {}, commands.length); }
+    catch (error) { aoaSetStatus(`载入失败：${error.message}`, 'error'); return; }
     aoaPlaybackReset();
     aoaPanelState.commandDebug = null;
     aoaPanelState.commandEdit = null;
@@ -424,7 +436,7 @@ function aoaLoadSelectedProfile() {
     aoaPanelState.editingProfileId = profile.id;
     aoaPanelState.commandsProfileId = profile.id;
     aoaEl('aoa-profile-name').value = profile.name;
-    aoaLoadHidMetadata(profile.metadata || {});
+    aoaLoadHidMetadata(profile.metadata || {}, commands.length);
     aoaEl('aoa-replay-wait').value = profile.wait_adb_seconds || 60;
     aoaRenderCommands();
     aoaSetStatus(`已载入：${profile.name}`);
@@ -456,7 +468,9 @@ function aoaRenderCommands() {
         index.className = 'aoa-command-index';
         index.textContent = String(i + 1);
         const code = document.createElement('code');
-        code.textContent = command;
+        code.textContent = command; code.title = command;
+        const semantic = aoaPanelState.profileMetadata?.semantic_template?.steps[i];
+        if (semantic) code.title = `${command}\n语义目标：${semantic.target || [semantic.from_target, semantic.to_target].filter(Boolean).join(' → ') || command}；触摸坐标由匹配布局计算，执行前后验证状态`;
         const edit = document.createElement('button');
         edit.className = 'btn-xxs aoa-command-edit'; edit.type = 'button'; edit.textContent = '编辑';
         edit.disabled = aoaPanelState.running || aoaPanelState.playbackActive;
@@ -476,6 +490,7 @@ function aoaRenderCommands() {
             if (aoaPanelState.running) return;
             if (!aoaCommandEditFinish()) return;
             aoaPanelState.commands.splice(i, 1);
+            aoaSyncCommandComments(i);
             aoaPanelState.editingProfileId = '';
             aoaRenderCommands();
         });
@@ -505,7 +520,7 @@ function aoaRenderCommands() {
             edit.after(cancel);
             commandNode = input;
         }
-        content.append(index, commandNode, state, actions); row.append(content); list.append(row);
+        content.append(index, commandNode, aoaCreateCommandComment(i), state, actions); row.append(content); list.append(row);
     });
     list.scrollTop = aoaPanelState.playbackActive ? 0 : list.scrollHeight;
     if (aoaPanelState.playbackActive) aoaUpdatePlaybackRows(aoaPanelState.playbackIndex);
@@ -527,6 +542,7 @@ function aoaCommandEditStart(index) {
 }
 
 function aoaCommandEditFinish(save = true) {
+    if (!aoaCommentEditFinish(save)) return false;
     const edit = aoaPanelState.commandEdit;
     if (!edit) return true;
     if (aoaPanelState.running || aoaPanelState.playbackActive) return false;
@@ -581,6 +597,7 @@ function aoaAppendCommand(command, addPace = true) {
         throw new Error('AOA 命令已达到 256 条上限，请保存当前配置');
     }
     aoaPanelState.commands.push(...additions);
+    aoaSyncCommandComments();
     aoaPanelState.editingProfileId = '';
     aoaRenderCommands();
 }
@@ -595,6 +612,8 @@ async function aoaRecordingStart() {
         showToast('请选择 ADB 可用的录制 Worker 和设备', 'warning'); return;
     }
     aoaPanelState.commands = []; aoaPanelState.editingProfileId = '';
+    aoaResetCommandComments();
+    delete aoaPanelState.profileMetadata.calibration;
     aoaPanelState.commandEdit = null;
     aoaPanelState.commandsProfileId = '';
     aoaPanelState.recording = true;
@@ -621,6 +640,7 @@ function aoaCommandUndo() {
     if (!aoaPanelState.commands.length) return;
     if (aoaPanelState.commands.at(-1)?.startsWith('sleep ')) aoaPanelState.commands.pop();
     if (aoaPanelState.commands.length) aoaPanelState.commands.pop();
+    aoaSyncCommandComments();
     aoaRenderCommands();
 }
 
@@ -630,6 +650,7 @@ async function aoaCommandsClear() {
     const ok = await showConfirmDialog('清空 AOA 命令', '确定清空当前命令轨道？');
     if (!ok) return;
     aoaPanelState.commands = []; aoaPanelState.editingProfileId = '';
+    aoaResetCommandComments();
     aoaPanelState.commandEdit = null;
     aoaRenderCommands();
 }
@@ -673,8 +694,10 @@ async function aoaImportFileChanged(event) {
                 || commands.some(item => typeof item !== 'string' || !item.trim())) {
             throw new Error('JSON 必须包含 1..256 条非空 commands');
         }
+        const metadata = Array.isArray(parsed) ? {} : parsed.metadata || {};
+        aoaValidateCommandComments(metadata, commands.length);
         aoaPanelState.commands = commands.map(item => item.trim());
-        aoaLoadHidMetadata(Array.isArray(parsed) ? {} : parsed.metadata || {});
+        aoaLoadHidMetadata(metadata, commands.length);
         aoaPanelState.commandEdit = null;
         aoaPanelState.editingProfileId = '';
         aoaPanelState.commandsProfileId = '';
@@ -689,70 +712,6 @@ async function aoaImportFileChanged(event) {
 }
 
 // 录制器执行/投屏交互/触摸标定：见 aoa-recorder.js（体积 ratchet 拆分）。
-function aoaPointFromPointer(event) {
-    // 实时投屏激活时以 canvas 为点击面，否则截图 img。
-    const liveActive = Boolean(window.aoaLiveScreen?.isActive());
-    const canvas = liveActive ? aoaEl('aoa-screen-canvas') : null;
-    const image = aoaEl('aoa-screen-image');
-    const surface = (canvas && !canvas.hidden) ? canvas : image;
-    if (!surface || surface.hidden) return null;
-    const rect = surface.getBoundingClientRect();
-    if (!rect.width || !rect.height) return null;
-    const naturalW = (surface === canvas) ? canvas.width : image.naturalWidth;
-    const naturalH = (surface === canvas) ? canvas.height : image.naturalHeight;
-    if (!naturalW || !naturalH) return null;
-    const x = Math.round((event.clientX - rect.left) * naturalW / rect.width);
-    const y = Math.round((event.clientY - rect.top) * naturalH / rect.height);
-    return {x: Math.max(0, Math.min(naturalW, x)),
-        y: Math.max(0, Math.min(naturalH, y))};
-}
-
-function aoaPointerDown(event) {
-    if (aoaPanelState.running) return;
-    // 实时投屏 canvas 或截图 img 任一可见即可操作。
-    const liveOn = aoaLiveInputSurfaceActive();
-    const canvasOn = liveOn && !aoaEl('aoa-screen-canvas')?.hidden;
-    const imageOn = !aoaEl('aoa-screen-image')?.hidden;
-    if (!canvasOn && !imageOn) return;
-    const point = aoaPointFromPointer(event); if (!point) return;
-    event.preventDefault();
-    if (event.currentTarget.setPointerCapture) {
-        event.currentTarget.setPointerCapture(event.pointerId);
-    }
-    aoaPanelState.pointer = {id: event.pointerId, startedAt: performance.now(),
-        clientX: event.clientX, clientY: event.clientY, point};
-}
-
-function aoaPointerMove(event) {
-    const pointer = aoaPanelState.pointer;
-    if (!pointer || pointer.id !== event.pointerId) return;
-    const stage = aoaEl('aoa-screen-stage').getBoundingClientRect();
-    const dx = event.clientX - pointer.clientX; const dy = event.clientY - pointer.clientY;
-    const line = aoaEl('aoa-gesture-line'); line.hidden = false;
-    line.style.left = `${pointer.clientX - stage.left}px`;
-    line.style.top = `${pointer.clientY - stage.top}px`;
-    line.style.width = `${Math.hypot(dx, dy)}px`;
-    line.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
-}
-
-function aoaPointerUp(event) {
-    const pointer = aoaPanelState.pointer;
-    if (!pointer || pointer.id !== event.pointerId) return;
-    aoaPanelState.pointer = null; aoaEl('aoa-gesture-line').hidden = true;
-    const end = aoaPointFromPointer(event) || pointer.point;
-    const distance = Math.hypot(event.clientX - pointer.clientX, event.clientY - pointer.clientY);
-    const elapsed = Math.round(performance.now() - pointer.startedAt);
-    if (distance < 9 && elapsed >= 650) {
-        aoaExecuteRecorderInput({action: 'long_click', x: pointer.point.x, y: pointer.point.y,
-            duration_ms: Math.min(Math.max(elapsed, 650), 3000)});
-    } else if (distance < 9) {
-        aoaExecuteRecorderInput({action: 'tap', x: pointer.point.x, y: pointer.point.y});
-    } else {
-        aoaExecuteRecorderInput({action: 'swipe', x1: pointer.point.x, y1: pointer.point.y,
-            x2: end.x, y2: end.y, duration_ms: Math.min(Math.max(elapsed, 150), 2000)});
-    }
-}
-
 async function aoaSaveRecording() {
     if (aoaPanelState.running || !aoaCommandEditFinish()) return;
     const name = aoaEl('aoa-profile-name')?.value.trim();
@@ -761,7 +720,7 @@ async function aoaSaveRecording() {
     }
     const body = {name, commands: aoaPanelState.commands,
         wait_adb_seconds: Number(aoaEl('aoa-replay-wait')?.value) || 60,
-        metadata: {...aoaHidMetadata(), calibration: aoaPanelState.calibration},
+        metadata: {...aoaHidMetadata(), calibration: aoaPanelState.calibration ?? aoaHidMetadata().calibration ?? null},
         description: `Web AOA interactive recording from ${aoaEl('aoa-record-device')?.value || 'device'}`};
     let targetId = aoaPanelState.editingProfileId;
     if (!targetId) {
@@ -783,9 +742,13 @@ async function aoaSaveRecording() {
         aoaPanelState.editingProfileId = result.profile.id;
         aoaPanelState.commandsProfileId = result.profile.id;
         showToast(`已保存 AOA 配置：${result.profile.name}`, 'success');
+        aoaSetStatus(`已保存 AOA 配置：${result.profile.name}`, 'success');
         await aoaLoadPanel(); aoaEl('aoa-replay-profile').value = result.profile.id;
         aoaProfileSelectionChanged();
-    } catch (error) { showToast(`保存失败：${error.message}`, 'warning'); }
+    } catch (error) {
+        aoaSetStatus(`保存失败：${error.message}`, 'error');
+        showToast(`保存失败：${error.message}`, 'warning');
+    }
 }
 
 async function aoaProfileDeleteSelected() {
@@ -826,8 +789,8 @@ async function aoaReplaySelected(profileId = '') {
         `将在 ${device} 上通过 USB 回放“${profile.name}”（${commands.length} 条），期间设备会短暂断开 ADB。继续？`);
     if (!ok || aoaPanelState.running) return;
     if (aoaPanelState.recording) aoaRecordingStop();
-    aoaLoadHidMetadata(hidMetadata);
-    // 回放前把该配置的完整命令渲染进 ③ 列表：页面刷新后编辑器可能为空，
+    aoaLoadHidMetadata(hidMetadata, commands.length);
+    // 回放前把该配置的完整命令渲染进 ② 列表：页面刷新后编辑器可能为空，
     // 而回放进度高亮（aoaHighlightCommandRow）依赖列表行存在才能滚动定位。
     aoaPanelState.commandDebug = null;
     aoaPanelState.playbackActive = true;
@@ -899,12 +862,10 @@ async function aoaViewToggle(show) {
     aoaEl('devices-list-tab')?.setAttribute('aria-selected', String(!visible));
     aoaEl('aoa-tab')?.setAttribute('aria-selected', String(visible));
     if (visible) {
-        if (typeof stopDevicesAutoRefresh === 'function') stopDevicesAutoRefresh();
         await aoaLoadPanel();
         // 只读联动：刷新下拉与画面状态，不自动发起投屏（变更请求仅跟随
         // 用户明确选择设备或「▶ 实时投屏」开关，零初始化写）。
         if (typeof loadDevicesManagement === 'function') await loadDevicesManagement();
-        if (typeof stopDevicesAutoRefresh === 'function') stopDevicesAutoRefresh();
         aoaRecorderDeviceChanged();
     } else {
         if (aoaDebugState.id) await aoaDebugEnd();
@@ -927,7 +888,7 @@ function aoaInitializeWorkbench() {
         image.addEventListener('pointerdown', aoaPointerDown);
         image.addEventListener('pointermove', aoaPointerMove);
         image.addEventListener('pointerup', aoaPointerUp);
-        image.addEventListener('pointercancel', aoaPointerUp);
+        image.addEventListener('pointercancel', aoaPointerCancel);
     }
     const canvas = aoaEl('aoa-screen-canvas');
     if (canvas && !canvas.dataset.aoaInitialized) {
@@ -935,7 +896,7 @@ function aoaInitializeWorkbench() {
         canvas.addEventListener('pointerdown', aoaPointerDown);
         canvas.addEventListener('pointermove', aoaPointerMove);
         canvas.addEventListener('pointerup', aoaPointerUp);
-        canvas.addEventListener('pointercancel', aoaPointerUp);
+        canvas.addEventListener('pointercancel', aoaPointerCancel);
     }
     const file = aoaEl('aoa-command-file');
     if (file && !file.dataset.aoaInitialized) {

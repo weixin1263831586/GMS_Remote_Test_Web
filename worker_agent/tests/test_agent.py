@@ -235,6 +235,27 @@ def test_background_slow_command_reports_failure(tmp_path):
     assert agent.client.ack.call_args.args[1] == "failed"
 
 
+def test_background_aoa_failure_keeps_step_and_adb_evidence(tmp_path):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.client = MagicMock()
+    command = {"id": "cmd-aoa-failed", "command_type": "device_action",
+               "payload": {"action": "aoa_sequence", "devices": ["ABC"]}}
+    error = RuntimeError("USB reconnect failed before step 63")
+    error.aoa_result = {"failed_index": 63, "commands_executed": 62,
+                        "adb_state": "unauthorized", "adb_recovered": False}
+    error.cleanup_errors = [{"step": "reset_usb", "error": "device vanished"}]
+    with patch("worker_agent.app.execute_device_action", side_effect=error), patch(
+        "worker_agent.app.discover_tradefed_processes", return_value=[]), patch(
+        "worker_agent.app._adb_proxy_imports_active", return_value=False):
+        agent.run_slow_command(command)
+    saved = agent.runtime.previous_command(command["id"])
+    assert saved["status"] == "failed"
+    result = agent.client.ack.call_args.args[2]
+    assert result["failed_index"] == 63 and result["adb_state"] == "unauthorized"
+    assert result["success"] is False and result["reconcile_required"] is True
+    assert result["cleanup_errors"] == error.cleanup_errors
+
+
 def test_ack_delivery_failure_preserves_completed_command(tmp_path):
     agent = WorkerAgent(worker_config(tmp_path))
     agent.client = MagicMock()

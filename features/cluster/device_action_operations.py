@@ -110,7 +110,8 @@ def execute_local_operation(repository, command: dict, execute) -> None:
     except Exception as exc:
         repository.ack_command(command["worker_id"], command["id"], {
             "status": "cancelled" if getattr(exc, "cancelled", False) else "failed", "error": str(exc),
-            "result": {"success": False, "reconcile_required": bool(getattr(exc, "cleanup_errors", []))
+            "result": {**getattr(exc, "aoa_result", {}),
+                       "success": False, "reconcile_required": bool(getattr(exc, "cleanup_errors", []))
                        or not getattr(exc, "cancelled", False), "cleanup_errors": getattr(exc, "cleanup_errors", [])},
         })
     finally:

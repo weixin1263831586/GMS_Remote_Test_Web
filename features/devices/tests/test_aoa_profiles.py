@@ -96,6 +96,22 @@ def test_store_rejects_invalid_commands_directly(tmp_path):
         store.create_profile("owner-1", "bad", "", ["key UNKNOWN"])
 
 
+def test_profile_save_validates_firmware_declaration_before_persisting(tmp_path):
+    from foundation.error_model import ApiError
+    from tests.aoa_fixtures import firmware_declaration, verified_mapping
+
+    store = aoa_service.AoaProfileStore(tmp_path)
+    with pytest.raises(ApiError) as caught:
+        store.create_profile("owner-1", "invalid", "", ["click 180 320"], metadata={"firmware_compatibility": {}})
+    assert caught.value.status_code == 422
+    assert store.list_profiles("owner-1") == []
+    mapping = verified_mapping().to_dict()
+    metadata = {"hid_touch_mode": "direct", "calibration": {"mapping": mapping},
+                "firmware_compatibility": firmware_declaration({**mapping["context"], "fingerprint": "post-flash-build"})}
+    profile = store.create_profile("owner-1", "valid", "", ["click 180 320"], metadata=metadata)
+    assert store.get_profile(profile["id"], "owner-1")["metadata"] == metadata
+
+
 def test_record_presets_exposed(environment, monkeypatch):
     client = environment
     monkeypatch.setattr(
@@ -172,7 +188,8 @@ def test_record_rejects_preset_and_steps_together(environment, monkeypatch):
     assert response.json()["code"] == "MALFORMED_REQUEST"
 
 
-def test_interactive_record_input_uses_device_action_boundary(environment, monkeypatch):
+@pytest.mark.parametrize("frame", [{}, {"frame_size": [576, 1024]}])
+def test_interactive_record_input_uses_device_action_boundary(environment, monkeypatch, frame):
     client = environment
     monkeypatch.setattr(
         "features.devices.aoa_api.require_human_principal",
@@ -191,7 +208,7 @@ def test_interactive_record_input_uses_device_action_boundary(environment, monke
     response = client.post("/api/devices/aoa/record/input", json={
         "worker_id": "ats-worker-controller",
         "device": "ser-1",
-        "input": {"action": "tap", "x": 400, "y": 600},
+        "input": {"action": "tap", "x": 400, "y": 600, **frame},
     })
     assert response.status_code == 200, response.text
     # with_screenshot 由 API 层注入（平台控制标志，客户端不可伪造）：
@@ -200,7 +217,7 @@ def test_interactive_record_input_uses_device_action_boundary(environment, monke
         "worker_id": "ats-worker-controller",
         "devices": ["ser-1"],
         "action": "aoa_record_input",
-        "aoa_record": {"action": "tap", "x": 400, "y": 600},
+        "aoa_record": {"action": "tap", "x": 400, "y": 600, **frame},
     }
 
 

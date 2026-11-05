@@ -402,14 +402,15 @@ MAX_CLICKS = 32
 
 RECORD_INPUT_ACTIONS = frozenset({
     "tap", "long_click", "swipe", "back", "home", "wake", "write", "sleep",
-    "calibrate",
+    "calibrate", "verify_direct", "observe_frame",
 })
 
 
 def parse_record_input_action(raw: dict) -> dict:
     """Validate one interactive Web AOA recording action.
 
-    Coordinates are physical display pixels.  The Worker executes the action
+    Coordinates are display pixels, or video pixels when frame_size is supplied.
+    The Worker resolves the current logical display before executing the action
     through ADB on the userdebug recorder and returns the equivalent AOAv2
     command for the command track.
     """
@@ -419,6 +420,15 @@ def parse_record_input_action(raw: dict) -> dict:
     if action not in RECORD_INPUT_ACTIONS:
         raise ValueError(f"unknown record input action: {action!r}")
     normalized: dict = {"action": action}
+    if action == "verify_direct":
+        display_id = raw.get("display_id", 0)
+        if type(display_id) is not int or not 0 <= display_id <= 255:
+            raise ValueError("reference display ID must be 0..255")
+        return {"action": action, "hid_touch_mode": "direct", "display_id": display_id}
+    if action == "observe_frame":
+        from foundation.aoa_display import rect
+
+        return {"action": action, "roi": list(rect(raw.get("roi", [0, 0, 1, 1]), normalized=True))}
 
     def integer(name: str, minimum: int, maximum: int, default=None) -> int:
         value = raw.get(name, default)
@@ -453,6 +463,17 @@ def parse_record_input_action(raw: dict) -> dict:
         normalized["text"] = text
     elif action == "sleep":
         normalized["duration_ms"] = integer("duration_ms", 1, MAX_SLEEP_MS, 800)
+
+    if "frame_size" in raw:
+        size = raw["frame_size"]
+        if (action not in {"tap", "long_click", "swipe"}
+                or not isinstance(size, list) or len(size) != 2
+                or any(type(n) is not int or not 1 <= n <= 10000 for n in size)):
+            raise ValueError("record input frame_size must contain two pixel dimensions for a pointer action")
+        for x, y in (("x1", "y1"), ("x2", "y2")) if action == "swipe" else (("x", "y"),):
+            if normalized[x] >= size[0] or normalized[y] >= size[1]:
+                raise ValueError("record input point is outside frame_size")
+        normalized["frame_size"] = list(size)
 
     for name in ("scale_x", "scale_y"):
         if raw.get(name) is None:

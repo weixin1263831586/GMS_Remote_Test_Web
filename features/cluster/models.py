@@ -181,6 +181,9 @@ class ClusterDeviceAction(BaseModel):
     aoa_touch_mapping: dict[str, Any] | None = None
     aoa_source_touch_mapping: dict[str, Any] | None = None
     aoa_mapping_policy: str = Field(default="", max_length=32)
+    aoa_semantic_plan: dict[str, Any] | None = None
+    aoa_direct_certificate: dict[str, Any] | None = None
+    aoa_firmware_sha256: str = Field(default="", max_length=64, pattern=r"^(?:[a-f0-9]{64})?$")
     aoa_debug_session_id: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
     aoa_debug_request_id: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
     aoa_debug_command: str = Field(default="", max_length=1024)
@@ -199,13 +202,31 @@ class ClusterDeviceAction(BaseModel):
 
     @model_validator(mode="after")
     def validate_aoa_mapping(self):
-        from foundation.aoa_calibration import mapping_options
+        from foundation.aoa_calibration import TouchMapping, convert_commands, mapping_options
+        from foundation.aoa_profile import parse_record_input_action
+
+        if self.action == "aoa_record_input" and self.aoa_record.get("action") in {"verify_direct", "observe_frame"}:
+            self.aoa_record = parse_record_input_action(self.aoa_record)
 
         normalized = mapping_options(self.model_dump(include={
-            "aoa_touch_mapping", "aoa_source_touch_mapping", "aoa_mapping_policy", "aoa_hid_touch_mode"}))
+            "aoa_touch_mapping", "aoa_source_touch_mapping", "aoa_mapping_policy", "aoa_hid_touch_mode",
+            "aoa_semantic_plan", "aoa_direct_certificate", "aoa_firmware_sha256"}))
         for key, value in normalized.items():
             setattr(self, key, value)
+        if self.aoa_semantic_plan is not None and self.aoa_commands != self.aoa_semantic_plan["source_commands"]:
+            raise ValueError("semantic source commands differ from the request command list")
+        if self.action == "aoa_sequence" and self.aoa_commands and self.aoa_touch_mapping:
+            target = TouchMapping.from_dict(self.aoa_touch_mapping)
+            source = TouchMapping.from_dict(self.aoa_source_touch_mapping) if self.aoa_source_touch_mapping else target
+            convert_commands(self.aoa_commands, source, target)
         return self
+
+
+class FirmwareRecoveryPreflight(BaseModel):
+    worker_id: str = Field(default="", max_length=128)
+    devices: list[str] = Field(min_length=1, max_length=1)
+    aoa_profile_id: str = Field(min_length=1, max_length=128)
+    aoa_boot_wait_seconds: int = Field(default=60, strict=True, ge=0, le=600)
 
 
 class ClusterSuiteDownload(BaseModel):

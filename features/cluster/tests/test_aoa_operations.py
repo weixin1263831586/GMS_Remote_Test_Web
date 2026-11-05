@@ -2,10 +2,10 @@
 import unittest
 from dataclasses import replace
 from threading import Event
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from features.cluster import api as cluster_api
-from features.cluster.device_action_operations import request_digest
+from features.cluster.device_action_operations import execute_local_operation, request_digest
 from foundation.error_model import ApiError
 
 from .api_hardening_fixture import ClusterApiHardeningFixture
@@ -123,3 +123,23 @@ class AoaOperationsTests(ClusterApiHardeningFixture, unittest.TestCase):
                 "aoa_record": {"action": "calibrate"},
             })
         assert response.status_code == 200, response.text
+
+
+def test_local_failed_receipt_keeps_step_and_adb_state():
+    repo = Mock()
+    repo.claims.active_claim.return_value = {"id": "lease", "generation": 1}
+    command = {"id": "cmd", "worker_id": "w", "payload": {
+        "action": "aoa_sequence", "devices": ["w:ABC"], "claim_source_id": "claim",
+        "release_claim_on_terminal": True,
+        "lease_tokens": [{"device_id": "w:ABC", "lease_id": "lease", "generation": 1}]}}
+    error = RuntimeError("USB reconnect failed")
+    error.aoa_result = {"failed_index": 63, "commands_executed": 62,
+                        "adb_state": "unauthorized", "adb_recovered": False}
+    execute = Mock(side_effect=error)
+    execute_local_operation(repo, command, execute)
+    ack = repo.ack_command.call_args.args[2]
+    assert ack["status"] == "failed" and ack["result"]["success"] is False
+    assert ack["result"]["failed_index"] == 63
+    assert ack["result"]["adb_state"] == "unauthorized"
+    repo.claims.release.assert_called_once_with("claim")
+    execute.assert_called_once()

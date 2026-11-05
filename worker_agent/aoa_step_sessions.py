@@ -7,6 +7,7 @@ import time
 from foundation.aoa_profile import MAX_AOA_OPERATION_SECONDS
 
 from .aoa_control import register, unregister, wait_if_paused
+from .aoa_diagnostics import record_failure
 
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,8 @@ def run_step_sessions(serial, commands, parsed, *, run_one, wait_adb,
     # including pauses and the final ADB wait, by the existing watchdog budget.
     deadline = time.monotonic() + MAX_AOA_OPERATION_SECONDS - wait_adb_seconds
     total, completed, reconnects, index = len(commands), 0, 0, 0
+    last_input = None
+    input_attempted = False
 
     def emit(phase, step, text=""):
         event = {"phase": phase, "index": step, "total": total,
@@ -44,6 +47,7 @@ def run_step_sessions(serial, commands, parsed, *, run_one, wait_adb,
         if control_id:
             register(control_id)
         for index, (text, command) in enumerate(zip(commands, parsed), 1):
+            input_attempted = False
             check()
             if control_id:
                 wait_if_paused(control_id, index=index, total=total, sleep=sleep,
@@ -56,6 +60,7 @@ def run_step_sessions(serial, commands, parsed, *, run_one, wait_adb,
                 sleep(command.sleep_ms / 1000)
                 check()
             else:
+                input_attempted = True
                 result = run_one(text, deadline, lambda event, index=index, text=text: (
                     emit("reconnecting", index, text) if event.get("phase") == "reconnecting" else None))
                 if (result.get("success") is not True or result.get("commands_executed") != 1
@@ -65,6 +70,7 @@ def run_step_sessions(serial, commands, parsed, *, run_one, wait_adb,
                     raise error
                 reconnects += int(result.get("usb_reconnections") or 0)
                 check()
+                last_input = (index, text)
             completed += 1
             emit("completed", index, text)
             if on_progress:
@@ -74,9 +80,16 @@ def run_step_sessions(serial, commands, parsed, *, run_one, wait_adb,
                     logger.warning("AOA per-command callback failed", exc_info=True)
     except Exception as exc:
         emit("cancelled" if getattr(exc, "cancelled", False) else "failed", index)
+        inner = getattr(exc, "aoa_result", {})
+        details = record_failure(exc, index=index, total=total,
+            command=commands[index - 1] if index else "", completed=completed,
+            reports_sent=inner.get("failed_reports_sent", 0),
+            reports_attempted=(inner.get("failed_input_state") != "not_sent"
+                               if inner else input_attempted), last_input=last_input)
         if getattr(exc, "cancelled", False):
             raise
         error = error_type(f"AOA per-command step {index}/{total}: {exc}")
+        error.aoa_result = details
         if getattr(exc, "cleanup_errors", None):
             error.cleanup_errors = exc.cleanup_errors
         raise error from exc
