@@ -209,8 +209,8 @@ class TouchMapping:
         tx, ty = self.offset
         return (a * u + b * v + tx, c * u + d * v + ty)
 
-    def screen_to_hid(self, x: float, y: float) -> tuple[int, int]:
-        """屏幕像素 → HID 逻辑坐标（round + clamp 到描述符范围）。"""
+    def screen_to_hid(self, x: float, y: float, *, strict: bool = False) -> tuple[int, int]:
+        """屏幕像素 → HID；自动转换使用 strict，人工调试可保留 clamp。"""
         a, b, c, d = self.matrix
         determinant = a * d - b * c
         if abs(determinant) < _INVERTIBLE_DETERMINANT_MIN:
@@ -219,6 +219,11 @@ class TouchMapping:
         dx, dy = x - tx, y - ty
         u = (d * dx - b * dy) / determinant
         v = (a * dy - c * dx) / determinant
+        if not all(math.isfinite(n) for n in (x, y, u, v)):
+            raise ValueError("AOA coordinate must be finite")
+        if strict and not (-1e-6 <= u <= AOA_TOUCH_MAX_X + 1e-6
+                           and -1e-6 <= v <= AOA_TOUCH_MAX_Y + 1e-6):
+            raise ValueError("AOA target point is outside the reachable HID region; recalibrate or adapt the profile")
         return (
             min(max(round(u), 0), AOA_TOUCH_MAX_X),
             min(max(round(v), 0), AOA_TOUCH_MAX_Y),
@@ -422,7 +427,10 @@ def convert_point(source: TouchMapping, target: TouchMapping, u: int, v: int) ->
         raise ValueError("missing display dimensions for AOA reprojection")
     if source.context.get("rotation", 0) != target.context.get("rotation", 0):
         raise ValueError("AOA reprojection requires matching display rotation")
-    return target.screen_to_hid(pixel_x * tw / sw, pixel_y * th / sh)
+    if not (0 <= u <= AOA_TOUCH_MAX_X and 0 <= v <= AOA_TOUCH_MAX_Y
+            and -1e-6 <= pixel_x < sw and -1e-6 <= pixel_y < sh):
+        raise ValueError("AOA source point is outside the display or HID region")
+    return target.screen_to_hid(pixel_x * tw / sw, pixel_y * th / sh, strict=True)
 
 
 def convert_commands(commands: list[str], source: TouchMapping,
@@ -458,14 +466,33 @@ def convert_commands(commands: list[str], source: TouchMapping,
 
 # ---- 标定记录复用匹配 ----
 
+def complete_context(context: dict) -> bool:
+    """Unknown environment values cannot establish device compatibility."""
+    if not isinstance(context, dict):
+        return False
+    for key in ("model", "release", "fingerprint", "kernel", "display_route"):
+        value = context.get(key)
+        if (not isinstance(value, str) or not value.strip()
+                or value.strip().lower() in {"unknown", "none", "null", "未知"}):
+            return False
+    display = context.get("display")
+    return (type(context.get("rotation")) is int and context["rotation"] in range(4)
+            and type(context.get("density")) is int and 0 < context["density"] <= 10000
+            and context.get("hid_touch_mode") in ("pointer", "direct")
+            and isinstance(display, list) and len(display) == 2
+            and all(type(v) is int and 0 < v <= 10000 for v in display))
+
+
 def context_matches(record_context: dict, query: dict) -> bool:
     """设备环境匹配键：model/release/display/rotation/hid_touch_mode 全等。
 
     Android 版本、显示配置、旋转或输入模式任一变化都可能改变映射
     （ADR 0026 Consequences），不满足条件时必须重新标定而不是复用。
     """
+    if not complete_context(record_context) or not complete_context(query):
+        return False
     for key in ("model", "release", "rotation", "hid_touch_mode", "fingerprint", "density", "kernel", "display_route"):
-        if str(record_context.get(key, "")) != str(query.get(key, "")):
+        if record_context[key] != query[key]:
             return False
     record_display = record_context.get("display")
     query_display = query.get("display")
@@ -482,6 +509,20 @@ def mapping_options(options: dict) -> dict:
     import json
 
     mode = options.get("aoa_hid_touch_mode", "pointer")
+    if options.get("aoa_semantic_plan") is not None:
+        from .aoa_semantics import validate_plan
+
+        if (mode != "direct" or options.get("aoa_touch_mapping") is not None
+                or options.get("aoa_source_touch_mapping") is not None
+                or options.get("aoa_mapping_policy", "") not in ("", "direct_standard")):
+            raise ValueError("certified semantic input requires direct mode and its own verified class transform")
+        validate_plan(options["aoa_semantic_plan"], options.get("aoa_direct_certificate"))
+        digest = options.get("aoa_firmware_sha256", "")
+        if not isinstance(digest, str) or (digest and not re.fullmatch(r"[a-f0-9]{64}", digest)):
+            raise ValueError("invalid semantic firmware SHA-256")
+        return {"aoa_semantic_plan": options["aoa_semantic_plan"],
+                "aoa_direct_certificate": options["aoa_direct_certificate"],
+                "aoa_firmware_sha256": digest, "aoa_mapping_policy": "direct_standard"}
     result = {}
     for key in ("aoa_touch_mapping", "aoa_source_touch_mapping"):
         raw = options.get(key)

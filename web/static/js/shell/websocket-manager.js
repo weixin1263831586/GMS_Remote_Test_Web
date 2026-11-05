@@ -175,6 +175,7 @@ function initWebSocket() {
                         break;
 
                     case 'devices_updated':
+                        if (typeof scheduleDevicesManagementRefresh === 'function') scheduleDevicesManagementRefresh();
                         if (!isLocalWorkspaceWorker(workspaceWorkerId())) break;
                         state.devices = data.devices;
                         renderDevices();
@@ -235,6 +236,7 @@ function initWebSocket() {
                         break;
 
                     case 'devices_changed':
+                        if (typeof scheduleDevicesManagementRefresh === 'function') scheduleDevicesManagementRefresh();
                         if (!isLocalWorkspaceWorker(workspaceWorkerId())) break;
                         // USB 设备插拔事件，自动刷新设备列表
                         debugLog('[WebSocket] devices_changed received:', data);
@@ -406,6 +408,7 @@ function handleServerEvent(eventType, payload) {
             }
             break;
         case 'worker.availability_changed': {
+            if (typeof scheduleDevicesManagementRefresh === 'function') scheduleDevicesManagementRefresh();
             // Emitted only on real online/offline flips (not per heartbeat).
             // Surface it through the notification center, a toast and, when
             // the tab is hidden, a browser notification.

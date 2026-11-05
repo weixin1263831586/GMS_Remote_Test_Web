@@ -104,11 +104,34 @@ class AoaProfileStore:
         return [{"kind": item.kind} for item in parsed]
 
     @staticmethod
-    def _metadata_json(metadata: dict) -> str:
+    def _metadata_json(metadata: dict, commands=None) -> str:
         if not isinstance(metadata, dict):
             raise ApiError.invalid_semantics("AOA metadata must be an object")
         encoded = json.dumps(metadata, ensure_ascii=False, separators=(",", ":"))
-        if len(encoded.encode()) > 8192:
+        if "command_comments" in metadata:
+            from foundation.aoa_comments import validate_command_comments
+
+            try:
+                validate_command_comments(metadata["command_comments"], len(commands or []))
+            except ValueError as exc:
+                raise ApiError.invalid_semantics(str(exc)) from exc
+        if "firmware_compatibility" in metadata:
+            from foundation.aoa_recovery_policy import firmware_compatibility
+
+            try:
+                firmware_compatibility(metadata, commands)
+            except (ValueError, TypeError) as exc:
+                raise ApiError.invalid_semantics(str(exc)) from exc
+        ordinary = {key: value for key, value in metadata.items() if key != "command_comments"}
+        if "semantic_template" in metadata:
+            from foundation.aoa_semantics import validate_template
+
+            try:
+                validate_template(metadata["semantic_template"], commands)
+            except (ValueError, TypeError) as exc:
+                raise ApiError.invalid_semantics(str(exc)) from exc
+            ordinary = {key: value for key, value in ordinary.items() if key != "semantic_template"}
+        if len(json.dumps(ordinary).encode()) > 8192:
             raise ApiError.invalid_semantics("AOA metadata exceeds 8192 bytes")
         return encoded
 
@@ -118,7 +141,7 @@ class AoaProfileStore:
         self.validate_commands(commands)
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         profile_id = uuid.uuid4().hex
-        metadata_json = self._metadata_json(metadata if metadata is not None else {})
+        metadata_json = self._metadata_json(metadata if metadata is not None else {}, commands)
         with self._lock, self.connect() as conn:
             try:
                 conn.execute(
@@ -148,7 +171,9 @@ class AoaProfileStore:
         if wait_adb_seconds is not None:
             updates["wait_adb_seconds"] = max(0, min(int(wait_adb_seconds), 600))
         if metadata is not None:
-            updates["metadata"] = self._metadata_json(metadata)
+            updates["metadata"] = self._metadata_json(metadata, cleaned if commands is not None else current["commands"])
+        elif commands is not None and any(key in (current.get("metadata") or {}) for key in ("semantic_template", "command_comments")):
+            self._metadata_json(current["metadata"], cleaned)
         if not updates:
             return current
         updates["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

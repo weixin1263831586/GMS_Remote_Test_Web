@@ -33,6 +33,8 @@ from .usbip import parse_adb_device_states, usbip_manager
 # 它们的使用方只有 management_api 自身与其单测（经 from .management_api
 # import 直连）。跨 Feature 需要的能力走下方显式公开符号。
 _LAZY_API_EXPORTS = {
+    'AoaCertificationStore': '.aoa_certifications',
+    'authorize_semantic_options': '.aoa_semantic_service',
     'annotate_cluster_usbip_devices': '.integrations_api',
     'connect_wifi': '.operations_api',
     'create_pair_grant': '.adb_proxy_security',
@@ -66,6 +68,7 @@ _LAZY_API_EXPORTS = {
     'parse_usbip_port_entries': '.usbip_transaction',
     'resolve_usbip_command': '.usbip_transaction',
     'validate_pair_grant': '.adb_proxy_security',
+    'validate_owned_semantic': '.aoa_semantic_service',
 }
 
 
@@ -92,6 +95,7 @@ __all__ = [
     "ADBForwardStartRequest",
     "ADBForwardStopRequest",
     "ADBProxyPairCodeRequest",
+    "AoaCertificationStore",
     "DeviceActionRequest",
     "DeviceLockManager",
     "DeviceLockRequest",
@@ -104,6 +108,7 @@ __all__ = [
     "UiTapRequest",
     "WifiConnectRequest",
     "annotate_cluster_usbip_devices",
+    "authorize_semantic_options",
     "bind_usbip_busid_via_ssh",
     "broadcast_device_lock_update",
     "calibration_store",
@@ -140,5 +145,6 @@ __all__ = [
     "test_transport_requirement",
     "update_user_state_field",
     "usbip_manager",
+    "validate_owned_semantic",
     "validate_pair_grant",
 ]

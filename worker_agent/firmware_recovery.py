@@ -8,6 +8,8 @@ import time
 from foundation.aoa_calibration import mapping_options
 from foundation.aoa_hid_mode import profile_hid_options
 from foundation.aoa_profile import parse_profile_commands
+from foundation.aoa_recovery_policy import firmware_compatibility, require_firmware_digest, require_verified_recovery
+from foundation.aoa_recovery_status import recovery_failure_reason
 
 
 def recovery_options(snapshot: dict) -> dict:
@@ -29,8 +31,12 @@ def recovery_options(snapshot: dict) -> dict:
         "aoa_touch_mapping": snapshot.get("touch_mapping"),
         "aoa_source_touch_mapping": ((snapshot.get("metadata") or {}).get("calibration") or {}).get("mapping"),
     }
+    checked_mappings = mapping_options({**hid_options, **mappings})
+    require_verified_recovery(commands, checked_mappings, snapshot.get("metadata") or {})
+    if snapshot.get("firmware_compatibility") != firmware_compatibility(snapshot.get("metadata") or {}, commands):
+        raise ValueError("AOA firmware compatibility snapshot changed")
     return {"aoa_commands": commands, "usb_port_path": snapshot["usb_port_path"],
-            **hid_options, **mapping_options({**hid_options, **mappings}),
+            **hid_options, **checked_mappings,
             "wait_adb_seconds": wait_adb_seconds,
             "aoa_metadata": snapshot.get("metadata") or {},
             "post_flash_recovery": snapshot}
@@ -72,8 +78,9 @@ def wait_for_boot(snapshot: dict, device_ids: list[str], validate, probe, on_eve
         time.sleep(1)
 
 
-def validate_preflash(snapshot: dict, devices: list[str], validate, probe) -> None:
+def validate_preflash(snapshot: dict, devices: list[str], validate, probe, *, firmware_sha256="") -> None:
     recovery_options(snapshot)
+    require_firmware_digest(snapshot.get("firmware_compatibility"), firmware_sha256)
     validate()
     if len(devices) != 1:
         raise ValueError("firmware AOA recovery requires exactly one device")
@@ -89,15 +96,17 @@ def recover_after_flash(flash_result: dict, snapshot: dict, devices: list[str],
                        suppress_adb_daemon_gate=None) -> dict:
     if not flash_result.get("success"):
         return flash_result
+    recovered = {}
     try:
         options = {**recovery_options(snapshot), "_validate_fencing": validate,
                    "suppress_adb_daemon": suppress_adb_daemon,
                    "suppress_adb_daemon_gate": suppress_adb_daemon_gate}
         recovered = execute("aoa_sequence", devices, options, progress_event_callback=on_event)
         if recovered.get("success") is not True or recovered.get("adb_recovered") is not True:
-            raise RuntimeError("ADB 尚未恢复或尚未授权；请在设备上确认允许 USB 调试")
+            raise RuntimeError(recovery_failure_reason(recovered))
         return {**flash_result, "flash_success": True, "stage": "ADB_READY", "aoa_recovery": recovered}
     except Exception as exc:
         return {**flash_result, "success": False, "flash_success": True,
                 "stage": "AOA_RECOVERY_FAILED", "reconcile_required": True,
+                "aoa_recovery": getattr(exc, "aoa_result", None) or recovered,
                 "error": f"固件烧写已完成，AOA 恢复失败：{exc}。请检查设备并单独调试 AOA，无需重新烧写"}

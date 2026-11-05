@@ -7,7 +7,7 @@ import pytest
 
 from features.automation.aoa_snapshot import freeze_recovery
 from features.automation.executors import HttpAutomationExecutor
-from tests.aoa_fixtures import verified_mapping
+from tests.aoa_fixtures import firmware_declaration, verified_mapping
 
 from .test_integrations import FakeResponse, FakeSession
 
@@ -19,7 +19,8 @@ def prepared_run(monkeypatch, *, target=None):
         find_matching=lambda owner, context: {'mapping': target.to_dict(), 'mapping_policy': target.effective_policy}
         if owner == 'alice' and context == target.context else None))
     plan = {'aoa': {'mode': 'user_build_recovery', 'commands': ['click 180 320'],
-                   'metadata': {'hid_touch_mode': 'direct', 'calibration': {'mapping': source.to_dict()}}}}
+                   'metadata': {'hid_touch_mode': 'direct', 'calibration': {'mapping': source.to_dict()},
+                                'firmware_compatibility': firmware_declaration(target.context)}}}
     freeze_recovery(plan, 'alice')
     run = {'id': 'run', 'worker_id': 'w', 'created_by': 'alice', 'test_plan_json': json.dumps(plan)}
     inventory = [{'id': 'w:ABC', 'properties': {'usb': '1-2', 'aoa_context': target.context}}]
@@ -47,7 +48,7 @@ def test_incompatible_target_is_rejected_before_reserving_or_flashing(monkeypatc
     run, repository, _, _ = prepared_run(monkeypatch)
     repository.list_devices = lambda _: [{'id': 'w:ABC', 'properties': {
         'usb': '1-2', 'aoa_context': {'model': 'unknown'}}}]
-    with pytest.raises(ValueError, match='verified mapping'):
+    with pytest.raises(ValueError, match='target device model'):
         HttpAutomationExecutor().snapshot_devices(repository, 'w', [{'id': 'w:ABC'}], run)
 
 
@@ -85,5 +86,17 @@ def test_invalid_mapping_does_not_leave_an_untracked_reservation(monkeypatch):
     monkeypatch.setattr('features.cluster.get_cluster_service', lambda: cluster)
     result = HttpAutomationExecutor().select_devices(run)
     assert result['success'] is False
-    assert 'verified mapping' in result['error']
+    assert 'target device model' in result['error']
     repository.reserve_devices.assert_not_called()
+
+
+def test_changed_firmware_declaration_cannot_reuse_a_frozen_run(monkeypatch):
+    run, repository, _, _ = prepared_run(monkeypatch)
+    executor = HttpAutomationExecutor(session=FakeSession())
+    run['devices_json'] = json.dumps(executor.snapshot_devices(repository, 'w', [{'id': 'w:ABC'}], run))
+    plan = json.loads(run['test_plan_json'])
+    plan['aoa']['metadata']['firmware_compatibility']['sha256'] = 'b' * 64
+    run['test_plan_json'] = json.dumps(plan)
+    result = executor.aoa_recover(run)
+    assert result['success'] is False and 'snapshot changed' in result['error']
+    assert executor.session.calls == []

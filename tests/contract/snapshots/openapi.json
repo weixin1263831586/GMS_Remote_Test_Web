@@ -530,6 +530,12 @@
             "title": "Aoa Boot Wait Seconds",
             "type": "integer"
           },
+          "aoa_firmware_sha256": {
+            "default": "",
+            "pattern": "^(?:[a-f0-9]{64})?$",
+            "title": "Aoa Firmware Sha256",
+            "type": "string"
+          },
           "aoa_profile_id": {
             "default": "",
             "title": "Aoa Profile Id",
@@ -1071,6 +1077,25 @@
             "title": "Aoa Debug Session Id",
             "type": "string"
           },
+          "aoa_direct_certificate": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aoa Direct Certificate"
+          },
+          "aoa_firmware_sha256": {
+            "default": "",
+            "maxLength": 64,
+            "pattern": "^(?:[a-f0-9]{64})?$",
+            "title": "Aoa Firmware Sha256",
+            "type": "string"
+          },
           "aoa_hid_session_mode": {
             "default": "continuous",
             "enum": [
@@ -1106,6 +1131,18 @@
             "additionalProperties": true,
             "title": "Aoa Record",
             "type": "object"
+          },
+          "aoa_semantic_plan": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aoa Semantic Plan"
           },
           "aoa_source_touch_mapping": {
             "anyOf": [
@@ -1991,6 +2028,44 @@
           "query"
         ],
         "title": "ExternalSearchRequest",
+        "type": "object"
+      },
+      "FirmwareRecoveryPreflight": {
+        "properties": {
+          "aoa_boot_wait_seconds": {
+            "default": 60,
+            "maximum": 600.0,
+            "minimum": 0.0,
+            "title": "Aoa Boot Wait Seconds",
+            "type": "integer"
+          },
+          "aoa_profile_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Aoa Profile Id",
+            "type": "string"
+          },
+          "devices": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1,
+            "minItems": 1,
+            "title": "Devices",
+            "type": "array"
+          },
+          "worker_id": {
+            "default": "",
+            "maxLength": 128,
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "devices",
+          "aoa_profile_id"
+        ],
+        "title": "FirmwareRecoveryPreflight",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -7620,6 +7695,44 @@
         ]
       }
     },
+    "/api/cluster/firmware/preflight": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FirmwareRecoveryPreflight"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preflight Worker Firmware",
+        "tags": [
+          "cluster"
+        ]
+      }
+    },
     "/api/cluster/firmware/stage": {
       "post": {
         "requestBody": {
@@ -12837,6 +12950,129 @@
         "summary": "Delete Calibration"
       }
     },
+    "/api/devices/aoa/certifications": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Certificates"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Issue Certificate"
+      }
+    },
+    "/api/devices/aoa/certifications/verify": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Reference"
+      }
+    },
+    "/api/devices/aoa/certifications/{certificate_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "certificate_id",
+            "required": true,
+            "schema": {
+              "title": "Certificate Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Certificate"
+      }
+    },
     "/api/devices/aoa/playback/{control_id}/control": {
       "post": {
         "description": "Control only the caller's persisted playback through its target Worker.",
@@ -13353,6 +13589,43 @@
           }
         },
         "summary": "Recover"
+      }
+    },
+    "/api/devices/aoa/templates/resolve": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Template"
       }
     },
     "/api/devices/bootloader-lock": {

@@ -8,6 +8,12 @@ from typing import Any
 from foundation.aoa_calibration import mapping_options
 from foundation.aoa_hid_mode import profile_hid_options
 from foundation.aoa_profile import MAX_AOA_OPERATION_SECONDS
+from foundation.aoa_recovery_policy import (
+    firmware_compatibility,
+    require_verified_recovery,
+    target_firmware_context,
+)
+from foundation.error_model import ApiError
 
 
 class RecoveryExecutorMixin:
@@ -24,28 +30,31 @@ class RecoveryExecutorMixin:
             from .executors import _run_test_plan
 
             recovery = _run_test_plan(run)["aoa"]
+            commands = recovery.get("commands") or []
             metadata = recovery.get("metadata") or {}
             mode = profile_hid_options(metadata)["aoa_hid_touch_mode"]
             owner = str(run.get("created_by") or run.get("owner") or "")
             for snapshot in snapshots:
                 properties = inventory.get(snapshot["serial"], {}).get("properties") or {}
-                context = properties.get("aoa_context") or {}
-                mappings = replay_mapping_options(metadata, context, owner, mode)
-                if mappings["aoa_mapping_policy"] == "unsupported":
-                    raise ValueError("AOA recovery requires a verified mapping for the target environment before flashing")
+                context = target_firmware_context(metadata, commands, properties.get("aoa_context") or {})
+                mappings = replay_mapping_options(metadata, context, owner, mode, commands=commands)
+                require_verified_recovery(commands, mappings, metadata)
                 snapshot["aoa_mapping_options"] = mappings
+                snapshot["aoa_firmware_compatibility"] = firmware_compatibility(metadata, commands)
         return snapshots
 
     @staticmethod
     def recovery_mapping_options(recovery: dict, identity: dict) -> dict:
         metadata = recovery.get("metadata") or {}
+        commands = recovery.get("commands") or []
         frozen = identity.get("aoa_mapping_options") or {}
         calibration = metadata.get("calibration") or {}
-        if calibration.get("mapping") and not frozen.get("aoa_source_touch_mapping"):
+        if calibration.get("mapping") and not frozen.get("aoa_source_touch_mapping") and not frozen.get("aoa_semantic_plan"):
             raise ValueError("AOA mapping snapshot is missing; create a new run before flashing")
         mappings = mapping_options({**profile_hid_options(metadata), **frozen})
-        if mappings["aoa_mapping_policy"] == "unsupported":
-            raise ValueError("AOA recovery target mapping is unsupported")
+        require_verified_recovery(commands, mappings, metadata)
+        if identity.get("aoa_firmware_compatibility") != firmware_compatibility(metadata, commands):
+            raise ValueError("AOA firmware compatibility snapshot changed; create a new run")
         return mappings
 
     def recovery_preflash_error(self, cluster, worker_id: str, run: dict) -> str:
@@ -66,8 +75,19 @@ class RecoveryExecutorMixin:
         options = profile_hid_options(recovery.get("metadata"))
         try:
             mappings = [self.recovery_mapping_options(recovery, item) for item in devices]
-        except ValueError as exc:
+            from features.devices import validate_owned_semantic
+
+            for mapping in mappings:
+                validate_owned_semantic(mapping, str(run.get("created_by") or run.get("owner") or ""))
+            from foundation.aoa_semantics import require_capture_capability
+
+            for mapping, identity in zip(mappings, devices):
+                if mapping.get("aoa_semantic_plan"):
+                    require_capture_capability(mapping, capabilities, identity["serial"], identity["usb_port_path"])
+        except (ValueError, ApiError) as exc:
             return str(exc)
+        if any(item.get("aoa_semantic_plan") for item in mappings) and capabilities.get("aoa_semantic_v1") is not True:
+            return "Worker does not support certified semantic recovery; update it before flashing"
         if (any(item.get("aoa_touch_mapping") or item.get("aoa_source_touch_mapping") for item in mappings)
                 and capabilities.get("aoa_affine_mapping_v2") is not True):
             return "Worker AOA mapping protocol is outdated; update it before flashing"
@@ -135,7 +155,10 @@ class RecoveryExecutorMixin:
 
             aoa_profile.parse_profile_commands(commands)
             mappings = self.recovery_mapping_options(recovery, identity)
-        except ValueError as exc:
+            from features.devices import validate_owned_semantic
+
+            validate_owned_semantic(mappings, str(run.get("created_by") or run.get("owner") or ""))
+        except (ValueError, ApiError) as exc:
             return {"success": False, "error": str(exc)}
         wait_adb_seconds = int(recovery.get("wait_adb_seconds") or 0)
 

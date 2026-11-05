@@ -1,7 +1,20 @@
 """AOA recover must pass profile HID mode through the existing dispatch port."""
+from types import SimpleNamespace
+
 import pytest
 
+from tests.aoa_fixtures import verified_mapping
+
 from .test_aoa_profiles import environment as environment
+
+
+@pytest.fixture(autouse=True)
+def target_inventory(monkeypatch):
+    context = verified_mapping().context
+    repository = SimpleNamespace(resolve_worker_device=lambda worker, device: (
+        {"properties": {"aoa_context": context}} if worker == "w" and device == "ABC" else None))
+    monkeypatch.setattr("features.devices.aoa_mapping_service.get_cluster_service",
+                        lambda: SimpleNamespace(repository=repository))
 
 
 @pytest.mark.parametrize("metadata,mode,settle", [({}, "pointer", 2),
@@ -42,8 +55,7 @@ def test_recover_forwards_embedded_mapping_and_source_context(environment, monke
         return {"success": True}
 
     monkeypatch.setattr(aoa_api.cluster_port, "submit_device_action", submit)
-    context = {"version": 3, "model": "RK3576", "release": "16",
-               "display": [800, 1280], "rotation": 0, "hid_touch_mode": "direct"}
+    context = verified_mapping().context
     mapping = mapping_from_samples(
         "direct",
         [((x, y), (x * 2.2, y * 2.2)) for x, y in five_point_calibration_points(360, 640)],

@@ -97,7 +97,8 @@ def test_real_calibration_pipeline_separates_fitting_and_validation(monkeypatch,
 
     monkeypatch.setattr(aoa_actions, "_usb", lambda: (None, SimpleNamespace(dispose_resources=lambda _: None)))
     monkeypatch.setattr(aoa_actions, "_adb_run", lambda *a, **kw: SimpleNamespace(
-        stdout="Status: ok", stderr="", returncode=0))
+        stdout="Status: ok\nmTopFocusedDisplayId=0\nmCurrentFocus=Window{123 u0 com.gms.remote.aoacalibration/.CalibrationActivity}",
+        stderr="", returncode=0))
     monkeypatch.setattr(aoa_actions, "_configure_accessory", lambda *a: object())
     monkeypatch.setattr(aoa_actions, "_detach_kernel_drivers", lambda _: None)
     monkeypatch.setattr(aoa_actions, "_register_all_hid", lambda *a: None)

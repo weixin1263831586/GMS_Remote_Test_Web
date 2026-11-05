@@ -99,7 +99,8 @@ def _probe_device_details_uncached(
         "echo __SOC__; getprop ro.soc.model; "
         "echo __FINGERPRINT__; getprop ro.build.fingerprint; "
         "echo __WM_SIZE__; wm size; echo __WM_DENSITY__; wm density; "
-        "echo __KERNEL__; uname -r; echo __INPUT__; dumpsys input",
+        "echo __KERNEL__; uname -r; echo __HARDWARE__; getprop ro.hardware; "
+        "echo __LOCALE__; getprop persist.sys.locale; echo __INPUT__; dumpsys input",
     ], timeout=3, env=_adb_environment(adb_server_socket))
     markers = {
         "__MODEL__": "model",
@@ -125,10 +126,13 @@ def _probe_device_details_uncached(
         if current == "battery_level":
             value = value.partition(":")[2].strip() if ":" in value else value
         details[current] = value
-    from .aoa_calibration import inventory_context
+    from .aoa_calibration import enrich_display_densities, inventory_context
 
     context = inventory_context(output, details)
     if context:
+        enrich_display_densities(context, lambda display_id: _run(
+            ["adb", "-s", serial, "shell", "wm", "density", "-d", str(display_id)],
+            timeout=2, env=_adb_environment(adb_server_socket)))
         details["aoa_context"] = context
     return details
 
@@ -401,17 +405,19 @@ def execute_usbip_action(
         timeout=180 if action == "attach" else 60,
     )
 
-def aoa_capabilities() -> dict[str, bool]:
+def aoa_capabilities() -> dict[str, Any]:
     """Advertise the same AOA runtime contract on Workers and the local bridge."""
     try:
         has_pyusb = importlib.util.find_spec("usb.core") is not None
     except (ModuleNotFoundError, ValueError):
         has_pyusb = False
-    return {"aoa_record_input_v1": shutil.which("adb") is not None,
+    from .aoa_observation import capture_capabilities
+
+    return {**capture_capabilities(), "aoa_record_input_v1": shutil.which("adb") is not None,
             "aoa_usb_hid_v1": has_pyusb, "aoa_identity_fencing_v1": True,
             "aoa_playback_control_v1": True, "firmware_aoa_recovery_v1": True,
             "aoa_hid_modes_v1": True, "aoa_per_command_v1": True,
-            "aoa_affine_mapping_v2": True}
+            "aoa_affine_mapping_v2": True, "aoa_calibration_focus_v1": True, "aoa_semantic_v1": True}
 
 
 def execute_device_action(
@@ -610,30 +616,52 @@ def execute_device_action(
                     if online.get("adb_recovered") is True:
                         return {"success": True, "skipped": True, **online}
 
-                return run_aoa_sequence(
-                    serials[0],
-                    [str(item) for item in options.get("aoa_commands") or []],
-                    int(options.get("wait_adb_seconds") or 0),
-                    on_progress=progress_callback if progress_event_callback is None else None,
-                    on_event=progress_event_callback,
-                    control_id=str(options.get("playback_control_id") or ""),
-                    control_source=options.get("_aoa_control_source"),
-                    debug_command_source=options.get("_aoa_debug_source"),
-                    suppress_adb_daemon=bool(options.get("suppress_adb_daemon")),
-                    suppress_adb_daemon_gate=options.get("suppress_adb_daemon_gate"),
-                    touch_mode=options.get("aoa_hid_touch_mode", "pointer"),
-                    hid_settle_seconds=options.get("aoa_hid_settle_seconds", 2),
-                    session_mode=options.get("aoa_hid_session_mode", "continuous"),
-                    touch_mapping=options.get("aoa_touch_mapping"),
-                    source_touch_mapping=options.get("aoa_source_touch_mapping"),
-                    mapping_policy=str(options.get("aoa_mapping_policy") or ""),
-                )
+                try:
+                    if options.get("aoa_semantic_plan") is not None:
+                        from .aoa_semantics import run_semantic_sequence
+
+                        return run_semantic_sequence(serials[0], list(options.get("aoa_commands") or []), options,
+                            on_event=progress_event_callback, on_progress=progress_callback if progress_event_callback is None else None)
+                    return run_aoa_sequence(
+                        serials[0],
+                        [str(item) for item in options.get("aoa_commands") or []],
+                        int(options.get("wait_adb_seconds") or 0),
+                        on_progress=progress_callback if progress_event_callback is None else None,
+                        on_event=progress_event_callback,
+                        control_id=str(options.get("playback_control_id") or ""),
+                        control_source=options.get("_aoa_control_source"),
+                        debug_command_source=options.get("_aoa_debug_source"),
+                        suppress_adb_daemon=bool(options.get("suppress_adb_daemon")),
+                        suppress_adb_daemon_gate=options.get("suppress_adb_daemon_gate"),
+                        touch_mode=options.get("aoa_hid_touch_mode", "pointer"),
+                        hid_settle_seconds=options.get("aoa_hid_settle_seconds", 2),
+                        session_mode=options.get("aoa_hid_session_mode", "continuous"),
+                        touch_mapping=options.get("aoa_touch_mapping"),
+                        source_touch_mapping=options.get("aoa_source_touch_mapping"),
+                        mapping_policy=str(options.get("aoa_mapping_policy") or ""),
+                    )
+                except AoaError as exc:
+                    if int(options.get("wait_adb_seconds") or 0) > 0:
+                        from .adb_suppression import adb_daemon_suppressed
+                        from .aoa_actions import _wait_adb_state
+                        from .aoa_diagnostics import inspect_failed_adb
+                        from .aoa_usb import validate_binding
+
+                        inspect_failed_adb(exc, observe=lambda: _wait_adb_state(serials[0], 0),
+                            suppressed=adb_daemon_suppressed, validate=validate_binding)
+                    raise
         except AoaError as exc:
+            from .aoa_diagnostics import failure_detail
+
             details = getattr(exc, "cleanup_errors", [])
-            message = str(exc) + (f"; cleanup diagnostics: {details}" if details else "")
+            receipt = getattr(exc, "aoa_result", {})
+            context = failure_detail(receipt)
+            message = str(exc) + (f"; {context}" if context else "")
+            message += f"; cleanup diagnostics: {details}" if details else ""
             error = RuntimeError(message)
             error.cancelled = getattr(exc, "cancelled", False)
             error.cleanup_errors = details
+            error.aoa_result = receipt
             raise error from exc
     if action == "tap":
         if len(serials) != 1 or options.get("x") is None or options.get("y") is None:

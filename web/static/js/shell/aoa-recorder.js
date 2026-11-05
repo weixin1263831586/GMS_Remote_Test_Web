@@ -115,6 +115,7 @@ function aoaLiveTarget() {
     const workerId = aoaEl('aoa-record-worker')?.value || '';
     const device = aoaEl('aoa-record-device')?.value || '';
     if (!workerId || !device) return null;
+    if (!aoaUsableDevices(workerId, true).some(item => aoaDeviceSerial(item) === device)) return null;
     return {workerId, device};
 }
 
@@ -137,6 +138,87 @@ async function aoaToggleLiveScreen() {
 
 function aoaLiveInputSurfaceActive() {
     return Boolean(window.aoaLiveScreen?.isActive());
+}
+
+function aoaPointerFrame() {
+    const live = aoaLiveInputSurfaceActive();
+    const canvas = aoaEl('aoa-screen-canvas');
+    const surface = live ? (window.aoaLiveScreen.activeSurface?.() ||
+        (!window.aoaLiveScreen.activeSurface && !canvas?.hidden ? canvas : null)) : aoaEl('aoa-screen-image');
+    if (!surface || surface.hidden) return null;
+    const width = live ? surface.width : surface.naturalWidth;
+    const height = live ? surface.height : surface.naturalHeight;
+    if (!width || !height) return null;
+    return {surface, width, height, worker: aoaEl('aoa-record-worker')?.value,
+        device: aoaEl('aoa-record-device')?.value};
+}
+
+function aoaPointFromPointer(event, frame = aoaPointerFrame(), clamp = false) {
+    if (!frame) return null;
+    const rect = frame.surface.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    // object-fit: contain can leave bars inside the element's box as well as
+    // outside it. Only the actual video/image content defines input pixels.
+    const scale = Math.min(rect.width / frame.width, rect.height / frame.height);
+    const left = rect.left + (rect.width - frame.width * scale) / 2;
+    const top = rect.top + (rect.height - frame.height * scale) / 2;
+    const x = (event.clientX - left) / scale;
+    const y = (event.clientY - top) / scale;
+    if (!clamp && (x < 0 || y < 0 || x >= frame.width || y >= frame.height)) return null;
+    return {x: Math.max(0, Math.min(frame.width - 1, Math.round(x))),
+        y: Math.max(0, Math.min(frame.height - 1, Math.round(y)))};
+}
+
+function aoaPointerDown(event) {
+    if (aoaPanelState.running || aoaPanelState.pointer) return;
+    const frame = aoaPointerFrame();
+    const point = aoaPointFromPointer(event, frame);
+    if (!point) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    aoaPanelState.pointer = {id: event.pointerId, startedAt: performance.now(),
+        clientX: event.clientX, clientY: event.clientY, point, frame};
+}
+
+function aoaPointerMove(event) {
+    const pointer = aoaPanelState.pointer;
+    if (!pointer || pointer.id !== event.pointerId) return;
+    const stage = aoaEl('aoa-screen-stage').getBoundingClientRect();
+    const dx = event.clientX - pointer.clientX; const dy = event.clientY - pointer.clientY;
+    const line = aoaEl('aoa-gesture-line'); line.hidden = false;
+    line.style.left = `${pointer.clientX - stage.left}px`;
+    line.style.top = `${pointer.clientY - stage.top}px`;
+    line.style.width = `${Math.hypot(dx, dy)}px`;
+    line.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
+}
+
+function aoaPointerCancel(event) {
+    if (aoaPanelState.pointer?.id !== event.pointerId) return;
+    aoaPanelState.pointer = null;
+    aoaEl('aoa-gesture-line').hidden = true;
+}
+
+function aoaPointerUp(event) {
+    const pointer = aoaPanelState.pointer;
+    if (!pointer || pointer.id !== event.pointerId) return;
+    aoaPointerCancel(event);
+    const frame = aoaPointerFrame();
+    if (aoaPanelState.running || !frame || ['surface', 'width', 'height', 'worker', 'device']
+        .some(key => frame[key] !== pointer.frame[key])) return;
+    const end = aoaPointFromPointer(event, frame, true);
+    if (!end) return;
+    const frame_size = [frame.width, frame.height];
+    const distance = Math.hypot(event.clientX - pointer.clientX, event.clientY - pointer.clientY);
+    const elapsed = Math.round(performance.now() - pointer.startedAt);
+    if (distance < 9 && elapsed >= 650) {
+        aoaExecuteRecorderInput({action: 'long_click', frame_size, x: pointer.point.x, y: pointer.point.y,
+            duration_ms: Math.min(Math.max(elapsed, 650), 3000)});
+    } else if (distance < 9) {
+        aoaExecuteRecorderInput({action: 'tap', frame_size, x: pointer.point.x, y: pointer.point.y});
+    } else {
+        aoaExecuteRecorderInput({action: 'swipe', frame_size, x1: pointer.point.x, y1: pointer.point.y,
+            x2: end.x, y2: end.y, duration_ms: Math.min(Math.max(elapsed, 150), 2000)});
+    }
 }
 
 function aoaSendKey(key) { return aoaExecuteRecorderInput({action: key}); }

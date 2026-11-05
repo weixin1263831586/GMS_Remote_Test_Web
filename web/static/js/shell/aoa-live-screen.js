@@ -22,8 +22,6 @@
         ws: null,
         decoder: null,
         canvas: null,
-        deviceW: 0,
-        deviceH: 0,
         buffer: new Uint8Array(0),
         pendingConfig: null,
         framesDecoded: 0,
@@ -81,6 +79,7 @@
         const level = sps[3].toString(16).padStart(2, '0');
         const decoder = new VideoDecoder({
             output(frame) {
+                if (state.decoder !== decoder) { frame.close(); return; }
                 // 每帧实时查 DOM（state.canvas 从未赋值导致解码帧被丢弃、
                 // 计数不涨、看门狗误回退——8 秒未出画面的真根因）。
                 const canvas = el('aoa-screen-canvas');
@@ -88,6 +87,7 @@
                     if (canvas.width !== frame.displayWidth) canvas.width = frame.displayWidth;
                     if (canvas.height !== frame.displayHeight) canvas.height = frame.displayHeight;
                     canvas.getContext('2d').drawImage(frame, 0, 0);
+                    canvas.dataset.aoaFrameReady = '1';
                 }
                 // 解码成功即计数（与绘制解耦）：看门狗据此判断流健康。
                 state.framesDecoded += 1;
@@ -219,6 +219,8 @@
     }
 
     function teardownStream() {
+        const canvas = el('aoa-screen-canvas');
+        if (canvas) delete canvas.dataset.aoaFrameReady;
         state.stopWs = true;
         if (state.pingTimer) { clearInterval(state.pingTimer); state.pingTimer = null; }
         if (state.watchdogTimer) { clearInterval(state.watchdogTimer); state.watchdogTimer = null; }
@@ -323,7 +325,7 @@
     function activeSurface() {
         // 投屏激活且 canvas 已显示时返回 canvas，否则截图 img。
         const canvas = el('aoa-screen-canvas');
-        if (state.active && canvas && !canvas.hidden) return canvas;
+        if (state.active && canvas && !canvas.hidden && canvas.dataset.aoaFrameReady) return canvas;
         return null;
     }
 

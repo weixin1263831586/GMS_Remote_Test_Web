@@ -28,6 +28,8 @@ from foundation import aoa_profile
 from foundation.aoa_calibration import TouchMapping
 
 from .adb_suppression import begin_suppression as _begin_adb_suppression
+from .aoa_diagnostics import confirm_usb_restore, record_failure
+from .aoa_input_geometry import resolve_frame_input
 from .aoa_session import AoaSession, device_gone, register_hids
 from .aoa_usb import bound_port, cleanup_diagnostics, cleanup_steps, find_bound_device, validate_binding
 
@@ -594,6 +596,8 @@ def _calibrate_touch_affine(
     sleep: Callable[[float], None],
     touch_mode: str = "pointer",
     context: dict | None = None,
+    evidence_hook: Callable | None = None,
+    probe_reader: Callable | None = None,
 ) -> TouchMapping | None:
     """多点仿射标定：五个 HID 探针实测 cooked 坐标，拟合 HID→屏幕仿射。
 
@@ -607,7 +611,7 @@ def _calibrate_touch_affine(
     """
     from foundation.aoa_calibration import mapping_from_samples
 
-    from .aoa_calibration import open_calibration_surface
+    from .aoa_calibration import open_calibration_surface, verify_calibration_surface
 
     validation_probes = [(120, 213), (240, 427)]
     probes = calibration_probe_points() + validation_probes
@@ -615,17 +619,25 @@ def _calibrate_touch_affine(
     device = None
     probe_down_sent = False
     try:
+        from foundation.aoa_calibration import complete_context
+
+        if not complete_context(context):
+            raise ValueError("AOA calibration requires complete device environment evidence")
+        display_id = context.get("display_id", 0)
         # 熄屏时 InputReader 会丢弃外接触摸：先亮屏解锁（与单点标定一致）。
         _adb_run(serial, "shell", "input", "keyevent", "224")
         _adb_run(serial, "shell", "wm", "dismiss-keyguard")
-        open_calibration_surface(serial, _adb_run)
+        open_calibration_surface(serial, _adb_run, display_id)
         sleep(1.0)
         device = _configure_accessory(usb_core, serial)
         _detach_kernel_drivers(device)
         _register_all_hid(device, touch_mode)
         sleep(CONFIGURE_DELAY_SECONDS)
+        if evidence_hook:
+            evidence_hook()
         samples: list[tuple[tuple[float, float], tuple[float, float]]] = []
         for probe_x, probe_y in probes:
+            verify_calibration_surface(serial, _adb_run, display_id)
             result = _transfer(
                 device, aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT,
                 aoa_profile.AOA_HID_TOUCH_SCREEN, 0,
@@ -636,7 +648,7 @@ def _calibrate_touch_affine(
             sleep(1.2)
             dump = _adb_run(serial, "shell", "dumpsys", "input",
                             timeout=30).stdout or ""
-            cooked = _parse_probe_cooked_point(dump, probe_x, probe_y)
+            cooked = (probe_reader or _parse_probe_cooked_point)(dump, probe_x, probe_y)
             result = _transfer(
                 device, aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT,
                 aoa_profile.AOA_HID_TOUCH_SCREEN, 0,
@@ -678,8 +690,8 @@ def _calibrate_touch_affine(
                 for hid, _ in reversed(aoa_profile.AOA_HID_REGISTRATIONS)]
             steps += [("reset_usb", lambda: _reset_usb(device)),
                       ("dispose_usb", lambda: usb_util.dispose_resources(device))]
-        steps += [("restore_native_mode", lambda: _ensure_native_mode(usb_core, serial)),
-                  ("verify_adb_state", lambda: _wait_adb_state(serial, 20).get("adb_recovered") is True)]
+            steps += [("restore_native_mode", lambda: _ensure_native_mode(usb_core, serial)),
+                      ("verify_adb_state", lambda: _wait_adb_state(serial, 20).get("adb_recovered") is True)]
         cleanup_steps(steps, errors)
         if errors:
             logger.warning("AOA affine calibration cleanup on %s: %s", serial, errors)
@@ -969,8 +981,18 @@ def _rescale_aoa_command(command: str, old_x: float, old_y: float,
 def record_aoa_input(serial: str, raw_action: dict) -> dict[str, Any]:
     """Execute one allow-listed ADB input and return its AOAv2 command."""
     action = aoa_profile.parse_record_input_action(raw_action)
+    if action["action"] == "verify_direct":
+        from .aoa_certification import verify_direct_reference
+
+        return verify_direct_reference(serial, action.get("display_id", 0))
+    if action["action"] == "observe_frame":
+        from .aoa_observation import capture_reference
+
+        return capture_reference(serial, action["roi"])
     touch_mode = action.get("hid_touch_mode", "pointer")
     display_w, display_h = _display_size(serial)
+    action, (display_w, display_h) = resolve_frame_input(
+        serial, action, (display_w, display_h), _adb_run)
     touch_mapping = None
     if action.get("touch_mapping") is not None:
         try:
@@ -1225,14 +1247,17 @@ def run_aoa_sequence(
                            touch_mode=touch_mode, settle_seconds=hid_settle_seconds)
     session = None
     reports_sent = 0
+    reports_attempted = 0
+    last_input = None
 
     position = 0
     original = ""
 
-    def report_event(phase, index, text=""):
+    def report_event(phase, index, text="", **details):
         if on_event:
             try:
                 event = {"phase": phase, "index": index, "total": max(index, len(parsed)), "command": text}
+                event.update(details)
                 if debug_command_source:
                     event["debug_sequence"] = index
                 on_event(event)
@@ -1280,7 +1305,7 @@ def run_aoa_sequence(
             clock=time.monotonic)
 
         def send_hid(hid_id: int, data: bytes, pause: float) -> None:
-            nonlocal reports_sent
+            nonlocal reports_sent, reports_attempted
             if time.monotonic() > deadline:
                 raise AoaError("AOA playback time budget exceeded; reconcile required")
             if hid_id not in registered:
@@ -1288,6 +1313,7 @@ def run_aoa_sequence(
                     f"AOA HID channel {hid_id} is not supported by device {serial} "
                     "(registration was rejected; use another device or non-HID steps)")
             try:
+                reports_attempted += 1
                 result = _transfer(
                     device, aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT, hid_id, 0, data)
             except AoaError as exc:
@@ -1331,6 +1357,7 @@ def run_aoa_sequence(
             steps = debug_steps(debug_command_source, parsed, tick=debug_tick, sleep=sleep,
                                 clock=time.monotonic, error_type=AoaError, transform=transform_debug)
         for position, command, original in steps:
+            reports_sent = reports_attempted = 0
             if control_id:
                 from .aoa_control import wait_if_paused as _gate
 
@@ -1343,7 +1370,6 @@ def run_aoa_sequence(
             validate_binding()
             if time.monotonic() > deadline:
                 raise AoaError("AOA playback time budget exceeded; reconcile required")
-            reports_sent = 0
             report_event("running", position, str(original))
             try:
                 if command.kind == "sleep":
@@ -1409,8 +1435,10 @@ def run_aoa_sequence(
                     executed += 1
             finally:
                 if executed >= position:
+                    if command.kind != "sleep":
+                        last_input = (position, str(original))
                     report_event("completed", position, str(original))
-                if on_progress is not None:
+                if executed >= position and on_progress is not None:
                     try:
                         on_progress(position, len(parsed), str(original))
                     except Exception:
@@ -1418,7 +1446,11 @@ def run_aoa_sequence(
                                        position, serial, exc_info=True)
     except Exception as exc:
         execution_error = exc
-        report_event("cancelled" if getattr(exc, "cancelled", False) else "failed", position, str(original))
+        details = record_failure(exc, index=position, total=max(position, len(parsed)),
+            command=original, completed=executed, reports_sent=reports_sent,
+            reports_attempted=reports_attempted, last_input=last_input)
+        report_event("cancelled" if getattr(exc, "cancelled", False) else "failed",
+                     position, str(original), **details)
         raise
     finally:
         cleanup_errors = cleanup_diagnostics()
@@ -1475,7 +1507,20 @@ def run_aoa_sequence(
     }
     if wait_adb_seconds:
         result.update(_wait_adb_state(serial, int(wait_adb_seconds)))
-        # AOA 执行成功但 ADB 未恢复：对编排器仍算"序列成功"，
-        # 但把恢复状态如实带回，由上层决定是否进入测试。
+
+        def observe_native():
+            validate_binding()
+            current = _open_device(usb_core, serial)
+            try:
+                native = current is not None and not _accessory_mode(usb_core, current)
+                validate_binding()
+                return native
+            finally:
+                if current is not None:
+                    usb_util.dispose_resources(current)
+
+        confirm_usb_restore(result, observe_native)
+        # Input completion, authorized ADB and verified native USB are distinct
+        # postconditions; the firmware workflow requires all of them.
         result["success"] = result.get("adb_recovered", False) and result["native_mode_restored"]
     return result

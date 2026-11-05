@@ -51,6 +51,19 @@ def test_uncertain_input_is_not_retried_and_later_steps_never_run():
     assert [call.args[0] for call in one.call_args_list] == ["click 180 525", "click 180 450"]
 
 
+def test_nested_failure_receipt_uses_profile_step_instead_of_single_step_index():
+    error = RuntimeError("connection vanished before input")
+    error.aoa_result = {"failed_index": 1, "failed_input_state": "not_sent", "failed_reports_sent": 0}
+    one = Mock(side_effect=[clean_result(), error])
+    with pytest.raises(RuntimeError) as caught:
+        execute(["click 320 320", "sleep 3000", "click 180 280"], run_one=one)
+    result = caught.value.aoa_result
+    assert result["failed_index"] == 3 and result["commands_executed"] == 2
+    assert result["failed_command"] == "click 180 280"
+    assert result["failed_input_state"] == "not_sent"
+    assert result["last_input_index"] == 1 and result["last_input_command"] == "click 320 320"
+
+
 @pytest.mark.parametrize("failure", [{"native_mode_restored": False}, {"cleanup_errors": [{"step": "reset_usb"}]}])
 def test_unclean_usb_state_stops_before_next_step(failure):
     one = Mock(return_value={**clean_result(), **failure})

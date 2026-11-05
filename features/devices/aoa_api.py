@@ -28,13 +28,15 @@ from foundation.cluster_port import get_local_worker_id
 from foundation.error_model import ApiError
 
 from . import scrcpy_stream
+from .aoa_advanced_api import router as advanced_router
 from .aoa_calibrations import calibration_store
-from .aoa_mapping_service import replay_mapping_options
+from .aoa_mapping_service import replay_mapping_options, trusted_target_context
 from .aoa_service import profile_store
 from .operation_claims import acquire_device_operation_claim, release_device_operation_claim
 
 
 router = APIRouter(prefix="/api/devices/aoa")
+router.include_router(advanced_router)
 
 
 def _validate_commands_or_422(commands: list[str]) -> None:
@@ -228,8 +230,9 @@ async def recover(request: Request, body: dict[str, Any]):
         "playback_control_id": str(body.get("playback_control_id") or ""),
     }
     try:
-        payload.update(replay_mapping_options(metadata, body.get("device_context"),
-            principal_owner_id(request), hid_options["aoa_hid_touch_mode"]))
+        payload.update(replay_mapping_options(metadata,
+            trusted_target_context(str(body["worker_id"]), str(body["device"])),
+            principal_owner_id(request), hid_options["aoa_hid_touch_mode"], commands=commands))
     except (ValueError, TypeError) as exc:
         raise ApiError.invalid_semantics(str(exc)) from exc
     if (payload.get("aoa_mapping_policy") == "unsupported"

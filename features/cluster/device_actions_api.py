@@ -123,7 +123,8 @@ async def _wait_for_command(
     flag = {"deduplicated": True} if deduplicated else {}
     if (command.get("payload") or {}).get("aoa_debug_session_id"):
         flag["debug_sequence"] = 1
-    if action == "aoa_sequence":
+    reference_action = ((command.get("payload") or {}).get("aoa_record") or {}).get("action")
+    if action == "aoa_sequence" or reference_action in {"verify_direct", "observe_frame"}:
         return {"success": True, "accepted": True, "command_id": command["id"],
                 "operation_timeout_seconds": MAX_AOA_OPERATION_SECONDS + (
                     MAX_AOA_PAUSE_SECONDS if command.get("payload", {}).get("playback_control_id") else 0), **flag}
@@ -177,7 +178,8 @@ async def device_action(body: ClusterDeviceAction, request: Request):
         if not device:
             raise HTTPException(409, f"device is not available on worker: {value}")
         state = device.get("state")
-        is_aoa_recovery = str(body.action.value) in {"aoa_probe", "aoa_sequence"}
+        is_aoa_recovery = (str(body.action.value) in {"aoa_probe", "aoa_sequence"}
+            or (body.action == "aoa_record_input" and body.aoa_record.get("action") == "observe_frame"))
         if state in {"offline", "unknown"} and not is_aoa_recovery:
             raise HTTPException(409, f"device is offline: {value}")
         if state == "usb_only" and not is_aoa_recovery:
@@ -222,6 +224,16 @@ async def device_action(body: ClusterDeviceAction, request: Request):
         if getattr(request.state, "auth_method", None) == "machine_authority":
             _require_machine_reservation(request, body.worker_id, requested)
     automation_run_id = str(body.automation_run_id or "").strip()
+    if body.aoa_semantic_plan is not None:
+        from features.devices import authorize_semantic_options
+
+        if body.action != "aoa_sequence" or len(requested) != 1 or body.aoa_debug_session_id:
+            raise ApiError.conflict("认证语义模板只支持单设备完整回放")
+        if not is_local and (worker.get("capabilities") or {}).get("aoa_semantic_v1") is not True:
+            raise ApiError.conflict("Worker 不支持认证语义回放，请更新 Worker")
+        context = (known[requested[0]].get("properties") or {}).get("aoa_context") or {}
+        action_payload = authorize_semantic_options(action_payload, owner_id, context,
+            repository, body.worker_id, automation_run_id)
     digest = request_digest(body.worker_id, requested, action_payload, owner_id)
     if body.aoa_debug_session_id:
         require_human_principal(request)
@@ -265,6 +277,14 @@ async def device_action(body: ClusterDeviceAction, request: Request):
         or (body.action == "aoa_record" and bool(body.aoa_record.get("calibrate_touch"))))
     if not is_local and needs_mapping and (worker.get("capabilities") or {}).get("aoa_affine_mapping_v2") is not True:
         raise ApiError.conflict("Worker 标定映射协议过旧，请更新 Worker 后重试")
+    needs_focus = ((body.action == "aoa_record_input" and body.aoa_record.get("action") == "calibrate")
+                   or (body.action == "aoa_record" and bool(body.aoa_record.get("calibrate_touch"))))
+    if not is_local and needs_focus and (worker.get("capabilities") or {}).get("aoa_calibration_focus_v1") is not True:
+        raise ApiError.conflict("Worker 不支持标定前台焦点检查，请更新 Worker 后再标定")
+    if (not is_local and body.action == "aoa_record_input"
+            and body.aoa_record.get("action") in {"verify_direct", "observe_frame"}
+            and (worker.get("capabilities") or {}).get("aoa_semantic_v1") is not True):
+        raise ApiError.conflict("Worker 不支持输入类别验证和外部画面观察，请更新 Worker")
     if (not is_local and body.action == "aoa_sequence" and body.aoa_hid_session_mode == "per_command"
             and (worker.get("capabilities") or {}).get("aoa_per_command_v1") is not True):
         raise ApiError.conflict("Worker 不支持按单条方式回放，请更新 Worker")
@@ -277,13 +297,16 @@ async def device_action(body: ClusterDeviceAction, request: Request):
     if (body.playback_control_id and not is_local
             and (worker.get("capabilities") or {}).get("aoa_playback_control_v1") is not True):
         raise ApiError.conflict("Worker needs an update to support AOA pause/resume")
-    if body.action in {"aoa_sequence", "aoa_probe"}:
+    reference_action = body.action == "aoa_record_input" and body.aoa_record.get("action") in {"verify_direct", "observe_frame"}
+    if body.action in {"aoa_sequence", "aoa_probe"} or reference_action:
         if len(requested) != 1:
             raise ApiError.conflict("AOA requires exactly one physical device")
         current_port = str((known[requested[0]].get("properties") or {}).get("usb") or "")
         if body.usb_port_path and current_port != body.usb_port_path:
             raise ApiError.conflict("physical USB identity differs from the reserved device")
         action_payload["usb_port_path"] = body.usb_port_path or current_port
+        if reference_action and not current_port:
+            raise ApiError.conflict("参考验证和外部画面观察必须绑定目标设备的物理 USB 端口")
     claim_source = f"operation:{operation_id}"
     if not is_read_only:
         action_payload.update(device_action_claim_payload(
@@ -297,7 +320,7 @@ async def device_action(body: ClusterDeviceAction, request: Request):
     else:
         action_payload.update({"owner_id": owner_id, "read_only": True})
 
-    durable_local = is_local and body.action == "aoa_sequence"
+    durable_local = is_local and (body.action == "aoa_sequence" or reference_action)
     if durable_local:
         # AOA 会话期抑制主机 adb daemon（18d1:2D0x 复合 accessory 的 adb
         # 接口会让 daemon 与 pyusb 抢设备，实机 RK3576 复现 reset 风暴）。

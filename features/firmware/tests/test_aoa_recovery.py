@@ -13,9 +13,10 @@ class FirmwareAoaRouteTests(unittest.TestCase):
     setUp = _BurnFixture.setUp
     tearDown = _BurnFixture.tearDown
 
-    def burn(self, *, flash_ok=True, recovery_ok=True, preflight_error=None):
+    def burn(self, *, flash_ok=True, recovery_ok=True, preflight_error=None, declared_sha=""):
         calls = []
-        prepared = {"device_id": "local:D1"}
+        prepared = {"device_id": "local:D1", "snapshot": {
+            "firmware_compatibility": {"sha256": declared_sha} if declared_sha else None}}
 
         async def batch(**kwargs):
             calls.append("flash")
@@ -34,6 +35,7 @@ class FirmwareAoaRouteTests(unittest.TestCase):
             stack.enter_context(patch.object(firmware_api, "validate_local_firmware_recovery"))
             stack.enter_context(patch.object(firmware_api, "release_local_firmware_recovery"))
             stack.enter_context(patch.object(firmware_api, "_scp_put_with_deadline", new=AsyncMock()))
+            stack.enter_context(patch.object(firmware_api, "_remote_sha256", new=AsyncMock(return_value="b" * 64)))
             stack.enter_context(patch.object(firmware_api, "_prepare_usbip_firmware_routes",
                                             new=AsyncMock(return_value=([], ""))))
             stack.enter_context(patch.object(firmware_api, "_device_flash_protocols", return_value={"D1": "rockusb-loader"}))
@@ -68,3 +70,14 @@ class FirmwareAoaRouteTests(unittest.TestCase):
         response, calls = self.burn(preflight_error=ApiError.conflict("USB port changed"))
         assert response.status_code == 409, response.text
         assert calls == ["release"]
+
+    def test_actual_remote_image_must_match_declared_firmware_before_flash(self):
+        response, calls = self.burn(declared_sha="a" * 64)
+        assert response.status_code == 409, response.text
+        assert "SHA-256" in response.json()["error"]
+        assert calls == ["release"]
+
+    def test_matching_remote_image_can_continue_recovery(self):
+        response, calls = self.burn(declared_sha="b" * 64)
+        assert response.status_code == 200, response.text
+        assert calls == ["flash", "aoa", "release"]

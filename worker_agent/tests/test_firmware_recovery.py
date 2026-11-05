@@ -15,7 +15,7 @@ def snapshot():
     import hashlib
     import json
 
-    commands = ["click 180 450", "sleep 2000"]
+    commands = ["home", "sleep 2000"]
     return {"commands": commands, "commands_sha256": hashlib.sha256(json.dumps(
         commands, separators=(",", ":")).encode()).hexdigest(),
         "usb_port_path": "1-6", "wait_adb_seconds": 60, "boot_wait_seconds": 0}
@@ -77,6 +77,37 @@ def test_mid_sequence_disconnect_is_never_retried():
     execute.assert_called_once()
 
 
+def test_interrupted_recovery_keeps_failed_step_and_authorization_state():
+    error = RuntimeError("AOA step 63 failed; ADB unauthorized")
+    error.aoa_result = {"success": False, "failed_index": 63, "commands_executed": 62,
+                        "adb_state": "unauthorized", "adb_recovered": False}
+    execute = Mock(side_effect=error)
+    result = recover_after_flash({"success": True}, snapshot(), ["w:ABC"], Mock(), execute)
+    assert result["flash_success"] is True and result["success"] is False
+    assert result["aoa_recovery"] == error.aoa_result
+    assert result["stage"] == "AOA_RECOVERY_FAILED"
+    execute.assert_called_once()
+
+
+def test_completed_input_retains_adb_failure_details():
+    recovered = {"success": False, "adb_recovered": False, "adb_state": "unauthorized",
+                 "adb_hint": "请确认电脑 RSA 授权弹框"}
+    result = recover_after_flash({"success": True}, snapshot(), ["w:ABC"], Mock(),
+                                  Mock(return_value=recovered))
+    assert result["aoa_recovery"] == recovered
+    assert "RSA" in result["error"] and "无需重新烧写" in result["error"]
+
+
+def test_connected_adb_with_failed_usb_restore_is_not_reported_as_missing_adb():
+    recovered = {"success": False, "adb_recovered": True, "adb_state": "device", "native_mode_restored": False}
+    execute = Mock(return_value=recovered)
+    result = recover_after_flash({"success": True}, snapshot(), ["w:ABC"], Mock(), execute)
+    assert result["success"] is False and result["flash_success"] is True
+    assert "ADB 已连接" in result["error"] and "USB" in result["error"]
+    assert "尚未恢复或尚未授权" not in result["error"]
+    execute.assert_called_once()
+
+
 def test_failed_flash_never_sends_hid():
     execute = Mock()
     result = recover_after_flash({"success": False}, snapshot(), ["w:ABC"], Mock(), execute)
@@ -89,6 +120,30 @@ def test_changed_snapshot_rejected_before_any_input():
     changed["commands"].append("home")
     with pytest.raises(ValueError, match="snapshot changed"):
         recovery_options(changed)
+
+
+def test_touch_recovery_requires_bound_firmware_before_flash():
+    import hashlib
+    import json
+
+    from tests.aoa_fixtures import firmware_declaration, verified_mapping
+
+    frozen = snapshot()
+    mapping = verified_mapping().to_dict()
+    frozen["commands"] = ["click 180 320"]
+    frozen["commands_sha256"] = hashlib.sha256(json.dumps(frozen["commands"], separators=(",", ":")).encode()).hexdigest()
+    declaration = firmware_declaration()
+    frozen.update({"metadata": {"hid_touch_mode": "direct", "firmware_compatibility": declaration},
+                   "firmware_compatibility": declaration,
+                   "mapping_options": {"aoa_touch_mapping": mapping, "aoa_source_touch_mapping": mapping,
+                                       "aoa_mapping_policy": "direct_calibrated"}})
+    validate_preflash(frozen, ["w:ABC"], Mock(), lambda: [device()], firmware_sha256="a" * 64)
+    with pytest.raises(ValueError, match="SHA-256"):
+        validate_preflash(frozen, ["w:ABC"], Mock(), lambda: [device()], firmware_sha256="b" * 64)
+    frozen["metadata"] = {"hid_touch_mode": "direct"}
+    # 声明已是可选强化；但已冻结的声明不得在冻结后被移除（篡改检测仍在）。
+    with pytest.raises(ValueError, match="snapshot changed"):
+        recovery_options(frozen)
 
 
 def test_preflash_port_change_rejected():

@@ -92,8 +92,11 @@ class AoaCalibrationStore:
             raise ApiError.invalid_semantics("AOA calibration requires an owner")
         try:
             mapping = TouchMapping.from_dict(mapping.to_dict())
+            from foundation.aoa_calibration import complete_context
+
             context = mapping.context
             if (not context.get("model") or not context.get("release")
+                    or not complete_context(context)
                     or type(context.get("rotation")) is not int
                     or context["rotation"] not in range(4)
                     or context.get("hid_touch_mode") != mapping.hid_touch_mode

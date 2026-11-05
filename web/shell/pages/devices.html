@@ -137,12 +137,58 @@
                             <input id="aoa-input-text" type="text" maxlength="128" placeholder="输入英文、数字或 @ - _ . +">
                             <button class="btn-xxs" type="button" data-click="aoaSendText" data-aoa-screen-action>输入</button>
                         </div>
-                        <div class="aoa-muted">单击投屏执行点按；按住约 0.7 秒为长按；拖动执行滑动。标定会切换一次 USB 模式并点击屏幕中心，仅在安全页面操作。</div>
+                        <div class="aoa-muted" title="单击投屏执行点按；按住约 0.7 秒为长按；拖动执行滑动。">标定会切换一次 USB 模式并点击屏幕中心，仅在安全页面操作。</div>
+                    </section>
+
+                    <section class="aoa-column aoa-command-column" aria-labelledby="aoa-command-heading">
+                        <div class="aoa-column-heading">
+                            <div><strong id="aoa-command-heading">② UI 操作对应命令</strong><span><b id="aoa-command-count">0</b> / 256 条</span></div>
+                            <div class="aoa-inline-actions">
+                                <button class="btn-xxs" type="button" data-click="aoaCommandUndo" data-aoa-edit>撤销</button>
+                                <button class="btn-xxs" type="button" data-click="aoaCommandsClear" data-aoa-edit>清空</button>
+                            </div>
+                        </div>
+                        <div class="aoa-command-tools" role="group" aria-label="命令文件与单条调试">
+                            <div class="aoa-inline-actions aoa-command-file-actions">
+                                <button class="btn-xxs" type="button" data-click="aoaCommandsImport" data-aoa-edit>导入</button>
+                                <button class="btn-xxs" type="button" data-click="aoaCommandsExport">导出 JSON</button>
+                            </div>
+                            <div class="aoa-command-debug-controls">
+                                <label class="aoa-debug-option" title="复用整段回放相同的 HID 通道；空闲 2 分钟或会话满 15 分钟后清理">
+                                    <input id="aoa-debug-keep" type="checkbox" checked data-change="aoaDebugKeepChanged"><span>单条调试保持 HID 连接</span>
+                                </label>
+                                <button id="aoa-debug-end" class="btn-xxs" type="button" data-click="aoaDebugEnd" disabled>结束调试</button>
+                            </div>
+                        </div>
+                        <div class="aoa-command-table">
+                            <div class="aoa-command-list-header">
+                                <span class="aoa-command-label">命令</span>
+                                <span class="aoa-comment-label">注释</span>
+                                <span class="aoa-actions-label">操作</span>
+                            </div>
+                            <ol id="aoa-command-list" class="aoa-command-list">
+                                <li class="aoa-command-empty">开始录制后，在左侧操作设备 UI</li>
+                            </ol>
+                        </div>
+                        <div class="aoa-command-add">
+                            <input id="aoa-command-input" type="text" placeholder="例如：sleep 1000 / key TAB ENTER">
+                            <button class="btn-xxs" type="button" data-click="aoaCommandAdd" data-aoa-edit>添加</button>
+                        </div>
+                        <div class="aoa-command-toolbar">
+                            <div id="aoa-playback-progress" class="aoa-playback-progress" role="status" aria-live="polite" hidden></div>
+                            <div class="aoa-inline-actions aoa-playback-controls">
+                                <button class="btn-xs" type="button" id="aoa-playback-pause" title="当前命令完成后暂停，保留设备租约；累计暂停最多 10 分钟" data-click="aoaPlaybackPause" data-aoa-run hidden>暂停</button>
+                                <button class="btn-xs" type="button" id="aoa-playback-resume" data-click="aoaPlaybackResume" data-aoa-run hidden>继续</button>
+                                <button class="btn-xs btn-danger" type="button" id="aoa-playback-cancel" data-click="aoaPlaybackCancel" data-aoa-run hidden>停止</button>
+                            </div>
+                        </div>
+                        <input id="aoa-command-file" type="file" accept="application/json,.json" hidden>
+                        <div id="aoa-calibration-status" class="aoa-calibration-status">触摸映射：未标定，使用显示分辨率按轴换算</div>
                     </section>
 
                     <section class="aoa-column aoa-config-column" aria-labelledby="aoa-config-heading">
                         <div class="aoa-column-heading">
-                            <div><strong id="aoa-config-heading">② AOA 录制 / 配置</strong><span id="aoa-record-state">尚未录制</span></div>
+                            <div><strong id="aoa-config-heading">③ AOA 录制 / 配置</strong><span id="aoa-record-state">尚未录制</span></div>
                             <div class="aoa-inline-actions">
                                 <button id="aoa-record-start" class="btn-xxs btn-primary" type="button" data-click="aoaRecordingStart">开始录制</button>
                                 <button id="aoa-record-stop" class="btn-xxs" type="button" data-click="aoaRecordingStop" disabled>停止</button>
@@ -150,7 +196,13 @@
                         </div>
                         <div class="aoa-config-group">
                             <div class="aoa-form-grid">
-                                <label class="aoa-field-wide">配置名称<input id="aoa-profile-name" type="text" maxlength="120" placeholder="例如：RK3562 Android 16 开启 USB 调试"></label>
+                                <div class="aoa-field-wide aoa-field">
+                                    <label for="aoa-profile-name">配置名称</label>
+                                    <div class="aoa-config-name-row">
+                                        <input id="aoa-profile-name" type="text" maxlength="120" placeholder="例如：RK3562 Android 16 开启 USB 调试">
+                                        <button class="btn-xs btn-primary" type="button" data-click="aoaSaveRecording" data-aoa-edit aria-label="保存当前命令" title="保存当前命令">保存</button>
+                                    </div>
+                                </div>
                                 <label>输入模式<select id="aoa-hid-touch-mode" class="btn-xxs" data-change="aoaHidModeChanged">
                                     <option value="direct" selected>直接触摸（标准映射优先）</option>
                                     <option value="pointer">兼容鼠标（旧配置兼容）</option>
@@ -161,21 +213,52 @@
                                     <option value="per_command">按单条方式回放（每条恢复 USB，较慢）</option>
                                 </select></label>
                             </div>
-                            <div class="aoa-muted">兼容模式可能显示 Mouse 条目；回放开始前注册输入设备并等待稳定。</div>
-                            <div class="aoa-inline-actions aoa-save-row">
-                                <button class="btn-xs btn-primary" type="button" data-click="aoaSaveRecording" data-aoa-edit>保存当前命令</button>
-                            </div>
+                            <div class="aoa-muted">兼容鼠标会显示 Mouse；输入设备注册后等待稳定。</div>
                         </div>
                         <div class="aoa-config-group aoa-profile-library">
-                            <label class="aoa-field">已保存配置
-                                <select id="aoa-replay-profile" class="btn-xxs" data-change="aoaProfileSelectionChanged"></select>
-                            </label>
-                            <div id="aoa-profile-summary" class="aoa-profile-summary">暂无配置</div>
-                            <div class="aoa-inline-actions aoa-profile-actions">
-                                <button class="btn-xs" type="button" data-click="aoaLoadSelectedProfile" data-aoa-edit>载入选中配置</button>
-                                <button class="btn-xxs" type="button" data-click="aoaProfileDeleteSelected" data-aoa-edit>删除配置</button>
+                            <div class="aoa-field">
+                                <label for="aoa-replay-profile">已保存配置</label>
+                                <div class="aoa-profile-picker">
+                                    <select id="aoa-replay-profile" class="btn-xxs" data-change="aoaProfileSelectionChanged"></select>
+                                    <button class="btn-xs" type="button" data-click="aoaLoadSelectedProfile" data-aoa-edit aria-label="载入选中配置" title="载入选中配置">载入</button>
+                                    <button class="btn-xxs" type="button" data-click="aoaProfileDeleteSelected" data-aoa-edit aria-label="删除配置" title="删除配置">删除</button>
+                                </div>
                             </div>
+                            <div id="aoa-profile-summary" class="aoa-profile-summary">暂无配置</div>
                         </div>
+                        <details class="aoa-config-group aoa-semantic-tools">
+                            <summary>类别认证 / 语义模板 / 固件声明</summary>
+                            <p class="aoa-muted">在安装安全标定应用的参考设备上验证；同类至少两台独立设备的 Worker 回执才能签发认证。只复用已验证的固件和显示配置。</p>
+                            <label class="aoa-field">参考显示器 ID<input id="aoa-reference-display" type="number" min="0" max="255" value="0" data-aoa-edit></label>
+                            <button class="btn-xs" type="button" data-click="aoaVerifyClassReference" data-aoa-run>验证录制设备 direct 输入</button>
+                            <label class="aoa-field">参考验证命令 ID（每行一条）<textarea id="aoa-reference-receipts" rows="2" data-aoa-edit></textarea></label>
+                            <label class="aoa-field">认证名称<input id="aoa-certificate-label" type="text" maxlength="128" data-aoa-edit></label>
+                            <div class="aoa-inline-actions">
+                                <button class="btn-xs" type="button" data-click="aoaIssueClassCertificate" data-aoa-run>签发认证</button>
+                                <button class="btn-xs" type="button" data-click="aoaRefreshClassCertificates" data-aoa-run>刷新认证</button>
+                                <button class="btn-xs" type="button" data-click="aoaRevokeClassCertificate" data-aoa-run>撤销选中认证</button>
+                            </div>
+                            <select id="aoa-class-certificates" class="btn-xxs" aria-label="设备类别认证"></select>
+                            <label class="aoa-field">模板使用的认证 ID<textarea id="aoa-template-certificates" rows="2" data-aoa-edit></textarea></label>
+                            <label class="aoa-field">目标显示器 ID<input id="aoa-template-display" type="number" min="0" max="255" value="0" data-aoa-edit></label>
+                            <label class="aoa-field">语义模板 JSON<textarea id="aoa-semantic-template" rows="6" maxlength="65536" spellcheck="false" data-aoa-edit></textarea></label>
+                            <div class="aoa-inline-actions">
+                                <button class="btn-xs" type="button" data-click="aoaTemplateRead" data-aoa-edit>读取当前模板</button>
+                                <button class="btn-xs" type="button" data-click="aoaTemplateApply" data-aoa-edit>应用到当前命令</button>
+                                <button class="btn-xs" type="button" data-click="aoaResolveSemanticTemplate" data-aoa-run>按目标匹配模板</button>
+                            </div>
+                            <p class="aoa-muted">语义回放逐步检查页面；无 ADB 时须使用已绑定的外部画面源。配置可随 JSON 导入导出。</p>
+                            <label class="aoa-field">画面参考区域（左,上,右,下，0..1）<input id="aoa-reference-roi" type="text" value="0,0,1,1" data-aoa-edit></label>
+                            <button class="btn-xs" type="button" data-click="aoaCapturePageReference" data-aoa-run>采集目标页面参考</button>
+                            <textarea id="aoa-frame-reference" rows="3" readonly aria-label="页面参考断言 JSON"></textarea>
+                            <strong class="aoa-subheading">目标固件兼容声明</strong>
+                            <p class="aoa-muted">填写已实测的目标固件 SHA-256、刷后环境及验证记录；无声明时「读取固件声明」会按烧写目标设备生成环境草稿。源设备环境不能替代刷后环境；触摸恢复还需有效标定或类别认证。</p>
+                            <label class="aoa-field">固件声明 JSON<textarea id="aoa-firmware-declaration" rows="6" maxlength="8192" spellcheck="false" data-aoa-edit></textarea></label>
+                            <div class="aoa-inline-actions">
+                                <button class="btn-xs" type="button" data-click="aoaFirmwareDeclarationRead" data-aoa-edit>读取固件声明</button>
+                                <button class="btn-xs" type="button" data-click="aoaFirmwareDeclarationApply" data-aoa-edit>应用固件声明</button>
+                            </div>
+                        </details>
                         <div id="aoa-result" class="aoa-result" tabindex="0" aria-label="AOA 执行结果" hidden></div>
                         <div class="aoa-target-section">
                             <div class="aoa-subheading">目标设备回放</div>
@@ -192,45 +275,6 @@
                             </div>
                             <div class="aoa-muted">回放期间 ADB 会断开；若恢复后显示 unauthorized，请在设备上确认“允许 USB 调试”。</div>
                         </div>
-                    </section>
-
-                    <section class="aoa-column aoa-command-column" aria-labelledby="aoa-command-heading">
-                        <div class="aoa-column-heading">
-                            <div><strong id="aoa-command-heading">③ UI 操作对应命令</strong><span><b id="aoa-command-count">0</b> / 256 条</span></div>
-                            <div class="aoa-inline-actions">
-                                <button class="btn-xxs" type="button" data-click="aoaCommandUndo" data-aoa-edit>撤销</button>
-                                <button class="btn-xxs" type="button" data-click="aoaCommandsClear" data-aoa-edit>清空</button>
-                            </div>
-                        </div>
-                        <div class="aoa-command-tools" role="group" aria-label="命令文件与单条调试">
-                            <div class="aoa-inline-actions aoa-command-file-actions">
-                                <button class="btn-xxs" type="button" data-click="aoaCommandsImport" data-aoa-edit>导入</button>
-                                <button class="btn-xxs" type="button" data-click="aoaCommandsExport">导出 JSON</button>
-                            </div>
-                            <div class="aoa-command-debug-controls">
-                                <label class="aoa-debug-option" title="复用整段回放相同的 HID 通道；空闲 2 分钟或会话满 15 分钟后清理">
-                                    <input id="aoa-debug-keep" type="checkbox" data-change="aoaDebugKeepChanged"><span>单条调试保持 HID 连接</span>
-                                </label>
-                                <button id="aoa-debug-end" class="btn-xxs" type="button" data-click="aoaDebugEnd" disabled>结束调试</button>
-                            </div>
-                        </div>
-                        <ol id="aoa-command-list" class="aoa-command-list">
-                            <li class="aoa-command-empty">开始录制后，在左侧操作设备 UI</li>
-                        </ol>
-                        <div class="aoa-command-add">
-                            <input id="aoa-command-input" type="text" placeholder="例如：sleep 1000 / key TAB ENTER">
-                            <button class="btn-xxs" type="button" data-click="aoaCommandAdd" data-aoa-edit>添加</button>
-                        </div>
-                        <div class="aoa-command-toolbar">
-                            <div id="aoa-playback-progress" class="aoa-playback-progress" role="status" aria-live="polite" hidden></div>
-                            <div class="aoa-inline-actions aoa-playback-controls">
-                                <button class="btn-xs" type="button" id="aoa-playback-pause" title="当前命令完成后暂停，保留设备租约；累计暂停最多 10 分钟" data-click="aoaPlaybackPause" data-aoa-run hidden>暂停</button>
-                                <button class="btn-xs" type="button" id="aoa-playback-resume" data-click="aoaPlaybackResume" data-aoa-run hidden>继续</button>
-                                <button class="btn-xs btn-danger" type="button" id="aoa-playback-cancel" data-click="aoaPlaybackCancel" data-aoa-run hidden>停止</button>
-                            </div>
-                        </div>
-                        <input id="aoa-command-file" type="file" accept="application/json,.json" hidden>
-                        <div id="aoa-calibration-status" class="aoa-calibration-status">触摸映射：未标定，使用显示分辨率按轴换算</div>
                     </section>
                 </div>
             </div>

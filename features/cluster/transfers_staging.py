@@ -31,10 +31,14 @@ from features.auth import (
     machine_has_permission,
     principal_owner_id,
     require_elevated_admin_when_auth_required,
+    require_human_principal,
 )
+from foundation.aoa_recovery_policy import require_firmware_digest
+from foundation.error_model import ApiError
 
 from .config import configured_max_bytes
-from .firmware_recovery import freeze_firmware_recovery
+from .firmware_recovery import freeze_firmware_recovery, preflight_firmware_recovery
+from .models import FirmwareRecoveryPreflight
 from .transfer_support import operation_claim_for_request, worker_device
 
 
@@ -48,6 +52,17 @@ def _shared():
     return transfers_api
 
 
+@router.post("/firmware/preflight")
+def preflight_worker_firmware(request: Request, body: FirmwareRecoveryPreflight):
+    require_human_principal(request)
+    try:
+        cluster = _shared().service()
+    except RuntimeError as exc:
+        raise ApiError.dependency_unavailable("Worker 清单服务尚未配置，无法检查 AOA 恢复条件") from exc
+    return preflight_firmware_recovery(request, cluster, body.worker_id, body.devices,
+                                      body.aoa_profile_id, body.aoa_boot_wait_seconds)
+
+
 @router.post("/firmware/stage")
 async def stage_worker_firmware(
     request: Request,
@@ -57,6 +72,7 @@ async def stage_worker_firmware(
     automation_run_id: str = Form(default=""),
     aoa_profile_id: str = Form(default=""),
     aoa_boot_wait_seconds: int = Form(default=60),
+    aoa_firmware_sha256: str = Form(default="", pattern=r"^(?:[a-f0-9]{64})?$"),
     firmware_file: UploadFile = File(...),
 ):
     # ADR 0012: a machine capability principal holding firmware.stage may
@@ -81,6 +97,12 @@ async def stage_worker_firmware(
             worker_id, "flash_firmware", "automation_run_id", automation_run_id
         )
         if existing:
+            try:
+                require_firmware_digest((recovery or {}).get("firmware_compatibility"), (existing.get("payload") or {}).get("sha256"))
+                if aoa_firmware_sha256:
+                    require_firmware_digest({"sha256": aoa_firmware_sha256}, (existing.get("payload") or {}).get("sha256"))
+            except ValueError as exc:
+                raise ApiError.conflict(str(exc)) from exc
             return {
                 "success": True,
                 "stage_id": (existing.get("payload") or {}).get("stage_id", ""),
@@ -119,6 +141,12 @@ async def stage_worker_firmware(
                 output.write(chunk)
         if not total:
             raise HTTPException(400, "firmware image is empty")
+        try:
+            require_firmware_digest((recovery or {}).get("firmware_compatibility"), digest.hexdigest())
+            if aoa_firmware_sha256:
+                require_firmware_digest({"sha256": aoa_firmware_sha256}, digest.hexdigest())
+        except ValueError as exc:
+            raise ApiError.conflict(str(exc)) from exc
         command = _shared().service().repository.create_command({
             "worker_id": worker_id,
             "command_type": "flash_firmware",
@@ -130,6 +158,7 @@ async def stage_worker_firmware(
                 "devices": [device_id],
                 "reservation_id": reservation_id,
                 "automation_run_id": automation_run_id,
+                **({"aoa_firmware_sha256": aoa_firmware_sha256} if aoa_firmware_sha256 else {}),
                 **({"aoa_recovery": recovery} if recovery else {}),
                 **claim_payload,
             },

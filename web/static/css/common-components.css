@@ -1180,6 +1180,15 @@ body.modal-open {
 }
 
 /* 烧写弹框：目标设备回显 */
+#firmware-modal > .modal-content {
+    height: min(600px, calc(100dvh - 40px));
+    max-height: calc(100dvh - 40px);
+    min-height: 0;
+}
+#firmware-modal .modal-body { scrollbar-gutter: stable; }
+#firmware-modal #firmware-aoa-hint { min-height: 3em; max-height: 6em; overflow: auto; }
+#firmware-modal #firmware-aoa-hint[data-state="error"] { color: var(--warning-color); }
+
 .firmware-target-list {
     display: flex;
     flex-wrap: wrap;

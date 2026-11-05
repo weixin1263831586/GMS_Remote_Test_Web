@@ -1,5 +1,6 @@
 """Firmware continuation freezes account data and retains its original claims."""
 import asyncio
+import hashlib
 import unittest
 from dataclasses import replace
 from types import SimpleNamespace
@@ -44,6 +45,107 @@ class FirmwareRecoveryTests(ClusterApiHardeningFixture, unittest.TestCase):
 
     def freeze(self, **kwargs):
         return freeze_firmware_recovery(self.request, self.repo, "worker-246", ["ABC"], "profile-1", **kwargs)
+
+    def prepare_verified_touch(self):
+        from tests.aoa_fixtures import firmware_declaration, verified_mapping
+
+        source, target = verified_mapping(), verified_mapping()
+        target.context.update({"release": "17", "fingerprint": "tested-user-firmware"})
+        self.profile["commands"] = ["click 180 320"]
+        self.profile["metadata"] = {"hid_touch_mode": "direct", "calibration": {"mapping": source.to_dict()},
+            "firmware_compatibility": firmware_declaration(target.context, hashlib.sha256(b"firmware").hexdigest())}
+        self.caps["aoa_affine_mapping_v2"] = True
+        self.repo.heartbeat("worker-246", {"devices": [{"serial": "ABC", "state": "available",
+            "transport": "local_usb", "properties": {"usb": "1-6", "aoa_context": source.context}}]})
+        store = SimpleNamespace(find_matching=lambda owner, context: (
+            {"mapping": target.to_dict(), "mapping_policy": "direct_calibrated"}
+            if owner == "admin-id" and context == target.context else None))
+        self.target_store_patch = patch("features.devices.aoa_mapping_service.calibration_store", return_value=store)
+        self.target_store_patch.start()
+        self.addCleanup(self.target_store_patch.stop)
+        return target
+
+    def test_post_flash_mapping_uses_declared_firmware_instead_of_old_build(self):
+        target = self.prepare_verified_touch()
+        frozen = self.freeze()
+        assert frozen["target_context"] == target.context
+        assert frozen["target_context"]["fingerprint"] == "tested-user-firmware"
+        assert frozen["mapping_options"]["aoa_touch_mapping"] == target.to_dict()
+
+    def test_wrong_firmware_bytes_never_create_a_flash_command_and_release_claim(self):
+        self.prepare_verified_touch()
+        with patch.object(self.repo, "create_command", wraps=self.repo.create_command) as create:
+            response = self.client.post("/api/cluster/firmware/stage", data={
+                "worker_id": "worker-246", "devices": "ABC", "aoa_profile_id": "profile-1"},
+                files={"firmware_file": ("update.img", b"different-firmware")})
+        assert response.status_code == 409, response.text
+        assert "SHA-256" in response.json()["error"]
+        create.assert_not_called()
+        assert not self.repo.claims.list_active()
+
+    def test_declared_firmware_is_bound_to_the_staged_command(self):
+        self.prepare_verified_touch()
+        response = self.client.post("/api/cluster/firmware/stage", data={
+            "worker_id": "worker-246", "devices": "ABC", "aoa_profile_id": "profile-1"},
+            files={"firmware_file": ("update.img", b"firmware")})
+        assert response.status_code == 200, response.text
+        command = self.repo.get_command(response.json()["command_id"])
+        assert command["payload"]["sha256"] == command["payload"]["aoa_recovery"]["firmware_compatibility"]["sha256"]
+        self.repo.claims.release(command["payload"]["claim_source_id"])
+
+    def test_preflight_allows_legacy_touch_profile_and_stays_read_only(self):
+        # 强制声明闸门已降级为选择性强化：legacy 触摸 Profile 预检放行，
+        # 按未验证估算回放（estimated），预检本身不产生烧写命令或占用。
+        self.profile["commands"] = ["click 180 320"]
+        with patch.object(self.repo, "create_command", wraps=self.repo.create_command) as create:
+            response = self.client.post("/api/cluster/firmware/preflight", json={
+                "worker_id": "worker-246", "devices": ["ABC"], "aoa_profile_id": "profile-1"})
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["ready"] is True
+        assert payload["mapping_policy"] == "estimated"
+        assert payload["expected_firmware_sha256"] == ""
+        create.assert_not_called()
+        assert not self.repo.claims.list_active()
+
+    def test_preflight_uses_actual_target_and_returns_only_readiness_summary(self):
+        self.prepare_verified_touch()
+        with patch.object(self.repo, "create_command", wraps=self.repo.create_command) as create:
+            response = self.client.post("/api/cluster/firmware/preflight", json={
+                "worker_id": "worker-246", "devices": ["ABC"], "aoa_profile_id": "profile-1"})
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["ready"] is True
+        assert payload["expected_firmware_sha256"] == hashlib.sha256(b"firmware").hexdigest()
+        assert payload["mapping_policy"] == "direct_calibrated"
+        assert "mapping_options" not in payload and "metadata" not in payload
+        create.assert_not_called()
+        assert not self.repo.claims.list_active()
+
+    def test_preflight_default_worker_matches_local_controller_configuration(self):
+        service = cluster_api.cluster_service
+        with patch.object(service, "config", replace(service.config, local_worker_id="worker-246")):
+            response = self.client.post("/api/cluster/firmware/preflight", json={
+                "devices": ["ABC"], "aoa_profile_id": "profile-1"})
+        assert response.status_code == 200, response.text
+        assert response.json()["worker_id"] == "worker-246"
+        assert not self.repo.claims.list_active()
+
+    def test_preflight_rejects_agent_and_foreign_profile(self):
+        body = {"worker_id": "worker-246", "devices": ["ABC"], "aoa_profile_id": "profile-1"}
+        response = self.client.post("/api/cluster/firmware/preflight", json=body, headers={"X-Test-Role": "agent_service"})
+        assert response.status_code == 403, response.text
+        self.profile_store.list_profiles.side_effect = lambda owner, include_all: [self.profile] if owner == "admin-id" else []
+        response = self.client.post("/api/cluster/firmware/preflight", json=body, headers={"X-Test-User": "other"})
+        assert response.status_code == 404, response.text
+        assert not self.repo.claims.list_active()
+
+    def test_automation_digest_field_is_checked_without_a_manual_profile(self):
+        response = self.client.post("/api/cluster/firmware/stage", data={
+            "worker_id": "worker-246", "devices": "ABC", "aoa_firmware_sha256": "a" * 64},
+            files={"firmware_file": ("update.img", b"firmware")})
+        assert response.status_code == 409, response.text
+        assert not self.repo.claims.list_active()
 
     def test_freeze_uses_only_creating_account_and_copies_commands(self):
         frozen = self.freeze()
@@ -133,6 +235,16 @@ class FirmwareRecoveryTests(ClusterApiHardeningFixture, unittest.TestCase):
         with patch("worker_agent.inventory.execute_device_action", return_value={"success": True, "adb_recovered": False}):
             result = asyncio.run(run_local_firmware_recovery(prepared))
         assert result["success"] is False and result["reconcile_required"] is True
+
+    def test_connected_adb_with_unconfirmed_native_usb_reports_usb_failure(self):
+        prepared = self.prepare_local()
+        receipt = {"success": False, "adb_recovered": True, "adb_state": "device",
+                   "native_mode_restored": False, "commands_executed": 1, "commands_total": 1}
+        with patch("worker_agent.inventory.execute_device_action", return_value=receipt):
+            result = asyncio.run(run_local_firmware_recovery(prepared))
+        assert result["success"] is False
+        assert "ADB 已连接" in result["error"] and "USB" in result["error"]
+        assert "尚未恢复或尚未授权" not in result["error"]
 
     def test_dispatch_failure_marks_recovery_failed_and_keeps_burn_claim(self):
         """start_local_command 派发失败：命令置 failed 供 reconcile，

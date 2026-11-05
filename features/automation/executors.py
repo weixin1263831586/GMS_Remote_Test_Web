@@ -572,11 +572,16 @@ class HttpAutomationExecutor(RecoveryExecutorMixin):
             from requests_toolbelt.multipart.encoder import MultipartEncoder
 
             with path.open("rb") as source:
+                from foundation.aoa_recovery_policy import firmware_compatibility
+
+                declaration = (firmware_compatibility((plan.get("aoa") or {}).get("metadata") or {},
+                    plan["aoa"]["commands"]) if self.aoa_enabled(run) else None)
                 encoder = MultipartEncoder(fields={
                     "worker_id": worker_id,
                     "devices": ",".join(devices),
                     "reservation_id": reservation_id,
                     "automation_run_id": run["id"],
+                    **({"aoa_firmware_sha256": declaration["sha256"]} if declaration else {}),
                     "firmware_file": (path.name, source, "application/octet-stream"),
                 })
                 response = self.session.post(

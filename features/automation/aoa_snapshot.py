@@ -6,6 +6,7 @@ import json
 
 from foundation import aoa_profile
 from foundation.aoa_hid_mode import profile_hid_options
+from foundation.aoa_recovery_policy import firmware_compatibility
 
 
 def commands_digest(commands: list[str]) -> str:
@@ -37,6 +38,7 @@ def freeze_recovery(plan: dict, owner_id: str) -> None:
     commands = [str(item).strip() for item in commands if str(item).strip()]
     aoa_profile.parse_profile_commands(commands)
     profile_hid_options(profile.get("metadata", recovery.get("metadata") or {}))
+    firmware_compatibility(profile.get("metadata", recovery.get("metadata") or {}), commands)
     raw_wait = recovery.get("wait_adb_seconds", profile.get("wait_adb_seconds", 60))
     if isinstance(raw_wait, bool) or not isinstance(raw_wait, (str, int)):
         raise ValueError("AOA recovery wait_adb_seconds must be an integer")

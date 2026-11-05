@@ -271,6 +271,10 @@ class WorkerAgent:
                 "aoa_hid_modes_v1": False,
                 "aoa_per_command_v1": False,
                 "aoa_affine_mapping_v2": False,
+                "aoa_calibration_focus_v1": False,
+                "aoa_semantic_v1": False,
+                "aoa_visual_capture_v1": False,
+                "aoa_capture_bindings": {},
                 "firmware_aoa_recovery_v1": False,
                 "usbip_client": False,
                 "usbip_preflight": False,
@@ -667,7 +671,8 @@ class WorkerAgent:
             self._ack_command(command["id"], "completed", result)
         except Exception as exc:
             logger.exception("slow command %s failed", command.get("id"))
-            result = ({"success": False, "reconcile_required": True}
+            result = ({**getattr(exc, "aoa_result", {}), "success": False, "reconcile_required": True,
+                       "cleanup_errors": getattr(exc, "cleanup_errors", [])}
                       if (command.get("payload") or {}).get("action") == "aoa_sequence" else {})
             status = "cancelled" if getattr(exc, "cancelled", False) else "failed"
             self.runtime.save_command(command["id"], status, result, error=str(exc))
@@ -1247,6 +1252,10 @@ class WorkerAgent:
                         digest.update(block)
                 if target.stat().st_size != int(spec["size_bytes"]) or digest.hexdigest() != spec["sha256"]:
                     raise ValueError("staged image checksum mismatch")
+                if payload.get("aoa_firmware_sha256"):
+                    from foundation.aoa_recovery_policy import require_firmware_digest
+
+                    require_firmware_digest({"sha256": payload["aoa_firmware_sha256"]}, digest.hexdigest())
                 downloaded[spec["kind"]] = target
             # 烧写过程逐行上报 command events，浏览器可实时
             # 看到 fastboot/upgrade_tool 输出（不再是结束后一次性 20KB）。
@@ -1278,7 +1287,8 @@ class WorkerAgent:
                 if not payload.get("lease_tokens"):
                     raise ValueError("firmware AOA recovery requires active device fencing")
                 validate_preflash(recovery, payload.get("devices", []),
-                                  lambda: self.runtime.check_current_fencing(command), probe_devices)
+                                  lambda: self.runtime.check_current_fencing(command), probe_devices,
+                                  firmware_sha256=payload.get("sha256", ""))
             result = (flash_gsi(self.config, downloaded.get("system"), downloaded.get("vendor"), payload.get("devices", []),
                                 on_output=_report_flash_output)
                       if command["command_type"] == "flash_gsi" else

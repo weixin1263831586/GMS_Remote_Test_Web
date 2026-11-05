@@ -34,17 +34,18 @@ function aoaApplyPlaybackEvent(event) {
         aoaPlaybackButtonState();
         aoaSetStatus(`命令 ${total}/${total} 已执行完成，正在完成设备恢复检查…`, 'running');
     } else {
-        aoaSetStatus(`${phase === 'failed' ? '执行失败' : phase === 'cancelled' ? '已停止' : phase === 'reconnecting' ? 'USB 重连中' : '回放中'}：${index}/${total} ${text}`, phase === 'failed' ? 'error' : 'running');
+        const label = {failed: '执行失败', cancelled: '已停止', reconnecting: 'USB 重连中', checking: '检查页面', verifying: '验证结果', skipped: '状态已满足，跳过'};
+        aoaSetStatus(`${label[phase] || '回放中'}：${index}/${total} ${text}`, phase === 'failed' ? 'error' : 'running');
     }
 }
 
 function aoaUpdatePlaybackRows(scrollIndex = 0) {
-    const labels = {pending: '待执行', running: '执行中', reconnecting: 'USB 重连中', completed: '已完成', paused: '已暂停', failed: '失败', cancelled: '已停止'};
+    const labels = {pending: '待执行', running: '执行中', reconnecting: 'USB 重连中', checking: '检查页面', verifying: '验证结果', skipped: '已跳过', completed: '已完成', paused: '已暂停', failed: '失败', cancelled: '已停止'};
     const rows = aoaEl('aoa-command-list')?.querySelectorAll('li') || [];
     rows.forEach((row, i) => {
         const state = aoaPanelState.playbackStates[i] || 'pending';
-        row.classList.toggle('aoa-command-active', state === 'running' || state === 'reconnecting');
-        row.classList.toggle('aoa-command-completed', state === 'completed');
+        row.classList.toggle('aoa-command-active', ['running', 'reconnecting', 'checking', 'verifying'].includes(state));
+        row.classList.toggle('aoa-command-completed', state === 'completed' || state === 'skipped');
         row.classList.toggle('aoa-command-paused', state === 'paused');
         row.classList.toggle('aoa-command-failed', state === 'failed');
         if (state === 'running' || state === 'paused') row.setAttribute('aria-current', 'step');
@@ -62,7 +63,7 @@ function aoaUpdatePlaybackRows(scrollIndex = 0) {
     }
     const progress = aoaEl('aoa-playback-progress');
     if (progress && aoaPanelState.playbackStates.length) {
-        const completed = aoaPanelState.playbackStates.filter(state => state === 'completed').length;
+        const completed = aoaPanelState.playbackStates.filter(state => state === 'completed' || state === 'skipped').length;
         progress.hidden = false;
         progress.textContent = `本次回放 ${aoaPanelState.commands.length} 条 · 已完成 ${completed} 条`;
         progress.title = progress.textContent;
