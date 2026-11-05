@@ -93,6 +93,29 @@ def test_automation_semantics_requires_successful_matching_firmware_receipt(tmp_
         authorize_semantic_options(opts, "owner-1", reference()["context"], repo, "w", "run-1")
 
 
+def test_automation_semantics_accepts_usb_only_inventory_with_matching_receipt(tmp_path, monkeypatch):
+    """P0 回归：刷机后 ADB 关闭（usb_only 清单无 model/board/hardware），
+    冻结的认证计划 + 同摘要烧写回执构成恢复证明，不得要求清单重新上报
+    只能经 ADB 采集的属性；但清单在场报告的键仍须与冻结计划一致。"""
+    store = AoaCertificationStore(tmp_path)
+    proof = issue(store)
+    monkeypatch.setattr("features.devices.aoa_semantic_service.certification_store", lambda: store)
+    opts = semantic_options({"semantic_template": semantic_template(), "class_certificate_ids": [proof["id"]]},
+                            reference()["context"], "owner-1", ["click 1 1"])
+    assert "aoa_firmware_sha256" not in opts  # 无固件声明的语义 Profile 也能凭回执派发
+    receipt = {"status": "completed", "result": {"success": True}, "payload": {"sha256": "c" * 64}}
+    repo = SimpleNamespace(find_correlated_command=lambda *args: dict(receipt))
+    usb_only = {"usb": "1-2", "usb_vendor_id": "18d1", "usb_product_id": "4ee7"}
+    assert authorize_semantic_options(opts, "owner-1", usb_only, repo, "w", "run-1") == opts
+    # 在场报告的键与冻结计划冲突仍拒绝；烧写失败回执同样拒绝。
+    with pytest.raises(ApiError):
+        authorize_semantic_options(opts, "owner-1", {**usb_only, "model": "OTHER-DEVICE"}, repo, "w", "run-1")
+    failed_receipt = {**receipt, "result": {"success": False}}
+    with pytest.raises(ApiError):
+        authorize_semantic_options(opts, "owner-1", usb_only,
+            SimpleNamespace(find_correlated_command=lambda *args: failed_receipt), "w", "run-1")
+
+
 def test_semantic_profile_roundtrip_and_incompatible_command_edit_rejected(tmp_path):
     store = AoaProfileStore(tmp_path)
     metadata = {"hid_touch_mode": "direct", "semantic_template": semantic_template(), "class_certificate_ids": ["test-cert"]}

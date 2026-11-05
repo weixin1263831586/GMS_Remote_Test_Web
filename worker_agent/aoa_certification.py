@@ -30,7 +30,7 @@ def verify_direct_reference(serial, display_id=0):
 
     def probe(dump, x, y):
         device_id = captured["input"]["reader_device_id"]
-        match = re.search(rf"(?ms)^  Device {device_id}:.*?(?=^  Device \d+:|\Z)", dump)
+        match = re.search(rf"(?ms)^  Device {re.escape(str(device_id))}:.*?(?=^  Device \d+:|\Z)", dump)
         if match is None:
             return None
         return actions._parse_probe_cooked_point(match[0], x, y)

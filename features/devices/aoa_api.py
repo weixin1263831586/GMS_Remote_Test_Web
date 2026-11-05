@@ -203,6 +203,7 @@ async def recover(request: Request, body: dict[str, Any]):
     require_human_principal(request)
     _payload(body, "worker_id", "device")
     commands = body.get("commands")
+    explicit_wait = body.get("wait_adb_seconds") is not None
     wait_adb_seconds = _int_or_422(body, "wait_adb_seconds")
     metadata = body.get("metadata") or {}
     if body.get("profile_id"):
@@ -210,7 +211,8 @@ async def recover(request: Request, body: dict[str, Any]):
             str(body["profile_id"]), principal_owner_id(request))
         commands = profile["commands"]
         metadata = profile.get("metadata") or {}
-        wait_adb_seconds = wait_adb_seconds or int(profile["wait_adb_seconds"] or 0)
+        if not explicit_wait:
+            wait_adb_seconds = int(profile["wait_adb_seconds"] or 0)
     if not commands:
         raise ApiError.malformed_request("profile_id or commands is required")
     commands = [str(item) for item in commands]
@@ -220,13 +222,17 @@ async def recover(request: Request, body: dict[str, Any]):
         hid_options = profile_hid_options(metadata)
     except (ValueError, TypeError, AttributeError) as exc:
         raise ApiError.invalid_semantics(str(exc)) from exc
+    semantic = bool(isinstance(metadata, dict) and metadata.get("semantic_template"))
     payload = {
         "worker_id": str(body["worker_id"]),
         "devices": [str(body["device"])],
         "action": "aoa_sequence",
         "aoa_commands": commands,
         **hid_options,
-        "wait_adb_seconds": max(wait_adb_seconds, 1),
+        # 语义单步调试显式允许 wait_adb_seconds=0：步骤成功只由 before/
+        # after 画面断言与 USB 清理决定，不再以 ADB 恢复为前置验收；
+        # 普通回放保持"至少等待 1 秒 ADB 恢复"的原有最终验收。
+        "wait_adb_seconds": wait_adb_seconds if semantic else max(wait_adb_seconds, 1),
         "playback_control_id": str(body.get("playback_control_id") or ""),
     }
     try:

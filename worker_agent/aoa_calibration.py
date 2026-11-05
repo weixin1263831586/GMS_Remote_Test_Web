@@ -8,6 +8,18 @@ from foundation.aoa_profile import AOA_TOUCH_CALIBRATION_VERSION
 CALIBRATION_COMPONENT = "com.gms.remote.aoacalibration/.CalibrationActivity"
 
 
+def _input_rotation(dump):
+    """Touch orientation across InputFlinger dump generations.
+
+    Android ≤16 emits ``SurfaceOrientation: N`` per device; Android 17
+    replaced it with ``InputDeviceOrientation: RotationN`` inside the
+    reader state. Both carry the same 0..3 quarter-turn semantics.
+    """
+    match = (re.search(r"SurfaceOrientation:\s*([0-3])\b", dump)
+             or re.search(r"InputDeviceOrientation:\s*Rotation\s*([0-3])\b", dump))
+    return int(match.group(1)) if match else None
+
+
 def display_context(serial, width, height, adb_run, touch_mode="pointer", display_id=0):
     model = (adb_run(serial, "shell", "getprop", "ro.product.model").stdout or "").strip()
     release = (adb_run(serial, "shell", "getprop", "ro.build.version.release").stdout or "").strip()
@@ -33,14 +45,14 @@ def display_context(serial, width, height, adb_run, touch_mode="pointer", displa
     routes = set(re.findall(r"uniqueId=['\"]([^'\"]+)['\"]", dump))
     if display_id != 0 and selected is None:
         raise ValueError("cannot verify requested display viewport")
-    rotation = re.search(r"SurfaceOrientation:\s*([0-3])\b", dump)
-    if not model or not rotation:
+    rotation = _input_rotation(dump)
+    if not model or rotation is None:
         raise ValueError("cannot verify display orientation; touch calibration must be repeated after reconnecting")
     context = {"version": AOA_TOUCH_CALIBRATION_VERSION, "model": model, "release": release,
             "fingerprint": fingerprint[:256], "density": density,
             "kernel": kernel[:256], "display_route": next(iter(routes)) if len(routes) == 1 else "",
             "board": board[:256], "hardware": hardware[:256], "locale": locale[:64], "display_id": display_id,
-            "display": [width, height], "rotation": int(rotation.group(1)),
+            "display": [width, height], "rotation": rotation,
             "hid_touch_mode": touch_mode}
     if selected:
         context.update(selected)
@@ -88,15 +100,15 @@ def inventory_context(output, details):
     dump = "\n".join(sections.get("__INPUT__", []))
     sizes = re.findall(r"(?:Physical|Override) size:\s*(\d+)x(\d+)", size)
     densities = re.findall(r"(?:Physical|Override) density:\s*(\d+)", density)
-    rotation = re.search(r"SurfaceOrientation:\s*([0-3])\b", dump)
+    rotation = _input_rotation(dump)
     displays = input_displays(dump)
     routes = set(re.findall(r"uniqueId=['\"]([^'\"]+)['\"]", dump))
-    if not sizes or not rotation or not details.get("model") or not details.get("android_version"):
+    if not sizes or rotation is None or not details.get("model") or not details.get("android_version"):
         return None
     context = {"version": AOA_TOUCH_CALIBRATION_VERSION, "model": details["model"],
             "release": details["android_version"], "display": list(map(int, sizes[-1])),
             "density": int(densities[-1]) if densities else None,
-            "rotation": int(rotation.group(1)),
+            "rotation": rotation,
             "fingerprint": "".join(sections.get("__FINGERPRINT__", [])).strip()[:256],
             "kernel": "".join(sections.get("__KERNEL__", [])).strip()[:256],
             "display_route": next(iter(routes)) if len(routes) == 1 else "", "display_id": 0,
