@@ -22,12 +22,32 @@ class RuntimeAoaHidModesTests(RuntimeUiHarness):
             route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
 
         def execute(route):
-            submitted.append(route.request.post_data_json)
+            body = route.request.post_data_json
+            submitted.append(body)
+            if body.get('aoa_debug_session_id'):
+                # “单条调试保持 HID 连接”默认使能：走调试会话契约，
+                # 回执只带受理信息，结果经命令轮询与调试事件回执。
+                respond(route, {"accepted": True, "command_id": "cmd-hid-debug",
+                                "debug_sequence": 1, "operation_timeout_seconds": 5})
+                return
             respond(route, {"success": True, "commands_executed": 1, "native_mode_restored": True})
+
+        debug_state = {"ended": False}
+
+        def debug_status(route):
+            status = "completed" if debug_state["ended"] else "running"
+            respond(route, {"command": {"status": status, "result": {}}})
 
         try:
             page.route("**/api/devices/aoa/**", lambda route: respond(route, {"success": True, "profiles": profiles}))
+            page.route("**/api/devices/aoa/playback/*/control", lambda route: (
+                debug_state.update(ended=True),
+                respond(route, {"success": True, "command_id": "cmd-hid-debug"})))
             page.route("**/api/cluster/devices/actions", execute)
+            page.route("**/api/cluster/commands/cmd-hid-debug/events?*", lambda route: respond(route, {"events": [
+                {"sequence": 1, "event_type": "progress",
+                 "payload": {"debug_sequence": 1, "phase": "completed"}}]}))
+            page.route("**/api/cluster/commands/cmd-hid-debug", debug_status)
             self.goto_shell(page)
             page.evaluate("switchPage('devices')")
             page.evaluate("aoaViewToggle(true)")
@@ -43,6 +63,10 @@ class RuntimeAoaHidModesTests(RuntimeUiHarness):
                 expect(page.locator('.aoa-command-state')).to_have_text('已执行')
                 assert submitted[-1]['aoa_hid_touch_mode'] == mode
                 assert submitted[-1]['aoa_hid_settle_seconds'] == wait
+                # 保持 HID 的调试会话会锁定目标选择器；切换配置前先结束调试。
+                debug_state["ended"] = False
+                page.locator('#aoa-debug-end').click()
+                expect(page.locator('#aoa-replay-profile')).to_be_enabled()
             assert submitted[0]['aoa_commands'] == ['click 180 525']
             assert submitted[1]['aoa_commands'] == ['click 180 580']
             with tempfile.TemporaryDirectory() as directory:

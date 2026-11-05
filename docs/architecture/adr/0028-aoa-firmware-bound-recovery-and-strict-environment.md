@@ -57,3 +57,22 @@
   回执约束（ADR 0029），但不做固件环境等值断言。
 - Worker / Controller / 暂存各处的 `require_firmware_digest` 实际镜像摘要核对
   保持不变：有声明就必须匹配实际镜像。
+
+## Revision 2（2026-11-05）：刷机后 usb_only 阶段的环境信任模型与语义单步语义
+
+外部复审发现两类恢复阻断与字段混用，修订如下：
+
+- **刷机后清单不再要求 ADB-only 属性。** ADB 关闭后 Worker 只能上报
+  `usb_only`（usb、VID/PID、序列号），而认证语义计划的环境（`model` /
+  `board` / `hardware`）只能来自刷机前经 ADB 冻结的 `aoa_context`。
+  自动化语义恢复的授权改为：同一 `automation_run_id` 的**成功烧写回执**
+  （`flash_firmware` `payload.sha256`）+ 冻结认证计划 + 物理身份链路
+  （serial/冻结 USB 端口/租约/Worker 端 `validate_binding`）构成恢复证明；
+  清单仍在场报告的键（如异常重枚举后重新可读的属性）必须与冻结计划一致，
+  冲突仍拒绝——保持安全边界，不跳过校验。
+- **实际镜像摘要与固件声明分离。** 烧写回执的 `payload.sha256` 是权威绑定；
+  `firmware_compatibility` 声明是可选的事前证据。声明存在时必须与回执摘要
+  一致；无声明时回执本身即绑定，不再要求 `aoa_firmware_sha256` 预先存在。
+- **语义单步调试允许 `wait_adb_seconds=0`。** 单步成功由该步骤的 before/
+  after 画面断言与 USB 清理结果决定，不以"ADB 恢复"为验收前置；完整恢复
+  回放仍保留 ADB 最终验收。普通回放入口维持"至少等待 1 秒"的既有语义。

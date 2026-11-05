@@ -1,16 +1,20 @@
 """Execute a certified plan, checking actual state around each single input."""
 from __future__ import annotations
 
+import logging
 import time
 
 from foundation.aoa_certification import matching_case
 from foundation.aoa_display import rect, standard_inverse, standard_point
-from foundation.aoa_profile import parse_profile_commands
+from foundation.aoa_profile import MAX_AOA_OPERATION_SECONDS, parse_profile_commands
 from foundation.aoa_semantics import validate_plan
 
 from .aoa_control import register, unregister, wait_if_paused
 from .aoa_observation import ObservationUnavailableError, Observer
 from .aoa_usb import validate_binding
+
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_live_command(command, step, layout, case, context, observer, timeout):
@@ -61,15 +65,19 @@ def run_semantic_sequence(serial, commands, options, *, on_event=None, on_progre
     layout = next(item for item in plan["template"]["layouts"] if item["id"] == plan["layout_id"])
     control_id = options.get("playback_control_id") or ""
     parsed = parse_profile_commands(plan["commands"])
-    deadline = clock() + 900 - int(options.get("wait_adb_seconds") or 0)
+    deadline = clock() + MAX_AOA_OPERATION_SECONDS - int(options.get("wait_adb_seconds") or 0)
     index, completed, skipped, verified, sent = 0, 0, 0, 0, False
     last_input = (0, "")
     stage = "checking"
 
     def event(phase):
         if on_event:
-            on_event({"phase": phase, "index": index, "total": len(commands),
-                      "command": commands[index - 1] if index else "", "semantic": True})
+            # 进度回调只报告，不参与执行：回调异常不得顶掉原始 AoaError。
+            try:
+                on_event({"phase": phase, "index": index, "total": len(commands),
+                          "command": commands[index - 1] if index else "", "semantic": True})
+            except Exception:
+                logger.warning("semantic AOA progress event failed", exc_info=True)
 
     def tick():
         validate_binding()

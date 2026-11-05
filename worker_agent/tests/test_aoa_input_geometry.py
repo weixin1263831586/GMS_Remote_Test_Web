@@ -156,3 +156,30 @@ def test_invalid_frame_size_rejected(size):
 def test_frame_coordinates_must_be_in_bounds_for_pointer_actions(action):
     with pytest.raises(ValueError, match="frame_size"):
         parse_record_input_action({**action, "frame_size": [576, 1024]})
+
+
+@pytest.mark.parametrize("dump", [
+    # Android 17 InputFlinger dump：SurfaceOrientation 行已移除，
+    # 改为 reader state 内的 InputDeviceOrientation: RotationN。
+    "InputDeviceOrientation: Rotation0\nViewport INTERNAL: displayId=0, "
+    "uniqueId=local:0, orientation=0, logicalFrame=[0, 0, 1080, 1920]",
+    "Viewport INTERNAL: displayId=0, uniqueId=local:0, orientation=0, "
+    "logicalFrame=[0, 0, 1080, 1920]\nInputDeviceOrientation: Rotation1",
+])
+def test_android17_orientation_tokens_are_recognized(monkeypatch, dump):
+    calls = recorder(monkeypatch, size="Physical size: 1080x1920", dump=dump)
+    result = aoa_actions.record_aoa_input("REC", {
+        "action": "tap", "x": 540, "y": 960, "frame_size": [1080, 1920]})
+    assert result["display"] == [1080, 1920]
+    assert ("shell", "input", "tap", "540", "960") in calls
+
+
+def test_android17_landscape_rotation_rotates_display(monkeypatch):
+    calls = recorder(monkeypatch, size="Physical size: 1080x1920", dump=(
+        "InputDeviceOrientation: Rotation3\n"
+        "Viewport INTERNAL: displayId=0, uniqueId=local:0, orientation=3, "
+        "logicalFrame=[0, 0, 1920, 1080]\n"))
+    result = aoa_actions.record_aoa_input("REC", {
+        "action": "tap", "x": 960, "y": 540, "frame_size": [1920, 1080]})
+    assert result["display"] == [1920, 1080]
+    assert ("shell", "input", "tap", "960", "540") in calls

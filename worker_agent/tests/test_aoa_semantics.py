@@ -91,6 +91,25 @@ def test_skip_if_prevents_repeating_an_already_enabled_usb_toggle(transport):
     assert result["skipped_steps"] == 1
 
 
+def test_zero_wait_adb_judges_success_by_assertions_without_adb(transport, monkeypatch):
+    """语义单步 wait_adb_seconds=0：画面断言通过即成功，ADB 不可达不算失败。"""
+    adb_calls = []
+    def no_adb(serial, seconds):
+        adb_calls.append((serial, seconds))
+        return {"adb_recovered": False}
+    monkeypatch.setattr(aoa_actions, "_wait_adb_state", no_adb)
+    clock = Clock()
+    result = run_semantic_sequence("TARGET", ["click 1 1"],
+        {**options(), "wait_adb_seconds": 0}, observer=Pages(), clock=clock.now, sleep=clock.sleep)
+    assert result["success"] is True
+    assert adb_calls == []  # wait=0 不做 ADB 最终验收
+    # 对照：wait>0 时仍以 ADB 恢复为成功前置，ADB 未恢复判失败。
+    failed = run_semantic_sequence("TARGET", ["click 1 1"],
+        {**options(), "wait_adb_seconds": 5}, observer=Pages(), clock=clock.now, sleep=clock.sleep)
+    assert adb_calls == [("TARGET", 5)]
+    assert failed["success"] is False
+
+
 def test_cancel_and_fencing_loss_stop_before_input(transport):
     opts = {**options(), "playback_control_id": "semantic-cancel"}
     aoa_control.request("semantic-cancel", "cancel")

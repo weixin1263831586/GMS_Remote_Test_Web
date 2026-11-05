@@ -48,11 +48,23 @@ def authorize_semantic_options(options, owner_id, observed_context, repository, 
     observed = next((item for item in display_contexts(observed) if item.get("display_id") == context.get("display_id")), observed)
     if automation_run_id:
         command = repository.find_correlated_command(worker_id, "flash_firmware", "automation_run_id", automation_run_id) or {}
+        receipt_sha256 = str((command.get("payload") or {}).get("sha256") or "")
         if (command.get("status") != "completed" or (command.get("result") or {}).get("success") is not True
-                or not options.get("aoa_firmware_sha256")
-                or (command.get("payload") or {}).get("sha256") != options["aoa_firmware_sha256"]):
-            raise ApiError.conflict("语义恢复尚无相同固件摘要的成功烧写回执")
-        keys = ("model", "board", "hardware")
+                or not receipt_sha256):
+            raise ApiError.conflict("语义恢复尚无成功烧写回执，不能派发认证语义回放")
+        # 实际烧写摘要（flash 回执 payload.sha256）是权威绑定；固件兼容性
+        # 声明是可选的事前证据（ADR 0028 Revision 1）。两者不得混为一谈：
+        # 声明存在时必须与回执一致，无声明时回执本身就构成恢复证明。
+        declared_sha256 = str(options.get("aoa_firmware_sha256") or "")
+        if declared_sha256 and declared_sha256 != receipt_sha256:
+            raise ApiError.conflict("语义恢复固件声明摘要与实际烧写镜像不一致")
+        # 刷机后 ADB 关闭（usb_only 清单只报 usb/VID/PID），model/board/
+        # hardware 只能来自烧写前冻结进认证计划的 ADB 环境，不得要求
+        # 清单重新上报。这里只校验清单仍在场报告的键：报告值与冻结
+        # 计划冲突仍拒绝，物理身份（serial/USB 端口/租约）由派发链路
+        # 与 Worker 端 validate_binding 继续把关。
+        keys = tuple(key for key in ("model", "board", "hardware")
+                     if observed.get(key) not in (None, ""))
     else:
         keys = (*FAMILY_KEYS, "fingerprint", "display", "density", "rotation", "display_route", "display_id", "locale")
     if any((not observed.get(key) and observed.get(key) != 0) or observed.get(key) != context.get(key) for key in keys):
