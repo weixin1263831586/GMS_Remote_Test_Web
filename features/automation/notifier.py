@@ -83,15 +83,12 @@ def _send_email(run: dict[str, Any], reporting: dict[str, Any]) -> dict[str, Any
         return {"transport": "email", "sent": False, "reason": "no email_to"}
     try:
         from features.email import send_email
-        from features.redmine import config_manager
 
+        # 不传 manager：走全局 SMTP 默认配置，无需 per-owner 凭据。
         result = send_email(
             to,
             f"[GMS ATS] {run.get('profile_id', 'run')} {run.get('status', '')}",
             _summarize(run),
-            manager=config_manager.for_owner(
-                str(run.get("created_by") or "automation")
-            ),
         )
         return {"transport": "email", **result}
     except Exception:

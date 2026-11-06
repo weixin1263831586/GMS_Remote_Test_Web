@@ -36,7 +36,10 @@
   "static_routes": {
     "enabled": false,
     "routes": [
-      {"destination": "192.0.2.0/24", "gateway": "192.0.2.1"}
+      {
+        "destination": "192.0.2.0/24",
+        "gateway": "192.0.2.1"
+      }
     ]
   },
   "suites_path": "/home/operator/GMS-Suite",
@@ -163,7 +166,11 @@
         "base_url": "http://192.0.2.50:3000",
         "api_format": "openai",
         "max_context_size": 500000,
-        "capabilities": ["thinking", "tool_use", "image_in"],
+        "capabilities": [
+          "thinking",
+          "tool_use",
+          "image_in"
+        ],
         "display_name": "glm-5.3-flash"
       }
     }
@@ -224,5 +231,15 @@
     "grafana_url": "",
     "crm_icon_url": "",
     "router_icon_url": ""
+  },
+  "ops_alerts": {
+    "enabled": false,
+    "webhook_url": "",
+    "webhook_format": "generic",
+    "webhook_token_file": "configs/secrets/ops_webhook_token",
+    "email_to": "",
+    "suppress_minutes": 60,
+    "consecutive_failure_threshold": 3,
+    "min_free_gb": 20
   }
 }

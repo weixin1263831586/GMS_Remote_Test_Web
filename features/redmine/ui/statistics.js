@@ -254,6 +254,13 @@ function copyProjectIssues(userId, btn) {
   copyText(urls.join(_NL), btn);
 }
 
+// 当前部门看板生效的未回复阈值（天）：看板渲染时从 data.stale_days 记录，
+// 提醒邮件主题/正文用它拼具体数字（如“超3天未回复”），不再笼统写“阈值”。
+function departmentStaleDays() {
+  var value = parseInt(window._departmentStaleDays, 10);
+  return value > 0 ? value : 3;
+}
+
 async function sendDepartmentReminder(userId, btn) {
   var user = (window._departmentUsers || []).find(function(item) { return String(item.id || '') === String(userId || ''); });
   var ids = redmineIssueIds((user || {}).overdue_issues || []);
@@ -266,7 +273,7 @@ async function sendDepartmentReminder(userId, btn) {
     var data = await api('/api/redmine-agent/reminders/email', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({user_id: userId, issue_ids: ids})
+      body: JSON.stringify({user_id: userId, issue_ids: ids, stale_days: departmentStaleDays()})
     });
     notifyUser('提醒邮件已发送', '已发送到 ' + (data.to || '绑定邮箱'), 'success');
   } catch (e) {
@@ -386,6 +393,7 @@ function renderDepartmentOverdue(data) {
   const generatedAt = String(data.generated_at || '-').replace('T', ' ').replace(/:\d{2}$/, '');
   const profile = data.profile || {};
   const sd = data.stale_days || 20;
+  window._departmentStaleDays = sd;
   departmentProfileId = profile.id || departmentProfileId || '';
   if (data.available_profiles) {
     statsConfig.dashboard = Object.assign({}, statsConfig.dashboard || {}, {profiles: data.available_profiles});

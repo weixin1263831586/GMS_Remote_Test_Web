@@ -22,8 +22,11 @@
         <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="events" data-click="switchWorkflowPane" data-a0="events">事件诊断</button>
         <span class="workflow-divider" aria-hidden="true"></span>
         <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="reports" data-click="switchWorkflowPane" data-a0="reports">测试报告</button>
+        <span class="workflow-divider" aria-hidden="true"></span>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="ops" data-click="switchWorkflowPane" data-a0="ops">运维</button>
         <div class="ats-actions">
             <span id="worker-indicator" class="worker-dot down" title="Worker 状态">Worker</span>
+            <span id="ops-indicator" class="worker-dot down" title="运维状态">运维</span>
             <button type="button" data-click="loadAll">刷新</button>
             <details class="ats-more-menu">
                 <summary class="ats-more-btn">更多</summary>
@@ -478,6 +481,29 @@
             </div>
         </section>
     </section>
+
+    <section id="workflow-pane-ops" class="workflow-pane" aria-hidden="true">
+        <section class="panel stage-panel">
+            <div class="panel-header stage-header">
+                <div class="stage-title-block">
+                    <span class="stage-nav-label">运维</span>
+                    <span class="panel-description">全局停机开关与运维事件台账（无人值守告警）</span>
+                </div>
+                <div class="log-actions">
+                    <button type="button" data-click="loadOpsStatus">刷新状态</button>
+                    <button type="button" id="ops-kill-switch" data-click="toggleKillSwitch">暂停推进</button>
+                </div>
+            </div>
+            <div class="stage-pane">
+                <div id="ops-status-strip" class="run-value muted">加载中...</div>
+                <p class="history-help">暂停推进（kill-switch）只停止新的自动化运行认领与计划调度；正在执行的步骤完成后停止，超时清理、日志保留与告警照常运行。恢复后队列自动继续。</p>
+                <div id="ops-disk" class="run-value muted"></div>
+                <div id="ops-events" class="run-list">
+                    <div class="empty-state">加载中...</div>
+                </div>
+            </div>
+        </section>
+    </section>
 </section>
     </main>
 
@@ -528,6 +554,7 @@
     <script src="/automation/run-actions.js"></script>
     <script src="/automation/plans.js"></script>
     <script src="/automation/resources.js"></script>
+    <script src="/automation/ops-panel.js"></script>
     <script src="/automation/trace.js"></script>
     <script src="/automation/page.js"></script>
 </body>

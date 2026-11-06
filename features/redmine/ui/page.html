@@ -354,28 +354,9 @@
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
       <div>
-        <label>SMTP 服务器</label>
-        <input type="text" id="settingSmtpHost" placeholder="例如：smtphz.qiye.163.com">
-      </div>
-      <div style="display:flex;gap:8px">
-        <div style="flex:1">
-          <label>端口</label>
-          <input type="number" id="settingSmtpPort" placeholder="465">
-        </div>
-        <div style="flex:1">
-          <label>发件人地址</label>
-          <input type="text" id="settingFromAddr" placeholder="留空则使用默认发件人">
-        </div>
-      </div>
-      <div style="display:flex;gap:8px">
-        <div style="flex:1">
-          <label>SMTP 用户名</label>
-          <input type="text" id="settingSmtpUser" placeholder="从 config.json 或设置中读取">
-        </div>
-        <div style="flex:1">
-          <label>SMTP授权码/密码</label>
-          <input type="password" id="settingSmtpPass" placeholder="企业邮箱SMTP授权码或密码">
-        </div>
+        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">邮件通知（接收方）</div>
+        <div id="emailSenderSummary" class="muted" style="font-size:12px;margin-bottom:6px;">读取发送方配置中…</div>
+        <div class="setting-help">发送方账号是系统级配置（管理员在「系统配置」弹框维护）；这里只决定提醒发给谁——部门逾期提醒按组织架构中各用户的邮箱逐人发送。</div>
       </div>
     </div>
     <div class="modal-footer">

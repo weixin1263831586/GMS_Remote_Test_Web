@@ -60,9 +60,49 @@ def split_emails(email_input: str | list[str] | None) -> list[str]:
 
 
 def _load_email_config(manager) -> dict[str, Any]:
-    """从 redmine_dashboard.email 读取 SMTP 配置。"""
-    dashboard_cfg = manager.load_config().get("redmine_dashboard") or {}
-    return dashboard_cfg.get("email") or {}
+    """从 redmine_dashboard.email 读取 SMTP 配置（兼容旧调用）。"""
+    return resolve_email_config(manager)
+
+
+def _merge_non_empty(target: dict[str, Any], source: dict[str, Any]) -> None:
+    """非空字段才参与合并：空串/缺省的覆盖层不遮挡下层配置。"""
+    for key, value in (source or {}).items():
+        if isinstance(value, str) and not value.strip():
+            continue
+        if value is None:
+            continue
+        target[key] = value
+
+
+def resolve_email_config(manager: Any = None) -> dict[str, Any]:
+    """解析生效的 SMTP 配置，无需每个 owner 重复配置账号。
+
+    合并顺序（低 → 高，均为非空字段覆盖）：
+
+    1. 全局默认 ``smtp`` 块（runtime 配置，一次配置全部署生效）；
+    2. 兼容兜底：静态配置遗留的 ``redmine_dashboard.email``
+       （automation owner 历史写入 configs/local/config.json 的位置）；
+    3. owner 覆盖 ``redmine_dashboard.email``（看板「设置 → SMTP」保存的
+       per-user 差异化配置；不传 manager 即只用全局默认）。
+    """
+    from foundation.config import config_manager
+
+    merged: dict[str, Any] = {}
+    try:
+        global_config = config_manager.load_config()
+    except Exception:
+        global_config = {}
+    _merge_non_empty(merged, (global_config.get("redmine_dashboard") or {}).get("email") or {})
+    _merge_non_empty(merged, global_config.get("smtp") or {})
+    if manager is not None:
+        try:
+            owner_config = manager.load_config() or {}
+        except Exception:
+            owner_config = {}
+        _merge_non_empty(
+            merged, (owner_config.get("redmine_dashboard") or {}).get("email") or {}
+        )
+    return merged
 
 
 def _email_password(email_cfg: dict[str, Any]) -> str:
@@ -117,7 +157,8 @@ def send_email(
     - ``attachment_paths``：附件路径列表；默认拒绝读取。只有落在
       ``allowed_attachment_roots`` 下的普通文件才会作为附件发送。
     - ``sender_name``：发件人昵称；缺省用配置里的 username 或 from_addr。
-    - ``manager``：redmine owner-aware config manager（必传）。
+    - ``manager``：可选的 owner config manager；省略时使用全局 SMTP 默认
+      配置（``resolve_email_config`` 合并规则），各 owner 无需重复配置账号。
     """
     email_cfg = _load_email_config(manager)
     smtp_host = str(email_cfg.get("smtp_host") or "").strip()
@@ -127,7 +168,7 @@ def send_email(
         return {
             "sent": False,
             "mode": "unconfigured",
-            "error": "SMTP 未配置，请在 Redmine 看板「设置 → SMTP」中填写 smtp_host",
+            "error": "SMTP 未配置：请在 Redmine 看板「设置 → SMTP」保存，或由管理员通过 POST /api/email/smtp 写入全局配置",
         }
 
     smtp_port = int(email_cfg.get("smtp_port") or 465)

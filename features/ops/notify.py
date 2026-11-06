@@ -1,0 +1,168 @@
+"""Ops alert notification transports: email and webhook (IM robots).
+
+Never raises — alerting sits inside maintenance/watchdog paths and must not
+break them (same contract as ``features.automation.notifier``). Webhook
+payloads are HMAC-SHA256 signed with a token from the ops-alerts config so a
+receiver can authenticate the sender (secret stored under ``configs/secrets/``
+per ADR 0007; ``configs/local/config.json`` only references it).
+
+Formats: ``generic`` (JSON body), ``wecom`` / ``dingtalk`` / ``feishu``
+(IM robot markdown envelopes).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import logging
+from typing import Any
+
+from foundation.error_model import record_internal_error
+
+
+logger = logging.getLogger(__name__)
+
+WEBHOOK_FORMATS = ("generic", "wecom", "dingtalk", "feishu")
+WEBHOOK_TIMEOUT_SECONDS = 10.0
+
+
+def load_ops_alerts_config() -> dict[str, Any]:
+    """Read the ``ops_alerts`` block with environment overrides."""
+    import os
+
+    from foundation.config import config_manager
+
+    raw = config_manager.load_config().get("ops_alerts", {})
+    cfg = raw if isinstance(raw, dict) else {}
+    return {
+        "enabled": str(
+            os.getenv("GMS_OPS_ALERTS_ENABLED", str(cfg.get("enabled", False)))
+        ).lower() not in ("0", "false", "no", "off"),
+        "webhook_url": os.getenv("GMS_OPS_ALERTS_WEBHOOK_URL", str(cfg.get("webhook_url", ""))),
+        "webhook_format": os.getenv(
+            "GMS_OPS_ALERTS_WEBHOOK_FORMAT", str(cfg.get("webhook_format", "generic"))
+        ),
+        "webhook_token_file": os.getenv(
+            "GMS_OPS_ALERTS_TOKEN_FILE", str(cfg.get("webhook_token_file", ""))
+        ),
+        "email_to": os.getenv("GMS_OPS_ALERTS_EMAIL_TO", str(cfg.get("email_to", ""))),
+        "suppress_minutes": max(0, int(
+            os.getenv("GMS_OPS_ALERTS_SUPPRESS_MINUTES", str(cfg.get("suppress_minutes", 60)))
+        )),
+        "consecutive_failure_threshold": max(1, int(
+            os.getenv(
+                "GMS_OPS_ALERTS_CONSECUTIVE_FAILURES",
+                str(cfg.get("consecutive_failure_threshold", 3)),
+            )
+        )),
+        "min_free_gb": max(0.0, float(
+            os.getenv("GMS_OPS_ALERTS_MIN_FREE_GB", str(cfg.get("min_free_gb", 20)))
+        )),
+    }
+
+
+def _incident_text(incident: dict[str, Any]) -> str:
+    severity = str(incident.get("severity") or "info").upper()
+    kind = str(incident.get("kind") or "incident")
+    subject = str(incident.get("subject") or "-")
+    message = str(incident.get("message") or "")
+    return f"[{severity}] {kind} · {subject}: {message}"
+
+
+def _wecom_payload(text: str) -> dict[str, Any]:
+    return {"msgtype": "markdown", "markdown": {"content": text}}
+
+
+def _dingtalk_payload(text: str) -> dict[str, Any]:
+    return {"msgtype": "markdown", "markdown": {"title": "GMS ATS 运维告警", "text": text}}
+
+
+def _feishu_payload(text: str) -> dict[str, Any]:
+    return {"msg_type": "text", "content": {"text": text}}
+
+
+def _webhook_payload(incident: dict[str, Any], fmt: str) -> dict[str, Any]:
+    text = _incident_text(incident)
+    if fmt == "wecom":
+        return _wecom_payload(text)
+    if fmt == "dingtalk":
+        return _dingtalk_payload(text)
+    if fmt == "feishu":
+        return _feishu_payload(text)
+    return {"source": "gms-ats-ops", "incident": incident}
+
+
+def _load_webhook_token(token_file: str) -> bytes:
+    if not token_file:
+        return b""
+    try:
+        from pathlib import Path
+
+        return Path(token_file).read_bytes()
+    except OSError:
+        return b""
+
+
+def send_webhook(incident: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
+    url = str(cfg.get("webhook_url") or "")
+    if not url:
+        return {"transport": "webhook", "sent": False, "reason": "no webhook_url"}
+    fmt = str(cfg.get("webhook_format") or "generic")
+    if fmt not in WEBHOOK_FORMATS:
+        fmt = "generic"
+    body = json.dumps(_webhook_payload(incident, fmt), ensure_ascii=False).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    token = _load_webhook_token(str(cfg.get("webhook_token_file") or ""))
+    if token:
+        digest = hmac.new(token.strip(), body, hashlib.sha256).hexdigest()
+        headers["X-GMS-Ops-Signature"] = f"sha256={digest}"
+    try:
+        import httpx
+
+        response = httpx.post(url, content=body, headers=headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
+        sent = response.status_code < 400
+        return {
+            "transport": "webhook",
+            "sent": sent,
+            "status_code": response.status_code,
+        }
+    except Exception:
+        message = record_internal_error(
+            logger, "运维告警 webhook 发送", "ops webhook notification failed"
+        )
+        return {"transport": "webhook", "sent": False, "error": message}
+
+
+def send_email(incident: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
+    to = str(cfg.get("email_to") or "")
+    if not to:
+        return {"transport": "email", "sent": False, "reason": "no email_to"}
+    try:
+        from features.email import send_email as send_email_message
+
+        # 不传 manager：走全局 SMTP 默认配置，无需 per-owner 凭据。
+        result = send_email_message(
+            to,
+            f"[GMS ATS 运维告警] {incident.get('kind', 'incident')} {incident.get('subject', '')}".strip(),
+            _incident_text(incident),
+        )
+        return {"transport": "email", **result}
+    except Exception:
+        message = record_internal_error(
+            logger, "运维告警邮件发送", "ops email notification failed"
+        )
+        return {"transport": "email", "sent": False, "error": message}
+
+
+def notify_incident(incident: dict[str, Any], *, cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Dispatch one incident to the enabled transports. Never raises."""
+    effective = cfg or load_ops_alerts_config()
+    if not effective.get("enabled"):
+        return {"sent": [], "reason": "ops alerts disabled"}
+    results = []
+    if effective.get("webhook_url"):
+        results.append(send_webhook(incident, effective))
+    if effective.get("email_to"):
+        results.append(send_email(incident, effective))
+    return {"sent": results, "ok": all(item.get("sent") for item in results) if results else True}

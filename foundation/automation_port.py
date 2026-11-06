@@ -28,3 +28,24 @@ def get_worker_status() -> dict[str, Any]:
     if _worker_status_provider is None:
         raise RuntimeError("automation worker status is not configured")
     return _worker_status_provider()
+
+
+AdvancementGate = Callable[[], bool]
+
+_advancement_gate: AdvancementGate | None = None
+
+
+def configure_advancement_gate(gate: AdvancementGate | None) -> None:
+    """Register or clear the ops kill-switch gate (ADR 0030)."""
+    global _advancement_gate
+    _advancement_gate = gate
+
+
+def advancement_paused() -> bool:
+    """Whether the ops kill-switch pauses run advancement.
+
+    Fail-open: an unconfigured (or failing) gate never wedges the pipeline.
+    """
+    if _advancement_gate is None:
+        return False
+    return bool(_advancement_gate())
