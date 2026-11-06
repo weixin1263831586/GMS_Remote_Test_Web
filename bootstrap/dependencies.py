@@ -43,6 +43,9 @@ def _wire_cross_feature_services() -> None:
     register_cluster_port()
     register_worker_status_port()
     register_devices_port()
+    from features.ops import register_ops_ports
+
+    register_ops_ports()
     configure_manager_provider(get_redmine_config_for_request)
     # 依赖倒置：报告附件解析（owner 校验 + ZIP 打包）由 reports
     # feature 提供，email 通过 provider 使用——避免 email→reports 直连

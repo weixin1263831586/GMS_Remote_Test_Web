@@ -118,14 +118,20 @@ function showSettingsModal() {
       document.getElementById('settingCacheTtl').value = statsConfig.cache_ttl || 600;
       document.getElementById('settingFreshnessDays').value = statsConfig.freshness_days || 180;
       document.getElementById('settingRedmineBaseUrl').value = redmineBaseUrl();
-      // SMTP fields from statsConfig (returned by get_stats_config)
-      var cfg = await api('/api/redmine-agent/config/stats');
-      var email = (cfg.dashboard || {}).email || {};
-      document.getElementById('settingSmtpHost').value = email.smtp_host || '';
-      document.getElementById('settingSmtpPort').value = email.smtp_port || 465;
-      document.getElementById('settingFromAddr').value = email.from_addr || email.default_from_addr || '';
-      document.getElementById('settingSmtpUser').value = email.username || '';
-      document.getElementById('settingSmtpPass').value = '';
+      // 邮件通知：只读展示生效的发送方（系统级），本弹框不再编辑 SMTP。
+      try {
+        var sender = await api('/api/email/smtp');
+        var summary = document.getElementById('emailSenderSummary');
+        if (summary) {
+          summary.textContent = sender.smtp_host
+            ? '发送方：' + sender.smtp_host + ':' + (sender.smtp_port || 465)
+              + '（' + (sender.from_addr || sender.username || '-') + '）'
+            : '发送方尚未配置，请联系管理员在「系统配置」弹框填写。';
+        }
+      } catch (_) {
+        var summary = document.getElementById('emailSenderSummary');
+        if (summary) summary.textContent = '发送方配置读取失败（需要登录）。';
+      }
       // Redmine 凭据状态（已配置则回显用户名，密码不回显）
       try {
         var creds = await api('/api/redmine-agent/config/credentials');
@@ -228,17 +234,7 @@ async function saveSettings() {
       body: JSON.stringify({base_url: redmineBase, stale_days: stale, window_days: window_, cache_ttl: cacheTtl, freshness_days: freshnessDays})
     });
     if (result) { statsConfig = Object.assign({}, statsConfig, result); _statsConfigCacheTs = Date.now(); }
-    // Save SMTP config
-    var smtpHost = document.getElementById('settingSmtpHost').value.trim();
-    var smtpPort = parseInt(document.getElementById('settingSmtpPort').value) || 465;
-    var fromAddr = document.getElementById('settingFromAddr').value.trim();
-    var smtpUser = document.getElementById('settingSmtpUser').value.trim();
-    var smtpPass = document.getElementById('settingSmtpPass').value;
-    await api('/api/redmine-agent/config/email', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({smtp_host: smtpHost, smtp_port: smtpPort, from_addr: fromAddr, username: smtpUser, password: smtpPass})
-    });
+    // 邮件发送方已移至系统配置弹框（系统级 SMTP，/api/email/smtp）；此处不再保存 SMTP。
     // Redmine 凭据（仅当填写了密码才保存，避免误清空）
     var redmineUser = document.getElementById('settingRedmineUser').value.trim();
     var redminePass = document.getElementById('settingRedminePass').value;

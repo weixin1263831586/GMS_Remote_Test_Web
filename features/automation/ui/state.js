@@ -1,7 +1,7 @@
 // Automation page state chunk; loaded by page.html in dependency order.
 const AUTOMATION_WORKFLOW_STORAGE_KEY = 'gms_automation_workflow_pane';
 const AUTOMATION_STATUS_STORAGE_KEY = 'gms_automation_status_filter';
-const AUTOMATION_WORKFLOW_PANES = new Set(['overview', 'create', 'runs', 'plans', 'resources', 'build', 'events', 'reports']);
+const AUTOMATION_WORKFLOW_PANES = new Set(['overview', 'create', 'runs', 'plans', 'resources', 'build', 'events', 'reports', 'ops']);
 const AUTOMATION_STATUS_FILTERS = new Set(['', 'queued', 'running', 'testing', 'completed', 'failed', 'cancelled']);
 
 function restoreAutomationViewValue(queryKey, storageKey, allowed, fallback) {

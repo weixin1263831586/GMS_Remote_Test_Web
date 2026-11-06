@@ -375,6 +375,32 @@ async function showConfig() {
         </div>
         </form>
 
+        <!-- 邮件发送方（系统级）：全局 SMTP，保存走 /api/email/smtp（admin） -->
+        <div style="margin-top:14px;border-top:1px solid var(--border-color);padding-top:10px;">
+            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">邮件发送方（系统级 SMTP）</div>
+            <div class="modal-form-row">
+                <label>SMTP 服务器:</label>
+                <input type="text" id="config-email-smtp-host" placeholder="例如: smtphz.qiye.163.com" />
+            </div>
+            <div class="modal-form-row">
+                <label>端口:</label>
+                <input type="number" id="config-email-smtp-port" min="1" max="65535" placeholder="465" />
+            </div>
+            <div class="modal-form-row">
+                <label>SMTP 用户名:</label>
+                <input type="text" id="config-email-username" autocomplete="off" />
+            </div>
+            <div class="modal-form-row">
+                <label>发件人地址:</label>
+                <input type="text" id="config-email-from-addr" placeholder="留空则使用用户名" autocomplete="off" />
+            </div>
+            <div class="modal-form-row">
+                <label>授权码/密码:</label>
+                <input type="password" id="config-email-password" placeholder="留空保持不变" autocomplete="new-password" />
+            </div>
+            <small id="config-email-status" style="color:var(--text-secondary);">接收方邮箱在各业务处配置（如 Redmine 用户资料、运维告警 email_to），不在此处。</small>
+        </div>
+
         <!-- 客户端 SSH 凭据管理（增删独立于上方静态配置，即时生效） -->
         <div class="modal-form-row" style="flex-direction:column;align-items:stretch;margin-top:14px;">
             <label style="margin-bottom:6px;">客户端 SSH 凭据:</label>
@@ -454,6 +480,46 @@ async function showConfig() {
     _bindConfigModalHandlers(modalBody);
     loadClientCredentials();
     loadStaticRoutes();
+    loadEmailSenderConfig();
+}
+
+// 邮件发送方（系统级 SMTP）：读全局配置回填；密码永不回显，留空表示保持不变。
+async function loadEmailSenderConfig() {
+    const status = document.getElementById('config-email-status');
+    try {
+        const result = await apiCall('/api/email/smtp', 'GET');
+        const data = result?.data || result || {};
+        const setValue = (id, value) => {
+            const input = document.getElementById(id);
+            if (input) input.value = value ?? '';
+        };
+        setValue('config-email-smtp-host', data.smtp_host);
+        setValue('config-email-smtp-port', data.smtp_port || 465);
+        setValue('config-email-username', data.username);
+        setValue('config-email-from-addr', data.from_addr);
+        if (status) {
+            status.textContent = data.password_set
+                ? '当前已配置授权码（不回显；留空保持不变）。接收方邮箱在各业务处配置（如 Redmine 用户资料、运维告警 email_to）。'
+                : '尚未配置授权码。接收方邮箱在各业务处配置（如 Redmine 用户资料、运维告警 email_to）。';
+        }
+    } catch (error) {
+        if (status) status.textContent = '读取邮件发送方配置失败: ' + error.message;
+    }
+}
+
+async function saveEmailSenderConfig() {
+    const host = document.getElementById('config-email-smtp-host').value.trim();
+    const password = document.getElementById('config-email-password').value;
+    // 主机为空视为不修改邮件配置（用户可能只想改系统配置的其它部分）。
+    if (!host) return;
+    const payload = {
+        smtp_host: host,
+        smtp_port: parseInt(document.getElementById('config-email-smtp-port').value, 10) || 465,
+        username: document.getElementById('config-email-username').value.trim(),
+        from_addr: document.getElementById('config-email-from-addr').value.trim(),
+        password: password ? password : '***',
+    };
+    await apiCall('/api/email/smtp', 'POST', payload);
 }
 
 // 配置模态内动态渲染控件的事件绑定（CSP 收紧前置：去掉 inline handler）。
@@ -782,6 +848,14 @@ async function saveConfig() {
             await saveStaticRoutes();
         } catch (routeError) {
             addLogEntry('静态路由保存失败: ' + routeError.message, 'error');
+        }
+
+        // 邮件发送方独立保存（admin API），失败不阻塞主配置但需提示。
+        try {
+            await saveEmailSenderConfig();
+        } catch (emailError) {
+            addLogEntry('邮件发送方保存失败: ' + emailError.message, 'error');
+            showToast('邮件发送方保存失败: ' + emailError.message, 'error');
         }
 
         // Reload page to update config values

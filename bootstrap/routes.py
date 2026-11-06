@@ -42,6 +42,7 @@ from features.gerrit.config import (
 from features.gerrit.service import query_gerrit_dual_mode
 from features.gerrit.settings import config_manager as gerrit_config_manager
 from features.knowledge.service import set_ask_analyzer_factory
+from features.ops import api as ops
 from features.redmine import api as redmine
 from features.redmine import apk_import_api as redmine_apk_import
 from features.redmine import credentials_api as redmine_credentials
@@ -147,6 +148,7 @@ ALL_ROUTERS = [
     integrations.router,
     mainline_known_issues.router,
     notifications.router,
+    ops.router,
     knowledge.router,
     knowledge.page_router,
     redmine.router,

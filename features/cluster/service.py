@@ -96,6 +96,25 @@ class ClusterService:
                     worker["status"] = "offline"
                     if not was_offline:
                         self.repository.mark_worker_offline(worker["id"])
+                        # ADR 0030：offline 切换沿经 foundation 端口写一条
+                        # 运维告警（去重由 dedup_key 承担）；端口未注册或
+                        # 钩子失败都不影响 watchdog 主循环。
+                        try:
+                            from foundation.ops_port import record_incident
+
+                            record_incident(
+                                severity="warning",
+                                kind="worker_offline",
+                                subject=str(worker.get("id") or ""),
+                                dedup_key=f"worker_offline:{worker.get('id')}",
+                                message=f"Worker {worker.get('id')} 心跳超时，已标记离线",
+                                suppress_minutes=60,
+                            )
+                        except Exception:
+                            logger.debug(
+                                "ops worker_offline incident hook failed",
+                                exc_info=True,
+                            )
             except (KeyError, ValueError, TypeError):
                 worker["status"] = "offline"
             warnings = [item["warning"] for item in tests_by_worker.get(worker["id"], [])

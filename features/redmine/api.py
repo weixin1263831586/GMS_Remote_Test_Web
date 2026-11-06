@@ -742,6 +742,16 @@ async def create_project_profile(request: Request):
     }}
 
 
+def _effective_stale_days(request: Request) -> int:
+    """当前 owner 生效的未回复阈值（天），用于提醒文案拼具体数字。"""
+    try:
+        config = get_redmine_config_for_request(request).load_config()
+        value = int((config.get("redmine_stats") or {}).get("stale_days") or 0)
+        return value if value > 0 else 0
+    except Exception:
+        return 0
+
+
 @router.post("/reminders/email")
 async def send_department_reminder_email(request: Request):
     user = require_authenticated_user(request)
@@ -764,11 +774,18 @@ async def send_department_reminder_email(request: Request):
     if not to_addr:
         return JSONResponse(status_code=400, content={"success": False, "error": "user email is not configured"})
 
+    stale_days = int(body.get("stale_days") or _effective_stale_days(request) or 3)
     base_url = _get_redmine_base_url(request)
     issues = [{"issue_id": issue_id} for issue_id in issue_ids]
     url_text = issue_url_text(issues, base_url)
-    subject = str(body.get("subject") or "").strip() or f"Redmine 超阈值未回复提醒 - {user.get('name') or user_id}"
-    intro = str(body.get("intro") or "").strip() or "以下 Redmine 问题已超过未回复阈值，请及时处理："
+    subject = (
+        str(body.get("subject") or "").strip()
+        or f"Redmine 超{stale_days}天未回复提醒 - {user.get('name') or user_id}"
+    )
+    intro = (
+        str(body.get("intro") or "").strip()
+        or f"以下 Redmine 问题已超过 {stale_days} 天未回复，请及时处理："
+    )
     body_text = intro + "\n\n" + url_text
     manager = get_redmine_config_for_request(request)
     try:

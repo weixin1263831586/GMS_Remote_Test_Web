@@ -22,6 +22,7 @@ _task: asyncio.Task | None = None
 _advancement_task: asyncio.Task | None = None
 _stale_swept: bool = False
 _last_build_poll_at: float = 0.0
+_last_ops_sweep_at: float = 0.0
 _last_tick_at: float = 0.0
 _last_tick_result: dict[str, Any] = {}
 
@@ -323,6 +324,24 @@ def run_maintenance_sync(
         run_artifact_retention()
     except Exception:
         logger.exception('[AutomationWorker] artifact retention sweep failed')
+    global _last_ops_sweep_at
+    ops_now = time.monotonic()
+    if not _last_ops_sweep_at or ops_now - _last_ops_sweep_at >= 3600:
+        _last_ops_sweep_at = ops_now
+        try:
+            from foundation.ops_port import run_alert_sweep
+
+            run_alert_sweep()
+        except Exception:
+            logger.exception('[AutomationWorker] ops alert sweep failed')
+        try:
+            from foundation.ops_port import run_disk_hygiene
+
+            # 无人值守清扫：只动 .part 残片与过期上传临时目录；暂存固件
+            # 保留给管理员显式清理（可能仍被排队回放引用）。
+            run_disk_hygiene(dry_run=False, include_stage=False)
+        except Exception:
+            logger.exception('[AutomationWorker] ops disk hygiene failed')
 
     return {
         "polled_builds": polled_builds,
@@ -336,7 +355,20 @@ def advance_runs_sync(
     *,
     automation_service: Any | None = None,
 ) -> dict[str, int]:
-    """在单航班长任务通道中推进持久化 run。"""
+    """在单航班长任务通道中推进持久化 run。
+
+    kill-switch（ops 标志 ``advancement_paused``）打开时直接返回：不认领
+    新 run、不触发计划调度；正在执行的当前步骤自然完成后停止。维护通道
+    （``run_maintenance_sync``）不受影响——停机不等于冻结，超时清理、
+    retention 与告警照常运行（ADR 0030）。
+    """
+    try:
+        from foundation.automation_port import advancement_paused
+
+        if advancement_paused():
+            return {"advanced_runs": 0, "paused_by_kill_switch": 1}
+    except Exception:
+        logger.exception("[AutomationWorker] kill-switch check failed; advancing")
 
     auto_svc = automation_service or _resolve_services()[0]
     if auto_svc is None:

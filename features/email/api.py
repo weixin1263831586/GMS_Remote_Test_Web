@@ -23,9 +23,10 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
+from pydantic import BaseModel, Field
 
-from features.auth import require_authenticated_user
+from features.auth import CurrentUser, require_authenticated_user, require_role
 from features.email.service import normalize_email_addresses, send_email
 from foundation.error_model import record_internal_error
 from foundation.responses import error_response, success_response
@@ -220,3 +221,102 @@ async def send_email_endpoint(request: Request):
         user.username, len(to) + len(cc), subject[:80], result.get("mode", ""),
     )
     return success_response(data={"subject": subject, **result}, message="邮件发送成功")
+
+
+# ---------------------------------------------------------------------------
+# 全局 SMTP 配置：一次配置全部署生效，owner 只在有差异时覆盖。
+# ---------------------------------------------------------------------------
+
+SECRET_MASK = "***"
+
+
+class SmtpConfigRequest(BaseModel):
+    smtp_host: str = Field(default="", max_length=255)
+    smtp_port: int = Field(default=465, ge=1, le=65535)
+    username: str = Field(default="", max_length=255)
+    from_addr: str = Field(default="", max_length=255)
+    sender_name: str = Field(default="", max_length=128)
+    password: str = Field(default="", max_length=512, description="*** 表示保持现有密码不变")
+    use_ssl: bool = True
+
+
+def _global_smtp_section() -> dict[str, Any]:
+    from foundation.config import config_manager
+
+    config = config_manager.load_config()
+    return (config.get("redmine_dashboard") or {}).get("email") or {}
+
+
+def _masked_email_view(email_cfg: dict[str, Any]) -> dict[str, Any]:
+    """脱敏视图：优先展示刚写入的配置段，回落全局生效配置。
+
+    ``password_set`` 基于传入配置段判断（保存响应的语义），同时附带
+    resolve 后的生效值，便于 UI 展示"全局默认 + owner 覆盖"的最终形态。
+    """
+    from features.email.service import resolve_email_config
+
+    effective = email_cfg if email_cfg else resolve_email_config()
+    return {
+        "smtp_host": str(effective.get("smtp_host") or ""),
+        "smtp_port": int(effective.get("smtp_port") or 465),
+        "use_ssl": bool(effective.get("use_ssl", int(effective.get("smtp_port") or 465) == 465)),
+        "username": str(effective.get("username") or ""),
+        "from_addr": str(effective.get("from_addr") or ""),
+        "sender_name": str(effective.get("sender_name") or ""),
+        "password_set": bool(effective.get("encrypted_password") or effective.get("password")),
+        "global_smtp_host": str(email_cfg.get("smtp_host") or ""),
+    }
+
+
+@router.get("/api/email/smtp")
+def get_smtp_config(request: Request):
+    """查看生效的 SMTP 配置（密码永不回显，仅返回 password_set）。"""
+    require_authenticated_user(request)
+    return success_response(data=_masked_email_view(_global_smtp_section()))
+
+
+@router.post("/api/email/smtp")
+def save_smtp_config(body: SmtpConfigRequest, admin: CurrentUser = Depends(require_role("admin"))):
+    """保存全局 SMTP 默认配置；密码经平台密钥加密，永不明文落盘。"""
+    from features.email.service import normalize_email_addresses
+
+    if body.smtp_host:
+        if body.username:
+            addresses = normalize_email_addresses(body.username)
+            if not addresses or len(addresses) != 1:
+                return error_response("username 必须是单个邮箱地址", status_code=400)
+        if body.from_addr:
+            addresses = normalize_email_addresses(body.from_addr)
+            if not addresses or len(addresses) != 1:
+                return error_response("from_addr 必须是单个邮箱地址", status_code=400)
+
+    from foundation.config import config_manager
+    from foundation.secrets import encrypt_secret
+
+    config = config_manager.load_config()
+    dashboard = config.get("redmine_dashboard") or {}
+    email = dict(dashboard.get("email") or {})
+    email.update({
+        "smtp_host": body.smtp_host.strip(),
+        "smtp_port": body.smtp_port,
+        "username": body.username.strip(),
+        "from_addr": (body.from_addr.strip() or body.username.strip()),
+        "sender_name": " ".join(body.sender_name.split()),
+    })
+    if body.smtp_port == 465:
+        email["use_ssl"] = True
+        email.pop("use_tls", None)
+    else:
+        email["use_tls"] = True
+        email.pop("use_ssl", None)
+    if body.password and body.password != SECRET_MASK:
+        email["encrypted_password"] = encrypt_secret(body.password)
+    email.pop("password", None)  # 历史遗留明文字段一律清除
+    dashboard["email"] = email
+    if not config_manager.update_runtime_config({"redmine_dashboard": dashboard}):
+        return error_response("保存 SMTP 配置失败", status_code=500)
+    logger.info(
+        "[EMAIL_SMTP] saved global smtp config by %s (host=%s)",
+        admin.username, body.smtp_host,
+    )
+    return success_response(data=_masked_email_view(email), message="SMTP 配置已保存")

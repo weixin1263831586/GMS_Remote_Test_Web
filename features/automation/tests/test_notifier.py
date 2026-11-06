@@ -25,7 +25,8 @@ class AutomationNotifierTests(unittest.TestCase):
         self.assertTrue(result['sent'][0]['sent'])
         sender.assert_called_once()
         self.assertEqual(sender.call_args.args[0], 'owner@example.com')
-        self.assertIsNotNone(sender.call_args.kwargs['manager'])
+        # 通知走全局 SMTP 默认配置，不再要求 per-owner 凭据（ADR 0030 整合）。
+        self.assertNotIn('manager', sender.call_args.kwargs)
 
     def test_unknown_transport_is_reported_without_raising(self):
         run = {

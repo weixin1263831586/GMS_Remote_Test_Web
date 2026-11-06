@@ -18,10 +18,10 @@ class RuntimeAutomationTests(RuntimeUiHarness):
                 "aria-selected", "true"
             )
             page.locator('[data-workflow="create"]').press("End")
-            expect(page.locator('[data-workflow="reports"]')).to_have_attribute(
+            expect(page.locator('[data-workflow="ops"]')).to_have_attribute(
                 "aria-selected", "true"
             )
-            page.locator('[data-workflow="reports"]').press("Home")
+            page.locator('[data-workflow="ops"]').press("Home")
             expect(page.locator('[data-workflow="overview"]')).to_have_attribute(
                 "aria-selected", "true"
             )
@@ -398,7 +398,7 @@ class RuntimeAutomationTests(RuntimeUiHarness):
             )
             self.assertEqual(
                 page.locator(".workflow-tab").all_text_contents(),
-                ["概览", "创建运行", "运行监控", "测试计划", "资源与存储", "构建日志", "事件诊断", "测试报告"],
+                ["概览", "创建运行", "运行监控", "测试计划", "资源与存储", "构建日志", "事件诊断", "测试报告", "运维"],
             )
             page.wait_for_function("!document.querySelector('#build-workspace-refresh').disabled")
             page.evaluate("document.querySelector('#build-workspace-refresh').click()")

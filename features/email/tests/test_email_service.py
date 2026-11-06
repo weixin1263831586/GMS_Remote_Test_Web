@@ -22,6 +22,15 @@ def _fake_manager(email_cfg: dict):
     return mgr
 
 
+# 隔离全局配置：resolve_email_config 的全局默认/兼容兜底读取真实 runtime，
+# 部署机上真实 SMTP 的非空字段会覆盖测试 fixture，必须屏蔽。
+_NO_GLOBAL = patch(
+    "foundation.config.config_manager.load_config", return_value={}
+)
+_NO_GLOBAL.start()
+_NO_GLOBAL_stop = _NO_GLOBAL.stop
+
+
 QIYE_CFG = {
     "smtp_host": "smtphz.qiye.163.com",
     "smtp_port": 465,
@@ -91,7 +100,7 @@ class SendEmailTests(unittest.TestCase):
         result = send_email("a@x.com", "s", "b", manager=_fake_manager({}))
         self.assertFalse(result["sent"])
         self.assertEqual(result["mode"], "unconfigured")
-        self.assertIn("smtp_host", result["error"])
+        self.assertIn("SMTP", result["error"])
 
     def test_empty_recipients_rejected(self):
         result = send_email("", "s", "b", manager=_fake_manager(QIYE_CFG))

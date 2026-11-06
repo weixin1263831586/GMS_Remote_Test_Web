@@ -118,9 +118,10 @@ async function loadAll(silent = false) {
         await Promise.all([loadBuildConfig(), loadClusterWorkers()]);
         await loadTestSuitesForAutomation();
         await Promise.all([loadDevices(false), loadProfiles()]);
-        await Promise.all([loadRuns(), loadBuildJobs(), loadWorkerStatus()]);
+        await Promise.all([loadRuns(), loadBuildJobs(), loadWorkerStatus(), loadOpsStatus()]);
         if (activeWorkflowPane === 'plans') await loadTestPlans();
         if (activeWorkflowPane === 'resources') await loadResourceCatalog();
+        if (activeWorkflowPane === 'ops') await Promise.all([loadOpsEvents(), loadOpsDisk()]);
         await applyAutomationWorkspaceContext(atsWorkspaceContext);
         if (!silent) toast('已刷新');
     } catch (err) { toast(err.message); }
@@ -157,6 +158,11 @@ async function refreshAutomationActivityOnce() {
             await refreshResourceCommands();
         }
         if (activeWorkflowPane === 'runs' || activeWorkflowPane === 'reports') await loadRuns();
+        if (activeWorkflowPane === 'ops') {
+            await loadOpsStatus();
+            await loadOpsEvents();
+            await loadOpsDisk();
+        }
         if (activeWorkflowPane === 'build') {
             await loadBuildJobs();
             if (selectedBuildJobId) await loadBuildLog(selectedBuildJobId, {silent: true});

@@ -11,7 +11,6 @@
 !/configs/examples/aoa/
 /configs/examples/aoa/*
 !/configs/examples/aoa/README.md
-!/configs/examples/aoa/rk3576-ss17-wizard-to-usb-debug.json
 !/configs/README.md
 !/configs/AGENTS.md
 

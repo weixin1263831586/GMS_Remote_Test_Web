@@ -119,6 +119,7 @@ def automation_ui_asset(ui_asset: str):
         'build-config.js', 'build-jobs.js', 'events.js', 'runs.js',
         'run-launch.js', 'run-actions.js', 'runs-payload.js', 'trace.js',
         'patch-utils.js', 'view-restore.js', 'plans.js', 'resources.js',
+        'ops-panel.js',
     }:
         # 与 redmine/gerrit 资产路由同语义（foundation.error_model 统一
         # envelope），不用裸 HTTPException。

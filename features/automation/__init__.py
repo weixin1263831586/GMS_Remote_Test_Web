@@ -12,6 +12,24 @@ def get_worker_status():
     return _status()
 
 
+def automation_ui_asset(ui_asset: str):
+    """Serve an automation page JS chunk (public surface for tests/tools)."""
+    from features.automation.api import automation_ui_asset as _serve
+
+    return _serve(ui_asset)
+
+
+def get_automation_service():
+    """Return the module-level AutomationService singleton.
+
+    Public surface for cross-feature consumers (ops alert sweep); importing
+    ``features.automation.api`` directly is an architecture violation.
+    """
+    from features.automation.api import automation_service
+
+    return automation_service
+
+
 def _port_worker_status():
     return get_worker_status()
 
@@ -30,6 +48,7 @@ __all__ = [
     'AutomationOrchestrator',
     'AutomationRunCreateRequest',
     'AutomationService',
+    'get_automation_service',
     'get_worker_status',
     'register_worker_status_port',
 ]
