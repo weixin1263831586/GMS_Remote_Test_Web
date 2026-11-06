@@ -144,7 +144,6 @@
                             <input id="aoa-input-text" type="text" maxlength="128" placeholder="输入英文、数字或 @ - _ . +">
                             <button class="btn-xxs" type="button" data-click="aoaSendText" data-aoa-screen-action>输入</button>
                         </div>
-                        <div class="aoa-muted" title="单击投屏执行点按；按住约 0.7 秒为长按；拖动执行滑动。">标定会切换一次 USB 模式并点击屏幕中心，仅在安全页面操作。</div>
                     </section>
 
                     <section class="aoa-column aoa-command-column" aria-labelledby="aoa-command-heading">
@@ -198,14 +197,14 @@
                                     <label for="aoa-profile-name">配置名称</label>
                                     <div class="aoa-config-name-row">
                                         <input id="aoa-profile-name" type="text" maxlength="120" placeholder="例如：RK3562 Android 16 开启 USB 调试">
-                                        <button class="btn-xs btn-primary" type="button" data-click="aoaSaveRecording" data-aoa-edit aria-label="保存当前命令" title="保存当前命令">保存</button>
+                                        <button class="btn-xxs btn-primary" type="button" data-click="aoaSaveRecording" data-aoa-edit aria-label="保存当前命令" title="保存当前命令">保存</button>
                                     </div>
                                 </div>
                                 <label>输入模式<select id="aoa-hid-touch-mode" class="btn-xxs" data-change="aoaHidModeChanged">
                                     <option value="direct" selected>直接触摸（标准映射优先）</option>
                                     <option value="pointer">兼容鼠标（旧配置兼容）</option>
                                 </select></label>
-                                <label>输入稳定等待(秒)<input id="aoa-hid-settle" type="number" min="0" max="10" step="0.5" value="2" data-change="aoaHidSettleChanged" data-aoa-edit></label>
+                                <label>稳定等待(秒)<input id="aoa-hid-settle" type="number" min="0" max="10" step="0.5" value="2" title="每条输入后等待输入法/输入设备注册稳定的秒数" data-change="aoaHidSettleChanged" data-aoa-edit></label>
                                 <label class="aoa-field-wide">回放方式<select id="aoa-hid-session-mode" class="btn-xxs" data-change="aoaSessionModeChanged">
                                     <option value="continuous">连续回放（保持 USB/HID 连接，较快）</option>
                                     <option value="per_command">按单条方式回放（每条恢复 USB，较慢）</option>
@@ -218,7 +217,7 @@
                                 <label for="aoa-replay-profile">已保存配置</label>
                                 <div class="aoa-profile-picker">
                                     <select id="aoa-replay-profile" class="btn-xxs" data-change="aoaProfileSelectionChanged"></select>
-                                    <button class="btn-xs" type="button" data-click="aoaLoadSelectedProfile" data-aoa-edit aria-label="载入选中配置" title="载入选中配置">载入</button>
+                                    <button class="btn-xxs" type="button" data-click="aoaLoadSelectedProfile" data-aoa-edit aria-label="载入选中配置" title="载入选中配置">载入</button>
                                     <button class="btn-xxs" type="button" data-click="aoaProfileDeleteSelected" data-aoa-edit aria-label="删除配置" title="删除配置">删除</button>
                                 </div>
                             </div>
@@ -265,9 +264,9 @@
                                 <label>目标设备<select id="aoa-replay-device" class="btn-xxs"></select></label>
                             </div>
                             <div class="aoa-replay-runner">
-                                <label>ADB 等待(秒)<input id="aoa-replay-wait" type="number" min="1" max="600" value="60"></label>
+                                <label>ADB 等待(秒)<input id="aoa-replay-wait" type="number" min="1" max="600" value="60" title="回放结束后等待 ADB 恢复的秒数"></label>
                                 <div class="aoa-inline-actions aoa-replay-actions">
-                                    <button class="btn-xs" type="button" data-click="aoaProbeStart" data-aoa-run>探测 AOA</button>
+                                    <button class="btn-xxs" type="button" data-click="aoaProbeStart" data-aoa-run>探测 AOA</button>
                                     <button class="btn-xs btn-primary" type="button" data-click="aoaReplaySelected" data-aoa-run>回放选中配置</button>
                                 </div>
                             </div>

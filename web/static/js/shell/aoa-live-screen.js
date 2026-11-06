@@ -25,6 +25,10 @@
         buffer: new Uint8Array(0),
         pendingConfig: null,
         framesDecoded: 0,
+        lastPongAt: 0,      // 最近一次服务端 pong 时间（连接判活）
+        retried: false,     // 有界自动重连：每次手动开启后只允许一次
+        failing: false,     // 失败处理闩（onerror/onclose 双触发去重）
+        lastTarget: null,   // 最近一次开启的 {serial, workerId}
         pollTimer: null,
         pingTimer: null,
         watchdogTimer: null,
@@ -212,8 +216,26 @@
     }
 
     function handleStreamFailure(message) {
-        if (!state.active) return;
+        if (!state.active || state.failing) return;
+        state.failing = true;   // onerror/onclose 可能双触发，只走一次
         teardownStream();
+        // 有界自动重连：USB 重枚举（实机观测：移除→约 4 秒后加回）或 adb
+        // 瞬断会杀掉 scrcpy 会话，这类故障几秒内自愈。失败后自动重试一次；
+        // 重试再失败才落回截图模式（不循环重试，服务下线时不会刷请求）。
+        // 用户手动重新点击「▶ 实时投屏」会复位重试预算（start 非 retry）。
+        if (!state.retried && state.lastTarget) {
+            const {serial, workerId} = state.lastTarget;
+            state.retried = true;
+            setStatus(`${message || '实时流断开'}，3 秒后自动重连…`, true);
+            setTimeout(() => {
+                state.failing = false;
+                if (!state.active) return;
+                state.active = false;   // 让 start() 的 active 守卫放行重启
+                start(serial, workerId, {isRetry: true});
+            }, 3000);
+            return;
+        }
+        state.failing = false;
         setStatus(message || '实时投屏不可用，已回退截图模式', true);
         startScreenshotPolling();
         // 回退后按钮必须回到"▶ 实时投屏"（停止态），与 aoaSyncLiveButton
@@ -245,8 +267,11 @@
         state.pendingConfig = null;
     }
 
-    async function start(serial, workerId) {
+    async function start(serial, workerId, {isRetry = false} = {}) {
         if (state.active) return;
+        if (!isRetry) state.retried = false;   // 用户手动开启：复位重试预算
+        state.failing = false;
+        state.lastTarget = {serial, workerId};
         if (typeof VideoDecoder === 'undefined') {
             state.active = true;
             setStatus('浏览器不支持 WebCodecs，使用截图模式（约1秒刷新）', false);
@@ -278,7 +303,14 @@
         socket.binaryType = 'arraybuffer';
         state.ws = socket;
         socket.onmessage = (event) => {
-            if (typeof event.data === 'string') return; // pong 等，忽略
+            if (typeof event.data === 'string') {
+                // 服务端 pong（JSON 文本）：记录接收时间，作为连接判活依据
+                // （静态画面长时间无新帧是正常现象，不能当流死亡）。
+                try {
+                    if (JSON.parse(event.data)?.type === 'pong') state.lastPongAt = Date.now();
+                } catch (_) { /* 非 pong 文本，忽略 */ }
+                return;
+            }
             state.buffer = concat(state.buffer, new Uint8Array(event.data));
             consumeBuffer();
         };
@@ -289,33 +321,28 @@
         socket.onopen = () => {
             showCanvas();
             setStatus('实时投屏中 · 等待首帧…');
-            // 停滞看门狗（持续运行）：首帧 8 秒超时；出画后若 12 秒无新帧
-            // （设备编码器停滞/USB 重枚举后中继死亡等）也判定流死亡并回退
-            // 截图模式——不再只守护连接建立那一刻（实机复现：点触摸标定
-            // 后画面永久冻结，只能手动刷新）。
-            let openedAt = state.framesDecoded;
-            let stallChecks = 0;
+            // 判活只看 ping/pong 心跳（15 秒无 pong ≈ 半开连接），绝不因
+            // "无新帧"杀流：设备熄屏/无画面输出时编码器本就不出帧，心跳
+            // 正常说明链路活着，亮屏后画面自动到来（实机复现：熄屏约 8 秒
+            // 后被首帧超时误杀断开）。会话真死时服务端会关闭 WS（onclose
+            // 兜底），中继死亡时 pump 的 finally 也会主动关闭订阅者 WS。
+            state.lastPongAt = Date.now();
             state.watchdogTimer = setInterval(() => {
                 if (!state.active) { clearInterval(state.watchdogTimer); return; }
-                if (state.framesDecoded === openedAt) {
-                    stallChecks += 1;
-                    const waited = (state.framesDecoded === 0 ? 8 : 12);
-                    if (stallChecks * 4 >= waited) {
-                        clearInterval(state.watchdogTimer);
-                        state.watchdogTimer = null;
-                        handleStreamFailure(state.framesDecoded === 0
-                            ? '实时流 8 秒未出画面，已回退截图模式'
-                            : '实时流已停滞，已回退截图模式');
-                    }
-                } else {
-                    stallChecks = 0;
-                    openedAt = state.framesDecoded;
+                if (Date.now() - state.lastPongAt >= 15000) {
+                    clearInterval(state.watchdogTimer);
+                    state.watchdogTimer = null;
+                    handleStreamFailure('实时流心跳超时，已回退截图模式');
                 }
             }, 4000);
             // 心跳 + 帧率指示（用户可直观确认画面在实时更新）。
             let lastShown = -1;
             state.statusTimer = setInterval(() => {
                 if (!state.active) return;
+                if (state.framesDecoded === 0) {
+                    setStatus('实时投屏中 · 等待设备画面（熄屏时无帧属正常，可点 Wake 唤醒）');
+                    return;
+                }
                 if (state.framesDecoded !== lastShown) {
                     lastShown = state.framesDecoded;
                     setStatus(`实时投屏中 · 已解码 ${state.framesDecoded} 帧 · 单击/拖动发送操作`);
@@ -323,7 +350,7 @@
             }, 2000);
             state.pingTimer = setInterval(() => {
                 if (socket.readyState === WebSocket.OPEN) socket.send('ping');
-            }, 15000);
+            }, 5000);
         };
     }
 
@@ -349,5 +376,7 @@
         return null;
     }
 
-    window.aoaLiveScreen = {start, stop, activeSurface, isActive: () => state.active};
+    // __state 仅供运行时 UI 测试注入/读取会话内部状态（framesDecoded、
+    // lastPongAt），生产代码不得依赖。
+    window.aoaLiveScreen = {start, stop, activeSurface, isActive: () => state.active, __state: state};
 })();

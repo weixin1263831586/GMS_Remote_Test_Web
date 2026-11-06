@@ -220,6 +220,54 @@ def test_late_subscriber_receives_replay_keyframe(fake_adb_env):
     asyncio.run(scenario())
 
 
+def test_relay_survives_recv_timeout_while_server_alive(fake_adb_env):
+    """静态画面不出帧：recv 超时不判死（仅当 scrcpy server 进程退出才
+    结束会话）；EOF 仍是真死并关闭订阅者 WS。"""
+    import asyncio
+
+    scrcpy_stream.start_stream("ser-1")
+    session = scrcpy_stream.get_stream("ser-1")
+
+    class _Ws:
+        pass
+
+    # 记录原始 FakeSocket，之后切换为"总是超时"的桩。
+    original = session.video
+    server_alive = {"poll": None}
+
+    class _TimeoutSock:
+        def settimeout(self, _t):
+            pass
+
+        def recv(self, _size):
+            raise TimeoutError()
+
+        def close(self):
+            pass
+
+    session.proc = SimpleNamespace(
+        poll=lambda *a, **k: server_alive["poll"],
+        terminate=lambda *a, **k: None, kill=lambda *a, **k: None,
+        wait=lambda *a, **k: 0)
+    session.video = _TimeoutSock()
+
+    async def scenario():
+        sub = session.subscribe(_Ws())
+        await asyncio.sleep(1.2)  # 覆盖多个 6s？否——真实 timeout 由桩立即抛出
+        # 桩每次 recv 立即抛 socket.timeout：进程活着 → 中继必须仍在运行。
+        assert not session.stopped.is_set(), "recv 超时不应终止会话"
+        assert session.relay_thread.is_alive()
+        # server 退出（poll 返回码）→ 下一次超时检查判死。
+        server_alive["poll"] = 1
+        await asyncio.sleep(0.3)
+        assert session.stopped.is_set(), "server 退出后应结束会话"
+        session.unsubscribe(sub)
+
+    asyncio.run(scenario())
+    session.stop()
+    original.close()
+
+
 def test_frame_carries_sps_or_idr_detection():
     carry = b"\x00\x00\x00\x01\x67\x42\xc0\x20"
     plain = b"\x00\x00\x00\x01\x41\x9a"
@@ -305,10 +353,14 @@ class FakeSession:
         return scrcpy_stream._Subscriber(ws, asyncio.get_running_loop())
 
     async def pump(self, sub):
+        # 与生产 pump 保持同一发送语义：PONG 哨兵 → JSON 文本帧。
         while sub.alive:
             chunk = await sub.queue.get()
             if chunk is None:
                 break
+            if chunk == scrcpy_stream._Subscriber.PONG:
+                await sub.ws.send_json({"type": "pong"})
+                continue
 
     def unsubscribe(self, sub):
         self.unsubscribed = True
@@ -406,3 +458,38 @@ def test_session_death_closes_subscriber_ws(fake_adb_env):
 
     asyncio.run(scenario())
     assert closed and closed[0] == 4409
+
+
+def test_session_death_with_full_queue_still_closes_ws(fake_adb_env):
+    """哨兵被丢弃（队列满）时也必须关 WS：pump 只看到 alive=False。
+
+    shutdown() 在队列满时投不进 None 哨兵，pump 退出循环拿不到
+    session_ended 标记；finally 里按 stopped 兜底关闭，否则前端画面
+    冻结且不回退（会话死亡 + 客户端消费慢同时发生时复现）。
+    """
+    import asyncio
+
+    scrcpy_stream.start_stream("ser-full-queue")
+    session = scrcpy_stream.get_stream("ser-full-queue")
+
+    class _Ws:
+        def __init__(self):
+            self.closed = None
+
+        async def send_bytes(self, _data):
+            pass
+
+        async def close(self, code=None):
+            self.closed = code
+
+    async def scenario():
+        ws = _Ws()
+        sub = session.subscribe(ws)
+        for _ in range(sub.QUEUE_LIMIT - sub.queue.qsize()):  # 填满：哨兵将投递失败
+            sub.enqueue(b"\x00")
+        session.stop()                      # stop → shutdown 哨兵被满队列丢弃
+        task = asyncio.get_running_loop().create_task(session.pump(sub))
+        await asyncio.wait_for(task, timeout=2)
+        assert ws.closed == 4409            # 无哨兵也兜底关闭 → 前端走回退
+
+    asyncio.run(scenario())

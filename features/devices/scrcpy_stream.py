@@ -59,6 +59,11 @@ class _Subscriber:
     """单个 WS 订阅者：线程安全的待发队列 + 事件循环内 pump 消费。"""
 
     QUEUE_LIMIT = 600  # 约 20s@30fps；超出视为客户端卡死，剔除
+    # pong 哨兵：心跳应答必须走 pump 的唯一 sender——WS handler 若直接
+    # send_json 会与 pump 的 send_bytes 并发（实机复现：建连约 7 秒后被
+    # 静默关闭，与前端 5s 首个 ping 对齐；hello/pump 同类竞态已修，这是
+    # 同一约束的 pong 侧补全）。
+    PONG = b"\x00gms-pong"
 
     def __init__(self, ws, loop):
         self.ws = ws
@@ -69,9 +74,22 @@ class _Subscriber:
     def enqueue(self, chunk: bytes) -> None:
         if self.alive:
             if self.queue.full():
-                self.alive = False
+                # 队列满：正常帧可丢（保活优先），pong 哨兵绝不能丢——丢一次
+                # pong 前端要等 15s 心跳超时。清一个位置给哨兵。
+                if chunk == self.PONG:
+                    try:
+                        self.queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                    self.queue.put_nowait(chunk)
+                else:
+                    self.alive = False
                 return
             self.queue.put_nowait(chunk)
+
+    def request_pong(self) -> None:
+        """WS handler 调用：把 pong 应答排入唯一 sender（pump）。"""
+        self.enqueue(self.PONG)
 
     def offer(self, chunk: bytes) -> bool:
         """中继线程调用：经 call_soon_threadsafe 调度入队；False=已死剔除。"""
@@ -348,7 +366,17 @@ class ScrcpySession:
         recent_bytes = 0
         try:
             while not self.stopped.is_set():
-                chunk = self.video.recv(262144)
+                try:
+                    chunk = self.video.recv(262144)
+                except TimeoutError:
+                    # recv 超时 ≠ 会话死亡：静态画面下 scrcpy 本来就不出帧
+                    # （实机复现：RK3576GMS1 静止桌面 → 首帧突发后 6 秒无帧
+                    # → timeout 被 OSError 分支吞掉 → 会话被误杀，WS 4409，
+                    # 前端每 ~7 秒断开重连一次）。超时只检查设备端 server
+                    # 进程是否仍活着；活着就继续等帧。
+                    if self.proc is not None and self.proc.poll() is not None:
+                        break
+                    continue
                 if not chunk:
                     break
                 self.first_byte.set()
@@ -431,6 +459,9 @@ class ScrcpySession:
                 if chunk is None:
                     session_ended = True   # 中继线程死亡：shutdown() 投递的哨兵
                     break
+                if chunk == sub.PONG:
+                    await sub.ws.send_json({"type": "pong"})
+                    continue
                 await sub.ws.send_bytes(chunk)
                 sent_bytes += len(chunk)
                 if sent_bytes == len(chunk):
@@ -442,8 +473,10 @@ class ScrcpySession:
             sub.alive = False
         finally:
             self.unsubscribe(sub)
-            if session_ended:
+            if session_ended or self.stopped.is_set():
                 # 会话已死：关掉这条 WS，让前端 onclose 触发截图回退。
+                # stopped 分支覆盖哨兵被丢弃的边缘路径（队列满时 shutdown()
+                # 投递失败，pump 只看到 alive=False 退出，拿不到 None）。
                 try:
                     await sub.ws.close(code=4409)
                 except Exception:
