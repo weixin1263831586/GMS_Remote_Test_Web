@@ -195,7 +195,8 @@ function aoaSetBusy(running, text = '') {
         .forEach(node => { node.disabled = running; });
     if (text) aoaSetStatus(text, running ? 'running' : '');
     if (aoaEl('aoa-record-start')) aoaEl('aoa-record-start').disabled = running || aoaPanelState.recording;
-    if (aoaEl('aoa-record-stop')) aoaEl('aoa-record-stop').disabled = running || !aoaPanelState.recording;
+    // 停止按钮合一：录制中/回放中都可点（分别走录制停止/回放取消），
+    // 由 aoaPlaybackButtonState 在回放态统一管理 disabled。
     aoaPlaybackButtonState();
     aoaDebugButtonState();
 }
@@ -290,13 +291,26 @@ function aoaSyncDeviceOptions() {
     if (!aoaDebugSyncTarget()) aoaFillDeviceSelect('aoa-replay-device', aoaEl('aoa-replay-worker')?.value || '', false, true);
 }
 
+// 截图轮询暂停标记按设备状态驱动：目标设备无 ADB（usb_only/fastboot/
+// 离线/不在清单）时直接暂停（零请求）；清单刷新或目标切换后按最新
+// 状态复位。不能盲目清标记——设备页每 10s 自动刷新会反复清除，随后
+// 轮询又打一轮 409（usb_only 设备的截图必然被拒）。
+function aoaSyncAdbPauseFlag() {
+    const workerId = aoaEl('aoa-record-worker')?.value || '';
+    const serial = aoaEl('aoa-record-device')?.value || '';
+    const device = aoaPanelState.devices.find(item =>
+        aoaDeviceWorker(item) === workerId && aoaDeviceSerial(item) === serial);
+    const deviceState = String(
+        device?.cluster_state || device?.state || device?.status || ''
+    ).toLowerCase();
+    aoaPanelState.adbUnavailable = !device
+        || ['usb_only', 'fastboot', 'offline', 'unknown'].includes(deviceState);
+}
+
 // 设备管理清单刷新后的只读同步入口。
 function aoaSyncDeviceSources(devices) {
     if (!aoaEl('aoa-panel')) return;
     aoaPanelState.devices = Array.isArray(devices) ? devices : [];
-    // 清单刷新意味着设备状态可能变化（usb_only → ADB 就绪）：清除截图
-    // 暂停标记，让轮询下一跳重新尝试。
-    aoaPanelState.adbUnavailable = false;
     const workers = [...new Set(aoaPanelState.devices
         .filter(device => device.transport !== 'adb_proxy')
         .map(aoaDeviceWorker).filter(Boolean))];
@@ -304,7 +318,10 @@ function aoaSyncDeviceSources(devices) {
     aoaReplaceOptions(aoaEl('aoa-record-worker'), entries, '（无可用 Worker）', true);
     aoaReplaceOptions(aoaEl('aoa-replay-worker'), entries, '（无可用 Worker）', true);
     aoaSyncDeviceOptions();
-
+    // 下拉就绪后按最新清单状态决定是否暂停截图轮询
+    // （usb_only → 暂停；ADB 就绪 → 恢复）。必须在填充之后：否则首次
+    // 同步时 select 为空、查不到目标，会误置暂停标记。
+    aoaSyncAdbPauseFlag();
 }
 
 function aoaRecorderWorkerChanged() {
@@ -324,8 +341,8 @@ function aoaRecorderDeviceSelected() {
 
 function aoaRecorderDeviceChanged(options = {}) {
     aoaPanelState.calibration = null;
-    // 切换目标设备：无 ADB 暂停标记跟随目标失效，允许新目标立即尝试截图。
-    aoaPanelState.adbUnavailable = false;
+    // 切换目标设备：按新目标在清单里的状态重设截图暂停标记。
+    aoaSyncAdbPauseFlag();
     const key = `gms-aoa-calibration:${aoaEl('aoa-record-worker')?.value || ''}:${aoaEl('aoa-record-device')?.value || ''}`;
     try {
         const saved = JSON.parse(localStorage.getItem(key) || 'null');
@@ -629,7 +646,6 @@ async function aoaRecordingStart() {
     aoaPanelState.commandsProfileId = '';
     aoaPanelState.recording = true;
     aoaEl('aoa-record-start').disabled = true;
-    aoaEl('aoa-record-stop').disabled = false;
     aoaEl('aoa-record-state').textContent = '录制中：左侧成功操作会写入命令';
     aoaSetStatus('录制中', 'running'); aoaRenderCommands();
     if (aoaEl('aoa-screen-image')?.hidden) await aoaRefreshScreen();
@@ -638,7 +654,6 @@ async function aoaRecordingStart() {
 function aoaRecordingStop() {
     aoaPanelState.recording = false;
     if (aoaEl('aoa-record-start')) aoaEl('aoa-record-start').disabled = false;
-    if (aoaEl('aoa-record-stop')) aoaEl('aoa-record-stop').disabled = true;
     if (aoaEl('aoa-record-state')) {
         aoaEl('aoa-record-state').textContent = `已停止 · ${aoaPanelState.commands.length} 条命令`;
     }

@@ -101,9 +101,6 @@
                         <div class="aoa-muted" title="在 userdebug 设备上操作并录制，保存后可在同机型 user 固件上通过 USB AOAv2 回放，无 ADB 依赖。">在 userdebug 设备上操作并录制，保存后可在同机型 user 固件上通过 USB AOAv2 回放，无 ADB 依赖。</div>
                     </div>
                     <div class="aoa-header-status">
-                        <button class="btn-xxs" type="button" id="aoa-playback-pause" title="当前命令完成后暂停，保留设备租约；累计暂停最多 10 分钟" data-click="aoaPlaybackPause" data-aoa-run hidden>暂停</button>
-                        <button class="btn-xxs" type="button" id="aoa-playback-resume" data-click="aoaPlaybackResume" data-aoa-run hidden>继续</button>
-                        <button class="btn-xxs btn-danger" type="button" id="aoa-playback-cancel" data-click="aoaPlaybackCancel" data-aoa-run hidden>停止</button>
                         <span id="aoa-run-status" class="aoa-status-pill">待机</span>
                     </div>
                 </div>
@@ -188,7 +185,14 @@
                             <div><strong id="aoa-config-heading">③ AOA 录制 / 配置</strong><span id="aoa-record-state">尚未录制</span></div>
                             <div class="aoa-inline-actions">
                                 <button id="aoa-record-start" class="btn-xxs btn-primary" type="button" data-click="aoaRecordingStart">开始录制</button>
-                                <button id="aoa-record-stop" class="btn-xxs" type="button" data-click="aoaRecordingStop" disabled>停止</button>
+                                <!-- 暂停/继续复用同个按钮（aoaPlaybackButtonState
+                                     切换文案与 data-mode，入口 aoaPlaybackPauseResume
+                                     按模式分发）；仅回放时出现。 -->
+                                <button class="btn-xxs" type="button" id="aoa-playback-pause" title="当前命令完成后暂停，保留设备租约；累计暂停最多 10 分钟" data-click="aoaPlaybackPauseResume" data-aoa-run hidden>暂停</button>
+                                <!-- 停止合一：回放激活时是"停止回放"（danger，
+                                     aoaPlaybackStop 按 playbackActive 分发），
+                                     否则是录制停止（aoa-record-stop 语义）。 -->
+                                <button class="btn-xxs btn-danger" type="button" id="aoa-record-stop" data-click="aoaPlaybackStop" data-aoa-run>停止</button>
                             </div>
                         </div>
                         <div class="aoa-config-group">
@@ -267,7 +271,7 @@
                                 <label>ADB 等待(秒)<input id="aoa-replay-wait" type="number" min="1" max="600" value="60" title="回放结束后等待 ADB 恢复的秒数"></label>
                                 <div class="aoa-inline-actions aoa-replay-actions">
                                     <button class="btn-xxs" type="button" data-click="aoaProbeStart" data-aoa-run>探测 AOA</button>
-                                    <button class="btn-xs btn-primary" type="button" data-click="aoaReplaySelected" data-aoa-run>回放选中配置</button>
+                                    <button class="btn-xs btn-primary" type="button" data-click="aoaReplaySelected" data-aoa-run>开始回放</button>
                                 </div>
                             </div>
                             <div class="aoa-muted">回放期间 ADB 会断开；若恢复后显示 unauthorized，请在设备上确认“允许 USB 调试”。</div>
