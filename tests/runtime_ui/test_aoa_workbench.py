@@ -128,7 +128,7 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
             expect(page.locator("#aoa-replay-profile")).to_have_value("profile-1")
 
             page.evaluate("window.showConfirmDialog = async () => true")
-            page.get_by_role("button", name="回放选中配置").click()
+            page.get_by_role("button", name="开始回放").click()
             expect(page.locator("#aoa-result")).to_contain_text("ADB 已恢复")
 
             input_request = next(item for item in requests if item["kind"] == "input")
@@ -231,6 +231,62 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_pause_pending_timeout_releases_button_when_event_lost(self):
+        """暂停请求 200 但 paused 过程事件丢失（USB 重枚举窗口）：
+        pending 卡死 15 秒后超时解禁，按钮恢复可点、文案回到"暂停"。"""
+        page = self.new_page()
+        state = {"controls": [], "events": []}
+        try:
+            commands = [f"click 180 {i}" for i in range(3)]
+            profile = {"id": "p1", "name": "P", "commands": commands, "wait_adb_seconds": 60}
+
+            def json_response(route, payload):
+                route.fulfill(content_type='application/json', body=json.dumps(payload))
+
+            def aoa_api(route):
+                path = route.request.url.split("?", 1)[0]
+                if path.endswith("/profiles"):
+                    return json_response(route, {"success": True, "profiles": [profile]})
+                body = route.request.post_data_json
+                if path.endswith("/recover"):
+                    return json_response(route, {"success": True, "accepted": True, "command_id": "cmd-x"})
+                if path.endswith("/control"):
+                    state["controls"].append(body["action"])
+                    # 受理成功，但 paused/resumed 过程事件永远不发。
+                    return json_response(route, {"success": True, "accepted": True, "action": body["action"]})
+                return json_response(route, {"success": True})
+
+            def command_events(route):
+                return json_response(route, {"success": True, "events": list(state["events"])})
+
+            def status(route):
+                return json_response(route, {"success": True, "command": {"status": "running", "result": {}}})
+
+            page.route("**/api/devices/aoa/**", aoa_api)
+            page.route("**/api/cluster/commands/cmd-x/events?*", command_events)
+            page.route("**/api/cluster/commands/cmd-x", status)
+            self.goto_shell(page)
+            page.evaluate("switchPage('devices')")
+            page.wait_for_function("typeof aoaViewToggle === 'function'")
+            page.evaluate("aoaViewToggle(true)")
+            page.evaluate("""() => {
+                aoaSyncDeviceSources([{serial_no: 'T', worker_id: 'w', transport: 'local_usb', state: 'usb_only'}]);
+                window.showConfirmDialog = async () => true;
+            }""")
+            page.get_by_role("button", name="开始回放").click()
+            expect(page.locator("#aoa-playback-pause")).to_be_enabled()
+            page.locator("#aoa-playback-pause").click()
+            expect(page.locator("#aoa-playback-pause")).to_have_text("正在暂停…")
+            expect(page.locator("#aoa-playback-pause")).to_be_disabled()
+            # 事件不达：15 秒超时后 pending 解除，按钮恢复"暂停"可再点。
+            expect(page.locator("#aoa-playback-pause")).to_have_text("暂停", timeout=20000)
+            expect(page.locator("#aoa-playback-pause")).to_be_enabled()
+            page.locator("#aoa-playback-pause").click()   # 可重发同一请求
+            expect(page.locator("#aoa-playback-pause")).to_have_text("正在暂停…")
+            assert state["controls"] == ["pause", "pause"], state["controls"]
+        finally:
+            page.close()
+
     def test_full_playback_list_tracks_steps_and_pauses_without_redispatch(self):
         page = self.new_page()
         commands = [f"click 180 {i}" for i in range(100)]
@@ -279,7 +335,7 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
             }""")
             command_list = page.locator('#aoa-command-list')
             list_top = command_list.evaluate('(node) => node.offsetTop')
-            page.get_by_role("button", name="回放选中配置").click()
+            page.get_by_role("button", name="开始回放").click()
             rows = page.locator("#aoa-command-list li")
             expect(rows).to_have_count(100)
             expect(rows.last.locator("code")).to_have_text("click 180 99")
@@ -301,15 +357,16 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
             expect(rows.nth(1).locator(".aoa-command-state")).to_have_text("执行中")
             page.locator("#aoa-playback-pause").click()
             expect(page.locator("#aoa-run-status")).to_contain_text("暂停请求已发送")
-            expect(page.locator("#aoa-playback-resume")).to_be_hidden()
             emit("completed", 2)
             emit("paused", 3)
             expect(rows.nth(2).locator(".aoa-command-state")).to_have_text("已暂停")
-            expect(page.locator("#aoa-playback-resume")).to_be_enabled()
+            # 暂停/继续复用同个按钮：paused 后同按钮切到"继续"模式。
+            expect(page.locator("#aoa-playback-pause")).to_have_text("继续")
+            expect(page.locator("#aoa-playback-pause")).to_be_enabled()
             self.assertEqual(command_list.evaluate('(node) => node.offsetTop'), list_top)
             expect(rows.first.locator('.aoa-command-edit')).to_be_disabled()
             page.screenshot(path="/tmp/gms-aoa-playback-paused.png", full_page=True)
-            page.locator("#aoa-playback-resume").click()
+            page.locator("#aoa-playback-pause").click()   # 同按钮切继续
             emit("resumed", 3)
             emit("running", 3)
             expect(rows.nth(2).locator(".aoa-command-state")).to_have_text("执行中")
@@ -321,7 +378,6 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
             state["finished"] = True
             expect(page.locator("#aoa-run-status")).to_contain_text("回放完成")
             expect(page.locator("#aoa-playback-pause")).to_be_hidden()
-            expect(page.locator("#aoa-playback-resume")).to_be_hidden()
             self.assertEqual(command_list.evaluate('(node) => node.offsetTop'), list_top)
         finally:
             page.close()
@@ -471,7 +527,7 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
             expect(page.locator('#aoa-run-status')).to_contain_text('命令不能为空')
             rows.first.get_by_role('button', name='执行第 1 条命令', exact=True).click()
             page.get_by_role('button', name='保存当前命令', exact=True).click()
-            page.get_by_role('button', name='回放选中配置', exact=True).click()
+            page.get_by_role("button", name="开始回放", exact=True).click()
             self.assertEqual(writes, [])
             editor.fill('  click 200 600  ')
             editor.press('Enter')
@@ -484,7 +540,7 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
                     transport: 'local_usb', state: 'usb_only'}]);
             }""")
             expect(rows.locator('.aoa-command-edit')).to_have_count(2)
-            page.get_by_role('button', name='回放选中配置', exact=True).click()
+            page.get_by_role("button", name="开始回放", exact=True).click()
             expect(page.locator('#aoa-result')).to_contain_text('回放完成')
             self.assertEqual(writes[0]['body']['commands'], ['click 200 600', 'sleep 800'])
             self.assertEqual(profile['commands'], ['click 180 522', 'sleep 800'])

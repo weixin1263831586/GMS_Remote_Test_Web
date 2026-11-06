@@ -72,13 +72,11 @@ function aoaHighlightCommandRow(index) {
     target.scrollIntoView({block: 'nearest'});
 }
 
-// ---- 回放过程控制（暂停 / 继续 / 停止）----
+// ---- 回放过程控制（暂停/继续合一按钮 + 停止）----
 
 function aoaPlaybackButtons() {
     return {
         pause: aoaEl('aoa-playback-pause'),
-        resume: aoaEl('aoa-playback-resume'),
-        cancel: aoaEl('aoa-playback-cancel'),
     };
 }
 
@@ -87,12 +85,23 @@ function aoaPlaybackButtonState() {
     if (!buttons.pause) return;
     const active = aoaPanelState.playbackActive && Boolean(aoaPanelState.playbackCommandId) && !aoaPanelState.playbackInputDone;
     const paused = aoaPanelState.playbackPaused;
-    buttons.pause.hidden = !active || paused;
-    buttons.resume.hidden = !active || !paused;
-    buttons.cancel.hidden = !active;
-    for (const button of Object.values(buttons)) if (button) button.disabled = Boolean(aoaPanelState.playbackPending) || !active;
-    buttons.pause.textContent = aoaPanelState.playbackPending === 'pause' ? '正在暂停…' : '暂停';
-    buttons.resume.textContent = aoaPanelState.playbackPending === 'resume' ? '正在继续…' : '继续';
+    // 暂停/继续复用同个按钮：hidden 只由"回放是否激活"决定，文案与
+    // handler 随 paused 状态切换。
+    buttons.pause.hidden = !active;
+    // 暂停与停止的 disabled 都必须在这里统一管理：aoaSetBusy(true) 会把
+    // [data-aoa-run] 全量禁用，回放启动（commandId 就绪）后由本函数解禁。
+    buttons.pause.disabled = Boolean(aoaPanelState.playbackPending) || !active;
+    const stop = aoaEl('aoa-record-stop');
+    if (stop) {
+        stop.disabled = Boolean(aoaPanelState.playbackPending) || !active;
+        stop.classList.toggle('btn-danger', active);
+        stop.classList.toggle('btn-xxs', true);
+    }
+    buttons.pause.dataset.mode = paused ? 'resume' : 'pause';
+    buttons.pause.textContent = paused
+        ? (aoaPanelState.playbackPending === 'resume' ? '正在继续…' : '继续')
+        : (aoaPanelState.playbackPending === 'pause' ? '正在暂停…' : '暂停');
+    buttons.pause.title = paused ? '继续回放' : '当前命令完成后暂停，保留设备租约；累计暂停最多 10 分钟';
 }
 
 function aoaPlaybackReset() {
@@ -115,6 +124,20 @@ async function aoaPlaybackControlRequest(action) {
             {method: 'POST', body: {action, worker_id: aoaPanelState.playbackWorker}, timeoutMs: 10000});
         if (id !== aoaPanelState.playbackControlId || !aoaPanelState.playbackPending) return;
         aoaSetStatus(action === 'pause' ? '暂停请求已发送，当前命令结束后暂停…' : action === 'resume' ? '继续请求已发送…' : '正在停止回放…', 'running');
+        // pending 只能由过程事件（paused/resumed/cancelled）解除；暂停必经
+        // AOA 模式切换 → USB 重枚举，这个窗口里事件可能永久丢失（实机：
+        // 暂停请求 200 后设备消失 1.5s，paused 事件未达，按钮卡在
+        // "正在暂停…"不可再点）。15 秒无事件则主动对账命令状态并解除
+        // 卡死，按钮恢复可用（再点可重发同一控制请求）。
+        const settled = await aoaWaitPlaybackEventOrTimeout(id, action);
+        if (id !== aoaPanelState.playbackControlId) return;
+        if (!settled && aoaPanelState.playbackPending === action) {
+            const status = await aoaReconcilePlaybackCommand(id);
+            aoaPanelState.playbackPending = '';
+            aoaPlaybackButtonState();
+            showToast(status ? `暂停/继续状态已对账（当前：${status}）；如按钮未生效可再点一次`
+                             : '控制事件等待超时，已恢复按钮；可再点一次重发请求', 'warning');
+        }
     } catch (error) {
         if (id === aoaPanelState.playbackControlId) {
             aoaPanelState.playbackPending = '';
@@ -124,8 +147,44 @@ async function aoaPlaybackControlRequest(action) {
     }
 }
 
+// 有界等待过程事件：事件到达（pending 清零）返回 true；15 秒无事件返回
+// false。只等待、不改状态。
+async function aoaWaitPlaybackEventOrTimeout(controlId, action) {
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        if (aoaPanelState.playbackControlId !== controlId) return true;   // 回放已重置/结束
+        if (aoaPanelState.playbackPending !== action) return true;        // 事件已解除 pending
+    }
+    return false;
+}
+
+// 主动对账：拉命令终态/运行态，仅供提示文案；事件通道仍是唯一状态源。
+async function aoaReconcilePlaybackCommand(commandId) {
+    try {
+        const status = await aoaApi(
+            `/api/cluster/commands/${encodeURIComponent(commandId)}`, {timeoutMs: 10000});
+        return status?.command?.status || '';
+    } catch (_) { return ''; }
+}
+
 function aoaPlaybackPause() { return aoaPlaybackControlRequest('pause'); }
+
+// 暂停/继续共用按钮的统一入口：按按钮当前模式分发到对应请求。
+function aoaPlaybackPauseResume() {
+    const button = aoaEl('aoa-playback-pause');
+    return aoaPlaybackControlRequest(button?.dataset.mode === 'resume' ? 'resume' : 'pause');
+}
 function aoaPlaybackResume() { return aoaPlaybackControlRequest('resume'); }
+// 停止合一：回放激活 → 停止回放（带确认，复用 aoaPlaybackCancel 语义）；
+// 否则 → 录制停止。按钮为单个 aoa-record-stop。
+async function aoaPlaybackStop() {
+    if (aoaPanelState.playbackActive) {
+        return aoaPlaybackCancel();
+    }
+    return aoaRecordingStop();
+}
+
 async function aoaPlaybackCancel() {
     if (!aoaPanelState.playbackActive) return;
     if (await showConfirmDialog('停止回放', '将停止后续命令并清理 USB，已执行的输入不会回滚。继续？')) {

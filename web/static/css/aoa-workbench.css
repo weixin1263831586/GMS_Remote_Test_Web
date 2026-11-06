@@ -11,7 +11,7 @@
 
 .aoa-workbench-header > div { align-items: center; display: flex; flex: 1; gap: 12px; min-width: 0; }
 .aoa-workbench-header .aoa-muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.aoa-header-status { align-items: center; display: flex; flex: none; gap: 8px; }
+.aoa-header-status { align-items: center; display: flex; flex: 1; gap: 8px; justify-content: flex-end; }
 /* .btn-xxs 的 display:inline-flex 会覆盖 [hidden]，回放控制按钮仅回放时出现 */
 .aoa-header-status button[hidden] { display: none !important; }
 .aoa-workbench-title { flex: none; font-size: 15px; font-weight: 700; white-space: nowrap; }
@@ -23,9 +23,9 @@
     box-sizing: border-box;
     color: var(--text-secondary);
     display: block;
-    flex: 0 1 28%;
+    flex: 0 1 auto;
     font-size: 11px;
-    max-width: 480px;
+    max-width: 520px;
     min-width: 0;
     overflow: hidden;
     padding: 6px 12px;
@@ -82,6 +82,9 @@
 .aoa-column-heading strong { display: block; font-size: 13px; line-height: 20px; }
 .aoa-column-heading span { color: var(--text-secondary); font-size: 11px; line-height: 18px; }
 .aoa-inline-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; }
+/* 回放控制按钮（暂停/继续/停止）藏在 ③ 列动作组里，仅回放时出现：
+   .btn-xxs 的 display:inline-flex 会覆盖 hidden 属性，需要显式豁免。 */
+.aoa-inline-actions button[hidden] { display: none !important; }
 .aoa-heading-divider { background: var(--border-color); flex: none; height: 16px; width: 1px; }
 
 #aoa-panel button {

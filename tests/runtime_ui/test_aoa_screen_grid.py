@@ -248,7 +248,16 @@ class RuntimeAoaScreenGridTests(RuntimeUiHarness):
             waiting = page.evaluate("() => document.getElementById('aoa-screen-status').textContent")
             assert '等待设备就绪' in waiting, waiting
 
-            # 设备就绪：清单同步复位标记 → 下一跳恢复截图成功。
+            # 清单刷新但设备仍是 usb_only：暂停标记必须保持（不能恢复轮询）。
+            state["no_adb"] = True
+            page.evaluate(
+                "aoaSyncDeviceSources([{serial_no:'REC',worker_id:'worker-a',transport:'local_usb',state:'usb_only'}])")
+            for _ in range(3):
+                page.evaluate("aoaRefreshScreen()")
+            page.wait_for_timeout(200)
+            assert state["shots"] == 1, (state["shots"], "usb_only 清单刷新后不应恢复轮询")
+
+            # 设备就绪（清单里 state=available）：状态驱动恢复 → 下一跳成功。
             state["no_adb"] = False
             page.evaluate(
                 "aoaSyncDeviceSources([{serial_no:'REC',worker_id:'worker-a',transport:'local_usb',state:'available'}])")
