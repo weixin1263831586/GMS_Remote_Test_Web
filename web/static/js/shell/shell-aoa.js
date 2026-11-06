@@ -294,6 +294,9 @@ function aoaSyncDeviceOptions() {
 function aoaSyncDeviceSources(devices) {
     if (!aoaEl('aoa-panel')) return;
     aoaPanelState.devices = Array.isArray(devices) ? devices : [];
+    // 清单刷新意味着设备状态可能变化（usb_only → ADB 就绪）：清除截图
+    // 暂停标记，让轮询下一跳重新尝试。
+    aoaPanelState.adbUnavailable = false;
     const workers = [...new Set(aoaPanelState.devices
         .filter(device => device.transport !== 'adb_proxy')
         .map(aoaDeviceWorker).filter(Boolean))];
@@ -321,6 +324,8 @@ function aoaRecorderDeviceSelected() {
 
 function aoaRecorderDeviceChanged(options = {}) {
     aoaPanelState.calibration = null;
+    // 切换目标设备：无 ADB 暂停标记跟随目标失效，允许新目标立即尝试截图。
+    aoaPanelState.adbUnavailable = false;
     const key = `gms-aoa-calibration:${aoaEl('aoa-record-worker')?.value || ''}:${aoaEl('aoa-record-device')?.value || ''}`;
     try {
         const saved = JSON.parse(localStorage.getItem(key) || 'null');

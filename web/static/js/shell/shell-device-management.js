@@ -3,6 +3,7 @@
         let devicesEventRefreshTimer = null;
         let devicesManagementLoadPromise = null;
         let devicesManagementLoadScope = '';
+        let devicesManagementRefreshQueued = false;
         let devicesManagementClusterMode = false;
         let allDevices = [];  // 存储所有设备数据用于排序
         let currentSort = { field: null, direction: 'asc' };
@@ -13,6 +14,14 @@
             clearTimeout(devicesEventRefreshTimer);
             devicesEventRefreshTimer = null;
         }
+
+        // 后台标签页期间 WS 设备变化事件会被丢弃（hidden 时刷新直接返回）。
+        // 回到前台时补一次刷新，避免插拔线后切回页面仍看到旧清单。
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && currentPage === 'devices') {
+                scheduleDevicesManagementRefresh();
+            }
+        });
 
         function scheduleDevicesManagementRefresh() {
             if (currentPage !== 'devices' || document.hidden || devicesEventRefreshTimer) return;
@@ -35,7 +44,7 @@
             }
         }
 
-        async function loadDevicesManagement() {
+        async function loadDevicesManagement(options = {}) {
             // Initial server context can replace the default scope without a
             // workspace-change event. Resolve it before choosing the inventory.
             try {
@@ -47,7 +56,18 @@
             const requestedScope = requestedDevicesManagementScope();
             if (devicesManagementLoadPromise) {
                 if (devicesManagementLoadScope === requestedScope) {
-                    return devicesManagementLoadPromise;
+                    // USB 插拔可能恰逢一次加载在途：在途结果基于旧清单，若
+                    // 只复用它，本次变化要等 10s 周期才可见。去重命中时排定
+                    // 一次"收尾补刷"（trailing，避免多个调用方叠加成连环刷新；
+                    // 补刷自身再去重命中时不再继续排队）。
+                    if (options.trailing || devicesManagementRefreshQueued) {
+                        return devicesManagementLoadPromise;
+                    }
+                    devicesManagementRefreshQueued = true;
+                    return devicesManagementLoadPromise.finally(() => {
+                        devicesManagementRefreshQueued = false;
+                        return loadDevicesManagement({trailing: true});
+                    });
                 }
                 // A mode switch happened while the old scope was loading.
                 // Wait for it to settle, then start a fresh scoped request.

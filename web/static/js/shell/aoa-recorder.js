@@ -21,6 +21,14 @@ async function aoaRefreshScreen() {
     let target;
     try { target = aoaRecorderTarget(); }
     catch (error) { showToast(error.message, 'warning'); return; }
+    // 设备无 ADB（usb_only）时截图必然 409：不再逐轮询打无效请求（控制台
+    // 会被浏览器资源错误刷屏），只等设备清单刷新（ADB 就绪）后由同步链路
+    // 复位标记再恢复截图。
+    if (aoaPanelState.adbUnavailable) {
+        const waiting = aoaEl('aoa-screen-status');
+        if (waiting) waiting.textContent = `${target.device} 无 ADB 连接（仅 AOA 恢复可用），等待设备就绪…`;
+        return;
+    }
     const refreshId = ++aoaPanelState.screenRefreshId;
     const status = aoaEl('aoa-screen-status');
     if (status) status.textContent = '正在获取设备截图…';
@@ -37,6 +45,12 @@ async function aoaRefreshScreen() {
         if (refreshId !== aoaPanelState.screenRefreshId) return;
         aoaEl('aoa-screen-image').hidden = true;
         const empty = aoaEl('aoa-screen-empty'); empty.hidden = false;
+        if (error?.status === 409 && /no ADB connection|only AOA recovery/i.test(error.message || '')) {
+            aoaPanelState.adbUnavailable = true;
+            empty.textContent = '设备当前无 ADB 连接（仅 AOA 恢复可用）；ADB 就绪后画面自动恢复。';
+            if (status) status.textContent = `${target.device} 无 ADB 连接（仅 AOA 恢复可用），等待设备就绪…`;
+            return;
+        }
         empty.textContent = '无法获取画面。AOA 回放或 USB 调试关闭后，ADB 截图会暂时不可用。';
         if (status) status.textContent = `截图失败：${error.message}`;
     }

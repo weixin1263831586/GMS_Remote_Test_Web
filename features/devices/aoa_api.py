@@ -16,6 +16,7 @@ DeviceActionSpec 登记）：复用设备租约/claim/审计，不新建执行�
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -34,6 +35,8 @@ from .aoa_mapping_service import replay_mapping_options, trusted_target_context
 from .aoa_service import profile_store
 from .operation_claims import acquire_device_operation_claim, release_device_operation_claim
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/devices/aoa")
 router.include_router(advanced_router)
@@ -430,7 +433,9 @@ async def record_stream_ws(websocket: WebSocket, serial: str):
             # 客户端仅发 ping 保活；输入一律走 /record/input REST 通道。
             try:
                 _stream_access(websocket, serial)
-            except (ApiError, HTTPException):
+            except (ApiError, HTTPException) as access_error:
+                logger.warning(
+                    "stream ws access denied for %s: %s", serial, access_error)
                 await websocket.close(code=4403)
                 break
             try:
@@ -438,9 +443,12 @@ async def record_stream_ws(websocket: WebSocket, serial: str):
             except asyncio.TimeoutError:
                 continue
             if message == "ping":
-                await websocket.send_json({"type": "pong"})
-    except WebSocketDisconnect:
-        pass
+                # pong 并入 pump 的唯一 sender：与 send_bytes 并发 send 会
+                # 触发 ASGI RuntimeError 断链（实机：建连约 7 秒静默关闭）。
+                sub.request_pong()
+    except WebSocketDisconnect as disconnect:
+        logger.info("stream ws disconnected for %s (code=%s)", serial,
+                    disconnect.code)
     finally:
         sub.alive = False
         if pump_task is not None:
