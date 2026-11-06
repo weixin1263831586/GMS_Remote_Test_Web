@@ -100,7 +100,12 @@
                         <div class="aoa-workbench-title">🔁 AOA工作台</div>
                         <div class="aoa-muted" title="在 userdebug 设备上操作并录制，保存后可在同机型 user 固件上通过 USB AOAv2 回放，无 ADB 依赖。">在 userdebug 设备上操作并录制，保存后可在同机型 user 固件上通过 USB AOAv2 回放，无 ADB 依赖。</div>
                     </div>
-                    <span id="aoa-run-status" class="aoa-status-pill">待机</span>
+                    <div class="aoa-header-status">
+                        <button class="btn-xxs" type="button" id="aoa-playback-pause" title="当前命令完成后暂停，保留设备租约；累计暂停最多 10 分钟" data-click="aoaPlaybackPause" data-aoa-run hidden>暂停</button>
+                        <button class="btn-xxs" type="button" id="aoa-playback-resume" data-click="aoaPlaybackResume" data-aoa-run hidden>继续</button>
+                        <button class="btn-xxs btn-danger" type="button" id="aoa-playback-cancel" data-click="aoaPlaybackCancel" data-aoa-run hidden>停止</button>
+                        <span id="aoa-run-status" class="aoa-status-pill">待机</span>
+                    </div>
                 </div>
 
                 <div class="aoa-workbench-grid">
@@ -126,12 +131,14 @@
                                 <span class="aoa-screen-hint">流不可用时自动回退截图模式（约 1 秒刷新）</span>
                             </div>
                             <div id="aoa-gesture-line" class="aoa-gesture-line" hidden></div>
+                            <canvas id="aoa-screen-grid" class="aoa-screen-grid" hidden></canvas>
                         </div>
                         <div class="aoa-screen-toolbar">
                             <button class="btn-xxs" type="button" data-click="aoaSendKey" data-r0="dataset.key" data-key="back" data-aoa-screen-action>← Back</button>
                             <button class="btn-xxs" type="button" data-click="aoaSendKey" data-r0="dataset.key" data-key="home" data-aoa-screen-action>⌂ Home</button>
                             <button class="btn-xxs" type="button" data-click="aoaSendKey" data-r0="dataset.key" data-key="wake" data-aoa-screen-action>⏻ Wake</button>
                             <button class="btn-xxs" type="button" data-click="aoaCalibrateTouch" data-aoa-screen-action>触摸标定</button>
+                            <button class="btn-xxs" id="aoa-grid-toggle" type="button" data-click="aoaToggleScreenGrid" title="叠加 AOA 命令坐标网格（0,0..360,640）与悬停坐标读数">⊞ 网格</button>
                         </div>
                         <div class="aoa-text-input">
                             <input id="aoa-input-text" type="text" maxlength="128" placeholder="输入英文、数字或 @ - _ . +">
@@ -144,27 +151,28 @@
                         <div class="aoa-column-heading">
                             <div><strong id="aoa-command-heading">② UI 操作对应命令</strong><span><b id="aoa-command-count">0</b> / 256 条</span></div>
                             <div class="aoa-inline-actions">
-                                <button class="btn-xxs" type="button" data-click="aoaCommandUndo" data-aoa-edit>撤销</button>
-                                <button class="btn-xxs" type="button" data-click="aoaCommandsClear" data-aoa-edit>清空</button>
+                                <button class="btn-xxs" type="button" title="撤销最近一条未保存的命令或编辑" data-click="aoaCommandUndo" data-aoa-edit>撤销</button>
+                                <button class="btn-xxs" type="button" title="清空当前命令列表" data-click="aoaCommandsClear" data-aoa-edit>清空</button>
+                                <span class="aoa-heading-divider" aria-hidden="true"></span>
+                                <button class="btn-xxs" type="button" title="导入命令 JSON 文件" data-click="aoaCommandsImport" data-aoa-edit>导入</button>
+                                <button class="btn-xxs" type="button" title="导出当前命令为 JSON 文件" data-click="aoaCommandsExport">导出</button>
                             </div>
                         </div>
-                        <div class="aoa-command-tools" role="group" aria-label="命令文件与单条调试">
-                            <div class="aoa-inline-actions aoa-command-file-actions">
-                                <button class="btn-xxs" type="button" data-click="aoaCommandsImport" data-aoa-edit>导入</button>
-                                <button class="btn-xxs" type="button" data-click="aoaCommandsExport">导出 JSON</button>
-                            </div>
-                            <div class="aoa-command-debug-controls">
-                                <label class="aoa-debug-option" title="复用整段回放相同的 HID 通道；空闲 2 分钟或会话满 15 分钟后清理">
-                                    <input id="aoa-debug-keep" type="checkbox" checked data-change="aoaDebugKeepChanged"><span>单条调试保持 HID 连接</span>
-                                </label>
-                                <button id="aoa-debug-end" class="btn-xxs" type="button" data-click="aoaDebugEnd" disabled>结束调试</button>
-                            </div>
-                        </div>
+                        <input id="aoa-command-file" type="file" accept="application/json,.json" hidden>
+                        <div id="aoa-calibration-status" class="aoa-calibration-status" title="触摸映射状态：未标定时按屏幕显示分辨率把投屏坐标换算为 HID 触摸轴，可能存在偏移（未验证）；点击左侧“触摸标定”可实测修正。">触摸映射：未标定，使用显示分辨率按轴换算</div>
                         <div class="aoa-command-table">
                             <div class="aoa-command-list-header">
                                 <span class="aoa-command-label">命令</span>
                                 <span class="aoa-comment-label">注释</span>
-                                <span class="aoa-actions-label">操作</span>
+                                <span class="aoa-actions-label">
+                                    <span>操作</span>
+                                    <span class="aoa-debug-cluster">
+                                        <label class="aoa-debug-option" title="单条调试复用整段回放相同的 HID 通道；空闲 2 分钟或会话满 15 分钟后清理">
+                                            <input id="aoa-debug-keep" type="checkbox" checked data-change="aoaDebugKeepChanged"><span>保持连接</span>
+                                        </label>
+                                        <button id="aoa-debug-end" class="btn-xxs" type="button" data-click="aoaDebugEnd" disabled>结束调试</button>
+                                    </span>
+                                </span>
                             </div>
                             <ol id="aoa-command-list" class="aoa-command-list">
                                 <li class="aoa-command-empty">开始录制后，在左侧操作设备 UI</li>
@@ -174,16 +182,6 @@
                             <input id="aoa-command-input" type="text" placeholder="例如：sleep 1000 / key TAB ENTER">
                             <button class="btn-xxs" type="button" data-click="aoaCommandAdd" data-aoa-edit>添加</button>
                         </div>
-                        <div class="aoa-command-toolbar">
-                            <div id="aoa-playback-progress" class="aoa-playback-progress" role="status" aria-live="polite" hidden></div>
-                            <div class="aoa-inline-actions aoa-playback-controls">
-                                <button class="btn-xs" type="button" id="aoa-playback-pause" title="当前命令完成后暂停，保留设备租约；累计暂停最多 10 分钟" data-click="aoaPlaybackPause" data-aoa-run hidden>暂停</button>
-                                <button class="btn-xs" type="button" id="aoa-playback-resume" data-click="aoaPlaybackResume" data-aoa-run hidden>继续</button>
-                                <button class="btn-xs btn-danger" type="button" id="aoa-playback-cancel" data-click="aoaPlaybackCancel" data-aoa-run hidden>停止</button>
-                            </div>
-                        </div>
-                        <input id="aoa-command-file" type="file" accept="application/json,.json" hidden>
-                        <div id="aoa-calibration-status" class="aoa-calibration-status">触摸映射：未标定，使用显示分辨率按轴换算</div>
                     </section>
 
                     <section class="aoa-column aoa-config-column" aria-labelledby="aoa-config-heading">

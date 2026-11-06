@@ -461,3 +461,38 @@ async def playback_control(request: Request, control_id: str, body: dict[str, An
     if not worker_id:
         raise ApiError.malformed_request("worker_id is required")
     return await cluster_port.control_aoa_playback(control_id, worker_id, principal_owner_id(request), action)
+
+
+@router.post("/calibration-app/deploy")
+async def deploy_calibration_app(request: Request, body: dict[str, Any]):
+    """为缺失的 AOA 标定应用发起一次人工审批部署（从 Controller dist/ 取 APK）。
+
+    设备重置/重刷会清掉 /data 上的 com.gms.remote.aoacalibration；工作台
+    检测到 ``calibration_app_missing`` 后引导用户走这里：APK 由服务端
+    固定路径提供（不接受客户端上传路径），安装仍需人工审批。
+    """
+    from pathlib import Path
+
+    from . import deployment_service as deployment
+
+    require_human_principal(request)
+    if not isinstance(body, dict):
+        raise ApiError.malformed_request("request body must be a JSON object")
+    worker_id = str(body.get("worker_id") or "").strip()
+    device = str(body.get("device") or "").strip()
+    if not worker_id or not device:
+        raise ApiError.malformed_request("worker_id and device are required")
+    apk = Path(__file__).resolve().parents[2] / "dist" / "aoa-calibration-debug.apk"
+    if not apk.is_file():
+        raise ApiError.not_found(
+            "dist/aoa-calibration-debug.apk 不存在；请先运行 "
+            "tools/scripts/utilities/build_aoa_calibration.py 构建标定应用")
+    class _Upload:
+        filename = apk.name
+        content_type = "application/vnd.android.package-archive"
+
+        async def read(self):
+            return apk.read_bytes()
+
+    payload = await deployment.prepare(request, worker_id, device, True, _Upload())
+    return {"success": True, "deployment": payload}

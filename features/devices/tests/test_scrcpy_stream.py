@@ -368,3 +368,41 @@ def test_stream_reuse_rejects_another_owner(monkeypatch):
     monkeypatch.setattr(scrcpy_stream, "_sessions", {"serial": SimpleNamespace(owner_id="alice", stop=lambda: None)})
     with pytest.raises(ApiError):
         scrcpy_stream.start_stream("serial", owner_id="bob")
+
+
+def test_session_death_closes_subscriber_ws(fake_adb_env):
+    """会话死亡（USB 重枚举/adb 断开）必须主动关闭订阅者 WS。
+
+    否则 pump 永远等空队列、前端画面冻结且无提示（实机 66df 复现：
+    点触摸标定后投屏不同步，刷新才恢复）。
+    """
+    import asyncio
+
+    scrcpy_stream.start_stream("ser-death")
+    session = scrcpy_stream.get_stream("ser-death")
+
+    class _Ws:
+        def __init__(self):
+            self.closed = None
+
+        async def send_bytes(self, _data):
+            pass
+
+        async def close(self, code=None):
+            self.closed = code
+
+    closed = []
+
+    async def scenario():
+        ws = _Ws()
+        sub = session.subscribe(ws)
+        task = asyncio.get_running_loop().create_task(session.pump(sub))
+        await asyncio.sleep(0.05)
+        assert ws.closed is None            # 会话活着：WS 保持打开
+        session.stop()                      # 会话死亡：stop → shutdown 哨兵
+        await asyncio.wait_for(task, timeout=2)
+        assert ws.closed is not None        # pump 关闭了 WS → 前端走回退
+        closed.append(ws.closed)
+
+    asyncio.run(scenario())
+    assert closed and closed[0] == 4409

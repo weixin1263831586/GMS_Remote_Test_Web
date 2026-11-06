@@ -11,6 +11,9 @@
 
 .aoa-workbench-header > div { align-items: center; display: flex; flex: 1; gap: 12px; min-width: 0; }
 .aoa-workbench-header .aoa-muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aoa-header-status { align-items: center; display: flex; flex: none; gap: 8px; }
+/* .btn-xxs 的 display:inline-flex 会覆盖 [hidden]，回放控制按钮仅回放时出现 */
+.aoa-header-status button[hidden] { display: none !important; }
 .aoa-workbench-title { flex: none; font-size: 15px; font-weight: 700; white-space: nowrap; }
 .aoa-muted { color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
 .aoa-status-pill {
@@ -79,6 +82,7 @@
 .aoa-column-heading strong { display: block; font-size: 13px; line-height: 20px; }
 .aoa-column-heading span { color: var(--text-secondary); font-size: 11px; line-height: 18px; }
 .aoa-inline-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; }
+.aoa-heading-divider { background: var(--border-color); flex: none; height: 16px; width: 1px; }
 
 #aoa-panel button {
     border-radius: 6px;
@@ -136,6 +140,9 @@
     justify-content: center;
     min-height: 180px;
     overflow: hidden;
+    /* 上下留 16px：网格水平刻度画在画面正上方的外框区域，不被
+       overflow:hidden 的圆角边框裁掉；网格 JS 按同一余量定位。 */
+    padding: 16px 6px 16px;
     position: relative;
     touch-action: none;
     user-select: none;
@@ -157,7 +164,31 @@
 /* display:flex 同样覆盖 [hidden] 的 UA 隐藏样式：不显式声明则空态文案
    与实时画面并排显示，把投屏挤到左侧（实机截图复现）。 */
 .aoa-screen-empty[hidden] { display: none; }
+/* AOA 命令坐标网格叠加层：几何（left/top/宽高）由 aoa-screen-grid.js
+   按 object-fit: contain 的内容框逐帧计算；纯展示层不拦截投屏输入。 */
+.aoa-screen-grid {
+    pointer-events: none;
+    position: absolute;
+}
+.aoa-screen-grid[hidden] { display: none; }
 .aoa-screen-actions { display: flex; flex: none; gap: 6px; }
+/* 投屏开关两种文案（▶ 实时投屏 / ⏹ 投屏中）宽度不同：固定最小宽度，
+   切换状态时不挤压旁边的「刷新」按钮、不引起整行回流。 */
+#aoa-toggle-live { min-width: 88px; text-align: center; }
+/* 实时投屏开关状态：data-live=on 时按钮转为停止态（绿点 + 停止文案）。 */
+#aoa-toggle-live[data-live="on"] {
+    color: var(--success-color);
+}
+#aoa-toggle-live[data-live="on"]::before {
+    background: var(--success-color);
+    border-radius: 50%;
+    content: '';
+    display: inline-block;
+    height: 6px;
+    margin-right: 4px;
+    vertical-align: middle;
+    width: 6px;
+}
 .aoa-screen-empty {
     align-items: center;
     color: #aeb4bf;
@@ -180,7 +211,8 @@
     transform-origin: 0 50%;
     z-index: 2;
 }
-.aoa-screen-toolbar { display: grid; gap: 5px; grid-template-columns: repeat(4, 1fr); }
+.aoa-screen-toolbar { align-items: center; display: flex; flex-wrap: nowrap; gap: 4px; }
+.aoa-screen-toolbar .btn-xxs { flex: 1 1 0; min-width: 0; padding-left: 2px; padding-right: 2px; }
 .aoa-text-input, .aoa-command-add { display: grid; gap: 6px; grid-template-columns: 1fr auto; }
 .aoa-save-row, .aoa-replay-actions { margin-top: 1px; }
 .aoa-config-group, .aoa-target-section { display: grid; flex: none; gap: 10px; min-width: 0; }
@@ -247,7 +279,11 @@
 }
 .aoa-command-label { grid-column: 2; }
 .aoa-comment-label { grid-column: 3; padding-left: 6px; }
-.aoa-actions-label { grid-column: 5; text-align: center; }
+.aoa-actions-label { align-items: center; display: flex; gap: 8px; grid-column: 4 / 6; justify-content: flex-end; }
+.aoa-debug-cluster { align-items: center; display: inline-flex; flex: none; gap: 6px; min-width: 0; }
+#aoa-panel .aoa-debug-cluster .aoa-debug-option { gap: 4px; }
+#aoa-panel .aoa-debug-cluster .aoa-debug-option span { font-size: 10px; font-weight: 400; }
+#aoa-panel .aoa-debug-cluster #aoa-debug-end { font-size: 10px; min-height: 20px; padding: 0 6px; }
 .aoa-command-list {
     flex: 1;
     list-style: none;
@@ -274,18 +310,7 @@
 .aoa-command-empty { color: var(--text-secondary); font-size: 11px; list-style: none; text-align: center; }
 .aoa-command-list:has(> .aoa-command-empty) { display: grid; place-items: center; }
 .aoa-command-list .aoa-command-empty { border: 0; line-height: 1.8; padding: 24px 12px; }
-.aoa-command-tools {
-    align-items: center;
-    background: var(--darker-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 7px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 12px;
-    padding: 8px;
-}
-.aoa-command-file-actions { flex: none; flex-wrap: nowrap; }
-.aoa-command-debug-controls { align-items: center; display: flex; flex: 1 1 230px; gap: 8px; justify-content: space-between; min-width: 0; }
+.aoa-command-column .aoa-column-heading { flex-wrap: wrap; }
 #aoa-panel .aoa-debug-option { align-items: center; cursor: pointer; display: inline-flex; gap: 6px; line-height: 20px; white-space: nowrap; }
 #aoa-panel input[type="checkbox"] { accent-color: var(--primary-color); flex: none; height: 14px; margin: 0; padding: 0; width: 14px; }
 #aoa-debug-end { flex: none; }
@@ -324,11 +349,11 @@
     .aoa-column { padding: 10px; }
     .aoa-column-heading { align-items: flex-start; flex-wrap: wrap; }
     .aoa-device-selectors, .aoa-form-grid, .aoa-replay-runner { grid-template-columns: minmax(0, 1fr); }
-    .aoa-command-debug-controls { flex-wrap: wrap; }
     .aoa-replay-actions { justify-content: flex-start; }
     .aoa-screen-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .aoa-command-table { --aoa-command-columns: 3ch minmax(0, 1.5fr) minmax(0, 1fr); }
-    .aoa-actions-label { grid-column: 2 / -1; grid-row: 2; text-align: right; }
+    .aoa-command-table { --aoa-command-columns: 3ch minmax(0, 1.5fr) minmax(0, 1fr) auto; }
+    .aoa-actions-label { grid-column: 2 / -1; grid-row: 2; justify-content: flex-start; }
+    .aoa-debug-cluster { flex: 1; justify-content: flex-end; }
     .aoa-command-row > code, .aoa-command-row > .aoa-command-editor { grid-column: 2; grid-row: 1; }
     .aoa-command-row > .aoa-command-comment { grid-column: 3; grid-row: 1; }
     .aoa-command-row > .aoa-command-index { align-self: start; grid-column: 1; grid-row: 1; line-height: 20px; }
@@ -344,24 +369,6 @@
 .aoa-command-completed { opacity: .72; }
 .aoa-command-paused { background: rgba(245, 158, 11, .12); border-left: 2px solid #f59e0b; }
 .aoa-command-failed { background: rgba(239, 68, 68, .12); border-left: 2px solid #ef4444; }
-.aoa-command-toolbar { align-items: center; display: flex; flex: none; gap: 8px; height: 34px; }
-.aoa-playback-progress {
-    box-sizing: border-box;
-    color: var(--text-secondary);
-    flex: 1;
-    font-size: 12px;
-    height: 34px;
-    line-height: 18px;
-    min-width: 0;
-    overflow: hidden;
-    padding: 8px 4px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.aoa-playback-progress[hidden] { display: block; visibility: hidden; }
-
-.aoa-playback-controls { flex: none; flex-wrap: nowrap; }
-.aoa-playback-controls button[hidden] { display: none !important; }
 
 .aoa-command-actions { display: flex; flex: none; gap: 4px; margin-left: auto; }
 .aoa-command-editor { flex: 1; min-width: 0; width: 100%; font: 11px monospace; padding: 2px 4px; }

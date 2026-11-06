@@ -1285,6 +1285,12 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/devices/aoa/calibration-app/deploy"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/devices/aoa/calibrations"

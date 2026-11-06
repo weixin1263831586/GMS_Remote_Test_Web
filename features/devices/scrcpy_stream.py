@@ -385,6 +385,15 @@ class ScrcpySession:
             pass
         finally:
             self.stopped.set()
+            # 会话死亡（USB 重枚举/adb 断开/编码器退出）时必须主动关闭
+            # 全部订阅者：否则 pump 永远等空队列、WS 保持打开，前端画面
+            # 冻结且无任何提示（实机复现：点触摸标定后画面不同步，刷新
+            # 才恢复）。先投递哨兵让 pump 退出循环，再由 pump 关闭 WS，
+            # 前端 onclose 走既有回退（截图轮询）恢复画面。
+            with self.lock:
+                subs = list(self.subscribers)
+            for sub in subs:
+                sub.shutdown()
 
     # ---- 订阅者：asyncio 队列 + 事件循环内 pump 任务 ----
     #
@@ -415,10 +424,12 @@ class ScrcpySession:
     async def pump(self, sub: _Subscriber) -> None:
         """事件循环内真正发送订阅数据（由 WS handler create_task 驱动）。"""
         sent_bytes = 0
+        session_ended = False
         try:
             while not self.stopped.is_set() and sub.alive:
                 chunk = await sub.queue.get()
                 if chunk is None:
+                    session_ended = True   # 中继线程死亡：shutdown() 投递的哨兵
                     break
                 await sub.ws.send_bytes(chunk)
                 sent_bytes += len(chunk)
@@ -431,6 +442,12 @@ class ScrcpySession:
             sub.alive = False
         finally:
             self.unsubscribe(sub)
+            if session_ended:
+                # 会话已死：关掉这条 WS，让前端 onclose 触发截图回退。
+                try:
+                    await sub.ws.close(code=4409)
+                except Exception:
+                    pass
 
     def unsubscribe(self, sub: _Subscriber) -> None:
         sub.alive = False

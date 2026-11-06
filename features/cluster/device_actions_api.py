@@ -134,9 +134,13 @@ async def _wait_for_command(
         current = repository.get_command(command["id"])
         if current and current["status"] in {"completed", "failed", "cancelled"}:
             if current["status"] != "completed":
-                raise HTTPException(
-                    502, current.get("error") or "worker device action failed"
-                )
+                detail: dict = {"message": current.get("error") or "worker device action failed"}
+                # 结构化失败标记原样透传（如 calibration_app_missing），
+                # 工作台据此给出可执行的引导而不是裸错误文案。
+                for key in ("calibration_app_missing", "reconcile_required"):
+                    if (current.get("result") or {}).get(key):
+                        detail[key] = True
+                raise HTTPException(502, detail)
             result = current.get("result") or {}
             if action == "screenshot" and result.get("image"):
                 repository.compact_command_result(command["id"], {
