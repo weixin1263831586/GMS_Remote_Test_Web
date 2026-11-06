@@ -71,7 +71,7 @@ class RuntimeAoaHidModesTests(RuntimeUiHarness):
             assert submitted[1]['aoa_commands'] == ['click 180 580']
             with tempfile.TemporaryDirectory() as directory:
                 with page.expect_download() as download:
-                    page.get_by_role('button', name='导出 JSON', exact=True).click()
+                    page.get_by_role('button', name='导出', exact=True).click()
                 path = Path(directory) / 'export.json'
                 download.value.save_as(path)
                 exported = json.loads(path.read_text())

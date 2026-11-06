@@ -216,6 +216,14 @@
         teardownStream();
         setStatus(message || '实时投屏不可用，已回退截图模式', true);
         startScreenshotPolling();
+        // 回退后按钮必须回到"▶ 实时投屏"（停止态），与 aoaSyncLiveButton
+        // 保持同一状态语义；直接改 DOM，避免跨模块依赖。
+        const button = el('aoa-toggle-live');
+        if (button) {
+            button.setAttribute('data-live', 'off');
+            button.textContent = '▶ 实时投屏';
+            button.title = '点击开始实时投屏';
+        }
     }
 
     function teardownStream() {
@@ -281,17 +289,29 @@
         socket.onopen = () => {
             showCanvas();
             setStatus('实时投屏中 · 等待首帧…');
-            // 存活看门狗：服务端会重放最近关键帧，正常应在数秒内解码出
-            // 首帧；超时（如设备编码器异常输出空流）则回退截图模式。
-            const openedAt = state.framesDecoded;
+            // 停滞看门狗（持续运行）：首帧 8 秒超时；出画后若 12 秒无新帧
+            // （设备编码器停滞/USB 重枚举后中继死亡等）也判定流死亡并回退
+            // 截图模式——不再只守护连接建立那一刻（实机复现：点触摸标定
+            // 后画面永久冻结，只能手动刷新）。
+            let openedAt = state.framesDecoded;
+            let stallChecks = 0;
             state.watchdogTimer = setInterval(() => {
                 if (!state.active) { clearInterval(state.watchdogTimer); return; }
                 if (state.framesDecoded === openedAt) {
-                    clearInterval(state.watchdogTimer);
-                    state.watchdogTimer = null;
-                    handleStreamFailure('实时流 8 秒未出画面，已回退截图模式');
+                    stallChecks += 1;
+                    const waited = (state.framesDecoded === 0 ? 8 : 12);
+                    if (stallChecks * 4 >= waited) {
+                        clearInterval(state.watchdogTimer);
+                        state.watchdogTimer = null;
+                        handleStreamFailure(state.framesDecoded === 0
+                            ? '实时流 8 秒未出画面，已回退截图模式'
+                            : '实时流已停滞，已回退截图模式');
+                    }
+                } else {
+                    stallChecks = 0;
+                    openedAt = state.framesDecoded;
                 }
-            }, 8000);
+            }, 4000);
             // 心跳 + 帧率指示（用户可直观确认画面在实时更新）。
             let lastShown = -1;
             state.statusTimer = setInterval(() => {

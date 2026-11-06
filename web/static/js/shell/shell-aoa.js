@@ -107,6 +107,12 @@ async function aoaApi(path, options = {}) {
         if (!response.ok || payload.success === false) {
             const error = new Error(aoaMessage(payload) || `HTTP ${response.status}`);
             error.status = response.status;
+            // 结构化失败标记（如 calibration_app_missing）随错误对象透传，
+            // 调用方据此给出可执行的引导而不是裸错误文案。
+            const detail = payload.detail || payload.error || {};
+            for (const key of ['calibration_app_missing', 'reconcile_required']) {
+                if (detail && typeof detail === 'object' && detail[key]) error[key] = true;
+            }
             throw error;
         }
         return payload.data || payload;
@@ -344,7 +350,9 @@ function aoaRecorderDeviceChanged(options = {}) {
     if (!target) {
         if (window.aoaLiveScreen?.isActive()) {
             window.aoaLiveScreen.stop();
-            aoaEl('aoa-toggle-live')?.setAttribute('data-live', 'off');
+            aoaEl('aoa-toggle-live')?.setAttribute(
+                'data-live', 'off');
+            aoaSyncLiveButton();
         }
         if (empty) empty.hidden = false;
         const status = aoaEl('aoa-screen-status');
@@ -363,17 +371,22 @@ function aoaRecorderDeviceChanged(options = {}) {
         window.aoaLiveScreen.start(target.device, target.workerId).then(() => {
             aoaEl('aoa-toggle-live')?.setAttribute(
                 'data-live', window.aoaLiveScreen.isActive() ? 'on' : 'off');
+            aoaSyncLiveButton();
         });
         aoaRenderCalibration();
         return;
     }
     if (targetChanged && window.aoaLiveScreen?.isActive()) {
         window.aoaLiveScreen.stop();
-        aoaEl('aoa-toggle-live')?.setAttribute('data-live', 'off');
+        aoaEl('aoa-toggle-live')?.setAttribute(
+            'data-live', 'off');
+        aoaSyncLiveButton();
     }
     const status = aoaEl('aoa-screen-status');
     if (status) status.textContent = `点「▶ 实时投屏」连接 ${target.device}`;
-    aoaEl('aoa-toggle-live')?.setAttribute('data-live', 'off');
+    aoaEl('aoa-toggle-live')?.setAttribute(
+        'data-live', 'off');
+    aoaSyncLiveButton();
     aoaRenderCalibration();
 }
 
@@ -555,7 +568,6 @@ function aoaCommandEditFinish(save = true) {
         aoaPanelState.commands[edit.index] = command;
         aoaPanelState.editingProfileId = '';
         aoaPanelState.commandDebug = null;
-        if (aoaEl('aoa-playback-progress')) aoaEl('aoa-playback-progress').hidden = true;
         aoaSetStatus(`第 ${edit.index + 1} 条已修改，保存配置后可持久保留`);
     }
     const list = aoaEl('aoa-command-list'); const scroll = list.scrollTop;
@@ -577,12 +589,6 @@ function aoaUpdateCommandDebug(state) {
     if (badge) {
         badge.hidden = false; badge.dataset.state = state;
         badge.textContent = state === 'running' ? '执行中' : state === 'completed' ? '已执行' : state === 'cancelled' ? '已停止' : '执行失败';
-    }
-    const progress = aoaEl('aoa-playback-progress');
-    if (progress) {
-        progress.hidden = false;
-        progress.textContent = `单条调试 · 第 ${debug.index + 1} 条 · ${debug.device} · ${badge?.textContent || ''}`;
-        progress.title = progress.textContent;
     }
 }
 
@@ -873,7 +879,9 @@ async function aoaViewToggle(show) {
         // 离开 AOA 页签：停止实时投屏与截图轮询。
         if (window.aoaLiveScreen) {
             window.aoaLiveScreen.stop();
-            aoaEl('aoa-toggle-live')?.setAttribute('data-live', 'off');
+            aoaEl('aoa-toggle-live')?.setAttribute(
+                'data-live', 'off');
+            aoaSyncLiveButton();
         }
         if (typeof currentPage === 'undefined' || currentPage === 'devices') {
             if (typeof loadDevicesManagement === 'function') loadDevicesManagement();

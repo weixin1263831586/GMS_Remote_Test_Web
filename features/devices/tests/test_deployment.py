@@ -561,3 +561,30 @@ def test_review_shell_explains_missing_or_other_owner_without_exposing_artifact(
     assert client.get(endpoint, headers=headers).status_code == 404
     assert client.post(endpoint + "/approve", headers=headers).status_code == 404
     assert client.get(endpoint + "/review", headers={**headers, "x-test-role": "worker_service"}).status_code == 200
+
+
+def test_calibration_app_deploy_endpoint(environment, monkeypatch):
+    """一键部署端点：从 dist/ 固定路径取 APK 走既有审批流；缺产物报 404。"""
+    from pathlib import Path
+
+    from features.devices import aoa_api
+    from features.devices import deployment_service as service
+
+    client, _repository, _auth = environment
+    client.app.include_router(aoa_api.router)
+    # dist 产物缺失：404 且提示构建命令（在权限检查之前拦截）。fixture
+    # 已把 service.ensure_agent_device_allowed 打成 no-op，但 404 必须先于
+    # 权限/设备检查发生——显式 patch check_acl 保证纯端点行为。
+    monkeypatch.setattr(service, "check_acl", lambda *_args: None)
+    monkeypatch.setattr(Path, "is_file", lambda _self: False)
+    # 部署通道仅限人工主体（审批流）；agent token 先于 404 被拒。
+    agent = client.post("/api/devices/aoa/calibration-app/deploy",
+                        json={"worker_id": "worker", "device": "SERIAL"},
+                        headers={"x-test-principal": "agent_token"})
+    assert agent.status_code == 403
+    assert agent.json()["detail"]["message"] == "Agent tokens cannot call this endpoint"
+    client.headers.update({"x-test-principal": "session", "x-test-role": "user"})
+    response = client.post("/api/devices/aoa/calibration-app/deploy",
+                           json={"worker_id": "worker", "device": "SERIAL"})
+    assert response.status_code == 404, response.text[:200]
+    assert "build_aoa_calibration" in response.json()["error"]

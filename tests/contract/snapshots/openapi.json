@@ -12825,6 +12825,44 @@
         "summary": "Auto Group Devices"
       }
     },
+    "/api/devices/aoa/calibration-app/deploy": {
+      "post": {
+        "description": "为缺失的 AOA 标定应用发起一次人工审批部署（从 Controller dist/ 取 APK）。\n\n设备重置/重刷会清掉 /data 上的 com.gms.remote.aoacalibration；工作台\n检测到 ``calibration_app_missing`` 后引导用户走这里：APK 由服务端\n固定路径提供（不接受客户端上传路径），安装仍需人工审批。",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Deploy Calibration App"
+      }
+    },
     "/api/devices/aoa/calibrations": {
       "get": {
         "responses": {

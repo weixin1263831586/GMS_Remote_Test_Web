@@ -319,7 +319,7 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
             self.assertEqual(state["recoveries"][0]["commands"], commands)
             emit("completed", 100)
             state["finished"] = True
-            expect(page.locator("#aoa-playback-progress")).to_contain_text("已完成 100 条")
+            expect(page.locator("#aoa-run-status")).to_contain_text("回放完成")
             expect(page.locator("#aoa-playback-pause")).to_be_hidden()
             expect(page.locator("#aoa-playback-resume")).to_be_hidden()
             self.assertEqual(command_list.evaluate('(node) => node.offsetTop'), list_top)

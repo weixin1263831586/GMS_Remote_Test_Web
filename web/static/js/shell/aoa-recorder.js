@@ -107,6 +107,8 @@ async function aoaExecuteRecorderInput(input, {refresh = true, pace = true} = {}
         }
         aoaSetStatus(`操作失败：${error.message}`, 'error');
         showToast(`AOA 录制操作失败：${error.message}`, 'warning');
+        // 结构化标记随异常冒泡给引导逻辑（标定应用缺失 → 一键部署）。
+        if (error.calibration_app_missing) throw error;
         return null;
     } finally { aoaSetBusy(false); }
 }
@@ -119,10 +121,21 @@ function aoaLiveTarget() {
     return {workerId, device};
 }
 
+// 实时投屏按钮状态单一真值：data-live=on/off 驱动文字与样式。
+// 各状态写入点只 set 属性，文字统一在这里跟随，避免两处漂移。
+function aoaSyncLiveButton() {
+    const button = aoaEl('aoa-toggle-live');
+    if (!button) return;
+    const on = button.getAttribute('data-live') === 'on';
+    button.textContent = on ? '⏹ 投屏中' : '▶ 实时投屏';
+    button.title = on ? '点击停止实时投屏' : '点击开始实时投屏';
+}
+
 async function aoaToggleLiveScreen() {
     if (window.aoaLiveScreen?.isActive()) {
         window.aoaLiveScreen.stop();
         aoaEl('aoa-toggle-live')?.setAttribute('data-live', 'off');
+        aoaSyncLiveButton();
         aoaSetStatus('实时投屏已关闭');
         return;
     }
@@ -134,6 +147,7 @@ async function aoaToggleLiveScreen() {
     await window.aoaLiveScreen.start(target.device, target.workerId);
     const on = window.aoaLiveScreen.isActive();
     aoaEl('aoa-toggle-live')?.setAttribute('data-live', on ? 'on' : 'off');
+    aoaSyncLiveButton();
 }
 
 function aoaLiveInputSurfaceActive() {
@@ -231,20 +245,76 @@ function aoaSendText() {
     });
 }
 
-async function aoaCalibrateTouch() {
-    const ok = await showConfirmDialog(
-        'AOA 触摸标定',
-        '标定将打开设备上的 AOA Calibration 安全页面，切入 AOAv2 后发送五个拟合点和两个独立验证点。'
-        + '请先安装安全标定应用，是否继续？');
-    if (!ok) return;
-    const result = await aoaExecuteRecorderInput({action: 'calibrate'}, {refresh: true, pace: false});
+async function aoaCalibrateTouch({retryAfterDeploy = false} = {}) {
+    if (!retryAfterDeploy) {
+        const ok = await showConfirmDialog(
+            'AOA 触摸标定',
+            '标定将打开设备上的 AOA Calibration 安全页面，切入 AOAv2 后发送五个拟合点和两个独立验证点。'
+            + '请先安装安全标定应用，是否继续？');
+        if (!ok) return;
+    }
+    let result;
+    try {
+        result = await aoaExecuteRecorderInput({action: 'calibrate'}, {refresh: true, pace: false});
+    } catch (error) {
+        // 结构化回执：设备缺 AOA 标定应用（/data 被清）→ 引导一次部署，
+        // 安装完成后自动重试；其他失败保持通用报错路径。
+        if (!error?.calibration_app_missing) throw error;
+        if (await aoaHandleCalibrationAppMissing()) {
+            await aoaCalibrateTouch({retryAfterDeploy: true});
+        }
+        return;
+    }
     if (result?.touch_calibration?.measured) {
         const mapping = result.touch_calibration.mapping || {};
         const verified = mapping.verified || result.touch_calibration.verified;
         showToast(verified ? 'AOA 多点仿射标定成功（已通过误差验证）'
                            : 'AOA 标定完成，但误差超出门槛（unverified）',
                   verified ? 'success' : 'warning');
+        return;
     }
+}
+
+// 标定应用缺失（设备重置/重刷后 /data 被清）：引导一次人工审批部署，
+// 轮询安装结果，成功后返回 true 让调用方自动重试标定。
+async function aoaHandleCalibrationAppMissing() {
+    let target;
+    try { target = aoaRecorderTarget(); }
+    catch (error) { return false; }
+    const ok = await showConfirmDialog(
+        '缺少 AOA 标定应用',
+        '设备上没有 AOA Calibration 安全页面应用（设备重置或重刷后会丢失）。'
+        + `可以从平台内置的构建产物为 ${target.device} 发起一次安装（需要你在审批页确认）。`
+        + '是否现在发起？');
+    if (!ok) return false;
+    let deployment;
+    try {
+        const response = await aoaApi('/api/devices/aoa/calibration-app/deploy', {
+            method: 'POST', body: {worker_id: target.workerId, device: target.device}});
+        deployment = response?.deployment;
+    } catch (error) {
+        showToast(`发起部署失败：${error.message}`, 'error');
+        return false;
+    }
+    if (!deployment?.id) { showToast('部署发起异常，请查看通知', 'error'); return false; }
+    window.open(deployment.approval_url, '_blank');
+    showToast('已发起部署，请在审批页确认；安装完成后将自动重试标定', 'success');
+    const deadline = Date.now() + 300000;
+    while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        let status;
+        try {
+            const response = await aoaApi(`/api/devices/deployments/${deployment.id}`);
+            status = response?.deployment?.status;
+        } catch (error) { continue; }
+        if (status === 'completed') { showToast('标定应用安装完成，正在重试标定…', 'success'); return true; }
+        if (['rejected', 'failed', 'interrupted', 'expired'].includes(status)) {
+            showToast(`部署未完成（${status}），请重试或手动安装`, 'warning');
+            return false;
+        }
+    }
+    showToast('等待审批超时（5 分钟）；安装完成后可直接再次点击「触摸标定」', 'warning');
+    return false;
 }
 
 function aoaRenderCalibration() {

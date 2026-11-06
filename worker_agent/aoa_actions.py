@@ -1023,10 +1023,25 @@ def record_aoa_input(serial: str, raw_action: dict) -> dict[str, Any]:
         # Estimates are returned as unsuccessful, unmeasured diagnostics.
         from foundation import aoa_calibration
 
-        mapping = _calibrate_touch_affine(
-            serial, display_w, display_h, time.sleep, touch_mode, context=context)
+        try:
+            mapping = _calibrate_touch_affine(
+                serial, display_w, display_h, time.sleep, touch_mode, context=context)
+        except ValueError as exc:
+            # 标定 Activity 拉不起来通常因为设备重置/重刷清掉了 /data 上的
+            # 标定应用：结构化标记让工作台直接给出"一键部署"引导，而不是
+            # 重复失败（部署通道经人工审批，Agent 不能自行安装）。
+            if "安全标定应用" in str(exc):
+                return {"serial": serial, "success": False, "action": "calibrate",
+                        "calibration_app_missing": True, "error": str(exc),
+                        "display": [display_w, display_h]}
+            raise
         errors = list(cleanup_diagnostics())
-        if errors:
+        # 拆除阶段（reset 之后）的错误只说明旧 USB 句柄失效、设备身份已
+        # 重枚举，拟合证据本身仍然有效；探针阶段错误才否定整个标定。
+        teardown_steps = {"reset_usb", "dispose_usb", "restore_native_mode", "verify_adb_state"}
+        session_errors = [item for item in errors if item.get("step") not in teardown_steps]
+        teardown_warnings = [item for item in errors if item.get("step") in teardown_steps]
+        if session_errors:
             mapping = None
         measured = mapping is not None
         if mapping is None:
@@ -1038,9 +1053,10 @@ def record_aoa_input(serial: str, raw_action: dict) -> dict[str, Any]:
         scale_x, scale_y = mapping.matrix[0], mapping.matrix[3]
         return {
             "serial": serial,
-            "success": measured and mapping.verified and not errors,
+            "success": measured and mapping.verified and not session_errors,
             "action": "calibrate",
-            "cleanup_errors": errors,
+            "cleanup_errors": session_errors,
+            "cleanup_warnings": teardown_warnings,
             "display": [display_w, display_h],
             "touch_calibration": {
                 "measured": measured,
@@ -1051,7 +1067,7 @@ def record_aoa_input(serial: str, raw_action: dict) -> dict[str, Any]:
                 "scale_y": round(scale_y, 4),
             },
             **({"error": "AOA 标定失败：请检查安全标定应用、独立验证点及 USB 状态"}
-               if not measured or not mapping.verified or errors else {}),
+               if not measured or not mapping.verified or session_errors else {}),
         }
 
     def logical(x: int, y: int) -> tuple[int, int]:

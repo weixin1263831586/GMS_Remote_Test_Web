@@ -60,6 +60,42 @@ def test_failed_probes_never_claim_success_or_measurement(monkeypatch):
     assert result["touch_calibration"]["verified"] is False
 
 
+def test_teardown_noise_keeps_a_verified_calibration(monkeypatch):
+    """复位后旧句柄上的拆除错误（ENOENT）不得作废已拟合的映射（实机 66df：API 37）。"""
+    from tests.aoa_fixtures import verified_mapping
+
+    measured = verified_mapping()
+    monkeypatch.setattr(aoa_actions, "_display_size", lambda _: (1080, 1920))
+    monkeypatch.setattr("worker_agent.aoa_calibration.display_context", lambda *a: measured.context)
+    monkeypatch.setattr(aoa_actions, "_calibrate_touch_affine", lambda *a, **kw: measured)
+    monkeypatch.setattr(aoa_actions, "cleanup_diagnostics", lambda: [
+        {"step": "reset_usb", "error": "[Errno 2] Entity not found"},
+        {"step": "verify_adb_state", "error": "adb wait timeout"}])
+    result = aoa_actions.record_aoa_input("ABC", {"action": "calibrate", "hid_touch_mode": "pointer"})
+    assert result["success"] is True
+    assert result["touch_calibration"]["measured"] is True
+    assert result["touch_calibration"]["mapping"]["mapping_policy"] == "direct_calibrated"
+    assert result["cleanup_errors"] == []
+    assert result["cleanup_warnings"] == [
+        {"step": "reset_usb", "error": "[Errno 2] Entity not found"},
+        {"step": "verify_adb_state", "error": "adb wait timeout"}]
+
+
+def test_probe_phase_errors_still_discard_the_mapping(monkeypatch):
+    from tests.aoa_fixtures import verified_mapping
+
+    measured = verified_mapping()
+    monkeypatch.setattr(aoa_actions, "_display_size", lambda _: (1080, 1920))
+    monkeypatch.setattr("worker_agent.aoa_calibration.display_context", lambda *a: measured.context)
+    monkeypatch.setattr(aoa_actions, "_calibrate_touch_affine", lambda *a, **kw: measured)
+    monkeypatch.setattr(aoa_actions, "cleanup_diagnostics", lambda: [
+        {"step": "release_touch", "error": "device vanished"}])
+    result = aoa_actions.record_aoa_input("ABC", {"action": "calibrate", "hid_touch_mode": "pointer"})
+    assert result["success"] is False
+    assert result["touch_calibration"]["measured"] is False
+    assert result["cleanup_errors"] == [{"step": "release_touch", "error": "device vanished"}]
+
+
 def test_safety_activity_required_before_usb_registration(monkeypatch):
     from worker_agent.aoa_calibration import open_calibration_surface
 
@@ -114,3 +150,22 @@ def test_real_calibration_pipeline_separates_fitting_and_validation(monkeypatch,
     assert len(mapping.samples) == 7
     assert sum(s["validation"] for s in mapping.samples) == 2
     assert mapping.verified is not bad_holdout
+
+
+def test_missing_calibration_app_returns_structured_guidance(monkeypatch):
+    """重置后 /data 清空导致标定 Activity 拉不起来：回执带
+    calibration_app_missing，工作台据此发起一键部署引导。"""
+    from tests.aoa_fixtures import verified_mapping
+
+    def missing_app(*_args, **_kwargs):
+        raise ValueError("安全标定应用未安装或无法启动；请安装 AOA Calibration 后重试")
+
+    monkeypatch.setattr(aoa_actions, "_display_size", lambda _: (1080, 1920))
+    monkeypatch.setattr("worker_agent.aoa_calibration.display_context",
+                        lambda *a: verified_mapping().context)
+    monkeypatch.setattr(aoa_actions, "_calibrate_touch_affine", missing_app)
+    result = aoa_actions.record_aoa_input("ABC", {"action": "calibrate", "hid_touch_mode": "pointer"})
+    assert result["success"] is False
+    assert result["calibration_app_missing"] is True
+    assert "安全标定应用" in result["error"]
+    assert "touch_calibration" not in result  # 缺应用不产出估算映射

@@ -61,13 +61,6 @@ function aoaUpdatePlaybackRows(scrollIndex = 0) {
             list.scrollTop = Math.max(0, top - list.clientHeight / 2);
         }
     }
-    const progress = aoaEl('aoa-playback-progress');
-    if (progress && aoaPanelState.playbackStates.length) {
-        const completed = aoaPanelState.playbackStates.filter(state => state === 'completed' || state === 'skipped').length;
-        progress.hidden = false;
-        progress.textContent = `本次回放 ${aoaPanelState.commands.length} 条 · 已完成 ${completed} 条`;
-        progress.title = progress.textContent;
-    }
 }
 
 function aoaHighlightCommandRow(index) {
