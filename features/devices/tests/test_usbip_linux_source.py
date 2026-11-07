@@ -902,7 +902,7 @@ class AutoBindUbuntuTests(unittest.TestCase):
         ), patch.object(
             usbip_flash.usbip_manager, "config_manager", manager.config_manager,
         ), patch.object(
-            usbip_flash.runtime, "config_manager", manager.config_manager,
+            usbip_flash.runtime.get_runtime(), "config_manager", manager.config_manager,
         ):
             result = usbip_flash.ensure_usbip_auto_bind_policies(
                 "hcq@10.0.0.5", ["1-17-13"],
@@ -928,7 +928,7 @@ class SourceOsCacheTests(unittest.TestCase):
         config_manager.get_runtime_config.side_effect = get_runtime_config
         config_manager.update_runtime_config.side_effect = update
         with patch.object(
-            usbip_persistence.runtime, "config_manager", config_manager,
+            usbip_persistence.runtime.get_runtime(), "config_manager", config_manager,
         ):
             # 对外值 "ubuntu" 归一化为内部 "linux"。
             usbip_persistence.record_usbip_source_os("hcq@10.0.0.5", "ubuntu")

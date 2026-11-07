@@ -106,7 +106,7 @@ abc                                   Android ADB Interface
         with patch.object(
             usbip_flash, "_local_worker_id", return_value="ats-worker-controller"
         ), patch.object(
-            usbip_flash.runtime, "config_manager", config,
+            usbip_flash.runtime.get_runtime(), "config_manager", config,
         ), patch.object(
             usbip_flash, "_known_sources", return_value={
                 "rk3572test": {"source": "hcq@172.16.14.66"},
@@ -163,8 +163,8 @@ abc                                   Android ADB Interface
         manager = Usbip()
         reconnect._transport_only_hosts.add("hcq@172.16.14.66")
         try:
-            with patch.object(reconnect.runtime, "config_manager", Config()), \
-                    patch.object(reconnect.runtime, "global_state", state), \
+            with patch.object(reconnect.runtime.get_runtime(), "config_manager", Config()), \
+                    patch.object(reconnect.runtime.get_runtime(), "global_state", state), \
                     patch.object(reconnect, "usbip_manager", manager), \
                     patch.object(
                         reconnect, "_resolved_busids_for_devices",
@@ -212,8 +212,8 @@ abc                                   Android ADB Interface
             device_cache={"devices": [], "timestamp": 0},
             device_cache_lock=threading.RLock(),
         )
-        with patch.object(reconnect.runtime, "config_manager", Config()), \
-                patch.object(reconnect.runtime, "global_state", state), \
+        with patch.object(reconnect.runtime.get_runtime(), "config_manager", Config()), \
+                patch.object(reconnect.runtime.get_runtime(), "global_state", state), \
                 patch.object(reconnect, "usbip_manager", manager), \
                 patch.object(
                     reconnect, "_resolved_busids_for_devices",
@@ -251,8 +251,8 @@ abc                                   Android ADB Interface
             device_cache_lock=threading.RLock(),
         )
         manager = Usbip()
-        with patch.object(reconnect.runtime, "config_manager", Config()), \
-                patch.object(reconnect.runtime, "global_state", state), \
+        with patch.object(reconnect.runtime.get_runtime(), "config_manager", Config()), \
+                patch.object(reconnect.runtime.get_runtime(), "global_state", state), \
                 patch.object(reconnect, "usbip_manager", manager), \
                 patch.object(reconnect, "has_blocked_adb_process", return_value=False), \
                 patch.object(
@@ -342,8 +342,8 @@ abc                                   Android ADB Interface
             device_cache={"devices": [], "timestamp": 0},
             device_cache_lock=threading.RLock(),
         )
-        with patch.object(reconnect.runtime, "config_manager", Config()), \
-                patch.object(reconnect.runtime, "global_state", state), \
+        with patch.object(reconnect.runtime.get_runtime(), "config_manager", Config()), \
+                patch.object(reconnect.runtime.get_runtime(), "global_state", state), \
                 patch.object(reconnect, "usbip_manager", manager), \
                 patch.object(reconnect, "has_blocked_adb_process", return_value=False), \
                 patch.object(reconnect, "_local_worker_id", return_value="ats-worker-controller"), \
@@ -389,7 +389,7 @@ abc                                   Android ADB Interface
                 "devices": [{"busid": "1-8", "serial": ""}],
             },
         )
-        with patch.object(reconnect.runtime, "config_manager", Config()), \
+        with patch.object(reconnect.runtime.get_runtime(), "config_manager", Config()), \
                 patch.object(reconnect, "usbip_manager", manager):
             selected = reconnect._refresh_reenumerated_busids(
                 "hcq@172.16.14.66",
@@ -441,8 +441,8 @@ abc                                   Android ADB Interface
                 "offline": ["rk3572test"],
             },
         }
-        with patch.object(reconnect.runtime, "config_manager", Config()), \
-                patch.object(reconnect.runtime, "global_state", state), \
+        with patch.object(reconnect.runtime.get_runtime(), "config_manager", Config()), \
+                patch.object(reconnect.runtime.get_runtime(), "global_state", state), \
                 patch.object(reconnect, "usbip_manager", manager), \
                 patch.object(reconnect, "has_blocked_adb_process", return_value=False), \
                 patch.object(
@@ -512,8 +512,8 @@ abc                                   Android ADB Interface
                 "mode": "adb",
             },
         )
-        with patch.object(reconnect.runtime, "config_manager", Config()), \
-                patch.object(reconnect.runtime, "ssh_manager", ssh_manager), \
+        with patch.object(reconnect.runtime.get_runtime(), "config_manager", Config()), \
+                patch.object(reconnect.runtime.get_runtime(), "ssh_manager", ssh_manager), \
                 patch(
                     "features.devices.usbip_transport_probe.usbip_manager",
                     manager,
@@ -715,9 +715,9 @@ class UsbipSerialMigrationTests(unittest.TestCase):
             device_cache_lock=threading.RLock(),
         )
         with patch.object(
-            usbip_persistence.runtime, "config_manager", FakeConfigManager(),
+            usbip_persistence.runtime.get_runtime(), "config_manager", FakeConfigManager(),
         ), patch.object(
-            usbip_persistence.runtime, "global_state", state,
+            usbip_persistence.runtime.get_runtime(), "global_state", state,
         ), patch.object(
             usbip_persistence.usbip_manager,
             "device_sources",
@@ -777,7 +777,7 @@ class UsbipSerialMigrationTests(unittest.TestCase):
                 raise AssertionError("conflicting migration must not be persisted")
 
         with patch.object(
-            usbip_persistence.runtime, "config_manager", FakeConfigManager(),
+            usbip_persistence.runtime.get_runtime(), "config_manager", FakeConfigManager(),
         ):
             migrated, error = usbip_persistence.migrate_local_usbip_serial(
                 device_host="hcq@172.16.14.66",
@@ -821,7 +821,7 @@ class UsbipAssignmentPruningTests(unittest.TestCase):
                 return True
 
         with patch.object(
-            usbip_assignments.runtime, "config_manager", FakeConfigManager()
+            usbip_assignments.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ):
             removed = usbip_assignments.prune_stale_unknown_usbip_assignments(
                 "hcq@172.16.14.66",
@@ -835,7 +835,7 @@ class UsbipAssignmentPruningTests(unittest.TestCase):
         )
 
         with patch.object(
-            usbip_assignments.runtime, "config_manager", FakeConfigManager()
+            usbip_assignments.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ):
             usbip_assignments.prune_stale_unknown_usbip_assignments(
                 "hcq@172.16.14.66",

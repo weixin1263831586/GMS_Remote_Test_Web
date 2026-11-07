@@ -23,7 +23,7 @@ from typing import Any
 # human (or a policy change) when they repeat consecutively on one profile.
 CONSECUTIVE_FAILURE_STAGES = frozenset({
     "jenkins_failed", "artifact_missing", "flash_failed", "aoa_failed",
-    "analysis_failed", "reporting_failed", "failed",
+    "test_failed", "analysis_failed", "reporting_failed", "failed",
 })
 
 DEFAULT_CONSECUTIVE_FAILURE_THRESHOLD = 3

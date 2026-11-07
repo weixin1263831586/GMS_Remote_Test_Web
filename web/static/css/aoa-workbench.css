@@ -260,7 +260,7 @@
 .aoa-config-column > .aoa-result { flex: 1 1 48px; min-height: 40px; max-height: 120px; }
 .aoa-config-column > .aoa-result[hidden] { display: none; }
 .aoa-command-table {
-    --aoa-command-columns: 3ch minmax(0, 1.5fr) minmax(0, 1fr) 60.5px 116px;
+    --aoa-command-columns: 3ch minmax(0, 1.5fr) minmax(0, 1fr) 60.5px 156px;
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
     border-radius: 6px;
@@ -310,6 +310,8 @@
 .aoa-command-row > .aoa-command-state { grid-column: 4; grid-row: 1; }
 .aoa-command-row > .aoa-command-actions { grid-column: 5; grid-row: 1; }
 .aoa-command-row:has(.aoa-command-editor) > .aoa-command-actions { grid-column: 4 / 6; }
+/* 标定态（定位 → 保存/取消）同编辑模式：5 个按钮跨到状态列，防止删除被 156px 列裁掉。 */
+.aoa-command-row.aoa-command-calibrating > .aoa-command-actions { grid-column: 4 / 6; }
 .aoa-command-row:has(.aoa-command-editor) > .aoa-command-state { visibility: hidden; }
 #aoa-panel input.aoa-command-comment { background: transparent; border-color: transparent; border-left-color: var(--border-color); color: var(--text-secondary); height: 22px; padding: 1px 6px; text-overflow: ellipsis; }
 #aoa-panel input.aoa-command-comment:focus { background: var(--darker-bg); border-color: var(--primary-color); color: var(--text-primary); }

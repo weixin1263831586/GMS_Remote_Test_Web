@@ -88,15 +88,15 @@ def cluster_ui_asset(ui_asset: str):
     """Cluster 页面脚本统一路由（CSP 收紧后禁止 inline <script>）。
 
     - page.js: 入口 chunk（事件接线与初始化，最后加载）；
-    - state.js: 顶层状态与共享助手（最先加载）；
-    - page-boot.js: embedded-workspace 就绪标记（原单行内联块外置）；
-    - page-echarts.js: ECharts 本地 vendor 加载器（原单行内联块外置）；
+    - state.js: 顶层状态与共享助手（最先加载）；开头含 embedded-workspace
+      就绪标记与 ECharts 本地 vendor 加载器（原 page-boot.js /
+      page-echarts.js 并入，均为数十字节，不再单独成文件）；
     - modal-controller.js: 弹框焦点控制器（初始焦点/Tab 陷阱/关闭恢复）；
     - 其余 chunk 按域拆分（jobs/workers/dash/library/management），由
       page.html 按 script 顺序引用，拼接语义等价拆分前单文件。
     """
     if ui_asset not in {
-        "page.js", "page-boot.js", "page-echarts.js", "modal-controller.js",
+        "page.js", "modal-controller.js",
         "state.js", "jobs.js", "workers.js", "dash-charts.js",
         "dash-render.js", "library.js", "management.js",
     }:

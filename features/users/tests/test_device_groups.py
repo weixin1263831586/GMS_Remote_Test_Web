@@ -12,10 +12,10 @@ class DeviceGroupPersistenceTests(unittest.TestCase):
     def setUp(self):
         self.previous_data_root = device_groups.runtime.data_root
         self.runtime_dir = tempfile.TemporaryDirectory()
-        device_groups.runtime.data_root = Path(self.runtime_dir.name)
+        device_groups.runtime.get_runtime().data_root = Path(self.runtime_dir.name)
 
     def tearDown(self):
-        device_groups.runtime.data_root = self.previous_data_root
+        device_groups.runtime.get_runtime().data_root = self.previous_data_root
         self.runtime_dir.cleanup()
 
     def test_user_groups_use_injected_data_root(self):

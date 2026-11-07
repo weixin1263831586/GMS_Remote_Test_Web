@@ -65,9 +65,9 @@ class BroadcastDeviceChangeTests(unittest.TestCase):
                 source="usbip_disconnect",
             )
 
-        with patch.object(support.runtime, "store_notification",
+        with patch.object(support.runtime.get_runtime(), "store_notification",
                           runtime_stub.store_notification), \
-             patch.object(support.runtime, "global_state",
+             patch.object(support.runtime.get_runtime(), "global_state",
                           runtime_stub.global_state):
             asyncio.run(run())
 
@@ -107,9 +107,9 @@ class BroadcastDeviceChangeTests(unittest.TestCase):
             # No disconnected/connected -> no notification title.
             await support.broadcast_device_change(["user-a"], source="poll")
 
-        with patch.object(support.runtime, "store_notification",
+        with patch.object(support.runtime.get_runtime(), "store_notification",
                           runtime_stub.store_notification), \
-             patch.object(support.runtime, "global_state",
+             patch.object(support.runtime.get_runtime(), "global_state",
                           runtime_stub.global_state):
             asyncio.run(run())
 
@@ -153,9 +153,9 @@ class BroadcastDeviceChangeMultiTabTests(unittest.TestCase):
                 source="usbip_disconnect",
             )
 
-        with patch.object(support.runtime, "store_notification",
+        with patch.object(support.runtime.get_runtime(), "store_notification",
                           runtime_stub.store_notification), \
-             patch.object(support.runtime, "global_state",
+             patch.object(support.runtime.get_runtime(), "global_state",
                           runtime_stub.global_state):
             asyncio.run(run())
 

@@ -9,15 +9,15 @@
             <div class="auth-row">
                 <label for="auth-username">账号</label>
                 <input id="auth-username" name="username" type="text" autocomplete="username" placeholder="管理员账号，或正在读取客户端身份…" aria-describedby="auth-username-help" required>
-                <div class="auth-help" id="auth-username-help">可使用平台管理员账号，或 SSH用户名@客户端IP，例如 gms@192.0.2.10。</div>
+                <div class="auth-help" id="auth-username-help">管理员账号，或 用户名@客户端IP（SSH 账号）。</div>
             </div>
             <div class="auth-row">
                 <label for="auth-password">密码</label>
                 <div class="password-input-wrap">
-                    <input id="auth-password" name="password" type="password" autocomplete="current-password" placeholder="管理员密码或客户端 SSH 密码" aria-describedby="auth-password-help" required>
+                    <input id="auth-password" name="password" type="password" autocomplete="current-password" placeholder="密码" aria-describedby="auth-password-help" required>
                     <button type="button" class="password-visibility-toggle" data-click="togglePasswordVisibility" data-r0="el" aria-label="显示密码" title="显示密码"></button>
                 </div>
-                <div class="auth-help" id="auth-password-help">管理员请输入平台密码；客户端账号请输入 SSH 密码（通常与系统登录/锁屏密码相同）。</div>
+                <div class="auth-help" id="auth-password-help">管理员用平台密码；客户端用 SSH 密码。</div>
             </div>
             <div class="auth-row" id="auth-display-name-row" style="display: none;">
                 <label for="auth-display-name">显示名</label>

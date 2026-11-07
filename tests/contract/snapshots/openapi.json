@@ -1887,6 +1887,29 @@
         "title": "DeviceShellRequest",
         "type": "object"
       },
+      "DiskCleanupRequest": {
+        "properties": {
+          "dry_run": {
+            "default": true,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "include_stage": {
+            "default": false,
+            "title": "Include Stage",
+            "type": "boolean"
+          },
+          "stage_max_age_days": {
+            "default": 7,
+            "maximum": 3650.0,
+            "minimum": 1.0,
+            "title": "Stage Max Age Days",
+            "type": "integer"
+          }
+        },
+        "title": "DiskCleanupRequest",
+        "type": "object"
+      },
       "ExecutionSpec": {
         "description": "Structured test execution parameters that replace free-form argv.\n\nWhen provided on ClusterJobCreate, the Controller validates the fields and\nbuilds the Worker argv internally — the browser never supplies raw command\nstrings.  The spec is persisted on the job for audit and structured retry.",
         "properties": {
@@ -2146,6 +2169,25 @@
           "events"
         ],
         "title": "JobEventBatch",
+        "type": "object"
+      },
+      "KillSwitchRequest": {
+        "properties": {
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "paused"
+        ],
+        "title": "KillSwitchRequest",
         "type": "object"
       },
       "NotificationCreateRequest": {
@@ -2789,6 +2831,55 @@
           "issue_id"
         ],
         "title": "SingleIssueAnalysisRequest",
+        "type": "object"
+      },
+      "SmtpConfigRequest": {
+        "properties": {
+          "from_addr": {
+            "default": "",
+            "maxLength": 255,
+            "title": "From Addr",
+            "type": "string"
+          },
+          "password": {
+            "default": "",
+            "description": "*** 表示保持现有密码不变",
+            "maxLength": 512,
+            "title": "Password",
+            "type": "string"
+          },
+          "sender_name": {
+            "default": "",
+            "maxLength": 128,
+            "title": "Sender Name",
+            "type": "string"
+          },
+          "smtp_host": {
+            "default": "",
+            "maxLength": 255,
+            "title": "Smtp Host",
+            "type": "string"
+          },
+          "smtp_port": {
+            "default": 465,
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Smtp Port",
+            "type": "integer"
+          },
+          "use_ssl": {
+            "default": true,
+            "title": "Use Ssl",
+            "type": "boolean"
+          },
+          "username": {
+            "default": "",
+            "maxLength": 255,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "title": "SmtpConfigRequest",
         "type": "object"
       },
       "SuiteApkAnalyzeRequest": {
@@ -15059,6 +15150,56 @@
         "summary": "Send Email Endpoint"
       }
     },
+    "/api/email/smtp": {
+      "get": {
+        "description": "查看生效的 SMTP 配置（密码永不回显，仅返回 password_set）。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Smtp Config"
+      },
+      "post": {
+        "description": "保存全局 SMTP 默认配置；密码经平台密钥加密，永不明文落盘。",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmtpConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Smtp Config"
+      }
+    },
     "/api/favicon/batch": {
       "post": {
         "description": "批量获取网站 Favicon。",
@@ -17982,6 +18123,234 @@
           }
         },
         "summary": "Search Opengrok"
+      }
+    },
+    "/api/ops/disk": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ops Disk Overview Api Ops Disk Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ops Disk Overview",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/api/ops/disk/cleanup": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiskCleanupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ops Disk Cleanup Api Ops Disk Cleanup Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ops Disk Cleanup",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/api/ops/events": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "",
+              "pattern": "^(open|ack)?$",
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Ops Events Api Ops Events Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Ops Events",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/api/ops/events/{event_id}/ack": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ack Ops Event Api Ops Events  Event Id  Ack Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ack Ops Event",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/api/ops/kill-switch": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KillSwitchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Kill Switch Api Ops Kill Switch Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Kill Switch",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/api/ops/status": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ops Status Api Ops Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ops Status",
+        "tags": [
+          "ops"
+        ]
       }
     },
     "/api/redmine-agent/artifacts/{artifact_id}/apk-analysis": {

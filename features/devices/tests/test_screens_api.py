@@ -49,12 +49,12 @@ class DeviceScreensApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_scrcpy_requires_explicit_devices(self):
         with (
             patch.object(
-                screens_api.runtime,
+                screens_api.runtime.get_runtime(),
                 "config_manager",
                 FakeConfigManager(),
             ),
             patch.object(
-                screens_api.runtime,
+                screens_api.runtime.get_runtime(),
                 "ssh_manager",
                 FakeSshManager(),
             ),
@@ -74,8 +74,8 @@ class DeviceScreensApiTests(unittest.IsolatedAsyncioTestCase):
         health_states = iter([(False, None), (True, "4321")])
 
         with (
-            patch.object(screens_api.runtime, "config_manager", FakeConfigManager()),
-            patch.object(screens_api.runtime, "ssh_manager", ssh_manager),
+            patch.object(screens_api.runtime.get_runtime(), "config_manager", FakeConfigManager()),
+            patch.object(screens_api.runtime.get_runtime(), "ssh_manager", ssh_manager),
             patch.object(
                 screens_api.DeviceUtils,
                 "check_scrcpy_healthy",
@@ -128,8 +128,8 @@ class DeviceScreensApiTests(unittest.IsolatedAsyncioTestCase):
         ssh_manager = FakeSshManager()
 
         with (
-            patch.object(screens_api.runtime, "config_manager", FakeConfigManager()),
-            patch.object(screens_api.runtime, "ssh_manager", ssh_manager),
+            patch.object(screens_api.runtime.get_runtime(), "config_manager", FakeConfigManager()),
+            patch.object(screens_api.runtime.get_runtime(), "ssh_manager", ssh_manager),
             # 健康检查始终不通过：进程虽在但投屏从未就绪。
             patch.object(
                 screens_api.DeviceUtils,

@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
-      # 双解释器审计（46.txt 评审要求）：只审计 3.11 解析会掩盖 3.10
+      # 双解释器审计：只审计 3.11 解析会掩盖 3.10
       # 运行基线的真实风险；3.10 腿带显式豁免清单，清单外新告警仍失败。
       fail-fast: false
       matrix:
@@ -114,7 +114,7 @@ jobs:
       - name: Ruff lint
         run: ruff check .
       - name: Vulture dead-code scan
-        # 审核第 22 项僵尸代码检测: min-confidence 90 只报 100% 置信度的
+        # 僵尸代码检测: min-confidence 90 只报 100% 置信度的
         # 未用局部变量; FastAPI/mock 误报在 tools/scripts/maintenance/vulture_allowlist.py。
         run: |
           python -m vulture features foundation worker_agent tools \

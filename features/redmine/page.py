@@ -16,7 +16,6 @@ PAGE_SCRIPTS = (
     "issues.js",
     "statistics.js",
     "knowledge.js",
-    "markdown-table.js",
     "daily-brief-diagnosis.js",
     "daily-brief-session.js",
     "daily-brief-timeline.js",
@@ -30,7 +29,7 @@ _ASSET_TYPES = {
     "daily-brief-session.css": "text/css",
 }
 _LEGACY_ASSETS = frozenset({
-    "page.js", "markdown-table.js", "daily-brief-diagnosis.js",
+    "page.js", "daily-brief-diagnosis.js",
     "daily-brief-session.js", "daily-brief-session.css", "daily-brief-timeline.js",
 })
 

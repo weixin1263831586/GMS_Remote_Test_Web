@@ -93,7 +93,14 @@ function aoaPlaybackButtonState() {
     buttons.pause.disabled = Boolean(aoaPanelState.playbackPending) || !active;
     const stop = aoaEl('aoa-record-stop');
     if (stop) {
-        stop.disabled = Boolean(aoaPanelState.playbackPending) || !active;
+        // 停止按钮语义随回放切换：回放激活时是「停止回放」，disabled 只由
+        // pending（控制请求在途）决定；非回放态是「停止录制」，可点性跟随
+        // 录制状态（busy 由 aoaSetBusy 统一禁用）。不能因 !active 一刀切
+        // 禁用——本函数在每次 aoaSetBusy 尾部执行，否则录制中第一次操作
+        // 完成后停止按钮即被永久禁用（录制无法停止）。
+        stop.disabled = active
+            ? Boolean(aoaPanelState.playbackPending)
+            : Boolean(aoaPanelState.running) || !aoaPanelState.recording;
         stop.classList.toggle('btn-danger', active);
         stop.classList.toggle('btn-xxs', true);
     }

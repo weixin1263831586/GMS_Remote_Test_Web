@@ -50,17 +50,18 @@ class LocalSuiteApiTests(unittest.IsolatedAsyncioTestCase):
             (tools / "subdir").mkdir(parents=True)
             (tools / "sample.apk").write_bytes(b"apk")
             manager = LocalConfigManager(str(root))
-            old_config = suites_api.runtime.config_manager
-            old_ssh = suites_api.runtime.ssh_manager
-            suites_api.runtime.config_manager = manager
-            suites_api.runtime.ssh_manager = FailingSshManager()
+            runtime_instance = suites_api.runtime.get_runtime()
+            old_config = runtime_instance.config_manager
+            old_ssh = runtime_instance.ssh_manager
+            suites_api.runtime.get_runtime().config_manager = manager
+            suites_api.runtime.get_runtime().ssh_manager = FailingSshManager()
             try:
                 response = await suites_api.list_suite_files(
                     suite_path=str(tools), path=""
                 )
             finally:
-                suites_api.runtime.config_manager = old_config
-                suites_api.runtime.ssh_manager = old_ssh
+                runtime_instance.config_manager = old_config
+                runtime_instance.ssh_manager = old_ssh
 
             payload = json.loads(response.body)
             self.assertTrue(payload["success"], payload)
@@ -77,10 +78,11 @@ class LocalSuiteApiTests(unittest.IsolatedAsyncioTestCase):
             report.parent.mkdir(parents=True)
             report.write_bytes(b"<html>local report</html>")
             manager = LocalConfigManager(str(root))
-            old_config = suites_api.runtime.config_manager
-            old_ssh = suites_api.runtime.ssh_manager
-            suites_api.runtime.config_manager = manager
-            suites_api.runtime.ssh_manager = FailingSshManager()
+            runtime_instance = suites_api.runtime.get_runtime()
+            old_config = runtime_instance.config_manager
+            old_ssh = runtime_instance.ssh_manager
+            suites_api.runtime.get_runtime().config_manager = manager
+            suites_api.runtime.get_runtime().ssh_manager = FailingSshManager()
             try:
                 response = await suites_api.download_suite_file(
                     suite_path=str(tools),
@@ -89,8 +91,8 @@ class LocalSuiteApiTests(unittest.IsolatedAsyncioTestCase):
                 )
                 body = await self._stream_body(response)
             finally:
-                suites_api.runtime.config_manager = old_config
-                suites_api.runtime.ssh_manager = old_ssh
+                runtime_instance.config_manager = old_config
+                runtime_instance.ssh_manager = old_ssh
 
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.headers["content-disposition"], "inline")
@@ -104,18 +106,19 @@ class LocalSuiteApiTests(unittest.IsolatedAsyncioTestCase):
             result_dir.mkdir(parents=True)
             (result_dir / "result.txt").write_text("local", encoding="utf-8")
             manager = LocalConfigManager(str(root))
-            old_config = suites_api.runtime.config_manager
-            old_ssh = suites_api.runtime.ssh_manager
-            suites_api.runtime.config_manager = manager
-            suites_api.runtime.ssh_manager = FailingSshManager()
+            runtime_instance = suites_api.runtime.get_runtime()
+            old_config = runtime_instance.config_manager
+            old_ssh = runtime_instance.ssh_manager
+            suites_api.runtime.get_runtime().config_manager = manager
+            suites_api.runtime.get_runtime().ssh_manager = FailingSshManager()
             try:
                 response = await suites_api.download_suite_directory(
                     suite_path=str(tools), path="results/run"
                 )
                 body = await self._stream_body(response)
             finally:
-                suites_api.runtime.config_manager = old_config
-                suites_api.runtime.ssh_manager = old_ssh
+                runtime_instance.config_manager = old_config
+                runtime_instance.ssh_manager = old_ssh
 
             self.assertEqual(response.status_code, 200)
             with zipfile.ZipFile(io.BytesIO(body)) as archive:
@@ -131,23 +134,24 @@ class LocalSuiteApiTests(unittest.IsolatedAsyncioTestCase):
             upload_dir = Path(tmp) / "uploads"
             manager = LocalConfigManager(str(root))
             captured = {}
+            runtime_instance = suites_api.runtime.get_runtime()
             old_values = (
-                suites_api.runtime.config_manager,
-                suites_api.runtime.ssh_manager,
-                suites_api.runtime.apk_upload_dir,
-                suites_api.runtime.apk_max_file_size,
-                suites_api.runtime.normalize_apk_filename,
-                suites_api.runtime.safe_join,
-                suites_api.runtime.create_apk_task,
+                runtime_instance.config_manager,
+                runtime_instance.ssh_manager,
+                runtime_instance.apk_upload_dir,
+                runtime_instance.apk_max_file_size,
+                runtime_instance.normalize_apk_filename,
+                runtime_instance.safe_join,
+                runtime_instance.create_apk_task,
                 suites_api.principal_owner_id,
             )
-            suites_api.runtime.config_manager = manager
-            suites_api.runtime.ssh_manager = FailingSshManager()
-            suites_api.runtime.apk_upload_dir = str(upload_dir)
-            suites_api.runtime.apk_max_file_size = 1024 * 1024
-            suites_api.runtime.normalize_apk_filename = os.path.basename
-            suites_api.runtime.safe_join = lambda base, name: os.path.join(base, name)
-            suites_api.runtime.create_apk_task = lambda *args: captured.setdefault("args", args)
+            runtime_instance.config_manager = manager
+            runtime_instance.ssh_manager = FailingSshManager()
+            runtime_instance.apk_upload_dir = str(upload_dir)
+            runtime_instance.apk_max_file_size = 1024 * 1024
+            runtime_instance.normalize_apk_filename = os.path.basename
+            runtime_instance.safe_join = lambda base, name: os.path.join(base, name)
+            runtime_instance.create_apk_task = lambda *args: captured.setdefault("args", args)
             # ADR 0010: the task must be owned by the resource owner account,
             # never the acting agent principal id, or the follow-up
             # /api/apk/analyze lookup (owner-filtered) returns 404.
@@ -161,13 +165,13 @@ class LocalSuiteApiTests(unittest.IsolatedAsyncioTestCase):
                 )
             finally:
                 (
-                    suites_api.runtime.config_manager,
-                    suites_api.runtime.ssh_manager,
-                    suites_api.runtime.apk_upload_dir,
-                    suites_api.runtime.apk_max_file_size,
-                    suites_api.runtime.normalize_apk_filename,
-                    suites_api.runtime.safe_join,
-                    suites_api.runtime.create_apk_task,
+                    runtime_instance.config_manager,
+                    runtime_instance.ssh_manager,
+                    runtime_instance.apk_upload_dir,
+                    runtime_instance.apk_max_file_size,
+                    runtime_instance.normalize_apk_filename,
+                    runtime_instance.safe_join,
+                    runtime_instance.create_apk_task,
                     suites_api.principal_owner_id,
                 ) = old_values
 
@@ -194,21 +198,22 @@ class LocalSuiteApiTests(unittest.IsolatedAsyncioTestCase):
             )
             os.chmod(launcher, 0o755)
             manager = LocalConfigManager(str(root))
-            old_config = transfers_api.runtime.config_manager
-            old_ssh = transfers_api.runtime.ssh_manager
-            old_help = transfers_api.runtime.generate_help_or_continue
-            transfers_api.runtime.config_manager = manager
-            transfers_api.runtime.ssh_manager = FailingSshManager()
-            transfers_api.runtime.generate_help_or_continue = lambda *_args: None
+            runtime_instance = transfers_api.runtime.get_runtime()
+            old_config = runtime_instance.config_manager
+            old_ssh = runtime_instance.ssh_manager
+            old_help = runtime_instance.generate_help_or_continue
+            runtime_instance.config_manager = manager
+            runtime_instance.ssh_manager = FailingSshManager()
+            runtime_instance.generate_help_or_continue = lambda *_args: None
             try:
                 response = await transfers_api.list_tradefed_results(
                     help=False,
                     req=TradefedListResultsRequest(suite_path=str(tools)),
                 )
             finally:
-                transfers_api.runtime.config_manager = old_config
-                transfers_api.runtime.ssh_manager = old_ssh
-                transfers_api.runtime.generate_help_or_continue = old_help
+                runtime_instance.config_manager = old_config
+                runtime_instance.ssh_manager = old_ssh
+                runtime_instance.generate_help_or_continue = old_help
 
             payload = json.loads(response.body)
             self.assertTrue(payload["success"])

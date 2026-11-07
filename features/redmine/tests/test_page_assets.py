@@ -50,9 +50,17 @@ def test_legacy_urls_work_without_loading_helpers_twice(client):
     assert legacy.status_code == 200
     assert "function loadStatistics" in legacy.text
     assert "function startDailyBriefRun" in legacy.text
-    for name in ("markdown-table.js", "daily-brief-session.js", "daily-brief-diagnosis.js"):
+    # markdown-table.js 已并入 core.js；其余 legacy 助手仍按原 URL 提供。
+    for name in ("daily-brief-session.js", "daily-brief-diagnosis.js"):
         helper = client.get(f"/redmine-agent/{name}")
         assert helper.status_code == 200
         assert helper.text == client.get(f"/redmine-agent/assets/{name}").text
         assert helper.text not in legacy.text
+    assert client.get("/redmine-agent/markdown-table.js").status_code == 404
     assert client.get("/redmine-agent/core.js").status_code == 404
+
+
+def test_merged_markdown_table_helper_serves_from_core_js(client):
+    core = client.get("/redmine-agent/assets/core.js")
+    assert core.status_code == 200
+    assert "function _splitMarkdownTableRow" in core.text

@@ -25,11 +25,11 @@ class TradefedTests(unittest.TestCase):
 
         old_manager = tradefed.runtime.ssh_manager
         fake_manager = FakeRuntimeSshManager()
-        tradefed.runtime.ssh_manager = fake_manager
+        tradefed.runtime.get_runtime().ssh_manager = fake_manager
         try:
             result = find_tradefed_binary(object(), "/tmp/suite with 'quote'/tools")
         finally:
-            tradefed.runtime.ssh_manager = old_manager
+            tradefed.runtime.get_runtime().ssh_manager = old_manager
 
         self.assertEqual(result, "/suite/tools/cts-tradefed")
         self.assertIn("find '/tmp/suite with '\"'\"'quote'\"'\"'/tools'", fake_manager.commands[0])

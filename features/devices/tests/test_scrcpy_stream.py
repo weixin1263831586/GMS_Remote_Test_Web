@@ -58,9 +58,11 @@ class FakeSocket:
 def fake_adb_env(monkeypatch):
     """桩掉 adb/Popen/socket：状态推进按真实协议（socket 名/握手/帧头）。"""
     state = SimpleNamespace(popen_cmds=[], push_calls=0, failed_once=False,
+                            adb_calls=[],
                             socket=SimpleNamespace(closed=False))
 
     def fake_adb(serial, *args, timeout=15):
+        state.adb_calls.append(" ".join(args))
         joined = " ".join(args)
         if joined.startswith("shell md5sum"):
             jar = server_jar_path().read_bytes()
@@ -287,6 +289,38 @@ def _auth(_request=None):
         state = type("S", (), {"current_user": user})()
 
     return FakeRequest()
+
+
+def test_session_keeps_screen_on_while_streaming_and_restores_on_stop(fake_adb_env):
+    """投屏会话保持设备屏幕常亮（svc power stayon usb），会话结束恢复默认熄屏。
+
+    录制全程需要观察画面：熄屏后编码器无帧，前端只能"等待设备画面"。
+    stayon usb 只在 USB 供电时生效，不改变无 USB 场景的熄屏策略。
+    """
+    scrcpy_stream.start_stream("ser-stayon")
+    session = scrcpy_stream.get_stream("ser-stayon")
+    assert session.stayon_active is True
+    assert "shell svc power stayon usb" in session_calls(fake_adb_env)
+
+    scrcpy_stream.stop_stream("ser-stayon")
+    assert session.stayon_active is False
+    assert "shell svc power stayon false" in session_calls(fake_adb_env)
+
+
+def test_screen_on_restore_is_idempotent_across_teardowns(fake_adb_env):
+    """候选链失败/重复 teardown 只恢复一次熄屏，不重复下发。"""
+    scrcpy_stream.start_stream("ser-idem")
+    session = scrcpy_stream.get_stream("ser-idem")
+    session._teardown_processes(restore_stayon=True)
+    session._teardown_processes(restore_stayon=True)
+    session.stop()
+    restores = [call for call in session_calls(fake_adb_env)
+                if "svc power stayon false" in call]
+    assert len(restores) == 1, session_calls(fake_adb_env)
+
+
+def session_calls(state):
+    return state.adb_calls
 
 
 def test_stream_start_stop_routes(client, monkeypatch):

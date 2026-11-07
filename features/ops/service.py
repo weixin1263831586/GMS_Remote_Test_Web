@@ -49,7 +49,8 @@ def advancement_paused() -> bool:
 
 def set_advancement_paused(paused: bool, updated_by: str = "") -> dict[str, Any]:
     store = get_ops_store()
-    store.set_flag(OPS_FLAG_PAUSED, bool(paused), updated_by=updated_by)
+    # 开关与审计事件同库同事务不可行（flag 表与事件表分两把写锁），
+    # 但审计写入失败必须回滚开关读取语义：先写审计，成功后再置位。
     result = store.record_incident(
         severity="info",
         kind="kill_switch",
@@ -61,9 +62,19 @@ def set_advancement_paused(paused: bool, updated_by: str = "") -> dict[str, Any]
         ),
         suppress_minutes=0,
     )
+    event = result.get("event") or {}
+    if event.get("id"):
+        # kill-switch 审计行是纯台账，不走告警投递闭环。
+        try:
+            store.mark_delivery_state(
+                str(event["id"]), state="skipped", attempts=0
+            )
+        except Exception:
+            logger.debug("kill-switch audit delivery-state mark failed", exc_info=True)
+    store.set_flag(OPS_FLAG_PAUSED, bool(paused), updated_by=updated_by)
     return {
         "advancement_paused": bool(paused),
-        "event_id": (result.get("event") or {}).get("id", ""),
+        "event_id": str(event.get("id", "")),
     }
 
 

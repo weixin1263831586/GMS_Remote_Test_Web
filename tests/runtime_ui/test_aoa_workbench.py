@@ -107,6 +107,8 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
             page.locator("#aoa-replay-device").select_option("TARGET-2")
             page.locator("#aoa-record-start").click()
             expect(page.locator("#aoa-screen-image")).to_be_visible()
+            # 停止按钮在录制开始后立即可点。
+            expect(page.locator("#aoa-record-stop")).to_be_enabled()
             page.evaluate("aoaExecuteRecorderInput({action: 'tap', x: 400, y: 640})")
             expect(page.locator("#aoa-command-count")).to_have_text("2")
             expect(page.locator("#aoa-command-list")).to_contain_text("click 180 320")
@@ -122,10 +124,19 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
                                 - idx.getBoundingClientRect().top) < 2;
             }""")
             self.assertTrue(row_layout, "index and command must render on one line")
+            # 回归：第一次输入完成（busy 周期结束触发 aoaPlaybackButtonState）
+            # 后停止按钮必须仍可点——非回放态曾被一刀切禁用，录制无法停止。
+            expect(page.locator("#aoa-record-stop")).to_be_enabled()
 
             page.locator("#aoa-profile-name").fill("RK3562 USB 调试恢复")
             page.get_by_role("button", name="保存当前命令").click()
             expect(page.locator("#aoa-replay-profile")).to_have_value("profile-1")
+
+            # 停止录制：命令保留，回放仍可用；按钮态复位。
+            page.locator("#aoa-record-stop").click()
+            expect(page.locator("#aoa-record-state")).to_have_text("已停止 · 2 条命令")
+            expect(page.locator("#aoa-record-start")).to_be_enabled()
+            expect(page.locator("#aoa-record-stop")).to_be_disabled()
 
             page.evaluate("window.showConfirmDialog = async () => true")
             page.get_by_role("button", name="开始回放").click()

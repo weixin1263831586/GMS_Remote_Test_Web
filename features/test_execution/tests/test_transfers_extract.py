@@ -175,10 +175,11 @@ class RemoteSuiteExtractTests(unittest.IsolatedAsyncioTestCase):
                     return CommandResult(stdout="", stderr="", code=0)
                 return CommandResult(stdout="extracted", stderr="", code=0)
 
-        old_config = transfers_api.runtime.config_manager
-        old_ssh = transfers_api.runtime.ssh_manager
-        transfers_api.runtime.config_manager = ConfigManager()
-        transfers_api.runtime.ssh_manager = SshManager()
+        runtime_instance = transfers_api.runtime.get_runtime()
+        old_config = runtime_instance.config_manager
+        old_ssh = runtime_instance.ssh_manager
+        transfers_api.runtime.get_runtime().config_manager = ConfigManager()
+        transfers_api.runtime.get_runtime().ssh_manager = SshManager()
         try:
             response = await extract_test_suite_archive(SuiteExtractRequest(
                 archive_path="/srv/suites/cts.zip",
@@ -186,8 +187,8 @@ class RemoteSuiteExtractTests(unittest.IsolatedAsyncioTestCase):
                 target_dir_name="cts",
             ))
         finally:
-            transfers_api.runtime.config_manager = old_config
-            transfers_api.runtime.ssh_manager = old_ssh
+            runtime_instance.config_manager = old_config
+            runtime_instance.ssh_manager = old_ssh
 
         payload = json.loads(response.body)
         self.assertTrue(payload["success"])
@@ -227,10 +228,11 @@ class RemoteSuiteDownloadTests(unittest.IsolatedAsyncioTestCase):
             def is_config_host_local(self, _config):
                 return False
 
+        runtime_instance = transfers_api.runtime.get_runtime()
         old = (
-            transfers_api.runtime.config_manager,
-            transfers_api.runtime.ssh_manager,
-            transfers_api.runtime.get_client_id_from_request,
+            runtime_instance.config_manager,
+            runtime_instance.ssh_manager,
+            runtime_instance.get_client_id_from_request,
         )
 
         # 类体里不能直接引用闭包参数（类作用域不做闭包查找），经中间
@@ -245,9 +247,9 @@ class RemoteSuiteDownloadTests(unittest.IsolatedAsyncioTestCase):
             def get_client_id_from_request(_request):
                 return "tester-client"
 
-        transfers_api.runtime.config_manager = Runtime.config_manager
-        transfers_api.runtime.ssh_manager = Runtime.ssh_manager
-        transfers_api.runtime.get_client_id_from_request = (
+        transfers_api.runtime.get_runtime().config_manager = Runtime.config_manager
+        transfers_api.runtime.get_runtime().ssh_manager = Runtime.ssh_manager
+        transfers_api.runtime.get_runtime().get_client_id_from_request = (
             Runtime.get_client_id_from_request
         )
         return old
@@ -281,8 +283,9 @@ class RemoteSuiteDownloadTests(unittest.IsolatedAsyncioTestCase):
                     SuiteDownloadRequest(url="https://example.com/suite.zip"),
                 )
             finally:
-                transfers_api.runtime.config_manager, transfers_api.runtime.ssh_manager, \
-                transfers_api.runtime.get_client_id_from_request = old
+                runtime = transfers_api.runtime.get_runtime()
+                runtime.config_manager, runtime.ssh_manager, \
+                    runtime.get_client_id_from_request = old
 
         payload = json.loads(response.body)
         self.assertTrue(payload["success"], payload)
@@ -307,8 +310,9 @@ class RemoteSuiteDownloadTests(unittest.IsolatedAsyncioTestCase):
                     SuiteDownloadRequest(url="https://example.com/suite.zip"),
                 )
             finally:
-                transfers_api.runtime.config_manager, transfers_api.runtime.ssh_manager, \
-                transfers_api.runtime.get_client_id_from_request = old
+                runtime = transfers_api.runtime.get_runtime()
+                runtime.config_manager, runtime.ssh_manager, \
+                    runtime.get_client_id_from_request = old
 
         self.assertEqual(response.status_code, 500)
         payload = json.loads(response.body)

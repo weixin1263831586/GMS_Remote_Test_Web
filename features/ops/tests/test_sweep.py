@@ -37,6 +37,74 @@ class SweepTests(unittest.TestCase):
             self.assertEqual(second["notified"], 0)  # dedup suppresses notify
             notify.assert_called_once()
 
+    def test_failed_delivery_is_retried_with_backoff_and_closed_loop(self):
+        # 发送失败的事件必须进 pending/failed 状态并在后续
+        # sweep 重试；成功后写 notified_at 形成闭环。
+        with TemporaryDirectory() as tmp:
+            store = OpsStore(Path(tmp) / "ops.sqlite3")
+            cfg = {
+                "enabled": True, "webhook_url": "https://x", "email_to": "",
+                "suppress_minutes": 60, "consecutive_failure_threshold": 3,
+                "min_free_gb": 20,
+            }
+            with mock.patch(
+                "features.ops.sweep.notify_incident",
+                return_value={"ok": False},
+            ), mock.patch(
+                "features.ops.service.get_ops_store", return_value=store
+            ):
+                run_ops_sweep(cfg)
+                pending = store.pending_events()
+                self.assertEqual(len(pending), 1)
+                self.assertEqual(pending[0]["notify_state"], "failed")
+                self.assertEqual(pending[0]["notify_attempts"], 1)
+
+            # 退避窗口内不重试（attempts=1 → 至少等 60s）。
+            with mock.patch(
+                "features.ops.sweep.notify_incident",
+                return_value={"ok": True},
+            ) as notify, mock.patch(
+                "features.ops.service.get_ops_store", return_value=store
+            ):
+                result = run_ops_sweep(cfg)
+            notify.assert_not_called()
+            self.assertEqual(result["notified"], 0)
+
+            # 把 failed 事件的 created_at 拨回模拟退避到期 → 重试成功 →
+            # sent 闭环。同时快照仍含同 dedup_key 的活跃 incident，且原事件
+            # 已超出抑制窗口：会重新入库一条新事件并立即投递（重报语义），
+            # 因此 notify 恰好调用两次：重试的旧行 + 新行。
+            import sqlite3
+
+            with sqlite3.connect(str(Path(tmp) / "ops.sqlite3")) as conn:
+                conn.execute("UPDATE ops_events SET created_at='2020-01-01T00:00:00Z'")
+            with mock.patch(
+                "features.ops.sweep.notify_incident",
+                return_value={"ok": True},
+            ) as notify, mock.patch(
+                "features.ops.service.get_ops_store", return_value=store
+            ):
+                result = run_ops_sweep(cfg)
+            self.assertEqual(notify.call_count, 2)
+            self.assertEqual(result["notified"], 2)
+            self.assertEqual(store.pending_events(), [])
+            states = sorted(e["notify_state"] for e in store.list_events())
+            self.assertEqual(states, ["sent", "sent"])
+            self.assertTrue(all(e["notified_at"] for e in store.list_events()))
+
+    def test_kill_switch_audit_row_never_enters_delivery(self):
+        # kill-switch 审计行是台账，不是告警：不进投递闭环。
+        from features.ops import service as ops_service
+
+        with TemporaryDirectory() as tmp:
+            store = OpsStore(Path(tmp) / "ops.sqlite3")
+            with mock.patch(
+                "features.ops.service.get_ops_store", return_value=store
+            ):
+                ops_service.set_advancement_paused(True, updated_by="tester")
+            self.assertEqual(store.pending_events(), [])
+            self.assertEqual(store.list_events()[0]["notify_state"], "skipped")
+
     def test_sweep_never_raises_on_snapshot_failure(self):
         with mock.patch(
             "features.ops.sweep.build_snapshot",

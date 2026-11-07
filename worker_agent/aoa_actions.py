@@ -608,10 +608,20 @@ def _calibrate_touch_affine(
 
     探针只在专用安全 Activity 中执行；五点拟合后额外测量两个独立点。
     Activity 不可用时不进行 USB/HID 注入，也不在普通页面降级探测。
+
+    仅 CalibrationSurfaceUnavailableError（Activity 拉不起来，应用缺失）原样
+    上抛：结构化引导场景，record_aoa_input 据此产出
+    calibration_app_missing 一键部署回执——吞成 None 会退化为笼统的
+    「AOA 标定失败」兜底文案（实机 66df75a34ebde4a4 回归）。界面被
+    遮挡/失焦等运行态失败仍返回 None，由调用方退回按轴/估算映射。
     """
     from foundation.aoa_calibration import mapping_from_samples
 
-    from .aoa_calibration import open_calibration_surface, verify_calibration_surface
+    from .aoa_calibration import (
+        CalibrationSurfaceUnavailableError,
+        open_calibration_surface,
+        verify_calibration_surface,
+    )
 
     validation_probes = [(120, 213), (240, 427)]
     probes = calibration_probe_points() + validation_probes
@@ -671,6 +681,12 @@ def _calibrate_touch_affine(
             serial, mapping.effective_policy, mapping.rms_error_px,
             mapping.max_error_px)
         return mapping
+    except CalibrationSurfaceUnavailableError:
+        # 启动失败（应用缺失）：一键部署引导依赖这个异常，不吞（finally
+        # 仍会执行设备状态恢复）。内层 re-raise 会被本 try 的通用
+        # except 再捕获，必须在这里优先放行。界面被遮挡/失焦的
+        # ValueError 保持吞掉语义（focus 合同：不发探针、不重置 USB）。
+        raise
     except Exception as exc:
         logger.warning("AOA affine calibration failed on %s: %s", serial, exc)
         return None

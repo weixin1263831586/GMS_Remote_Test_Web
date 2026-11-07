@@ -33,8 +33,8 @@ class TestDurableStartTests(unittest.IsolatedAsyncioTestCase):
             cluster_api.cluster_service = service
             try:
                 with (
-                    patch.object(execution_api.runtime, 'generate_help_or_continue', return_value=None),
-                    patch.object(execution_api.runtime, 'get_client_id_from_request', return_value='alice'),
+                    patch.object(execution_api.runtime.get_runtime(), 'generate_help_or_continue', return_value=None),
+                    patch.object(execution_api.runtime.get_runtime(), 'get_client_id_from_request', return_value='alice'),
                 ):
                     result = await execution_api.start_test(
                         SimpleNamespace(),
@@ -58,9 +58,9 @@ class TestDurableStartTests(unittest.IsolatedAsyncioTestCase):
             sentinel = {"success": True, "cluster_job_id": "job-1"}
             try:
                 with (
-                    patch.object(execution_api.runtime, 'generate_help_or_continue', return_value=None),
-                    patch.object(execution_api.runtime, 'get_client_id_from_request', return_value='alice'),
-                    patch.object(execution_api.runtime, 'start_cluster_test', return_value=sentinel) as start,
+                    patch.object(execution_api.runtime.get_runtime(), 'generate_help_or_continue', return_value=None),
+                    patch.object(execution_api.runtime.get_runtime(), 'get_client_id_from_request', return_value='alice'),
+                    patch.object(execution_api.runtime.get_runtime(), 'start_cluster_test', return_value=sentinel) as start,
                 ):
                     result = await execution_api.start_test(
                         SimpleNamespace(),
@@ -108,12 +108,12 @@ class TestDurableStartTests(unittest.IsolatedAsyncioTestCase):
             try:
                 with (
                     patch.object(
-                        execution_api.runtime,
+                        execution_api.runtime.get_runtime(),
                         "generate_help_or_continue",
                         return_value=None,
                     ),
                     patch.object(
-                        execution_api.runtime,
+                        execution_api.runtime.get_runtime(),
                         "start_cluster_test",
                         return_value=sentinel,
                     ) as start,
@@ -148,9 +148,9 @@ class TestDurableStartTests(unittest.IsolatedAsyncioTestCase):
             sentinel = {"success": True, "cluster_job_id": "job-local"}
             try:
                 with (
-                    patch.object(execution_api.runtime, "generate_help_or_continue", return_value=None),
-                    patch.object(execution_api.runtime, "get_client_id_from_request", return_value="alice"),
-                    patch.object(execution_api.runtime, "start_cluster_test", return_value=sentinel) as start,
+                    patch.object(execution_api.runtime.get_runtime(), "generate_help_or_continue", return_value=None),
+                    patch.object(execution_api.runtime.get_runtime(), "get_client_id_from_request", return_value="alice"),
+                    patch.object(execution_api.runtime.get_runtime(), "start_cluster_test", return_value=sentinel) as start,
                 ):
                     result = await execution_api.start_test(
                         SimpleNamespace(),
@@ -164,10 +164,10 @@ class TestDurableStartTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_start_never_falls_back_to_process_local_task(self):
         with (
-            patch.object(execution_api.runtime, 'generate_help_or_continue', return_value=None),
-            patch.object(execution_api.runtime, 'get_client_id_from_request', return_value='alice'),
+            patch.object(execution_api.runtime.get_runtime(), 'generate_help_or_continue', return_value=None),
+            patch.object(execution_api.runtime.get_runtime(), 'get_client_id_from_request', return_value='alice'),
             patch('features.cluster.get_cluster_service', side_effect=RuntimeError('cluster unavailable')),
-            patch.object(execution_api.runtime, 'start_cluster_test') as start,
+            patch.object(execution_api.runtime.get_runtime(), 'start_cluster_test') as start,
         ):
             result = await execution_api.start_test(
                 SimpleNamespace(),
@@ -189,9 +189,9 @@ class TestDurableStartTests(unittest.IsolatedAsyncioTestCase):
             cluster_api.cluster_service = ClusterService(repository)
             try:
                 with (
-                    patch.object(execution_api.runtime, "generate_help_or_continue", return_value=None),
-                    patch.object(execution_api.runtime, "get_client_id_from_request", return_value="alice"),
-                    patch.object(execution_api.runtime, "start_cluster_test") as start,
+                    patch.object(execution_api.runtime.get_runtime(), "generate_help_or_continue", return_value=None),
+                    patch.object(execution_api.runtime.get_runtime(), "get_client_id_from_request", return_value="alice"),
+                    patch.object(execution_api.runtime.get_runtime(), "start_cluster_test") as start,
                 ):
                     result = await execution_api.start_test(
                         SimpleNamespace(),

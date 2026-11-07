@@ -49,3 +49,31 @@ def advancement_paused() -> bool:
     if _advancement_gate is None:
         return False
     return bool(_advancement_gate())
+
+
+ActiveRunIdsProvider = Callable[[], set[str]]
+
+_active_run_ids_provider: ActiveRunIdsProvider | None = None
+
+
+def configure_active_run_ids_provider(
+    provider: ActiveRunIdsProvider | None,
+) -> None:
+    """Register or clear the non-terminal automation run-id provider."""
+    global _active_run_ids_provider
+    _active_run_ids_provider = provider
+
+
+def active_run_ids() -> set[str] | None:
+    """Run IDs still queued/in-flight; ``None`` when the lookup fails.
+
+    Ops disk hygiene consumes this to skip staged firmware a live run may
+    replay (fail-closed). An unconfigured provider also returns ``None`` so
+    cleanup never guesses "nothing is referenced".
+    """
+    if _active_run_ids_provider is None:
+        return None
+    try:
+        return _active_run_ids_provider()
+    except Exception:
+        return None

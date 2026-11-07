@@ -114,7 +114,10 @@ def test_local_configuration_is_ignored_but_source_templates_are_visible(tmp_pat
         "configs/worker_tokens.json", "configs/certs/test.key", "configs/config.json.bak",
         "configs/cluster.local.json", "configs/examples/local-secret.json",
         "configs/cluster.json", "configs/local/config.json", "configs/secrets/environment.json",
+        # AOA recordings are site-local data: any JSON dropped into the aoa
+        # examples directory stays untracked (only the README is visible).
         "configs/examples/aoa/local-secret.json", "configs/examples/aoa/local-secret.key",
+        "configs/examples/aoa/rk3576-ss17-wizard-to-usb-debug.json",
         "data/settings/preferences.json", "data/config-migration-backups/original.json",
     ]
     source_paths = ["configs/README.md", *(
@@ -123,7 +126,6 @@ def test_local_configuration_is_ignored_but_source_templates_are_visible(tmp_pat
     )]
     source_paths.extend([
         "configs/examples/aoa/README.md",
-        "configs/examples/aoa/rk3576-ss17-wizard-to-usb-debug.json",
     ])
     result = subprocess.run(
         ["git", "check-ignore", "--no-index", "--stdin"], cwd=tmp_path,

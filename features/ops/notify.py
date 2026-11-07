@@ -28,13 +28,38 @@ WEBHOOK_TIMEOUT_SECONDS = 10.0
 
 
 def load_ops_alerts_config() -> dict[str, Any]:
-    """Read the ``ops_alerts`` block with environment overrides."""
+    """Read the ``ops_alerts`` block with environment overrides.
+
+    数值字段转换放在各自 try 块内：单个坏值只回退默认值，不让一处
+    配置错误拖垮整个告警通道。
+    """
     import os
 
     from foundation.config import config_manager
 
     raw = config_manager.load_config().get("ops_alerts", {})
     cfg = raw if isinstance(raw, dict) else {}
+
+    def _env_int(env_key: str, cfg_key: str, default: int, minimum: int) -> int:
+        try:
+            return max(minimum, int(os.getenv(env_key, str(cfg.get(cfg_key, default)))))
+        except (TypeError, ValueError):
+            logger.warning(
+                "ops_alerts.%s is not an integer (%r); using default %s",
+                cfg_key, cfg.get(cfg_key), default,
+            )
+            return default
+
+    def _env_float(env_key: str, cfg_key: str, default: float) -> float:
+        try:
+            return max(0.0, float(os.getenv(env_key, str(cfg.get(cfg_key, default)))))
+        except (TypeError, ValueError):
+            logger.warning(
+                "ops_alerts.%s is not a number (%r); using default %s",
+                cfg_key, cfg.get(cfg_key), default,
+            )
+            return default
+
     return {
         "enabled": str(
             os.getenv("GMS_OPS_ALERTS_ENABLED", str(cfg.get("enabled", False)))
@@ -47,18 +72,16 @@ def load_ops_alerts_config() -> dict[str, Any]:
             "GMS_OPS_ALERTS_TOKEN_FILE", str(cfg.get("webhook_token_file", ""))
         ),
         "email_to": os.getenv("GMS_OPS_ALERTS_EMAIL_TO", str(cfg.get("email_to", ""))),
-        "suppress_minutes": max(0, int(
-            os.getenv("GMS_OPS_ALERTS_SUPPRESS_MINUTES", str(cfg.get("suppress_minutes", 60)))
-        )),
-        "consecutive_failure_threshold": max(1, int(
-            os.getenv(
-                "GMS_OPS_ALERTS_CONSECUTIVE_FAILURES",
-                str(cfg.get("consecutive_failure_threshold", 3)),
-            )
-        )),
-        "min_free_gb": max(0.0, float(
-            os.getenv("GMS_OPS_ALERTS_MIN_FREE_GB", str(cfg.get("min_free_gb", 20)))
-        )),
+        "suppress_minutes": _env_int(
+            "GMS_OPS_ALERTS_SUPPRESS_MINUTES", "suppress_minutes", 60, 0
+        ),
+        "consecutive_failure_threshold": _env_int(
+            "GMS_OPS_ALERTS_CONSECUTIVE_FAILURES",
+            "consecutive_failure_threshold", 3, 1,
+        ),
+        "min_free_gb": _env_float(
+            "GMS_OPS_ALERTS_MIN_FREE_GB", "min_free_gb", 20
+        ),
     }
 
 
@@ -104,10 +127,36 @@ def _load_webhook_token(token_file: str) -> bytes:
         return b""
 
 
+def _validate_webhook_url(url: str) -> str | None:
+    """Basic outbound guard: only https (or http for local test rigs).
+
+    返回 None 表示合法；否则返回拒绝原因。仓库其余出站访问同样只允许
+    https/受限 http；告警 webhook 不做内网豁免，避免配置把告警引流到
+    未预期的端点。
+    """
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return "unparsable webhook_url"
+    if parsed.scheme not in ("https", "http"):
+        return f"unsupported scheme: {parsed.scheme!r}"
+    if not parsed.hostname:
+        return "webhook_url has no host"
+    if parsed.scheme == "http" and parsed.hostname not in ("localhost", "127.0.0.1"):
+        return "plain http is only allowed for localhost"
+    return None
+
+
 def send_webhook(incident: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     url = str(cfg.get("webhook_url") or "")
     if not url:
         return {"transport": "webhook", "sent": False, "reason": "no webhook_url"}
+    rejected = _validate_webhook_url(url)
+    if rejected:
+        logger.warning("ops webhook_url rejected: %s", rejected)
+        return {"transport": "webhook", "sent": False, "reason": rejected}
     fmt = str(cfg.get("webhook_format") or "generic")
     if fmt not in WEBHOOK_FORMATS:
         fmt = "generic"
@@ -120,7 +169,11 @@ def send_webhook(incident: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any
     try:
         import httpx
 
-        response = httpx.post(url, content=body, headers=headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
+        # follow_redirects=False：告警端点不应被 3xx 引流到其他主机。
+        response = httpx.post(
+            url, content=body, headers=headers,
+            timeout=WEBHOOK_TIMEOUT_SECONDS, follow_redirects=False,
+        )
         sent = response.status_code < 400
         return {
             "transport": "webhook",

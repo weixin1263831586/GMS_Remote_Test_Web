@@ -211,14 +211,14 @@ async def test_local_usbip_partial_disconnect_preserves_sibling_assignment_and_s
         device_cache_lock=threading.RLock(),
     )
 
-    with patch.object(integrations.runtime, "global_state", global_state), patch.object(
-        integrations.runtime, "config_manager", ConfigManager()
+    with patch.object(integrations.runtime.get_runtime(), "global_state", global_state), patch.object(
+        integrations.runtime.get_runtime(), "config_manager", ConfigManager()
     ), patch.object(
-        integrations.runtime, "ssh_manager", ssh_manager
+        integrations.runtime.get_runtime(), "ssh_manager", ssh_manager
     ), patch.object(
-        integrations.runtime, "get_client_id_from_request", return_value=device_host
+        integrations.runtime.get_runtime(), "get_client_id_from_request", return_value=device_host
     ), patch.object(
-        integrations.runtime, "resolve_tailscale_device_host", return_value=(None, None)
+        integrations.runtime.get_runtime(), "resolve_tailscale_device_host", return_value=(None, None)
     ), patch.object(
         cluster_module, "get_cluster_service", return_value=fake_cluster
     ), patch("features.devices.usbip_disconnect_api.DeviceSSHConnection", DeviceConnection
@@ -265,7 +265,7 @@ def test_partial_disconnect_error_preserves_sibling_source_state():
         usbip_states_lock=threading.RLock(),
     )
 
-    with patch.object(integrations.runtime, "global_state", global_state):
+    with patch.object(integrations.runtime.get_runtime(), "global_state", global_state):
         integrations._mark_usbip_source_disconnected(
             device_host,
             has_remaining_assignments=True,
@@ -298,7 +298,7 @@ def test_unconfirmed_remote_detach_leaves_assignment_retryable():
             runtime_config.update(updates)
             return True
 
-    with patch.object(usbip_assignments.runtime, "config_manager", ConfigManager()):
+    with patch.object(usbip_assignments.runtime.get_runtime(), "config_manager", ConfigManager()):
         usbip_assignments.mark_usbip_detach_unknown(
             device_host, ["1-1"], "worker-1", 7
         )

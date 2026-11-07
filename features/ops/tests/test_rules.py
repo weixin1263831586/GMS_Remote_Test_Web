@@ -25,6 +25,29 @@ class RuleEngineTests(unittest.TestCase):
         self.assertEqual(incidents[0]["kind"], "consecutive_failures")
         self.assertEqual(incidents[0]["severity"], "critical")
 
+    def test_consecutive_test_failed_triggers_and_independent_profiles(self):
+        # test_failed 曾被遗漏：连续三次测试失败必须触发告警。
+        runs = [{"profile_id": "p", "status": "test_failed"} for _ in range(3)]
+        incidents = evaluate({"recent_runs": runs})
+        self.assertEqual(len(incidents), 1)
+        self.assertEqual(incidents[0]["kind"], "consecutive_failures")
+        self.assertEqual(incidents[0]["subject"], "p")
+        self.assertEqual(incidents[0]["severity"], "critical")
+
+        # 成功运行打断连败；不同 profile 各自独立计数。
+        mixed = [
+            {"profile_id": "p", "status": "test_failed"},
+            {"profile_id": "p", "status": "test_failed"},
+            {"profile_id": "p", "status": "completed"},
+            {"profile_id": "p", "status": "test_failed"},
+            {"profile_id": "q", "status": "test_failed"},
+            {"profile_id": "q", "status": "test_failed"},
+            {"profile_id": "q", "status": "test_failed"},
+        ]
+        incidents = evaluate({"recent_runs": mixed})
+        self.assertEqual(len(incidents), 1)
+        self.assertEqual(incidents[0]["subject"], "q")
+
     def test_success_run_breaks_streak(self):
         runs = [{"profile_id": "p", "status": s} for s in (
             "flash_failed", "flash_failed", "completed", "flash_failed",

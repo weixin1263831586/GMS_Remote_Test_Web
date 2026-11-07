@@ -303,12 +303,14 @@ def save_smtp_config(body: SmtpConfigRequest, admin: CurrentUser = Depends(requi
         "from_addr": (body.from_addr.strip() or body.username.strip()),
         "sender_name": " ".join(body.sender_name.split()),
     })
-    if body.smtp_port == 465:
+    if body.use_ssl:
+        # 按提交值建模：SSL 显式写 use_ssl；非 SSL 端口记录
+        # use_tls（STARTTLS）。service 端回读时以存储值优先，不再只按端口推断。
         email["use_ssl"] = True
         email.pop("use_tls", None)
     else:
+        email["use_ssl"] = False
         email["use_tls"] = True
-        email.pop("use_ssl", None)
     if body.password and body.password != SECRET_MASK:
         email["encrypted_password"] = encrypt_secret(body.password)
     email.pop("password", None)  # 历史遗留明文字段一律清除

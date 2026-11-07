@@ -26,7 +26,7 @@ async def test_release_matches_host_and_busid_as_one_route_target():
     execute = MagicMock(side_effect=command_results)
     ssh_manager = SimpleNamespace(execute_command=execute)
     with patch.object(
-        usbip_transport.runtime, "ssh_manager", ssh_manager
+        usbip_transport.runtime.get_runtime(), "ssh_manager", ssh_manager
     ), patch(
         "features.devices.parse_usbip_port_entries",
         side_effect=[initial_entries, []],

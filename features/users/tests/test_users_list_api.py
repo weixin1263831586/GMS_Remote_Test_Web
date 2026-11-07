@@ -30,10 +30,10 @@ class UsersListApiTests(unittest.TestCase):
 
         old_config_manager = clients.runtime.config_manager
         old_global_state = clients.runtime.global_state
-        clients.runtime.config_manager = SimpleNamespace(
+        clients.runtime.get_runtime().config_manager = SimpleNamespace(
             load_config=lambda: {"client_hosts": {"172.16.14.66": "hcq"}}
         )
-        clients.runtime.global_state = SimpleNamespace(
+        clients.runtime.get_runtime().global_state = SimpleNamespace(
             user_states={
                 "N387pLbIBhpMw5JsWUL9hg": {
                     "client_username": "hcq",
@@ -65,8 +65,8 @@ class UsersListApiTests(unittest.TestCase):
                     "hcq@172.16.14.66",
                 )
         finally:
-            clients.runtime.config_manager = old_config_manager
-            clients.runtime.global_state = old_global_state
+            clients.runtime.get_runtime().config_manager = old_config_manager
+            clients.runtime.get_runtime().global_state = old_global_state
 
     def test_configured_active_user_keeps_configured_flag(self):
         import features.users.users_api as users_api
@@ -98,8 +98,8 @@ class UsersListApiTests(unittest.TestCase):
             user_states_lock=threading.Lock(),
         )
 
-        users_api.runtime.config_manager = FakeConfigManager()
-        users_api.runtime.global_state = fake_state
+        users_api.runtime.get_runtime().config_manager = FakeConfigManager()
+        users_api.runtime.get_runtime().global_state = fake_state
         try:
             with patch(
                 "features.cluster.get_cluster_service",
@@ -107,8 +107,8 @@ class UsersListApiTests(unittest.TestCase):
             ):
                 resp = asyncio.run(users_api.list_users())
         finally:
-            users_api.runtime.config_manager = old_config_manager
-            users_api.runtime.global_state = old_global_state
+            users_api.runtime.get_runtime().config_manager = old_config_manager
+            users_api.runtime.get_runtime().global_state = old_global_state
 
         body = json.loads(resp.body.decode("utf-8"))
         self.assertEqual(body["total"], 1)
@@ -124,10 +124,10 @@ class UsersListApiTests(unittest.TestCase):
         old_config_manager = users_api.runtime.config_manager
         old_global_state = users_api.runtime.global_state
         now = datetime.now().isoformat()
-        users_api.runtime.config_manager = SimpleNamespace(
+        users_api.runtime.get_runtime().config_manager = SimpleNamespace(
             load_config=lambda: {"client_hosts": {}, "vpn_gateways": []}
         )
-        users_api.runtime.global_state = SimpleNamespace(
+        users_api.runtime.get_runtime().global_state = SimpleNamespace(
             user_states={
                 "agent:agt_8642a1e1e838168e": {
                     "running": False,
@@ -158,8 +158,8 @@ class UsersListApiTests(unittest.TestCase):
             ):
                 resp = asyncio.run(users_api.list_users())
         finally:
-            users_api.runtime.config_manager = old_config_manager
-            users_api.runtime.global_state = old_global_state
+            users_api.runtime.get_runtime().config_manager = old_config_manager
+            users_api.runtime.get_runtime().global_state = old_global_state
 
         body = json.loads(resp.body.decode("utf-8"))
         self.assertEqual(body["total"], 1)
@@ -170,13 +170,13 @@ class UsersListApiTests(unittest.TestCase):
 
         old_config_manager = users_api.runtime.config_manager
         old_global_state = users_api.runtime.global_state
-        users_api.runtime.config_manager = SimpleNamespace(
+        users_api.runtime.get_runtime().config_manager = SimpleNamespace(
             load_config=lambda: {
                 "client_hosts": {"172.16.14.80": "offline-user"},
                 "vpn_gateways": [],
             }
         )
-        users_api.runtime.global_state = SimpleNamespace(
+        users_api.runtime.get_runtime().global_state = SimpleNamespace(
             user_states={},
             user_states_lock=threading.Lock(),
         )
@@ -187,8 +187,8 @@ class UsersListApiTests(unittest.TestCase):
             ):
                 resp = asyncio.run(users_api.list_users())
         finally:
-            users_api.runtime.config_manager = old_config_manager
-            users_api.runtime.global_state = old_global_state
+            users_api.runtime.get_runtime().config_manager = old_config_manager
+            users_api.runtime.get_runtime().global_state = old_global_state
 
         body = json.loads(resp.body.decode("utf-8"))
         self.assertEqual(body["users"][0]["status"], "offline")
@@ -199,10 +199,10 @@ class UsersListApiTests(unittest.TestCase):
 
         old_config_manager = users_api.runtime.config_manager
         old_global_state = users_api.runtime.global_state
-        users_api.runtime.config_manager = SimpleNamespace(
+        users_api.runtime.get_runtime().config_manager = SimpleNamespace(
             load_config=lambda: {"client_hosts": {}, "vpn_gateways": []}
         )
-        users_api.runtime.global_state = SimpleNamespace(
+        users_api.runtime.get_runtime().global_state = SimpleNamespace(
             user_states={
                 "temporary-user-id": {
                     "client_username": "172.16.14.246",
@@ -252,8 +252,8 @@ class UsersListApiTests(unittest.TestCase):
             ):
                 resp = asyncio.run(users_api.list_users())
         finally:
-            users_api.runtime.config_manager = old_config_manager
-            users_api.runtime.global_state = old_global_state
+            users_api.runtime.get_runtime().config_manager = old_config_manager
+            users_api.runtime.get_runtime().global_state = old_global_state
 
         body = json.loads(resp.body.decode("utf-8"))
         self.assertEqual(body["total"], 2)
@@ -271,13 +271,13 @@ class UsersListApiTests(unittest.TestCase):
 
         old_config_manager = users_api.runtime.config_manager
         old_global_state = users_api.runtime.global_state
-        users_api.runtime.config_manager = SimpleNamespace(
+        users_api.runtime.get_runtime().config_manager = SimpleNamespace(
             load_config=lambda: {
                 "client_hosts": {"172.16.14.65": "cp2-share"},
                 "vpn_gateways": [],
             }
         )
-        users_api.runtime.global_state = SimpleNamespace(
+        users_api.runtime.get_runtime().global_state = SimpleNamespace(
             user_states={}, user_states_lock=threading.Lock(),
         )
         inventory = {
@@ -297,8 +297,8 @@ class UsersListApiTests(unittest.TestCase):
             ) as mock_inventory:
                 resp = asyncio.run(users_api.list_users())
         finally:
-            users_api.runtime.config_manager = old_config_manager
-            users_api.runtime.global_state = old_global_state
+            users_api.runtime.get_runtime().config_manager = old_config_manager
+            users_api.runtime.get_runtime().global_state = old_global_state
 
         body = json.loads(resp.body.decode("utf-8"))
         self.assertEqual(body["total"], 1)
@@ -315,13 +315,13 @@ class UsersListApiTests(unittest.TestCase):
 
         old_config_manager = users_api.runtime.config_manager
         old_global_state = users_api.runtime.global_state
-        users_api.runtime.config_manager = SimpleNamespace(
+        users_api.runtime.get_runtime().config_manager = SimpleNamespace(
             load_config=lambda: {
                 "client_hosts": {"172.16.14.233": "hcq@172.16.14.233"},
                 "vpn_gateways": [],
             }
         )
-        users_api.runtime.global_state = SimpleNamespace(
+        users_api.runtime.get_runtime().global_state = SimpleNamespace(
             user_states={
                 "UenosBYxAtzselkIfGqb-w": {
                     "running": False,
@@ -346,8 +346,8 @@ class UsersListApiTests(unittest.TestCase):
             ):
                 resp = asyncio.run(users_api.list_users())
         finally:
-            users_api.runtime.config_manager = old_config_manager
-            users_api.runtime.global_state = old_global_state
+            users_api.runtime.get_runtime().config_manager = old_config_manager
+            users_api.runtime.get_runtime().global_state = old_global_state
 
         body = json.loads(resp.body.decode("utf-8"))
         self.assertEqual(body["total"], 1)
@@ -374,10 +374,10 @@ class UsersListLockSafetyTests(unittest.TestCase):
 
         old_config_manager = users_api.runtime.config_manager
         old_global_state = users_api.runtime.global_state
-        users_api.runtime.config_manager = SimpleNamespace(
+        users_api.runtime.get_runtime().config_manager = SimpleNamespace(
             load_config=lambda: {"client_hosts": {}, "vpn_gateways": []}
         )
-        users_api.runtime.global_state = SimpleNamespace(
+        users_api.runtime.get_runtime().global_state = SimpleNamespace(
             user_states={
                 # 无 @ 的平台 user_id 状态：触发 resolve_client_display_id 路径。
                 "PlatformUserIdNoAtSign": {
@@ -416,8 +416,8 @@ class UsersListLockSafetyTests(unittest.TestCase):
             ):
                 resp = asyncio.run(users_api.list_users())
         finally:
-            users_api.runtime.config_manager = old_config_manager
-            users_api.runtime.global_state = old_global_state
+            users_api.runtime.get_runtime().config_manager = old_config_manager
+            users_api.runtime.get_runtime().global_state = old_global_state
 
         body = json.loads(resp.body.decode("utf-8"))
         self.assertEqual(body["total"], 1)

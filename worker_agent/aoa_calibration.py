@@ -8,6 +8,15 @@ from foundation.aoa_profile import AOA_TOUCH_CALIBRATION_VERSION
 CALIBRATION_COMPONENT = "com.gms.remote.aoacalibration/.CalibrationActivity"
 
 
+class CalibrationSurfaceUnavailableError(ValueError):
+    """标定 Activity 无法启动（应用缺失/组件不可达）。
+
+    结构化部署引导依赖它：record_aoa_input 据此产出
+    calibration_app_missing 一键部署回执。界面被遮挡/失焦等运行态
+    问题仍走普通 ValueError（返回 None 按轴回退，不触发部署引导）。
+    """
+
+
 def _input_rotation(dump):
     """Touch orientation across InputFlinger dump generations.
 
@@ -81,7 +90,8 @@ def open_calibration_surface(serial, adb_run, display_id=0):
                      CALIBRATION_COMPONENT, timeout=30)
     output = (result.stdout or "") + (result.stderr or "")
     if result.returncode != 0 or "Error" in output or "Status: ok" not in output:
-        raise ValueError("安全标定应用未安装或无法启动；请安装 AOA Calibration 后重试")
+        raise CalibrationSurfaceUnavailableError(
+            "安全标定应用未安装或无法启动；请安装 AOA Calibration 后重试")
     verify_calibration_surface(serial, adb_run, display_id)
 
 

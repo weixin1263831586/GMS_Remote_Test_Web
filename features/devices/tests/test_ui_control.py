@@ -118,6 +118,6 @@ def test_android_cli_path_default_when_unset(monkeypatch):
         def get_ubuntu_user(config):
             return "testuser"
 
-    monkeypatch.setattr(mod.runtime, "config_manager", _CM)
+    monkeypatch.setattr(mod.runtime.get_runtime(), "config_manager", _CM)
     assert _android_cli_path({}) == "/home/testuser/.local/bin/android"
     assert _android_cli_path(None) == "/home/testuser/.local/bin/android"

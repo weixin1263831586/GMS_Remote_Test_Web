@@ -242,11 +242,11 @@ class DeviceListLoaderMergeTests(unittest.IsolatedAsyncioTestCase):
         )
         with (
             patch.object(
-                devices_api.runtime,
+                devices_api.runtime.get_runtime(),
                 "get_client_id_from_request",
                 return_value="alice",
             ),
-            patch.object(devices_api.runtime, "global_state", global_state),
+            patch.object(devices_api.runtime.get_runtime(), "global_state", global_state),
             patch.object(
                 devices_api.device_manager,
                 "get_connected_devices",

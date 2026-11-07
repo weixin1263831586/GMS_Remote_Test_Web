@@ -50,7 +50,10 @@ def main():
         classes, dex = temporary / "classes", temporary / "dex"
         classes.mkdir()
         dex.mkdir()
-        manifest = ET.parse(source / "AndroidManifest.xml")
+        # 可信来源豁免（nosemgrep: use-defused-xml-parse）：解析的是仓库内
+        # 固定签入的 AndroidManifest.xml，无运行时外部输入，仅改写 package
+        # 属性后交给 aapt2；引入 defusedxml 依赖对离线构建脚本没有增量收益。
+        manifest = ET.parse(source / "AndroidManifest.xml")  # nosemgrep: python.lang.security.use-defused-xml-parse.use-defused-xml-parse
         manifest.getroot().set("package", "com.gms.remote.aoacalibration")
         manifest.write(temporary / "AndroidManifest.xml", encoding="utf-8", xml_declaration=True)
         run("javac", "--release", "8", "-classpath", android, "-d", classes,
