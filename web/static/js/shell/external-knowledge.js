@@ -105,32 +105,10 @@
         document.body.appendChild(root);
     }
 
-    function injectTitleButton() {
-        const page = document.getElementById('page-notes');
-        if (!page) return;
-        const title = page.querySelector('.section-title');
-        if (!title || title.closest('[data-ek-title-row]')) return;
-        // 公共 .page-title-row/.page-title-action 规范（common.css，与
-        // adb-title-row 同一几何）：标题居左、动作按钮居右，24px 点击
-        // 目标由公共类保证，本文件不再做任何局部尺寸 hack。
-        // .section-title 自带的 6px margin-bottom 仍留在行盒内部，
-        // "标题→内容"间距与其他页面一致（runtime UI smoke 的
-        // titleToContent/frame-top 契约）。
-        const row = document.createElement('div');
-        row.className = 'page-title-row';
-        row.setAttribute('data-ek-title-row', '');
-        title.parentNode.insertBefore(row, title);
-        row.appendChild(title);
-        // 保持 data-click 为源码中的声明式字面量，使 act-bridge 的冻结
-        // UI 契约扫描与运行时实际属性使用同一锚点。
-        row.insertAdjacentHTML(
-            'beforeend',
-            '<button type="button" class="btn-xs page-title-action" data-click="ekOpen"></button>',
-        );
-        const actionButton = row.lastElementChild;
-        actionButton.title = '外部知识库（Android Internals Wiki）revision 状态与管理';
-        actionButton.textContent = '🔗 外部知识库';
-    }
+    // 标题按钮已组件化静态声明（pages/notes.html 页头动作区，
+    // data-click="ekOpen" 字面量仍在源码中，act-bridge 冻结 UI 契约
+    // 扫描与运行时属性使用同一锚点）；早期运行时注入会重建标题行、
+    // 破坏 .page-header-row 组件结构（字形顶契约），不再注入。
 
     function open() { buildModal(); ModalManager.open(EK_MODAL_ID); loadStatus(); }
     function close() { ModalManager.close(EK_MODAL_ID); }
@@ -159,7 +137,6 @@
         }
     }
 
-    injectTitleButton();
     // 逐个 window.* 赋值导出（act-bridge 完整性测试按
     // window\.name= 模式识别惰性全局，Object.assign 形式不在识别范围）。
     window.ekOpen = open;

@@ -274,9 +274,17 @@ async def agent_package_download_endpoint(version: str, request: Request):
 
 # ==================== Architecture Page ====================
 
+ARCHITECTURE_TOPOLOGIES = {
+    "PLATFORM_TOPOLOGY": "platform-topology.mmd",
+    "USBIP_TOPOLOGY": "usbip-topology.mmd",
+    "AOA_TOPOLOGY": "aoa-topology.mmd",
+    "FIRMWARE_TOPOLOGY": "firmware-topology.mmd",
+}
+
+
 @router.get("/templates/architecture.html")
 async def get_architecture():
-    """获取系统架构图"""
+    """获取系统架构图（平台总览 / USB/IP / AOA / 固件烧写视图）"""
     architecture_file = os.path.join(PROJECT_ROOT, 'web', 'templates', 'architecture.html')
     if os.path.exists(architecture_file):
         with open(architecture_file, encoding='utf-8') as f:
@@ -285,9 +293,13 @@ async def get_architecture():
         ui_defaults = config.get("ui_defaults") or {}
         build_server = str(ui_defaults.get("architecture_build_server") or "未配置")
         content = content.replace("{{BUILD_SERVER_LABEL}}", html.escape(build_server))
-        topology_file = os.path.join(PROJECT_ROOT, 'docs', 'architecture', 'platform-topology.mmd')
-        with open(topology_file, encoding='utf-8') as source:
-            content = content.replace("{{PLATFORM_TOPOLOGY}}", render_topology(source.read()))
+        for placeholder, source_name in ARCHITECTURE_TOPOLOGIES.items():
+            topology_file = os.path.join(
+                PROJECT_ROOT, 'docs', 'architecture', source_name)
+            with open(topology_file, encoding='utf-8') as source:
+                content = content.replace(
+                    f"{{{{{placeholder}}}}}",
+                    render_topology(source.read(), source_name=source_name))
         return HTMLResponse(content=content)
     return JSONResponse(status_code=404, content={"error": "Architecture diagram not found"})
 

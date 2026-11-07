@@ -414,7 +414,8 @@
             cluster: 'cluster-frame',
             'devices-console': 'devices-console-frame',
             'redmine-agent': 'redmine-agent-frame',
-            'gerrit-dashboard': 'gerrit-dashboard-frame'
+            'gerrit-dashboard': 'gerrit-dashboard-frame',
+            architecture: 'architecture-iframe'
         });
 
         function pageForEmbeddedTabFrame(frame) {
@@ -706,6 +707,12 @@
                 if (window.agentAccessPanelIsOpen?.()) {
                     stopUsersAutoRefresh();
                     agentAccessReload();
+                } else if (sessionStorage.getItem('gms_users_view') === 'agent'
+                        && typeof agentAccessToggle === 'function'
+                        && (agentAccessIsAdmin() || state.elevated)) {
+                    // F5 恢复「Agent 接入」页签；非管理员不做自动恢复，
+                    // 避免每次进入用户页都弹出交互式提权弹框。
+                    await agentAccessToggle(true);
                 } else {
                     // 未提权时 loadUsersList 会等待交互式提权弹框，
                     // 不能阻塞页面初始化的完成语义：定时器立即启动，
@@ -722,6 +729,11 @@
             }
             if (pageName === 'devices') {
                 await loadDevicesManagement();
+                if (sessionStorage.getItem('gms_devices_view') === 'aoa'
+                        && typeof aoaViewToggle === 'function') {
+                    // F5 恢复「AOA工作台」页签（toggle 内部完成面板加载）。
+                    await aoaViewToggle(true);
+                }
             } else {
                 stopDevicesAutoRefresh();
             }

@@ -8,9 +8,17 @@
     :root { color-scheme: dark; --bg: #020617; --panel: #0f172a; --line: #334155; --text: #e2e8f0; --muted: #94a3b8; --blue: #38bdf8; --green: #34d399; --amber: #fbbf24; --violet: #a78bfa; }
     * { box-sizing: border-box; }
     body { margin: 0; padding: 24px; background: var(--bg); color: var(--text); font-family: "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace; }
-    main { max-width: 1440px; margin: 0 auto; }
+    main { margin: 0 auto; }
     h1 { margin: 0; font-size: 28px; }
-    .lead { color: var(--muted); line-height: 1.7; margin: 8px 0 24px; }
+    .lead { color: var(--muted); line-height: 1.7; margin: 8px 0 18px; }
+    .arch-tabs { display: flex; align-items: center; gap: 0; margin: 0 0 18px; border: 1px solid var(--line); border-radius: 10px; background: rgba(2, 6, 23, .6); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+    .arch-tabs::-webkit-scrollbar { display: none; }
+    .arch-tab { flex: 0 0 auto; padding: 11px 20px; border: 0; border-right: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .arch-tab:last-child { border-right: 0; }
+    .arch-tab:hover { color: var(--text); }
+    .arch-tab:focus-visible { outline: 0; background: rgba(56, 189, 248, .12); }
+    .arch-tab.active { color: var(--blue); background: rgba(56, 189, 248, .10); box-shadow: inset 0 -2px 0 var(--blue); }
+    .arch-pane { min-width: 0; }
     section { margin: 18px 0; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(145deg, rgba(15, 23, 42, .98), rgba(15, 23, 42, .78)); }
     h2 { margin: 0 0 16px; font-size: 18px; color: var(--blue); }
     .grid { display: grid; gap: 14px; }
@@ -40,45 +48,103 @@
 <body>
 <main>
   <h1>GMS Remote Test 系统架构</h1>
-  <p class="lead">Controller 统一认证和调度；Worker 主动轮询命令并回报状态；Agent Runtime 通过独立 Service Token 使用受控能力。</p>
+  <p class="lead">Controller 统一认证和调度；Worker 主动轮询命令并回报状态；Agent Runtime 通过独立 Service Token 使用受控能力。切换下方视图查看平台总览、USB/IP 接入、AOA 恢复与固件烧写数据面。</p>
 
-  <section aria-labelledby="topology-heading">
-    <h2 id="topology-heading">平台拓扑</h2>
-    <div class="topology">{{PLATFORM_TOPOLOGY}}</div>
-  </section>
+  <nav class="arch-tabs" role="tablist" aria-label="架构视图切换">
+    <button type="button" role="tab" class="arch-tab active" id="arch-tab-platform" data-arch="platform" aria-selected="true" aria-controls="arch-pane-platform">平台总览</button>
+    <button type="button" role="tab" class="arch-tab" id="arch-tab-usbip" data-arch="usbip" aria-selected="false" aria-controls="arch-pane-usbip" tabindex="-1">USB/IP 接入</button>
+    <button type="button" role="tab" class="arch-tab" id="arch-tab-aoa" data-arch="aoa" aria-selected="false" aria-controls="arch-pane-aoa" tabindex="-1">AOA 恢复与回放</button>
+    <button type="button" role="tab" class="arch-tab" id="arch-tab-firmware" data-arch="firmware" aria-selected="false" aria-controls="arch-pane-firmware" tabindex="-1">固件烧写</button>
+  </nav>
 
-  <section aria-labelledby="roles-title">
-    <h2 id="roles-title">部署角色</h2>
-    <div class="grid roles">
-      <article class="card"><h3>Web Browser</h3><p>通过 HTTPS、Session Cookie 和 WebSocket 访问 Controller。</p></article>
-      <article class="card agent"><h3>Agent Runtime</h3><p>Codex / Kimi / kkagent 使用 <code>gms-rt</code> CLI 与 MCP；Service Token、scope、ACL 和 Approval Token 均由 Controller 校验。</p></article>
-      <article class="card"><h3>FastAPI Controller</h3><p>Web UI、认证、任务调度、SQLite 状态、报告、审计与外部系统集成。生产入口为 HTTPS。</p></article>
-      <article class="card source"><h3>Build / External Services</h3><p>受审计 SSH 连接 {{BUILD_SERVER_LABEL}}；集成 Redmine、Gerrit、AI 与 OpenGrok。</p></article>
-    </div>
-  </section>
+  <div class="arch-pane" id="arch-pane-platform" role="tabpanel" data-arch-pane="platform" aria-labelledby="arch-tab-platform">
+    <section aria-labelledby="topology-heading">
+      <h2 id="topology-heading">平台拓扑</h2>
+      <div class="topology">{{PLATFORM_TOPOLOGY}}</div>
+    </section>
 
-  <section aria-labelledby="control-title">
-    <h2 id="control-title">控制平面</h2>
-    <p class="note">Worker 使用 Worker Token 主动发送 Heartbeat / Poll / ACK，回传 Job 状态和 Artifact。命令随 Poll 响应返回，随后由 Worker 执行 Tradefed / ADB / Fastboot。</p>
-  </section>
+    <section aria-labelledby="roles-title">
+      <h2 id="roles-title">部署角色</h2>
+      <div class="grid roles">
+        <article class="card"><h3>Web Browser</h3><p>通过 HTTPS、Session Cookie 和 WebSocket 访问 Controller。</p></article>
+        <article class="card agent"><h3>Agent Runtime</h3><p>Codex / Kimi / kkagent 使用 <code>gms-rt</code> CLI 与 MCP；Service Token、scope、ACL 和 Approval Token 均由 Controller 校验。</p></article>
+        <article class="card"><h3>FastAPI Controller</h3><p>Web UI、认证、任务调度、SQLite 状态、报告、审计与外部系统集成。生产入口为 HTTPS。</p></article>
+        <article class="card source"><h3>Build / External Services</h3><p>受审计 SSH 连接 {{BUILD_SERVER_LABEL}}；集成 Redmine、Gerrit、AI 与 OpenGrok。</p></article>
+      </div>
+    </section>
 
-  <section aria-labelledby="worker-title">
-    <h2 id="worker-title">Worker 与测试执行</h2>
-    <div class="grid workers">
-      <article class="card worker"><h3>Linux Worker A</h3><ul><li>CTS / GTS / VTS / STS 套件</li><li>本地 USB 或 USB/IP 导入设备</li><li>Job 日志、结果和 Artifact 回传</li></ul></article>
-      <article class="card worker"><h3>Linux Worker B</h3><ul><li>独立能力与设备清单</li><li>Device Claim / Lease 所有权</li><li>断线后按 generation 重新注册</li></ul></article>
-    </div>
-  </section>
+    <section aria-labelledby="control-title">
+      <h2 id="control-title">控制平面</h2>
+      <p class="note">Worker 使用 Worker Token 主动发送 Heartbeat / Poll / ACK，回传 Job 状态和 Artifact。命令随 Poll 响应返回，随后由 Worker 执行 Tradefed / ADB / Fastboot。</p>
+    </section>
 
-  <section aria-labelledby="device-title">
-    <h2 id="device-title">设备数据平面与 USB/IP 接入示例</h2>
-    <div class="grid sources">
-      <article class="card source"><h3>Local USB</h3><p>Android 设备直接连接 Worker，由本机 ADB / Fastboot / upgrade_tool 使用。</p></article>
-      <article class="card source"><h3>Windows USB Source</h3><p><code>usbipd-win</code> 提供 USB/IP；完整固件烧写可交还 Source Agent 执行。</p></article>
-      <article class="card source"><h3>Linux USB Source</h3><p>支持 USB/IP 共享、分配和重连；完整固件烧写能力按支持矩阵 fail closed。</p></article>
-    </div>
-    <p class="note">USB/IP 是设备接入示例，不代表平台整体拓扑。不同来源的固件烧写能力并不相同。</p>
-  </section>
+    <section aria-labelledby="worker-title">
+      <h2 id="worker-title">Worker 与测试执行</h2>
+      <div class="grid workers">
+        <article class="card worker"><h3>Linux Worker A</h3><ul><li>CTS / GTS / VTS / STS 套件</li><li>本地 USB 或 USB/IP 导入设备</li><li>Job 日志、结果和 Artifact 回传</li></ul></article>
+        <article class="card worker"><h3>Linux Worker B</h3><ul><li>独立能力与设备清单</li><li>Device Claim / Lease 所有权</li><li>断线后按 generation 重新注册</li></ul></article>
+      </div>
+    </section>
+
+    <section aria-labelledby="device-title">
+      <h2 id="device-title">设备数据平面与 USB/IP 接入示例</h2>
+      <div class="grid sources">
+        <article class="card source"><h3>Local USB</h3><p>Android 设备直接连接 Worker，由本机 ADB / Fastboot / upgrade_tool 使用。</p></article>
+        <article class="card source"><h3>Windows USB Source</h3><p><code>usbipd-win</code> 提供 USB/IP；完整固件烧写可交还 Source Agent 执行。</p></article>
+        <article class="card source"><h3>Linux USB Source</h3><p>支持 USB/IP 共享、分配和重连；完整固件烧写能力按支持矩阵 fail closed。</p></article>
+      </div>
+      <p class="note">USB/IP 是设备接入示例，不代表平台整体拓扑。不同来源的固件烧写能力并不相同；完整数据面见「USB/IP 接入」视图。</p>
+    </section>
+  </div>
+
+  <div class="arch-pane" id="arch-pane-usbip" role="tabpanel" data-arch-pane="usbip" aria-labelledby="arch-tab-usbip" hidden>
+    <section aria-labelledby="usbip-topology-heading">
+      <h2 id="usbip-topology-heading">USB/IP 接入拓扑</h2>
+      <div class="topology">{{USBIP_TOPOLOGY}}</div>
+    </section>
+    <section aria-labelledby="usbip-sources-title">
+      <h2 id="usbip-sources-title">接入链路分层</h2>
+      <div class="grid sources">
+        <article class="card source"><h3>Source 侧（Windows / Linux）</h3><p><code>usbipd-win</code> 或 Linux <code>usbipd</code> 把本机 USB 设备以 USB/IP 协议暴露在 TCP 3240；设备仍物理插在 Source 主机。</p></article>
+        <article class="card worker"><h3>Worker 侧（usbip attach）</h3><p>Worker attach 远端共享后得到虚拟 USB 总线，ADB / Fastboot / upgrade_tool 按本地设备方式使用，并回报清单与心跳。</p></article>
+        <article class="card"><h3>Controller 协调</h3><p>跨主机动作只经受审计 SSH 边界（ADR 0004）；USB/IP 设备的整包烧写不跨链路维持重枚举，按 ADR 0005 把设备所有权交还 Source Host 执行，期间暂停通用重连 watchdog。</p></article>
+      </div>
+      <p class="note">USB/IP 链路无法跨越 ADB → Loader → ADB 的多次 USB 重枚举：断开即设备离线，Worker 以清单与心跳上报实际状态，Controller 不假设远端设备仍然存在。</p>
+    </section>
+  </div>
+
+  <div class="arch-pane" id="arch-pane-aoa" role="tabpanel" data-arch-pane="aoa" aria-labelledby="arch-tab-aoa" hidden>
+    <section aria-labelledby="aoa-topology-heading">
+      <h2 id="aoa-topology-heading">AOA 恢复与回放拓扑</h2>
+      <div class="topology">{{AOA_TOPOLOGY}}</div>
+    </section>
+    <section aria-labelledby="aoa-layers-title">
+      <h2 id="aoa-layers-title">执行链路分层</h2>
+      <div class="grid sources">
+        <article class="card"><h3>AOA 工作台（Web）</h3><p>录制 / 回放 / 标定 Profile；Profile 按 owner 隔离存储，回放过程支持暂停 / 继续 / 终止（control_id 语义）。</p></article>
+        <article class="card worker"><h3>Worker 回放</h3><p><code>run_aoa_sequence</code> 按物理 USB 端口绑定执行 AOAv2 控制：启动 Accessory，注入 HID 触点 / 按键序列驱动开机向导。</p></article>
+        <article class="card agent"><h3>ADB 就绪判定</h3><p>回放结束 ≠ ADB 已恢复：Worker 对 device 态做 <code>adb shell true</code> 往返校验，unauthorized 需要人工在设备上确认授权弹窗。</p></article>
+      </div>
+      <p class="note">AOA 执行成功与 ADB 恢复是两个独立事实；结果里如实带回 adb_state，由调用方决定后续动作。</p>
+    </section>
+  </div>
+
+  <div class="arch-pane" id="arch-pane-firmware" role="tabpanel" data-arch-pane="firmware" aria-labelledby="arch-tab-firmware" hidden>
+    <section aria-labelledby="firmware-topology-heading">
+      <h2 id="firmware-topology-heading">固件烧写拓扑</h2>
+      <div class="topology">{{FIRMWARE_TOPOLOGY}}</div>
+    </section>
+    <section aria-labelledby="firmware-layers-title">
+      <h2 id="firmware-layers-title">烧写链路分层</h2>
+      <div class="grid sources">
+        <article class="card"><h3>Web 烧写入口</h3><p>固件分片上传与断点续传；烧写入口按设备所在 Worker 解析，跨 Worker 入口 fail closed。</p></article>
+        <article class="card worker"><h3>Worker 烧写执行</h3><p>设备进入 Loader / Rockusb 后由 <code>upgrade_tool</code> / fastboot 完成 Download Firmware；烧写完成设备自动重启。</p></article>
+        <article class="card agent"><h3>AOA 恢复接续（可选）</h3><p>烧写成功与 ADB 就绪分离上报：可接续 AOA 恢复旅程（向导 → USB 调试），失败时提示单独调试而无需重新烧写。</p></article>
+      </div>
+      <p class="note">烧写会重启设备并可能进入 fastboot / loader；USB/IP 来源设备的整包烧写按 ADR 0005 交还 Source Host 执行。恢复判定以 adb 传输 liveness 为准，而非 adb devices 字面状态。</p>
+    </section>
+  </div>
 </main>
+<script src="/static/js/pages/architecture-view.js?v=20261107-arch-keys" defer></script>
 </body>
 </html>

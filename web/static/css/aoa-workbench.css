@@ -58,7 +58,6 @@
 .aoa-column > * { flex-shrink: 0; }
 .aoa-screen-column { container-type: inline-size; }
 .aoa-config-column { gap: 8px; padding: 10px; }
-.aoa-config-column .aoa-column-heading { min-height: 38px; padding-bottom: 6px; }
 .aoa-config-column .aoa-config-group, .aoa-config-column .aoa-target-section { gap: 6px; }
 .aoa-config-column .aoa-config-group { padding-bottom: 8px; }
 .aoa-config-column .aoa-form-grid, .aoa-config-column .aoa-device-selectors { gap: 6px; }
@@ -75,12 +74,26 @@
     flex: none;
     gap: 8px;
     justify-content: space-between;
-    min-height: 44px;
-    padding-bottom: 10px;
+    min-height: 40px;
+    padding-bottom: 8px;
 }
-.aoa-column-heading > div:first-child { min-width: 0; }
-.aoa-column-heading strong { display: block; font-size: 13px; line-height: 20px; }
-.aoa-column-heading span { color: var(--text-secondary); font-size: 11px; line-height: 18px; }
+/* 标题 + 副标题同一行（基线对齐）；副标题超宽时截断省略，
+   保证三列 header 一行显示且等高。 */
+.aoa-column-heading > div:first-child {
+    align-items: baseline;
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+}
+.aoa-column-heading strong { font-size: 13px; line-height: 20px; white-space: nowrap; }
+.aoa-column-heading > div:first-child > span {
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 18px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .aoa-inline-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; }
 /* 回放控制按钮（暂停/继续/停止）藏在 ③ 列动作组里，仅回放时出现：
    .btn-xxs 的 display:inline-flex 会覆盖 hidden 属性，需要显式豁免。 */
@@ -175,6 +188,10 @@
 }
 .aoa-screen-grid[hidden] { display: none; }
 .aoa-screen-actions { display: flex; flex: none; gap: 6px; }
+/* header 内的动作组不换行：空间不足时由副标题（可截断）让位，
+   三列 header 保持单行等高；≤480px 断点恢复 wrap 兜底。 */
+.aoa-column-heading > .aoa-inline-actions,
+.aoa-column-heading > .aoa-screen-actions { flex-wrap: nowrap; }
 /* 投屏开关两种文案（▶ 实时投屏 / ⏹ 投屏中）宽度不同：固定最小宽度，
    切换状态时不挤压旁边的「刷新」按钮、不引起整行回流。 */
 #aoa-toggle-live { min-width: 88px; text-align: center; }
@@ -322,7 +339,6 @@
 .aoa-command-empty { color: var(--text-secondary); font-size: 11px; list-style: none; text-align: center; }
 .aoa-command-list:has(> .aoa-command-empty) { display: grid; place-items: center; }
 .aoa-command-list .aoa-command-empty { border: 0; line-height: 1.8; padding: 24px 12px; }
-.aoa-command-column .aoa-column-heading { flex-wrap: wrap; }
 #aoa-panel .aoa-debug-option { align-items: center; cursor: pointer; display: inline-flex; gap: 6px; line-height: 20px; white-space: nowrap; }
 #aoa-panel input[type="checkbox"] { accent-color: var(--primary-color); flex: none; height: 14px; margin: 0; padding: 0; width: 14px; }
 #aoa-debug-end { flex: none; }

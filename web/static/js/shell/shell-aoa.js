@@ -306,6 +306,9 @@ function aoaSyncAdbPauseFlag() {
     ).toLowerCase();
     aoaPanelState.adbUnavailable = !device
         || ['usb_only', 'fastboot', 'offline', 'unknown'].includes(deviceState);
+    // 占用暂停（烧写/GSI fencing 409）随清单同步复位：允许重试一次，
+    // 仍被占用则由下一轮 409 重新暂停（每轮清单至多 1 次请求）。
+    aoaPanelState.screenBusyPaused = false;
 }
 
 // 设备管理清单刷新后的只读同步入口。
@@ -683,7 +686,7 @@ async function aoaRecordingStart() {
     if (aoaEl('aoa-record-stop')) aoaEl('aoa-record-stop').disabled = false;
     aoaEl('aoa-record-state').textContent = '录制中：左侧成功操作会写入命令';
     aoaSetStatus('录制中', 'running'); aoaRenderCommands();
-    if (aoaEl('aoa-screen-image')?.hidden) await aoaRefreshScreen();
+    if (aoaEl('aoa-screen-image')?.hidden) await aoaRefreshScreen({force: true});
 }
 
 function aoaRecordingStop() {
@@ -925,6 +928,8 @@ async function aoaViewToggle(show) {
     aoaEl('aoa-tab')?.classList.toggle('active', visible);
     aoaEl('devices-list-tab')?.setAttribute('aria-selected', String(!visible));
     aoaEl('aoa-tab')?.setAttribute('aria-selected', String(visible));
+    // 页签状态随 F5 刷新恢复（页面初始化经 runPageInitializers 读取）。
+    try { sessionStorage.setItem('gms_devices_view', visible ? 'aoa' : 'list'); } catch (_error) {}
     if (visible) {
         await aoaLoadPanel();
         // 只读联动：刷新下拉与画面状态，不自动发起投屏（变更请求仅跟随

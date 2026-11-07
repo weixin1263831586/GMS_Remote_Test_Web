@@ -44,6 +44,17 @@ DATE_RE = re.compile(r"^\d{8}$")
 
 # ---- merged from serial_console_identity.py ----
 
+_USB_BUS_NODE_RE = re.compile(r"\d+(?:\.\d+)*-\d+(?:\.\d+)*(?::\d+\.\d+)*")
+
+
+def usb_bus_node(sys_path: str) -> str:
+    """物理 USB 总线节点（如 ``1-14``），与 lsusb/sysfs、AOA usb_only 清单对账。"""
+    match = _USB_BUS_NODE_RE.search(sys_path or "")
+    if not match:
+        return ""
+    return match.group(0).split(":", 1)[0]
+
+
 def serial_port_identity(
     *, by_id: str, devname: str, usb_path: str
 ) -> dict[str, str | bool]:
@@ -73,6 +84,31 @@ def serial_port_identity(
         "identity_source": "kernel-node",
         "identity_stable": False,
     }
+
+
+_TTY_NODE_RE = re.compile(r"^(?P<prefix>.*?)(?P<number>\d+)$")
+
+
+def _tty_natural_key(name: str) -> tuple[str, int]:
+    """tty 名的自然排序键：ttyUSB2 应排在 ttyUSB10 前（字典序会颠倒）。"""
+
+    match = _TTY_NODE_RE.search(name)
+    if match:
+        return (match.group("prefix"), int(match.group("number")))
+    return (name, -1)
+
+
+def _port_display_key(item: dict[str, Any]) -> tuple[int, str, int, str]:
+    """端口卡片展示顺序：在位端口按 devname 自然序在前，离线绑定在后。"""
+
+    name = str(item.get("devname") or "") or str(item.get("port_key") or "")
+    prefix, number = _tty_natural_key(name)
+    return (
+        0 if item.get("devname") else 1,
+        prefix,
+        number,
+        str(item.get("port_key") or ""),
+    )
 
 
 # ---- merged from serial_console_errors.py ----
@@ -246,6 +282,20 @@ class SerialConsoleService:
             port_key = validate_port_key(str(identity["port_key"]))
             vid = self._device_value(device, "ID_VENDOR_ID").lower()
             pid = self._device_value(device, "ID_MODEL_ID").lower()
+            # 描述符/数据库里的厂商、型号与芯片序列号：把设备串口卡片和
+            # lsusb、AOA usb_only 清单（如 FT232R 调试小板 A6022883）对上。
+            usb_serial = (
+                self._device_value(device, "ID_SERIAL_SHORT")
+                or self._device_value(device, "ID_SERIAL")
+            )
+            usb_vendor_name = (
+                self._device_value(device, "ID_VENDOR")
+                or self._device_value(device, "ID_VENDOR_FROM_DATABASE")
+            )
+            usb_model_name = (
+                self._device_value(device, "ID_MODEL")
+                or self._device_value(device, "ID_MODEL_FROM_DATABASE")
+            )
             ports.append(
                 {
                     "port_key": port_key,
@@ -256,12 +306,16 @@ class SerialConsoleService:
                     "vendor_product": f"{vid}:{pid}" if vid and pid else "",
                     "driver": self._device_driver(device),
                     "usb_path": usb_path,
+                    "usb_serial": usb_serial,
+                    "usb_vendor_name": usb_vendor_name,
+                    "usb_model_name": usb_model_name,
+                    "usb_bus_node": usb_bus_node(str(getattr(device, "sys_path", "") or "")),
                     "identity_source": identity["identity_source"],
                     "identity_stable": identity["identity_stable"],
                     "online": True,
                 }
             )
-        ports.sort(key=lambda item: (item["devname"], item["port_key"]))
+        ports.sort(key=_port_display_key)
         with self._lock:
             self._port_cache = {item["port_key"]: dict(item) for item in ports}
             self._devname_to_key.clear()
@@ -277,7 +331,7 @@ class SerialConsoleService:
             raise RuntimeError(self._enumeration_error)
         bindings = self.store.list()
         result = []
-        for key in sorted(set(physical) | set(bindings)):
+        for key in set(physical) | set(bindings):
             port = dict(physical.get(key) or {
                 "port_key": key,
                 "devname": "",
@@ -287,6 +341,10 @@ class SerialConsoleService:
                 "vendor_product": "",
                 "driver": "",
                 "usb_path": "",
+                "usb_serial": "",
+                "usb_vendor_name": "",
+                "usb_model_name": "",
+                "usb_bus_node": "",
                 "identity_source": "stored-binding",
                 "identity_stable": True,
                 "online": False,
@@ -305,6 +363,10 @@ class SerialConsoleService:
                     }
                 )
             result.append(port)
+        # 在位端口自然序在前、离线绑定在后；与 _physical_ports 的展示
+        # 顺序一致（此前一处按 devname 字典序、一处按 port_key 字典序，
+        # 两个口径在多口/离线卡下都不稳定）。
+        result.sort(key=_port_display_key)
         return result
 
     def update_binding(self, port_key: str, value: dict[str, Any]) -> dict[str, Any]:

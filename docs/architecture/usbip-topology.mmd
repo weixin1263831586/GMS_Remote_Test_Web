@@ -1,0 +1,17 @@
+flowchart TB
+    DevSrc["Android Device（Source 侧）"]
+    WinSrc["Windows USB Source（usbipd-win）"]
+    LinuxSrc["Linux USB Source（usbipd）"]
+    Worker["Linux Worker（usbip attach）"]
+    Ctrl["FastAPI Controller"]
+    Tools["ADB / Fastboot / upgrade_tool"]
+    DevWorker["Android Device（Worker 侧）"]
+
+    DevSrc -->|"USB 物理接入"| WinSrc
+    DevSrc -->|"USB 物理接入"| LinuxSrc
+    WinSrc -->|"USB/IP TCP 3240"| Worker
+    LinuxSrc -->|"USB/IP TCP 3240"| Worker
+    Worker --> Tools
+    Tools --> DevWorker
+    Ctrl -.->|"SSH：usbip attach / bind（ADR 0004）"| Worker
+    Worker -->|"清单与心跳回报"| Ctrl

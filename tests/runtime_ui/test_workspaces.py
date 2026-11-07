@@ -978,7 +978,7 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                         )
                         final_status_box = page.locator(status_selector).bounding_box()
                         title_box = page.locator(
-                            f"{page_selector} .host-workspace-title-row > .section-title"
+                            f"{page_selector} .page-header-row > .section-title"
                         ).bounding_box()
                         refresh_box = page.locator(
                             f"{page_selector} .host-workspace-single-bar "
@@ -1234,3 +1234,310 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
             expect(page.locator("#terminal-workspace-status-0")).not_to_have_text("准备中")
         finally:
             page.close()
+
+    def test_page_header_action_controls_and_stat_cards_share_uniform_template(self):
+        """页面右上角动作控件与顶部统计卡的全站统一几何验收。
+
+        - 单机范围：各页右上角动作区控件（按钮/下拉/label，含 devices 页签组）
+          统一 26px 高、11px 字号、同一竖直中线；desktop/terminal 单机状态条
+          （pane-status + 刷新按钮）同处一条 24px 中线。
+        - 集群范围：test-suites 主机下拉可见且同样 26px/11px。
+        - users/devices/security-audit/api-docs 四页顶部统计卡共用 page-stat
+          模板：卡片外壳高度一致（24px 数值 + 12px 标签）。
+        """
+        page = self.new_page()
+        page.route(
+            "**/api/desktop/vnc/status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"running":true}',
+            ),
+        )
+        page.route(
+            "**/api/desktop/novnc/access",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"success":true,"url":"about:blank"}',
+            ),
+        )
+        page_errors = []
+        page.on("pageerror", lambda error: page_errors.append(error))
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("window.GmsWorkspace && typeof renderHostWorkspace === 'function'")
+            page.evaluate(
+                """() => {
+                  state.elevated = true;
+                  state.elevatedUntil = Date.now() + 60000;
+                  applyClusterMode(false);
+                  return true;
+                }"""
+            )
+            measured = page.evaluate(
+                """async () => {
+                  const pages = ['users', 'devices', 'reports', 'test-suites',
+                                 'apk-analysis', 'gms-assistant', 'notes'];
+                  const visible = (el) => {
+                    const box = el.getBoundingClientRect();
+                    return box.width > 0 && box.height > 0;
+                  };
+                  const measure = (el) => {
+                    const box = el.getBoundingClientRect();
+                    const style = getComputedStyle(el);
+                    return {
+                      tag: el.tagName.toLowerCase(),
+                      h: box.height,
+                      fs: style.fontSize,
+                      x: box.x,
+                      w: box.width,
+                      bottom: box.bottom,
+                      center: box.y + box.height / 2,
+                      text: (el.textContent || '').trim().slice(0, 6),
+                    };
+                  };
+                  const collected = {};
+                  for (const name of pages) {
+                    switchPage(name, null);
+                    await new Promise((resolve) => setTimeout(resolve, 120));
+                    const collect = (sel) => {
+                      const els = Array.from(
+                        document.querySelectorAll(sel)
+                      ).filter(visible);
+                      // 只取顶层控件：label 内嵌 select/checkbox 随父容器
+                      // 算一个单元，避免嵌套控件被双计破坏间距断言。
+                      const set = new Set(els);
+                      const topLevel = els.filter((el) => {
+                        for (
+                          let p = el.parentElement; p; p = p.parentElement
+                        ) {
+                          if (set.has(p)) return false;
+                        }
+                        return true;
+                      });
+                      // 动作区右对齐，DOM 顺序 = 视觉从左到右；按 x 排序
+                      // 保证相邻间距断言成立（flex-wrap 换行时仅比对行内）。
+                      return topLevel.map(measure).sort((a, b) => a.x - b.x);
+                    };
+                    if (name === 'devices') {
+                      // devices 动作区含两个子容器（分组工具栏 + 视图页签），
+                      // 容器之间允许分组间隔，容器内部控件必须贴住。
+                      collected[name] = [
+                        {group: 'toolbar', expectH: 26, expectBottom: 41,
+                         boxes: collect('#page-devices .device-group-toolbar :is(button, select)')},
+                        {group: 'tabs', expectH: 26, expectBottom: 41,
+                         boxes: collect('#page-devices #devices-view-tabs > button')},
+                      ];
+                    } else if (name === 'users') {
+                      // users 页签胶囊：24px 分段按钮 + 边框 = 26px 外壳，
+                      // 底边 41；胶囊内按钮底边 40（胶囊 1px 下边框）。
+                      collected[name] = [
+                        {group: 'tabs-capsule', expectH: 24, expectBottom: 40,
+                         boxes: collect('#page-users .users-view-tabs :is(button)')},
+                      ];
+                    } else {
+                      collected[name] = [
+                        {group: 'actions', expectH: 26, expectBottom: 41,
+                         boxes: collect(
+                           `#page-${name} .page-header-actions :is(button, select, label)`
+                         )},
+                      ];
+                    }
+                  }
+                  return {controls: collected};
+                }"""
+            )
+            for name, groups in measured["controls"].items():
+                if name == "test-suites":
+                    # 单机范围内主机下拉被隐藏，集群范围单独验收。
+                    continue
+                self.assertTrue(groups, f"{name} 页右上角动作区没有任何可见控件")
+                for group in groups:
+                    boxes = group["boxes"]
+                    self.assertTrue(
+                        boxes,
+                        f"{name} 页右上角 {group['group']} 组没有任何可见控件",
+                    )
+                    for box in boxes:
+                        self.assertEqual(
+                            box["fs"], "11px",
+                            msg=f"{name} 页右上角控件「{box['text']}」字号 {box['fs']}，应为 11px",
+                        )
+                        expected_h = (
+                            26 if box["tag"] == "label" else group["expectH"]
+                        )
+                        self.assertAlmostEqual(
+                            box["h"], expected_h, delta=1,
+                            msg=f"{name} 页右上角 {group['group']} 组"
+                                f"「{box['text']}」高度 {box['h']}，应为 {expected_h}px",
+                        )
+                        self.assertAlmostEqual(
+                            box["bottom"], group["expectBottom"], delta=1,
+                            msg=f"{name} 页右上角 {group['group']} 组"
+                                f"「{box['text']}」底边 {box['bottom']}，应为页内 {group['expectBottom']}px",
+                        )
+                    centers = [box["center"] for box in boxes]
+                    self.assertAlmostEqual(
+                        max(centers), min(centers), delta=1.5,
+                        msg=f"{name} 页右上角 {group['group']} 组竖直中线不一致: {boxes}",
+                    )
+                    # 同组控件之间不留空隙：相邻控件左边缘 = 前一个右边缘。
+                    for left, right in zip(boxes, boxes[1:]):
+                        self.assertAlmostEqual(
+                            left["x"] + left["w"], right["x"], delta=1,
+                            msg=f"{name} 页右上角 {group['group']} 组内"
+                                f"「{left['text']}」与「{right['text']}」之间存在空隙",
+                        )
+            # desktop/terminal 单机状态条：先按项目约定初始化工作区，再等
+            # scope 应用、状态条可见（workspace-ready 类在挂载完成后加上）。
+            for name, init_fn in (
+                ("desktop", "ensureDesktopInitialized"),
+                ("terminal", "ensureTerminalWorkspaceInitialized"),
+            ):
+                page.evaluate(
+                    f"""async () => {{
+                      switchPage('{name}', null);
+                      await {init_fn}();
+                    }}"""
+                )
+                page.wait_for_function(
+                    f"""() => {{
+                      const bar = document.querySelector(
+                        '#page-{name} .page-header-actions '
+                        + '.host-workspace-single-bar'
+                      );
+                      return !!bar && bar.getBoundingClientRect().height > 0;
+                    }}"""
+                )
+                boxes = page.evaluate(
+                    """(name) => {
+                      const visible = (el) => {
+                        const box = el.getBoundingClientRect();
+                        return box.width > 0 && box.height > 0;
+                      };
+                      return Array.from(
+                        document.querySelectorAll(
+                          `#page-${name} .page-header-actions `
+                          + '.host-workspace-single-bar :is(span, button)'
+                        )
+                      ).filter(visible).map((el) => {
+                        const box = el.getBoundingClientRect();
+                        return {
+                          tag: el.tagName.toLowerCase(),
+                          h: box.height,
+                          fs: getComputedStyle(el).fontSize,
+                          center: box.y + box.height / 2,
+                          text: (el.textContent || '').trim().slice(0, 6),
+                        };
+                      });
+                    }""",
+                    name,
+                )
+                self.assertTrue(boxes, f"{name} 页单机状态条没有任何可见控件")
+                for box in boxes:
+                    if box["tag"] == "button":
+                        self.assertAlmostEqual(
+                            box["h"], 24, delta=1.5,
+                            msg=f"{name} 页状态条按钮「{box['text']}」高度 {box['h']}，应为 24px",
+                        )
+                        self.assertEqual(
+                            box["fs"], "11px",
+                            msg=f"{name} 页状态条按钮「{box['text']}」字号 {box['fs']}，应为 11px",
+                        )
+                    else:
+                        self.assertEqual(
+                            box["fs"], "10px",
+                            msg=f"{name} 页状态条文本「{box['text']}」字号 {box['fs']}，应为 10px",
+                        )
+                centers = [box["center"] for box in boxes]
+                self.assertAlmostEqual(
+                    max(centers), min(centers), delta=1.5,
+                    msg=f"{name} 页状态条控件竖直中线不一致: {boxes}",
+                )
+
+            # 统计卡模板：四页 page-stat 卡片外壳/数值/标签几何一致。
+            # 逐页 Python 侧等待+测量（页面内 async 循环 + 固定 sleep 对
+            # 各页异步渲染时序敏感）。
+            stats = {}
+            for name in ("users", "devices", "security-audit", "api-docs"):
+                page.evaluate(f"switchPage('{name}', null)")
+                page.wait_for_function(
+                    f"""() => {{
+                      const row = document.querySelector(
+                        '#page-{name} .page-stat-row'
+                      );
+                      return !!row && row.getBoundingClientRect().height > 0;
+                    }}"""
+                )
+                stats[name] = page.evaluate(
+                    """(name) => {
+                      const row = document.querySelector(
+                        `#page-${name} .page-stat-row`
+                      );
+                      if (!row) return null;
+                      return Array.from(
+                        row.querySelectorAll(':scope > .page-stat-card')
+                      ).filter((card) => card.getBoundingClientRect().width > 0)
+                        .map((card) => {
+                          const value = card.querySelector('.page-stat-value');
+                          const label = card.querySelector('.page-stat-label');
+                          return {
+                            h: card.getBoundingClientRect().height,
+                            vfs: value ? getComputedStyle(value).fontSize : null,
+                            lfs: label ? getComputedStyle(label).fontSize : null,
+                            html: card.outerHTML,
+                          };
+                        });
+                    }""",
+                    name,
+                )
+            card_heights = {}
+            for name, cards in stats.items():
+                self.assertTrue(cards, f"{name} 页未找到可见的 page-stat 统计卡")
+                for index, card in enumerate(cards):
+                    self.assertEqual(
+                        card["vfs"], "24px",
+                        msg=f"{name} 页统计卡#{index} 数值字号: {card.get('html', '')[:200]}",
+                    )
+                    self.assertEqual(card["lfs"], "12px", msg=f"{name} 页统计卡标签字号")
+                heights = {card["h"] for card in cards}
+                self.assertEqual(
+                    len(heights), 1,
+                    msg=f"{name} 页统计卡外壳高度不一致: {sorted(heights)}",
+                )
+                card_heights[name] = cards[0]["h"]
+            self.assertEqual(
+                len(set(card_heights.values())), 1,
+                msg=f"四页统计卡高度不统一: {card_heights}",
+            )
+
+            # test-suites 主机下拉显隐由真实 workspace-context 决定（专项测试
+            # test_test_suite_cluster_controls_wait_for_scope_before_becoming_
+            # visible 覆盖可见性）；这里只验收统一几何规则本身生效。放在
+            # 统计卡之后，避免 applyClusterMode(true) 的异步 scope 回调干扰
+            # 上面的逐页测量。
+            page.evaluate(
+                """async () => {
+                  applyClusterMode(true);
+                  switchPage('test-suites', null);
+                  await new Promise((resolve) => setTimeout(resolve, 150));
+                  return true;
+                }"""
+            )
+            suite_select = page.evaluate(
+                """() => {
+                  const el = document.querySelector(
+                    '#page-test-suites .page-header-actions select'
+                  );
+                  if (!el) return null;
+                  const style = getComputedStyle(el);
+                  return {h: style.minHeight, fs: style.fontSize};
+                }"""
+            )
+            self.assertIsNotNone(suite_select)
+            self.assertEqual(suite_select["fs"], "11px")
+            self.assertEqual(suite_select["h"], "26px")
+        finally:
+            page.close()
+            self.assert_no_page_errors(page_errors)

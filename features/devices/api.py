@@ -32,7 +32,7 @@ from .debug_api import router as debug_router
 from .deployment_api import router as deployment_router
 from .locks import device_lock_manager
 from .management_api import _prune_inactive_usbip_sources, known_usbip_sources
-from .management_inventory import local_usb_only_inventory
+from .management_inventory import local_unresponsive_inventory, local_usb_only_inventory
 from .manager import device_manager
 from .operations_api import (
     connect_wifi as connect_wifi,
@@ -121,6 +121,7 @@ async def get_connected_devices(
     )
 
     usb_only_inventory = await asyncio.to_thread(local_usb_only_inventory)
+    unresponsive_inventory = await asyncio.to_thread(local_unresponsive_inventory)
     # 共享缓存仅保存主机和设备事实，用户状态按请求合并。
     if cache_fresh:
         inventory = cached_inventory
@@ -204,6 +205,13 @@ async def get_connected_devices(
     # label. Fastboot/Loader remain explicit modes rather than HID candidates.
     by_id = {item['device_id']: item for item in inventory}
     for serial, observed in usb_only_inventory.items():
+        previous = by_id.get(serial, {})
+        if previous.get('status') not in {'fastboot', 'loader'}:
+            by_id[serial] = dict(observed)
+    # 心跳权威的 unresponsive（adb 幽灵传输）同样覆盖本机字面扫描：
+    # 烧写后停 loader 的设备 adb server 里残留 device 态条目，本机扫描
+    # 会标 online → 测试页「ADB 已连接」误导选机（66df75a34ebde4a4）。
+    for serial, observed in unresponsive_inventory.items():
         previous = by_id.get(serial, {})
         if previous.get('status') not in {'fastboot', 'loader'}:
             by_id[serial] = dict(observed)

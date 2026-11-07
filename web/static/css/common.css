@@ -809,9 +809,8 @@ body {
     min-height: 0;
 }
 
-.page-title-actions { position:absolute; top:0; right:0; }
 .host-workspace-layouts { display:flex; align-items:center; gap:0; flex-wrap:nowrap; }
-.host-workspace-layouts > .btn-xs { padding:2px 7px; min-height:24px; font-size:10px; border-radius:0; box-shadow:none; transform:none; }
+.host-workspace-layouts > .btn-xs { padding:2px 7px; min-height:24px; font-size:11px; border-radius:0; box-shadow:none; transform:none; }
 .host-workspace-layouts > .btn-xs:first-child { border-radius:4px 0 0 4px; }
 .host-workspace-layouts > .btn-xs:last-child { border-radius:0 4px 4px 0; }
 .host-workspace-layouts > .btn-xs + .btn-xs { margin-left:-1px; }
@@ -1015,6 +1014,105 @@ body {
     display: inline-block;
 }
 
+/* ==================== Page Header Row（组件化标题行） ==================== */
+/* 结构单点：components/page-header{,-actions,-end}.html——页面只保留标题
+   文本与动作内容，标题行几何不得再写页内联样式（历史上 22 页各自微调
+   导致字形顶漂移 17/19.4/28px 三种落点）。几何契约（1440x960）：
+   标题盒顶 15px、字形顶 16px（行高 17.2 收紧半行距）、盒高保持 19.2px
+   使「盒底→内容顶 6px」与内容顶位置（--page-body-frame-top）不受行高
+   调整影响；装饰条顶对齐后与 14px 字形恰好垂直居中。 */
+.page-header-row {
+    align-items: flex-start;
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+    margin-bottom: 6px;
+    min-height: 19.2px;
+    position: relative;
+}
+.page-header-row > .section-title {
+    align-items: flex-start;
+    align-self: stretch;
+    line-height: 17.2px;
+    margin: 0;
+}
+.page-header-actions {
+    /* 绝对定位：动作区不参与标题行高度——历史上 in-flow 动作内容会把
+       行撑高、字形顶与内容顶随之漂移。行高因此全站统一为标题盒自然
+       高度 19.2px。子容器一律 in-flow（本模板是右上角唯一定位源），
+       交叉轴底边对齐 + 容器高钉 26px：26px 控件顶 15 底 41（贴内容
+       框顶 40.19，视觉无缝）；28px 分段容器（users 页签）向上溢出 2px
+       得同一底边；24px 状态条用下方 margin 补偿保持标题顶对齐契约。
+       控件之间不留空隙（gap:0）。 */
+    position: absolute;
+    top: 0;
+    right: 0;
+    align-items: flex-end;
+    align-content: flex-end;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    height: 26px;
+    justify-content: flex-end;
+}
+/* 24px 单机状态条/占位条：保持与标题字形顶对齐（顶 15 底 39）的
+   历史几何契约（runtime_ui 用例断言其 y == 标题 y）。 */
+.page-header-actions > .host-workspace-title-state { margin-bottom: 2px; }
+/* devices 页签组保持单行 flex（旧内联样式迁移；id/role 保留供
+   快照与脚本引用）。控件之间不留空隙，与动作区统一。 */
+#page-devices #devices-view-tabs {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    justify-content: flex-end;
+}
+/* 带图标标题（APK分析）：图标随行盒顶对齐，向下补偿半行距使其与
+   14px 字形（行盒内居中偏移 1.6px）垂直居中。 */
+.page-header-row > .section-title .section-title-icon { margin-top: 1.6px; }
+/* 拉丁混排标题（Gerrit/Redmine）保持输入原样，不吃基类 uppercase。 */
+#page-gerrit-dashboard .page-header-row > .section-title,
+#page-redmine-agent .page-header-row > .section-title { text-transform: none; }
+/* 动作区控件统一规范：26px 高、11px 字号、单行不换行（历史上各页
+   22~28px 混杂；btn-xs 基类 min-height:28 在此被覆盖为统一 26）。
+   devices 页签组是独立容器（#devices-view-tabs），与动作区共用同一
+   几何契约。标签文字不许在收缩时竖排（中文无空格，min-content 即
+   单字宽，必须显式 nowrap）。 */
+.page-header-actions :is(button, select),
+#page-devices #devices-view-tabs :is(button, select) {
+    box-sizing: border-box;
+    font-size: 11px;
+    min-height: 26px;
+    max-height: 26px;
+    white-space: nowrap;
+}
+.page-header-actions label {
+    /* 裸文字 label 包成 26px 行盒并垂直居中：底边与按钮齐（41），
+       文字中线与 26px 按钮文字中线一致；否则 flex-end 会把裸行盒压到
+       底部，视觉上“文字高低不齐”。checkbox 等内嵌控件随行盒居中。 */
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    height: 26px;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+/* 页面顶部统计卡公共规范（用户/设备/审计/API 页共享；原为各页复制的
+   内联样式）。line-height 必须显式声明：button 卡（users 筛选卡）的
+   UA 默认 line-height:normal 会覆盖继承值，导致同一模板出现两种卡高。 */
+.page-stat-row { display: flex; gap: 15px; margin-bottom: 10px; }
+.page-stat-card {
+    background: var(--light-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    flex: 1;
+    line-height: 1.6;
+    padding: 15px;
+}
+.page-stat-card > .page-stat-value { display: block; font-size: 24px; font-weight: bold; }
+.page-stat-card > .page-stat-label { display: block; color: var(--text-secondary); font-size: 12px; margin-top: 5px; }
+
 /* 页面标题行公共规范：24px 动作按钮点击目标（只看关注/外部知识库共用）。 */
 .page-title-row { display:flex; align-items:center !important; justify-content:space-between; }
 .page-title-row .btn-xxs, .page-title-row .btn-xs, .page-title-action { flex:0 0 auto; min-width:0; min-height:24px; padding:2px 8px; font-size:11px; line-height:16px; margin:0; }
@@ -1171,7 +1269,7 @@ body {
 .device-group-toolbar {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 0;
     flex-wrap: wrap;
 }
 

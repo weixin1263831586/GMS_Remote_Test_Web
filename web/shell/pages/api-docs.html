@@ -1,27 +1,27 @@
 <div class="container page-content" id="page-api-docs">
-            <div class="section-title">📡 系统接口</div>
+            {% include 'components/page-header.html' %}📡 系统接口{% include 'components/page-header-end.html' %}
 
             <!-- API统计卡片 -->
-            <div style="display: flex; gap: 15px; margin-bottom: 10px;">
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-apis-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">API总数</div>
+            <div class="page-stat-row">
+                <div class="page-stat-card">
+                    <div class="page-stat-value" style="color: var(--primary-color);" id="total-apis-count">-</div>
+                    <div class="page-stat-label">API总数</div>
                 </div>
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="get-apis-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">GET接口</div>
+                <div class="page-stat-card">
+                    <div class="page-stat-value" style="color: var(--success-color);" id="get-apis-count">-</div>
+                    <div class="page-stat-label">GET接口</div>
                 </div>
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="post-apis-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">POST接口</div>
+                <div class="page-stat-card">
+                    <div class="page-stat-value" style="color: var(--warning-color);" id="post-apis-count">-</div>
+                    <div class="page-stat-label">POST接口</div>
                 </div>
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: var(--info-color);" id="filtered-apis-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">筛选结果</div>
+                <div class="page-stat-card">
+                    <div class="page-stat-value" style="color: var(--info-color);" id="filtered-apis-count">-</div>
+                    <div class="page-stat-label">筛选结果</div>
                 </div>
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: #8b5cf6;" id="skills-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Skill总数</div>
+                <div class="page-stat-card">
+                    <div class="page-stat-value" style="color: #8b5cf6;" id="skills-count">-</div>
+                    <div class="page-stat-label">Skill总数</div>
                 </div>
             </div>
 

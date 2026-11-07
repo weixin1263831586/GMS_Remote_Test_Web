@@ -371,6 +371,7 @@
                     external_busy: ['var(--danger-color)', '● 外部占用'],
                     fastboot: ['#42a5f5', '● Fastboot'],
                     usb_only: ['var(--warning-color)', '● USB / AOA'],
+                    unresponsive: ['var(--danger-color)', '● ADB 无响应'],
                     unauthorized: ['var(--danger-color)', '● 未授权'],
                     offline: ['var(--text-secondary)', '○ 离线'],
                     unknown: ['var(--text-secondary)', '○ 未知']
@@ -378,6 +379,7 @@
                 const localStatus = {
                     fastboot: ['#42a5f5', '● Fastboot'],
                     usb_only: ['var(--warning-color)', '● USB / AOA'],
+                    unresponsive: ['var(--danger-color)', '● ADB 无响应'],
                     unauthorized: ['var(--danger-color)', '● 未授权'],
                     offline: ['var(--text-secondary)', '○ 离线']
                 }[device.status];
@@ -419,14 +421,19 @@
                 const isUsbOnly = device.protocol === 'usb_only'
                     || device.status === 'usb_only'
                     || device.cluster_state === 'usb_only';
-                const hasNoAdb = isFastboot || isUsbOnly;
+                // ADB 幽灵传输（设备重枚举进 loader 等）：列表可见但任何
+                // ADB 操作都会 error: closed，与 fastboot/usb_only 一样
+                // 禁用本地 ADB 入口，避免点了必然失败。
+                const isUnresponsive = device.status === 'unresponsive'
+                    || device.cluster_state === 'unresponsive';
+                const hasNoAdb = isFastboot || isUsbOnly || isUnresponsive;
                 const clusterWorkerAttr = escapeIconAttr(device.worker_id || '');
                 const clusterFullId = actionDeviceId.startsWith(`${device.worker_id || ''}:`)
                     ? actionDeviceId
                     : `${device.worker_id || ''}:${actionDeviceId}`;
                 const clusterFullIdAttr = escapeIconAttr(clusterFullId);
                 const clusterInspectable = !device.claimed
-                    && !['offline', 'unknown', 'unauthorized', 'fastboot', 'usb_only']
+                    && !['offline', 'unknown', 'unauthorized', 'fastboot', 'usb_only', 'unresponsive']
                         .includes(device.cluster_state);
                 const clusterMutable = device.cluster_state === 'available';
                 const localClaimed = !isClusterRemote && Boolean(device.locked_by);

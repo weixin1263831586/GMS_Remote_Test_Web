@@ -238,6 +238,10 @@ class SmtpConfigRequest(BaseModel):
     sender_name: str = Field(default="", max_length=128)
     password: str = Field(default="", max_length=512, description="*** 表示保持现有密码不变")
     use_ssl: bool = True
+    enabled: bool | None = Field(
+        default=None,
+        description="邮件全局总开关；None 表示不修改现有值",
+    )
 
 
 def _global_smtp_section() -> dict[str, Any]:
@@ -264,6 +268,7 @@ def _masked_email_view(email_cfg: dict[str, Any]) -> dict[str, Any]:
         "from_addr": str(effective.get("from_addr") or ""),
         "sender_name": str(effective.get("sender_name") or ""),
         "password_set": bool(effective.get("encrypted_password") or effective.get("password")),
+        "enabled": effective.get("enabled", True) is not False,
         "global_smtp_host": str(email_cfg.get("smtp_host") or ""),
     }
 
@@ -311,6 +316,9 @@ def save_smtp_config(body: SmtpConfigRequest, admin: CurrentUser = Depends(requi
     else:
         email["use_ssl"] = False
         email["use_tls"] = True
+    if body.enabled is not None:
+        # 全局总开关（send_email 单一收口读取）；None = 保持现有值。
+        email["enabled"] = body.enabled
     if body.password and body.password != SECRET_MASK:
         email["encrypted_password"] = encrypt_secret(body.password)
     email.pop("password", None)  # 历史遗留明文字段一律清除

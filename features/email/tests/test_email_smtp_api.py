@@ -136,6 +136,43 @@ class SmtpApiTests(unittest.TestCase):
             ))
         self.assertFalse(result["success"])
 
+    def test_enabled_toggle_persists_and_defaults_to_true(self):
+        saved: dict = {}
+
+        def fake_update(updates, *, remove_keys=None):
+            saved.update(updates)
+            return True
+
+        with mock.patch(
+            "foundation.config.config_manager.load_config", return_value={}
+        ), mock.patch(
+            "foundation.config.config_manager.update_runtime_config",
+            side_effect=fake_update,
+        ):
+            result = self._masked(save_smtp_config(
+                SmtpConfigRequest(
+                    smtp_host="smtp.x.com", username="ops@x.com", enabled=False,
+                ),
+                admin=ADMIN,
+            ))
+        self.assertTrue(result["success"])
+        self.assertFalse(result["data"]["enabled"])
+        self.assertFalse(saved["redmine_dashboard"]["email"]["enabled"])
+
+        # None = 不修改现有值；回读走 resolve 语义（缺省视为开启）。
+        with mock.patch(
+            "foundation.config.config_manager.load_config", return_value={}
+        ), mock.patch(
+            "foundation.config.config_manager.update_runtime_config",
+            side_effect=fake_update,
+        ):
+            result = self._masked(save_smtp_config(
+                SmtpConfigRequest(smtp_host="smtp.x.com", username="ops@x.com"),
+                admin=ADMIN,
+            ))
+        self.assertTrue(result["data"]["enabled"])
+        self.assertNotIn("enabled", saved["redmine_dashboard"]["email"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -323,46 +323,46 @@ async function showConfig() {
     // ADR：结构用 HTML、数据用 DOM property —— 模板不插入任何配置数据，
     // 避免 " < > & 破坏属性 / DOM 注入 / 字段消失类 UI 完整性问题。
     modalBody.innerHTML = `
+        <div class="config-section config-section-notice">
+            部署拓扑（用户/主机/路径/VID:PID）为静态配置：请由管理员在
+            <code>configs/local/config.json</code> 修改后重启生效；此处只读展示，
+            密码经环境变量（GMS_UBUNTU_PASSWORD 等）注入，不在 Web 端保存。
+        </div>
         <form id="test-control-config-form" autocomplete="off">
-        <div class="modal-form-row">
-            <label>测试主机用户:</label>
-            <input type="text" id="config-ubuntu-user" autocomplete="username" />
-        </div>
-        <div class="modal-form-row">
-            <label>测试主机地址:</label>
-            <input type="text" id="config-ubuntu-host" />
-        </div>
-        <div class="modal-form-row">
-            <label>测试主机密码:</label>
-            <input type="password" id="config-ubuntu-pswd" placeholder="输入测试主机SSH密码(留空保持不变)" autocomplete="current-password" />
-        </div>
-        <div class="modal-form-row">
-            <label>设备主机地址:</label>
-            <input type="text" id="config-device-host" />
-        </div>
-        <div class="modal-form-row">
-            <label>设备主机密码:</label>
-            <input type="password" id="config-device-pswd" placeholder="输入设备主机SSH密码(留空保持不变)" autocomplete="current-password" />
-        </div>
-        <div class="modal-form-row">
-            <label>本地主机地址:</label>
-            <input type="text" id="config-local-server" />
-        </div>
-        <div class="modal-form-row">
-            <label>设备VID:PID:</label>
-            <input type="text" id="config-usbip-vid-pids" placeholder="例如: 2207:0006, 18d1:4d00" />
-        </div>
-        <div class="modal-form-row">
-            <label>测试脚本路径:</label>
-            <input type="text" id="config-script-path" class="readonly" readonly />
-        </div>
-        <div class="modal-form-row">
-            <label>测试套件路径:</label>
-            <input type="text" id="config-suites-path" />
+        <div class="config-section config-section-accent-deploy">
+            <div class="config-section-title">部署拓扑（只读）</div>
+            <div class="modal-form-row">
+                <label>测试主机用户:</label>
+                <input type="text" id="config-ubuntu-user" class="readonly" readonly />
+            </div>
+            <div class="modal-form-row">
+                <label>测试主机地址:</label>
+                <input type="text" id="config-ubuntu-host" class="readonly" readonly />
+            </div>
+            <div class="modal-form-row">
+                <label>设备主机地址:</label>
+                <input type="text" id="config-device-host" class="readonly" readonly />
+            </div>
+            <div class="modal-form-row">
+                <label>本地主机地址:</label>
+                <input type="text" id="config-local-server" />
+            </div>
+            <div class="modal-form-row">
+                <label>设备VID:PID:</label>
+                <input type="text" id="config-usbip-vid-pids" class="readonly" readonly placeholder="例如: 2207:0006, 18d1:4d00" />
+            </div>
+            <div class="modal-form-row">
+                <label>测试脚本路径:</label>
+                <input type="text" id="config-script-path" class="readonly" readonly />
+            </div>
+            <div class="modal-form-row">
+                <label>测试套件路径:</label>
+                <input type="text" id="config-suites-path" class="readonly" readonly />
+            </div>
         </div>
 
-        <div style="margin-top:14px;border-top:1px solid var(--border-color);padding-top:10px;">
-            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">日志显示设置</div>
+        <div class="config-section config-section-accent-logs">
+            <div class="config-section-title">日志显示设置</div>
             <div class="modal-form-row">
                 <label>历史日志条数:</label>
                 <input type="number" id="config-log-history-limit" min="10" max="2000" />
@@ -371,13 +371,20 @@ async function showConfig() {
                 <label>实时日志上限:</label>
                 <input type="number" id="config-log-max-entries" min="50" max="10000" />
             </div>
-            <small style="color:var(--text-secondary);">历史日志：首次加载状态时显示的条数；实时日志：页面每个Tab最多保留的条数。保存后即时生效。</small>
+            <small>历史日志：首次加载状态时显示的条数；实时日志：页面每个Tab最多保留的条数。保存后即时生效。</small>
         </div>
         </form>
 
         <!-- 邮件发送方（系统级）：全局 SMTP，保存走 /api/email/smtp（admin） -->
-        <div style="margin-top:14px;border-top:1px solid var(--border-color);padding-top:10px;">
-            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">邮件发送方（系统级 SMTP）</div>
+        <div class="config-section config-section-accent-email">
+            <div class="config-section-title">邮件发送方（系统级 SMTP）</div>
+            <div class="modal-form-row">
+                <label>启用邮件发送:</label>
+                <label style="margin:0;">
+                    <input type="checkbox" id="config-email-enabled" style="vertical-align:middle;" />
+                    开启后 Redmine 提醒、ATS 通知、运维告警等全部邮件出口生效
+                </label>
+            </div>
             <div class="modal-form-row">
                 <label>SMTP 服务器:</label>
                 <input type="text" id="config-email-smtp-host" placeholder="例如: smtphz.qiye.163.com" />
@@ -398,12 +405,12 @@ async function showConfig() {
                 <label>授权码/密码:</label>
                 <input type="password" id="config-email-password" placeholder="留空保持不变" autocomplete="new-password" />
             </div>
-            <small id="config-email-status" style="color:var(--text-secondary);">接收方邮箱在各业务处配置（如 Redmine 用户资料、运维告警 email_to），不在此处。</small>
+            <small id="config-email-status">接收方邮箱在各业务处配置（如 Redmine 用户资料、运维告警 email_to），不在此处。</small>
         </div>
 
         <!-- 客户端 SSH 凭据管理（增删独立于上方静态配置，即时生效） -->
-        <div class="modal-form-row" style="flex-direction:column;align-items:stretch;margin-top:14px;">
-            <label style="margin-bottom:6px;">客户端 SSH 凭据:</label>
+        <div class="config-section config-section-accent-creds">
+            <div class="config-section-title">客户端 SSH 凭据</div>
             <table style="width:100%;border-collapse:collapse;font-size:13px;">
                 <thead>
                     <tr style="background: var(--darker-bg);">
@@ -422,12 +429,12 @@ async function showConfig() {
                 <input type="password" id="client-cred-password" placeholder="SSH 密码" autocomplete="new-password" style="flex:1.5;" />
                 <button class="btn-xxs btn-primary" id="client-cred-add-btn" type="button">添加/更新</button>
             </div>
-            <small style="color:var(--text-secondary);margin-top:4px;">填入已有主机的地址+新密码可覆盖更新；密码不会回显明文。</small>
+            <small>填入已有主机的地址+新密码可覆盖更新；密码不会回显明文。</small>
         </div>
 
         <!-- 静态路由管理（增删独立于上方静态配置，保存后立即应用到本机路由表） -->
-        <div class="modal-form-row" style="flex-direction:column;align-items:stretch;margin-top:14px;">
-            <label style="margin-bottom:6px;">静态路由（启动时与保存后自动应用）:</label>
+        <div class="config-section config-section-accent-routes">
+            <div class="config-section-title">静态路由（启动时与保存后自动应用）</div>
             <div class="modal-form-row" style="gap:8px;margin-bottom:6px;">
                 <label style="margin:0;">
                     <input type="checkbox" id="config-static-routes-enabled" style="vertical-align:middle;" />
@@ -451,7 +458,7 @@ async function showConfig() {
                 <input type="text" id="static-route-gateway" placeholder="网关，例如 192.0.2.1" autocomplete="off" style="flex:1.5;" />
                 <button class="btn-xxs btn-primary" id="static-route-add-btn" type="button">添加</button>
             </div>
-            <small style="color:var(--text-secondary);margin-top:4px;">程序启动和每次保存时自动应用（幂等）。修改路由表需要 root；普通用户运行时需配置 sudoers 免密 ip route。</small>
+            <small>程序启动和每次保存时自动应用（幂等）。修改路由表需要 root；普通用户运行时需配置 sudoers 免密 ip route。</small>
         </div>
     `;
 
@@ -497,10 +504,13 @@ async function loadEmailSenderConfig() {
         setValue('config-email-smtp-port', data.smtp_port || 465);
         setValue('config-email-username', data.username);
         setValue('config-email-from-addr', data.from_addr);
+        const enabledInput = document.getElementById('config-email-enabled');
+        if (enabledInput) enabledInput.checked = data.enabled !== false;
         if (status) {
+            const state = data.enabled === false ? '【已关闭】' : '';
             status.textContent = data.password_set
-                ? '当前已配置授权码（不回显；留空保持不变）。接收方邮箱在各业务处配置（如 Redmine 用户资料、运维告警 email_to）。'
-                : '尚未配置授权码。接收方邮箱在各业务处配置（如 Redmine 用户资料、运维告警 email_to）。';
+                ? `${state}当前已配置授权码（不回显；留空保持不变）。接收方邮箱在各业务处配置（如 Redmine 用户资料、运维告警 email_to）。`
+                : `${state}尚未配置授权码。接收方邮箱在各业务处配置（如 Redmine 用户资料、运维告警 email_to）。`;
         }
     } catch (error) {
         if (status) status.textContent = '读取邮件发送方配置失败: ' + error.message;
@@ -510,8 +520,11 @@ async function loadEmailSenderConfig() {
 async function saveEmailSenderConfig() {
     const host = document.getElementById('config-email-smtp-host').value.trim();
     const password = document.getElementById('config-email-password').value;
-    // 主机为空视为不修改邮件配置（用户可能只想改系统配置的其它部分）。
-    if (!host) return;
+    const enabledInput = document.getElementById('config-email-enabled');
+    const enabled = enabledInput ? enabledInput.checked : undefined;
+    const hostUnchanged = !host;
+    // 主机为空且开关未变视为不修改邮件配置（用户可能只想改系统配置的其它部分）。
+    if (hostUnchanged && enabled === undefined) return;
     const payload = {
         smtp_host: host,
         smtp_port: parseInt(document.getElementById('config-email-smtp-port').value, 10) || 465,
@@ -519,6 +532,7 @@ async function saveEmailSenderConfig() {
         from_addr: document.getElementById('config-email-from-addr').value.trim(),
         password: password ? password : '***',
     };
+    if (enabled !== undefined) payload.enabled = enabled;
     await apiCall('/api/email/smtp', 'POST', payload);
 }
 
@@ -803,28 +817,12 @@ function closeModal(modalId) {
 }
 
 async function saveConfig() {
-    const ubuntuPassword = document.getElementById('config-ubuntu-pswd').value;
-    const devicePassword = document.getElementById('config-device-pswd').value;
-    const usbipVidPids = document.getElementById('config-usbip-vid-pids').value
-        .split(/[,;\s]+/)
-        .map(value => value.trim().toLowerCase())
-        .filter(Boolean);
+    // /api/config/update 只接受运行时字段（client_hosts / local_server）。
+    // 静态部署拓扑（用户/主机/路径/VID:PID/SSH 密码）按 ADR 0007 存放在
+    // configs/local/config.json 与环境变量，Web 端不再提交。
     const config = {
-        ubuntu_user: document.getElementById('config-ubuntu-user').value,
-        ubuntu_host: document.getElementById('config-ubuntu-host').value,
-        device_host: document.getElementById('config-device-host').value,
         local_server: document.getElementById('config-local-server').value,
-        suites_path: document.getElementById('config-suites-path').value,
-        usbip_vid_pids: [...new Set(usbipVidPids)]
     };
-
-    // Only include passwords if they are not empty
-    if (ubuntuPassword) {
-        config.ubuntu_pswd = ubuntuPassword;
-    }
-    if (devicePassword) {
-        config.device_pswd = devicePassword;
-    }
 
     // Save UI log settings to localStorage (frontend-only)
     const historyLimit = parseInt(document.getElementById('config-log-history-limit')?.value) || 100;

@@ -1,0 +1,8 @@
+<!-- 页面标题行组件（open 段）：所有 page-content 左上角标题行的统一入口。
+     几何契约单点收敛在 common.css 的 .page-header-row（1440x960：
+     标题盒顶 15px、字形顶 16px、盒底→内容顶 6px、内容顶跟随
+     --page-body-frame-top）。带右侧动作区的页面用 page-header-actions.html
+     开动作区，最后以 page-header-end.html 闭合；无动作区直接接 end。
+     片段必须保持纯输出（不得引入 set/if/macro），否则 shell 模板整体
+     退出展平路径、丢失 JS/CSS bundle 合并（bootstrap/shell_templates.py）。 -->
+<div class="page-header-row"><div class="section-title">

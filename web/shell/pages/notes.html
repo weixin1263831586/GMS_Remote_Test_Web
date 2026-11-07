@@ -1,5 +1,7 @@
 <div class="container page-content" id="page-notes">
-            <div class="section-title">📚 个人知识库</div>
+            {% include 'components/page-header.html' %}📚 个人知识库{% include 'components/page-header-actions.html' %}
+                <button type="button" class="btn-xs page-title-action" data-click="ekOpen" title="外部知识库（Android Internals Wiki）revision 状态与管理">🔗 外部知识库</button>
+            {% include 'components/page-header-end.html' %}
             <div class="kb-layout" style="display:grid;grid-template-columns:220px 300px minmax(0,1fr);gap:10px;flex:1;min-height:0;">
                 <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
                     <div style="padding: 8px 10px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">

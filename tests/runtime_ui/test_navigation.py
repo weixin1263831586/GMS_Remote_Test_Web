@@ -848,6 +848,36 @@ class RuntimeNavigationTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_devices_aoa_and_users_agent_tabs_persist_across_reload(self):
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof window.switchPage === 'function'")
+
+            page.evaluate("switchPage('devices')")
+            page.evaluate("aoaViewToggle(true)")
+            expect(page.locator("#aoa-panel")).to_be_visible()
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_load_state("load")
+            page.wait_for_function("typeof window.switchPage === 'function'")
+            expect(page.locator("#aoa-panel")).to_be_visible()
+            self.assertEqual(
+                page.evaluate("localStorage.getItem('gms_current_page')"), "devices")
+
+            page.evaluate("switchPage('users')")
+            self.close_initial_modals(page)
+            page.evaluate("agentAccessToggle(true)")
+            expect(page.locator("#agent-access-panel")).to_be_visible()
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_load_state("load")
+            page.wait_for_function("typeof window.switchPage === 'function'")
+            expect(page.locator("#agent-access-panel")).to_be_visible()
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
     def test_sidebar_visibility_options_each_have_an_explanation(self):
         page = self.new_page()
         try:

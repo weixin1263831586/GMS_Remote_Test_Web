@@ -47,7 +47,10 @@ def local_management_inventory() -> tuple[list[str], dict, dict, str] | None:
         if props.get('aoa_context'):
             properties[serial]['aoa_context'] = props['aoa_context']
         state = str(item.get('state') or '')
-        protocols[serial] = state if state in {'fastboot', 'usb_only'} else 'adb'
+        # unresponsive（adb 幽灵传输）必须显式透传：压平成 'adb' 会让
+        # 管理页/设备列表把它标成「ADB 已连接」，烧写后停 loader 的设备
+        # 就是这样误导选机的（实机 66df75a34ebde4a4 回归）。
+        protocols[serial] = state if state in {'fastboot', 'usb_only', 'unresponsive'} else 'adb'
     if not devices:
         return None
     return devices, properties, protocols, observed_at
@@ -84,3 +87,20 @@ def local_usb_only_inventory() -> dict[str, dict]:
     return {serial: {'device_id': serial, 'status': 'usb_only', 'protocol': 'usb_only',
                      'transport': 'local_usb'}
             for serial in devices if protocols.get(serial) == 'usb_only'}
+
+
+def local_unresponsive_inventory() -> dict[str, dict]:
+    """Owning Worker 的 adb 幽灵传输清单（心跳权威，替代本机字面 adb）。
+
+    本机 ``adb devices`` 的 device 态来自 server 缓存：设备烧写后重枚举进
+    loader 时条目残留但 I/O 全死，本机扫描会照字面把它标成 online，
+    测试页随之显示「ADB 已连接」。Worker 的 liveness 探测已把它标为
+    unresponsive——这里把该权威事实交给设备列表主路径做覆盖。
+    """
+    snapshot = local_management_inventory()
+    if snapshot is None:
+        return {}
+    devices, _properties, protocols, _observed = snapshot
+    return {serial: {'device_id': serial, 'status': 'unresponsive',
+                     'protocol': 'unresponsive', 'transport': 'local_usb'}
+            for serial in devices if protocols.get(serial) == 'unresponsive'}

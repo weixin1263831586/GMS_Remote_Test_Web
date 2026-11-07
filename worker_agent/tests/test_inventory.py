@@ -21,6 +21,10 @@ def _isolate_host_usb_inventory(monkeypatch):
     # （及标志 TTL 未过期时）adb 抑制会让 probe 跳过 adb 分支，
     # patch 的 _run 序列错位 → 偶发失败。本文件只测解析/枚举逻辑。
     monkeypatch.setattr(device_actions, "_adb_daemon_suppressed", lambda: False)
+    # liveness 往返同理：mock 的 _run 无法应答真实 `adb shell true`，
+    # 默认放行（设备态健康），幽灵传输由下面的专测显式关掉。
+    monkeypatch.setattr(
+        device_actions, "_adb_transport_alive", lambda *_a, **_k: True)
 
 
 def test_usb_only_android_device_remains_available_for_aoa(tmp_path):
@@ -60,6 +64,44 @@ def test_usb_only_inventory_ignores_non_android_usb_device(tmp_path):
     (interface / "bInterfaceClass").write_text("08\n")
 
     assert _probe_usb_only_devices(set(), tmp_path) == []
+
+
+def test_usb_only_probe_excludes_usb_uart_bridge_dongles(tmp_path):
+    # FT232R 串口调试小板（vendor 0403，接口类恰为 ff）曾被 class-ff 兜底
+    # 误收成 AOA 恢复候选，污染设备清单并可能被烧写流程误 reset 串口。
+    # 宿主机 sysfs 实证：1-14 vendor=0403 product=6001 class=ff iSerial=A6022883。
+    for port, vendor, product, serial in (
+        ("1-14", "0403", "6001", "A6022883"),
+        ("1-15", "1a86", "7523", "CH340-1"),
+    ):
+        device = tmp_path / port
+        interface = tmp_path / f"{port}:1.0"
+        device.mkdir()
+        interface.mkdir()
+        (device / "serial").write_text(f"{serial}\n")
+        (device / "idVendor").write_text(f"{vendor}\n")
+        (device / "idProduct").write_text(f"{product}\n")
+        (interface / "bInterfaceClass").write_text("ff\n")
+
+    assert _probe_usb_only_devices(set(), tmp_path) == []
+
+
+def test_usb_only_probe_keeps_other_vendor_specific_boot_devices(tmp_path):
+    # class-ff 兜底仍放行非桥接芯片厂商（如 Qualcomm EDL 05c6:9008）；
+    # 排除名单只针对 USB-UART 桥，不得把兜底收窄成纯 18d1/2207 白名单。
+    device = tmp_path / "3-2"
+    interface = tmp_path / "3-2:1.0"
+    device.mkdir()
+    interface.mkdir()
+    (device / "serial").write_text("EDL-9008\n")
+    (device / "idVendor").write_text("05c6\n")
+    (device / "idProduct").write_text("9008\n")
+    (interface / "bInterfaceClass").write_text("ff\n")
+
+    devices = _probe_usb_only_devices(set(), tmp_path)
+
+    assert [item["serial"] for item in devices] == ["EDL-9008"]
+    assert devices[0]["properties"]["aoa_recovery_candidate"] == "true"
 
 
 def test_detailed_probe_serves_from_cache_and_enriches_in_background():
@@ -151,6 +193,50 @@ def test_lightweight_probe_skips_detail_shell_call():
 
     assert devices[0]["properties"]["model"] == "Box"
     assert runner.call_count == 2
+
+
+def test_probe_marks_ghost_adb_transport_unresponsive():
+    # 烧写后设备重枚举进 loader（2207:0006），adb server 里仍残留 device
+    # 态幽灵条目：任何往返 error: closed。清单必须标 unresponsive，
+    # 否则 Web「ADB 已连接」徽标误导选机（实机 66df75a34ebde4a4 回归）。
+    with patch(
+        "worker_agent.device_actions._run",
+        side_effect=[
+            "List of devices attached\n66df75a34ebde4a4 device usb:1-13 product:rk\n",
+            "",
+        ],
+    ), patch(
+        "worker_agent.device_actions._adb_transport_alive",
+        return_value=False,
+    ) as alive:
+        devices = probe_devices()
+
+    assert devices[0]["serial"] == "66df75a34ebde4a4"
+    assert devices[0]["state"] == "unresponsive"
+    # 幽灵条目仍占位 known：usb_only 探测不重复列同一物理口。
+    alive.assert_called_once_with("66df75a34ebde4a4", None)
+
+
+def test_probe_checks_liveness_only_for_device_state():
+    # offline/unauthorized 是显式异常态，不需要额外往返确认；
+    # 只有 device 态才值得为真实性付一次往返。
+    with patch(
+        "worker_agent.device_actions._run",
+        side_effect=[
+            "List of devices attached\n"
+            "A\tdevice usb:1-6\n"
+            "B\toffline\n"
+            "C\tunauthorized usb:1-7\n",
+            "",
+        ],
+    ), patch(
+        "worker_agent.device_actions._adb_transport_alive",
+        return_value=True,
+    ) as alive:
+        devices = probe_devices()
+
+    assert [item["state"] for item in devices] == ["available", "offline", "unauthorized"]
+    alive.assert_called_once()
 
 
 def test_probe_normalizes_bare_usb_port_from_platform_tools_35():
