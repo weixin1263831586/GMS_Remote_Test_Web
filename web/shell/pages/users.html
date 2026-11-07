@@ -1,28 +1,27 @@
 <div class="container page-content" id="page-users">
-            <div class="users-page-header">
-                <div class="section-title" id="users-page-title">👥 用户管理</div>
+            {% include 'components/page-header.html' %}👥 用户管理{% include 'components/page-header-actions.html' %}
                 <div class="users-view-tabs" id="users-view-tabs" role="tablist" aria-label="用户管理视图" style="display: none;">
                     <button id="users-list-tab" class="btn-xs active" type="button" role="tab" aria-selected="true" data-click="agentAccessToggle" data-a0="false">用户列表</button>
                     <div id="agent-access-entry">
                         <button id="agent-access-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="agentAccessToggle" data-a0="true">🔑 Agent 接入</button>
                     </div>
                 </div>
-            </div>
+            {% include 'components/page-header-end.html' %}
 
             <div id="users-main-view">
                 <!-- 用户统计卡片 -->
-                <div class="users-stats">
-                    <button class="user-stat-card" type="button" data-user-status-card="" data-click="setUsersStatusFilter" data-a0="">
-                        <span class="user-stat-value total" id="total-users-count">-</span>
-                        <span class="user-stat-label">全部用户</span>
+                <div class="users-stats page-stat-row">
+                    <button class="user-stat-card page-stat-card" type="button" data-user-status-card="" data-click="setUsersStatusFilter" data-a0="">
+                        <span class="page-stat-value total" id="total-users-count">-</span>
+                        <span class="page-stat-label">全部用户</span>
                     </button>
-                    <button class="user-stat-card" type="button" data-user-status-card="online" data-click="setUsersStatusFilter" data-a0="online">
-                        <span class="user-stat-value online" id="active-users-count">-</span>
-                        <span class="user-stat-label">空闲在线</span>
+                    <button class="user-stat-card page-stat-card" type="button" data-user-status-card="online" data-click="setUsersStatusFilter" data-a0="online">
+                        <span class="page-stat-value online" id="active-users-count">-</span>
+                        <span class="page-stat-label">空闲在线</span>
                     </button>
-                    <button class="user-stat-card" type="button" data-user-status-card="testing" data-click="setUsersStatusFilter" data-a0="testing">
-                        <span class="user-stat-value testing" id="testing-users-count">-</span>
-                        <span class="user-stat-label">正在测试</span>
+                    <button class="user-stat-card page-stat-card" type="button" data-user-status-card="testing" data-click="setUsersStatusFilter" data-a0="testing">
+                        <span class="page-stat-value testing" id="testing-users-count">-</span>
+                        <span class="page-stat-label">正在测试</span>
                     </button>
                 </div>
 

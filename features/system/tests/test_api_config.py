@@ -58,11 +58,25 @@ class SystemApiConfigTests(unittest.TestCase):
         self.assertIn("<body>chat</body>", rewritten)
 
     def test_architecture_replaces_configured_build_server_safely(self):
-        page = "<text>{{BUILD_SERVER_LABEL}} • 编译服务器</text>{{PLATFORM_TOPOLOGY}}"
-        topology = Path(
-            api.PROJECT_ROOT, "docs", "architecture", "platform-topology.mmd"
-        ).read_text(encoding="utf-8")
-        files = {"architecture.html": page, "platform-topology.mmd": topology}
+        page = ("<text>{{BUILD_SERVER_LABEL}} • 编译服务器</text>"
+                "{{PLATFORM_TOPOLOGY}}{{USBIP_TOPOLOGY}}"
+                "{{AOA_TOPOLOGY}}{{FIRMWARE_TOPOLOGY}}")
+        topology_dir = Path(api.PROJECT_ROOT, "docs", "architecture")
+        files = {
+            "architecture.html": page,
+            "platform-topology.mmd": (
+                topology_dir / "platform-topology.mmd"
+            ).read_text(encoding="utf-8"),
+            "usbip-topology.mmd": (
+                topology_dir / "usbip-topology.mmd"
+            ).read_text(encoding="utf-8"),
+            "aoa-topology.mmd": (
+                topology_dir / "aoa-topology.mmd"
+            ).read_text(encoding="utf-8"),
+            "firmware-topology.mmd": (
+                topology_dir / "firmware-topology.mmd"
+            ).read_text(encoding="utf-8"),
+        }
 
         def open_by_path(file, *args, **kwargs):
             return io.StringIO(files[os.path.basename(str(file))])

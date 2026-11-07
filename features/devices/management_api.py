@@ -342,6 +342,7 @@ def _build_devices_management_payload(
                 "status": (
                     "fastboot" if protocol == "fastboot"
                     else "usb_only" if protocol == "usb_only"
+                    else "unresponsive" if protocol == "unresponsive"
                     else "online"
                 ),
                 "protocol": protocol,

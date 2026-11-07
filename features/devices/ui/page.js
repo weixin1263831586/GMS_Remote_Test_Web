@@ -64,6 +64,20 @@
         container.append(element('span', '', label), element('span', 'mono', value || '—'));
     }
 
+    function addIdentityMeta(container, port) {
+        // 稳定标识 + 可靠性合并为一行：徽标区分 by-id/usb-path（稳定）与
+        // 裸 tty 名（临时节点），tooltip 保留完整提示，端口卡矮一行。
+        const unstable = port.identity_stable === false;
+        const value = element('span', 'mono', port.by_id || port.port_key);
+        const badge = element('span', `identity-badge${unstable ? ' unstable' : ''}`,
+            unstable ? '临时节点' : '稳定');
+        badge.title = unstable
+            ? '只有易变的 tty 名称，重插后可能指向不同硬件，不能持久绑定'
+            : 'by-id / usb-path 稳定标识，重插后绑定保持';
+        value.append(badge);
+        container.append(element('span', '', '稳定标识'), value);
+    }
+
     function button(text, action, className = '') {
         const node = element('button', className, text);
         node.type = 'button';
@@ -159,12 +173,17 @@
             card.append(head);
 
             const meta = element('div', 'port-meta');
-            addMeta(meta, '设备节点', port.devname);
-            addMeta(meta, '稳定标识', port.by_id || port.port_key);
-            addMeta(meta, '标识可靠性', port.identity_stable === false ? '临时节点，重插后需确认' : '稳定');
-            addMeta(meta, 'USB 芯片', [port.vendor_product, port.driver].filter(Boolean).join(' · '));
+            // 硬件身份行按实际有值展示：离线绑定卡（list_ports 无设备
+            // 节点、USB 字段为空）不再渲染整排 "—" 占位。
+            if (port.devname) addMeta(meta, '设备节点', port.devname);
+            addIdentityMeta(meta, port);
+            const chipLine = [port.vendor_product, port.usb_vendor_name, port.usb_model_name, port.driver].filter(Boolean).join(' · ');
+            if (chipLine) addMeta(meta, 'USB 芯片/驱动', chipLine);
+            if (port.usb_serial) addMeta(meta, 'USB 序列号', port.usb_serial);
+            if (port.usb_bus_node) addMeta(meta, 'USB 总线节点', port.usb_bus_node);
             addMeta(meta, '绑定设备', port.binding
-                ? (port.binding.device_id || '未关联（见备注）')
+                ? (port.binding.device_id
+                    || (port.binding.note ? '未关联（见备注）' : '未关联（可补填）'))
                 : '未绑定');
             addMeta(meta, '波特率', port.binding ? String(port.binding.baudrate) : '未绑定');
             addMeta(meta, '常驻采集', port.capture_enabled ? (port.capture_active ? '采集中' : '等待端口') : '关闭');

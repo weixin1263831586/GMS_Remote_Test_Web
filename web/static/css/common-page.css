@@ -1,44 +1,34 @@
 /* ==================== APK Analysis ==================== */
-.apk-page-header {
-    min-height: 19.2px;
-    margin-bottom: 6px;
-    display: flex;
-    position: relative;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 10px;
-}
-
-.apk-page-header > .section-title {
-    margin: 0;
-}
-
+/* 页头已组件化（page-header-row）；动作区定位锚点为标题行。 */
 .apk-task-history-controls {
     min-width: 0;
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 6px;
+    gap: 0;
     font-size: 11px;
     color: var(--text-secondary);
-    position: absolute;
-    top: 0;
-    right: 0;
-    height: 24px;
 }
 
 #apk-task-history {
     width: min(360px, 42vw);
     min-width: 180px;
-    height: 24px;
+    min-height: 26px;
+    height: 26px;
     padding: 3px 8px;
     font-size: 11px;
 }
 
 #apk-task-history-refresh {
+    /* 宽度钉死（busy 文案「刷新中」与「↻ 刷新」同为 64px 内），
+       刷新态切换不再引起控件尺寸跳动。 */
+    width: 64px;
     min-width: 64px;
-    min-height: 24px;
-    height: 24px;
+    max-width: 64px;
+    overflow: hidden;
+    white-space: nowrap;
+    min-height: 26px;
+    height: 26px;
 }
 
 .apk-upload-zone {
@@ -112,8 +102,7 @@
     font-size: 12px;
     line-height: 1.6;
 }
-#page-report-analysis > .section-title,
-.apk-page-header > .section-title {
+#page-report-analysis > .section-title {
     font-family: inherit;
     font-size: 12px;
     font-weight: 700;
@@ -883,21 +872,9 @@ body.apk-resizing {
 }
 
 /* ==================== 用户与 Agent 接入管理 ==================== */
-.users-page-header {
-    position: relative;
-    flex-shrink: 0;
-    min-height: 18px;
-    margin-bottom: 6px;
-}
-
-.users-page-header > .section-title {
-    margin: 0;
-}
-
 .users-view-tabs {
-    position: absolute;
-    top: -4px;
-    right: 0;
+    /* in-flow 子容器：定位由 .page-header-actions 模板统一（底边对齐
+       内容框顶）。仅保留胶囊视觉（边框/分段按钮）。 */
     display: flex;
     align-items: center;
     gap: 0;
@@ -909,8 +886,9 @@ body.apk-resizing {
 }
 
 .users-view-tabs .btn-xs {
-    height: 26px;
-    min-height: 26px;
+    /* 24px 分段按钮 + 上下边框 = 26px 胶囊，与全站动作区控件同高同底边。 */
+    height: 24px;
+    min-height: 24px;
     padding: 3px 9px;
     border: 0;
     border-radius: 0;
@@ -954,7 +932,9 @@ body.apk-resizing {
     flex-direction: column;
 }
 
-.users-stats,
+/* users 统计卡行布局由 common.css 的 .page-stat-row 模板统一（宽屏
+   flex gap 15，窄屏由下方媒体查询网格化，与 audit-stats 行为一致）；
+   agent-access 面板仍用本页 3 列网格。 */
 .agent-access-stats {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -962,7 +942,6 @@ body.apk-resizing {
     margin-bottom: 10px;
 }
 
-.user-stat-card,
 .agent-access-stat {
     min-width: 0;
     padding: 12px 14px;
@@ -971,6 +950,16 @@ body.apk-resizing {
     color: inherit;
     background: var(--light-bg);
     box-shadow: var(--shadow-sm);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+/* users 卡片外壳（内距/边框/圆角/底色）由 page-stat-card 模板提供，
+   保证与审计/API/设备页统计卡像素同高；这里只保留按钮语义差异。 */
+.user-stat-card {
+    min-width: 0;
+    color: inherit;
     text-align: left;
     cursor: pointer;
     transition: border-color 0.15s ease, background 0.15s ease;
@@ -988,28 +977,24 @@ body.apk-resizing {
     background: color-mix(in srgb, var(--primary-color) 10%, var(--light-bg));
 }
 
-.user-stat-value,
-.user-stat-label,
 .agent-access-stat strong,
 .agent-access-stat span {
     display: block;
 }
 
-.user-stat-value,
 .agent-access-stat strong {
     font-size: 24px;
     line-height: 1.1;
     font-weight: 750;
 }
 
-.user-stat-value.total { color: var(--primary-color); }
-.user-stat-value.online { color: var(--success-color); }
-.user-stat-value.testing { color: var(--warning-color); }
+.user-stat-card .page-stat-value.total { color: var(--primary-color); }
+.user-stat-card .page-stat-value.online { color: var(--success-color); }
+.user-stat-card .page-stat-value.testing { color: var(--warning-color); }
 .agent-access-stat:nth-child(1) strong { color: var(--primary-color); }
 .agent-access-stat:nth-child(2) strong { color: var(--success-color); }
 .agent-access-stat:nth-child(3) strong { color: var(--danger-color); }
 
-.user-stat-label,
 .agent-access-stat span {
     margin-top: 5px;
     color: var(--text-secondary);

@@ -1,22 +1,22 @@
 <div class="container page-content" id="page-security-audit">
-            <div class="section-title">🛡️ 安全审计</div>
+            {% include 'components/page-header.html' %}🛡️ 安全审计{% include 'components/page-header-end.html' %}
 
-            <div class="audit-stats" style="display: flex; gap: 15px; margin-bottom: 10px;">
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="audit-total-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">审计记录</div>
+            <div class="audit-stats page-stat-row">
+                <div class="page-stat-card">
+                    <div class="page-stat-value" style="color: var(--primary-color);" id="audit-total-count">-</div>
+                    <div class="page-stat-label">审计记录</div>
                 </div>
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="audit-web-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Web访问</div>
+                <div class="page-stat-card">
+                    <div class="page-stat-value" style="color: var(--success-color);" id="audit-web-count">-</div>
+                    <div class="page-stat-label">Web访问</div>
                 </div>
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="audit-cli-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">CLI操作</div>
+                <div class="page-stat-card">
+                    <div class="page-stat-value" style="color: var(--warning-color);" id="audit-cli-count">-</div>
+                    <div class="page-stat-label">CLI操作</div>
                 </div>
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: var(--danger-color);" id="audit-error-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">异常请求</div>
+                <div class="page-stat-card">
+                    <div class="page-stat-value" style="color: var(--danger-color);" id="audit-error-count">-</div>
+                    <div class="page-stat-label">异常请求</div>
                 </div>
             </div>
 

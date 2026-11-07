@@ -74,6 +74,8 @@ async function agentAccessToggle(show) {
 
     panel.style.display = visible ? 'flex' : 'none';
     mainView.style.display = visible ? 'none' : '';
+    // 页签状态随 F5 刷新恢复（页面初始化经 runPageInitializers 读取）。
+    try { sessionStorage.setItem('gms_users_view', visible ? 'agent' : 'list'); } catch (_error) {}
     // 左上角页面标题保持“👥 用户管理”不变：视图切换由下方
     // “用户列表 / 🔑 Agent 接入”页签的 active 态表达，不重写标题。
 

@@ -1,10 +1,9 @@
 <div class="container page-content" id="page-test-suites">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-                <div class="section-title">📚 测试套件</div>
-                <label data-multi-host-control style="font-size:12px;color:var(--text-secondary);">主机
+            {% include 'components/page-header.html' %}📚 测试套件{% include 'components/page-header-actions.html' %}
+                <label data-multi-host-control style="color:var(--text-secondary);">主机
                     <select id="suite-worker-select" data-change="switchSuiteWorker" disabled style="width:130px;padding:3px 6px;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);font-size:11px;box-sizing:border-box;"><option value="">正在加载主机...</option></select>
                 </label>
-            </div>
+            {% include 'components/page-header-end.html' %}
 
             <!-- 下载和解压区域 -->
             <div class="suite-download-section" style="margin-bottom: 10px; padding: 8px; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border-color);">

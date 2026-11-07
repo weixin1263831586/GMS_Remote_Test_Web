@@ -1,9 +1,5 @@
 <div class="container page-content" id="page-apk-analysis">
-            <div class="apk-page-header">
-                <div class="section-title section-title-with-icon">
-                    <img src="/static/icons/jadx-icon.webp" alt="" class="section-title-icon" aria-hidden="true">
-                    <span>APK分析</span>
-                </div>
+            {% include 'components/page-header.html' %}<img src="/static/icons/jadx-icon.webp" alt="" class="section-title-icon" aria-hidden="true"><span>APK分析</span>{% include 'components/page-header-actions.html' %}
                 <div class="apk-task-history-controls">
                     <label for="apk-task-history">最近任务</label>
                     <select id="apk-task-history" class="entry-field" data-change="restoreApkTask" data-r0="value">
@@ -11,7 +7,7 @@
                     </select>
                     <button id="apk-task-history-refresh" class="btn-xs ui-refresh-action" type="button" data-click="loadApkTaskHistory" data-a0="true">↻ 刷新</button>
                 </div>
-            </div>
+            {% include 'components/page-header-end.html' %}
 
             <!-- 上传区域 -->
             <div class="analysis-upload-frame">

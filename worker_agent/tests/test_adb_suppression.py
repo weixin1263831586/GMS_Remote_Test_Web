@@ -118,6 +118,9 @@ def test_probe_devices_enumerates_adb_when_not_suppressed(tmp_path, monkeypatch)
         return ""
 
     monkeypatch.setattr(device_actions, "_run", fake_run)
+    # liveness 往返与宿主机 adb 解耦（同 test_inventory 的 autouse 夹具）。
+    monkeypatch.setattr(
+        device_actions, "_adb_transport_alive", lambda *_a, **_k: True)
     monkeypatch.setattr(
         device_actions, "_probe_usb_only_devices", lambda known: [])
 

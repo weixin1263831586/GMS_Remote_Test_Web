@@ -149,6 +149,8 @@ function buildDeviceItemEl({
         ? 'Loader/MaskROM 烧写模式设备，可直接选中重新烧写固件'
         : status === 'usb_only'
         ? '仅检测到 USB 连接，ADB 未连接；USB-HID/AOA 能力待验证，可在 AOA 工作台探测'
+        : status === 'unresponsive'
+        ? 'ADB 往返无响应（设备可能在烧写后重启/进 loader）：不可执行 ADB 操作，等待设备就绪或走 AOA 恢复'
         : status === 'unknown'
         ? '设备状态待确认，请刷新设备列表后重试'
         : selectable ? 'ADB 已连接；测试就绪状态仍需执行前检查' : `设备当前处于 ${status} 状态`;
@@ -188,6 +190,8 @@ function buildDeviceItemEl({
         ? '未授权'
         : statusLower === 'usb_only'
         ? 'USB-HID / AOA（待验证）'
+        : statusLower === 'unresponsive'
+        ? 'ADB 无响应'
         : isLocked ? '已分配'
         : ['online', 'available'].includes(statusLower) ? 'ADB 已连接'
         : statusLower === 'offline' || statusLower === 'absent' ? '已断开'

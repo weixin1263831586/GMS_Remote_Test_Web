@@ -1,0 +1,14 @@
+flowchart TB
+    Browser["Web 烧写入口（分片上传）"]
+    Ctrl["Controller：固件服务与烧写编排"]
+    Worker["Worker：upgrade_tool / fastboot"]
+    Loader[("Loader / Rockusb 模式")]
+    Dev["Android 设备"]
+    AoaRec["AOA 恢复接续（向导 → USB 调试）"]
+
+    Browser -->|"HTTPS：固件上传"| Ctrl
+    Ctrl -->|"SSH 执行（受审计，ADR 0004）"| Worker
+    Worker -->|"Download Firmware"| Loader
+    Loader -->|"烧写完成自动重启"| Dev
+    Worker -->|"烧写后接续 AOA 恢复（可选）"| AoaRec
+    AoaRec -->|"ADB device 态验证"| Dev

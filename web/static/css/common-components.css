@@ -1138,6 +1138,60 @@ body.modal-open {
     border-color: var(--primary-color);
 }
 
+/* ==================== Config Modal Sections ==================== */
+/* 系统配置弹框的卡片式分块：每块一个带边框/底色的 section，
+   块间距与内边距统一，标题行醒目，视觉边界清晰。 */
+.config-section {
+    background: var(--light-bg);
+    border: 1px solid var(--border-color);
+    border-left: 3px solid var(--accent, var(--primary-color));
+    border-radius: 8px;
+    margin-bottom: 16px;
+    padding: 12px 14px;
+}
+/* 收尾清零只针对弹框 body 的直接末位卡片；不能写成
+   .config-section:last-child——那会误伤任何父容器的末位卡片
+   （如 form 内的日志块，它后面还有 form 外的邮件卡片）。 */
+.modal-body > .config-section:last-child { margin-bottom: 0; }
+.config-section-title {
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    margin: -12px -14px 12px;
+    padding: 10px 14px;
+}
+.config-section-title::before {
+    content: '';
+    display: inline-block;
+    width: 3px;
+    height: 12px;
+    margin-right: 8px;
+    background: var(--accent, var(--primary-color));
+    border-radius: 2px;
+    vertical-align: -1px;
+}
+.config-section > .config-note,
+.config-section > small {
+    color: var(--text-secondary);
+    display: block;
+    font-size: 12px;
+    line-height: 1.6;
+    margin-top: 6px;
+}
+.config-section.config-section-notice {
+    background: transparent;
+    border: 0;
+    border-left: 3px solid var(--warning-color);
+    padding: 8px 10px;
+}
+/* 各块区分色：左边框 + 标题竖条同一 accent，扫一眼即知所处区块。 */
+.config-section-accent-deploy { --accent: var(--primary-color); }
+.config-section-accent-logs { --accent: var(--success-color); }
+.config-section-accent-email { --accent: #a78bfa; }
+.config-section-accent-creds { --accent: var(--warning-color); }
+.config-section-accent-routes { --accent: #22d3ee; }
+
 .modal-form-row input.readonly {
     background: #1a1a1a;
     color: var(--text-muted);
@@ -1375,8 +1429,8 @@ body.modal-open {
 .toast {
     position: fixed;
     top: 50%;
-    right: 24px;
-    transform: translateY(-50%) scale(0.9);
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.9);
     padding: 18px 28px;
     background: var(--card-bg);
     border: 1px solid var(--border-color);
@@ -1397,7 +1451,7 @@ body.modal-open {
 .toast.show {
     opacity: 1;
     visibility: visible;
-    transform: translateY(-50%) scale(1);
+    transform: translate(-50%, -50%) scale(1);
 }
 
 .toast.success {

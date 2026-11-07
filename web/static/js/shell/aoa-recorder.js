@@ -14,7 +14,7 @@ function aoaRecorderTarget() {
     return {workerId, device};
 }
 
-async function aoaRefreshScreen() {
+async function aoaRefreshScreen({force = false} = {}) {
     // 实时投屏激活期间画面由流自更新：截图刷新（手动按钮/回退轮询残留）
     // 一律跳过，避免「正在获取…/已连接」状态在实时状态上反复跳动。
     if (window.aoaLiveScreen?.isActive()) return;
@@ -29,6 +29,19 @@ async function aoaRefreshScreen() {
         if (waiting) waiting.textContent = `${target.device} 无 ADB 连接（仅 AOA 恢复可用），等待设备就绪…`;
         return;
     }
+    // 后台轮询（实时流回退）在故障窗口的两道闸，手动刷新（force）不受限：
+    // 1) 占用暂停：设备被烧写/GSI 任务 fencing（409 占用类）后零请求，
+    //    设备清单同步时复位、重试一次，仍占用则再次暂停；
+    // 2) 连续失败退避：其余失败（如 502 远程执行失败）从第 3 次起静默
+    //    6s、第 6 次起 12s，成功即复位——1.2s 驱动定时器保持不动。
+    if (!force) {
+        if (aoaPanelState.screenBusyPaused) {
+            const busyStatus = aoaEl('aoa-screen-status');
+            if (busyStatus) busyStatus.textContent = `${target.device} 正被其他操作占用（如烧写/回放），等待释放…`;
+            return;
+        }
+        if (Date.now() < (aoaPanelState.screenNextAttemptAt || 0)) return;
+    }
     const refreshId = ++aoaPanelState.screenRefreshId;
     const status = aoaEl('aoa-screen-status');
     if (status) status.textContent = '正在获取设备截图…';
@@ -38,6 +51,8 @@ async function aoaRefreshScreen() {
         }, () => refreshId === aoaPanelState.screenRefreshId && aoaViewIsOpen());
         if (refreshId !== aoaPanelState.screenRefreshId) return;
         if (!result?.image) throw new Error(result?.error || '截图为空');
+        aoaPanelState.screenFailures = 0;
+        aoaPanelState.screenNextAttemptAt = 0;
         const image = aoaEl('aoa-screen-image'); image.src = result.image; image.hidden = false;
         aoaEl('aoa-screen-empty').hidden = true;
         if (status) status.textContent = `已连接 ${target.device} · 单击、长按或拖动操作`;
@@ -45,14 +60,24 @@ async function aoaRefreshScreen() {
         if (refreshId !== aoaPanelState.screenRefreshId) return;
         aoaEl('aoa-screen-image').hidden = true;
         const empty = aoaEl('aoa-screen-empty'); empty.hidden = false;
-        if (error?.status === 409 && /no ADB connection|only AOA recovery/i.test(error.message || '')) {
+        const message = error?.message || '';
+        if (error?.status === 409 && /no ADB connection|only AOA recovery/i.test(message)) {
             aoaPanelState.adbUnavailable = true;
             empty.textContent = '设备当前无 ADB 连接（仅 AOA 恢复可用）；ADB 就绪后画面自动恢复。';
             if (status) status.textContent = `${target.device} 无 ADB 连接（仅 AOA 恢复可用），等待设备就绪…`;
             return;
         }
+        if (error?.status === 409 && /占用|busy|fenc|claim|已选择|其他操作|烧写/i.test(message)) {
+            aoaPanelState.screenBusyPaused = true;
+            empty.textContent = '设备正被其他操作（如烧写/GSI 烧写）占用，释放后画面自动恢复。';
+            if (status) status.textContent = `${target.device} 正被其他操作占用（如烧写/回放），等待释放…`;
+            return;
+        }
+        const failures = (aoaPanelState.screenFailures || 0) + 1;
+        aoaPanelState.screenFailures = failures;
+        aoaPanelState.screenNextAttemptAt = Date.now() + (failures >= 6 ? 12000 : failures >= 3 ? 6000 : 0);
         empty.textContent = '无法获取画面。AOA 回放或 USB 调试关闭后，ADB 截图会暂时不可用。';
-        if (status) status.textContent = `截图失败：${error.message}`;
+        if (status) status.textContent = `截图失败：${message}（连续 ${failures} 次，已退避重试）`;
     }
 }
 
@@ -110,7 +135,7 @@ async function aoaExecuteRecorderInput(input, {refresh = true, pace = true} = {}
         aoaSetStatus(aoaPanelState.recording ? '录制中' : '操作完成', 'success');
         // 实时投屏激活时画面自更新，跳过截图刷新（省一条命令+轮询）。
         if (refresh && !aoaLiveInputSurfaceActive()) {
-            setTimeout(() => aoaRefreshScreen(), 500);
+            setTimeout(() => aoaRefreshScreen({force: true}), 500);
         }
         return result;
     } catch (error) {

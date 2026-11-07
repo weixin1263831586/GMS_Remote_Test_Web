@@ -191,6 +191,15 @@ async def device_action(body: ClusterDeviceAction, request: Request):
                 409,
                 f"device has no ADB connection; only AOA recovery is available: {value}",
             )
+        if state == "unresponsive" and not is_aoa_recovery:
+            # adb server 里残留 device 态幽灵传输（设备烧写后重枚举进
+            # loader 或 adbd 已死）：下发任何 ADB 动作都必然失败，与
+            # usb_only 同样只放行 AOA 恢复（走物理 USB，不依赖 adb）。
+            raise HTTPException(
+                409,
+                f"ADB transport is unresponsive (device may have rebooted "
+                f"after flashing); only AOA recovery is available: {value}",
+            )
         if state == "external_busy" and not is_read_only:
             raise HTTPException(409, f"device is busy with a manual Tradefed test: {value}")
         if (

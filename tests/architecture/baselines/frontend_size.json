@@ -8,10 +8,5 @@
     "web/static/js/pages/report-analysis.js": 93063,
     "web/static/js/shell/weekly-report.js": 41351
   },
-  "waivers": {
-    "web/static/js/navigation.js": {
-      "reason": "登记时文件已超旧 ceiling(并发改动);后续拆分回落",
-      "expires": "2026-11-06"
-    }
-  }
+  "waivers": {}
 }

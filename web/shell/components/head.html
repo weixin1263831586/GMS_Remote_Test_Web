@@ -4,14 +4,14 @@
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="preload" as="script" href="/static/js/shell/shell-early-boot.js" fetchpriority="high">
-    <link rel="stylesheet" href="/static/css/common.css?v=20260930-css-split" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-components.css?v=20261106-toast-right" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common.css?v=20261107-actions-inflow" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-components.css?v=20261107-config-gap" data-shell-styles>
     <link rel="stylesheet" href="/static/css/common-layout.css?v=20260930-css-split" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-page.css?v=20260930-css-split" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-page.css?v=20261107-actions-inflow" data-shell-styles>
     <link rel="stylesheet" href="/static/css/agent-access.css?v=20261014-agent-access" data-shell-styles>
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <link rel="stylesheet" href="/static/css/shell-extra.css?v=20260930-shell-extra">
-    <link rel="stylesheet" href="/static/css/aoa-workbench.css?v=20261106-calibrate-layout">
+    <link rel="stylesheet" href="/static/css/aoa-workbench.css?v=20261107-heading-row">
     <!-- 运行时配置以 JSON 数据标签注入：type="application/json" 不被
          执行，因此不受 CSP script-src 管制，也消除了 tojson 内容
          逃逸出 JS 上下文的可能。shell-config.js 优先解析为
@@ -104,14 +104,14 @@
     <script src="/static/js/pages/auth-elevation.js?v=20260910-elevation-retry" defer></script>
     <script src="/static/js/pages/vpn-control.js?v=20260902-vpn-per-worker" defer></script>
     <script src="/static/js/pages/file-browser.js?v=20260904-gsi-worker-browse" defer></script>
-    <script src="/static/js/pages/test-control.js?v=20260827-usbip-vid-pids" defer></script>
+    <script src="/static/js/pages/test-control.js?v=20261107-config-sections" defer></script>
     <script src="/static/js/pages/test-reports.js?v=20260812-stable-surfaces" defer></script>
     <script src="/static/js/pages/report-analysis.js?v=20260920-adr0014" defer></script>
     <script src="/static/js/pages/report-analysis-diagnosis.js?v=20260920-adr0014" defer></script>
     <script src="/static/js/pages/conversational-agent.js?v=20260813-ai-status" defer></script>
     <script src="/static/js/pages/agent-access.js?v=20261014-agent-access" defer></script>
     <script src="/static/js/pages/api-docs.js?v=20260812-stable-surfaces" defer></script>
-    <script src="/static/js/pages/apk-analysis.js?v=20260828-apk-scroll-containers" defer></script>
+    <script src="/static/js/pages/apk-analysis.js?v=20261107-apk-refresh-width" defer></script>
     <script src="/static/js/pages/security-audit.js?v=20260917-elevation-gate" defer></script>
     <!-- 加载主导航模块 - 使用 defer 异步加载，不阻塞页面渲染 -->
     <script src="/static/js/navigation.js?v=20260902-adbproxy-state" defer crossorigin="anonymous"></script>
@@ -154,40 +154,18 @@
         body.workspace-scope-single #page-desktop .host-workspace-pane-header,
         body.workspace-scope-single #page-terminal .host-workspace-pane-header { display: none !important; }
         .host-workspace-single-bar { display: none; }
-        body.workspace-scope-single .host-workspace-single-bar { display: flex; align-items: center; gap: 6px; }
+        body.workspace-scope-single .host-workspace-single-bar { display: flex; align-items: center; gap: 0; }
         .host-workspace-mode-pending { display: none; }
-        /* 与其他页面标题保持相同的 6px 内容间距。标题行保留 24px 供右侧
-           按钮（page-title-actions）使用；左侧标题文字保持顶部对齐
-           （line-height 1.6，字形不进 24px 行盒垂直居中——那会整体下沉
-           约 2px），但盒子本身 align-self: stretch 撑满行高，使
-           "标题盒底 → 内容顶"的间距仍是 margin-bottom 的 6px
-           （runtime UI smoke 的 titleToContent 契约）。stretch 只改变
-           盒高，字形仍渲染在盒顶，与 69f91b0 的防下沉意图一致。 */
-        .host-workspace-title-row { position: relative; min-height: 24px; margin-bottom: 6px; display: flex; align-items: flex-start; }
+        /* 与其他页面标题保持相同的 6px 内容间距。标题行结构已组件化
+           （components/page-header{,-actions,-end}.html → .page-header-row，
+           几何单点在 common.css：行高 19.2px、内容顶 40.19 ≈ 默认
+           frame-top 40，页级覆盖不再需要）。行内特有子元素（拉伸状态
+           条、布局按钮组）的样式保留在此。 */
         .main-container > #page-desktop.page-content,
-        .main-container > #page-terminal.page-content { --page-body-frame-top: 45px; }
-        /* 设备页标题行右侧带 tab 工具条（高约 28px），内容起点比统一
-           默认（40px）低 9px，页级覆盖外框顶使其与内容顶对齐。 */
-        .main-container > #page-devices.page-content { --page-body-frame-top: 49px; }
-        @media (max-width: 600px) {
-            .main-container > #page-desktop.page-content,
-            .main-container > #page-terminal.page-content { --page-body-frame-top: 38px; }
-        }
-        .host-workspace-title-row > .section-title,
-        #page-devices > div:first-child > .section-title {
-            height: auto; min-height: 19px; line-height: 1.6; align-self: stretch;
-            /* 拉伸/定高标题盒内文字行盒必须顶对齐：align-items:center 会把
-               行盒垂直居中进 24/28px 盒，字形整体下沉约 2.4px，与其他页面
-               的 17px 字形顶不一致（实机 1440x960 契约）。顶对齐后行盒从
-               盒顶开始排，字形位置与未拉伸页完全同构。 */
-            align-items: flex-start;
-        }
-        .host-workspace-title-row > .section-title::before,
-        #page-devices > div:first-child > .section-title::before {
-            /* 装饰条补偿：普通页 bar 垂直居中于 19.2px 行盒（顶偏 1.6px）；
-               顶对齐盒内 bar 也保持同一相对位置，bar 与字形的相对关系
-               像素级一致。 */
-            margin-top: calc((1.6em - 16px) / 2);
+        .main-container > #page-terminal.page-content,
+        .main-container > #page-devices.page-content {
+            /* 组件化后内容顶与默认 frame-top 对齐（原 45/49px 覆盖对应
+               旧的内联行高，已由组件统一）。占位保留页级锚点便于调整。 */
         }
         .host-workspace-title-state { height: 24px; align-items: center; }
         .host-workspace-title-state > .host-workspace-pane-status {
@@ -270,7 +248,7 @@
         }
         body.workspace-scope-pending .host-workspace-mode-pending,
         #page-desktop:not(.host-workspace-ready) .host-workspace-mode-pending,
-        #page-terminal:not(.host-workspace-ready) .host-workspace-mode-pending { display: flex; align-items: center; gap: 6px; }
+        #page-terminal:not(.host-workspace-ready) .host-workspace-mode-pending { display: flex; align-items: center; gap: 0; }
         body.workspace-scope-pending #page-desktop .host-workspace-layouts,
         body.workspace-scope-pending #page-terminal .host-workspace-layouts,
         body.workspace-scope-pending .host-workspace-single-bar,

@@ -102,6 +102,29 @@ class SendEmailTests(unittest.TestCase):
         self.assertEqual(result["mode"], "unconfigured")
         self.assertIn("SMTP", result["error"])
 
+    def test_global_kill_switch_disabled_mode(self):
+        result = send_email(
+            "a@x.com", "s", "b", manager=_fake_manager({**QIYE_CFG, "enabled": False})
+        )
+        self.assertFalse(result["sent"])
+        self.assertEqual(result["mode"], "disabled")
+        self.assertIn("全局关闭", result["error"])
+
+    def test_enabled_flag_defaults_to_on(self):
+        with patch.dict("os.environ", {"GMS_EMAIL_ENABLED": "0"}):
+            result = send_email(
+                "a@x.com", "s", "b", manager=_fake_manager(QIYE_CFG)
+            )
+        self.assertFalse(result["sent"])
+        self.assertEqual(result["mode"], "disabled")
+
+        with patch.dict("os.environ", {"GMS_EMAIL_ENABLED": "1"}):
+            result = send_email(
+                "", "s", "b", manager=_fake_manager({**QIYE_CFG, "enabled": False})
+            )
+        # 环境变量显式开启可覆盖配置关闭；空收件人报错说明已越过开关。
+        self.assertIn("收件人", result.get("error", ""))
+
     def test_empty_recipients_rejected(self):
         result = send_email("", "s", "b", manager=_fake_manager(QIYE_CFG))
         self.assertFalse(result["sent"])

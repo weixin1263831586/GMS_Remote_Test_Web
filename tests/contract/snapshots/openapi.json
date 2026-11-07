@@ -2835,6 +2835,18 @@
       },
       "SmtpConfigRequest": {
         "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "邮件全局总开关；None 表示不修改现有值",
+            "title": "Enabled"
+          },
           "from_addr": {
             "default": "",
             "maxLength": 255,
@@ -25528,7 +25540,7 @@
     },
     "/templates/architecture.html": {
       "get": {
-        "description": "获取系统架构图",
+        "description": "获取系统架构图（平台总览 / USB/IP / AOA / 固件烧写视图）",
         "responses": {
           "200": {
             "content": {

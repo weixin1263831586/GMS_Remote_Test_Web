@@ -83,6 +83,7 @@ def resolve_email_config(manager: Any = None) -> dict[str, Any]:
     2. 兼容兜底：静态配置遗留的 ``redmine_dashboard.email``
        （automation owner 历史写入 configs/local/config.json 的位置）；
     3. owner 覆盖 ``redmine_dashboard.email``（看板「设置 → SMTP」保存的
+       ``enabled: false`` 可作为该 owner 的邮件总开关；
        per-user 差异化配置；不传 manager 即只用全局默认）。
     """
     from foundation.config import config_manager
@@ -161,6 +162,22 @@ def send_email(
       配置（``resolve_email_config`` 合并规则），各 owner 无需重复配置账号。
     """
     email_cfg = _load_email_config(manager)
+    # 全局总开关：`email.enabled=false`（或 GMS_EMAIL_ENABLED=0）关闭全部
+    # 出站邮件——Redmine 提醒、ATS 运行通知、运维告警、通用发送 API 都
+    # 走这个单一收口；默认开启（缺配置 ≠ 关闭）。
+    import os
+
+    env_enabled = os.getenv("GMS_EMAIL_ENABLED")
+    if env_enabled is not None:
+        enabled = env_enabled.strip().lower() not in ("0", "false", "no", "off")
+    else:
+        enabled = email_cfg.get("enabled", True) is not False
+    if not enabled:
+        return {
+            "sent": False,
+            "mode": "disabled",
+            "error": "邮件功能已全局关闭（email.enabled=false 或 GMS_EMAIL_ENABLED=0）",
+        }
     smtp_host = str(email_cfg.get("smtp_host") or "").strip()
     default_from = str(email_cfg.get("default_from_addr") or "").strip()
     from_addr = str(email_cfg.get("from_addr") or email_cfg.get("username") or default_from).strip()

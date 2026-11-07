@@ -408,6 +408,29 @@ class ClusterApiHardeningTests(ClusterApiHardeningFixture, unittest.TestCase):
         })
         self.assertEqual(recording.status_code, 409)
 
+    def test_unresponsive_ghost_adb_transport_allows_recovery_only(self):
+        """adb 幽灵传输（device 态残留但 I/O 全死）只放行 AOA 恢复。
+
+        烧写后设备重枚举进 loader，adb server 里的 device 条目变成幽灵：
+        常规动作必须 409（否则 Worker 侧必然失败），AOA 恢复走物理 USB
+        照常放行。实机 66df75a34ebde4a4 回归。
+        """
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1", "running_jobs": [], "suites": [],
+            "devices": [{"serial": "ABC", "state": "unresponsive", "transport": "local_usb"}],
+        })
+        with patch("features.cluster.device_actions_api.device_action_wait_steps", return_value=0):
+            reboot = self.client.post("/api/cluster/devices/actions", json={
+                "worker_id": "worker-246", "devices": ["ABC"], "action": "reboot",
+            })
+            recovered = self.client.post("/api/cluster/devices/actions", json={
+                "worker_id": "worker-246", "devices": ["ABC"],
+                "action": "aoa_sequence", "aoa_commands": ["home"],
+            })
+        self.assertEqual(reboot.status_code, 409)
+        self.assertIn("unresponsive", reboot.json()["detail"])
+        self.assertEqual(recovered.status_code, 200, recovered.text)
+
     def test_automation_replay_deduplicates_remote_command(self):
         """automation_run_id 重放：收敛到既有命令，不二次派发。"""
         self.repo.heartbeat("worker-246", {

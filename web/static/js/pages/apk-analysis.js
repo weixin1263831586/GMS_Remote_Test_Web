@@ -93,7 +93,9 @@ async function loadApkTaskHistory(force = false) {
     select.setAttribute('aria-busy', 'true');
     if (refresh) {
         refresh.disabled = true;
-        refresh.textContent = '刷新中…';
+        /* 「刷新中」三字与「↻ 刷新」同宽（按钮 64px 钉死），加载态
+           不引起右上角控件尺寸变化。 */
+        refresh.textContent = '刷新中';
     }
     window.apkTaskHistoryPromise = (async () => {
         try {

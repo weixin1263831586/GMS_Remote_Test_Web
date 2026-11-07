@@ -1,8 +1,7 @@
 <div class="container page-content" id="page-devices">
-            <div style="position: relative; margin-bottom: 6px; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; min-height: 28px;">
-                <div class="section-title" style="margin: 0;">📱 设备管理</div>
-                <div id="devices-view-tabs" role="tablist" aria-label="设备管理视图" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end;">
-                    <div class="device-group-toolbar" id="device-group-toolbar" style="display: flex; align-items: center; gap: 6px;">
+            {% include 'components/page-header.html' %}📱 设备管理{% include 'components/page-header-actions.html' %}
+                <div id="devices-view-tabs" role="tablist" aria-label="设备管理视图">
+                    <div class="device-group-toolbar" id="device-group-toolbar">
                         <button class="btn-xxs" data-click="openCreateGroupModal" title="新建分组">➕ 新建分组</button>
                         <select class="btn-xxs" data-change="autoGroupAndReset" data-r0="value" title="按属性自动分组">
                             <option value="">⊞ 自动分组…</option>
@@ -18,31 +17,31 @@
                     <button id="devices-list-tab" class="btn-xs active" type="button" role="tab" aria-selected="true" data-click="aoaViewToggle" data-a0="false">设备列表</button>
                     <button id="aoa-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="aoaViewToggle" data-a0="true">🔁 AOA工作台</button>
                 </div>
-            </div>
+            {% include 'components/page-header-end.html' %}
             <div id="devices-main-view">
             <div id="devices-scope-hint" style="color:var(--text-secondary);font-size:12px;"></div>
 
-            <!-- 设备统计卡片 -->
-            <div style="display: flex; gap: 15px; margin-bottom: 10px;">
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: var(--primary-color);" id="total-devices-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">总设备数</div>
+            <!-- 设备统计卡片（page-stat 模板，与用户/审计/API 页一致） -->
+            <div class="page-stat-row">
+                <div class="page-stat-card">
+                    <div class="page-stat-value" style="color: var(--primary-color);" id="total-devices-count">-</div>
+                    <div class="page-stat-label">总设备数</div>
                 </div>
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: var(--success-color);" id="local-devices-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Controller 本机设备</div>
+                <div class="page-stat-card">
+                    <div class="page-stat-value" style="color: var(--success-color);" id="local-devices-count">-</div>
+                    <div class="page-stat-label">Controller 本机设备</div>
                 </div>
-                <div data-cluster-mode-only style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: #42a5f5;" id="cluster-devices-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">集群 Worker 设备</div>
+                <div class="page-stat-card" data-cluster-mode-only>
+                    <div class="page-stat-value" style="color: #42a5f5;" id="cluster-devices-count">-</div>
+                    <div class="page-stat-label">集群 Worker 设备</div>
                 </div>
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: var(--warning-color);" id="usbip-devices-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">USB/IP设备</div>
+                <div class="page-stat-card">
+                    <div class="page-stat-value" style="color: var(--warning-color);" id="usbip-devices-count">-</div>
+                    <div class="page-stat-label">USB/IP设备</div>
                 </div>
-                <div style="flex: 1; background: var(--light-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 24px; font-weight: bold; color: #42a5f5;" id="fastboot-devices-count">-</div>
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Fastboot设备</div>
+                <div class="page-stat-card">
+                    <div class="page-stat-value" style="color: #42a5f5;" id="fastboot-devices-count">-</div>
+                    <div class="page-stat-label">Fastboot设备</div>
                 </div>
             </div>
 

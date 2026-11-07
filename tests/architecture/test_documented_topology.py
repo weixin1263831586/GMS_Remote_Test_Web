@@ -4,7 +4,12 @@ import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from features.system.topology_view import parse_topology, render_topology
+from features.system.topology_view import (
+    NODE_TEXT_WIDTH,
+    _estimate_text_width,
+    parse_topology,
+    render_topology,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -44,6 +49,80 @@ def test_web_architecture_covers_canonical_roles_and_flows():
     assert "{{PLATFORM_TOPOLOGY}}" in content
 
 
+ARCHITECTURE_VIEWS = {
+    "{{PLATFORM_TOPOLOGY}}": "platform-topology.mmd",
+    "{{USBIP_TOPOLOGY}}": "usbip-topology.mmd",
+    "{{AOA_TOPOLOGY}}": "aoa-topology.mmd",
+    "{{FIRMWARE_TOPOLOGY}}": "firmware-topology.mmd",
+}
+
+
+def test_architecture_views_cover_module_topologies():
+    content = (ROOT / "web/templates/architecture.html").read_text(encoding="utf-8")
+    for placeholder, source_name in ARCHITECTURE_VIEWS.items():
+        assert placeholder in content, f"missing placeholder {placeholder}"
+        source = (ROOT / "docs/architecture" / source_name).read_text(
+            encoding="utf-8"
+        )
+        assert parse_topology(source), f"{source_name} must define nodes and edges"
+
+
+def test_architecture_views_render_as_local_svg():
+    for source_name in ARCHITECTURE_VIEWS.values():
+        source = (ROOT / "docs/architecture" / source_name).read_text(
+            encoding="utf-8"
+        )
+        svg = ET.fromstring(render_topology(source, source_name=source_name))
+        assert svg.attrib["data-topology-source"] == source_name
+
+
+def test_architecture_page_script_is_external_for_strict_csp():
+    content = (ROOT / "web/templates/architecture.html").read_text(encoding="utf-8")
+    assert '/static/js/pages/architecture-view.js' in content
+    assert "<script>" not in content
+    script = (ROOT / "web/static/js/pages/architecture-view.js").read_text(
+        encoding="utf-8"
+    )
+    for token in (
+        "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
+        "embedded-focus-active-tab", "embedded-sidebar-arrow",
+        "aria-selected", "sessionStorage",
+    ):
+        assert token in script
+
+
+def test_architecture_page_uses_full_width_without_inline_max_width():
+    content = (ROOT / "web/templates/architecture.html").read_text(encoding="utf-8")
+    assert "main { margin: 0 auto; }" in content
+    assert "main { max-width" not in content
+
+
+def test_architecture_registered_as_embedded_tab_focus_frame():
+    switching = (ROOT / "web/static/js/shell/shell-page-switching.js").read_text(
+        encoding="utf-8"
+    )
+    assert "architecture: 'architecture-iframe'" in switching
+
+
+def test_architecture_node_labels_stay_inside_node_boxes():
+    for source_name in ARCHITECTURE_VIEWS.values():
+        source = (ROOT / "docs/architecture" / source_name).read_text(
+            encoding="utf-8"
+        )
+        svg = ET.fromstring(render_topology(source, source_name=source_name))
+        ns = "{http://www.w3.org/2000/svg}"
+        for group in svg.findall(f"{ns}g"):
+            if "data-node" not in group.attrib:
+                continue
+            text = group.find(f"{ns}text")
+            label = text.text or ""
+            estimated = _estimate_text_width(label)
+            if estimated > NODE_TEXT_WIDTH:
+                assert text.attrib.get("textLength") == str(NODE_TEXT_WIDTH), (
+                    f"{source_name}:{label} overflows without textLength"
+                )
+
+
 def test_web_topology_preserves_every_node_and_directed_edge():
     nodes, edges = parse_topology(CANONICAL)
     svg = ET.fromstring(render_topology(CANONICAL))
@@ -62,8 +141,15 @@ def test_web_topology_preserves_every_node_and_directed_edge():
     ]
     assert rendered_nodes == nodes
     assert rendered_edges == edges
-    assert all(
-        group.find("{http://www.w3.org/2000/svg}path").attrib["marker-end"]
-        == "url(#topology-arrow)"
-        for group in groups if "data-source" in group.attrib
-    )
+    # 单向边与实线回报通道用蓝色箭头；虚线命令通道用紫色专属箭头。
+    expected_markers = {
+        (start, end): ("url(#topology-arrow-cmd)" if style == "-.->" else "url(#topology-arrow)")
+        for start, end, _, style in edges
+    }
+    assert {
+        (group.attrib["data-source"], group.attrib["data-target"]): group.find(
+            "{http://www.w3.org/2000/svg}path"
+        ).attrib["marker-end"]
+        for group in groups
+        if "data-source" in group.attrib
+    } == expected_markers

@@ -1,0 +1,17 @@
+flowchart TB
+    Browser["AOA 工作台（Web）"]
+    Ctrl["Controller：AOA 服务"]
+    Store[("SQLite：Profile / 回放状态 / 标定")]
+    Worker["Worker：run_aoa_sequence"]
+    Acc["AOAv2 Accessory 控制（HID 注入）"]
+    Dev["Android 设备（开机向导）"]
+    Adb[("ADB 传输（USB 调试开启后）")]
+
+    Browser -->|"HTTPS：Profile 保存 / 回放 / 标定"| Ctrl
+    Ctrl --> Store
+    Ctrl -.->|"命令随 Poll 响应下发（含暂停 / 继续 / 终止）"| Worker
+    Worker -->|"命令事件 / ACK（HTTP）"| Ctrl
+    Worker -->|"USB 控制请求：启动 Accessory"| Acc
+    Acc -->|"HID 触点 / 按键序列"| Dev
+    Worker -->|"adb liveness / 状态校验"| Adb
+    Dev -->|"开启 USB 调试"| Adb

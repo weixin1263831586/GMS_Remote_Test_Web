@@ -457,6 +457,39 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("此处不使用客户端 SSH 账号", api_script)
         self.assertIn("loginHost !== String(result.client_ip || '')", api_script)
 
+    def test_page_title_rows_use_the_shared_header_component(self):
+        """页面标题行组件化：几何单点收敛（components/page-header*.html +
+        .page-header-row），页面只保留标题文本与动作内容。
+
+        历史：22 页各自内联微调（margin/padding/text-transform）导致标题
+        字形顶出现 17/19.4/28px 三种落点。组件化后新增页面不得再写
+        section-title 内联样式。"""
+        components_dir = Path("web/shell/components")
+        for fragment in ("page-header.html", "page-header-actions.html", "page-header-end.html"):
+            self.assertTrue((components_dir / fragment).is_file(), fragment)
+        css = read_text("web/static/css/common.css")
+        self.assertIn(".page-header-row", css)
+        # 字形顶 16px 契约：行高 17.2（12px 字号 + 2.6px 半行距收紧）。
+        self.assertIn("line-height: 17.2px", css)
+
+        pages = sorted(Path("web/shell/pages").glob("*.html"))
+        adopted = [
+            page.name for page in pages
+            if "components/page-header.html" in page.read_text(encoding="utf-8")
+        ]
+        expected_exceptions = {"test.html"}  # 面板内小标题（非页级标题行）
+        top_level_titles = {
+            name for name in {p.name for p in pages} - expected_exceptions
+        }
+        self.assertEqual(set(adopted), top_level_titles, "标题行必须统一走组件")
+
+        # 回归：组件化页面不得再给 section-title 写内联样式（例外页除外）。
+        for page in pages:
+            with self.subTest(page=page.name):
+                if page.name in expected_exceptions:
+                    continue
+                self.assertNotIn('class="section-title" style=', page.read_text(encoding="utf-8"))
+
     def test_firmware_share_copy_explains_public_download(self):
         navigation = read_all_frontend_js()
 
@@ -876,8 +909,10 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("device.protocol === 'fastboot'", main_text)
         self.assertIn("● Fastboot", main_text)
         self.assertIn("config.usbip_vid_pids", controls)
-        self.assertIn("usbip_vid_pids: [...new Set(usbipVidPids)]", controls)
-        self.assertIn("test-control.js?v=20260827-usbip-vid-pids", main_text)
+        # ADR 0007：部署拓扑改为只读展示，VID:PID 列表以逗号连接渲染，
+        # 不再在 Web 端提交去重（saveConfig 只保留 local_server）。
+        self.assertIn("config.usbip_vid_pids.join(', ')", controls)
+        self.assertIn("test-control.js?v=20261107-config-sections", main_text)
 
     def test_unselectable_devices_stay_selected_but_render_unchecked(self):
         navigation = read_text("web/static/js/navigation.js")

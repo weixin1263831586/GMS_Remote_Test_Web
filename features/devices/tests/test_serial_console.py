@@ -18,7 +18,10 @@ from starlette.websockets import WebSocketDisconnect
 from features.devices import serial_console_api
 from features.devices.serial_console import (
     SerialConsoleService,
+    _port_display_key,
+    _tty_natural_key,
     serial_port_identity,
+    usb_bus_node,
 )
 from features.devices.serial_console_access import device_serial_availability, visible_ports
 from features.devices.serial_console_storage import BindingStore
@@ -35,6 +38,9 @@ class _FakeDevice:
             "ID_VENDOR_ID": "0403",
             "ID_MODEL_ID": "6001",
             "ID_PATH": "pci-0000:00:14.0-usb-0:1:1.0",
+            "ID_SERIAL_SHORT": "A6022883",
+            "ID_VENDOR": "FTDI",
+            "ID_MODEL": "FT232R_USB_UART",
         }
 
 
@@ -157,6 +163,47 @@ class SerialConsoleStoreTests(unittest.TestCase):
                 store.upsert("../ttyUSB0", {"baudrate": 115200})
 
 
+class UsbBusNodeTests(unittest.TestCase):
+    def test_extracts_physical_bus_node_from_sys_path(self):
+        self.assertEqual(
+            usb_bus_node("/sys/devices/platform/usb/1-14:1.0/tty/ttyUSB0"),
+            "1-14",
+        )
+        self.assertEqual(
+            usb_bus_node("/sys/devices/pci/usb1/1-1.2:1.0/ttyUSB0"),
+            "1-1.2",
+        )
+        self.assertEqual(usb_bus_node(""), "")
+        self.assertEqual(usb_bus_node("/sys/devices/pci/usb1"), "")
+
+
+class PortDisplayOrderTests(unittest.TestCase):
+    def test_tty_natural_key_orders_numeric_suffixes_numerically(self):
+        self.assertEqual(_tty_natural_key("ttyUSB2"), ("ttyUSB", 2))
+        self.assertEqual(_tty_natural_key("ttyACM10"), ("ttyACM", 10))
+        self.assertEqual(
+            _tty_natural_key("usb-FTDI_A-if00-port0"),
+            ("usb-FTDI_A-if00-port", 0),
+        )
+        # 无数字后缀的键排在该前缀的最前面。
+        self.assertEqual(_tty_natural_key("ttyUSB"), ("ttyUSB", -1))
+
+    def test_ports_sort_online_by_devname_then_offline_bindings(self):
+        """字典序会把 ttyUSB10 排到 ttyUSB2 前；在位口自然序在前，离线绑定垫底。"""
+
+        ports = [
+            {"port_key": "ttyUSB10", "devname": "/dev/ttyUSB10"},
+            {"port_key": "usb-FTDI_old-if00-port0", "devname": ""},
+            {"port_key": "ttyUSB2", "devname": "/dev/ttyUSB2"},
+            {"port_key": "ttyACM3", "devname": "/dev/ttyACM3"},
+        ]
+        ports.sort(key=_port_display_key)
+        self.assertEqual(
+            [item["port_key"] for item in ports],
+            ["ttyACM3", "ttyUSB2", "ttyUSB10", "usb-FTDI_old-if00-port0"],
+        )
+
+
 class SerialConsoleServiceTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -187,6 +234,11 @@ class SerialConsoleServiceTests(unittest.TestCase):
         self.assertEqual(ports[0]["by_id"], str(self.by_id / self.stable_name))
         self.assertEqual(ports[0]["vendor_product"], "0403:6001")
         self.assertEqual(ports[0]["driver"], "ftdi_sio")
+        # USB 身份扩展字段：与 lsusb / AOA usb_only 清单对账（如 FT232R 调试小板）。
+        self.assertEqual(ports[0]["usb_serial"], "A6022883")
+        self.assertEqual(ports[0]["usb_vendor_name"], "FTDI")
+        self.assertEqual(ports[0]["usb_model_name"], "FT232R_USB_UART")
+        self.assertEqual(ports[0]["usb_bus_node"], "1-1")
 
     def test_enumeration_uses_usb_path_instead_of_unstable_tty_number(self):
         (self.by_id / self.stable_name).unlink()

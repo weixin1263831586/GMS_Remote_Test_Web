@@ -61,6 +61,30 @@ def _adb_environment(adb_server_socket: str | None) -> dict[str, str] | None:
     return env
 
 
+def _adb_transport_alive(serial: str, adb_env: dict[str, str] | None = None) -> bool:
+    """Bounded adb round trip proving the transport can actually do I/O.
+
+    ``adb devices`` 的 device 态来自 adb server 缓存：设备烧写后重枚举
+    （loader 2207:0006）或 adbd 挂死时条目仍残留，任何 shell 往返都
+    ``error: closed``（实机 66df75a34ebde4a4 回归：清单仍标 available，
+    Web 徽标「ADB 已连接」误导选机与烧写流程）。``get-state`` 同样只读
+    server 缓存，无法识别这种半死传输，必须做一次真实往返；
+    ``shell true`` 是最轻的探测，正常设备毫秒级返回，超时 2s 封顶。
+    """
+    try:
+        completed = subprocess.run(
+            ["adb", "-s", serial, "shell", "true"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+            env=adb_env,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
+
+
 # 设备详情缓存：heartbeat 高频调用 probe_devices，但每台设备的详情探测
 # 是一次串行 ADB 往返（超时 3s）。多设备 + ADB 卡顿时会拖过 Controller 的
 # offline 阈值造成假离线。详情（model/Android 版本/电量/SoC）变化缓慢，
@@ -236,6 +260,18 @@ def _probe_device_details(
     return {}
 
 
+# 已知 USB-UART 桥接芯片厂商（FTDI/Prolific/SiLabs/WCH）。它们的接口类
+# 也是 vendor-specific(ff)（如 FT232R 串口调试小板），会被 class-ff 兜底
+# 误收成 AOA 恢复候选；烧写/AOA 流程一旦选中它们还会 reset 正在使用的
+# 串口会话，必须在 usb_only 探测里显式排除。
+_USB_UART_BRIDGE_VENDORS = frozenset({
+    "0403",  # FTDI FT232R/FT2232 等
+    "067b",  # Prolific PL2303
+    "10c4",  # SiLabs CP210x
+    "1a86",  # WCH CH340/CH341
+})
+
+
 def _probe_usb_only_devices(
     known_serials: set[str],
     sysfs_root: Path = Path("/sys/bus/usb/devices"),
@@ -245,7 +281,10 @@ def _probe_usb_only_devices(
     AOA exists specifically for the USB-debugging-off state, so an ADB-only
     inventory would make the target disappear before recovery can start.
     Limit discovery to devices with a serial and a vendor-specific interface;
-    ordinary hubs, keyboards and storage devices are not exposed.
+    ordinary hubs, keyboards and storage devices are not exposed.  Known
+    USB-UART bridge vendors (FTDI, Prolific, SiLabs, WCH) are excluded: their
+    vendor-specific interfaces would otherwise pass the class-ff fallback
+    even though they are debug dongles rather than Android targets.
     """
     discovered: list[dict[str, Any]] = []
     try:
@@ -262,6 +301,8 @@ def _probe_usb_only_devices(
         except OSError:
             continue
         if not serial or serial in known_serials:
+            continue
+        if vendor in _USB_UART_BRIDGE_VENDORS:
             continue
         try:
             vendor_specific = any(
@@ -348,6 +389,12 @@ def probe_devices(
                 "adb_proxy_source_address": proxy_source["source_address"],
                 "adb_proxy_source_serial": proxy_source["source_serial"],
             })
+        if adb_state == "device" and not proxy_source and not _adb_transport_alive(serial, adb_env):
+            # adb server 缓存的幽灵传输（设备已重枚举进 loader 或 adbd
+            # 已死）：不得标 available 进清单，否则 Web「ADB 已连接」徽标
+            # 与选机、烧写前置检查全部被误导。serial 保留（仍占位 known，
+            # 避免同物理口的 usb_only 探测重复列出）。
+            adb_state = "unresponsive"
         if include_details and adb_state == "device":
             seed_device_details(serial)
             properties.update(

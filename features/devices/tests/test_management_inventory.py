@@ -54,6 +54,34 @@ def test_usb_only_aoa_target_is_preserved_but_not_reported_as_adb(cluster):
     assert protocols['USB-OFF'] == 'usb_only'
 
 
+def test_unresponsive_ghost_transport_is_explicit_not_adb(cluster):
+    # adb 幽灵传输（烧写后重枚举进 loader，adb server 残留 device 态）：
+    # 不能压平成 'adb'，否则管理页标「ADB 已连接」误导选机
+    # （实机 66df75a34ebde4a4 回归）。
+    cluster.repository.list_devices.return_value.append({
+        'worker_id': 'local', 'serial': 'GHOST', 'state': 'unresponsive',
+        'properties': {},
+    })
+
+    devices, _properties, protocols, _ = management_inventory.local_management_inventory()
+
+    assert 'GHOST' in devices
+    assert protocols['GHOST'] == 'unresponsive'
+
+
+def test_workspace_unresponsive_inventory_exposes_ghost_transport(cluster, monkeypatch):
+    from features.devices import runtime
+
+    monkeypatch.setattr(runtime.get_runtime(), 'config_manager', SimpleNamespace(
+        load_config=lambda: {'ubuntu_host': '127.0.0.1'}))
+    cluster.repository.list_devices.return_value.append({
+        'worker_id': 'local', 'serial': 'GHOST', 'state': 'unresponsive', 'properties': {},
+    })
+    observed = management_inventory.local_unresponsive_inventory()
+    assert set(observed) == {'GHOST'}
+    assert observed['GHOST']['protocol'] == observed['GHOST']['status'] == 'unresponsive'
+
+
 def test_workspace_usb_only_inventory_uses_fresh_local_worker_facts(cluster, monkeypatch):
     from features.devices import runtime
 
