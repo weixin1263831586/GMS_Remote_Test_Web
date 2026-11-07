@@ -34,7 +34,7 @@ class WebhookTests(unittest.TestCase):
         class Response:
             status_code = 200
 
-        def fake_post(url, content=None, headers=None, timeout=None):
+        def fake_post(url, content=None, headers=None, timeout=None, **_kwargs):
             captured.update({"url": url, "content": content, "headers": headers})
             return Response()
 
@@ -56,7 +56,7 @@ class WebhookTests(unittest.TestCase):
         class Response:
             status_code = 200
 
-        def fake_post(url, content=None, headers=None, timeout=None):
+        def fake_post(url, content=None, headers=None, timeout=None, **_kwargs):
             captured.update({"content": content, "headers": headers})
             return Response()
 
@@ -123,6 +123,55 @@ class DispatchTests(unittest.TestCase):
         self.assertTrue(cfg["enabled"])
         self.assertEqual(cfg["min_free_gb"], 42.5)
         self.assertEqual(cfg["consecutive_failure_threshold"], 5)
+
+
+class WebhookUrlGuardTests(unittest.TestCase):
+    """webhook 出站 URL 基础校验（scheme/host/禁重定向）。"""
+
+    def test_plain_http_remote_rejected(self):
+        result = send_webhook(
+            {"kind": "k"},
+            {"webhook_url": "http://10.0.0.5/hook", "webhook_format": "generic",
+             "webhook_token_file": ""},
+        )
+        self.assertFalse(result["sent"])
+        self.assertIn("plain http", result["reason"])
+
+    def test_ftp_and_missing_host_rejected(self):
+        for url in ("ftp://example/hook", "https:///hook"):
+            result = send_webhook(
+                {"kind": "k"},
+                {"webhook_url": url, "webhook_format": "generic",
+                 "webhook_token_file": ""},
+            )
+            self.assertFalse(result["sent"], url)
+
+    def test_localhost_http_allowed(self):
+        class Response:
+            status_code = 200
+
+        with mock.patch("httpx.post", return_value=Response()) as post:
+            result = send_webhook(
+                {"kind": "k"},
+                {"webhook_url": "http://127.0.0.1:9000/hook",
+                 "webhook_format": "generic", "webhook_token_file": ""},
+            )
+        self.assertTrue(result["sent"])
+        self.assertFalse(post.call_args.kwargs.get("follow_redirects", True))
+
+    def test_bad_numeric_config_falls_back_to_defaults(self):
+        with mock.patch.dict("os.environ", {
+            "GMS_OPS_ALERTS_SUPPRESS_MINUTES": "not-a-number",
+            "GMS_OPS_ALERTS_MIN_FREE_GB": "",
+            "GMS_OPS_ALERTS_CONSECUTIVE_FAILURES": "abc",
+        }), mock.patch(
+            "foundation.config.config_manager",
+        ) as config_manager:
+            config_manager.load_config.return_value = {}
+            cfg = load_ops_alerts_config()
+        self.assertEqual(cfg["suppress_minutes"], 60)
+        self.assertEqual(cfg["min_free_gb"], 20.0)
+        self.assertEqual(cfg["consecutive_failure_threshold"], 3)
 
 
 if __name__ == "__main__":

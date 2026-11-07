@@ -449,11 +449,10 @@ class FrontendIntegrityTests(unittest.TestCase):
         shell = read_shell_bundle()
         api_script = read_text("web/static/js/api.js")
 
-        self.assertIn("SSH用户名@客户端IP，例如 ", shell)
-        self.assertIn("可使用平台管理员账号", shell)
-        self.assertIn("通常与系统登录/锁屏密码相同", shell)
+        # 简化后每项信息只出现一次：placeholder 给格式示例，help 一句话区分。
+        self.assertIn("管理员账号，或 用户名@客户端IP（SSH 账号）。", shell)
+        self.assertIn("管理员用平台密码；客户端用 SSH 密码。", shell)
         self.assertIn("identity.includes('@')", api_script)
-        self.assertIn("但尚不知道 SSH 用户名", api_script)
         self.assertIn("usernameInput.placeholder.includes('正在读取客户端身份')", api_script)
         self.assertIn("此处不使用客户端 SSH 账号", api_script)
         self.assertIn("loginHost !== String(result.client_ip || '')", api_script)

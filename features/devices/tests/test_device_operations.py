@@ -83,12 +83,12 @@ class DeviceOperationsTests(unittest.TestCase):
                 },
             ),
             patch.object(
-                management_api.runtime,
+                management_api.runtime.get_runtime(),
                 "config_manager",
                 _ConfigManager(),
             ),
             patch.object(
-                management_api.runtime,
+                management_api.runtime.get_runtime(),
                 "global_state",
                 SimpleNamespace(
                     usbip_devices_source={},
@@ -156,9 +156,9 @@ class DeviceOperationsTests(unittest.TestCase):
             )
 
         with (
-            patch.object(management_api.runtime, "config_manager", _ConfigManager()),
+            patch.object(management_api.runtime.get_runtime(), "config_manager", _ConfigManager()),
             patch.object(
-                management_api.runtime,
+                management_api.runtime.get_runtime(),
                 "global_state",
                 SimpleNamespace(
                     device_cache={"devices": [], "timestamp": 0},
@@ -168,12 +168,12 @@ class DeviceOperationsTests(unittest.TestCase):
                 ),
             ),
             patch.object(
-                management_api.runtime,
+                management_api.runtime.get_runtime(),
                 "get_client_id_from_request",
                 return_value="alice",
             ),
             patch.object(
-                management_api.runtime,
+                management_api.runtime.get_runtime(),
                 "run_local_shell_command",
                 side_effect=run_local,
             ),
@@ -233,10 +233,10 @@ class DeviceOperationsTests(unittest.TestCase):
     def test_management_payload_uses_persisted_usbip_source(self):
         with (
             patch.object(management_api.device_lock_manager, "get_all_locks", return_value={}),
-            patch.object(management_api.runtime, "config_manager", _ConfigManager()),
+            patch.object(management_api.runtime.get_runtime(), "config_manager", _ConfigManager()),
             patch.object(management_api, "_active_usbip_serials", return_value={"USBIP001"}),
             patch.object(
-                management_api.runtime,
+                management_api.runtime.get_runtime(),
                 "global_state",
                 SimpleNamespace(
                     usbip_devices_source={},
@@ -266,7 +266,7 @@ class DeviceOperationsTests(unittest.TestCase):
                 "get_all_locks",
                 return_value={},
             ),
-            patch.object(management_api.runtime, "config_manager", _ConfigManager()),
+            patch.object(management_api.runtime.get_runtime(), "config_manager", _ConfigManager()),
             patch.object(management_api, "known_usbip_sources", return_value={}),
             patch.object(
                 management_api,
@@ -325,8 +325,8 @@ class DeviceOperationsTests(unittest.TestCase):
 
         with (
             patch.object(management_api.device_lock_manager, "get_all_locks", return_value={}),
-            patch.object(management_api.runtime, "config_manager", ConfigManager()),
-            patch.object(management_api.runtime, "global_state", global_state),
+            patch.object(management_api.runtime.get_runtime(), "config_manager", ConfigManager()),
+            patch.object(management_api.runtime.get_runtime(), "global_state", global_state),
             patch.object(management_api, "_active_usbip_serials", return_value=set()),
         ):
             payload = management_api._build_devices_management_payload(
@@ -342,20 +342,18 @@ class DeviceOperationsTests(unittest.TestCase):
 
     def test_connect_wifi_uses_configured_defaults_when_request_omits_credentials(self):
         ssh_manager = _SshManager()
-        original_config_manager = operations_api.runtime.config_manager
-        original_ssh_manager = operations_api.runtime.ssh_manager
-        operations_api.runtime.config_manager = _ConfigManager()
-        operations_api.runtime.ssh_manager = ssh_manager
-        try:
+        # 通过单例打补丁（与全仓库测试约定一致）：直接给 runtime 模块属性
+        # 赋值会永久遮蔽 __getattr__ 代理，污染同进程后续测试。
+        with (
+            patch.object(operations_api.runtime.get_runtime(), "config_manager", _ConfigManager()),
+            patch.object(operations_api.runtime.get_runtime(), "ssh_manager", ssh_manager),
+        ):
             response = asyncio.run(
                 operations_api.connect_wifi(
                     WifiConnectRequest(devices=["ABC-123"]),
                     self.request_for(),
                 )
             )
-        finally:
-            operations_api.runtime.config_manager = original_config_manager
-            operations_api.runtime.ssh_manager = original_ssh_manager
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(ssh_manager.commands), 1)
@@ -379,9 +377,9 @@ class DeviceOperationsTests(unittest.TestCase):
                 side_effect=reboot,
             ),
             patch.object(operations_api, "known_usbip_device_ids", return_value=set()),
-            patch.object(operations_api.runtime, "config_manager", _ConfigManager()),
+            patch.object(operations_api.runtime.get_runtime(), "config_manager", _ConfigManager()),
             patch.object(
-                operations_api.runtime,
+                operations_api.runtime.get_runtime(),
                 "global_state",
                 SimpleNamespace(
                     usbip_devices_source={},

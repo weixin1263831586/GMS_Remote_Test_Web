@@ -16,7 +16,7 @@ class NavigationPreferencesTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.data_root_patch = patch.object(
-            navigation_preferences.runtime,
+            navigation_preferences.runtime.get_runtime(),
             "data_root",
             Path(self.tmp.name),
         )
@@ -83,7 +83,7 @@ class NavigationPreferencesTests(unittest.TestCase):
                 return "tester"
 
         with patch.object(config_api, "config_manager", FakeConfigManager()), patch.object(
-            config_api.runtime,
+            config_api.runtime.get_runtime(),
             "get_or_create_user_state",
             return_value={},
         ):

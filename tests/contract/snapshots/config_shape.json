@@ -80,6 +80,16 @@
       "18": "str"
     }
   },
+  "ops_alerts": {
+    "consecutive_failure_threshold": "int",
+    "email_to": "str",
+    "enabled": "bool",
+    "min_free_gb": "int",
+    "suppress_minutes": "int",
+    "webhook_format": "str",
+    "webhook_token_file": "str",
+    "webhook_url": "str"
+  },
   "private_key_path": "str",
   "redmine": {
     "base_url": "str",

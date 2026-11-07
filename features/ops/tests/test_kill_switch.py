@@ -56,6 +56,39 @@ class AdvancementPausedTests(unittest.TestCase):
         self.assertIn("advanced_runs", result)
         auto.worker_tick.assert_called_once()
 
+    def test_pause_mid_loop_stops_claiming_new_runs(self):
+        # kill-switch 仅在入口检查时，循环中途打开仍会继续
+        # 认领最多 25 次；现在每个认领边界重查，打开后立即停止。
+        from features.automation import worker
+
+        auto = mock.MagicMock()
+        ticks = {"n": 0}
+
+        import threading
+
+        paused = threading.Event()
+
+        def tick(_executor):
+            ticks["n"] += 1
+            # 第三次 tick 期间管理员打开 kill-switch。
+            if ticks["n"] >= 3:
+                paused.set()
+            return {"id": f"run-{ticks['n']}", "status": "testing"}
+
+        def check_paused():
+            return paused.is_set()
+
+        auto.worker_tick.side_effect = tick
+        with mock.patch(
+            "foundation.automation_port.advancement_paused",
+            side_effect=check_paused,
+        ):
+            result = worker.advance_runs_sync(
+                {"executor": "http"}, automation_service=auto
+            )
+        self.assertEqual(result, {"advanced_runs": 3})
+        self.assertEqual(ticks["n"], 3)
+
     def test_set_advancement_paused_writes_flag_and_event(self):
         from features.ops import service
         from features.ops.store import OpsStore

@@ -26,7 +26,7 @@ class DeviceLifecycleTests(unittest.TestCase):
                 attempted.set()
                 return {"success": False, "device_list": []}
 
-        with patch.object(reconnect.runtime, "config_manager", FakeConfigManager()), \
+        with patch.object(reconnect.runtime.get_runtime(), "config_manager", FakeConfigManager()), \
                 patch.object(reconnect, "usbip_manager", FakeUsbipManager()), \
                 patch.object(reconnect, "has_blocked_adb_process", return_value=False), \
                 patch.object(reconnect, "USBIP_RECONNECT_INTERVAL_SECONDS", 60):

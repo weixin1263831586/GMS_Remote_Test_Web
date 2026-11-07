@@ -1,4 +1,19 @@
 // Redmine core; loaded by page.html in dependency order.
+//
+// 原 markdown-table.js（414 B）并入本文件：_splitMarkdownTableRow 只被
+// _renderMarkdownTable 调用，单独成文件只增加一次请求与资产白名单。
+
+// GFM 表格单元格内的 \| 是字面管道符，不是列分隔符。
+function _splitMarkdownTableRow(row) {
+  var guard = '\u0000';
+  var cells = String(row).split('\\|').join(guard).split('|').map(function (cell) {
+    return cell.split(guard).join('|').trim();
+  });
+  if (cells.length && cells[0] === '') cells.shift();
+  if (cells.length && cells[cells.length - 1] === '') cells.pop();
+  return cells;
+}
+
 function scrollToSection(id) {
   var el = document.getElementById(id);
   if (!el) return;

@@ -202,6 +202,12 @@ function aoaPointerDown(event) {
     const frame = aoaPointerFrame();
     const point = aoaPointFromPointer(event, frame);
     if (!point) return;
+    // 命令坐标标定模式：点击只取点更新准星，不执行任何设备输入。
+    if (aoaPanelState.commandCalibrate) {
+        event.preventDefault();
+        aoaCommandCalibratePick(aoaCalibrateLogicalPoint(frame, point));
+        return;
+    }
     event.preventDefault();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     aoaPanelState.pointer = {id: event.pointerId, startedAt: performance.now(),

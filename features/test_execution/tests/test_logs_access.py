@@ -40,9 +40,9 @@ class TestLogAccessTests(unittest.TestCase):
         app.include_router(logs_api.router)
         self.patches = [
             patch.object(logs_api, "test_logs_manager", self.manager),
-            patch.object(logs_api.runtime, "global_state", self.global_state),
+            patch.object(logs_api.runtime.get_runtime(), "global_state", self.global_state),
             patch.object(
-                logs_api.runtime,
+                logs_api.runtime.get_runtime(),
                 "get_client_id_from_request",
                 side_effect=lambda request: request.state.current_user.id,
             ),

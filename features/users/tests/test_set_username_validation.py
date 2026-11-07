@@ -47,12 +47,12 @@ def test_valid_username_still_saved(monkeypatch):
             return {'client_hosts': {saved.get('ip', ''): saved.get('username', '')}}
 
     monkeypatch.setattr(
-        users_api.runtime,
+        users_api.runtime.get_runtime(),
         'config_manager',
         FakeConfigManager(),
     )
     monkeypatch.setattr(
-        users_api.runtime,
+        users_api.runtime.get_runtime(),
         'global_state',
         SimpleNamespace(user_states={}, user_states_lock=threading.Lock()),
     )

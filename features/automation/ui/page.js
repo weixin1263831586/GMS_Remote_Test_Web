@@ -194,8 +194,15 @@ window.addEventListener('gms:embedded-visibility', syncAutomationAutoRefresh);
 syncAutomationAutoRefresh();
 
 document.addEventListener('DOMContentLoaded', () => {
-    document.body.dataset.automationReady = 'true';
-    loadAll(true).finally(() => window.GmsEmbeddedWorkspace?.markReady());
+    // E2E 以 automationReady 为就绪信号：必须在首轮 loadAll 完成（成功或
+    // 失败）后置位，否则测试会在首轮 API 重绘表单前操作，丢失草稿状态
+    // 。
+    loadAll(true)
+        .catch(() => {})
+        .finally(() => {
+            document.body.dataset.automationReady = 'true';
+            window.GmsEmbeddedWorkspace?.markReady();
+        });
 });
 
 

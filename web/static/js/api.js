@@ -282,12 +282,12 @@ function showAuthGate(setupRequired = false) {
     if (usernameHelp) {
         usernameHelp.textContent = setupRequired
             ? '创建平台管理员账号；此处不使用客户端 SSH 账号。'
-            : '可使用平台管理员账号，或 SSH用户名@客户端IP，例如 gms@192.0.2.10。';
+            : '管理员账号，或 用户名@客户端IP（SSH 账号）。';
     }
     if (passwordHelp) {
         passwordHelp.textContent = setupRequired
             ? '请设置平台管理员密码。'
-            : '管理员请输入平台密码；客户端账号请输入 SSH 密码（通常与系统登录/锁屏密码相同）。';
+            : '管理员用平台密码；客户端用 SSH 密码。';
     }
     const message = document.getElementById('auth-message');
     if (message) message.textContent = setupRequired ? '首次访问需要创建管理员账户。' : '';
@@ -347,10 +347,9 @@ async function prefillAuthUsernameFromClient() {
             usernameInput.value = identity;
             usernameInput.dataset.autoFilled = 'true';
         } else if (clientIp && clientIp !== 'unknown') {
+            // placeholder 已给出完整格式示例（用户名@IP，例如 gms@IP），
+            // help 不再重复同样的内容。
             usernameInput.placeholder = `用户名@${clientIp}，例如 gms@${clientIp}`;
-            if (usernameHelp) {
-                usernameHelp.textContent = `检测到客户端 IP ${clientIp}，但尚不知道 SSH 用户名；请填写完整账号，例如 gms@${clientIp}。`;
-            }
         }
     } catch (error) {
         debugLog('[Auth] client identity prefill failed:', error);

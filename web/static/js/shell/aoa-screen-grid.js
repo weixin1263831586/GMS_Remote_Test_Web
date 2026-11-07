@@ -9,6 +9,9 @@
  *
  * 约束：本模块不注入任何设备事件、不参与录制输入路径（overlay
  * pointer-events:none，input 换算仍在 aoa-recorder.js 的 frame 空间）。
+ * 「标定标记」是命令坐标的可视化引用（shell-aoa.js 标定模式经
+ * aoaScreenGridCalibrate 下发坐标）：红色准星画在命令坐标处，点击画面
+ * 改写命令坐标的交互由录制路径拦截，本模块只画不拦。
  * 几何按 object-fit: contain 的实际内容框计算（黑边不计入网格），
  * 布局尺寸变化经 ResizeObserver 自动重画；开关状态本地持久化。
  */
@@ -22,6 +25,7 @@
     const state = {
         enabled: null,      // null = 尚未从本地偏好初始化
         hover: null,
+        calibrate: null,    // {index, x, y}：命令坐标标定标记（AOA 逻辑坐标）
         observer: null,
         initTries: 0,
     };
@@ -70,13 +74,14 @@
         const overlay = el('aoa-screen-grid');
         const stage = el('aoa-screen-stage');
         if (!overlay || !stage) return;
-        const media = state.enabled ? activeMedia() : null;
+        const showGrid = state.enabled;
+        const showMark = Boolean(state.calibrate);
+        const media = showGrid || showMark ? activeMedia() : null;
         if (!media) { overlay.hidden = true; state.hover = null; return; }
         const box = contentBox(stage, media);
         if (!box) { overlay.hidden = true; return; }
         // 覆盖整个 stage（含黑边）：网格线仍只落在画面内容框内，
         // 刻度数字画在画面外侧的黑边上，不遮挡设备画面。
-        const MARGIN = 14;
         const dpr = window.devicePixelRatio || 1;
         const width = Math.max(box.w, stage.clientWidth);
         const height = Math.max(box.h, stage.clientHeight);
@@ -95,6 +100,15 @@
         ctx.textBaseline = 'top';
         ctx.lineWidth = 1;
         ctx.textAlign = 'center';
+        if (showGrid) {
+            drawGridLines(ctx, box, width, height);
+        }
+        if (showMark) drawCalibrateMark(ctx, box);
+        if (!showGrid && !showMark) overlay.hidden = true;
+    }
+
+    function drawGridLines(ctx, box, width, height) {
+        const MARGIN = 14;
         const stepX = maxStep(GRID_MAX_X);
         const stepY = maxStep(GRID_MAX_Y);
         // 黑边余量：某侧有足够黑边时刻度画在外面，贴边时回退到画面内
@@ -181,6 +195,48 @@
         return {x: Math.round(x), y: Math.round(y)};
     }
 
+    function drawCalibrateMark(ctx, box) {
+        const mark = state.calibrate;
+        if (!mark) return;
+        const px = box.left + (mark.x / GRID_MAX_X) * box.w;
+        const py = box.top + (mark.y / GRID_MAX_Y) * box.h;
+        // 红色准星：当前选中命令将点击的 AOA 逻辑坐标。与白色网格线/蓝色
+        // 悬停十字高对比；圆环直径随画面缩放，小画面下仍可辨识。
+        const ring = Math.max(9, Math.min(box.w, box.h) * 0.028);
+        ctx.save();
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.95)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(px, py, ring, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 2]);
+        ctx.beginPath();
+        ctx.moveTo(px + 0.5, box.top); ctx.lineTo(px + 0.5, box.top + box.h);
+        ctx.moveTo(box.left, py + 0.5); ctx.lineTo(box.left + box.w, py + 0.5);
+        ctx.stroke();
+        ctx.restore();
+        // 读数贴准星右上；贴近右/下边缘时收进画面内，保证不被裁剪。
+        const text = `#${mark.index + 1}  ${mark.x},${mark.y}`;
+        const width = ctx.measureText(text).width + 8;
+        const tx = px + ring + 3 + width > box.left + box.w
+            ? px - ring - 3 - width : px + ring + 3;
+        const ty = Math.min(Math.max(box.top + 2, py - 7), box.top + box.h - 16);
+        ctx.fillStyle = 'rgba(127, 29, 29, 0.9)';
+        ctx.fillRect(tx, ty, width, 14);
+        ctx.fillStyle = '#fecaca';
+        ctx.fillText(text, tx + 4, ty + 3);
+    }
+
+    // 标定标记入口（shell-aoa.js 标定模式调用）：传入 null 清除。
+    function aoaScreenGridCalibrate(mark) {
+        state.calibrate = mark && Number.isFinite(mark.x) && Number.isFinite(mark.y)
+            ? {index: mark.index, x: Math.round(mark.x), y: Math.round(mark.y)}
+            : null;
+        draw();
+    }
+
     function syncButton() {
         const button = el('aoa-grid-toggle');
         if (button) button.textContent = state.enabled ? '⊞ 网格开' : '⊞ 网格关';
@@ -217,7 +273,7 @@
             draw();
         });
         stage.addEventListener('pointerleave', () => {
-            if (!state.enabled && state.hover === null) return;
+            if (!state.enabled && !state.calibrate) return;
             state.hover = null;
             draw();
         });
@@ -225,9 +281,11 @@
     }
 
     window.aoaToggleScreenGrid = aoaToggleScreenGrid;
+    window.aoaScreenGridCalibrate = aoaScreenGridCalibrate;
     // 运行时测试与调试检查入口（只读状态，不触发重画）。
     window.aoaScreenGridState = () => ({
-        enabled: state.enabled, hover: state.hover, media: Boolean(activeMedia()),
+        enabled: state.enabled, hover: state.hover, calibrate: state.calibrate,
+        media: Boolean(activeMedia()),
         overlayHidden: el('aoa-screen-grid')?.hidden ?? null,
     });
 

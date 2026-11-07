@@ -63,11 +63,11 @@ class DeviceListIsolationTests(unittest.IsolatedAsyncioTestCase):
         try:
             with (
                 patch.object(
-                    devices_api.runtime,
+                    devices_api.runtime.get_runtime(),
                     "get_client_id_from_request",
                     side_effect=lambda request: request.state.current_user.username,
                 ),
-                patch.object(devices_api.runtime, "global_state", global_state),
+                patch.object(devices_api.runtime.get_runtime(), "global_state", global_state),
                 patch.object(
                     devices_api.device_manager,
                     "get_connected_devices",
@@ -146,11 +146,11 @@ class DeviceListIsolationTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(
-                devices_api.runtime,
+                devices_api.runtime.get_runtime(),
                 "get_client_id_from_request",
                 return_value="alice",
             ),
-            patch.object(devices_api.runtime, "global_state", global_state),
+            patch.object(devices_api.runtime.get_runtime(), "global_state", global_state),
             patch.object(
                 devices_api.device_manager,
                 "get_connected_devices",
@@ -220,11 +220,11 @@ class DeviceListIsolationTests(unittest.IsolatedAsyncioTestCase):
         try:
             with (
                 patch.object(
-                    devices_api.runtime,
+                    devices_api.runtime.get_runtime(),
                     "get_client_id_from_request",
                     return_value="alice",
                 ),
-                patch.object(devices_api.runtime, "global_state", global_state),
+                patch.object(devices_api.runtime.get_runtime(), "global_state", global_state),
                 patch.object(
                     devices_api.device_manager,
                     "get_connected_devices",

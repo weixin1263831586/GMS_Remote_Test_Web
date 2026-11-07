@@ -67,6 +67,9 @@ def test_workspace_usb_only_inventory_uses_fresh_local_worker_facts(cluster, mon
     assert observed['USB-OFF']['protocol'] == observed['USB-OFF']['status'] == 'usb_only'
     cluster.repository.get_worker.return_value = {'status': 'offline'}
     assert management_inventory.local_usb_only_inventory() == {}
+    assert observed['USB-OFF']['protocol'] == observed['USB-OFF']['status'] == 'usb_only'
+    cluster.repository.get_worker.return_value = {'status': 'offline'}
+    assert management_inventory.local_usb_only_inventory() == {}
 
 
 def test_workspace_does_not_mix_controller_usb_with_remote_legacy_adb_host(cluster, monkeypatch):
@@ -105,8 +108,8 @@ def test_endpoint_bypasses_live_probes_and_sanitizes_current_ownership(cluster, 
     request = Request({'type': 'http', 'method': 'GET', 'path': '/', 'headers': [], 'client': ('127.0.0.1', 1)})
     request.state.current_user = principal
     config = SimpleNamespace(load_config=lambda: {}, get_ubuntu_host=lambda _: '127.0.0.1', get_ubuntu_user=lambda _: 'tester')
-    monkeypatch.setattr(management_api.runtime, 'config_manager', config)
-    monkeypatch.setattr(management_api.runtime, 'get_client_id_from_request', lambda _: 'alice')
+    monkeypatch.setattr(management_api.runtime.get_runtime(), 'config_manager', config)
+    monkeypatch.setattr(management_api.runtime.get_runtime(), 'get_client_id_from_request', lambda _: 'alice')
     monkeypatch.setattr(management_api, 'require_authenticated_user_when_auth_required', lambda _: principal)
     monkeypatch.setattr(management_api, 'known_usbip_sources', lambda: {})
     monkeypatch.setattr(management_api, '_local_adb_proxy_sources', lambda _: {})
@@ -116,7 +119,7 @@ def test_endpoint_bypasses_live_probes_and_sanitizes_current_ownership(cluster, 
         'LOCAL': {'client_id': 'bob', 'username': 'bob', 'lease_id': 'private-lease', 'generation': 7},
     })
     probe = Mock(side_effect=AssertionError('A list request must not probe devices'))
-    monkeypatch.setattr(management_api.runtime, 'run_local_shell_command', probe)
+    monkeypatch.setattr(management_api.runtime.get_runtime(), 'run_local_shell_command', probe)
     monkeypatch.setattr(management_api.device_manager, 'get_fastboot_devices', probe)
     monkeypatch.setattr(management_api, 'has_blocked_adb_process', probe)
     payload = json.loads(asyncio.run(management_api.devices_management(request)).body)
@@ -136,8 +139,8 @@ def test_endpoint_empty_heartbeat_falls_back_to_live_probes(cluster, monkeypatch
     request = Request({'type': 'http', 'method': 'GET', 'path': '/', 'headers': [], 'client': ('127.0.0.1', 1)})
     request.state.current_user = principal
     config = SimpleNamespace(load_config=lambda: {}, get_ubuntu_host=lambda _: '127.0.0.1', get_ubuntu_user=lambda _: 'tester')
-    monkeypatch.setattr(management_api.runtime, 'config_manager', config)
-    monkeypatch.setattr(management_api.runtime, 'get_client_id_from_request', lambda _: 'alice')
+    monkeypatch.setattr(management_api.runtime.get_runtime(), 'config_manager', config)
+    monkeypatch.setattr(management_api.runtime.get_runtime(), 'get_client_id_from_request', lambda _: 'alice')
     monkeypatch.setattr(management_api, 'require_authenticated_user_when_auth_required', lambda _: principal)
     monkeypatch.setattr(management_api, 'known_usbip_sources', lambda: {})
     monkeypatch.setattr(management_api, '_local_adb_proxy_sources', lambda _: {})
@@ -154,7 +157,7 @@ def test_endpoint_empty_heartbeat_falls_back_to_live_probes(cluster, monkeypatch
         return CommandResult(stdout='===DEVICE:ADB001===\nADB001\nBox\n16\n90\nRK\n',
                              stderr='', code=0)
 
-    monkeypatch.setattr(management_api.runtime, 'run_local_shell_command', run_local)
+    monkeypatch.setattr(management_api.runtime.get_runtime(), 'run_local_shell_command', run_local)
     payload = json.loads(asyncio.run(management_api.devices_management(request)).body)
     assert payload['source'] == 'local'
     assert [item['device_id'] for item in payload['devices']] == ['ADB001']

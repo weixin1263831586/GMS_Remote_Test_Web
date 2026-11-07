@@ -39,7 +39,7 @@ class LoadSaveAssignmentsTests(unittest.TestCase):
 
     def _patch_runtime(self):
         return patch.object(
-            ua.runtime, "config_manager", _config_manager(self.runtime_config)
+            ua.runtime.get_runtime(), "config_manager", _config_manager(self.runtime_config)
         )
 
     def test_load_returns_empty_when_key_missing(self):
@@ -71,7 +71,7 @@ class LoadSaveAssignmentsTests(unittest.TestCase):
 
     def test_save_raises_when_persistence_fails(self):
         with patch.object(
-            ua.runtime, "config_manager", _config_manager(self.runtime_config, update_error=True)
+            ua.runtime.get_runtime(), "config_manager", _config_manager(self.runtime_config, update_error=True)
         ), self.assertRaises(RuntimeError):
             ua.save_usbip_assignments({})
 
@@ -94,7 +94,7 @@ class PruneStaleUnknownTests(unittest.TestCase):
         self.runtime_config: dict = {}
         self.patches = [
             patch.object(
-                ua.runtime, "config_manager", _config_manager(self.runtime_config)
+                ua.runtime.get_runtime(), "config_manager", _config_manager(self.runtime_config)
             ),
             patch.object(ua, "usbip_assignment_lock", MagicMock()),
         ]
@@ -130,7 +130,7 @@ class ReconcileSerialsTests(unittest.TestCase):
         self.persisted: list = []
         self.patches = [
             patch.object(
-                ua.runtime, "config_manager", _config_manager(self.runtime_config)
+                ua.runtime.get_runtime(), "config_manager", _config_manager(self.runtime_config)
             ),
             patch.object(ua, "usbip_assignment_lock", MagicMock()),
             patch.object(
@@ -182,7 +182,7 @@ class MarkDetachUnknownTests(unittest.TestCase):
         self.runtime_config: dict = {}
         self.patches = [
             patch.object(
-                ua.runtime, "config_manager", _config_manager(self.runtime_config)
+                ua.runtime.get_runtime(), "config_manager", _config_manager(self.runtime_config)
             ),
             patch.object(ua, "usbip_assignment_lock", MagicMock()),
         ]

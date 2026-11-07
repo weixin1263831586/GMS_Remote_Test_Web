@@ -50,7 +50,7 @@ class CspBoundaryTests(SecurityBoundaryFixtureTests):
         report.write_text("<script>document.title='report'</script>", encoding="utf-8")
         manager = LocalConfigManager(str(root))
 
-        with patch.object(suites_api.runtime, "config_manager", manager):
+        with patch.object(suites_api.runtime.get_runtime(), "config_manager", manager):
             preview = self.client.get(
                 "/api/test/suites/download",
                 params={

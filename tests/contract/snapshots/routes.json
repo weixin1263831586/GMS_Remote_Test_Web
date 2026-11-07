@@ -1663,6 +1663,18 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/email/smtp"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/email/smtp"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/favicon/batch"
@@ -2110,6 +2122,42 @@
       "POST"
     ],
     "path": "/api/opengrok/search"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/ops/disk"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/ops/disk/cleanup"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/ops/events"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/ops/events/{event_id}/ack"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/ops/kill-switch"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/ops/status"
   },
   {
     "methods": [

@@ -114,8 +114,8 @@ class ParseArgsSuiteReferenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_short_suite_name_becomes_tools_path(self):
         previous_config = parse_api.runtime.config_manager
         previous_ssh = parse_api.runtime.ssh_manager
-        parse_api.runtime.config_manager = self.manager
-        parse_api.runtime.ssh_manager = FailingSshManager()
+        parse_api.runtime.get_runtime().config_manager = self.manager
+        parse_api.runtime.get_runtime().ssh_manager = FailingSshManager()
         try:
             response = await parse_api.parse_test_args(
                 request=None,
@@ -125,8 +125,8 @@ class ParseArgsSuiteReferenceTests(unittest.IsolatedAsyncioTestCase):
                 ),
             )
         finally:
-            parse_api.runtime.config_manager = previous_config
-            parse_api.runtime.ssh_manager = previous_ssh
+            parse_api.runtime.get_runtime().config_manager = previous_config
+            parse_api.runtime.get_runtime().ssh_manager = previous_ssh
         expected = str(self.root / "android-cts-17_r1" / "android-cts" / "tools")
         self.assertEqual(response.test_suite, expected)
         self.assertEqual(response.test_module, "CtsCamera")
@@ -135,8 +135,8 @@ class ParseArgsSuiteReferenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_short_name_keeps_positional_semantics(self):
         previous_config = parse_api.runtime.config_manager
         previous_ssh = parse_api.runtime.ssh_manager
-        parse_api.runtime.config_manager = self.manager
-        parse_api.runtime.ssh_manager = FailingSshManager()
+        parse_api.runtime.get_runtime().config_manager = self.manager
+        parse_api.runtime.get_runtime().ssh_manager = FailingSshManager()
         try:
             response = await parse_api.parse_test_args(
                 request=None,
@@ -146,8 +146,8 @@ class ParseArgsSuiteReferenceTests(unittest.IsolatedAsyncioTestCase):
                 ),
             )
         finally:
-            parse_api.runtime.config_manager = previous_config
-            parse_api.runtime.ssh_manager = previous_ssh
+            parse_api.runtime.get_runtime().config_manager = previous_config
+            parse_api.runtime.get_runtime().ssh_manager = previous_ssh
         self.assertEqual(response.test_suite, "")
         self.assertEqual(response.test_module, "android-cts-99_r9")
         self.assertTrue(any("/api/test/suites" in warning for warning in response.warnings))
@@ -166,8 +166,8 @@ class SuitesResultShortNameTests(unittest.IsolatedAsyncioTestCase):
     async def test_short_name_resolves_before_path_validation(self):
         previous_config = transfers_api.runtime.config_manager
         previous_ssh = transfers_api.runtime.ssh_manager
-        transfers_api.runtime.config_manager = self.manager
-        transfers_api.runtime.ssh_manager = FailingSshManager()
+        transfers_api.runtime.get_runtime().config_manager = self.manager
+        transfers_api.runtime.get_runtime().ssh_manager = FailingSshManager()
         expected = str(self.root / "android-cts-17_r1" / "android-cts" / "tools")
         collected = {}
 
@@ -177,31 +177,31 @@ class SuitesResultShortNameTests(unittest.IsolatedAsyncioTestCase):
 
         try:
             with (
-                patch.object(transfers_api.runtime, "generate_help_or_continue", return_value=None),
+                patch.object(transfers_api.runtime.get_runtime(), "generate_help_or_continue", return_value=None),
                 patch.object(transfers_api, "collect_tradefed_results", fake_collect),
             ):
                 response = await transfers_api.list_tradefed_results(
                     req=TradefedListResultsRequest(suite_path="android-cts-17_r1")
                 )
         finally:
-            transfers_api.runtime.config_manager = previous_config
-            transfers_api.runtime.ssh_manager = previous_ssh
+            transfers_api.runtime.get_runtime().config_manager = previous_config
+            transfers_api.runtime.get_runtime().ssh_manager = previous_ssh
         self.assertEqual(collected["suite_path"], expected)
         self.assertEqual(response.status_code, 200)
 
     async def test_unknown_short_name_returns_404_with_hint(self):
         previous_config = transfers_api.runtime.config_manager
         previous_ssh = transfers_api.runtime.ssh_manager
-        transfers_api.runtime.config_manager = self.manager
-        transfers_api.runtime.ssh_manager = FailingSshManager()
+        transfers_api.runtime.get_runtime().config_manager = self.manager
+        transfers_api.runtime.get_runtime().ssh_manager = FailingSshManager()
         try:
-            with patch.object(transfers_api.runtime, "generate_help_or_continue", return_value=None):
+            with patch.object(transfers_api.runtime.get_runtime(), "generate_help_or_continue", return_value=None):
                 response = await transfers_api.list_tradefed_results(
                     req=TradefedListResultsRequest(suite_path="android-cts-99_r9")
                 )
         finally:
-            transfers_api.runtime.config_manager = previous_config
-            transfers_api.runtime.ssh_manager = previous_ssh
+            transfers_api.runtime.get_runtime().config_manager = previous_config
+            transfers_api.runtime.get_runtime().ssh_manager = previous_ssh
         self.assertEqual(response.status_code, 404)
         body = bytes(response.body).decode("utf-8")
         self.assertIn("/api/test/suites", body)

@@ -89,9 +89,27 @@ class OpsStore:
                     status TEXT NOT NULL DEFAULT 'open',
                     acknowledged_at TEXT NOT NULL DEFAULT '',
                     acknowledged_by TEXT NOT NULL DEFAULT '',
-                    notified_at TEXT NOT NULL DEFAULT ''
+                    notified_at TEXT NOT NULL DEFAULT '',
+                    notify_state TEXT NOT NULL DEFAULT 'pending',
+                    notify_attempts INTEGER NOT NULL DEFAULT 0
                 )
             """)
+            # Phase migrations: the delivery-state columns were added after
+            # the first release of the ledger; keep idempotent ALTERs here.
+            existing_cols = {
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(ops_events)").fetchall()
+            }
+            if "notify_state" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE ops_events ADD COLUMN notify_state "
+                    "TEXT NOT NULL DEFAULT 'pending'"
+                )
+            if "notify_attempts" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE ops_events ADD COLUMN notify_attempts "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ops_events_status "
                 "ON ops_events(status, created_at)"
@@ -170,23 +188,46 @@ class OpsStore:
         caller can skip notifications for deduplicated repeats.
         """
         now_text = utc_now_iso()
-        if dedup_key and suppress_minutes > 0:
-            with self._connect() as conn:
-                row = conn.execute(
-                    """SELECT * FROM ops_events
-                       WHERE dedup_key=? AND status='open'
-                       ORDER BY created_at DESC LIMIT 1""",
-                    (dedup_key,),
-                ).fetchone()
-            if row is not None:
-                created = _parse_iso(row["created_at"])
-                if created is not None:
-                    age = datetime.now(timezone.utc) - created
-                    if age <= timedelta(minutes=suppress_minutes):
-                        return {"event": dict(row), "suppressed": True}
         event_id = "ops-" + uuid.uuid4().hex[:12]
+        # 去重查询与插入必须在同一 BEGIN IMMEDIATE 事务内：分开两次连接
+        # 时两个进程可能同时读到“无新鲜事件”然后各插一条。
+        if not (dedup_key and suppress_minutes > 0):
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """INSERT INTO ops_events
+                       (id, created_at, severity, kind, subject, dedup_key,
+                        message, next_actions_json)
+                       VALUES (?,?,?,?,?,?,?,?)""",
+                    (
+                        event_id,
+                        now_text,
+                        severity,
+                        kind,
+                        subject,
+                        dedup_key,
+                        message,
+                        json.dumps(next_actions or [], ensure_ascii=False),
+                    ),
+                )
+            return {"event": self.get_event(event_id), "suppressed": False}
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """SELECT * FROM ops_events
+                   WHERE dedup_key=? AND status='open'
+                   ORDER BY created_at DESC LIMIT 1""",
+                (dedup_key,),
+            ).fetchone()
+            if row is not None:
+                created = _parse_iso(row["created_at"])
+                age = (
+                    datetime.now(timezone.utc) - created
+                    if created is not None
+                    else None
+                )
+                if age is not None and age <= timedelta(minutes=suppress_minutes):
+                    return {"event": dict(row), "suppressed": True}
             conn.execute(
                 """INSERT INTO ops_events
                    (id, created_at, severity, kind, subject, dedup_key,
@@ -236,6 +277,62 @@ class OpsStore:
                 (utc_now_iso(), username, event_id),
             )
         return self.get_event(event_id)
+
+    # ---- delivery state ----------------------------------------------------
+
+    def pending_events(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        """Events whose notification is still pending or failed (retryable).
+
+        Kill-switch audit rows are informational and never notify; they are
+        recorded with ``notify_state='sent'`` at insert time via
+        ``mark_delivery_state`` right after creation in service.py.
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM ops_events
+                   WHERE notify_state IN ('pending', 'failed')
+                   ORDER BY created_at ASC, id ASC LIMIT ?""",
+                (max(1, min(int(limit), 100)),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_delivery_state(
+        self, event_id: str, *, state: str, attempts: int
+    ) -> None:
+        """Persist notification outcome: sent (with notified_at) or failed."""
+        allowed = {"pending", "failed", "sent", "skipped"}
+        if state not in allowed:
+            raise ValueError(f"invalid notify_state: {state}")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """UPDATE ops_events
+                   SET notify_state=?, notify_attempts=?, notified_at=?
+                   WHERE id=?""",
+                (
+                    state,
+                    int(attempts),
+                    utc_now_iso() if state == "sent" else "",
+                    event_id,
+                ),
+            )
+
+    def notify_backoff_ready(self, event: dict[str, Any]) -> bool:
+        """Exponential backoff for failed deliveries: 1, 2, 4… up to 30 min.
+
+        ``notify_attempts == 0`` means never attempted (a fresh event):
+        always immediately ready so alerts are not delayed by one sweep
+        cycle. Backoff only applies once a real send has failed.
+        """
+        attempts = int(event.get("notify_attempts") or 0)
+        if attempts <= 0:
+            return True
+        delay_seconds = min(1800.0, 60.0 * (2 ** (attempts - 1)))
+        created = _parse_iso(str(event.get("created_at") or ""))
+        if created is None:
+            return True
+        age = (datetime.now(timezone.utc) - created).total_seconds()
+        return age >= delay_seconds
 
     def open_event_count(self) -> int:
         with self._connect() as conn:

@@ -1,4 +1,25 @@
 // Cluster page state chunk; loaded by page.html in dependency order.
+//
+// 原 page-boot.js / page-echarts.js 并入本文件开头（均为数十字节，
+// 单独成文件只增加请求与路由白名单）。脚本顺序约束不变：本 chunk 在
+// embedded-workspace.js 之后加载，boot 逻辑仍在其就绪后执行；
+// dashEchartsStatus 先于 dash-charts/dash-render 初始化。
+window.GmsEmbeddedWorkspace && window.GmsEmbeddedWorkspace.markReady();
+
+/* ECharts 仅从本地 vendor 加载，避免集群页面向第三方 CDN 发请求。 */
+(function () {
+    window.dashEchartsStatus = 'loading';
+    var mark = function (status) {
+        window.dashEchartsStatus = status;
+        window.renderDashboard && window.renderDashboard();
+    };
+    var s = document.createElement('script');
+    s.src = '/static/vendor/echarts.min.js?v=5.5.0';
+    s.onload = function () { mark('ready'); };
+    s.onerror = function () { mark('failed'); };
+    document.head.appendChild(s);
+})();
+
 // 页面运行配置（由模板以 body data 属性注入；本文件为静态资源，
 // 不再经 Jinja 渲染）。
 window.GMS_CLUSTER_DEFAULT_MAX_JOBS =

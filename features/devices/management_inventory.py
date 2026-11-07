@@ -62,7 +62,7 @@ def local_usb_only_inventory() -> dict[str, dict]:
     返回空：本函数位于设备列表主路径（api.get_connected_devices），
     不得让辅助 inventory 拖垮整条接口。
     """
-    config_manager = runtime.config_manager
+    config_manager = runtime.get_runtime().config_manager
     if config_manager is None:
         return {}
     try:

@@ -55,8 +55,8 @@ class TestStatusApiPolling(unittest.IsolatedAsyncioTestCase):
             "devices": [],
         }
         with (
-            patch.object(status_api.runtime, "generate_help_or_continue", return_value=None),
-            patch.object(status_api.runtime, "get_client_id_from_request", return_value="alice"),
+            patch.object(status_api.runtime.get_runtime(), "generate_help_or_continue", return_value=None),
+            patch.object(status_api.runtime.get_runtime(), "get_client_id_from_request", return_value="alice"),
             patch.object(status_api, "get_or_create_user_state", return_value=user_state),
             patch.object(status_api, "get_usb_monitor", return_value=None),
             patch.object(status_api, "_active_durable_jobs", return_value=[]),
@@ -78,8 +78,8 @@ class TestStatusApiPolling(unittest.IsolatedAsyncioTestCase):
             "devices": ["ats-worker-controller:SERIAL-1"], "created_at": "", "updated_at": "",
         }]
         with (
-            patch.object(status_api.runtime, "generate_help_or_continue", return_value=None),
-            patch.object(status_api.runtime, "get_client_id_from_request", return_value="user-uuid"),
+            patch.object(status_api.runtime.get_runtime(), "generate_help_or_continue", return_value=None),
+            patch.object(status_api.runtime.get_runtime(), "get_client_id_from_request", return_value="user-uuid"),
             patch.object(status_api, "get_or_create_user_state", return_value={"logs": []}),
             patch.object(status_api, "get_usb_monitor", return_value=None),
             patch.object(status_api, "_active_durable_jobs", return_value=durable_jobs) as active,
@@ -103,8 +103,8 @@ class TestStatusApiPolling(unittest.IsolatedAsyncioTestCase):
             state=SimpleNamespace(current_user=_agent_principal("alice")),
         )
         with (
-            patch.object(status_api.runtime, "generate_help_or_continue", return_value=None),
-            patch.object(status_api.runtime, "get_client_id_from_request", return_value="agent:token-1"),
+            patch.object(status_api.runtime.get_runtime(), "generate_help_or_continue", return_value=None),
+            patch.object(status_api.runtime.get_runtime(), "get_client_id_from_request", return_value="agent:token-1"),
             patch.object(status_api, "get_or_create_user_state", return_value={"logs": []}),
             patch.object(status_api, "get_usb_monitor", return_value=None),
             patch.object(status_api, "_active_durable_jobs", return_value=[]) as active,
@@ -149,7 +149,7 @@ class TestLogStreamOwnerResolution(unittest.IsolatedAsyncioTestCase):
         )
         with (
             patch.object(
-                status_api.runtime, "get_client_id_from_request",
+                status_api.runtime.get_runtime(), "get_client_id_from_request",
                 return_value="agent:token-1",
             ),
             patch("foundation.cluster_port.get_cluster_service") as cluster,

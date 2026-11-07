@@ -122,7 +122,7 @@ def test_probe_reports_missing_device(monkeypatch):
             pass
 
         @staticmethod
-        def find(custom_match=None, find_all=False):
+        def find(**_kwargs):
             return iter(())
 
     monkeypatch.setattr(aoa_actions, "_usb", lambda: (FakeCore(), None))
@@ -372,7 +372,7 @@ def test_run_sequence_mocked_hid(monkeypatch):
             pass
 
         @staticmethod
-        def find(custom_match=None, find_all=False):
+        def find(**_kwargs):
             return iter([FakeDevice()])
 
     monkeypatch.setattr(aoa_actions, "_usb", lambda: (FakeCore(), None))
@@ -434,7 +434,7 @@ def test_run_sequence_reports_progress_per_command(monkeypatch):
             pass
 
         @staticmethod
-        def find(custom_match=None, find_all=False):
+        def find(**_kwargs):
             return iter([FakeDevice()])
 
     monkeypatch.setattr(aoa_actions, "_usb", lambda: (FakeCore(), None))
@@ -486,7 +486,7 @@ def test_run_sequence_progress_callback_error_does_not_abort(monkeypatch):
             pass
 
         @staticmethod
-        def find(custom_match=None, find_all=False):
+        def find(**_kwargs):
             return iter([FakeDevice()])
 
     monkeypatch.setattr(aoa_actions, "_usb", lambda: (FakeCore(), None))
@@ -554,7 +554,7 @@ def _stall_usb(monkeypatch, state, stall_channels):
             pass
 
         @staticmethod
-        def find(custom_match=None, find_all=False):
+        def find(**_kwargs):
             return iter([_stall_device_factory(state, stall_channels)])
 
     monkeypatch.setattr(aoa_actions, "_usb", lambda: (FakeCore(), None))
@@ -764,7 +764,7 @@ def _gate_probe_usb(monkeypatch):
             pass
 
         @staticmethod
-        def find(custom_match=None, find_all=False):
+        def find(**_kwargs):
             return iter([FakeDevice()])
 
     monkeypatch.setattr(aoa_actions, "_usb", lambda: (FakeCore(), None))

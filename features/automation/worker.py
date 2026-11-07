@@ -23,6 +23,7 @@ _advancement_task: asyncio.Task | None = None
 _stale_swept: bool = False
 _last_build_poll_at: float = 0.0
 _last_ops_sweep_at: float = 0.0
+_last_disk_hygiene_at: float = 0.0
 _last_tick_at: float = 0.0
 _last_tick_result: dict[str, Any] = {}
 
@@ -324,9 +325,11 @@ def run_maintenance_sync(
         run_artifact_retention()
     except Exception:
         logger.exception('[AutomationWorker] artifact retention sweep failed')
-    global _last_ops_sweep_at
+    global _last_ops_sweep_at, _last_disk_hygiene_at
     ops_now = time.monotonic()
-    if not _last_ops_sweep_at or ops_now - _last_ops_sweep_at >= 3600:
+    # 告警扫描（评估 + 投递重试）分钟级：worker offline / 磁盘压力 /
+    # 连败告警延迟 1 小时对无人值守场景不可接受。
+    if not _last_ops_sweep_at or ops_now - _last_ops_sweep_at >= 60:
         _last_ops_sweep_at = ops_now
         try:
             from foundation.ops_port import run_alert_sweep
@@ -334,6 +337,9 @@ def run_maintenance_sync(
             run_alert_sweep()
         except Exception:
             logger.exception('[AutomationWorker] ops alert sweep failed')
+    # 磁盘清扫与告警扫描拆成独立周期，仍按小时执行。
+    if not _last_disk_hygiene_at or ops_now - _last_disk_hygiene_at >= 3600:
+        _last_disk_hygiene_at = ops_now
         try:
             from foundation.ops_port import run_disk_hygiene
 
@@ -383,6 +389,15 @@ def advance_runs_sync(
     cap = 25
     previous_signature: tuple[str, str] | None = None
     while advanced_runs < cap:
+        # 每个认领边界都重查 kill-switch：暂停发生在循环中途时，
+        # 不得继续认领后续 run。
+        try:
+            from foundation.automation_port import advancement_paused
+
+            if advancement_paused():
+                break
+        except Exception:
+            logger.exception("[AutomationWorker] kill-switch recheck failed; advancing")
         try:
             advanced = auto_svc.worker_tick(cfg["executor"])
         except Exception:

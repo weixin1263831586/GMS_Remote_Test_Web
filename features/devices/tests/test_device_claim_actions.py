@@ -56,7 +56,7 @@ def active_test_claim():
 
 def test_reboot_rejects_claimed_device_before_side_effect():
     with patch.object(
-        operations_api.runtime,
+        operations_api.runtime.get_runtime(),
         "get_client_id_from_request",
         return_value="bob",
     ), patch.object(operations_api.device_manager, "reboot_device") as reboot:
@@ -70,10 +70,10 @@ def test_reboot_rejects_claimed_device_before_side_effect():
 
 def test_ui_tap_rejects_even_the_active_claim_owner():
     with patch.object(
-        ui_control_api.runtime,
+        ui_control_api.runtime.get_runtime(),
         "get_client_id_from_request",
         return_value="alice",
-    ), patch.object(ui_control_api.runtime, "config_manager") as config:
+    ), patch.object(ui_control_api.runtime.get_runtime(), "config_manager") as config:
         response = asyncio.run(ui_control_api.ui_tap(
             UiTapRequest(serial=DEVICE_ID, x=10, y=20), _request("alice")
         ))

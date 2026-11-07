@@ -230,6 +230,8 @@ class ScrcpySession:
         self.max_size = 1024
         self.max_fps = 30
         self.bit_rate = 4_000_000
+        # 投屏期间屏幕常亮标志：stop/回收时恢复默认熄屏策略。
+        self.stayon_active = False
         self.proc: subprocess.Popen | None = None
         self.video: socket.socket | None = None
         self.forward_port: int | None = None
@@ -257,6 +259,12 @@ class ScrcpySession:
         jar = server_jar_path()
         jar_bytes = jar.read_bytes()
         _adb(self.serial, "shell", "input", "keyevent", "224")
+        # 投屏期间屏幕常亮：录制全程需要观察画面，熄屏会导致编码器无帧
+        # （前端提示"等待设备画面"）。``svc power stayon usb`` 只在 USB
+        # 供电时保持亮屏，安全性优于全局 stayon true；会话结束（手动
+        # 停止/空闲回收/新会话替换）时恢复默认熄屏策略。
+        _adb(self.serial, "shell", "svc", "power", "stayon", "usb")
+        self.stayon_active = True
         # jar 推送与编码器无关：候选链外层只推一次（设备 /data/local/tmp
         # 存在周期清理，失败重推）。
         for _push_attempt in range(_START_ATTEMPTS):
@@ -501,9 +509,15 @@ class ScrcpySession:
             for sub in list(self.subscribers):
                 sub.shutdown()
             self.subscribers.clear()
-        self._teardown_processes()
+        self._teardown_processes(restore_stayon=True)
 
-    def _teardown_processes(self) -> None:
+    def _teardown_processes(self, restore_stayon: bool = False) -> None:
+        if restore_stayon and self.stayon_active:
+            self.stayon_active = False
+            try:
+                _adb(self.serial, "shell", "svc", "power", "stayon", "false")
+            except subprocess.SubprocessError:
+                pass
         if self.video is not None:
             try:
                 self.video.close()

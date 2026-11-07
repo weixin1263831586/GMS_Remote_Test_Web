@@ -67,7 +67,7 @@ class TradefedResultEnrichmentTests(unittest.TestCase):
                 return CommandResult(stdout="", stderr="", code=0)
 
         original = tradefed_results.runtime.ssh_manager
-        tradefed_results.runtime.ssh_manager = Manager()
+        tradefed_results.runtime.get_runtime().ssh_manager = Manager()
         try:
             tradefed_results._enrich_remote_results(
                 [
@@ -78,7 +78,7 @@ class TradefedResultEnrichmentTests(unittest.TestCase):
                 "/srv/GMS Suite/android-cts/tools",
             )
         finally:
-            tradefed_results.runtime.ssh_manager = original
+            tradefed_results.runtime.get_runtime().ssh_manager = original
 
         command, timeout = calls[0]
         self.assertIn(

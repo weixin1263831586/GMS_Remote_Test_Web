@@ -42,7 +42,10 @@
 ## Consequences
 
 运维事件是单点台账，后续修复闭环（fail↔patch 关联、结果驱动决策）可
-直接消费 `ops_events` 作为升级通知的输入。kill-switch 是进程内标志，
+直接消费 `ops_events` 作为升级通知的输入。kill-switch 持久化在
+`ops_flags`（SQLite），Web/Worker/CLI 多进程按轮询读取同一全局开关，
 不持久化排队意图——暂停期间 Gerrit webhook 仍可入队，恢复后按原顺序
-推进。磁盘卫生是启发式 mtime 清扫，不做 SHA 校验；被误删的暂存固件
-可通过重新触发构建或 Jenkins 下载恢复。
+推进；每个认领边界都重查标志，暂停后不再认领新 run。磁盘卫生是启发式
+mtime 清扫：stage 清理前核对运行状态，非终态 run 引用的镜像跳过
+（fail-closed）；活跃上传会话按子树最新 mtime 判定，仅 rmdir 空目录。
+告警投递状态持久化在 `ops_events.notify_state`，失败按指数退避重试。

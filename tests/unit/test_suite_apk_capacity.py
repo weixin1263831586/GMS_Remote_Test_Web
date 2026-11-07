@@ -33,7 +33,7 @@ def suite_import(tmp_path, monkeypatch):
     for name, value in {
         "apk_upload_dir": str(uploads), "apk_max_tasks": 1, "global_state": state, "apk_task_store": store,
     }.items():
-        monkeypatch.setattr(apk.runtime, name, value)
+        monkeypatch.setattr(apk.runtime.get_runtime(), name, value)
     for name, value in {
         "config_manager": SimpleNamespace(load_config=lambda: {
             "ubuntu_host": "127.0.0.1", "ubuntu_user": "tester", "suites_path": str(root),
@@ -42,7 +42,7 @@ def suite_import(tmp_path, monkeypatch):
         "normalize_apk_filename": apk.normalize_apk_filename, "safe_join": apk.safe_join,
         "create_apk_task": apk.create_apk_task, "cleanup_files": apk.cleanup_files,
     }.items():
-        monkeypatch.setattr(suites_api.runtime, name, value)
+        monkeypatch.setattr(suites_api.runtime.get_runtime(), name, value)
     request = Request({"type": "http", "method": "POST", "path": "/api/test/suites/apk/analyze"})
     request.state.current_user = CurrentUser(id="alice", username="alice", role="user")
     body = SuiteApkAnalyzeRequest(suite_path=str(tools), path="testcases/sample.apk")
@@ -52,7 +52,7 @@ def suite_import(tmp_path, monkeypatch):
 def configure_transport(monkeypatch, local, source):
     monkeypatch.setattr(suites_api, "is_config_host_local", lambda _config: local)
     manager = MagicMock()
-    monkeypatch.setattr(suites_api.runtime, "ssh_manager", manager)
+    monkeypatch.setattr(suites_api.runtime.get_runtime(), "ssh_manager", manager)
     if not local:
         monkeypatch.setattr(suites_api, "_run_suite_file_script", lambda *_args: {
             "success": True, "is_apk": True, "is_jar": False, "size": source.stat().st_size,

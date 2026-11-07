@@ -83,6 +83,15 @@ class UsbipCredentialTests(unittest.TestCase):
     def tearDown(self):
         import features.devices.reconnect as reconnect
         reconnect.stop_usbip_reconnect_tasks(timeout=1)
+        # 断连/固件接管类用例会写入模块级抑制与暂停表；不清除会让
+        # 后续 _reconnect_worker 直接被抑制或暂停（跨文件状态泄漏）。
+        # clear/resume 是按键弹出，这里强制全表复位。
+        with reconnect._suppression_lock:
+            reconnect._suppressed_hosts.clear()
+            reconnect._suppressed_devices.clear()
+        with reconnect._pause_lock:
+            reconnect._paused_hosts.clear()
+            reconnect._paused_devices.clear()
 
     def test_usbip_request_models_reject_shell_metacharacters_in_busids(self):
         for model in (USBIPStartRequest, USBIPDisconnectRequest):
@@ -367,10 +376,10 @@ BUSID  VID:PID    DEVICE                                                        
         ])
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
 
-        with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
+        with patch.object(integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()), \
                 patch("features.devices.usbip_connect_api.usbip_manager", fake_manager), \
                 patch.object(
-                    integrations.runtime,
+                    integrations.runtime.get_runtime(),
                     "get_client_id_from_request",
                     return_value="hcq@172.16.14.66",
                 ), \
@@ -442,7 +451,7 @@ BUSID  VID:PID    DEVICE                                                        
         }
 
         with patch.object(
-            integrations.runtime,
+            integrations.runtime.get_runtime(),
             "config_manager",
             SimpleNamespace(
                 get_runtime_config=lambda: dict(runtime_config)
@@ -487,7 +496,7 @@ BUSID  VID:PID    DEVICE                                                        
         }
 
         with patch.object(
-            integrations.runtime,
+            integrations.runtime.get_runtime(),
             "config_manager",
             SimpleNamespace(
                 get_runtime_config=lambda: runtime_config,
@@ -539,7 +548,7 @@ BUSID  VID:PID    DEVICE                                                        
         }
 
         with patch.object(
-            integrations.runtime,
+            integrations.runtime.get_runtime(),
             "config_manager",
             SimpleNamespace(
                 get_runtime_config=lambda: runtime_config,
@@ -587,7 +596,7 @@ BUSID  VID:PID    DEVICE                                                        
 
         repository = MagicMock()
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ):
             integrations.reconcile_cluster_usbip_command({
                 "worker_id": "ats-worker-246",
@@ -636,7 +645,7 @@ BUSID  VID:PID    DEVICE                                                        
                 return True
 
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ):
             integrations.reconcile_cluster_usbip_command({
                 "worker_id": "ats-worker-246",
@@ -719,9 +728,9 @@ BUSID  VID:PID    DEVICE                                                        
         user = CurrentUser(id="admin-id", username="admin", role="admin")
 
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ), patch.object(
-            integrations.runtime,
+            integrations.runtime.get_runtime(),
             "get_client_id_from_request",
             return_value="hcq@172.16.14.66",
         ), patch.object(
@@ -789,9 +798,9 @@ BUSID  VID:PID    DEVICE                                                        
         user = CurrentUser(id="admin-id", username="admin", role="admin")
 
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ), patch.object(
-            integrations.runtime,
+            integrations.runtime.get_runtime(),
             "get_client_id_from_request",
             return_value="hcq@172.16.14.66",
         ), patch.object(
@@ -847,9 +856,9 @@ BUSID  VID:PID    DEVICE                                                        
         run_worker = AsyncMock()
 
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ), patch.object(
-            integrations.runtime,
+            integrations.runtime.get_runtime(),
             "get_client_id_from_request",
             return_value="hcq@172.16.14.66",
         ), patch.object(
@@ -915,9 +924,9 @@ BUSID  VID:PID    DEVICE                                                        
         })
 
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ), patch.object(
-            integrations.runtime,
+            integrations.runtime.get_runtime(),
             "get_client_id_from_request",
             return_value="hcq@172.16.14.66",
         ), patch.object(
@@ -1115,9 +1124,9 @@ BUSID  VID:PID    DEVICE                                                        
                 return {"success": True, "message": "ok", "device_list": ["USBIP001"]}
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
         req = USBIPStartRequest(device_host="hcq@172.16.14.66", device_password="secret")
-        with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
+        with patch.object(integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()), \
                 patch("features.devices.usbip_connect_api.usbip_manager", FakeUsbipManager()), \
-                patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
+                patch.object(integrations.runtime.get_runtime(), "get_client_id_from_request", return_value="hcq@172.16.14.66"):
             response = asyncio.run(integrations.start_usbip(req=req, request=request, help=False))
         self.assertEqual(response.status_code, 200)
         body = json.loads(response.body.decode("utf-8"))
@@ -1168,9 +1177,9 @@ BUSID  VID:PID    DEVICE                                                        
                     "source": "cp2-share@172.16.14.65",
                     "timestamp": 1,
                 }
-            with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
+            with patch.object(integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()), \
                     patch("features.devices.usbip_connect_api.usbip_manager", FakeUsbipManager()), \
-                    patch.object(integrations.runtime, "get_client_id_from_request", return_value="waha@172.16.14.64"):
+                    patch.object(integrations.runtime.get_runtime(), "get_client_id_from_request", return_value="waha@172.16.14.64"):
                 response = asyncio.run(integrations.start_usbip(
                     req=USBIPStartRequest(device_host="waha@172.16.14.64"),
                     request=request,
@@ -1213,9 +1222,9 @@ BUSID  VID:PID    DEVICE                                                        
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
         req = USBIPStartRequest(device_host="hcq@172.16.14.66")
 
-        with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
+        with patch.object(integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()), \
                 patch("features.devices.usbip_connect_api.usbip_manager", FakeUsbipManager()), \
-                patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
+                patch.object(integrations.runtime.get_runtime(), "get_client_id_from_request", return_value="hcq@172.16.14.66"):
             response = asyncio.run(integrations.start_usbip(req=req, request=request, help=False))
 
         self.assertEqual(response.status_code, 200)
@@ -1248,10 +1257,10 @@ BUSID  VID:PID    DEVICE                                                        
             headers={}, client=SimpleNamespace(host="127.0.0.1")
         )
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ), patch("features.devices.usbip_connect_api.usbip_manager", manager
         ), patch.object(
-            integrations.runtime,
+            integrations.runtime.get_runtime(),
             "get_client_id_from_request",
             return_value="hcq@172.16.14.66",
         ), patch.object(
@@ -1311,10 +1320,10 @@ BUSID  VID:PID    DEVICE                                                        
             config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         )
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ), patch("features.devices.usbip_connect_api.usbip_manager", manager
         ), patch.object(
-            integrations.runtime,
+            integrations.runtime.get_runtime(),
             "get_client_id_from_request",
             return_value="hcq@172.16.14.66",
         ), patch.object(
@@ -1368,10 +1377,10 @@ BUSID  VID:PID    DEVICE                                                        
             config=SimpleNamespace(local_worker_id="ats-worker-controller"),
         )
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ), patch("features.devices.usbip_connect_api.usbip_manager", manager
         ), patch.object(
-            integrations.runtime,
+            integrations.runtime.get_runtime(),
             "get_client_id_from_request",
             return_value="hcq@172.16.14.66",
         ), patch.object(
@@ -1440,10 +1449,10 @@ BUSID  VID:PID    DEVICE                                                        
             headers={}, client=SimpleNamespace(host="127.0.0.1")
         )
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ), patch("features.devices.usbip_connect_api.usbip_manager", manager
         ), patch.object(
-            integrations.runtime,
+            integrations.runtime.get_runtime(),
             "get_client_id_from_request",
             return_value="hcq@172.16.14.66",
         ), patch.object(
@@ -1508,10 +1517,10 @@ BUSID  VID:PID    DEVICE                                                        
             global_state.usbip_devices_source.clear()
         try:
             with patch.object(
-                integrations.runtime, "config_manager", FakeConfigManager()
+                integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
             ), patch("features.devices.usbip_connect_api.usbip_manager", manager
             ), patch.object(
-                integrations.runtime,
+                integrations.runtime.get_runtime(),
                 "get_client_id_from_request",
                 return_value="hcq@172.16.14.66",
             ), patch.object(
@@ -1562,9 +1571,9 @@ BUSID  VID:PID    DEVICE                                                        
             global_state.usbip_states.clear()
             global_state.usbip_states["hcq@172.16.14.66"] = {"connected": True, "timestamp": 1}
         try:
-            with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
-                    patch.object(integrations.runtime, "get_client_id_from_request", return_value="alice-user-id"), \
-                    patch.object(integrations.runtime, "resolve_tailscale_device_host", None):
+            with patch.object(integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()), \
+                    patch.object(integrations.runtime.get_runtime(), "get_client_id_from_request", return_value="alice-user-id"), \
+                    patch.object(integrations.runtime.get_runtime(), "resolve_tailscale_device_host", None):
                 response = asyncio.run(integrations.get_usbip_status(request=request))
         finally:
             with global_state.usbip_states_lock:
@@ -1619,7 +1628,7 @@ BUSID  VID:PID    DEVICE                                                        
                 }
 
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ):
             response = asyncio.run(integrations.list_usbip_assignments())
 
@@ -1649,7 +1658,7 @@ BUSID  VID:PID    DEVICE                                                        
                 return {}
 
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ):
             response = asyncio.run(integrations.list_usbip_assignments())
 
@@ -1709,9 +1718,9 @@ BUSID  VID:PID    DEVICE                                                        
         )
 
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ), patch.object(
-            integrations.runtime, "ssh_manager", fake_ssh_manager,
+            integrations.runtime.get_runtime(), "ssh_manager", fake_ssh_manager,
         ):
             response = asyncio.run(
                 integrations.list_usbip_assignments(verify=True)
@@ -1775,9 +1784,9 @@ BUSID  VID:PID    DEVICE                                                        
         )
 
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ), patch.object(
-            integrations.runtime, "ssh_manager", fake_ssh_manager,
+            integrations.runtime.get_runtime(), "ssh_manager", fake_ssh_manager,
         ):
             response = asyncio.run(
                 integrations.list_usbip_assignments(verify=True)
@@ -1817,9 +1826,9 @@ BUSID  VID:PID    DEVICE                                                        
         )
 
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ), patch.object(
-            integrations.runtime, "ssh_manager", fake_ssh_manager,
+            integrations.runtime.get_runtime(), "ssh_manager", fake_ssh_manager,
         ):
             response = asyncio.run(
                 integrations.list_usbip_assignments(verify=True)
@@ -1858,13 +1867,13 @@ BUSID  VID:PID    DEVICE                                                        
             headers={}, client=SimpleNamespace(host="127.0.0.1")
         )
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ), patch.object(
-            integrations.runtime,
+            integrations.runtime.get_runtime(),
             "get_client_id_from_request",
             return_value="hcq@172.16.14.66",
         ), patch.object(
-            integrations.runtime, "resolve_tailscale_device_host", None
+            integrations.runtime.get_runtime(), "resolve_tailscale_device_host", None
         ), patch("features.devices.usbip_status_api.probe_existing_local_usbip_transport",
             return_value={
                 "transport_connected": True,
@@ -1941,13 +1950,13 @@ BUSID  VID:PID    DEVICE                                                        
             }
         try:
             with patch.object(
-                integrations.runtime, "config_manager", FakeConfigManager()
+                integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
             ), patch.object(
-                integrations.runtime,
+                integrations.runtime.get_runtime(),
                 "get_client_id_from_request",
                 return_value="hcq@172.16.14.66",
             ), patch.object(
-                integrations.runtime, "resolve_tailscale_device_host", None
+                integrations.runtime.get_runtime(), "resolve_tailscale_device_host", None
             ), patch("features.devices.usbip_status_api.probe_existing_local_usbip_transport",
                 return_value=None,
             ), patch("features.devices.usbip_status_api._local_worker_id",
@@ -2008,9 +2017,9 @@ BUSID  VID:PID    DEVICE                                                        
                 "timestamp": 1,
             }
         try:
-            with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
-                    patch.object(integrations.runtime, "get_client_id_from_request", return_value="alice-user-id"), \
-                    patch.object(integrations.runtime, "resolve_tailscale_device_host", None):
+            with patch.object(integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()), \
+                    patch.object(integrations.runtime.get_runtime(), "get_client_id_from_request", return_value="alice-user-id"), \
+                    patch.object(integrations.runtime.get_runtime(), "resolve_tailscale_device_host", None):
                 response = asyncio.run(integrations.get_usbip_status(request=request))
         finally:
             with global_state.usbip_states_lock:
@@ -2049,9 +2058,9 @@ BUSID  VID:PID    DEVICE                                                        
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
         reconnect.suppress_usbip_reconnect("hcq@172.16.14.66", ["USBIP001"])
         try:
-            with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
+            with patch.object(integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()), \
                     patch("features.devices.usbip_connect_api.usbip_manager", FakeUsbipManager()), \
-                    patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
+                    patch.object(integrations.runtime.get_runtime(), "get_client_id_from_request", return_value="hcq@172.16.14.66"):
                 auto_response = asyncio.run(integrations.start_usbip(
                     req=USBIPStartRequest(device_host="hcq@172.16.14.66"),
                     request=request,
@@ -2088,9 +2097,9 @@ BUSID  VID:PID    DEVICE                                                        
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
         reconnect.suppress_usbip_reconnect("hcq@172.16.14.66", ["USBIP001"])
         try:
-            with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
+            with patch.object(integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()), \
                     patch("features.devices.usbip_connect_api.usbip_manager", FakeUsbipManager()), \
-                    patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"):
+                    patch.object(integrations.runtime.get_runtime(), "get_client_id_from_request", return_value="hcq@172.16.14.66"):
                 response = asyncio.run(integrations.start_usbip(
                     req=USBIPStartRequest(device_host="hcq@172.16.14.66", manual_connect=True),
                     request=request,
@@ -2295,10 +2304,10 @@ BUSID  VID:PID    DEVICE                                                        
 
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
 
-        with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
-                patch.object(integrations.runtime, "ssh_manager", FakeSshManager()), \
-                patch.object(integrations.runtime, "get_client_id_from_request", return_value="hcq@172.16.14.66"), \
-                patch.object(integrations.runtime, "resolve_tailscale_device_host", return_value=(None, None)), \
+        with patch.object(integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()), \
+                patch.object(integrations.runtime.get_runtime(), "ssh_manager", FakeSshManager()), \
+                patch.object(integrations.runtime.get_runtime(), "get_client_id_from_request", return_value="hcq@172.16.14.66"), \
+                patch.object(integrations.runtime.get_runtime(), "resolve_tailscale_device_host", return_value=(None, None)), \
                 patch("features.devices.usbip_disconnect_api.DeviceSSHConnection", FakeDeviceSSHConnection), \
                 patch("features.devices.usbip_disconnect_api.notify_device_change", AsyncMock()), \
                 patch("features.devices.usbip_disconnect_api.acquire_device_operation_claim", return_value=("operation:usbip:test", [{"id": "claim-1", "device_key": "ats-worker-controller:USBIP001", "generation": 1, "owner_id": "user-id"}], None)), \
@@ -2383,11 +2392,11 @@ BUSID  VID:PID    DEVICE                                                        
             "remaining_devices": [],
         }
         with patch.object(
-            integrations.runtime, "config_manager", FakeConfigManager()
+            integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()
         ), patch.object(
-            integrations.runtime, "ssh_manager", FakeSshManager()
+            integrations.runtime.get_runtime(), "ssh_manager", FakeSshManager()
         ), patch.object(
-            integrations.runtime,
+            integrations.runtime.get_runtime(),
             "get_client_id_from_request",
             return_value="hcq@172.16.14.66",
         ), patch.object(
@@ -2472,10 +2481,10 @@ BUSID  VID:PID    DEVICE                                                        
 
         request = SimpleNamespace(headers={}, client=SimpleNamespace(host="172.16.14.66"))
 
-        with patch.object(integrations.runtime, "config_manager", FakeConfigManager()), \
-                patch.object(integrations.runtime, "ssh_manager", FakeSshManager()), \
-                patch.object(integrations.runtime, "get_client_id_from_request", return_value="NqWo58sh1jr5c6ZiyxxPtQ"), \
-                patch.object(integrations.runtime, "resolve_tailscale_device_host", return_value=(None, None)), \
+        with patch.object(integrations.runtime.get_runtime(), "config_manager", FakeConfigManager()), \
+                patch.object(integrations.runtime.get_runtime(), "ssh_manager", FakeSshManager()), \
+                patch.object(integrations.runtime.get_runtime(), "get_client_id_from_request", return_value="NqWo58sh1jr5c6ZiyxxPtQ"), \
+                patch.object(integrations.runtime.get_runtime(), "resolve_tailscale_device_host", return_value=(None, None)), \
                 patch("features.devices.usbip_support.get_client_display_id_from_request", return_value="hcq@172.16.14.66"), \
                 patch("features.devices.usbip_disconnect_api.DeviceSSHConnection", FakeDeviceSSHConnection), \
                 patch("features.devices.usbip_disconnect_api.notify_device_change", AsyncMock()), \
@@ -2511,7 +2520,7 @@ BUSID  VID:PID    DEVICE                                                        
             detach_calls.append((remote_host, detach_all))
             return ["00"] if not detach_all else ["01"]
 
-        with patch.object(integrations.runtime, "ssh_manager", FakeSshManager()), \
+        with patch.object(integrations.runtime.get_runtime(), "ssh_manager", FakeSshManager()), \
                 patch("features.devices.usbip_support.detach_ubuntu_usbip_ports", side_effect=fake_detach):
             result = integrations._detach_ubuntu_usbip_for_devices(
                 "ubuntu-ssh",
@@ -2539,7 +2548,7 @@ BUSID  VID:PID    DEVICE                                                        
                 return CommandResult(stdout="", stderr="", code=0)
 
         with patch.object(
-            integrations.runtime, "ssh_manager", FakeSshManager()
+            integrations.runtime.get_runtime(), "ssh_manager", FakeSshManager()
         ), patch("features.devices.usbip_support.detach_ubuntu_usbip_ports",
             return_value=["00"],
         ), patch.object(integrations.time, "sleep") as sleep:
@@ -2574,9 +2583,9 @@ BUSID  VID:PID    DEVICE                                                        
             request = _authenticated_request()
             with patch.object(devices_router.device_manager, "get_connected_devices", return_value=["LOCAL001"]), \
                     patch.object(devices_router.device_manager, "get_fastboot_devices", return_value=[]), \
-                    patch.object(devices_router.runtime, "get_client_id_from_request", return_value="hcq@127.0.0.1"), \
-                    patch.object(devices_router.runtime, "get_client_ip", return_value="127.0.0.1"), \
-                    patch.object(devices_router.runtime, "client_manager", SimpleNamespace(get_client_id=lambda _ip: "hcq@127.0.0.1")):
+                    patch.object(devices_router.runtime.get_runtime(), "get_client_id_from_request", return_value="hcq@127.0.0.1"), \
+                    patch.object(devices_router.runtime.get_runtime(), "get_client_ip", return_value="127.0.0.1"), \
+                    patch.object(devices_router.runtime.get_runtime(), "client_manager", SimpleNamespace(get_client_id=lambda _ip: "hcq@127.0.0.1")):
                 asyncio.run(devices_router.get_connected_devices(request=request, help=False, force_refresh=True))
 
             self.assertIn("USBIP001", global_state.usbip_devices_source)
@@ -2599,9 +2608,9 @@ BUSID  VID:PID    DEVICE                                                        
             request = _authenticated_request()
             with patch.object(devices_router.device_manager, "get_connected_devices", return_value=["LOCAL001", "USBIP001"]), \
                     patch.object(devices_router.device_manager, "get_fastboot_devices", return_value=[]), \
-                    patch.object(devices_router.runtime, "get_client_id_from_request", return_value="hcq@127.0.0.1"), \
-                    patch.object(devices_router.runtime, "get_client_ip", return_value="127.0.0.1"), \
-                    patch.object(devices_router.runtime, "client_manager", SimpleNamespace(get_client_id=lambda _ip: "hcq@127.0.0.1")):
+                    patch.object(devices_router.runtime.get_runtime(), "get_client_id_from_request", return_value="hcq@127.0.0.1"), \
+                    patch.object(devices_router.runtime.get_runtime(), "get_client_ip", return_value="127.0.0.1"), \
+                    patch.object(devices_router.runtime.get_runtime(), "client_manager", SimpleNamespace(get_client_id=lambda _ip: "hcq@127.0.0.1")):
                 response = asyncio.run(devices_router.get_connected_devices(request=request, help=False, force_refresh=True))
 
             body = json.loads(response.body.decode("utf-8"))
@@ -2631,9 +2640,9 @@ BUSID  VID:PID    DEVICE                                                        
                         }
                     }), \
                     patch.object(devices_router, "_prune_inactive_usbip_sources", side_effect=lambda _devices, sources, _config: sources), \
-                    patch.object(devices_router.runtime, "get_client_id_from_request", return_value="hcq@127.0.0.1"), \
-                    patch.object(devices_router.runtime, "get_client_ip", return_value="127.0.0.1"), \
-                    patch.object(devices_router.runtime, "client_manager", SimpleNamespace(get_client_id=lambda _ip: "hcq@127.0.0.1")):
+                    patch.object(devices_router.runtime.get_runtime(), "get_client_id_from_request", return_value="hcq@127.0.0.1"), \
+                    patch.object(devices_router.runtime.get_runtime(), "get_client_ip", return_value="127.0.0.1"), \
+                    patch.object(devices_router.runtime.get_runtime(), "client_manager", SimpleNamespace(get_client_id=lambda _ip: "hcq@127.0.0.1")):
                 response = asyncio.run(devices_router.get_connected_devices(request=request, help=False, force_refresh=True))
 
             body = json.loads(response.body.decode("utf-8"))
@@ -2661,7 +2670,7 @@ BUSID  VID:PID    DEVICE                                                        
                 calls.append((device_id, wait_for_online))
                 return {"success": True, "back_online": False, "wait_time": 0.0}
 
-            with patch.object(operations.runtime, "config_manager", SimpleNamespace(get_runtime_config=lambda: {
+            with patch.object(operations.runtime.get_runtime(), "config_manager", SimpleNamespace(get_runtime_config=lambda: {
                 "usbip_devices_source": {
                     "USBIP001": {"source": "hcq@172.16.14.66", "timestamp": 1}
                 }
@@ -2744,7 +2753,7 @@ BUSID  VID:PID    DEVICE                                                        
             ["USBIP001"],
         ])
 
-        with patch.object(reconnect.runtime, "config_manager", FakeConfigManager()), \
+        with patch.object(reconnect.runtime.get_runtime(), "config_manager", FakeConfigManager()), \
                 patch.object(reconnect, "usbip_manager", fake_usbip), \
                 patch.object(
                     reconnect, "_resolved_busids_for_devices",
@@ -2787,7 +2796,7 @@ BUSID  VID:PID    DEVICE                                                        
         try:
             with global_state.usbip_devices_source_lock:
                 global_state.usbip_devices_source.clear()
-            with patch.object(reconnect.runtime, "config_manager", FakeConfigManager()), \
+            with patch.object(reconnect.runtime.get_runtime(), "config_manager", FakeConfigManager()), \
                     patch.object(reconnect, "usbip_manager", FakeUsbipManager()), \
                     patch.object(
                         reconnect, "_resolved_busids_for_devices",
@@ -2832,7 +2841,7 @@ BUSID  VID:PID    DEVICE                                                        
                     "expected_devices": ["USBIP001"],
                     "protocol_status": {"mode": "reconnecting"},
                 }
-            with patch.object(reconnect.runtime, "config_manager", FakeConfigManager()), \
+            with patch.object(reconnect.runtime.get_runtime(), "config_manager", FakeConfigManager()), \
                  patch.object(
                      reconnect, "classify_local_usb_attachment",
                      return_value={},
@@ -2880,7 +2889,7 @@ BUSID  VID:PID    DEVICE                                                        
                     "expected_devices": ["RK3562GMS7"],
                     "protocol_status": {"mode": "reconnecting"},
                 }
-            with patch.object(reconnect.runtime, "config_manager", FakeConfigManager()), \
+            with patch.object(reconnect.runtime.get_runtime(), "config_manager", FakeConfigManager()), \
                  patch.object(
                      reconnect, "classify_local_usb_attachment",
                      return_value={"RK3562GMS7": "physical"},
@@ -3028,7 +3037,7 @@ class StaleAssignmentRetirementTests(unittest.TestCase):
         }
 
         with patch.object(
-            integrations.runtime,
+            integrations.runtime.get_runtime(),
             "config_manager",
             self._make_config_manager(runtime_config),
         ):
@@ -3071,7 +3080,7 @@ class StaleAssignmentRetirementTests(unittest.TestCase):
         )
 
         with patch.object(
-            integrations.runtime,
+            integrations.runtime.get_runtime(),
             "config_manager",
             self._make_config_manager(runtime_config),
         ):

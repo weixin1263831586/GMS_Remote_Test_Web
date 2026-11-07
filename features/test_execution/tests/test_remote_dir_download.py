@@ -59,16 +59,16 @@ class SuiteDirectoryTimeoutTests(unittest.IsolatedAsyncioTestCase):
     async def _download(self, ssh_manager):
         old_config = suites_api.runtime.config_manager
         old_ssh = suites_api.runtime.ssh_manager
-        suites_api.runtime.config_manager = RemoteConfigManager()
-        suites_api.runtime.ssh_manager = ssh_manager
+        suites_api.runtime.get_runtime().config_manager = RemoteConfigManager()
+        suites_api.runtime.get_runtime().ssh_manager = ssh_manager
         try:
             return await suites_api.download_suite_directory(
                 suite_path="/srv/GMS-Suite/android-cts/tools",
                 path="results/2026-09-01_09.25.32.033+0800_test_approval-go",
             )
         finally:
-            suites_api.runtime.config_manager = old_config
-            suites_api.runtime.ssh_manager = old_ssh
+            suites_api.runtime.get_runtime().config_manager = old_config
+            suites_api.runtime.get_runtime().ssh_manager = old_ssh
 
     async def test_remote_zip_timeout_maps_to_504_and_returns_connection(self):
         manager = FailingSshManager(TimeoutError("SSH command timed out"))
@@ -294,8 +294,8 @@ class RemoteFileDownloadLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def _download(self, manager):
         old_config = suites_api.runtime.config_manager
         old_ssh = suites_api.runtime.ssh_manager
-        suites_api.runtime.config_manager = RemoteConfigManager()
-        suites_api.runtime.ssh_manager = manager
+        suites_api.runtime.get_runtime().config_manager = RemoteConfigManager()
+        suites_api.runtime.get_runtime().ssh_manager = manager
         try:
             return await suites_api.download_suite_file(
                 suite_path="/srv/GMS-Suite/android-cts/tools",
@@ -303,8 +303,8 @@ class RemoteFileDownloadLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 inline=True,
             )
         finally:
-            suites_api.runtime.config_manager = old_config
-            suites_api.runtime.ssh_manager = old_ssh
+            suites_api.runtime.get_runtime().config_manager = old_config
+            suites_api.runtime.get_runtime().ssh_manager = old_ssh
 
     async def test_preparation_does_not_block_the_event_loop(self):
         entered, release = threading.Event(), threading.Event()

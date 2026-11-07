@@ -317,8 +317,9 @@ Worker。网络故障不自动重发命令，进程中断后的 running 回执�
 
 仓库中的可复用 JSON 模板统一放在
 [`configs/examples/aoa/`](../configs/examples/aoa/README.md)，采用
-`<model>-<firmware>-<scenario>.json` 命名，例如
-[`rk3576-ss17-wizard-to-usb-debug.json`](../configs/examples/aoa/rk3576-ss17-wizard-to-usb-debug.json)。
+`<model>-<firmware>-<scenario>.json` 命名。
+录制得到的模板属于站点本地数据，默认被 `.gitignore` 忽略、不入库；
+仅 `README.md` 作为目录说明纳入版本管理。
 模板文件与账号 Profile 分开管理；需要先通过 Profile API 保存为当前账号的配置，
 才能在 AOA 工作台和固件烧写弹框中选择，文件放入目录不会自动导入。
 

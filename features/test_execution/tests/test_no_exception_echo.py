@@ -25,8 +25,8 @@ class NoInternalExceptionEchoTests(unittest.IsolatedAsyncioTestCase):
             app=SimpleNamespace(state=SimpleNamespace()),
         )
         with (
-            patch.object(status_api.runtime, "generate_help_or_continue", return_value=None),
-            patch.object(status_api.runtime, "get_client_id_from_request", return_value="alice"),
+            patch.object(status_api.runtime.get_runtime(), "generate_help_or_continue", return_value=None),
+            patch.object(status_api.runtime.get_runtime(), "get_client_id_from_request", return_value="alice"),
             patch.object(
                 status_api, "get_or_create_user_state",
                 side_effect=RuntimeError(f"db locked at {_MARKER}"),

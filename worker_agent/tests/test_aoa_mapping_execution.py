@@ -169,3 +169,26 @@ def test_missing_calibration_app_returns_structured_guidance(monkeypatch):
     assert result["calibration_app_missing"] is True
     assert "安全标定应用" in result["error"]
     assert "touch_calibration" not in result  # 缺应用不产出估算映射
+
+
+def test_calibration_surface_open_failure_propagates_through_real_pipeline(monkeypatch):
+    """实机回归（66df75a34ebde4a4）：_calibrate_touch_affine 曾把
+    open_calibration_surface 的启动失败（应用缺失）吞成 None，
+    record_aoa_input 的 calibration_app_missing 结构化回执（一键部署
+    引导）变成死代码，用户只看到「AOA 标定失败：请检查…」兜底文案。
+    CalibrationSurfaceUnavailableError 必须从真实标定管线原样上抛。"""
+    from tests.aoa_fixtures import verified_mapping
+    from worker_agent.aoa_calibration import CalibrationSurfaceUnavailableError
+
+    def missing_app(*_args, **_kwargs):
+        raise CalibrationSurfaceUnavailableError(
+            "安全标定应用未安装或无法启动；请安装 AOA Calibration 后重试")
+
+    monkeypatch.setattr("worker_agent.aoa_calibration.open_calibration_surface", missing_app)
+    monkeypatch.setattr(aoa_actions, "_adb_run",
+                        lambda *a, **kw: SimpleNamespace(returncode=0, stdout="", stderr=""))
+    monkeypatch.setattr(aoa_actions, "_usb",
+                        lambda: (None, SimpleNamespace(dispose_resources=lambda _: None)))
+    with pytest.raises(CalibrationSurfaceUnavailableError, match="安全标定应用"):
+        aoa_actions._calibrate_touch_affine("ABC", 800, 1280, lambda _: None,
+                                            "pointer", context=verified_mapping().context)

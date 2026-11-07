@@ -11,10 +11,10 @@ class WorkspaceLocalWorkerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.previous_root = workspace_context.runtime.data_root
-        workspace_context.runtime.data_root = Path(self.temp.name)
+        workspace_context.runtime.get_runtime().data_root = Path(self.temp.name)
 
     def tearDown(self):
-        workspace_context.runtime.data_root = self.previous_root
+        workspace_context.runtime.get_runtime().data_root = self.previous_root
         self.temp.cleanup()
 
     def test_single_scope_uses_configured_local_worker_id(self):

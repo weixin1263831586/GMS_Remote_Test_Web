@@ -15,6 +15,7 @@ const aoaPanelState = {
     playbackControlId: '', playbackPaused: false, playbackActive: false,
     playbackCommandId: '', playbackWorker: '', playbackPending: '', playbackInputDone: false,
     playbackStates: [], playbackIndex: 0, commandDebug: null, commandEdit: null, commentEdit: null, commandsProfileId: '',
+    commandCalibrate: null,   // 命令坐标标定模式：{index, original, x, y}
 };
 
 function aoaEl(id) { return document.getElementById(id); }
@@ -487,6 +488,7 @@ function aoaRenderCommands() {
     if (count) count.textContent = String(aoaPanelState.commands.length);
     if (!list) return;
     list.replaceChildren();
+    aoaCommandCalibrateStale();   // 命令已变/列表重置：自动清准星并按现状渲染
     if (!aoaPanelState.playbackActive) aoaPanelState.playbackStates = [];
     if (!aoaPanelState.commands.length) {
         const empty = document.createElement('li');
@@ -518,6 +520,33 @@ function aoaRenderCommands() {
         execute.title = '在选中的目标设备上仅执行这一条 AOA 命令';
         execute.setAttribute('aria-label', `执行第 ${i + 1} 条命令`);
         execute.addEventListener('click', () => aoaCommandExecute(i));
+        const locate = document.createElement('button');
+        locate.className = 'btn-xxs aoa-command-locate'; locate.type = 'button'; locate.textContent = '定位';
+        locate.disabled = aoaPanelState.running || aoaPanelState.playbackActive;
+        // 标定模式：不执行命令、不碰设备。在投屏上显示该命令坐标的准星，
+        // 点击画面把准星（命令坐标）挪到想要的点位，再点「保存」改写命令。
+        // AOA HID 是触摸屏，没有"悬停移动"报文，设备端无法只移动不点击；
+        // 可视化定位都发生在投屏叠加层上（aoa-screen-grid.js）。
+        locate.title = '投屏上显示该命令的坐标准星；点击画面调整位置，保存后改写命令坐标（不执行）';
+        locate.setAttribute('aria-label', `定位第 ${i + 1} 条命令坐标`);
+        locate.addEventListener('click', () => aoaPanelState.commandCalibrate?.index === i
+            ? aoaCommandCalibrateFinish() : aoaCommandCalibrateStart(i));
+        const actionButtons = [edit, execute, locate];
+        if (aoaPanelState.commandCalibrate?.index === i) {
+            // 标定态 5 个按钮（编辑/执行/保存/取消/删除）超出第 5 列固定
+            // 156px：与编辑模式同规则跨到状态列（4 / 6），避免删除被裁掉。
+            // class 加在 .aoa-command-row（content）上，与 CSS 选择器同元素。
+            content.classList.add('aoa-command-calibrating');
+            locate.textContent = '保存';
+            locate.title = '把准星坐标写回这条命令（click X Y）';
+            locate.setAttribute('aria-label', `保存第 ${i + 1} 条命令标定坐标`);
+            const cancelCal = document.createElement('button');
+            cancelCal.className = 'btn-xxs'; cancelCal.type = 'button'; cancelCal.textContent = '取消';
+            cancelCal.disabled = locate.disabled;
+            cancelCal.setAttribute('aria-label', `取消第 ${i + 1} 条命令标定`);
+            cancelCal.addEventListener('click', () => { aoaCommandCalibrateCancel(); aoaRenderCommands(); });
+            actionButtons.push(cancelCal);
+        }
         const remove = document.createElement('button');
         remove.className = 'btn-xxs'; remove.type = 'button'; remove.textContent = '删除';
         remove.disabled = aoaPanelState.running;
@@ -532,7 +561,7 @@ function aoaRenderCommands() {
         const state = document.createElement('span'); state.className = 'aoa-command-state';
         state.hidden = !aoaPanelState.playbackActive;
         const actions = document.createElement('div'); actions.className = 'aoa-command-actions';
-        actions.append(edit, execute, remove);
+        actions.append(...actionButtons, remove);
         let commandNode = code;
         if (aoaPanelState.commandEdit?.index === i) {
             const input = document.createElement('input');
@@ -567,9 +596,11 @@ function aoaRenderCommands() {
 }
 
 function aoaCommandEditStart(index) {
-    if (aoaPanelState.running || aoaPanelState.playbackActive || !aoaCommandEditFinish()) return;
+    if (aoaPanelState.running || aoaPanelState.playbackActive) return;
     const command = aoaPanelState.commands[index];
     if (typeof command !== 'string') return;
+    aoaCommandCalibrateCancel();   // 标定与编辑互斥：进编辑先撤准星（不保存）
+    if (!aoaCommandEditFinish()) return;
     const list = aoaEl('aoa-command-list'); const scroll = list.scrollTop;
     aoaPanelState.commandEdit = {index, original: command, draft: command};
     aoaRenderCommands(); list.scrollTop = scroll;
@@ -578,6 +609,7 @@ function aoaCommandEditStart(index) {
 
 function aoaCommandEditFinish(save = true) {
     if (!aoaCommentEditFinish(save)) return false;
+    aoaCommandCalibrateCancel();   // 标定与编辑互斥：收口命令编辑时撤准星
     const edit = aoaPanelState.commandEdit;
     if (!edit) return true;
     if (aoaPanelState.running || aoaPanelState.playbackActive) return false;
@@ -646,6 +678,9 @@ async function aoaRecordingStart() {
     aoaPanelState.commandsProfileId = '';
     aoaPanelState.recording = true;
     aoaEl('aoa-record-start').disabled = true;
+    // 停止按钮立即可点：启动路径可能没有 aoaSetBusy 周期来触发
+    // aoaPlaybackButtonState 解禁（空闲态上次 busy 周期会把它禁用）。
+    if (aoaEl('aoa-record-stop')) aoaEl('aoa-record-stop').disabled = false;
     aoaEl('aoa-record-state').textContent = '录制中：左侧成功操作会写入命令';
     aoaSetStatus('录制中', 'running'); aoaRenderCommands();
     if (aoaEl('aoa-screen-image')?.hidden) await aoaRefreshScreen();
@@ -654,6 +689,9 @@ async function aoaRecordingStart() {
 function aoaRecordingStop() {
     aoaPanelState.recording = false;
     if (aoaEl('aoa-record-start')) aoaEl('aoa-record-start').disabled = false;
+    // 停止后回到空闲态：可点性交给 aoaPlaybackButtonState 的录制语义
+    // （!recording → disabled），这里显式复位避免中间态漂移。
+    if (aoaEl('aoa-record-stop')) aoaEl('aoa-record-stop').disabled = true;
     if (aoaEl('aoa-record-state')) {
         aoaEl('aoa-record-state').textContent = `已停止 · ${aoaPanelState.commands.length} 条命令`;
     }
@@ -896,7 +934,8 @@ async function aoaViewToggle(show) {
     } else {
         if (aoaDebugState.id) await aoaDebugEnd();
         aoaPanelState.screenRefreshId += 1;
-        // 离开 AOA 页签：停止实时投屏与截图轮询。
+        // 离开 AOA 页签：结束标定取点、停止实时投屏与截图轮询。
+        aoaCommandCalibrateCancel();
         if (window.aoaLiveScreen) {
             window.aoaLiveScreen.stop();
             aoaEl('aoa-toggle-live')?.setAttribute(
