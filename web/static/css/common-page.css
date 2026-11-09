@@ -921,13 +921,18 @@ body.apk-resizing {
 }
 
 #users-main-view,
-#agent-access-panel {
+#agent-access-panel,
+#audit-main-view,
+#audit-outbox-panel {
     flex: 1;
     min-height: 0;
+    min-width: 0;
 }
 
 #users-main-view,
-#agent-access-panel {
+#agent-access-panel,
+#audit-main-view,
+#audit-outbox-panel {
     display: flex;
     flex-direction: column;
 }

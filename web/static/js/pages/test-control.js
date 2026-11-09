@@ -406,6 +406,29 @@ async function showConfig() {
                 <input type="password" id="config-email-password" placeholder="留空保持不变" autocomplete="new-password" />
             </div>
             <small id="config-email-status">接收方邮箱在各业务处配置（如 Redmine 用户资料、运维告警 email_to），不在此处。</small>
+            <div style="margin-top:10px;display:flex;align-items:center;gap:8px;">
+                <button class="btn-xxs" id="email-outbox-refresh-btn" type="button">↻ 刷新历史邮件</button>
+                <label style="margin:0;font-size:12px;">通道:
+                    <select id="email-outbox-channel" style="font-size:12px;">
+                        <option value="">全部</option>
+                        <option value="manual">手动发送</option>
+                        <option value="automation">自动化通知</option>
+                        <option value="ops">运维告警</option>
+                        <option value="redmine_reminder">Redmine 提醒</option>
+                    </select>
+                </label>
+                <label style="margin:0;font-size:12px;">结果:
+                    <select id="email-outbox-sent" style="font-size:12px;">
+                        <option value="">全部</option>
+                        <option value="true">成功</option>
+                        <option value="false">失败</option>
+                    </select>
+                </label>
+            </div>
+            <div id="email-outbox-list" style="margin-top:6px;max-height:220px;overflow:auto;border:1px solid var(--border-color,#333);border-radius:4px;">
+                <div style="padding:14px;text-align:center;color:var(--text-muted,#888);">点击「刷新历史邮件」查看本人邮件记录</div>
+            </div>
+            <small>记录每次出站邮件（含失败尝试）：时间、通道、收件人、主题与结果；正文仅存预览。自动化/运维邮件回链到对应任务/事件。</small>
         </div>
 
         <!-- 客户端 SSH 凭据管理（增删独立于上方静态配置，即时生效） -->
@@ -488,6 +511,65 @@ async function showConfig() {
     loadClientCredentials();
     loadStaticRoutes();
     loadEmailSenderConfig();
+    loadEmailOutbox();
+}
+
+// 历史邮件（outbox ledger）：本人视角；管理员如需全量走 GET /api/email/outbox?admin_view=true。
+const EMAIL_OUTBOX_CHANNEL_LABELS = {
+    manual: '手动',
+    automation: '自动化',
+    ops: '运维告警',
+    redmine_reminder: 'Redmine',
+};
+
+async function loadEmailOutbox() {
+    const listEl = document.getElementById('email-outbox-list');
+    if (!listEl) return;
+    const channel = document.getElementById('email-outbox-channel')?.value || '';
+    const sent = document.getElementById('email-outbox-sent')?.value || '';
+    listEl.innerHTML = '<div style="padding:14px;text-align:center;color:var(--text-muted,#888);">加载中...</div>';
+    try {
+        const params = new URLSearchParams({limit: '30'});
+        if (channel) params.set('channel', channel);
+        if (sent) params.set('sent', sent);
+        const result = await apiCall(`/api/email/outbox?${params.toString()}`, 'GET');
+        const data = result?.data || {};
+        const items = Array.isArray(data.items) ? data.items : [];
+        if (!items.length) {
+            listEl.innerHTML = '<div style="padding:14px;text-align:center;color:var(--text-muted,#888);">暂无发件记录（筛选条件下无匹配）</div>';
+            return;
+        }
+        const rows = items.map((item) => {
+            const state = item.sent
+                ? '<span style="color:var(--success-color,#4caf50);">✓ 成功</span>'
+                : `<span style="color:var(--error-color,#f44336);" title="${escapeJsAttr(item.error || '')}">✗ 失败</span>`;
+            const channelLabel = EMAIL_OUTBOX_CHANNEL_LABELS[item.channel] || escapeJsAttr(item.channel || '未知');
+            const ref = item.ref_type && item.ref_id
+                ? `<span title="${escapeJsAttr(item.ref_type + ':' + item.ref_id)}" style="color:var(--text-muted,#888);"> ↳${escapeJsAttr(String(item.ref_id).slice(0, 14))}</span>`
+                : '';
+            const toText = (item.to_addrs || []).join(', ');
+            const preview = String(item.subject || '') +
+                (item.body_preview ? `　<span style="color:var(--text-muted,#888);">${escapeJsAttr(item.body_preview.slice(0, 60))}…</span>` : '');
+            return `<tr>
+                <td style="padding:4px 6px;white-space:nowrap;">${escapeJsAttr(item.created_at || '')}</td>
+                <td style="padding:4px 6px;white-space:nowrap;">${channelLabel}${ref}</td>
+                <td style="padding:4px 6px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeJsAttr(toText)}">${escapeJsAttr(toText)}</td>
+                <td style="padding:4px 6px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeJsAttr(item.subject || '')}">${preview}</td>
+                <td style="padding:4px 6px;white-space:nowrap;">${state}</td>
+            </tr>`;
+        }).join('');
+        listEl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead><tr style="background:var(--darker-bg,#222);">
+                <th style="padding:4px 6px;text-align:left;">时间(UTC)</th>
+                <th style="padding:4px 6px;text-align:left;">通道</th>
+                <th style="padding:4px 6px;text-align:left;">收件人</th>
+                <th style="padding:4px 6px;text-align:left;">主题/预览</th>
+                <th style="padding:4px 6px;text-align:left;">结果</th>
+            </tr></thead><tbody>${rows}</tbody></table>
+            <div style="padding:4px 6px;color:var(--text-muted,#888);font-size:11px;">共 ${data.total} 条，显示最近 ${items.length} 条</div>`;
+    } catch (error) {
+        listEl.innerHTML = `<div style="padding:14px;text-align:center;color:var(--error-color,#f44336);">加载历史邮件失败: ${escapeJsAttr(error.message)}</div>`;
+    }
 }
 
 // 邮件发送方（系统级 SMTP）：读全局配置回填；密码永不回显，留空表示保持不变。
@@ -538,6 +620,14 @@ async function saveEmailSenderConfig() {
 
 // 配置模态内动态渲染控件的事件绑定（CSP 收紧前置：去掉 inline handler）。
 function _bindConfigModalHandlers(scope) {
+    const outboxRefresh = scope.querySelector('#email-outbox-refresh-btn');
+    if (outboxRefresh) {
+        outboxRefresh.addEventListener('click', loadEmailOutbox);
+    }
+    const outboxChannel = scope.querySelector('#email-outbox-channel');
+    if (outboxChannel) outboxChannel.addEventListener('change', loadEmailOutbox);
+    const outboxSent = scope.querySelector('#email-outbox-sent');
+    if (outboxSent) outboxSent.addEventListener('change', loadEmailOutbox);
     const form = scope.querySelector('#test-control-config-form');
     if (form) {
         form.addEventListener('submit', (event) => {

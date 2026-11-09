@@ -423,3 +423,273 @@ window.showSecurityAuditDetail = showSecurityAuditDetail;
 window.closeSecurityAuditDetailModal = closeSecurityAuditDetailModal;
 window.exportSecurityAudit = exportSecurityAudit;
 window.elevateSecurityAuditView = elevateSecurityAuditView;
+
+// ==================== 历史邮件（email outbox ledger） ====================
+// 与 users 页「用户列表 / Agent 接入」同款视图页签：owner 视图为默认，
+// 管理员可勾选查看全部用户。审计页本身是管理员页面，但历史邮件的
+// owner 视图让普通运维在提权会话内也能查到自己触发的邮件记录；
+// 「查看全部用户」需要 admin 角色（服务端二次校验，前端仅控制可见性）。
+
+const auditOutboxState = {
+    offset: 0,
+    limit: 50,
+    loading: false,
+    hasMore: false,
+    loaded: false,
+};
+
+const AUDIT_OUTBOX_CHANNEL_LABELS = {
+    manual: '手动',
+    automation: '自动化',
+    ops: '运维告警',
+    redmine_reminder: 'Redmine',
+};
+
+function auditOutboxPanelIsOpen() {
+    const panel = document.getElementById('audit-outbox-panel');
+    return !!panel && panel.style.display !== 'none';
+}
+
+async function auditOutboxToggle(show) {
+    const panel = document.getElementById('audit-outbox-panel');
+    const mainView = document.getElementById('audit-main-view');
+    const tabs = document.getElementById('audit-view-tabs');
+    if (!panel || !mainView) return;
+    const visible = show !== undefined ? Boolean(show) : !auditOutboxPanelIsOpen();
+
+    panel.style.display = visible ? 'flex' : 'none';
+    mainView.style.display = visible ? 'none' : '';
+    try { sessionStorage.setItem('gms_audit_view', visible ? 'outbox' : 'logs'); } catch (_error) {}
+    // 左上角页面标题保持「🛡️ 安全审计」不变：视图切换由页签 active 态表达。
+
+    const logsTab = document.getElementById('audit-logs-tab');
+    const outboxTab = document.getElementById('audit-outbox-tab');
+    logsTab?.classList.toggle('active', !visible);
+    outboxTab?.classList.toggle('active', visible);
+    logsTab?.setAttribute('aria-selected', String(!visible));
+    outboxTab?.setAttribute('aria-selected', String(visible));
+
+    // 「查看全部用户」仅 admin 可见（服务端 admin_view 仍会二次校验）。
+    const allUsersLabel = document.getElementById('email-outbox-all-users-label');
+    if (allUsersLabel) {
+        allUsersLabel.style.display =
+            (state.currentUser?.role === 'admin') ? 'inline-flex' : 'none';
+    }
+
+    if (visible && !auditOutboxState.loaded) await loadAuditOutbox(true);
+}
+
+function getAuditOutboxFilterParams(reset = false) {
+    const params = new URLSearchParams();
+    if (reset) auditOutboxState.offset = 0;
+    params.set('limit', String(auditOutboxState.limit));
+    params.set('offset', String(auditOutboxState.offset));
+    const channel = $('email-outbox-channel-filter')?.value || '';
+    const sent = $('email-outbox-sent-filter')?.value || '';
+    const query = $('email-outbox-search-input')?.value?.trim() || '';
+    if (channel) params.set('channel', channel);
+    if (sent) params.set('sent', sent);
+    if (query) params.set('q', query);
+    if ($('email-outbox-all-users')?.checked) params.set('admin_view', 'true');
+    return params;
+}
+
+function formatOutboxTime(iso) {
+    // 2026-11-09T07:36:14Z -> 2026-11-09 07:36:14（UTC 字面量，不换时区：
+    // 台账统一存 UTC，转本地时区会让同一行数据与 journalctl 时间对不上）。
+    const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/.exec(String(iso || ''));
+    return match ? `${match[1]} ${match[2]}` : String(iso || '');
+}
+
+function renderAuditOutboxRows(items, { append = false } = {}) {
+    const tbody = $('email-outbox-table-body');
+    if (!tbody) return;
+    if (!items.length && !append) {
+        tbody.innerHTML = `
+            <tr><td colspan="5" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                暂无历史邮件（当前筛选条件下无匹配）
+            </td></tr>`;
+        return;
+    }
+    const html = items.map((item) => {
+        const state = item.sent
+            ? '<span style="color: var(--success-color);">✓ 成功</span>'
+            : `<span style="color: var(--danger-color);" title="${escapeJsAttr(item.error || '')}">✗ 失败</span>`;
+        const channelLabel = AUDIT_OUTBOX_CHANNEL_LABELS[item.channel]
+            || escapeJsAttr(item.channel || '未知');
+        const ref = item.ref_type && item.ref_id
+            ? `<span title="${escapeJsAttr(item.ref_type + ':' + item.ref_id)}" style="color: var(--text-secondary); margin-left: 4px;">↳${escapeJsAttr(String(item.ref_id).slice(0, 12))}</span>`
+            : '';
+        // 一行一封邮件：主行 = 收件人 + 主题；次信息（发送者/回链/预览）
+        // 全部进悬停提示，行内不再堆叠两行文本。
+        const toText = (item.to_addrs || []).join(', ');
+        const senderText = item.username || '系统';
+        const previewText = item.body_preview ? `｜${item.body_preview.slice(0, 100)}` : '';
+        const hoverTitle = [
+            `发件人: ${senderText}`,
+            `主题: ${item.subject || ''}`,
+            `正文预览: ${(item.body_preview || '').slice(0, 200)}`,
+            item.error ? `错误: ${item.error}` : '',
+            item.ref_type ? `关联: ${item.ref_type}:${item.ref_id}` : '',
+        ].filter(Boolean).join('\n');
+        return `<tr data-outbox-id="${escapeHtml(item.id || '')}" style="border-bottom: 1px solid var(--border-color); cursor: pointer;">
+            <td style="padding: 6px 8px; text-align: center; font-size: 12px; white-space: nowrap;" title="${escapeJsAttr(formatOutboxTime(item.created_at))} (UTC)">${escapeHtml(formatOutboxTime(item.created_at))}</td>
+            <td style="padding: 6px 8px; text-align: center; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeJsAttr(((item.username || '系统')) + (item.ref_type ? ` ↳${item.ref_type}:${item.ref_id}` : ''))}">${channelLabel}${ref}</td>
+            <td style="padding: 6px 8px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeJsAttr(toText)}">${escapeHtml(toText)}</td>
+            <td style="padding: 6px 8px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeJsAttr(hoverTitle)}">${escapeHtml(String(item.subject || ''))}</td>
+            <td style="padding: 6px 8px; text-align: center; font-size: 12px; white-space: nowrap;">${state}</td>
+        </tr>`;
+    }).join('');
+    if (append) {
+        tbody.insertAdjacentHTML('beforeend', html);
+        tbody.querySelectorAll('tr[data-outbox-id]:not([data-outbox-bound])').forEach((row) => {
+            row.setAttribute('data-outbox-bound', '1');
+            row.addEventListener('click', () => showOutboxDetail(row.dataset.outboxId));
+        });
+    } else {
+        tbody.innerHTML = html;
+        tbody.querySelectorAll('tr[data-outbox-id]').forEach((row) => {
+            row.addEventListener('click', () => showOutboxDetail(row.dataset.outboxId));
+        });
+    }
+}
+
+// ==================== 历史邮件详情弹框（同审计日志详情模板） ====================
+
+function ensureOutboxDetailModal() {
+    let modal = $('outbox-detail-modal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'outbox-detail-modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content" style="width: min(760px, 92vw); max-width: min(760px, 92vw); max-height: 88vh; overflow: hidden; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <span class="modal-title">历史邮件详情</span>
+                <button type="button" class="modal-close" aria-label="关闭" data-action="close-outbox-detail">&times;</button>
+            </div>
+            <div class="modal-body" id="outbox-detail-body" style="overflow: auto; padding-right: 4px;">
+                加载中...
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) closeOutboxDetailModal();
+    });
+    modal.querySelector('[data-action="close-outbox-detail"]')
+        .addEventListener('click', closeOutboxDetailModal);
+    return modal;
+}
+
+function closeOutboxDetailModal() {
+    ModalManager.close('outbox-detail-modal');
+}
+
+function renderOutboxDetailField(label, value) {
+    return `
+        <div style="display: grid; grid-template-columns: 96px 1fr; gap: 6px; padding: 5px 0; border-bottom: 1px dashed var(--border-color); font-size: 12px;">
+            <div style="color: var(--text-secondary);">${escapeHtml(label)}</div>
+            <div style="color: var(--text-primary); word-break: break-all;">${value}</div>
+        </div>
+    `;
+}
+
+async function showOutboxDetail(emailId) {
+    if (!emailId) return;
+    const modal = ensureOutboxDetailModal();
+    const body = $('outbox-detail-body');
+    ModalManager.open('outbox-detail-modal');
+    body.innerHTML = '加载中...';
+    try {
+        const result = await apiCall(`/api/email/outbox/${encodeURIComponent(emailId)}`);
+        const entry = result.data || {};
+        const sentBadge = entry.sent
+            ? '<span style="color: var(--success-color);">✓ 成功</span>'
+            : `<span style="color: var(--danger-color);">✗ 失败</span>`;
+        const backlink = entry.ref_type && entry.ref_id
+            ? `${escapeHtml(entry.ref_type)}:<span style="user-select: all;">${escapeHtml(entry.ref_id)}</span>`
+            : '-';
+        const errorBlock = entry.error
+            ? renderAuditDetailBlock('失败原因', entry.error, { json: false })
+            : '';
+        body.innerHTML = `
+            <div style="background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; margin-bottom: 10px;">
+                ${renderOutboxDetailField('记录 ID', `<span style="user-select: all;">${escapeHtml(entry.id || '')}</span>`)}
+                ${renderOutboxDetailField('时间 (UTC)', escapeHtml(formatOutboxTime(entry.created_at)))}
+                ${renderOutboxDetailField('通道', escapeHtml(AUDIT_OUTBOX_CHANNEL_LABELS[entry.channel] || entry.channel || '-'))}
+                ${renderOutboxDetailField('发送者', escapeHtml(entry.username || '系统'))}
+                ${renderOutboxDetailField('发件人地址', escapeHtml(entry.from_addr || '-'))}
+                ${renderOutboxDetailField('收件人', escapeHtml((entry.to_addrs || []).join(', ') || '-'))}
+                ${renderOutboxDetailField('抄送', escapeHtml((entry.cc_addrs || []).join(', ') || '-'))}
+                ${renderOutboxDetailField('主题', escapeHtml(entry.subject || '-'))}
+                ${renderOutboxDetailField('附件', escapeHtml((entry.attachments || []).join(', ') || '无'))}
+                ${renderOutboxDetailField('结果', sentBadge)}
+                ${renderOutboxDetailField('发送模式', escapeHtml(entry.mode || '-'))}
+                ${renderOutboxDetailField('业务回链', backlink)}
+            </div>
+            ${renderAuditDetailBlock('正文预览（台账仅存前 500 字符）', entry.body_preview || '（空）', { json: false })}
+            ${errorBlock}
+        `;
+    } catch (error) {
+        body.innerHTML = `<div style="color: var(--danger-color); padding: 20px;">加载失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+window.showOutboxDetail = showOutboxDetail;
+window.closeOutboxDetailModal = closeOutboxDetailModal;
+
+async function loadAuditOutbox(reset = false, append = false) {
+    const tbody = $('email-outbox-table-body');
+    if (!tbody) return;
+    if (auditOutboxState.loading) return;
+    auditOutboxState.loading = true;
+    if (reset && !append) {
+        tbody.innerHTML = `
+            <tr><td colspan="5" style="padding: 40px; text-align: center; color: var(--text-secondary);">加载中...</td></tr>`;
+    }
+    try {
+        const params = getAuditOutboxFilterParams(reset);
+        const result = await apiCall(`/api/email/outbox?${params.toString()}`);
+        const data = result?.data || {};
+        const items = Array.isArray(data.items) ? data.items : [];
+        auditOutboxState.hasMore = (auditOutboxState.offset + auditOutboxState.limit) < (data.total || 0);
+        auditOutboxState.offset += items.length;
+        auditOutboxState.loaded = true;
+        renderAuditOutboxRows(items, { append });
+        const wrapper = $('email-outbox-load-more-wrapper');
+        if (wrapper) {
+            wrapper.innerHTML = auditOutboxState.hasMore
+                ? `<button class="btn-xs" data-click="loadAuditOutboxMore">加载更多（共 ${data.total} 条）</button>`
+                : (items.length ? `<span style="color: var(--text-secondary); font-size: 12px;">共 ${data.total} 条</span>` : '');
+        }
+    } catch (error) {
+        if (!append) {
+            tbody.innerHTML = `
+                <tr><td colspan="5" style="padding: 40px; text-align: center; color: var(--danger-color);">
+                    加载历史邮件失败: ${escapeHtml(error.message)}
+                </td></tr>`;
+        }
+    } finally {
+        auditOutboxState.loading = false;
+    }
+}
+
+async function loadAuditOutboxMore() {
+    await loadAuditOutbox(false, true);
+}
+
+// 页签容器随登录就绪显示（模板与 users-view-tabs 一致）。
+function auditViewTabsEnsureVisible() {
+    if (!state.authReady) return;
+    const tabs = document.getElementById('audit-view-tabs');
+    if (tabs) tabs.style.display = 'flex';
+}
+
+runAfterAuthReady(auditViewTabsEnsureVisible);
+window.addEventListener('gms:auth-ready', auditViewTabsEnsureVisible);
+
+window.auditOutboxToggle = auditOutboxToggle;
+window.loadAuditOutbox = loadAuditOutbox;
+window.loadAuditOutboxMore = loadAuditOutboxMore;

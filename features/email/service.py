@@ -1,154 +1,63 @@
-"""支持多收件人、抄送、HTML 和附件的通用 SMTP 服务。"""
+"""通用 SMTP 发送管线：校验 → 组装 → 传输 → 台账，三条链路统一收口。
+
+分层（本包内各文件，均为仓库依赖方向的叶子）：
+
+- ``parsing``    纯函数：地址拆分/校验、MIME 头折叠清洗；
+- ``config``     ``resolve_email_config`` 合并规则与 SMTP 密码读取；
+- ``message``    MIME 报文与信封组装（附件白名单）；
+- ``transport``  唯一 ``smtplib`` 使用点，错误映射为面向用户的文案；
+- ``store``      发件台账（email_outbox.sqlite3，每封邮件一行，可追溯）；
+- ``service``    本文件：发送管线与对外契约。
+
+``send_email`` 是三条链路（手动/API、自动化流水线通知、运维告警）
+的唯一出口：每次调用——包括被全局开关/未配置/SMTP 错误拒绝的尝试——
+都在台账留一行记录（channel/owner/ref 回链触发业务），正文只存
+500 字符预览。台账写入失败只降级为不记录，绝不影响发送结果。
+"""
 
 from __future__ import annotations
 
 import logging
 import os
-import re
-import smtplib
-from email.encoders import encode_base64
-from email.mime.base import MIMEBase
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.utils import formataddr
-from pathlib import Path
 from typing import Any
+
+from features.email.config import (
+    email_password,
+    load_email_config,
+    resolve_email_config,
+)
+from features.email.message import build_mime_message
+from features.email.parsing import normalize_email_addresses, safe_header_text, split_emails
+from features.email.store import get_email_outbox_store
+from features.email.transport import SmtpSettings, smtp_deliver
 
 
 logger = logging.getLogger(__name__)
 
-_SAFE_ADDRESS_RE = re.compile(r'[^\s,;<>"@]+@[^\s,;<>"@]+')
-
-
-def normalize_email_addresses(
-    email_input: str | list[str] | None,
-) -> list[str] | None:
-    """Split and validate envelope/header addresses; ``None`` means invalid."""
-    if email_input is None:
-        return []
-    if not isinstance(email_input, (str, list)):
-        return None
-    if isinstance(email_input, list) and not all(
-        isinstance(item, str) for item in email_input
-    ):
-        return None
-    addresses = split_emails(email_input)
-    if any(not _SAFE_ADDRESS_RE.fullmatch(address) for address in addresses):
-        return None
-    return addresses
-
-
-def _safe_header_text(value: Any) -> str:
-    """Collapse CR/LF and other folding whitespace before MIME headers."""
-    return ' '.join(str(value or '').split())
-
-
-def split_emails(email_input: str | list[str] | None) -> list[str]:
-    """将输入（字符串或列表）转换为干净的邮件地址列表。
-
-    支持逗号、分号分隔；递归处理列表内的混合分隔符。来自 rk-email send_email.py。
-    """
-    if not email_input:
-        return []
-
-    if isinstance(email_input, list):
-        # 递归处理列表中的每一项，防止项内含有逗号
-        result: list[str] = []
-        for item in email_input:
-            result.extend(split_emails(item))
-        return result
-
-    raw_list = email_input.replace(';', ',').split(',')
-    return [e.strip() for e in raw_list if e.strip()]
-
-
-def _load_email_config(manager) -> dict[str, Any]:
-    """从 redmine_dashboard.email 读取 SMTP 配置（兼容旧调用）。"""
-    return resolve_email_config(manager)
-
-
-def _merge_non_empty(target: dict[str, Any], source: dict[str, Any]) -> None:
-    """非空字段才参与合并：空串/缺省的覆盖层不遮挡下层配置。"""
-    for key, value in (source or {}).items():
-        if isinstance(value, str) and not value.strip():
-            continue
-        if value is None:
-            continue
-        target[key] = value
-
-
-def resolve_email_config(manager: Any = None) -> dict[str, Any]:
-    """解析生效的 SMTP 配置，无需每个 owner 重复配置账号。
-
-    合并顺序（低 → 高，均为非空字段覆盖）：
-
-    1. 全局默认 ``smtp`` 块（runtime 配置，一次配置全部署生效）；
-    2. 兼容兜底：静态配置遗留的 ``redmine_dashboard.email``
-       （automation owner 历史写入 configs/local/config.json 的位置）；
-    3. owner 覆盖 ``redmine_dashboard.email``（看板「设置 → SMTP」保存的
-       ``enabled: false`` 可作为该 owner 的邮件总开关；
-       per-user 差异化配置；不传 manager 即只用全局默认）。
-    """
-    from foundation.config import config_manager
-
-    merged: dict[str, Any] = {}
-    try:
-        global_config = config_manager.load_config()
-    except Exception:
-        global_config = {}
-    _merge_non_empty(merged, (global_config.get("redmine_dashboard") or {}).get("email") or {})
-    _merge_non_empty(merged, global_config.get("smtp") or {})
-    if manager is not None:
-        try:
-            owner_config = manager.load_config() or {}
-        except Exception:
-            owner_config = {}
-        _merge_non_empty(
-            merged, (owner_config.get("redmine_dashboard") or {}).get("email") or {}
-        )
-    return merged
+# 对外兼容导出：老调用方（redmine 透传、旧测试 patch 目标）继续可用。
+__all__ = [
+    "normalize_email_addresses",
+    "resolve_email_config",
+    "send_email",
+    "split_emails",
+]
 
 
 def _email_password(email_cfg: dict[str, Any]) -> str:
-    """SMTP 密码优先取密文解密；遗留明文仅作旧部署兼容读取。"""
-    encrypted = str(email_cfg.get("encrypted_password") or "").strip()
-    if encrypted:
-        try:
-            from foundation.secrets import decrypt_secret
-
-            return decrypt_secret(encrypted).strip()
-        except Exception:
-            return ""
-    legacy = str(email_cfg.get("password") or "").strip()
-    if legacy:
-        # 迁移告警：新写入已走平台密钥加密（email/api.py），明文分支只为
-        # 旧部署兼容。设定迁移截止点：所有部署改写为 encrypted_password
-        # 后移除本分支（migration mapping: scripts/sanitize_tracked_config.py）。
-        logger.warning(
-            "SMTP 密码仍以明文配置读取（遗留部署兼容）；请重新保存邮箱配置"
-            "以迁移为加密存储，明文兼容分支将在后续版本移除"
-        )
-    return legacy
+    """兼容别名：历史测试与调用方通过 service 引用密码读取。"""
+    return email_password(email_cfg)
 
 
-def _resolve_allowed_attachment(path: str, allowed_roots: list[str | os.PathLike[str]]) -> Path | None:
-    """Return a real attachment path only if it lives under an allowed root."""
-    if not path:
-        return None
-    try:
-        candidate = Path(path).expanduser().resolve(strict=True)
-    except OSError:
-        return None
-    if not candidate.is_file():
-        return None
-    for root in allowed_roots:
-        try:
-            root_path = Path(root).expanduser().resolve(strict=True)
-        except OSError:
-            continue
-        if candidate == root_path or root_path in candidate.parents:
-            return candidate
-    return None
+def _safe_header_text(value: Any) -> str:
+    """兼容别名：MIME 头折叠清洗。"""
+    return safe_header_text(value)
+
+
+def _resolve_allowed_attachment(path: str, allowed_roots):
+    """兼容别名：附件白名单解析（历史上从 service 导出过）。"""
+    from features.email.message import resolve_allowed_attachment
+
+    return resolve_allowed_attachment(path, allowed_roots)
 
 
 def send_email(
@@ -162,8 +71,15 @@ def send_email(
     allowed_attachment_roots: list[str | os.PathLike[str]] | None = None,
     sender_name: str | None = None,
     manager=None,
+    channel: str = "manual",
+    owner_id: str = "",
+    username: str = "",
+    ref_type: str = "",
+    ref_id: str = "",
 ) -> dict[str, Any]:
-    """发送邮件，返回 ``{"sent": bool, "mode": str, "error": str | None}``。
+    """发送一封邮件并写入发件台账。
+
+    返回 ``{"sent": bool, "mode": str, "error": str | None, ...}``：
 
     - ``to`` / ``cc``：字符串（逗号/分号分隔）或列表。
     - ``is_html``：True 时 body 作为 HTML 正文。
@@ -172,13 +88,63 @@ def send_email(
     - ``sender_name``：发件人昵称；缺省用配置里的 username 或 from_addr。
     - ``manager``：可选的 owner config manager；省略时使用全局 SMTP 默认
       配置（``resolve_email_config`` 合并规则），各 owner 无需重复配置账号。
+    - ``channel``：触发通道标识（``manual`` / ``automation`` / ``ops`` /
+      ``redmine_reminder``），台账按通道过滤展示；
+    - ``owner_id`` / ``username``：资源所有者（ADR 0010
+      ``resource_owner_id``）与操作者显示名，owner 视图按 owner_id 过滤；
+    - ``ref_type`` / ``ref_id``：业务回链（如 ``automation_run`` + run id、
+      ``ops_event`` + 事件 id），从台账可跳回触发业务。
+
+    失败也记录：mode 为 ``disabled``（全局关闭）、``unconfigured``（缺
+    SMTP 配置）、``invalid``（收件人/主题非法）、``smtp``（发送错误）。
+    成功时附带 ``to/cc/recipients/from_addr`` 与附件缺失/拦截清单。
     """
-    email_cfg = _load_email_config(manager)
+    result = _send_pipeline(
+        to,
+        subject,
+        body,
+        is_html=is_html,
+        cc=cc,
+        attachment_paths=attachment_paths,
+        allowed_attachment_roots=allowed_attachment_roots,
+        sender_name=sender_name,
+        manager=manager,
+    )
+    _record_outbox(
+        result,
+        to=to,
+        cc=cc,
+        subject=subject,
+        body=body,
+        is_html=is_html,
+        attachment_paths=attachment_paths,
+        channel=channel,
+        owner_id=owner_id,
+        username=username,
+        ref_type=ref_type,
+        ref_id=ref_id,
+    )
+    return result
+
+
+def _send_pipeline(
+    to: str | list[str],
+    subject: str,
+    body: str,
+    *,
+    is_html: bool,
+    cc: str | list[str] | None,
+    attachment_paths: list[str] | None,
+    allowed_attachment_roots: list[str | os.PathLike[str]] | None,
+    sender_name: str | None,
+    manager,
+) -> dict[str, Any]:
+    """执行一次发送，返回结果字典（不发台账）。"""
+    # —— 阶段 1：配置解析与全局开关 ——
+    email_cfg = load_email_config(manager)
     # 全局总开关：`email.enabled=false`（或 GMS_EMAIL_ENABLED=0）关闭全部
     # 出站邮件——Redmine 提醒、ATS 运行通知、运维告警、通用发送 API 都
     # 走这个单一收口；默认开启（缺配置 ≠ 关闭）。
-    import os
-
     env_enabled = os.getenv("GMS_EMAIL_ENABLED")
     if env_enabled is not None:
         enabled = env_enabled.strip().lower() not in ("0", "false", "no", "off")
@@ -190,6 +156,7 @@ def send_email(
             "mode": "disabled",
             "error": "邮件功能已全局关闭（email.enabled=false 或 GMS_EMAIL_ENABLED=0）",
         }
+
     smtp_host = str(email_cfg.get("smtp_host") or "").strip()
     default_from = str(email_cfg.get("default_from_addr") or "").strip()
     from_addr = str(email_cfg.get("from_addr") or email_cfg.get("username") or default_from).strip()
@@ -200,15 +167,15 @@ def send_email(
             "error": "SMTP 未配置：请在 Redmine 看板「设置 → SMTP」保存，或由管理员通过 POST /api/email/smtp 写入全局配置",
         }
 
-    smtp_port = int(email_cfg.get("smtp_port") or 465)
+    # —— 阶段 2：输入校验（收件人/主题/凭据） ——
     username = str(email_cfg.get("username") or "").strip()
-    password = _email_password(email_cfg)
+    password = email_password(email_cfg)
     is_qiye_163 = smtp_host.lower().endswith("qiye.163.com")
     # 163 企业邮要求发件人与登录账号一致；缺省（default_from）或与账号不符时，强制对齐
     if is_qiye_163 and username and (not from_addr or from_addr == default_from or from_addr != username):
         from_addr = username
-    use_ssl = bool(email_cfg.get("use_ssl", smtp_port == 465))
-    use_tls = bool(email_cfg.get("use_tls", not use_ssl and smtp_port != 465))
+    use_ssl = bool(email_cfg.get("use_ssl", int(email_cfg.get("smtp_port") or 465) == 465))
+    use_tls = bool(email_cfg.get("use_tls", not use_ssl and int(email_cfg.get("smtp_port") or 465) != 465))
     timeout = int(email_cfg.get("timeout") or 10)
 
     # 163 企业邮必须使用独立 SMTP 授权码。
@@ -229,86 +196,88 @@ def send_email(
     if not safe_from or len(safe_from) != 1:
         return {"sent": False, "mode": "unconfigured", "error": "发件人邮箱地址无效"}
     from_addr = safe_from[0]
-    subject = _safe_header_text(subject)
+    subject = safe_header_text(subject)
     if not subject:
         return {"sent": False, "mode": "invalid", "error": "邮件主题为空"}
 
-    message = MIMEMultipart()
-    display_name = _safe_header_text(sender_name or email_cfg.get("sender_name"))
-    if display_name:
-        message["From"] = formataddr((display_name, from_addr))
-    else:
-        message["From"] = from_addr
-    message["To"] = ", ".join(final_to_list)
-    if final_cc_list:
-        message["Cc"] = ", ".join(final_cc_list)
-    message["Subject"] = subject
+    # —— 阶段 3：MIME 组装（含附件白名单） ——
+    message, envelope = build_mime_message(
+        from_addr=from_addr,
+        display_name=safe_header_text(sender_name or email_cfg.get("sender_name")) or None,
+        to_list=final_to_list,
+        cc_list=final_cc_list,
+        subject=subject,
+        body=body,
+        is_html=is_html,
+        attachment_paths=attachment_paths,
+        allowed_attachment_roots=allowed_attachment_roots,
+    )
 
-    # 邮件正文
-    message.attach(MIMEText(body, "html" if is_html else "plain", _charset="utf-8"))
+    # —— 阶段 4：SMTP 传输 ——
+    settings = SmtpSettings(
+        host=smtp_host,
+        port=int(email_cfg.get("smtp_port") or 465),
+        from_addr=from_addr,
+        username=username,
+        password=password,
+        use_ssl=use_ssl,
+        use_tls=use_tls,
+        timeout=timeout,
+    )
+    delivered = smtp_deliver(settings, message, envelope["recipients"])
 
-    # 处理附件（参考 rk-email send_email.py）
-    missing_attachments: list[str] = []
-    blocked_attachments: list[str] = []
-    allowed_roots = list(allowed_attachment_roots or [])
-    for path in attachment_paths or []:
-        abs_path = os.path.abspath(str(path))
-        resolved = _resolve_allowed_attachment(str(path), allowed_roots)
-        if resolved is None:
-            if os.path.exists(abs_path):
-                blocked_attachments.append(abs_path)
-            else:
-                missing_attachments.append(abs_path)
-            continue
-        try:
-            filename = _safe_header_text(resolved.name)[:255]
-            with resolved.open("rb") as fh:
-                part = MIMEBase("application", "octet-stream")
-                part.set_payload(fh.read())
-            encode_base64(part)
-            part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
-            message.attach(part)
-        except Exception as exc:  # 单个附件失败不阻断整体发送
-            missing_attachments.append(f"{resolved} ({exc})")
-
-    # 真正的 SMTP 接收者列表 = to + cc 去重
-    smtp_recipients = list({*final_to_list, *final_cc_list})
-
-    try:
-        if use_ssl:
-            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=timeout) as smtp:
-                if username and password:
-                    smtp.login(username, password)
-                smtp.sendmail(from_addr, smtp_recipients, message.as_string())
-        else:
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=timeout) as smtp:
-                if use_tls:
-                    smtp.starttls()
-                if username and password:
-                    smtp.login(username, password)
-                smtp.sendmail(from_addr, smtp_recipients, message.as_string())
-    except smtplib.SMTPAuthenticationError as exc:
-        return {
-            "sent": False,
-            "mode": "smtp",
-            "error": f"SMTP认证失败，请在设置中填写企业邮箱SMTP授权码/密码，发件人需与账号一致: {exc}",
-        }
-    except smtplib.SMTPServerDisconnected as exc:
-        return {
-            "sent": False,
-            "mode": "smtp",
-            "error": f"SMTP连接被服务器关闭，请检查企业邮箱SMTP授权码/密码、账号是否开启SMTP服务，发件人需与账号一致: {exc}",
-        }
-
-    result: dict[str, Any] = {
-        "sent": True,
-        "mode": "smtp",
-        "to": final_to_list,
-        "cc": final_cc_list,
-        "recipients": smtp_recipients,
-    }
-    if missing_attachments:
-        result["attachments_missing"] = missing_attachments
-    if blocked_attachments:
-        result["attachments_blocked"] = blocked_attachments
+    result: dict[str, Any] = dict(delivered)
+    result.setdefault("error", None)
+    result["to"] = envelope["to"]
+    result["cc"] = envelope["cc"]
+    result["recipients"] = envelope["recipients"]
+    result["from_addr"] = envelope["from_addr"]
+    if envelope["attachments_missing"]:
+        result["attachments_missing"] = envelope["attachments_missing"]
+    if envelope["attachments_blocked"]:
+        result["attachments_blocked"] = envelope["attachments_blocked"]
     return result
+
+
+def _record_outbox(
+    result: dict[str, Any],
+    *,
+    to: str | list[str],
+    cc: str | list[str] | None,
+    subject: str,
+    body: str,
+    is_html: bool,
+    attachment_paths: list[str] | None,
+    channel: str,
+    owner_id: str,
+    username: str,
+    ref_type: str,
+    ref_id: str,
+) -> None:
+    """把本次发送尝试写入台账；审计增强，绝不影响发送结果。"""
+    try:
+        get_email_outbox_store().record(
+            {
+                "channel": channel,
+                "owner_id": owner_id,
+                "username": username,
+                "ref_type": ref_type,
+                "ref_id": ref_id,
+                "from_addr": str(result.get("from_addr") or ""),
+                "to_addrs": normalize_email_addresses(to) or [],
+                "cc_addrs": normalize_email_addresses(cc) or [],
+                "subject": subject,
+                "body_preview": str(body or ""),
+                "is_html": bool(is_html),
+                "attachments": [
+                    os.path.basename(str(path)) for path in attachment_paths or []
+                ],
+                "sent": bool(result.get("sent")),
+                "mode": str(result.get("mode") or ""),
+                "error": str(result.get("error") or ""),
+            }
+        )
+    except Exception:
+        # 台账是审计增强，不是发送路径的一部分：任何异常都不能改变
+        # 发送结果或让调用方看到额外错误。
+        logger.warning("email outbox ledger write failed", exc_info=True)

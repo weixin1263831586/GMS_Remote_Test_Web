@@ -1657,6 +1657,18 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/email/outbox"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/email/outbox/{email_id}"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/email/send"
@@ -2421,6 +2433,12 @@
       "GET"
     ],
     "path": "/api/redmine-agent/evidence/{snapshot_id}/search"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/evidence/{snapshot_id}/search/batch"
   },
   {
     "methods": [

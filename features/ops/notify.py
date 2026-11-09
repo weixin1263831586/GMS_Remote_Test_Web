@@ -174,7 +174,9 @@ def send_webhook(incident: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any
             url, content=body, headers=headers,
             timeout=WEBHOOK_TIMEOUT_SECONDS, follow_redirects=False,
         )
-        sent = response.status_code < 400
+        # 3xx 在禁用重定向时意味着告警没有真正送达接收端（跳转未被跟随），
+        # 只把 2xx 视为已送达，否则失败投递会被标记 sent 而不再重试。
+        sent = 200 <= response.status_code < 300
         return {
             "transport": "webhook",
             "sent": sent,
@@ -195,10 +197,14 @@ def send_email(incident: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
         from features.email import send_email as send_email_message
 
         # 不传 manager：走全局 SMTP 默认配置，无需 per-owner 凭据。
+        # 台账回链：channel=ops + ref 指向触发本告警的 incident。
         result = send_email_message(
             to,
             f"[GMS ATS 运维告警] {incident.get('kind', 'incident')} {incident.get('subject', '')}".strip(),
             _incident_text(incident),
+            channel="ops",
+            ref_type="ops_event",
+            ref_id=str(incident.get("id") or ""),
         )
         return {"transport": "email", **result}
     except Exception:

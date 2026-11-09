@@ -47,6 +47,25 @@ class WebhookTests(unittest.TestCase):
         self.assertTrue(result["sent"])
         self.assertNotIn("X-GMS-Ops-Signature", captured["headers"])
 
+    def test_redirect_status_is_not_marked_sent(self):
+        # follow_redirects=False 下 3xx 表示告警未送达接收端，必须保持
+        # sent=False 以便退避重试，不能把跳转响应当作成功。
+        class Response:
+            status_code = 302
+
+        def fake_post(url, content=None, headers=None, timeout=None, **_kwargs):
+            return Response()
+
+        with mock.patch("httpx.post", side_effect=fake_post):
+            result = send_webhook(
+                {"kind": "k", "message": "m"},
+                {"webhook_url": "https://example/hook", "webhook_format": "generic",
+                 "webhook_token_file": ""},
+            )
+
+        self.assertFalse(result["sent"])
+        self.assertEqual(result["status_code"], 302)
+
     def test_signature_present_with_token_file(self):
         import tempfile
         from pathlib import Path

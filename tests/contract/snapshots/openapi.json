@@ -196,6 +196,31 @@
         "title": "ArtifactUploadInit",
         "type": "object"
       },
+      "BatchSearchRequest": {
+        "additionalProperties": false,
+        "description": "批量关键词搜索请求体：一次 IO 完成多个关键词的全文匹配。",
+        "properties": {
+          "per_query_limit": {
+            "default": 20,
+            "minimum": 1.0,
+            "title": "Per Query Limit",
+            "type": "integer"
+          },
+          "queries": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Queries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "queries"
+        ],
+        "title": "BatchSearchRequest",
+        "type": "object"
+      },
       "BindingUpdate": {
         "properties": {
           "baudrate": {
@@ -15146,6 +15171,131 @@
         "summary": "Connect Wifi"
       }
     },
+    "/api/email/outbox": {
+      "get": {
+        "description": "历史邮件：普通用户看自己的记录，管理员可看全量。\n\n- ``channel``：按触发通道过滤（manual/automation/ops/redmine_reminder）；\n- ``sent``：``true`` / ``false`` 过滤成败；缺省返回全部（含失败尝试）；\n- ``admin_view=true``：仅 admin 角色生效，跨 owner 返回全部记录。",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Channel",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sent",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Sent",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "admin_view",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Admin View",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Email Outbox"
+      }
+    },
+    "/api/email/outbox/{email_id}": {
+      "get": {
+        "description": "单封邮件的台账详情；owner 或 admin 可见，正文只有预览。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "email_id",
+            "required": true,
+            "schema": {
+              "title": "Email Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Email Outbox Detail"
+      }
+    },
     "/api/email/send": {
       "post": {
         "description": "发送支持抄送、HTML 和附件的邮件。",
@@ -19885,6 +20035,53 @@
           }
         },
         "summary": "Search Evidence"
+      }
+    },
+    "/api/redmine-agent/evidence/{snapshot_id}/search/batch": {
+      "post": {
+        "description": "多关键词单遍全文搜索（#661066 复审：MCP→CLI→HTTP 逐关键词重复\n扫描同一批大日志的调用模式，改为一次服务端遍历完成全部匹配）。\n\n每个关键词独立计数与截断（``truncated``=该词命中超过 per_query_limit），\n覆盖语义与单查询端点一致：``coverage_complete=false`` 时零命中不可\n当作否定证据。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Evidence Batch"
       }
     },
     "/api/redmine-agent/evidence/{snapshot_id}/wait": {

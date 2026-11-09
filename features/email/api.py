@@ -194,7 +194,16 @@ async def send_email_endpoint(request: Request):
         kwargs["sender_name"] = " ".join(str(body.get("sender_name")).split())
 
     try:
-        result = await asyncio.to_thread(send_email, to, subject, content, **kwargs)
+        result = await asyncio.to_thread(
+            send_email,
+            to,
+            subject,
+            content,
+            channel="manual",
+            owner_id=user.resource_owner_id,
+            username=user.username,
+            **kwargs,
+        )
     except Exception:
         message = record_internal_error(logger, "发送邮件", "send_email failed")
         return error_response(message, status_code=500)
@@ -330,3 +339,77 @@ def save_smtp_config(body: SmtpConfigRequest, admin: CurrentUser = Depends(requi
         admin.username, body.smtp_host,
     )
     return success_response(data=_masked_email_view(email), message="SMTP 配置已保存")
+
+
+# ---------------------------------------------------------------------------
+# 历史邮件（outbox ledger）：三条链路统一的可追溯台账
+# ---------------------------------------------------------------------------
+
+_EMAIL_CHANNELS = ("manual", "automation", "ops", "redmine_reminder")
+
+
+@router.get("/api/email/outbox")
+def list_email_outbox(
+    request: Request,
+    limit: int = 50,
+    offset: int = 0,
+    channel: str = "",
+    sent: str = "",
+    admin_view: str = "",
+    q: str = "",
+):
+    """历史邮件：普通用户看自己的记录，管理员可看全量。
+
+    - ``channel``：按触发通道过滤（manual/automation/ops/redmine_reminder）；
+    - ``sent``：``true`` / ``false`` 过滤成败；缺省返回全部（含失败尝试）；
+    - ``admin_view=true``：仅 admin 角色生效，跨 owner 返回全部记录。
+    """
+    user = require_authenticated_user(request)
+    from features.email.store import get_email_outbox_store
+
+    sent_filter: bool | None
+    if str(sent).lower() in ("true", "1"):
+        sent_filter = True
+    elif str(sent).lower() in ("false", "0"):
+        sent_filter = False
+    else:
+        sent_filter = None
+    channel = str(channel or "").strip()
+    if channel and channel not in _EMAIL_CHANNELS:
+        return error_response(
+            "channel 必须是: " + ", ".join(_EMAIL_CHANNELS), status_code=400
+        )
+    owner_filter: str | None
+    if str(admin_view).lower() == "true":
+        if user.role != "admin":
+            return error_response("仅管理员可查看全部用户的历史邮件", status_code=403)
+        owner_filter = None
+    else:
+        owner_filter = user.resource_owner_id
+    data = get_email_outbox_store().list(
+        limit=limit,
+        offset=offset,
+        channel=channel,
+        sent=sent_filter,
+        owner_id=owner_filter,
+        query=str(q or "").strip(),
+    )
+    return success_response(data=data, **{
+        "owner_view": owner_filter is not None,
+        "channel": channel,
+        "sent": sent_filter,
+    })
+
+
+@router.get("/api/email/outbox/{email_id}")
+def get_email_outbox_detail(email_id: str, request: Request):
+    """单封邮件的台账详情；owner 或 admin 可见，正文只有预览。"""
+    user = require_authenticated_user(request)
+    from features.email.store import get_email_outbox_store
+
+    entry = get_email_outbox_store().get(email_id)
+    if entry is None:
+        return error_response("发件记录不存在", status_code=404)
+    if user.role != "admin" and entry["owner_id"] != user.resource_owner_id:
+        return error_response("无权查看该发件记录", status_code=403)
+    return success_response(data=entry)

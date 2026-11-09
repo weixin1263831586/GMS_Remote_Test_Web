@@ -30,6 +30,25 @@ _NO_GLOBAL = patch(
 _NO_GLOBAL.start()
 _NO_GLOBAL_stop = _NO_GLOBAL.stop
 
+# 隔离发件台账：send_email 管线每次调用都写 outbox 台账，data_root 默认
+# 指向仓库 data/——不隔离的话单测 fixture（"s"/"b"、头注入样例等）会
+# 污染生产台账（曾以「系统」发件人出现在历史邮件页面）。模块加载即把
+# store 的 data_root 指到临时目录并重置单例。
+import tempfile as _tempfile
+from pathlib import Path as _Path
+from types import SimpleNamespace as _SimpleNamespace
+
+from features.email import store as _store_module
+from features.email.store import reset_email_outbox_store as _reset_outbox
+
+_store_data_root_patch = patch.object(
+    _store_module,
+    "settings",
+    _SimpleNamespace(data_root=_Path(_tempfile.mkdtemp(prefix="gms-email-test-"))),
+)
+_store_data_root_patch.start()
+_reset_outbox()
+
 
 QIYE_CFG = {
     "smtp_host": "smtphz.qiye.163.com",
@@ -130,7 +149,7 @@ class SendEmailTests(unittest.TestCase):
         self.assertFalse(result["sent"])
         self.assertIn("收件人", result["error"])
 
-    @patch("features.email.service.smtplib.SMTP_SSL")
+    @patch("features.email.transport.smtplib.SMTP_SSL")
     def test_header_injection_is_rejected_or_collapsed_for_all_callers(self, smtp_cls):
         invalid = send_email(
             "dev@example.com\r\nBcc: evil@example.com",
@@ -166,7 +185,7 @@ class SendEmailTests(unittest.TestCase):
     def test_qiye_163_forces_from_equals_username(self):
         cfg = dict(QIYE_CFG)
         cfg["from_addr"] = "other@rock-chips.com"  # 与 username 不符
-        with patch("features.email.service.smtplib.SMTP_SSL") as smtp_cls:
+        with patch("features.email.transport.smtplib.SMTP_SSL") as smtp_cls:
             smtp = smtp_cls.return_value.__enter__.return_value
             result = send_email("a@x.com", "主题", "正文", manager=_fake_manager(cfg))
 
@@ -175,7 +194,7 @@ class SendEmailTests(unittest.TestCase):
             from_addr, _recipients, _ = smtp.sendmail.call_args.args
             self.assertEqual(from_addr, "me@rock-chips.com")
 
-    @patch("features.email.service.smtplib.SMTP_SSL")
+    @patch("features.email.transport.smtplib.SMTP_SSL")
     def test_plain_text_send_with_cc_dedup(self, smtp_cls):
         smtp = smtp_cls.return_value.__enter__.return_value
         result = send_email(
@@ -196,7 +215,7 @@ class SendEmailTests(unittest.TestCase):
         # 登录用授权码
         smtp.login.assert_called_once_with("me@rock-chips.com", "smtp-auth-code")
 
-    @patch("features.email.service.smtplib.SMTP_SSL")
+    @patch("features.email.transport.smtplib.SMTP_SSL")
     def test_html_body_uses_multipart(self, smtp_cls):
         smtp = smtp_cls.return_value.__enter__.return_value
         send_email("a@x.com", "主题", "<p>hi</p>", is_html=True, manager=_fake_manager(QIYE_CFG))
@@ -208,7 +227,7 @@ class SendEmailTests(unittest.TestCase):
         subtypes = [part.get_content_type() for part in msg.walk() if part is not msg]
         self.assertIn("text/html", subtypes)
 
-    @patch("features.email.service.smtplib.SMTP_SSL")
+    @patch("features.email.transport.smtplib.SMTP_SSL")
     def test_sender_name_display(self, smtp_cls):
         smtp = smtp_cls.return_value.__enter__.return_value
         send_email("a@x.com", "主题", "正文", sender_name="AI周报", manager=_fake_manager(QIYE_CFG))
@@ -220,7 +239,7 @@ class SendEmailTests(unittest.TestCase):
         decoded = str(make_header(decode_header(msg["From"])))
         self.assertEqual(decoded, "AI周报 <me@rock-chips.com>")
 
-    @patch("features.email.service.smtplib.SMTP_SSL")
+    @patch("features.email.transport.smtplib.SMTP_SSL")
     def test_attachment_present_and_missing(self, smtp_cls):
         smtp = smtp_cls.return_value.__enter__.return_value
         with tempfile.TemporaryDirectory() as tmp:
@@ -245,7 +264,7 @@ class SendEmailTests(unittest.TestCase):
             self.assertEqual(len(attachments), 1)
             self.assertIn("/nonexistent/file.xyz", result["attachments_missing"][0])
 
-    @patch("features.email.service.smtplib.SMTP_SSL")
+    @patch("features.email.transport.smtplib.SMTP_SSL")
     def test_attachment_paths_blocked_without_allowed_roots(self, smtp_cls):
         smtp = smtp_cls.return_value.__enter__.return_value
         with tempfile.NamedTemporaryFile(delete=False, suffix=".md") as fh:
@@ -271,7 +290,7 @@ class SendEmailTests(unittest.TestCase):
         finally:
             os.unlink(blocked_path)
 
-    @patch("features.email.service.smtplib.SMTP_SSL")
+    @patch("features.email.transport.smtplib.SMTP_SSL")
     def test_smtp_auth_error_returned(self, smtp_cls):
         smtp = smtp_cls.return_value.__enter__.return_value
         smtp.login.side_effect = smtplib.SMTPAuthenticationError(535, b"auth failed")
@@ -281,7 +300,7 @@ class SendEmailTests(unittest.TestCase):
         self.assertEqual(result["mode"], "smtp")
         self.assertIn("SMTP认证失败", result["error"])
 
-    @patch("features.email.service.smtplib.SMTP")
+    @patch("features.email.transport.smtplib.SMTP")
     def test_non_ssl_uses_starttls(self, smtp_cls):
         """非 SSL 端口应走 SMTP + STARTTLS（use_ssl 默认由端口判定）。"""
         cfg = {
