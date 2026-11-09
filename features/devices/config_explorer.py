@@ -22,6 +22,7 @@ from pathlib import Path
 
 from foundation.config import settings
 from foundation.processes import run_local_shell_command
+from foundation.security import quote_device_shell_arg
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,9 @@ _RESOURCE_RE = re.compile(
 _DEFAULT_VALUE_RE = re.compile(r"^\s*\(\)\s(.*)$")
 # cmd overlay lookup 无法解析资源引用时返回的数字资源 ID。
 _RESID_REF_RE = re.compile(r"^@0x[0-9a-fA-F]+\s*(?:->\s*)?$|^@\d+\s*(?:->\s*)?$")
+# Android 包名白名单：包名会被拼进 adb shell 命令行，由设备端 shell 二次
+# 解析，凡不符合该形态的输入必须直接拒绝（quote_device_shell_arg 仅是第二层）。
+_ANDROID_PACKAGE_RE = re.compile(r"^[A-Za-z0-9._]+$")
 # 有效值位于 Best matching 标记之后。
 _BEST_MATCH_RE = re.compile(r"Best matching is from .*? of ([\w.]+)\s*$")
 
@@ -102,12 +106,25 @@ def _aapt2_path() -> str:
     return p
 
 
+def _require_safe_package(package: str) -> str:
+    """Whitelist-validate a package name before it reaches ``adb shell``.
+
+    The name is joined into one command line that the device shell re-parses,
+    so anything outside the Android package grammar is rejected outright;
+    ``quote_device_shell_arg`` is only the second layer.
+    """
+    if not _ANDROID_PACKAGE_RE.fullmatch(package or ""):
+        raise ValueError("非法包名：仅允许字母、数字、点、下划线")
+    return package
+
+
 def _resolve_package_apk(device_id: str | None, package: str) -> str:
     """Return the on-device APK path for ``package`` (first split if multiple)."""
     adb = _adb_path()
+    _require_safe_package(package)
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
     pm_path_result = run_local_shell_command(
-        f"{adb} {serial}shell pm path {shlex.quote(package)}", timeout=20
+        f"{adb} {serial}shell pm path {quote_device_shell_arg(package)}", timeout=20
     )
     if not pm_path_result.ok or not pm_path_result.stdout.strip():
         raise RuntimeError(
@@ -136,7 +153,8 @@ def _pull_apk(device_id: str | None, on_device_path: str, package: str) -> str:
         f"{adb} {serial}shell getprop ro.build.fingerprint", timeout=10
     )
     metadata_result = run_local_shell_command(
-        f"{adb} {serial}shell stat -c %s:%Y {shlex.quote(on_device_path)}",
+        # on_device_path 源自 pm path 输出（设备侧数据），按设备端 shell 语法转义。
+        f"{adb} {serial}shell stat -c %s:%Y {quote_device_shell_arg(on_device_path)}",
         timeout=10,
     )
     fingerprint, fingerprint_code = (
@@ -322,11 +340,13 @@ def _lookup_effective(
     overlaid.
     """
     adb = _adb_path()
+    _require_safe_package(package)
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
     resource = f"{package}:{entry.type}/{entry.resname}"
     # 有效值写入 stdout，错误写入 stderr 并返回非零状态。
     lookup_result = run_local_shell_command(
-        f"{adb} {serial}shell cmd overlay lookup --verbose {shlex.quote(package)} {shlex.quote(resource)}",
+        f"{adb} {serial}shell cmd overlay lookup --verbose "
+        f"{quote_device_shell_arg(package)} {quote_device_shell_arg(resource)}",
         timeout=15,
     )
     if not lookup_result.ok:
@@ -509,7 +529,8 @@ def device_file_size(
     adb = _adb_path()
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
     stat_result = run_local_shell_command(
-        f"{adb} {serial}shell stat -c %s {shlex.quote(on_device_path)}",
+        # on_device_path 来自请求参数（设备文件浏览），按设备端 shell 语法转义。
+        f"{adb} {serial}shell stat -c %s {quote_device_shell_arg(on_device_path)}",
         timeout=timeout,
     )
     size = stat_result.stdout.strip() if stat_result.ok else ""

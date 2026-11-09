@@ -28,27 +28,27 @@ _gms_rt_command_usage() {
         gms-rt-agent-enroll-code) printf '%s' 'gms-rt-agent-enroll-code --name <NAME> [--scopes s1,s2] [--workers w1,w2|*] [--devices d1,d2|*] [--expires-days N] [--ttl-minutes N]' ;;
         gms-rt-agent-token-revoke) printf '%s' 'gms-rt-agent-token-revoke <TOKEN_ID>' ;;
         gms-rt-approval-create) printf '%s' 'gms-rt-approval-create --tool <gms_rt_burn_firmware|gms_rt_shell_exec> --device <serial>[,<serial>...] [--command <command>|--firmware-sha256 <sha256> [--wipe-data true|false] [--burn-mode auto|uf]]' ;;
-        gms-rt-burn-firmware) printf '%s' 'gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--approval-token TOKEN] [--wait-online[=SECONDS]]' ;;
+        gms-rt-burn-firmware) printf '%s' 'gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--approval-token TOKEN | env GMS_RT_BURN_APPROVAL_TOKEN] [--wait-online[=SECONDS]]' ;;
         gms-rt-burn-gsi) printf '%s' 'gms-rt-burn-gsi <gsi_path> <devices> [wipe_data] [--wait-online[=SECONDS]]' ;;
         gms-rt-burn-serial) printf '%s' 'gms-rt-burn-serial <device_id> <serial>' ;;
         gms-rt-cluster-devices) printf '%s' 'gms-rt-cluster-devices [--worker WORKER_ID] [--query REGEX]' ;;
         gms-rt-cluster-resolve) printf '%s' 'gms-rt-cluster-resolve --device <serial> [--worker <worker_id>]' ;;
         gms-rt-config-update) printf '%s' 'gms-rt-config-update <key> <value>' ;;
         gms-rt-desktop-validate) printf '%s' 'gms-rt-desktop-validate <user@ip>' ;;
-        gms-rt-desktop-vnc-start) printf '%s' 'gms-rt-desktop-vnc-start [host] [password] [vnc_password]' ;;
+        gms-rt-desktop-vnc-start) printf '%s' 'gms-rt-desktop-vnc-start [host] (密码优先用 env GMS_REMOTE_DEVICE_PASSWORD / GMS_REMOTE_VNC_PASSWORD；位置参数密码进入 argv，仅限本机可信场景)' ;;
         gms-rt-system-command-describe) printf '%s' 'gms-rt-system-command-describe <command>' ;;
         gms-rt-devices-info|gms-rt-devices-reboot|gms-rt-devices-remount|gms-rt-devices-bootloader-lock|gms-rt-devices-bootloader-unlock|gms-rt-devices-bootloader-status)
             printf '%s' "$1 <devices>"
             ;;
         gms-rt-devices-wait) printf '%s' 'gms-rt-devices-wait <devices> [--state online|fastboot|any] [--interval SECONDS] [--max-wait SECONDS]' ;;
         gms-rt-devices-console) printf '%s' 'gms-rt-devices-console [port_key] [--tail N] [--date YYYYMMDD] [--device SERIAL [--worker WORKER_ID]]' ;;
-        gms-rt-devices-shell) printf '%s' 'gms-rt-devices-shell <device_id> [--approval-token TOKEN] [command]' ;;
+        gms-rt-devices-shell) printf '%s' 'gms-rt-devices-shell <device_id> [--approval-token TOKEN | env GMS_RT_APPROVAL_TOKEN] [command]' ;;
         gms-rt-devices-diag) printf '%s' 'gms-rt-devices-diag <device_id> <command>' ;;
         gms-rt-devices-scrcpy) printf '%s' 'gms-rt-devices-scrcpy DEVICE1 [DEVICE2 ...]' ;;
         gms-rt-devices-screencap) printf '%s' 'gms-rt-devices-screencap <device_id>' ;;
         gms-rt-devices-ui-dump) printf '%s' 'gms-rt-devices-ui-dump <device_id>' ;;
         gms-rt-devices-snapshot) printf '%s' 'gms-rt-devices-snapshot <device_id>' ;;
-        gms-rt-devices-wifi) printf '%s' 'gms-rt-devices-wifi <devices> <ssid> [password]' ;;
+        gms-rt-devices-wifi) printf '%s' 'gms-rt-devices-wifi <devices> <ssid> (密码优先用 env GMS_REMOTE_WIFI_PASSWORD；位置参数密码进入 argv，仅限本机可信场景)' ;;
         gms-rt-jobs-follow) printf '%s' 'gms-rt-jobs-follow <job_id> [--after SEQUENCE] [--limit N]' ;;
         gms-rt-devices-logcat) printf '%s' 'gms-rt-devices-logcat <device_id> [-c] [logcat args]' ;;
         gms-rt-devices-push) printf '%s' 'gms-rt-devices-push <device_id> <local_file> <remote_path>' ;;

@@ -245,12 +245,30 @@ def list_worker_tests(
 
 
 @router.get("/metrics/history")
-def get_metrics_history(worker_id: str = Query(default="")):
+def get_metrics_history(
+    request: Request,
+    worker_id: str = Query(default=""),
+):
+    _require_agent_scope_when_agent(request, "devices.read")
     svc = service()
     if worker_id and not svc.effective_enabled and worker_id != svc.config.local_worker_id:
         raise HTTPException(409, "cluster mode is disabled")
-    rows = svc.repository.get_worker_metrics_history(worker_id)
-    return {"success": True, "metrics": rows}
+    # Agent token 的可见 Worker 集合按 ACL 收敛（与 /workers 同口径）；
+    # 人类会话保持原全量行为。
+    if getattr(request.state, "auth_method", "") == "agent_token":
+        visible_ids = {worker["id"] for worker in _visible_workers(request)}
+        if worker_id:
+            if worker_id not in visible_ids:
+                raise HTTPException(404, "worker not found")
+            return {
+                "success": True,
+                "metrics": svc.repository.get_worker_metrics_history(worker_id),
+            }
+        metrics = []
+        for visible_id in sorted(visible_ids):
+            metrics.extend(svc.repository.get_worker_metrics_history(visible_id))
+        return {"success": True, "metrics": metrics}
+    return {"success": True, "metrics": svc.repository.get_worker_metrics_history(worker_id)}
 
 
 @router.delete("/workers/{worker_id}")
@@ -281,12 +299,13 @@ async def delete_worker(
 
 
 @router.get("/status")
-def cluster_status():
+def cluster_status(request: Request):
+    _require_agent_scope_when_agent(request, "devices.read")
     svc = service()
     config = svc.config
     # The local bridge remains online in single-host mode, but it must not
     # override the explicit runtime mode selected by the user.
-    workers = svc.list_workers()
+    workers = _visible_workers(request)
     local_online = any(
         w['id'] == config.local_worker_id and w.get('status') in {'online', 'busy'}
         for w in workers
@@ -426,7 +445,11 @@ def _redact_command_payload(command: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.get("/suites")
-def list_suites(worker_id: str = Query(default="")):
+def list_suites(
+    request: Request,
+    worker_id: str = Query(default=""),
+):
+    _require_agent_scope_when_agent(request, "suites.read")
     raw_suites = service().repository.list_suites(worker_id)
     local_worker_id = service().config.local_worker_id
     local_present = any(item.get("worker_id") == local_worker_id for item in raw_suites)
@@ -456,6 +479,10 @@ def list_suites(worker_id: str = Query(default="")):
             "suite_key": item.get("suite_key", ""),
             "available": bool(item.get("available", 1)),
         })
+    # Agent token 只能看到其 ACL 允许的 Worker 的套件清单（与 /workers 同口径）。
+    if getattr(request.state, "auth_method", "") == "agent_token":
+        visible_ids = {worker["id"] for worker in _visible_workers(request)}
+        suites = [item for item in suites if item.get("worker_id") in visible_ids]
     return {"success": True, "suites": suites}
 
 

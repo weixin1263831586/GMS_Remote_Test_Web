@@ -223,16 +223,34 @@ _post_firmware_burn_path() {
     local device_list
     device_list=$(echo "$devices" | tr ' ' ',')
 
-    local approval_query=""
+    # Approval token 一次性凭据：与 Bearer token 同纪律，绝不进入 URL
+    # query（Controller/代理访问日志会留存）也不进入 curl argv（
+    # /proc/<pid>/cmdline 同机可读，拷贝固件阶段进程长时间存活），
+    # 而是写入 0600 临时文件后用 curl --header @file 读取。
+    local approval_curl_args=()
+    local approval_header_file=""
     if [ -n "${GMS_RT_BURN_APPROVAL_TOKEN:-}" ]; then
-        approval_query="?approval_token=$(_urlencode "$GMS_RT_BURN_APPROVAL_TOKEN")"
+        approval_header_file=$(mktemp "${TMPDIR:-/tmp}/gms-approval-header.XXXXXX") || {
+            error "无法创建 approval header 临时文件"
+            return "$GMS_RT_EXIT_OPERATION"
+        }
+        chmod 600 "$approval_header_file" 2>/dev/null || true
+        printf 'X-GMS-Approval-Token: %s\n' "$GMS_RT_BURN_APPROVAL_TOKEN" \
+            > "$approval_header_file"
+        approval_curl_args=(--header "@$approval_header_file")
     fi
-    _gms_curl_authenticated -sS -w "\nHTTP_STATUS:%{http_code}" \
+    local response curl_status
+    response=$(_gms_curl_authenticated -sS -w "\nHTTP_STATUS:%{http_code}" \
         --max-time "$CURL_BURN_TIMEOUT" \
-        -X POST "${API_BASE}/burn/firmware${approval_query}" \
+        "${approval_curl_args[@]}" \
+        -X POST "${API_BASE}/burn/firmware" \
         -F "firmware_path=${remote_path}" \
         -F "devices=${device_list}" \
-        -F "wipe_data=${wipe_data}"
+        -F "wipe_data=${wipe_data}")
+    curl_status=$?
+    [ -n "$approval_header_file" ] && rm -f -- "$approval_header_file"
+    printf '%s\n' "$response"
+    return "$curl_status"
 }
 
 _post_firmware_burn_upload() {
@@ -243,17 +261,32 @@ _post_firmware_burn_upload() {
     local device_query
     device_list=$(echo "$devices" | tr ' ' ',')
     device_query=$(_urlencode "$device_list")
-    local approval_query=""
-    if [ -n "${GMS_RT_BURN_APPROVAL_TOKEN:-}" ]; then
-        approval_query="&approval_token=$(_urlencode "$GMS_RT_BURN_APPROVAL_TOKEN")"
-    fi
 
-    _gms_curl_authenticated -# -o /dev/stdout -w "\nHTTP_STATUS:%{http_code}" \
+    # 同 _post_firmware_burn_path：approval token 走 0600 header 文件。
+    local approval_curl_args=()
+    local approval_header_file=""
+    if [ -n "${GMS_RT_BURN_APPROVAL_TOKEN:-}" ]; then
+        approval_header_file=$(mktemp "${TMPDIR:-/tmp}/gms-approval-header.XXXXXX") || {
+            error "无法创建 approval header 临时文件"
+            return "$GMS_RT_EXIT_OPERATION"
+        }
+        chmod 600 "$approval_header_file" 2>/dev/null || true
+        printf 'X-GMS-Approval-Token: %s\n' "$GMS_RT_BURN_APPROVAL_TOKEN" \
+            > "$approval_header_file"
+        approval_curl_args=(--header "@$approval_header_file")
+    fi
+    local response curl_status
+    response=$(_gms_curl_authenticated -# -o /dev/stdout -w "\nHTTP_STATUS:%{http_code}" \
         --max-time "$CURL_BURN_TIMEOUT" \
-        -X POST "${API_BASE}/burn/firmware?devices=${device_query}${approval_query}" \
+        "${approval_curl_args[@]}" \
+        -X POST "${API_BASE}/burn/firmware?devices=${device_query}" \
         -F "firmware_file=@${firmware_path}" \
         -F "firmware_path=$(basename "$firmware_path")" \
-        -F "wipe_data=${wipe_data}"
+        -F "wipe_data=${wipe_data}")
+    curl_status=$?
+    [ -n "$approval_header_file" ] && rm -f -- "$approval_header_file"
+    printf '%s\n' "$response"
+    return "$curl_status"
 }
 
 _copy_firmware_to_test_host() {

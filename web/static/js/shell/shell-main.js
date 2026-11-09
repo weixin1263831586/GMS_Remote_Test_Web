@@ -78,6 +78,10 @@
 
             // 更新页面标题
             document.title = PAGE_TITLES[targetPage] || 'GMS远程测试';
+            // 页面初始化即上报 page-view：这是安全审计功能的固有服务端写入，
+            // 属于「初始化不得 mutating 请求」规则的已文档化豁免（
+            // tests/architecture/test_agent_scope_boundary.py 对该路由显式
+            // 豁免；runtime UI 冒烟测试只封禁 /api/websites/save 类状态写）。
             runAfterAuthReady(function() {
         if (typeof recordSecurityPageView === 'function') {
             recordSecurityPageView(targetPage);

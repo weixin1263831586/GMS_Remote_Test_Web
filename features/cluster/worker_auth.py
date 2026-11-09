@@ -15,6 +15,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from foundation.config_paths import worker_tokens_path
+from foundation.security import bearer_token
 
 
 _token_lock = threading.RLock()
@@ -139,12 +140,12 @@ def revoke_worker_token(worker_id: str) -> bool:
 
 
 def authenticate_worker(worker_id: str, authorization: str | None) -> None:
+    supplied = bearer_token(authorization)
     expected = worker_tokens().get(worker_id)
-    if not expected:
-        raise HTTPException(503, f"worker token is not configured for {worker_id}")
-    supplied = (authorization or "").removeprefix("Bearer ").strip()
-    if not hmac.compare_digest(
-        hashlib.sha256(supplied.encode()).digest(),
-        hashlib.sha256(expected.encode()).digest(),
-    ):
+    # 统一 401：「该 worker 未配置令牌」与「令牌错误」对未认证调用方必须
+    # 不可区分，否则可用于枚举哪些 worker_id 已配置（worker_id 回显同理）。
+    # 摘要后常量时间比较，不泄露存储令牌长度。
+    supplied_digest = hashlib.sha256((supplied or "").encode()).digest()
+    expected_digest = hashlib.sha256((expected or "").encode()).digest()
+    if not hmac.compare_digest(supplied_digest, expected_digest):
         raise HTTPException(401, "invalid worker token")

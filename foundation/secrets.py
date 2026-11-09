@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import stat
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -54,6 +55,50 @@ def _validate_key(raw: bytes) -> bytes:
     return candidate
 
 
+def _key_file_present(path: Path) -> bool:
+    """True when the key file exists with real content.
+
+    An empty file means a previous creator crashed between O_EXCL creation
+    and the write; it never held key material, so it must not be treated as
+    a published key — that state would otherwise hard-fail every startup
+    forever while the bootstrap branch only runs when the file is absent.
+    """
+    try:
+        return path.exists() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _atomic_write_private_file(path: Path, payload: bytes) -> None:
+    """Publish key material atomically: temp file + fsync + ``os.replace``.
+
+    Mirrors ``private_config.write_private_json``. A crash mid-write must
+    never leave a truncated key at ``path`` — that would permanently strand
+    every secret encrypted under it. Concurrent publishers are safe when the
+    payload is derived from the same source (identical bytes; ``os.replace``
+    is atomic).
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    descriptor, name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _key_path() -> Path:
     configured = os.getenv("GMS_SECRET_KEY_FILE", "").strip()
     if configured:
@@ -62,9 +107,11 @@ def _key_path() -> Path:
     # Secrets under configs/secrets must survive cleanup/recreation of the
     # runtime data directory.  Keep the data-root location as a legacy
     # fallback so existing deployments continue using their current key.
+    # An empty file counts as absent (crashed creator) so a half-done
+    # migration falls back to the legacy key and can be redone.
     canonical = settings.project_root / "configs/secrets/master.key"
     legacy = settings.data_root / "secrets/master.key"
-    if canonical.exists() or not legacy.exists():
+    if _key_file_present(canonical) or not _key_file_present(legacy):
         return canonical
     return legacy
 
@@ -114,38 +161,28 @@ def _load_key() -> bytes:
 def _load_key_from_file(path: Path) -> bytes:
     legacy_path = settings.data_root / "secrets/master.key"
     canonical_path = settings.project_root / "configs/secrets/master.key"
-    if path == legacy_path and not canonical_path.exists():
+    if path == legacy_path and not _key_file_present(canonical_path):
         # Preserve existing deployments while moving the default key beside
-        # the encrypted configuration it protects.  Use exclusive creation
-        # so two Web/Worker processes cannot overwrite each other's key.
+        # the encrypted configuration it protects.  Publish atomically so a
+        # crash can never leave a truncated key; concurrent migrators write
+        # identical bytes read from the same legacy file.
         try:
-            canonical_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            descriptor = os.open(
-                canonical_path,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                0o600,
-            )
-            try:
-                _write_all(descriptor, legacy_path.read_bytes())
-            finally:
-                os.close(descriptor)
+            _atomic_write_private_file(canonical_path, legacy_path.read_bytes())
             path = canonical_path
-        except FileExistsError:
-            return _read_key_after_concurrent_create(canonical_path)
         except OSError:
             # A read-only deployment can continue with the legacy key; the
             # next writable startup can complete the migration.
             pass
-    if path.exists():
+    if _key_file_present(path):
         mode = stat.S_IMODE(path.stat().st_mode)
         if mode & 0o077:
             raise RuntimeError(f"secret key file permissions must be 0600: {path}")
         return _validate_key(path.read_bytes())
 
-    # 部署数据目录（data/）可能被整体重置。密钥文件缺失时自举一个新
-    # 的部署本地密钥，而不是启动即崩溃；生产模式下明确告警，提示旧密
-    # 钥加密过的存量密文将无法解密。文件存在但损坏/权限错误仍按配置
-    # 错误硬失败。
+    # 部署数据目录（data/）可能被整体重置。密钥文件缺失（或为空残留——
+    # 创建者崩溃于写入前）时自举一个新的部署本地密钥，而不是启动即崩溃；
+    # 生产模式下明确告警，提示旧密钥加密过的存量密文将无法解密。文件存
+    # 在但内容损坏/权限错误仍按配置错误硬失败。
     if _production():
         logger.warning(
             "GMS master key file missing (%s); generated a new "
@@ -154,6 +191,12 @@ def _load_key_from_file(path: Path) -> bytes:
             path,
         )
 
+    # 空文件不是密钥：先清除崩溃残留，否则下方 O_EXCL 永远命中既有空文件。
+    try:
+        if path.exists() and path.stat().st_size == 0:
+            path.unlink()
+    except OSError:
+        pass
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     key = Fernet.generate_key()
     try:
@@ -164,6 +207,8 @@ def _load_key_from_file(path: Path) -> bytes:
         return _read_key_after_concurrent_create(path)
     try:
         _write_all(descriptor, key + b"\n")
+        # 密钥是后续所有密文的信任根：写入即落盘，避免断电留下半截文件。
+        os.fsync(descriptor)
     finally:
         os.close(descriptor)
     return key

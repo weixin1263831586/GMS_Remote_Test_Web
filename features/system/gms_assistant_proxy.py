@@ -431,6 +431,8 @@ async def gms_assistant_root():
 # advertise their removal via Deprecation/Sunset; drop them once the
 # successor scoped routes are confirmed as the only seen traffic.
 _ASSISTANT_ROOT_SHIM_SUNSET = "Wed, 31 Dec 2025 23:59:59 GMT"
+# 到期跟进：Sunset 已过期/临近时，先确认线上无根级路径流量
+# （前端已核实无引用，仅存历史书签），再删除整个 root-level shim 段落。
 
 
 def _deprecation_headers() -> dict[str, str]:

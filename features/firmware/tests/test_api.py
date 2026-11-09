@@ -611,9 +611,10 @@ class FirmwareApiTests(unittest.TestCase):
         with (
             patch("features.firmware.shares_api.paramiko.SSHClient", return_value=_FakeClient()),
             patch("features.firmware.shares_api._host_credentials", return_value={
-                "hostname": "10.10.10.206", "username": "hcq", "password": None,
+                # RFC5737 保留网段 + 通用用户名：真实内网拓扑不得进入 git 历史。
+                "hostname": "192.0.2.10", "username": "operator", "password": None,
                 "key_filename": None, "port": 22,
-            }),shares_api._sftp_client("10.10.10.206", "hcq", {}, password="override")
+            }),shares_api._sftp_client("192.0.2.10", "operator", {}, password="override")
         ):
             pass
 

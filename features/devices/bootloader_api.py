@@ -167,7 +167,10 @@ def _run_bootloader_lock_block(
                 ssh, f"chmod +x {shlex.quote(remote_script)}"
             )
         except Exception as exc:
-            return _api_error(f"Script upload failed: {exc!s}", status_code=500)
+            # SFTP/SSH 基础设施失败属于远端故障：语义码 502，异常原文只进
+            # 日志，不回显给客户端（可能包含远端路径/主机细节）。
+            logger.error("device-lock script upload failed: %s", exc)
+            return _api_error("脚本上传失败（远端 SSH/SFTP 错误）", status_code=502)
 
         results = []
         for device_id in devices:

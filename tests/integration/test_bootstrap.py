@@ -234,6 +234,28 @@ class BootstrapTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertNotIn(response.status_code, (401, 403))
 
+    def test_auth_gate_redirects_document_navigation_but_keeps_json_401(self):
+        """浏览器原生导航的下载/预览链接（<a href>、window.open）在会话
+        失效时不得落进 Chrome「无法下载 - 需要授权」死错误：GET 且 Accept
+        含 text/html 时改 303 到 shell（新标签页呈现登录层）；fetch/apiCall
+        （Accept */*，无 text/html）保持 JSON 401，由 apiCall 弹登录层。"""
+        from fastapi.testclient import TestClient
+
+        with patch.dict(os.environ, {'GMS_AUTH_REQUIRED': 'true'}):
+            client = TestClient(create_app(), follow_redirects=False)
+            nav = client.get(
+                '/api/test/suites/download?suite_path=/tmp/suite&path=a.html',
+                headers={'Accept': 'text/html,application/xhtml+xml'},
+            )
+            self.assertEqual(nav.status_code, 303)
+            self.assertEqual(nav.headers['location'], '/')
+            api = client.get(
+                '/api/test/suites/download?suite_path=/tmp/suite&path=a.html',
+                headers={'Accept': '*/*'},
+            )
+            self.assertEqual(api.status_code, 401)
+            self.assertEqual(api.json()['error'], 'Authentication required')
+
     def test_create_app_keeps_automation_cluster_preflight_enabled(self):
         from features.automation import api as automation
         from features.cluster import get_cluster_service

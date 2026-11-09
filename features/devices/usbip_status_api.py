@@ -375,6 +375,8 @@ async def list_usbip_source_devices(
     enforce_usbip_host_access(request, device_host, resolved)
     result = await asyncio.to_thread(usbip_manager.list_source_devices, resolved)
     if not result.get("success"):
+        # manager 返回的 error 均为策划文案（主机名级别，不含远端 stderr）；
+        # 这里只做语义映射，不再原样透传底层异常文本。
         if "凭据" in str(result.get("error") or ""):
             return error_response(
                 result.get("error"), status_code=401,
@@ -383,10 +385,13 @@ async def list_usbip_source_devices(
         message = result.get("error", "USB设备枚举失败")
         error_fields = _usbip_error_fields(message)
         if result.get("install_guide"):
+            # usbipd 缺失属于源主机依赖不可用，不是 Controller 编程错误。
             error_fields["install_guide"] = str(result["install_guide"])
+            return error_response(message, status_code=503, **error_fields)
+        # SSH/远端执行失败是远端基础设施故障，语义码为 502 而非 500。
         return error_response(
             message,
-            status_code=500,
+            status_code=502,
             **error_fields,
         )
     _reconcile_usbip_assignment_serials(

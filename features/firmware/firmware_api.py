@@ -334,7 +334,14 @@ async def burn_firmware(
     caller = get_authenticated_user(request)
     agent_burn = caller is not None and caller.role == AGENT_ROLE
     if agent_burn:
-        approval_token = str(request.query_params.get("approval_token") or "").strip()
+        # 令牌绝不进 URL：Controller/代理访问日志会留存 query。新 CLI 把
+        # approval token 放在 X-GMS-Approval-Token 请求头；query 参数仅为
+        # 旧版客户端兼容保留。
+        approval_token = str(
+            request.headers.get("x-gms-approval-token")
+            or request.query_params.get("approval_token")
+            or ""
+        ).strip()
         if not approval_token:
             return error_response(
                 "Agent 烧录需要一次性审批令牌：请让用户运行 "

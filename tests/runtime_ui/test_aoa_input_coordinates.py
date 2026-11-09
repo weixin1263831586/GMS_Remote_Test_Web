@@ -15,9 +15,18 @@ class RuntimeAoaInputCoordinatesTests(RuntimeUiHarness):
                 'success': True, 'profiles': [], 'command': 'click 200 540'}))
 
         page.route('**/api/devices/aoa/**', reply)
-        for path in ('**/api/devices/management*', '**/api/cluster/devices*'):
-            page.route(path, lambda route: route.fulfill(
-                content_type='application/json', body='{"success":true,"devices":[]}'))
+        # 页面初始化会真实调用 loadDevicesManagement（10s 自动刷新同源），
+        # 其响应晚于测试 evaluate 的钉状态时会把清单清空（异步初始化竞态，
+        # 画面被重同步隐藏）。桩直接返回 REC 设备：无论在飞请求何时
+        # resolve，清单都保持一致。
+        page.route('**/api/devices/management*', lambda route: route.fulfill(
+            content_type='application/json', body=json.dumps({
+                'success': True, 'devices': [
+                    {'serial_no': 'REC', 'worker_id': 'worker-a',
+                     'transport': 'local_usb', 'state': 'available',
+                     'status': 'available'}]})))
+        page.route('**/api/cluster/devices*', lambda route: route.fulfill(
+            content_type='application/json', body='{"success":true,"devices":[]}'))
         self.goto_shell(page)
         page.evaluate("""async () => {
             switchPage('devices'); await aoaViewToggle(true);
@@ -25,6 +34,17 @@ class RuntimeAoaInputCoordinatesTests(RuntimeUiHarness):
             window.aoaLiveScreen = {start: async () => {}, stop: () => {}, isActive: () => window.testLive};
             aoaSyncDeviceSources([{serial_no:'REC',worker_id:'worker-a',transport:'local_usb',state:'available'}]);
             window.loadDevicesManagement = async () => {};
+            aoaPanelState.liveTargetKey = 'worker-a:REC';
+            const canvas = aoaEl('aoa-screen-canvas');
+            canvas.width = 576; canvas.height = 1024; canvas.hidden = false;
+            aoaEl('aoa-screen-image').hidden = true; aoaEl('aoa-screen-empty').hidden = true;
+        }""")
+        # switchPage('devices') 触发的 loadDevicesManagement 在飞结算后，
+        # 只读重同步会按清单刷新投屏区；等它先落地，再重钉画布状态，
+        # 消除顺序竞态（与 test_aoa_screen_grid 的 prepare 同一模式）。
+        page.wait_for_function(
+            "() => (aoaPanelState.devices || []).some(d => d.serial_no === 'REC')")
+        page.evaluate("""() => {
             aoaPanelState.liveTargetKey = 'worker-a:REC';
             const canvas = aoaEl('aoa-screen-canvas');
             canvas.width = 576; canvas.height = 1024; canvas.hidden = false;

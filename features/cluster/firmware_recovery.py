@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from features.auth import AGENT_ROLE, get_authenticated_user, is_machine_principal, principal_owner_id
+from features.auth import AGENT_ROLE, is_machine_principal, principal_owner_id, require_human_principal
 from features.devices import profile_store, usbip_source_host_for_device
 from foundation.aoa_hid_mode import profile_hid_options
 from foundation.aoa_profile import parse_profile_commands
@@ -38,8 +38,14 @@ def freeze_firmware_recovery(request, repository, worker_id: str, devices: list[
                              profile_id: str, boot_wait_seconds=60) -> dict | None:
     if not profile_id:
         return None
-    user = get_authenticated_user(request)
-    if is_machine_principal(user) or (user and user.role == AGENT_ROLE):
+    # ADR 0012 human-only，双层守卫：
+    # ① require_human_principal 先完成认证（无效/被拒 Bearer 在此 401，
+    #    原实现会放行 None 用户、把守卫后移到 principal_owner_id），
+    #    并拒绝带 auth_method 标记的 agent/machine 主体；
+    # ② 对直接构造的 principal（如内部调用/测试注入，无 auth_method
+    #    标记），按角色与主体身份再拒一次。固件审批不包含 UI 操作。
+    user = require_human_principal(request)
+    if is_machine_principal(user) or user.role == AGENT_ROLE:
         raise ApiError.forbidden("烧写后 AOA 恢复需要人工管理员会话；固件审批不包含 UI 操作")
     if len(devices) != 1:
         raise ApiError.invalid_semantics("启用烧写后 AOA 恢复时，一次请选择一台设备")
@@ -142,7 +148,7 @@ def prepare_local_firmware_recovery(request, client_id: str, devices: list[str],
     # Extend this exact burn's claim to its physical port and aliases. Generic
     # device actions still cannot borrow another operation's firmware claim.
     extra_source = f"firmware-aoa:{claim['id']}"
-    aliases = [item for item in repository._claim_devices(worker_id, [device["id"]])
+    aliases = [item for item in repository.alias_claim_targets(worker_id, device["id"])
                if item["device_key"] != device["id"]]
     acquired, extra = repository.claims.acquire(
         aliases, owner_id=client_id, username=claim["username"], source_type="firmware",

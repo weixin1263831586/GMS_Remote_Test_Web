@@ -332,8 +332,9 @@ async def stream_test_logs(request: Request):
                     break
                 await asyncio.sleep(0.5)
         except Exception as e:
-            logger.error(f"Error in stream: {e}")
-            yield f"Error: {e!s}\n"
+            logger.error(f"Error in stream: {e}", exc_info=True)
+            # SSE 是纯文本通道，异常原文可能含路径/内网细节，推固定文案。
+            yield "Error: log stream failed (see server logs)\n"
 
     return StreamingResponse(
         log_stream(),

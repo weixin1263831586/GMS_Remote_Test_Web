@@ -314,9 +314,13 @@ class RemoteSuiteDownloadTests(unittest.IsolatedAsyncioTestCase):
                 runtime.config_manager, runtime.ssh_manager, \
                     runtime.get_client_id_from_request = old
 
-        self.assertEqual(response.status_code, 500)
+        # 基础设施失败走错误模型：502（UPSTREAM_FAILURE）+ 策划文案；
+        # 远端 curl 输出不可信，不得回显（错误码表语义）。
+        self.assertEqual(response.status_code, 502)
         payload = json.loads(response.body)
-        self.assertIn("404", payload.get("error", ""))
+        self.assertEqual(payload.get("code"), "UPSTREAM_FAILURE")
+        self.assertIn("套件压缩包下载失败", payload.get("error", ""))
+        self.assertNotIn("404", payload.get("error", ""))
 
 
 if __name__ == "__main__":

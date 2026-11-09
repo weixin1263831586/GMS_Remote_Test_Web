@@ -149,7 +149,11 @@ async def run_suite_download_task(task_id: str, url: str, archive_path: str):
         if process and process.returncode is None:
             process.kill()
             await process.wait()
-        update_suite_download_task(task_id, status="error", error=f"Download error: {e!s}")
+        # 任务 error 会随任务状态接口回传给所有者：原文只进日志。
+        logger.error(f"[Suite Download] Failed: {e}", exc_info=True)
+        update_suite_download_task(
+            task_id, status="error", error="套件下载失败（详见服务端日志）"
+        )
 
 
 def _extract_archive_with_progress(archive_path: str, extract_dir: str, target_dir_name: str, task_id: str | None = None) -> dict:

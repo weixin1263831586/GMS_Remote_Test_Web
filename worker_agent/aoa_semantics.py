@@ -5,7 +5,7 @@ import logging
 import time
 
 from foundation.aoa_certification import matching_case
-from foundation.aoa_display import rect, standard_inverse, standard_point
+from foundation.aoa_display import MAX_SAFE_INPUT_ERROR_PX, rect, standard_inverse, standard_point
 from foundation.aoa_profile import MAX_AOA_OPERATION_SECONDS, parse_profile_commands
 from foundation.aoa_semantics import validate_plan
 
@@ -34,7 +34,7 @@ def resolve_live_command(command, step, layout, case, context, observer, timeout
         if len(matches) != 1:
             raise ObservationUnavailableError("目标元素不存在，停止自动点击")
         left, top, right, bottom = rect(matches[0]["bounds"])
-        if case["max_error_px"] > min(8, (right - left) / 4, (bottom - top) / 4):
+        if case["max_error_px"] > min(MAX_SAFE_INPUT_ERROR_PX, (right - left) / 4, (bottom - top) / 4):
             raise ObservationUnavailableError("当前控件过小，超过实测输入误差的安全范围")
         frame = layout.get("frame", [0, 0, 1, 1])
         x, y = (left + right) / 2, (top + bottom) / 2
@@ -44,7 +44,7 @@ def resolve_live_command(command, step, layout, case, context, observer, timeout
         point = standard_inverse(x, y, context["display"], case["axis_rotation"], case["input"]["viewport"])
         cooked = standard_point(*point, context["display"], case["axis_rotation"], case["input"]["viewport"])
         error = ((cooked[0] - x) ** 2 + (cooked[1] - y) ** 2) ** 0.5 + case["max_error_px"]
-        if error > min(8, (right - left) / 4, (bottom - top) / 4):
+        if error > min(MAX_SAFE_INPUT_ERROR_PX, (right - left) / 4, (bottom - top) / 4):
             raise ObservationUnavailableError("控件中心量化后的误差超过安全范围")
         points.append(point)
     if parsed.kind == "swipe":

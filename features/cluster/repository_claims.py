@@ -112,6 +112,18 @@ class ClusterClaimRepositoryMixin:
                     })
         return claimed
 
+    def alias_claim_targets(
+        self, worker_id: str, device_id: str
+    ) -> list[dict[str, Any]]:
+        """Read-only public view of :meth:`_claim_devices` for one device.
+
+        Exposed for flows that must know the physical-port/alias key set
+        before acquiring claims (firmware AOA recovery extends the burn's
+        claim to the bound port); callers reach this public method instead
+        of the private helper.
+        """
+        return self._claim_devices(worker_id, [device_id])
+
     def acquire_device_operation_claim(
         self,
         worker_id: str,

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import shlex
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -15,7 +14,7 @@ from features.auth import (
 from foundation.error_model import ApiError, record_internal_error
 from foundation.errors import handle_api_errors
 from foundation.responses import ApiResponse, error_response
-from foundation.security import sanitize_device_ids
+from foundation.security import quote_device_shell_arg, sanitize_device_ids
 from foundation.security_audit import security_audit_logger
 
 from . import reconnect, runtime
@@ -253,9 +252,10 @@ async def connect_wifi(req: WifiConnectRequest, request: Request):
         wifi_defaults = runtime.config_manager.get_wifi_defaults(config)
         ssid = req.ssid or wifi_defaults["ssid"]
         password = req.password or wifi_defaults["password"]
-        # Wi-Fi 参数转义后再传给 ADB Shell。
-        ssid_q = shlex.quote(ssid)
-        password_q = shlex.quote(password)
+        # adb 会把 shell 后的参数拼成一行交设备端 shell 二次解析，WiFi 参数
+        # 必须按设备端语法转义（foundation/security.py::quote_device_shell_arg）。
+        ssid_q = quote_device_shell_arg(ssid)
+        password_q = quote_device_shell_arg(password)
         async with runtime.ssh_manager.async_optional_connection(config) as ssh:
             if not ssh:
                 return ApiError.upstream_failure(

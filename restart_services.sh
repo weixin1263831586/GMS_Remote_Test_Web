@@ -52,13 +52,18 @@ systemctl_admin() {
     if [[ "${EUID}" -eq 0 ]]; then
         systemctl "$@"
     else
-        # sudo 失败（无权限/无 sudo）时退回 polkit 非交互通道；若 sudo
-        # 本身执行了命令但命令失败（返回非零），不得重试第二种方式——
-        # 否则一次失败的服务操作会被执行两次（副作用重复）。
-        if sudo -n systemctl "$@" 2>/dev/null; then
-            return 0
+        # 先只校验 sudo 凭据（sudo -n true / sudo -v 不执行目标命令），
+        # 凭据可用才让 systemctl 通过 sudo 执行且仅执行一次。sudo 会把
+        # 目标命令自身的退出码原样返回：若直接探测 `sudo -n systemctl`，
+        # "命令已执行但失败"（如 restart 撞端口）与 "sudo 无权执行" 无法
+        # 区分，会再跑 sudo/polkit 通道把同一操作重复执行最多三次。
+        if sudo -n true 2>/dev/null; then
+            sudo -n systemctl "$@"
+        elif sudo -v 2>/dev/null; then
+            sudo systemctl "$@"
+        else
+            systemctl --no-ask-password "$@"
         fi
-        sudo systemctl "$@" || systemctl --no-ask-password "$@"
     fi
 }
 
@@ -238,12 +243,14 @@ else
     fi
 
     echo -e "  启动 FastAPI (${PORT})..."
+    # APE_API_KEY 与 tools/GMS-Host-Tools/env.sh 统一从 GMS_SOFTWARE_ROOT
+    # 解析，避免两处路径约定漂移导致静默取错凭据文件。
     nohup setsid env \
         GMS_ENV="${GMS_ENV:-production}" \
         GMS_DATA_ROOT="${GMS_DATA_ROOT:-${PROJECT_DIR}/data}" \
         PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-${PROJECT_DIR}/data/pycache}" \
         GMS_SOFTWARE_ROOT="${GMS_SOFTWARE_ROOT:-${HOME}/Software}" \
-        APE_API_KEY="${APE_API_KEY:-${HOME}/Software/gts-rockchip.json}" \
+        APE_API_KEY="${APE_API_KEY:-${GMS_SOFTWARE_ROOT:-${HOME}/Software}/gts-rockchip.json}" \
         "${PYTHON_BIN}" -m uvicorn app:app \
         --host 0.0.0.0 --port "${PORT}" --log-level info --access-log \
         --ssl-keyfile "${CERT_KEY}" --ssl-certfile "${CERT_CRT}" \
@@ -252,11 +259,18 @@ else
 fi
 
 # 健康检查（带重试，最多等待 60 秒；清理 Python 缓存后冷启动可能超过 20 秒）
+# 本机回环 + 自签证书场景：优先使用 GMS_CURL_CA_CERT 校验，仅在未配置时
+# 退化为 -k（与 gms-remote-test.sh 的 GMS_CURL_* 口径一致，-k 仅限本机回环）。
+if [[ -n "${GMS_CURL_CA_CERT:-}" ]]; then
+    CURL_TLS_ARGS=(--cacert "${GMS_CURL_CA_CERT}")
+else
+    CURL_TLS_ARGS=(-k)
+fi
 echo -e "${BLUE}  进行健康检查...${NC}"
 HEALTH_OK=false
 for attempt in $(seq 1 20); do
     sleep 3
-    if timeout 5 curl -sk -f "https://localhost:${PORT}/api/system/health/live" >/dev/null 2>&1; then
+    if timeout 5 curl -s -f "${CURL_TLS_ARGS[@]}" "https://localhost:${PORT}/api/system/health/live" >/dev/null 2>&1; then
         HEALTH_OK=true
         break
     fi

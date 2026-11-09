@@ -1488,6 +1488,12 @@ def run_aoa_sequence(
         cleanup_errors = cleanup_diagnostics()
         if session is not None:
             device, registered = session.device, session.registered
+            if device is None:
+                # Rebuild failure path (prepare() aborted mid-way): fall back
+                # to the last known handle so reset_usb/dispose/restore still
+                # run. HID steps stay skipped because `registered` is empty —
+                # the re-enumerated device must not receive stale HID writes.
+                device = session.last_device
         if device is not None:
             steps = [
                 ("release_touch", lambda: _transfer(device, aoa_profile.AOA_ACCESSORY_SEND_HID_EVENT,

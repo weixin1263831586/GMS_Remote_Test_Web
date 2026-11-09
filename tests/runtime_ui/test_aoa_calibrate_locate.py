@@ -19,9 +19,18 @@ class RuntimeAoaCalibrateLocateTests(RuntimeUiHarness):
             route.fulfill(content_type='application/json', body=json.dumps({
                 'success': True, 'profiles': [], 'command': 'click 200 540'}))
         page.route('**/api/devices/aoa/**', base_reply)
-        for path in ('**/api/devices/management*', '**/api/cluster/devices*'):
-            page.route(path, lambda route: route.fulfill(
-                content_type='application/json', body='{"success":true,"devices":[]}'))
+        # 页面初始化会真实调用 loadDevicesManagement（10s 自动刷新同源），
+        # 其响应晚于测试 evaluate 的钉状态时会把清单清空（异步初始化竞态，
+        # 网格随画面一起被重同步隐藏）。桩直接返回 REC 设备：无论在飞
+        # 请求何时 resolve，清单都保持一致。
+        page.route('**/api/devices/management*', lambda route: route.fulfill(
+            content_type='application/json', body=json.dumps({
+                'success': True, 'devices': [
+                    {'serial_no': 'REC', 'worker_id': 'worker-a',
+                     'transport': 'local_usb', 'state': 'available',
+                     'status': 'available'}]})))
+        page.route('**/api/cluster/devices*', lambda route: route.fulfill(
+            content_type='application/json', body='{"success":true,"devices":[]}'))
         page.add_init_script(
             "try { localStorage.removeItem('aoa-screen-grid'); } catch (e) {}")
         self.goto_shell(page)
@@ -36,6 +45,20 @@ class RuntimeAoaCalibrateLocateTests(RuntimeUiHarness):
             canvas.dataset.aoaFrameReady = '1';
             aoaEl('aoa-screen-image').hidden = true; aoaEl('aoa-screen-empty').hidden = true;
             // 直接注入两条命令（跳过录制）：click + sleep。
+            aoaPanelState.commands = ['click 180 320', 'sleep 1000'];
+            aoaRenderCommands();
+        }""")
+        # switchPage('devices') 触发的 loadDevicesManagement 在飞结算后，
+        # 只读重同步会按清单刷新投屏区；等它先落地，再重钉画布状态，
+        # 消除顺序竞态（与 test_aoa_screen_grid 的 prepare 同一模式）。
+        page.wait_for_function(
+            "() => (aoaPanelState.devices || []).some(d => d.serial_no === 'REC')")
+        page.evaluate("""() => {
+            aoaPanelState.liveTargetKey = 'worker-a:REC';
+            const canvas = aoaEl('aoa-screen-canvas');
+            canvas.width = 720; canvas.height = 1280; canvas.hidden = false;
+            canvas.dataset.aoaFrameReady = '1';
+            aoaEl('aoa-screen-image').hidden = true; aoaEl('aoa-screen-empty').hidden = true;
             aoaPanelState.commands = ['click 180 320', 'sleep 1000'];
             aoaRenderCommands();
         }""")

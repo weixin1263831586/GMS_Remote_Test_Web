@@ -51,13 +51,18 @@ gms-rt-burn-firmware() {
         return "$GMS_RT_EXIT_USAGE"
     fi
 
-    [ -z "$firmware_path" ] && { error "Firmware path required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--approval-token TOKEN] [--wait-online[=SECONDS]]"; return 1; }
-    [ -z "$devices" ] && { error "Devices required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--approval-token TOKEN] [--wait-online[=SECONDS]]"; return 1; }
+    [ -z "$firmware_path" ] && { error "Firmware path required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--approval-token TOKEN | env GMS_RT_BURN_APPROVAL_TOKEN] [--wait-online[=SECONDS]]"; return 1; }
+    [ -z "$devices" ] && { error "Devices required. Usage: gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--approval-token TOKEN | env GMS_RT_BURN_APPROVAL_TOKEN] [--wait-online[=SECONDS]]"; return 1; }
     [ ! -f "$firmware_path" ] && { error "Firmware file not found: $firmware_path"; return 1; }
     check_jq || return 1
     devices=$(_resolve_devices "$devices")
     # Agent token sessions burn only with a one-shot approval; human
     # admin sessions may omit it. Forwarded to the server via env.
+    # MCP 工具走 env 传递（GMS_RT_BURN_APPROVAL_TOKEN）而不是
+    # --approval-token argv：detached 烧录进程的 argv 在整个拷贝/烧写
+    # 窗口内对同机用户可读（/proc/<pid>/cmdline），env 只对 root/自身
+    # 可读。flag 仍为人工 CLI 兼容入口。
+    approval_token="${approval_token:-${GMS_RT_BURN_APPROVAL_TOKEN:-}}"
     GMS_RT_BURN_APPROVAL_TOKEN="$approval_token"
     export GMS_RT_BURN_APPROVAL_TOKEN
 

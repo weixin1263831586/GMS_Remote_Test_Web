@@ -152,14 +152,20 @@ class AuthService(
 
     def _verify_password(self, password: str, stored: str) -> bool:
         try:
-            algorithm, iterations, salt, digest = stored.split("$", 3)
-            if algorithm != PASSWORD_ALGORITHM:
+            algorithm, iterations_raw, salt, digest = stored.split("$", 3)
+            if algorithm != PASSWORD_ALGORITHM or not iterations_raw.isdigit():
+                return False
+            iterations = int(iterations_raw)
+            # 存储串里的迭代数属于持久化数据：行被篡改成超大值会把每次
+            # 登录变成 CPU 放大攻击。钳制到合法窗口（兼容历史部署较低的
+            # 迭代数，上限为当前值的 8 倍）。
+            if not (1 <= iterations <= PASSWORD_ITERATIONS * 8):
                 return False
             candidate = hashlib.pbkdf2_hmac(
                 "sha256",
                 password.encode("utf-8"),
                 salt.encode("ascii"),
-                int(iterations),
+                iterations,
             ).hex()
             return hmac.compare_digest(candidate, digest)
         except Exception:

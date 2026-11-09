@@ -306,7 +306,12 @@ async def get_opengrok_config(
 
 
 @router.get("/api/tailscale/status")
-async def get_tailscale_status(request: Request):
+async def get_tailscale_status(
+    request: Request,
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
+):
     """获取 Tailscale 内网访问地址"""
     try:
         status = await asyncio.to_thread(_get_tailscale_status)
@@ -586,7 +591,12 @@ async def update_static_routes_config(
 
 
 @router.get("/api/sidebar-order")
-async def get_sidebar_order(request: Request):
+async def get_sidebar_order(
+    request: Request,
+    _user: CurrentUser | None = Depends(
+        require_authenticated_user_when_auth_required
+    ),
+):
     """获取侧边栏导航顺序。"""
     owner_id = owner_id_from_request(request)
     preferences = load_navigation_preferences(owner_id)

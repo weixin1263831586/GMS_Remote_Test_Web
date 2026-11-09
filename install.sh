@@ -582,7 +582,12 @@ setup_local_ssh_key() {
     fi
 
     sudo -H -u "${RUN_USER}" touch "${RUN_HOME}/.ssh/known_hosts"
+    # TOFU（首次信任）：ssh-keyscan 盲写会让安装期中间人钉入伪造主机密钥，
+    # 污染后续 SSH 执行边界的信任根。操作员有责任在安装完成后核对指纹
+    # （compare with `ssh-keygen -lf` against the hosts' out-of-band fingerprint）。
+    echo "  ⚠ TOFU: 以下 known_hosts 条目来自网络抓取，安装后请人工核对主机指纹" >&2
     for known_host in "${HOST_IP}" localhost 127.0.0.1; do
+        echo "    ${known_host}: $(sudo -H -u "${RUN_USER}" ssh-keyscan -H -T 3 "${known_host}" 2>/dev/null | head -1 | ssh-keygen -lf /dev/stdin 2>/dev/null | awk '{print $2, $4}' || echo '指纹获取失败，请人工核验')" >&2
         sudo -H -u "${RUN_USER}" ssh-keyscan -H -T 3 "${known_host}" >> "${RUN_HOME}/.ssh/known_hosts" 2>/dev/null || true
     done
     sudo -H -u "${RUN_USER}" sh -c "sort -u '${RUN_HOME}/.ssh/known_hosts' -o '${RUN_HOME}/.ssh/known_hosts'"
@@ -690,7 +695,15 @@ configure_sudoers() {
 # USB/IP commands are executed only over the authenticated host SSH boundary.
 # Network routes and Tailscale lifecycle remain deployment-time administration.
 # VPN activation uses the separate NetworkManager Polkit rule below, not sudo.
-Cmnd_Alias GMS_WEB_APP_CMDS = /usr/sbin/usbip *, /usr/bin/usbip *, /sbin/modprobe *, /usr/sbin/modprobe *, /usr/bin/udevadm *, /sbin/udevadm *, /usr/bin/systemctl start ${SERVICE_NAME}-local-software.service, /bin/systemctl start ${SERVICE_NAME}-local-software.service
+# 最小权限：modprobe 仅允许加载 USB/IP 所需的 vhci_hcd；udevadm 仅允许
+# 只读 info 与设备重枚举 trigger/settle——通配 `modprobe *`/`udevadm *`
+# 可加载任意内核模块或重载 udev 规则，超出 USB/IP 实际需要。
+Cmnd_Alias GMS_WEB_APP_CMDS = /usr/sbin/usbip *, /usr/bin/usbip *, \\
+    /sbin/modprobe vhci_hcd, /usr/sbin/modprobe vhci_hcd, \\
+    /usr/bin/udevadm info *, /sbin/udevadm info *, \\
+    /usr/bin/udevadm trigger, /sbin/udevadm trigger, \\
+    /usr/bin/udevadm settle, /sbin/udevadm settle, \\
+    /usr/bin/systemctl start ${SERVICE_NAME}-local-software.service, /bin/systemctl start ${SERVICE_NAME}-local-software.service
 ${RUN_USER} ALL=(root) NOPASSWD: GMS_WEB_APP_CMDS
 EOF
     sudo visudo -cf "${tmp}" >/dev/null

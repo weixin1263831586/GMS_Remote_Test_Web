@@ -74,6 +74,15 @@ class AoaSession:
     error_type: type[Exception]
     clock: Callable = time.monotonic
     rebuilds: int = 0
+    # Last handle that was successfully obtained (initial build or rebuild).
+    # ``device`` is nulled while a rebuild is in flight; cleanup must fall
+    # back to ``last_device`` so a rebuild failure can still run the USB
+    # level steps (reset/dispose/restore) instead of skipping them entirely.
+    last_device: Any = None
+
+    def __post_init__(self) -> None:
+        if self.device is not None and self.last_device is None:
+            self.last_device = self.device
 
     def _find(self):
         try:
@@ -126,8 +135,15 @@ class AoaSession:
         old = self.device
         self.device = None
         self.registered = set()
-        self.dispose(old)
+        try:
+            self.dispose(old)
+        except Exception as exc:
+            # Best-effort: a failed stale-handle dispose must not abort the
+            # rebuild — the action layer keeps ``last_device`` (the old
+            # handle) for its USB-level cleanup steps.
+            logger.warning('AOA old-handle dispose failed during rebuild: %s', exc)
         self.device = self.configure(timeout_seconds=max(1, int(timeout - self.clock())))
+        self.last_device = self.device
         validate_binding()
         self.detach(self.device)
         self.sleep(1.0)

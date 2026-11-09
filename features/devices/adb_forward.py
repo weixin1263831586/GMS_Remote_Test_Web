@@ -119,14 +119,20 @@ class ADBForwardManager:
                 return result
 
             except Exception as e:
-                logger.error(f"Error starting ADB forward: {e}")
-                return {'success': False, 'error': str(e)}
+                logger.error(f"Error starting ADB forward: {e}", exc_info=True)
+                return {
+                    'success': False,
+                    'error': 'ADB 端口转发失败（SSH/adb 错误，详见服务端日志）',
+                }
             finally:
                 self.ssh_manager.return_connection(ssh)
 
         except Exception as e:
-            logger.error(f"Error in start_forward: {e}")
-            return {'success': False, 'error': str(e)}
+            logger.error(f"Error in start_forward: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': 'ADB 端口转发失败（SSH/adb 错误，详见服务端日志）',
+            }
 
     def stop_forward(self) -> dict[str, Any]:
         """
@@ -148,14 +154,20 @@ class ADBForwardManager:
                 return {'success': True, 'message': '✅ ADB端口转发已停止'}
 
             except Exception as e:
-                logger.error(f"Error stopping ADB forward: {e}")
-                return {'success': False, 'error': str(e)}
+                logger.error(f"Error stopping ADB forward: {e}", exc_info=True)
+                return {
+                    'success': False,
+                    'error': 'ADB 端口转发停止失败（SSH/adb 错误，详见服务端日志）',
+                }
             finally:
                 self.ssh_manager.return_connection(ssh)
 
         except Exception as e:
-            logger.error(f"Error in stop_forward: {e}")
-            return {'success': False, 'error': str(e)}
+            logger.error(f"Error in stop_forward: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': 'ADB 端口转发停止失败（SSH/adb 错误，详见服务端日志）',
+            }
 
 
 # 全局ADB转发管理器实例

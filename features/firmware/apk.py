@@ -368,10 +368,13 @@ async def run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
                 runtime.global_state.apk_analysis_tasks[task_id]['error'] = f'jadx 反编译超时（超过{runtime.jadx_timeout}秒）'
                 persist_apk_task_locked(task_id)
     except Exception as e:
+        # 任务 error 字段会随所有者查询接口回传：异常原文（可能含本地路径）
+        # 只进日志，任务里存策划文案。
+        logger.error("jadx analysis task %s failed: %s", task_id, e, exc_info=True)
         with runtime.global_state.apk_analysis_tasks_lock:
             if task_id in runtime.global_state.apk_analysis_tasks:
                 runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'error'
-                runtime.global_state.apk_analysis_tasks[task_id]['error'] = str(e)
+                runtime.global_state.apk_analysis_tasks[task_id]['error'] = 'APK 分析失败：内部错误（详见服务端日志）'
                 persist_apk_task_locked(task_id)
 
 

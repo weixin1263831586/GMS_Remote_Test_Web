@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import smtplib
@@ -13,6 +14,8 @@ from email.utils import formataddr
 from pathlib import Path
 from typing import Any
 
+
+logger = logging.getLogger(__name__)
 
 _SAFE_ADDRESS_RE = re.compile(r'[^\s,;<>"@]+@[^\s,;<>"@]+')
 
@@ -116,7 +119,16 @@ def _email_password(email_cfg: dict[str, Any]) -> str:
             return decrypt_secret(encrypted).strip()
         except Exception:
             return ""
-    return str(email_cfg.get("password") or "").strip()
+    legacy = str(email_cfg.get("password") or "").strip()
+    if legacy:
+        # 迁移告警：新写入已走平台密钥加密（email/api.py），明文分支只为
+        # 旧部署兼容。设定迁移截止点：所有部署改写为 encrypted_password
+        # 后移除本分支（migration mapping: scripts/sanitize_tracked_config.py）。
+        logger.warning(
+            "SMTP 密码仍以明文配置读取（遗留部署兼容）；请重新保存邮箱配置"
+            "以迁移为加密存储，明文兼容分支将在后续版本移除"
+        )
+    return legacy
 
 
 def _resolve_allowed_attachment(path: str, allowed_roots: list[str | os.PathLike[str]]) -> Path | None:

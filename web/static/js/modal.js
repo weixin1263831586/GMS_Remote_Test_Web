@@ -1,4 +1,9 @@
 // Shared modal helpers and Escape-key modal lifecycle management.
+//
+// 适用范围：web/shell 主应用文档——本文件是 shell 内 modal 可见性的唯一
+// owner（AGENTS.md UI/Modal 政策）。standalone/iframe 独立页面使用
+// web/static/js/embedded-ui/modal-controller.js（不同文档、互斥使用），
+// 不要把那套实现复制进 shell，否则违反唯一 owner 规则。
 
 // 可聚焦元素选择器：focus trap 与初始聚焦共用同一契约。
 const MODAL_FOCUSABLE_SELECTOR = [

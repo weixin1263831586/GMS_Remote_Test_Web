@@ -5,6 +5,12 @@ import math
 import re
 
 
+# 语义 AOA 输入误差的绝对安全上限（px）。计划编译（target_point）与
+# Worker 实时执行（worker_agent.aoa_semantics）共用同一来源，禁止
+# 在执行层另行硬编码，保证策略上限可审计、不漂移。
+MAX_SAFE_INPUT_ERROR_PX = 8.0
+
+
 def input_displays(dump):
     """Only expose unambiguous viewport identities, never the first display found."""
     candidates = {}
@@ -106,7 +112,7 @@ def target_point(target, frame, display, *, rotate_quarters=0, max_error_px=0):
         dx, dy = dy, dx
     margin = dx * (right - left) * display[0]
     margin_y = dy * (bottom - top) * display[1]
-    tolerance = min(8.0, margin / 2, margin_y / 2)
+    tolerance = min(MAX_SAFE_INPUT_ERROR_PX, margin / 2, margin_y / 2)
     if max_error_px > tolerance:
         raise ValueError("verified mapping error exceeds this control's safe click margin")
     x, y = ((x, y), (1 - y, x), (1 - x, 1 - y), (y, 1 - x))[rotate_quarters]

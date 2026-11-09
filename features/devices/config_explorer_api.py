@@ -240,6 +240,9 @@ async def api_explore(
                 effective_limit=effective_limit,
             )
         )
+    except ValueError as e:
+        # 包名白名单拒绝：文案为固定提示，不回显原始输入。
+        return error_response(str(e), status_code=400)
     except RuntimeError as e:
         # explore() 的领域错误文案（设备离线/包不存在/工具失败）由本模块生成，
         # 面向客户端是安全的；其余未知异常不得回显 str(e)。

@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from foundation.sqlite_schema import ensure_schema
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -33,47 +35,64 @@ class DeviceClaimRegistry:
             if self._memory_conn is None:
                 self._memory_conn = sqlite3.connect(":memory:", check_same_thread=False)
                 self._memory_conn.row_factory = sqlite3.Row
+                self._initialize(self._memory_conn)
             conn = self._memory_conn
-        else:
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            conn = sqlite3.connect(str(self.db_path), timeout=30)
-            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=30000")
+            return conn
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(self.db_path), timeout=30)
+        conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout=30000")
-        schema_exists = conn.execute(
-            """SELECT 1 FROM sqlite_master
-               WHERE type='table' AND name='device_claims'"""
-        ).fetchone() is not None
-        if not schema_exists:
-            self._initialize(conn)
+        # File-backed registries may be opened concurrently by Web, Worker and
+        # CLI processes; route first-time initialisation through ensure_schema
+        # so it is per-process cached and the DDL below runs under the SQLite
+        # write lock instead of racing (repository migration rule).
+        ensure_schema(conn, self.db_path, self._initialize)
         return conn
 
     def _initialize(self, conn: sqlite3.Connection) -> None:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS device_claims (
-                id TEXT PRIMARY KEY,
-                device_key TEXT NOT NULL,
-                worker_id TEXT NOT NULL,
-                serial TEXT NOT NULL,
-                owner_id TEXT NOT NULL,
-                username TEXT NOT NULL,
-                source_type TEXT NOT NULL,
-                source_id TEXT NOT NULL,
-                status TEXT NOT NULL,
-                generation INTEGER NOT NULL,
-                acquired_at TEXT NOT NULL,
-                heartbeat_at TEXT NOT NULL,
-                expires_at TEXT NOT NULL,
-                released_at TEXT NOT NULL
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_active_device_claim
-                ON device_claims(device_key) WHERE status='active';
-            CREATE INDEX IF NOT EXISTS idx_device_claim_source
-                ON device_claims(source_id,status);
-            CREATE INDEX IF NOT EXISTS idx_device_claim_owner
-                ON device_claims(owner_id,status);
-            """
-        )
+        # Hold BEGIN IMMEDIATE across the DDL so concurrent first-time
+        # initialisers serialise; every statement is IF NOT EXISTS, so the
+        # process that loses the race is a no-op. user_version stamps the
+        # schema generation for ensure_schema's identity check.
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS device_claims (
+                    id TEXT PRIMARY KEY,
+                    device_key TEXT NOT NULL,
+                    worker_id TEXT NOT NULL,
+                    serial TEXT NOT NULL,
+                    owner_id TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    generation INTEGER NOT NULL,
+                    acquired_at TEXT NOT NULL,
+                    heartbeat_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    released_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS idx_active_device_claim
+                   ON device_claims(device_key) WHERE status='active'"""
+            )
+            conn.execute(
+                """CREATE INDEX IF NOT EXISTS idx_device_claim_source
+                   ON device_claims(source_id,status)"""
+            )
+            conn.execute(
+                """CREATE INDEX IF NOT EXISTS idx_device_claim_owner
+                   ON device_claims(owner_id,status)"""
+            )
+            conn.execute("PRAGMA user_version = 1")
+        except Exception:
+            conn.rollback()
+            raise
         conn.commit()
 
     def _close(self, conn: sqlite3.Connection) -> None:

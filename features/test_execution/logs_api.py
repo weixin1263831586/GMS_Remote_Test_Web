@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from features.auth import require_authenticated_user_when_auth_required
 from features.devices import get_or_create_user_state, update_user_state_field
+from foundation.error_model import ApiError
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 
@@ -142,7 +143,12 @@ async def save_current_log(req: dict, request: Request):
             test_type=display_test_type,
         )
         if not result.get("success"):
-            return error_response(result.get("error", "Failed to save log"), status_code=500)
+            # manager 的 error 可能内嵌 str(e)（含服务器日志目录绝对路径）：
+            # 进日志，客户端收策划文案；本地存储失败属依赖不可用（503）。
+            logger.error("save-current-log failed: %s", result.get("error"))
+            return ApiError.dependency_unavailable(
+                "日志保存失败：本地存储不可用"
+            ).to_response()
 
         log_path = result["file_path"]
         log_filename = result["filename"]

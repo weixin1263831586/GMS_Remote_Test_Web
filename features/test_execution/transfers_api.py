@@ -21,7 +21,7 @@ from foundation.archives import (
     sanitize_suite_dir_name,
     sanitize_suite_filename_from_url,
 )
-from foundation.error_model import record_internal_error
+from foundation.error_model import ApiError, record_internal_error
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response
 
@@ -263,10 +263,17 @@ async def download_test_suite_from_url(
                 runtime.ssh_manager.execute_command, ssh, cmd, timeout=600,
             )
             if not download_result.ok:
+                # 远端 curl 的 stdout/stderr 属于不可信输出且可能含内网细节：
+                # 全量进日志，客户端只收策划文案 + 502（远端基础设施失败）。
                 detail = (
                     download_result.stdout or download_result.stderr or ""
                 ).strip()
-                return error_response(f"Download failed: {detail}", 500)
+                logger.error(
+                    "suite archive download failed on worker: %s", detail[:2000]
+                )
+                return ApiError.upstream_failure(
+                    "套件压缩包下载失败（Worker 远端错误）", service="ssh"
+                ).to_response()
             size_cmd = (
                 f"{shlex.join(['stat', '-c%s', archive_path])} 2>/dev/null || "
                 f"{shlex.join(['stat', '-f%z', archive_path])} 2>/dev/null || echo 0"
@@ -505,7 +512,14 @@ async def extract_test_suite_archive(req: TestSuiteExtractRequest):
             extract_result = await asyncio.to_thread(runtime.ssh_manager.execute_command, ssh, cmd, timeout=300)
 
             if not extract_result.ok:
-                return error_response(f"Extraction failed: {extract_result.stdout}", 500)
+                # 解压器输出不可信且可能暴露远端目录结构：进日志，不回显。
+                logger.error(
+                    "suite archive extraction failed on worker: %s",
+                    (extract_result.stdout or "").strip()[:2000],
+                )
+                return ApiError.upstream_failure(
+                    "套件压缩包解压失败（Worker 远端错误）", service="ssh"
+                ).to_response()
 
             extracted_name = target_dir_name or derive_suite_dir_name_from_archive(req.archive_path)
             extracted_path = os.path.join(extract_dir, extracted_name)

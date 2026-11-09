@@ -1058,6 +1058,7 @@ class AuthElevateAndBurnToolTests(unittest.TestCase):
             captured["command"] = command
             captured["args"] = args
             captured["stdin_text"] = stdin_text
+            captured["env_extra"] = env_extra
             captured["timeout"] = timeout
             return '{"ok":true,"exit_code":0,"data":{}}', False
 
@@ -1107,8 +1108,15 @@ class AuthElevateAndBurnToolTests(unittest.TestCase):
         self.assertEqual(captured["command"], "gms-rt-burn-firmware")
         self.assertEqual(
             captured["args"],
-            ["/a/update.img", "RK3562GMS7", "true", "--approval-token", "tok"],
+            ["/a/update.img", "RK3562GMS7", "true"],
         )
+        # Approval token travels via env, never argv: the burn CLI may run
+        # detached for minutes and /proc/<pid>/cmdline is readable by
+        # same-host users.
+        self.assertEqual(
+            captured["env_extra"], {"GMS_RT_BURN_APPROVAL_TOKEN": "tok"}
+        )
+        self.assertNotIn("--approval-token", captured["args"])
         self.assertEqual(captured["timeout"], 1800)
 
     def test_burn_firmware_wipe_false_and_wait_online(self):
@@ -1123,9 +1131,11 @@ class AuthElevateAndBurnToolTests(unittest.TestCase):
             captured["args"],
             [
                 "/a/update.img", "D1,D2", "false",
-                "--approval-token", "tok",
                 "--wait-online", "--wait-online=900",
             ],
+        )
+        self.assertEqual(
+            captured["env_extra"], {"GMS_RT_BURN_APPROVAL_TOKEN": "tok"}
         )
 
     def test_burn_firmware_requires_approval_token(self):
@@ -1625,6 +1635,7 @@ class ShellExecToolTests(unittest.TestCase):
             captured["command"] = command
             captured["args"] = args
             captured["timeout"] = timeout
+            captured["env_extra"] = env_extra
             return '{"ok":true,"exit_code":0,"data":{}}', False
 
         original = mcp_server.run_cli
@@ -1659,10 +1670,12 @@ class ShellExecToolTests(unittest.TestCase):
         self.assertEqual(captured["command"], "gms-rt-devices-shell")
         self.assertEqual(
             captured["args"],
-            [
-                "RK3562GMS7", "--approval-token", "tok123",
-                "settings put global wifi_on 1",
-            ],
+            ["RK3562GMS7", "settings put global wifi_on 1"],
+        )
+        # Token goes via env (devices.sh reads GMS_RT_APPROVAL_TOKEN), never
+        # through argv where same-host users could read it.
+        self.assertEqual(
+            captured["env_extra"], {"GMS_RT_APPROVAL_TOKEN": "tok123"}
         )
         self.assertEqual(captured["timeout"], 120)
 

@@ -10,7 +10,7 @@ from contextlib import suppress
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -352,14 +352,27 @@ def create_app(services: AppServices | None = None) -> FastAPI:
                 (auth_required and session_required and not current_user)
                 or (credentials_rejected and session_required)
             ):
-                response = JSONResponse(
-                    content={
-                        'success': False,
-                        'error': 'Authentication required',
-                        'detail': 'Authentication required',
-                    },
-                    status_code=401,
-                )
+                # 浏览器原生导航的下载/预览链接（<a href>、window.open）带
+                # Accept: text/html 且不走前端 apiCall（fetch 默认 */*），
+                # 会话失效时 Chrome 只显示"无法下载 - 需要授权"死错误。
+                # 文档导航改为重定向到 shell，让新标签页呈现登录层；
+                # fetch/API 调用保持 JSON 401（apiCall 据此弹登录层）。
+                accept = str(request.headers.get('accept', ''))
+                if (
+                    request.method in ('GET', 'HEAD')
+                    and 'text/html' in accept.lower()
+                    and 'application/json' not in accept.lower()
+                ):
+                    response = RedirectResponse(url='/', status_code=303)
+                else:
+                    response = JSONResponse(
+                        content={
+                            'success': False,
+                            'error': 'Authentication required',
+                            'detail': 'Authentication required',
+                        },
+                        status_code=401,
+                    )
             else:
                 csrf_error = csrf_rejection_reason(request)
                 if csrf_error:

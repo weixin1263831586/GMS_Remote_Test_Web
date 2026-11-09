@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import shutil
 from pathlib import Path, PurePosixPath
 
@@ -31,6 +32,9 @@ from .transfers_staging import router as transfers_staging_router
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
 def _transfer_root() -> Path:
     return service().repository.db_path.parent / "transfers"
 
@@ -330,7 +334,12 @@ async def create_report_copy(
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         except OSError as exc:
-            raise HTTPException(500, f"failed to prepare local report: {exc}") from exc
+            # 本地导出失败（磁盘/权限）是环境故障：503 语义；OSError 原文
+            # 含本地绝对路径，只进日志不回显。
+            logger.error("local report export failed: %s", exc, exc_info=True)
+            raise ApiError.dependency_unavailable(
+                "本地报告导出失败：本地存储不可用"
+            ) from exc
         return {
             "success": True,
             "copy_id": transfer["id"],

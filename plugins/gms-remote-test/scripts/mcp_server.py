@@ -117,7 +117,7 @@ mcp_debug_tools = _load_typed_tools("mcp_debug_tools")
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.66"
+SERVER_VERSION = "0.22.68"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -1126,7 +1126,11 @@ def burn_firmware_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
                 )
             except (TypeError, ValueError):
                 return "wait_online_max must be an integer (seconds)", True
-    args = [firmware_path, device, wipe_str, "--approval-token", approval_token, *extra]
+    args = [firmware_path, device, wipe_str, *extra]
+    # Approval token 经 env 传入 CLI（GMS_RT_BURN_APPROVAL_TOKEN），绝不放
+    # 进子进程 argv：wait=false 的烧录进程 detached 存活整个拷贝/烧写窗口，
+    # /proc/<pid>/cmdline 对同机用户可读。CLI 侧 firmware.sh 优先读 env。
+    env_extra = {"GMS_RT_BURN_APPROVAL_TOKEN": approval_token}
     if arguments.get("wait") is True:
         timeout = 1800
         if arguments.get("timeout") is not None:
@@ -1134,9 +1138,9 @@ def burn_firmware_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
                 timeout = max(1, int(arguments["timeout"]))
             except (TypeError, ValueError):
                 return "timeout must be an integer (seconds)", True
-        return run_cli("gms-rt-burn-firmware", args, timeout=timeout)
+        return run_cli("gms-rt-burn-firmware", args, timeout=timeout, env_extra=env_extra)
     # 异步：后台启动 CLI，立即返回 operation_id；结果落盘供 burn_status 读取。
-    return start_burn_operation("gms-rt-burn-firmware", args)
+    return start_burn_operation("gms-rt-burn-firmware", args, env_extra=env_extra)
 
 
 def _burn_operations_dir() -> Path:
@@ -1167,13 +1171,16 @@ def _process_alive(pid: int) -> bool:
         return True
 
 
-def start_burn_operation(command: str, args: list[str]) -> tuple[str, bool]:
+def start_burn_operation(
+    command: str, args: list[str], env_extra: dict[str, str] | None = None
+) -> tuple[str, bool]:
     """Launch a long CLI op detached; return an operation id immediately.
 
     The CLI runs detached from this MCP subprocess (setsid, own process
     group) so a 60s client-side tool timeout can never kill a burn. Its
     stdout/stderr land in a spool file the status tool parses for the final
-    JSON envelope.
+    JSON envelope. ``env_extra`` carries one-shot secrets (approval tokens)
+    so they never appear in the detached child's argv.
     """
     ops_dir = _burn_operations_dir()
     try:
@@ -1184,6 +1191,7 @@ def start_burn_operation(command: str, args: list[str]) -> tuple[str, bool]:
         meta = op_dir / "meta.json"
         log_path = op_dir / "output.log"
         argv = build_argv(command, args)
+        child_env = {**os.environ, **env_extra} if env_extra else None
         # SIM115: the handle must stay open across Popen (the child writes to
         # it) and is closed deterministically in the finally block below.
         log_handle = open(log_path, "w")  # noqa: SIM115
@@ -1197,6 +1205,7 @@ def start_burn_operation(command: str, args: list[str]) -> tuple[str, bool]:
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
                 start_new_session=True,
+                env=child_env,
             )
         finally:
             log_handle.close()
@@ -2106,11 +2115,14 @@ def shell_exec_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         except (TypeError, ValueError):
             return "timeout must be an integer (seconds)", True
     # The CLI validates-and-consumes the approval server-side before running
-    # the command (gms-rt-devices-shell --approval-token ...).
+    # the command (gms-rt-devices-shell). Token travels via env, never argv:
+    # the CLI process may outlive this tool call and /proc/<pid>/cmdline is
+    # readable by same-host users (devices.sh reads GMS_RT_APPROVAL_TOKEN).
     return run_cli(
         "gms-rt-devices-shell",
-        [device, "--approval-token", approval_token, command],
+        [device, command],
         timeout=timeout,
+        env_extra={"GMS_RT_APPROVAL_TOKEN": approval_token},
     )
 
 

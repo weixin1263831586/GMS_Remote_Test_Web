@@ -25,6 +25,28 @@ def is_safe_device_id(value: str | None) -> bool:
     return bool(value) and _DEVICE_ID_PATTERN.match(str(value)) is not None
 
 
+def bearer_token(authorization: str | None) -> str | None:
+    """Extract the credential from an ``Authorization: Bearer <token>`` header.
+
+    Strict scheme parsing: a missing separator or a non-Bearer scheme yields
+    ``None`` instead of silently accepting a bare token. Callers must still
+    compare digests under ``hmac.compare_digest`` (hash both sides first so
+    the comparison time cannot leak the stored token's length), e.g.::
+
+        hmac.compare_digest(
+            hashlib.sha256(supplied.encode()).digest(),
+            hashlib.sha256(expected.encode()).digest(),
+        )
+    """
+    if not authorization:
+        return None
+    scheme, separator, supplied = authorization.partition(" ")
+    if not separator or scheme.lower() != "bearer":
+        return None
+    supplied = supplied.strip()
+    return supplied or None
+
+
 def sanitize_device_ids(values) -> list[str]:
     """Return only the safe device ids from ``values``, dropping the rest.
 

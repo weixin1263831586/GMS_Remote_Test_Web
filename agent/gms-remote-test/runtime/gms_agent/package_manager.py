@@ -725,6 +725,19 @@ def write_profile(client: str, server: str, ca_cert: str, profile: str = "") -> 
         raise ValueError(f"非法 profile 名: {name!r}")
     insecure = _profile_insecure(name)
     profile_store.write_profile_toml(name, client, server, ca_cert, insecure)
+    if insecure:
+        # 一次性安装开关被持久化后会放大为运行期常态（launcher 映射为
+        # GMS_CURL_INSECURE=1），所有携带服务令牌的 Controller 流量都不再
+        # 验证服务端身份。写入点显式告警，并给出迁移到 CA 校验的动作。
+        print(
+            f"Warning: profile {name} persisted insecure=true (TLS certificate "
+            "verification disabled for ALL Controller traffic including the "
+            "service token). This is intended for throwaway environments "
+            "only — configure GMS_CURL_CA_CERT and re-run gms-agent install "
+            "to switch to CA verification. Check status with "
+            "`gms-agent doctor --json` (profile.tls_verify_disabled).",
+            file=sys.stderr,
+        )
     return name
 
 
@@ -939,10 +952,15 @@ def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
             "valid": False,
         }
         token_state = _token_file_status("")
+        tls_verify_disabled = False
         if selected:
             flat = load_profile(selected.stem)
             server = flat.get("url", "")
             ca_cert = flat.get("ca_cert", "")
+            # 安装期 GMS_INSTALL_INSECURE=1 会被持久化为 insecure=true 并
+            # 放大为运行期常态（launcher 映射 GMS_CURL_INSECURE=1）。doctor
+            # 把该状态作为醒目字段输出，生产部署清单可据此拒绝。
+            tls_verify_disabled = flat.get("insecure", "") == "true"
             token_state = _token_file_status(flat.get("token_file", ""))
             controller_valid = _controller_url_valid(server)
             profile_state.update(
@@ -951,6 +969,7 @@ def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
                     "controller_url_valid": controller_valid,
                     "ca_configured": bool(ca_cert),
                     "ca_present": bool(ca_cert and Path(ca_cert).is_file()),
+                    "tls_verify_disabled": tls_verify_disabled,
                     "valid": bool(controller_valid),
                 }
             )
@@ -960,6 +979,12 @@ def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
                 )
             if ca_cert and not Path(ca_cert).is_file():
                 actions.append(f"restore the Controller CA file for {client_name}")
+            if tls_verify_disabled:
+                actions.append(
+                    f"profile {selected.stem} runs with TLS verification "
+                    "disabled (insecure=true): configure GMS_CURL_CA_CERT and "
+                    "re-run gms-agent install — throwaway environments only"
+                )
         elif len(candidates) > 1:
             actions.append(
                 f"select one {client_name} profile explicitly with GMS_RT_PROFILE"

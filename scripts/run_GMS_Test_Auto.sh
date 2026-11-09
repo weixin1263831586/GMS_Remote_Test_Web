@@ -10,9 +10,14 @@ LOG_FILE="$SCRIPT_LOG_FILE"
 
 export PATH="$HOME/Software/platform-tools:$PATH"
 
-# 未显式设置时从固定凭据文件加载 GTS 认证。
-if [[ -z "${APE_API_KEY:-}" && -f "$HOME/Software/gts-rockchip.json" ]]; then
-    export APE_API_KEY="$HOME/Software/gts-rockchip.json"
+# 未显式设置时从固定凭据文件加载 GTS 认证。路径与 tools/GMS-Host-Tools/env.sh
+# 统一走 GMS_SOFTWARE_ROOT（无该变量时回落传统 $HOME/Software）。
+if [[ -z "${APE_API_KEY:-}" ]]; then
+    _software_root="${GMS_SOFTWARE_ROOT:-${HOME}/Software}"
+    if [[ -f "${_software_root}/gts-rockchip.json" ]]; then
+        export APE_API_KEY="${_software_root}/gts-rockchip.json"
+    fi
+    unset _software_root
 fi
 
 # 运行状态

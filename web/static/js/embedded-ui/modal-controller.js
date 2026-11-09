@@ -1,4 +1,7 @@
 // Shared modal stack controller for standalone/iframe pages (Redmine, Gerrit, ...).
+// 适用范围：standalone/iframe 独立页面——与 web/shell 的 modal.js（ModalManager，
+// shell 文档内唯一 owner）分属不同文档、互斥使用；本文件仅读取 display 判断
+// 栈状态，不得移植进 shell（AGENTS.md UI/Modal 政策）。
 // Single owner for everything the pages used to reimplement separately:
 // modal stack + z-index, inert/aria attributes, Escape, backdrop click,
 // focus trap + initial focus + focus restore, background inert, scroll lock.

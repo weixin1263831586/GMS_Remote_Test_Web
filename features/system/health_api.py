@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 from datetime import datetime
 
@@ -13,6 +14,7 @@ from features.auth import CurrentUser, require_role
 from features.system.health import readiness
 from features.system.metrics import metrics_token, render_metrics
 from foundation.product import APPLICATION_VERSION, SERVICE_NAME
+from foundation.security import bearer_token
 
 
 router = APIRouter()
@@ -66,11 +68,15 @@ async def prometheus_metrics(
     expected = metrics_token()
     if not expected:
         raise HTTPException(status_code=503, detail='GMS_METRICS_TOKEN is required')
-    scheme, separator, supplied = authorization.partition(' ')
+    token = bearer_token(authorization)
     if (
-        not separator
-        or scheme.lower() != 'bearer'
-        or not hmac.compare_digest(supplied.strip(), expected)
+        token is None
+        # 摘要后比较：原始串比较在长度不同时常量时间保证不完整（泄露
+        # 令牌长度），与 worker_auth 同口径。
+        or not hmac.compare_digest(
+            hashlib.sha256(token.encode()).digest(),
+            hashlib.sha256(expected.encode()).digest(),
+        )
     ):
         raise HTTPException(status_code=401, detail='Invalid metrics credential')
     return Response(

@@ -670,13 +670,15 @@ gms-rt-devices-scrcpy() {
 # Execute shell command (local adb or SSH fallback to test host)
 gms-rt-devices-shell() {
     local device_id="$1"
-    [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-shell DEVICE_ID [--approval-token TOKEN] [COMMAND]"; return 1; }
+    [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-shell DEVICE_ID [--approval-token TOKEN | env GMS_RT_APPROVAL_TOKEN] [COMMAND]"; return 1; }
 
     shift
     # One-shot approval token: with this flag the CLI
     # validates-and-consumes the approval server-side (tool+device+command
     # binding, 5-min TTL, single use) before running the command.
-    local approval_token=""
+    # MCP typed tools pass the token via env（GMS_RT_APPROVAL_TOKEN）而不是
+    # argv：--approval-token 仍为人工 CLI 入口。
+    local approval_token="${GMS_RT_APPROVAL_TOKEN:-}"
     local shell_args=()
     local pending_approval=0
     local _gms_approval_consumed=0
@@ -1112,9 +1114,9 @@ gms-rt-devices-wifi() {
     local password
     password=$(_secret_value "${3:-${GMS_REMOTE_WIFI_PASSWORD:-}}")
 
-    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-wifi <devices> <ssid> [password]"; return 1; }
-    [ -z "$ssid" ] && { error "SSID必填. 用法: gms-rt-devices-wifi <devices> <ssid> [password]"; return 1; }
-    [ -z "$password" ] && { error "密码必填（第三个参数或 GMS_REMOTE_WIFI_PASSWORD）. 用法: gms-rt-devices-wifi <devices> <ssid> [password]"; return 1; }
+    [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-wifi <devices> <ssid>（密码优先用 env GMS_REMOTE_WIFI_PASSWORD）"; return 1; }
+    [ -z "$ssid" ] && { error "SSID必填. 用法: gms-rt-devices-wifi <devices> <ssid>（密码优先用 env GMS_REMOTE_WIFI_PASSWORD）"; return 1; }
+    [ -z "$password" ] && { error "密码必填（env GMS_REMOTE_WIFI_PASSWORD 或第三个位置参数；env 优先，避免密码出现在进程 argv）. 用法: gms-rt-devices-wifi <devices> <ssid> [password]"; return 1; }
 
     check_jq
     devices=$(_resolve_devices "$devices")

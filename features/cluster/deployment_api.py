@@ -421,7 +421,8 @@ async def deploy_adb_proxy_source(
 
         archive_path: Path | None = None
         remote_archive = f"/tmp/gms-adb-source-{worker_id}.tar.gz"
-        remote_token = f"/tmp/gms-adb-source-{worker_id}.token"
+        # Token 暂存名随机化（同 _staged_credential_path 注释）。
+        remote_token = _staged_credential_path(f"gms-adb-source-{worker_id}.token")
         try:
             project_root = Path(__file__).resolve().parents[2]
             with tempfile.NamedTemporaryFile(
@@ -676,15 +677,18 @@ async def deploy_worker(
                     )
             sftp = ssh.open_sftp()
             remote_archive = "/tmp/gms-worker-setup.tar.gz"
-            remote_credential = f"/tmp/gms-worker-gts-{worker_id}.json"
-            # Token 上传为 0600 文件并按路径传给安装器，绝不进入远程命令
-            # argv（ps 对同主机任意用户可见，整个安装窗口内可读）。
-            remote_token = f"/tmp/gms-worker-token-{worker_id}"
+            # 凭据暂存名随机化：固定名允许同主机低权用户预置 symlink 或
+            # 抢在 chmod 前读取；随机名使预置不可行（见 _staged_credential_path）。
+            # Token/GTS 凭据上传为 0600 文件并按路径传给安装器，内容绝不
+            # 进入远程命令 argv（ps 对同主机任意用户可见）。
+            remote_token = _staged_credential_path(f"gms-worker-token-{worker_id}")
+            remote_credential = _staged_credential_path(f"gms-worker-gts-{worker_id}.json")
             try:
                 sftp.put(str(archive_path), remote_archive)
                 write_remote_token_file(sftp, remote_token, token)
-                sftp.put(str(gts_credential), remote_credential)
-                sftp.chmod(remote_credential, 0o600)
+                write_remote_private_file(
+                    sftp, remote_credential, gts_credential.read_bytes()
+                )
             except Exception:
                 remove_remote_files_quietly(sftp, remote_archive, remote_token, remote_credential)
                 raise
@@ -761,11 +765,36 @@ async def deploy_worker(
         raise HTTPException(502, record_internal_error(logger, "Worker 自动部署", "deploy failed")) from exc
 
 
+def write_remote_private_file(sftp, remote_path: str, payload: bytes) -> None:
+    """Exclusively create ``remote_path`` as a 0600 file holding ``payload``.
+
+    Two properties matter for credential staging on a shared host:
+    - ``x`` (O_EXCL) fails instead of following a pre-placed symlink, which
+      a plain ``w`` open would happily write through;
+    - chmod runs on the open handle *before* the first byte is written, so
+      the content is never visible under a broader mode.
+    Callers should pass a randomized ``remote_path`` (see
+    ``_staged_credential_path``) so pre-placement is infeasible.
+    """
+    with sftp.open(remote_path, "x") as handle:
+        handle.chmod(0o600)
+        handle.write(payload)
+
+
 def write_remote_token_file(sftp, remote_path: str, token: str) -> None:
     """Create remote_path as a 0600 file containing token + newline."""
-    with sftp.open(remote_path, "w") as token_file:
-        sftp.chmod(remote_path, 0o600)
-        token_file.write((token + "\n").encode("utf-8"))
+    write_remote_private_file(sftp, remote_path, (token + "\n").encode("utf-8"))
+
+
+def _staged_credential_path(base: str) -> str:
+    """Randomized /tmp staging name for one credential upload.
+
+    A predictable name lets a same-host unprivileged user pre-place a
+    symlink or race the writer for the whole staging window; the random
+    suffix makes that infeasible (sticky /tmp keeps others from touching
+    the file once created).
+    """
+    return f"/tmp/{base}-{secrets.token_hex(8)}"
 
 
 def remove_remote_files_quietly(sftp, *remote_paths: str) -> None:
