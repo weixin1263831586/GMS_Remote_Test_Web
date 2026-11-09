@@ -1264,18 +1264,49 @@ ALL_TOOLS: list[dict[str, Any]] = [
             },
         },
         {
+            "name": "gms_rt_redmine_artifact_search_batch",
+            "description": (
+                "Multi-keyword one-pass search across description, journals "
+                "and artifact text in a single server-side scan — prefer "
+                "this over repeated gms_rt_redmine_artifact_search calls "
+                "on large logs. Each query reports independent total/"
+                "truncated/matches; coverage_complete=false means parts of "
+                "the evidence were NOT scanned, so a zero hit is not "
+                "negative evidence. Matches carry char_index offsets usable "
+                "with gms_rt_redmine_artifact_read."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "snapshot_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                    "queries": {
+                        "type": "array",
+                        "items": {"type": "string", "maxLength": 256},
+                        "minItems": 1,
+                        "maxItems": 16,
+                    },
+                    "per_query_limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                },
+                "required": ["snapshot_id", "queries"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "gms_rt_redmine_artifact_read",
             "description": (
                 "Read a text/log artifact by character window "
                 "(offset+limit, max 262144 chars). Response carries "
-                "total_chars and truncated."
+                "total_chars and truncated. Offset is validated, not "
+                "clamped: out-of-range values are rejected — locate the "
+                "region with gms_rt_redmine_artifact_search first (its "
+                "char_index offsets are usable here)."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "artifact_id": {"type": "string", "minLength": 0, "maxLength": 2048},
-                    "offset": {"type": "integer", "minimum": 0},
-                    "limit": {"type": "integer", "minimum": 1},
+                    "offset": {"type": "integer", "minimum": 0, "maximum": 1000000000},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 262144},
                 },
                 "required": ["artifact_id"],
                 "additionalProperties": False,

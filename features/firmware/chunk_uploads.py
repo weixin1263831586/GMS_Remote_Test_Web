@@ -53,6 +53,95 @@ def cleanup_expired_upload_sessions(root: str, client_id: str, max_age: int) -> 
                 logger.debug("Failed to clean expired firmware upload %s", entry.path)
 
 
+def _burn_lock_holds_live_process(session_dir: str) -> bool:
+    """会话的 .burn.lock 仍被存活进程持有时返回 True。
+
+    finalize 烧写可长达 RESULT_TIMEOUT_SECONDS（90 分钟），期间 staged
+    文件不再增长、目录 mtime 冻结——仅靠 mtime 判定会把进行中的烧写
+    会话误删。锁持有者 PID 存活即视为进行中；无锁或旧格式空锁不算。
+    """
+    lock_path = os.path.join(session_dir, ".burn.lock")
+    try:
+        if not os.path.exists(lock_path):
+            return False
+    except OSError:
+        return True  # 探测失败保守处理：宁可不回收
+    holder = _read_lock_holder(lock_path)
+    if holder is None:
+        return False
+    return _pid_alive(holder)
+
+
+def cleanup_orphan_upload_sessions(root: str, max_age: int) -> int:
+    """全租户孤儿暂存会话回收，返回回收的会话数。
+
+    ``cleanup_expired_upload_sessions`` 只清理发起上传的当前 client 目录，
+    且仅在该 client 再次上传分片时触发——烧写失败/中断/服务重启后该
+    client 不再有新分片，多 GB 的 staged 会话会永久残留（实测单次 5 GB）。
+    本函数遍历整个 staging root 兜底。
+
+    跳过规则（保护进行中的烧写与续传）：
+    - ``.burn.lock`` 仍被存活进程持有 → 跳过；
+    - 目录 mtime 未超过 max_age → 跳过（分片续传会持续刷新 mtime）。
+    """
+    removed = 0
+    cutoff = time.time() - max_age
+    try:
+        client_entries = list(os.scandir(root))
+    except OSError:
+        return 0
+    for client_entry in client_entries:
+        try:
+            if not client_entry.is_dir(follow_symlinks=False):
+                continue
+            session_entries = list(os.scandir(client_entry.path))
+        except OSError:
+            continue
+        for entry in session_entries:
+            try:
+                if not entry.is_dir(follow_symlinks=False):
+                    continue
+                if entry.stat(follow_symlinks=False).st_mtime >= cutoff:
+                    continue
+                if _burn_lock_holds_live_process(entry.path):
+                    continue
+                shutil.rmtree(entry.path)
+                removed += 1
+            except OSError:
+                logger.debug("Failed to clean orphan firmware upload %s", entry.path)
+    return removed
+
+
+GLOBAL_SWEEP_MIN_INTERVAL_SECONDS = 10 * 60
+_global_sweep_lock = threading.Lock()
+_last_global_sweep = 0.0
+
+
+def maybe_cleanup_orphan_upload_sessions(
+    root: str,
+    max_age: int,
+    *,
+    min_interval: int = GLOBAL_SWEEP_MIN_INTERVAL_SECONDS,
+) -> int:
+    """限频的全局 janitor 入口。
+
+    每次分片上传都全量扫描 staging root 会在大目录下放大 IO；进程内
+    限频（默认 10 分钟一次）。返回本次实际回收的会话数，未到间隔返回 0。
+    """
+    global _last_global_sweep
+    now = time.time()
+    with _global_sweep_lock:
+        if now - _last_global_sweep < min_interval:
+            return 0
+        _last_global_sweep = now
+    removed = cleanup_orphan_upload_sessions(root, max_age)
+    if removed:
+        logger.info(
+            "Firmware staging janitor removed %d orphan upload sessions", removed
+        )
+    return removed
+
+
 def _metadata_path(session_dir: str) -> str:
     return os.path.join(session_dir, "upload_metadata.json")
 
@@ -270,6 +359,9 @@ async def handle_chunk_upload(form, client_id: str, root: str, global_state, max
         return error_response("upload_id and file_name are required for chunk upload", 400), None
 
     await asyncio.to_thread(cleanup_expired_upload_sessions, root, client_id, max_age)
+    # 全租户兜底：清理其他 client 因烧写失败/中断遗留的孤儿暂存会话
+    # （限频，默认 10 分钟一次）。
+    await asyncio.to_thread(maybe_cleanup_orphan_upload_sessions, root, max_age)
     session_dir = upload_session_dir(root, client_id, upload_id)
     os.makedirs(session_dir, exist_ok=True)
     total_chunks, file_size, chunk_size, shape_error = _parse_chunk_shape(form)

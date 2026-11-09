@@ -61,7 +61,17 @@ vnc_manager = _VNCManager()
 
     harness = r'''
 find() { return 0; }
-sudo() { "$@"; }
+# 忠实模拟 systemctl_admin 的 sudo 探测语义：`sudo -n true` 是凭据探测
+# （不执行 systemctl），`sudo -n CMD` 去掉 -n 后执行目标命令。旧的
+# `"$@"` 直通会把 `-n true` 当成命令 `-n`（127），迫使脚本走
+# --no-ask-password 兜底，破坏契约断言的调用序列。
+sudo() {
+    case "$1" in
+        -n) shift; if [[ "$1" == "true" ]]; then return 0; fi; "$@" ;;
+        -v) return 0 ;;
+        *) "$@" ;;
+    esac
+}
 systemctl() {
     printf '%s\n' "$*" >> "$RESTART_CALLS"
     case "$*" in

@@ -315,7 +315,7 @@ function initTerminal() {
     terminal = new Terminal({
         cursorBlink: true,
         fontSize: 14,
-        fontFamily: 'Consolas, "Courier New", monospace',
+        fontFamily: '"DejaVu Sans Mono", "Liberation Mono", Consolas, "Courier New", monospace',
         theme: createTerminalTheme(),
         scrollback: 1000,
         convertEol: false,  // 不转换行尾，保持原始格式

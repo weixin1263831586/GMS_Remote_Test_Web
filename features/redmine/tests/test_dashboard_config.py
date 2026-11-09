@@ -271,7 +271,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 with patch(
                     "foundation.config.config_manager.load_config",
                     return_value={},
-                ), patch("features.email.service.smtplib.SMTP") as smtp_cls:
+                ), patch("features.email.transport.smtplib.SMTP") as smtp_cls:
                     smtp = smtp_cls.return_value.__enter__.return_value
 
                     result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
@@ -328,7 +328,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 with (
                     patch.object(manager, "load_redmine_credentials", return_value={"username": "chaoqun.huang@rock-chips.com", "password": "redmine-login-secret"}),
                     patch("foundation.config.config_manager.load_config", return_value={}),
-                    patch("features.email.service.smtplib.SMTP_SSL") as smtp_cls,
+                    patch("features.email.transport.smtplib.SMTP_SSL") as smtp_cls,
                 ):
                     result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
 
@@ -356,7 +356,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 with patch(
                     "foundation.config.config_manager.load_config",
                     return_value={},
-                ), patch("features.email.service.smtplib.SMTP_SSL") as smtp_cls:
+                ), patch("features.email.transport.smtplib.SMTP_SSL") as smtp_cls:
                     smtp = smtp_cls.return_value.__enter__.return_value
 
                     result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
@@ -402,7 +402,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 manager.config_path = str(configs / "config.json")
                 manager.runtime_config_path = str(configs / "config_runtime.json")
                 manager.invalidate_cache()
-                with patch("features.email.service.smtplib.SMTP_SSL") as smtp_cls:
+                with patch("features.email.transport.smtplib.SMTP_SSL") as smtp_cls:
                     smtp = smtp_cls.return_value.__enter__.return_value
 
                     result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
@@ -449,7 +449,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 manager.config_path = str(configs / "config.json")
                 manager.runtime_config_path = str(configs / "config_runtime.json")
                 manager.invalidate_cache()
-                with patch("features.email.service.smtplib.SMTP_SSL", side_effect=smtplib.SMTPServerDisconnected("Connection unexpectedly closed")):
+                with patch("features.email.transport.smtplib.SMTP_SSL", side_effect=smtplib.SMTPServerDisconnected("Connection unexpectedly closed")):
                     result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
 
                     self.assertFalse(result["sent"])

@@ -112,6 +112,30 @@ class RuntimeAoaCalibrateLocateTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_locate_preserves_longclick_kind_on_save(self):
+        # 回归：标定只调整坐标，不允许把 longClick 命令回写成普通点击
+        # （曾统一保存为 `click X Y`，长按回放静默变义）。
+        page = self.new_page()
+        try:
+            self.prepare(page)
+            rows = page.locator('#aoa-command-list > li')
+            page.evaluate("""() => {
+                aoaPanelState.commands = ['longClick 180 320', 'sleep 1000'];
+                aoaRenderCommands();
+            }""")
+            rows.nth(0).get_by_role('button', name='定位第 1 条命令坐标').click()
+            assert page.evaluate("aoaPanelState.commandCalibrate") is not None
+            box = page.locator('#aoa-screen-canvas').bounding_box()
+            page.mouse.click(box['x'] + box['width'] * 0.75,
+                             box['y'] + box['height'] * 0.75)
+            rows.nth(0).get_by_role('button', name='保存第 1 条命令标定坐标').click()
+            assert page.evaluate("aoaPanelState.commands[0]") == 'longClick 271 481'
+            assert page.evaluate("aoaScreenGridState().calibrate") is None
+            status = page.evaluate("() => document.getElementById('aoa-run-status').textContent")
+            assert '已标定为 longClick' in status, status
+        finally:
+            page.close()
+
     def test_locate_cancel_restores_command_without_change(self):
         page = self.new_page()
         try:

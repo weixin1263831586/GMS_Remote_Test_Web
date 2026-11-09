@@ -360,7 +360,7 @@
             const terminalElement = document.createElement('div');
             terminalElement.className = 'host-workspace-terminal';
             body.replaceChildren(terminalElement);
-            const term = new Terminal({cursorBlink: true, fontSize: 13, fontFamily: 'Consolas, "Courier New", monospace',
+            const term = new Terminal({cursorBlink: true, fontSize: 13, fontFamily: '"DejaVu Sans Mono", "Liberation Mono", Consolas, "Courier New", monospace',
                 theme: createTerminalTheme(), scrollback: 2000, termName: 'xterm-256color'});
             const fit = new FitAddon.FitAddon();
             term.loadAddon(fit);

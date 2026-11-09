@@ -512,6 +512,47 @@ gms-rt-artifact-search() {
     api_call "$url" "GET" | jq -r '.data | "query: \(.query) matches: \(.total)\(if .limited then " (limited)" else "" end)", (.matches[] | "[\(.kind)\(.journal_id // .artifact_id // "")] \(.snippet)")'
 }
 
+gms-rt-artifact-search-batch() {
+    # 多关键词单遍搜索（#661066 复审）：一次请求完成全部关键词匹配，
+    # 避免逐词搜索对同一批大日志的重复扫描。用法：
+    #   gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N]
+    local snapshot_id=""
+    local per_query_limit=20
+    local queries=()
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --per-query-limit)
+                shift
+                [ $# -gt 0 ] || { error "--per-query-limit requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                per_query_limit="$1"
+                ;;
+            *) queries+=("$1") ;;
+        esac
+        shift
+    done
+    snapshot_id="${queries[0]:-}"
+    if [ -z "$snapshot_id" ] || [ "${#queries[@]}" -lt 2 ]; then
+        error "Usage: gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N]"
+        return "$GMS_RT_EXIT_USAGE"
+    fi
+    local -a word_queries=("${queries[@]:1}")
+    check_jq
+    local body
+    body=$(printf '%s\n' "${word_queries[@]}" \
+        | jq -Rn --argjson lim "$per_query_limit" \
+        '{queries: ([inputs | ltrimstr(" ") | rtrimstr(" ")]), per_query_limit: $lim}')
+    local url="/redmine-agent/evidence/$(_urlencode "$snapshot_id")/search/batch"
+    if [ "$GMS_RT_OUTPUT" = "json" ]; then
+        api_call "$url" "POST" "$body" | jq '.'
+        return $?
+    fi
+    api_call "$url" "POST" "$body" | jq -r '
+        .data | "coverage: \(if .coverage_complete then "complete" else "PARTIAL — zero hits are not negative evidence" end) matches: \(.total_matches)",
+        (.queries[] | "## \(.query): \(.total)\(if .truncated then " (truncated)" else "" end)",
+         (.matches[] | "  [\(.kind)]\(.zip_member // "")\(if .line then ":L\(.line)" else "" end) \(.snippet | gsub("\n"; " ") | .[0:200])"))
+    '
+}
+
 gms-rt-apk-analyze-attachment() {
     local snapshot_id="$1"
     local artifact_id="$2"

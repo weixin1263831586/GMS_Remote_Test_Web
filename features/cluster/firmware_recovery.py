@@ -1,8 +1,10 @@
 """Freeze the human-selected recovery profile before firmware is dispatched."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import logging
 
 from features.auth import AGENT_ROLE, is_machine_principal, principal_owner_id, require_human_principal
 from features.devices import profile_store, usbip_source_host_for_device
@@ -10,6 +12,9 @@ from foundation.aoa_hid_mode import profile_hid_options
 from foundation.aoa_profile import parse_profile_commands
 from foundation.aoa_recovery_policy import firmware_compatibility, require_verified_recovery, target_firmware_context
 from foundation.error_model import ApiError
+
+
+logger = logging.getLogger(__name__)
 
 
 def preflight_firmware_recovery(request, cluster, worker_id, devices, profile_id, boot_wait_seconds=60):
@@ -183,10 +188,26 @@ def validate_local_firmware_recovery(prepared: dict | None) -> None:
         validate_local_firmware_identity(prepared["device_id"], prepared["snapshot"]["usb_port_path"])
 
 
+def refresh_post_burn_inventory(repository, worker_id: str) -> None:
+    """烧写恢复完成后立即把本机设备清单写入库存（best-effort）。
+
+    真实 agent 守护进程的周期心跳（2-3 分钟）之前，库存还停留在
+    accessory 窗口的 usb_only；完成触发的设备列表刷新会拿到旧快照。
+    本函数让 Controller 主机烧写结束后库存立即可用。探测器经
+    local_bridge 同宿主桥（worker_agent.inventory，白名单内）；
+    刷新失败只告警，绝不影响烧写/恢复结果。
+    """
+    from . import local_bridge
+
+    try:
+        devices = local_bridge._probe_devices()
+        repository.refresh_devices(worker_id, devices)
+    except Exception:
+        logger.warning("post-burn inventory refresh failed", exc_info=True)
+
+
 async def run_local_firmware_recovery(prepared: dict, on_event=None) -> dict:
     """Continue the frozen burn claim, with a durable receipt before HID input."""
-    import asyncio
-
     from .api import service
     from .device_action_operations import execute_local_operation, fenced_local_payload, request_digest
     from .device_actions_api import execute_local_firmware_aoa
@@ -241,6 +262,8 @@ async def run_local_firmware_recovery(prepared: dict, on_event=None) -> dict:
             "error": "local AOA recovery dispatch failed; firmware already flashed, "
                      "replay the AOA recovery separately (reconcile required)",
         })
+        await asyncio.to_thread(
+            refresh_post_burn_inventory, repository, prepared["worker_id"])
         return repository.get_command(command["id"])
     current = repository.get_command(command["id"])
     result = current.get("result") or {}
@@ -248,6 +271,9 @@ async def run_local_firmware_recovery(prepared: dict, on_event=None) -> dict:
                and result.get("adb_recovered") is True)
     from foundation.aoa_recovery_status import recovery_failure_reason
 
+    await asyncio.to_thread(
+        refresh_post_burn_inventory, repository, prepared["worker_id"])
     return {"success": success, "command_id": command["id"], "result": result,
             "error": "" if success else recovery_failure_reason(result, current.get("error") or ""),
+            "replay_completed": result.get("replay_completed") is True,
             "reconcile_required": not success}

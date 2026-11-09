@@ -174,7 +174,9 @@ class FirmwareApiTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 500)
-        self.assertEqual(released, [("codex@127.0.0.1", ["D1"])])
+        # 锁属主是 ADR 0010 resource owner（principal 账号 id），
+        # 不再复用 client_id 桩的 dev 显示名（codex@127.0.0.1）。
+        self.assertEqual(released, [("id-codex", ["D1"])])
 
     def test_invalid_staged_firmware_is_rejected_before_loader(self):
         fake_ssh = FakeSshManager("__GMS_REMOTE_FILE_MISSING__\n")

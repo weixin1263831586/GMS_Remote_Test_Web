@@ -101,6 +101,9 @@ def run_step_sessions(serial, commands, parsed, *, run_one, wait_adb,
               "cleanup_errors": [], "reconcile_required": False, "usb_reconnections": reconnects,
               "hid_touch_mode": touch_mode, "hid_settle_seconds": hid_settle_seconds,
               "hid_session_mode": "per_command"}
+    # 走到这里说明全部命令已执行；回放完成证据独立于 ADB 终验（见
+    # firmware_recovery.recover_after_flash 的 REPLAY_DONE_ADB_UNAVAILABLE）。
+    result["replay_completed"] = True
     if wait_adb_seconds:
         result.update(wait_adb(serial, wait_adb_seconds))
         result["success"] = result.get("adb_recovered") is True

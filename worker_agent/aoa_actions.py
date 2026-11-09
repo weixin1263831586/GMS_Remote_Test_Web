@@ -151,6 +151,27 @@ def probe_aoa(serial: str) -> dict[str, Any]:
     return info
 
 
+def _adb_io_alive(serial: str) -> bool:
+    """有界真实往返，证明 ``adb devices`` 的 device 态能做 I/O。
+
+    与 device_actions._adb_transport_alive 同语义：device 态可能只是
+    adb server 缓存或 adbd 半死（握手成功、任何 shell 往返都
+    ``error: closed``；实机 66df75a34ebde4a4 回归），不得据此宣布
+    ADB 已恢复。
+    """
+    try:
+        completed = subprocess.run(
+            ["adb", "-s", serial, "shell", "true"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
+
+
 def _wait_adb_state(serial: str, timeout_seconds: int) -> dict[str, Any]:
     """轮询 adb，等待设备进入 device 状态（AOA 执行成功 ≠ ADB 已恢复）。"""
     deadline = time.monotonic() + max(0, int(timeout_seconds))
@@ -176,6 +197,11 @@ def _wait_adb_state(serial: str, timeout_seconds: int) -> dict[str, Any]:
             last_state = "ambiguous"
         if getattr(completed, "returncode", 0) != 0:
             last_state = "probe_failed"
+        if last_state == "device" and not _adb_io_alive(serial):
+            # device 态只是 server 视图；必须能真实 I/O 才算恢复，
+            # 否则 adbd 半死的镜像会在终验拿到假绿（烧写后 AOA 恢复
+            # 的最后防线，与 probe_devices 的 unresponsive 判定同源）。
+            last_state = "io_dead"
         validate_binding()
         if last_state == "device":
             return {"adb_state": "device", "adb_recovered": True,
@@ -188,6 +214,7 @@ def _wait_adb_state(serial: str, timeout_seconds: int) -> dict[str, Any]:
                     "unauthorized": "请在设备上确认 USB 调试授权弹窗",
                     "offline": "ADB 处于 offline，尝试重新插拔或重启 adbd",
                     "absent": "设备未出现，确认已开启 USB 调试并连接",
+                    "io_dead": "ADB 显示 device 但 I/O 无响应（adbd 半死）；请重启设备后再验证",
                 }.get(last_state, "ADB 未进入 device 状态"),
             }
         time.sleep(2)
@@ -1561,4 +1588,8 @@ def run_aoa_sequence(
         # Input completion, authorized ADB and verified native USB are distinct
         # postconditions; the firmware workflow requires all of them.
         result["success"] = result.get("adb_recovered", False) and result["native_mode_restored"]
+    # 走到这里说明全部命令已执行：回放完成证据独立于 ADB 终验。adbd 半死
+    # 的镜像上输入层可能已全部成功，recover_after_flash 据此区分
+    # REPLAY_DONE_ADB_UNAVAILABLE，不再把"回放没跑"与"ADB 没恢复"混为一谈。
+    result["replay_completed"] = True
     return result

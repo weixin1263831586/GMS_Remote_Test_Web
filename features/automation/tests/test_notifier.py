@@ -48,6 +48,10 @@ class AutomationNotifierTests(unittest.TestCase):
             'status': 'completed',
             'gerrit_change_id': '123',
             'gerrit_patchset': '7',
+            'test_summary_json': json.dumps(
+                {'total': 100, 'passed': 100, 'failed': 0,
+                 'outcome': 'passed', 'counts_complete': True}
+            ),
             'test_plan_json': json.dumps({'reporting': {
                 'transports': ['gerrit'],
                 'gerrit_comment': True,
@@ -68,6 +72,62 @@ class AutomationNotifierTests(unittest.TestCase):
         self.assertEqual(sender.await_args.kwargs['change_id'], '123')
         self.assertEqual(sender.await_args.kwargs['patchset'], '7')
         self.assertEqual(sender.await_args.kwargs['verified'], 1)
+
+    def test_gerrit_verified_is_negative_when_reported_cases_failed(self):
+        # 报告可靠且存在失败用例：即使流水线走到 completed，也必须投 -1。
+        run = {
+            'id': 'ats-failed',
+            'created_by': 'alice',
+            'status': 'completed',
+            'gerrit_change_id': '123',
+            'gerrit_patchset': '7',
+            'test_summary_json': json.dumps(
+                {'total': 100, 'passed': 98, 'failed': 2,
+                 'outcome': 'failed', 'counts_complete': True}
+            ),
+            'test_plan_json': json.dumps({'reporting': {
+                'transports': ['gerrit'], 'gerrit_verified_label': True,
+            }}),
+        }
+        manager = MagicMock()
+        manager.for_owner.return_value.get_gerrit_dashboard_config.return_value = {
+            'base_url': 'https://gerrit.example.com'
+        }
+        sender = AsyncMock(return_value={'sent': True, 'source': 'rest'})
+        with patch('features.gerrit.gerrit_config_manager', manager), patch(
+            'features.gerrit.post_gerrit_review', sender
+        ):
+            result = notify_run_completion(run)
+
+        self.assertTrue(result['sent'][0]['sent'])
+        self.assertEqual(sender.await_args.kwargs['verified'], -1)
+
+    def test_gerrit_verified_is_withheld_when_report_is_unreliable(self):
+        # 执行完成但报告统计缺失/不完整：不能把流水线完成当作测试通过，
+        # 不投 Verified 票（comment 仍发送，提示人工检查）。
+        for summary in ('', '{"outcome":"incomplete"}', '{"total": 100}'):
+            run = {
+                'created_by': 'alice',
+                'status': 'completed',
+                'gerrit_change_id': '123',
+                'gerrit_patchset': '7',
+                'test_summary_json': summary,
+                'test_plan_json': json.dumps({'reporting': {
+                    'transports': ['gerrit'], 'gerrit_verified_label': True,
+                }}),
+            }
+            manager = MagicMock()
+            manager.for_owner.return_value.get_gerrit_dashboard_config.return_value = {
+                'base_url': 'https://gerrit.example.com'
+            }
+            sender = AsyncMock(return_value={'sent': True, 'source': 'rest'})
+            with patch('features.gerrit.gerrit_config_manager', manager), patch(
+                'features.gerrit.post_gerrit_review', sender
+            ):
+                result = notify_run_completion(run)
+
+            self.assertTrue(result['sent'][0]['sent'])
+            self.assertIsNone(sender.await_args.kwargs['verified'])
 
     def test_redmine_transport_writes_note_with_owner_credentials(self):
         run = {

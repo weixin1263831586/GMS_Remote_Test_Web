@@ -169,3 +169,20 @@ def test_api_pages_remain_owner_scoped_and_reject_invalid_cursors(store, tmp_pat
         assert exc.value.code == 'MALFORMED_REQUEST'
         with pytest.raises(ApiError):
             asyncio.run(api.list_automation_runs(request, status='', limit=1, outcome='arbitrary'))
+
+
+def test_active_run_ids_are_not_bounded_by_recent_window(store):
+    # 回归：ops 暂存固件清理依赖“全量非终态任务”。list_runs(limit=500)
+    # 只返回最近 500 条，更早的 queued 任务会被漏掉、其暂存产物可能被
+    # 误清理——active_run_ids 必须不受该窗口限制。
+    add_run(store, 'recent-terminal', status='completed')
+    for index in range(505):
+        add_run(store, f'old-{index:03d}', status='queued')
+
+    active = set(store.active_run_ids())
+
+    assert len(active) == 505
+    assert all(f'old-{index:03d}' in active for index in range(505))
+    assert 'recent-terminal' not in active
+    # 对比口径：受 limit 钳制的 list_runs 确实覆盖不了全部活跃任务。
+    assert len(store.list_runs(limit=500)) < len(active)

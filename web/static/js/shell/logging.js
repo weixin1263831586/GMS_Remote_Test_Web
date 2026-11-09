@@ -235,11 +235,16 @@ function switchLogTab(tabName) {
 
 // 用户主动发起设备、烧写、VNC、VPN 或上传操作时显示系统日志。
 // 只绑定操作按钮点击，避免后台系统消息在测试运行时抢走“测试日志”页签。
+// 注意不要检查 button.disabled：浏览器本就不为 disabled <button> 派发
+// click 事件；而 act-bridge 的 data-click 处理器（先注册）会在自己的
+// 监听器里同步 disable 按钮（防重复点击），同一事件的这个监听器随后
+// 运行——若在这里看 disabled 就会把「刚点下的按钮」误杀，页签永远
+// 不切换（锁定/解锁/锁定状态/设备信息等处理器全部同步 disable）。
 document.addEventListener('click', (event) => {
     const button = event.target?.closest?.(
         '#page-test [data-operation-log-tab="system"] button'
     );
-    if (!button || button.disabled) return;
+    if (!button) return;
     switchLogTab('system');
 });
 

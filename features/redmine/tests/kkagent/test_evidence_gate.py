@@ -114,6 +114,76 @@ class EvidenceGateTests(unittest.TestCase):
         gate = evaluate_evidence_gate(trace, {"attachment_count": 2})
         self.assertTrue(gate["attachments_checked"])
 
+    def test_window_read_only_attachment_is_flagged_without_coverage_search(self):
+        # 回归（#661066）：读过 4096 首窗 ≠ 看过全文。没有 coverage-
+        # complete 搜索时，已读附件进入 window_read_only_artifact_ids，
+        # gate_errors 给出"补 search 或读剩余窗口"的可执行修复提示。
+        trace = _full_trace()
+        attachment_call = next(
+            call for call in trace.tool_calls if "redmine_attachments" in call.tool_name
+        )
+        attachment_call.text_artifact_ids = ["log-1"]
+        consume_line(trace, json.dumps({
+            "type": "tool_call", "tool_call_id": "read-1",
+            "tool_name": "gms_rt_redmine_artifact_read",
+            "input": {"artifact_id": "log-1"},
+        }))
+        consume_line(trace, json.dumps({
+            "type": "tool_result", "tool_call_id": "read-1",
+            "is_error": False, "output": "first window contents",
+        }))
+
+        gate = evaluate_evidence_gate(trace, {"attachment_count": 2})
+        self.assertTrue(gate["attachments_checked"])  # 读过 → 通过基础门禁
+        self.assertIn("log-1", gate["window_read_only_artifact_ids"])
+        errors = gate_errors(gate)
+        self.assertTrue(any("only window-read" in e for e in errors))
+        self.assertTrue(any("log-1" in e for e in errors))
+
+        # coverage-complete 的批量搜索覆盖该 artifact 后解除提示。
+        consume_line(trace, json.dumps({
+            "type": "tool_call", "tool_call_id": "batch-1",
+            "tool_name": "gms_rt_redmine_artifact_search_batch",
+            "input": {"snapshot_id": "snap-1", "queries": ["boom"]},
+        }))
+        consume_line(trace, json.dumps({
+            "type": "tool_result", "tool_call_id": "batch-1",
+            "is_error": False,
+            "output": json.dumps({"data": {
+                "coverage_complete": True,
+                "queries": [{"query": "boom", "total": 1, "truncated": False,
+                             "matches": [{"kind": "artifact",
+                                          "artifact_id": "log-1",
+                                          "char_index": 12,
+                                          "snippet": "boom here"}]}],
+            }}),
+        }))
+
+        gate = evaluate_evidence_gate(trace, {"attachment_count": 2})
+        self.assertEqual(gate["window_read_only_artifact_ids"], [])
+        self.assertFalse(any("only window-read" in e for e in gate_errors(gate)))
+
+    def test_partial_coverage_search_does_not_claim_full_coverage(self):
+        # coverage_complete=false 的搜索（如旧格式兜底/部分扫描）不得记为
+        # 全文覆盖——零命中不能当否定证据。
+        trace = KkAgentTrace()
+        consume_line(trace, json.dumps({
+            "type": "tool_call", "tool_call_id": "s1",
+            "tool_name": "gms_rt_redmine_artifact_search",
+            "input": {"snapshot_id": "snap-1", "query": "boom"},
+        }))
+        consume_line(trace, json.dumps({
+            "type": "tool_result", "tool_call_id": "s1",
+            "is_error": False,
+            "output": json.dumps({"data": {
+                "coverage_complete": False,
+                "matches": [{"kind": "artifact", "artifact_id": "a9",
+                             "char_index": 0, "snippet": "x"}],
+            }}),
+        }))
+        self.assertEqual(trace.search_covered_artifact_ids(), set())
+        self.assertTrue(trace.read_artifact_ids() == set())
+
     def test_manifest_attachments_cannot_be_bypassed_by_stale_zero_count(self):
         trace = _full_trace()
         attachment_call = next(

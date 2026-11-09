@@ -259,7 +259,12 @@ function initWebSocket() {
                             if (disconnected.length > 0) {
                                 changeMessage += `，断开：${disconnected.join(' ')}`;
                             }
-                            addLogEntry(changeMessage, 'info');
+                            // 烧写会话期间等待门槛的迁移日志已逐事件叙述同一
+                            // 物理事件，这里不再重复打印；列表刷新与 toast 保留。
+                            if (!(typeof isFirmwareBurnSessionActive === 'function'
+                                  && isFirmwareBurnSessionActive())) {
+                                addLogEntry(changeMessage, 'info');
+                            }
 
                             let message = '设备列表已更新';
                             if (connected.length > 0) {

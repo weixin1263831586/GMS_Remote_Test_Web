@@ -1,8 +1,13 @@
-"""证据检索原文兜底的限流回归。
+"""证据检索的限流与覆盖回归。
 
 审核项：search 的原文/派生文本兜底曾无条件 read_text 整个文件，且对
-非文本 kind（image/apk 等）也读原文。现在：非文本 kind 跳过原文读取，
-文本读取限 1MB 前缀窗口。
+非文本 kind（image/apk 等）也读原文。现在：非文本 kind 跳过原文读取。
+
+#661066 复审后进一步收紧：旧实现只扫描每个文件的前 1MiB 前缀且每文件
+只报首个命中。现在文本按增量块流式扫描整个文件（内存只保留滚动窗口），
+报告每一次出现（≤limit），默认大小写不敏感，并如实上报覆盖情况
+（coverage_complete/scanned_bytes/total_bytes）——"没搜到"和"还没搜到
+的部分"是两个不同的答案。
 """
 
 from __future__ import annotations
@@ -89,6 +94,23 @@ class EvidenceSearchLimitTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
 
+    def _add_text_artifact(self, attachment_id: str, filename: str, content: str,
+                           kind: str = "log"):
+        rel = f"648526/{filename}"
+        self._write(rel, content)
+        artifact = self.store.create_artifact(
+            snapshot_id=self.snapshot["snapshot_id"],
+            attachment_id=attachment_id,
+            filename=filename,
+            original_filename=filename,
+            content_type="text/plain",
+            kind=kind,
+        )
+        self.store.update_artifact(
+            artifact["artifact_id"], status="ready", stored_path=rel
+        )
+        return artifact
+
     def _search(self, needle: str):
         manifest = {"description": f"issue description {needle}-in-description", "journals": []}
         with patch.object(evidence_search_api, "require_agent_scope", lambda _scope: lambda _request: None), \
@@ -113,10 +135,44 @@ class EvidenceSearchLimitTests(unittest.TestCase):
         # 描述命中保留；image 原文不得参与匹配。
         self.assertTrue(all(m["kind"] == "description" for m in matches))
 
-    def test_text_read_is_capped_to_one_megabyte_prefix(self):
+    def test_match_beyond_one_megabyte_is_found(self):
+        # 回归（#661066）：旧实现只扫前 1MiB，日志尾部的异常完全搜不到。
         result = self._search("NEEDLE-BEYOND-CAP")
-        matches = result["data"]["matches"]
-        self.assertTrue(all(m["kind"] == "description" for m in matches))
+        kinds = [m["kind"] for m in result["data"]["matches"]]
+        self.assertIn("artifact", kinds)
+        self.assertTrue(result["data"]["coverage_complete"])
+        self.assertGreater(result["data"]["total_bytes"], 1024 * 1024)
+        self.assertEqual(
+            result["data"]["scanned_bytes"], result["data"]["total_bytes"]
+        )
+
+    def test_all_occurrences_are_reported(self):
+        # 回归：旧实现每文件只报首个命中，多次异常看不见。
+        self._add_text_artifact("9101", "multi.log", "boom\nfirst\nboom\nsecond\nboom\nlast\n")
+        result = self._search("boom")
+        artifacts = [m for m in result["data"]["matches"] if m["kind"] == "artifact"]
+        self.assertEqual(len(artifacts), 3)
+        self.assertEqual([m["char_index"] for m in artifacts], [0, 11, 23])
+
+    def test_case_insensitive_by_default(self):
+        self._add_text_artifact("9102", "case.log", "boot ok\nKernel panic: LmKd killed process\n")
+        result = self._search("lmkd killed")
+        artifacts = [m for m in result["data"]["matches"] if m["kind"] == "artifact"]
+        self.assertEqual(len(artifacts), 1)
+        # snippet 保留原文大小写。
+        self.assertIn("LmKd killed process", artifacts[0]["snippet"])
+
+    def test_limit_boundary_reports_limited(self):
+        self._add_text_artifact("9103", "limit.log", "hit\n" * 8)
+        result = self._search("hit")
+        data = result["data"]
+        self.assertEqual(len(data["matches"]), 9)  # 8 artifact + 1 description
+        self.assertFalse(data["limited"])
+        self._add_text_artifact("9104", "limit2.log", "hit\n" * 12)
+        result = self._search("hit")
+        data = result["data"]
+        self.assertEqual(len(data["matches"]), 10)
+        self.assertTrue(data["limited"])
 
 
 if __name__ == "__main__":

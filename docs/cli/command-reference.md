@@ -28,6 +28,7 @@
 | `gms-rt-approval-create` | Create a one-shot approval token (human terminal: auto-login/session reuse; scripts: GMS_RT_HUMAN_SESSION=1) | gms-rt-approval-create --tool <gms_rt_burn_firmware\|gms_rt_shell_exec> --device <serial>[,<serial>...] [--command <command>\|--firmware-sha256 <sha256> [--wipe-data true\|false] [--burn-mode auto\|uf]] |
 | `gms-rt-artifact-read` | Read a text/log artifact derived text by char window (--offset/--limit) | gms-rt-artifact-read <artifact_id> [--offset N] [--limit N] |
 | `gms-rt-artifact-search` | Search description, journals, and artifact text for a fixed query with evidence refs | gms-rt-artifact-search <snapshot_id> <query> [--limit N] |
+| `gms-rt-artifact-search-batch` | Multi-keyword one-pass search across description/journals/artifact text; per-query totals and truncation with coverage report | gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N] |
 | `gms-rt-auth-credential-mode` | Show whether this CLI invocation uses an Agent Token file or a session cookie |  |
 | `gms-rt-auth-elevate` | Activate administrator elevation for the current human session | gms-rt-auth-elevate [admin_username] [--password-stdin] |
 | `gms-rt-auth-elevation-reset` | Clear administrator elevation from the current human session |  |
@@ -35,7 +36,7 @@
 | `gms-rt-auth-logout` | Revoke the current human API session and remove its local cookie jar |  |
 | `gms-rt-auth-scopes-check` | Pre-flight check that the current credential carries required agent scopes (default: Redmine evidence chain) | gms-rt-auth-scopes-check [--requires s1,s2] |
 | `gms-rt-auth-status` | Show whether authentication is required and describe the current principal/session |  |
-| `gms-rt-burn-firmware` | Transfer and burn a firmware image, with optional approved Agent execution and online wait | gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--approval-token TOKEN] [--wait-online[=SECONDS]] |
+| `gms-rt-burn-firmware` | Transfer and burn a firmware image, with optional approved Agent execution and online wait | gms-rt-burn-firmware <firmware_path> <devices> [wipe_data] [--approval-token TOKEN \| env GMS_RT_BURN_APPROVAL_TOKEN] [--wait-online[=SECONDS]] |
 | `gms-rt-burn-gsi` | Transfer and burn a GSI image, with optional online wait | gms-rt-burn-gsi <gsi_path> <devices> [wipe_data] [--wait-online[=SECONDS]] |
 | `gms-rt-burn-serial` | Program a serial number on one device | gms-rt-burn-serial <device_id> <serial> |
 | `gms-rt-cluster-devices` | List the authoritative cross-Worker device inventory, optionally filtered by Worker or serial | gms-rt-cluster-devices [--worker WORKER_ID] [--query REGEX] |
@@ -48,7 +49,7 @@
 | `gms-rt-debug-session-revoke` | Revoke this Agent debugging grant |  |
 | `gms-rt-debug-session-status` | Read one debugging grant and its recent operations |  |
 | `gms-rt-desktop-validate` | Validate SSH access to a desktop host | gms-rt-desktop-validate <user@ip> |
-| `gms-rt-desktop-vnc-start` | Start the configured VNC service on a desktop host | gms-rt-desktop-vnc-start [host] [password] [vnc_password] |
+| `gms-rt-desktop-vnc-start` | Start the configured VNC service on a desktop host | gms-rt-desktop-vnc-start [host] (密码优先用 env GMS_REMOTE_DEVICE_PASSWORD / GMS_REMOTE_VNC_PASSWORD；位置参数密码进入 argv，仅限本机可信场景) |
 | `gms-rt-desktop-vnc-status` | Read the configured desktop VNC service status |  |
 | `gms-rt-desktop-vnc-stop` | Stop the configured desktop VNC service |  |
 | `gms-rt-devices-bootloader-lock` | Lock the bootloader on one or more devices |  |
@@ -65,12 +66,12 @@
 | `gms-rt-devices-remount` | Remount one or more devices read-write and optionally reboot when required |  |
 | `gms-rt-devices-scrcpy` | Start human interactive screen mirroring for one or more devices | gms-rt-devices-scrcpy DEVICE1 [DEVICE2 ...] |
 | `gms-rt-devices-screencap` | Capture one device screenshot as a base64 PNG payload | gms-rt-devices-screencap <device_id> |
-| `gms-rt-devices-shell` | Open a human ADB shell or run one approved device command | gms-rt-devices-shell <device_id> [--approval-token TOKEN] [command] |
+| `gms-rt-devices-shell` | Open a human ADB shell or run one approved device command | gms-rt-devices-shell <device_id> [--approval-token TOKEN \| env GMS_RT_APPROVAL_TOKEN] [command] |
 | `gms-rt-devices-snapshot` | Collect a fixed read-only device diagnostic snapshot (build, activity, lock and owners) | gms-rt-devices-snapshot <device_id> |
 | `gms-rt-devices-ui-dump` | Read one device UI hierarchy as structured elements | gms-rt-devices-ui-dump <device_id> |
 | `gms-rt-devices-user-locked` | List devices currently locked by a platform user |  |
 | `gms-rt-devices-wait` | Wait for selected devices to become visible in the requested state | gms-rt-devices-wait <devices> [--state online\|fastboot\|any] [--interval SECONDS] [--max-wait SECONDS] |
-| `gms-rt-devices-wifi` | Connect one or more devices to a Wi-Fi network | gms-rt-devices-wifi <devices> <ssid> [password] |
+| `gms-rt-devices-wifi` | Connect one or more devices to a Wi-Fi network | gms-rt-devices-wifi <devices> <ssid> (密码优先用 env GMS_REMOTE_WIFI_PASSWORD；位置参数密码进入 argv，仅限本机可信场景) |
 | `gms-rt-jobs-cancel` | Request cancellation of a durable test job | gms-rt-jobs-cancel <job_id> |
 | `gms-rt-jobs-events` | Read incremental durable test job events | gms-rt-jobs-events <job_id> [after_sequence] [limit] |
 | `gms-rt-jobs-follow` | Return job status, incremental events and a terminal failure summary in one call | gms-rt-jobs-follow <job_id> [--after SEQUENCE] [--limit N] |

@@ -45,6 +45,12 @@ h1{font-size:20px}h2{font-size:15px}h3{font-size:13px}
 .terminal-column{min-width:0}
 .terminal,.history-output{margin:0;background:#070a0e;border:1px solid #29313d;border-radius:8px;color:#d5dfcf;font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}
 .terminal{height:min(58vh,650px);padding:6px;overflow:hidden}
+/* xterm 两条字体链必须一致：CharSizeService/WidthCache 测量 span 在
+   .xterm-helpers（继承本规则），行 span 靠 xterm 注入样式表。若注入样式
+   因任何原因失效，行 span 会退回继承 .terminal 的 12px 栈，与测量链
+   解析出不同字体，DOM 渲染器的 letter-spacing 补偿把日志撑成散字。
+   这里把两条链的 family/size/weight 显式钉成同一组值兜底。 */
+.terminal .xterm-helpers,.terminal .xterm-rows{font-family:"DejaVu Sans Mono","Liberation Mono",Consolas,"Courier New",monospace;font-size:13px;font-weight:400}
 .terminal .xterm{height:100%}.terminal .xterm-viewport{overscroll-behavior:contain}.history-output{white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto}
 .input-row{margin-top:8px}.input-row input{flex:1;min-width:80px}
 input,textarea,select{width:100%;border:1px solid var(--border);border-radius:6px;background:#111722;color:var(--text);padding:7px 9px;outline:none}

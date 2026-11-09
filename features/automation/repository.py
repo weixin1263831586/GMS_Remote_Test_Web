@@ -298,6 +298,23 @@ class AutomationStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def active_run_ids(self) -> list[str]:
+        """All non-terminal run IDs, without ``list_runs``' limit cap.
+
+        Ops staged-firmware hygiene consumes this via
+        ``foundation.automation_port`` (fail-closed): a queued/in-flight run
+        older than the recent-500 window must still protect its staged
+        artifacts from cleanup, so this query may not be bounded.
+        """
+        statuses = sorted(TERMINAL_STATUSES)
+        placeholders = ", ".join("?" for _ in statuses)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT id FROM automation_runs WHERE status NOT IN ({placeholders})",
+                statuses,
+            ).fetchall()
+        return [str(row["id"]) for row in rows]
+
     def list_run_summaries(
         self, status: str = "", limit: int = 50, created_by: str = ""
     ) -> list[dict[str, Any]]:

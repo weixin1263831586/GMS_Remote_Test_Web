@@ -305,3 +305,77 @@ def test_expired_upload_sessions_are_removed():
         chunk_uploads.cleanup_expired_upload_sessions(root, 'client', max_age=1)
 
         assert not expired.exists()
+
+
+def test_orphan_cleanup_removes_stale_sessions_across_clients():
+    """全租户兜底：其他 client 的过期暂存会话也要被回收。"""
+    with TemporaryDirectory() as root:
+        stale = Path(chunk_uploads.upload_session_dir(root, 'client-a', 'old'))
+        stale.mkdir(parents=True)
+        (stale / 'staged-update.img').write_bytes(b'firmware')
+        old = time.time() - 7200
+        os.utime(stale, (old, old))
+        fresh = Path(chunk_uploads.upload_session_dir(root, 'client-b', 'new'))
+        fresh.mkdir(parents=True)
+        (fresh / 'upload_metadata.json').write_text('{}', encoding='utf-8')
+
+        removed = chunk_uploads.cleanup_orphan_upload_sessions(root, max_age=3600)
+
+        assert removed == 1
+        assert not stale.exists()
+        assert fresh.exists()
+
+
+def test_orphan_cleanup_skips_live_burn_lock_holder():
+    """finalize 烧写进行中（锁持有者存活）的会话不得被 janitor 回收。"""
+    with TemporaryDirectory() as root:
+        session = Path(chunk_uploads.upload_session_dir(root, 'client', 'burning'))
+        session.mkdir(parents=True)
+        (session / 'staged-update.img').write_bytes(b'firmware')
+        (session / '.burn.lock').write_text(str(os.getpid()), encoding='ascii')
+        old = time.time() - 7200
+        os.utime(session, (old, old))
+
+        removed = chunk_uploads.cleanup_orphan_upload_sessions(root, max_age=3600)
+
+        assert removed == 0
+        assert session.exists()
+
+
+def test_orphan_cleanup_reclaims_dead_holder_lock_session():
+    """锁持有者已死（服务重启/崩溃）的旧会话必须能被回收。"""
+    with TemporaryDirectory() as root:
+        session = Path(chunk_uploads.upload_session_dir(root, 'client', 'dead'))
+        session.mkdir(parents=True)
+        (session / 'staged-update.img').write_bytes(b'firmware')
+        (session / '.burn.lock').write_text(str(_spawn_exiting_process()), encoding='ascii')
+        old = time.time() - 7200
+        os.utime(session, (old, old))
+
+        removed = chunk_uploads.cleanup_orphan_upload_sessions(root, max_age=3600)
+
+        assert removed == 1
+        assert not session.exists()
+
+
+def test_maybe_cleanup_rate_limits_repeated_calls():
+    with TemporaryDirectory() as root:
+        stale = Path(chunk_uploads.upload_session_dir(root, 'client', 'old'))
+        stale.mkdir(parents=True)
+        old = time.time() - 7200
+        os.utime(stale, (old, old))
+
+        first = chunk_uploads.maybe_cleanup_orphan_upload_sessions(
+            root, 3600, min_interval=0
+        )
+        assert first == 1
+        stale_again = Path(chunk_uploads.upload_session_dir(root, 'client', 'old2'))
+        stale_again.mkdir(parents=True)
+        os.utime(stale_again, (old, old))
+
+        # 同一限频窗口内（1 小时）重复调用不扫描。
+        second = chunk_uploads.maybe_cleanup_orphan_upload_sessions(
+            root, 3600, min_interval=3600
+        )
+        assert second == 0
+        assert stale_again.exists()

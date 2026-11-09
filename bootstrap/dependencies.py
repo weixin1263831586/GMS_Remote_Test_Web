@@ -49,20 +49,15 @@ def _wire_cross_feature_services() -> None:
     # 依赖倒置：磁盘卫生需要"非终态 run 集合"保护暂存固件（fail-closed），
     # automation 经 foundation.automation_port 反向提供，避免 ops→automation
     # 内部模块直连闭合跨 feature 依赖。
-    from features.automation.models import TERMINAL_STATUSES
     from features.automation.repository import AutomationStore
     from foundation.automation_port import configure_active_run_ids_provider
     from foundation.config import settings
 
     def _active_automation_run_ids() -> set[str]:
         store = AutomationStore(settings.data_root / "automation/automation.sqlite3")
-        active: set[str] = set()
-        for run in store.list_runs(limit=500):
-            if str(run.get("status") or "") not in TERMINAL_STATUSES:
-                run_id = str(run.get("id") or "").strip()
-                if run_id:
-                    active.add(run_id)
-        return active
+        # 必须全量查询非终态任务：list_runs 的 limit 上限（500）会把更早
+        # 入队/在途的任务漏掉，其暂存固件会被清理语义误判为可回收。
+        return set(store.active_run_ids())
 
     configure_active_run_ids_provider(_active_automation_run_ids)
     configure_manager_provider(get_redmine_config_for_request)

@@ -435,7 +435,10 @@
             convertEol: true,
             cursorBlink: false,
             disableStdin: true,
-            fontFamily: 'Consolas, "Courier New", monospace',
+            // DejaVu/Liberation 置前：Linux 客户端 fontconfig 会把 Consolas
+            // 别名到比例宽度字体，xterm 量出的单元格宽度与行渲染字形不一致，
+            // 导致串口日志字符间距被 letter-spacing 补偿拉开。
+            fontFamily: '"DejaVu Sans Mono", "Liberation Mono", Consolas, "Courier New", monospace',
             fontSize: 13,
             scrollback: 10000,
             theme: {background: '#070a0e', foreground: '#d5dfcf', cursor: '#d5dfcf'},

@@ -334,6 +334,160 @@ class EvidenceApiTests(unittest.TestCase):
         self.assertEqual(entry["line"], 2)
         self.assertEqual(entry["zip_member"], "logs/logcat.txt")
 
+    def test_search_requires_artifacts_read_own_for_agent_tokens(self):
+        """搜索返回原文片段，与 artifact 读取端点同界（#661066 复审）。
+
+        只带 redmine.read 的 Agent 不能再借搜索逐窗口提取无权读取的
+        附件内容；两个 scope 都带或人类会话（user 角色）照常放行。
+        """
+        url = f"/api/redmine-agent/evidence/{self.snapshot['snapshot_id']}/search"
+        denied = self.client.get(
+            url + "?q=AssertionError",
+            headers={"x-test-owner": "owner-a",
+                     "x-test-scopes": "redmine.read"},
+        )
+        self.assertEqual(denied.status_code, 403)
+        allowed = self.client.get(
+            url + "?q=AssertionError",
+            headers={"x-test-owner": "owner-a",
+                     "x-test-scopes": "redmine.read,artifacts.read_own"},
+        )
+        self.assertEqual(allowed.status_code, 200)
+
+    def test_artifact_text_window_keeps_total_chars_semantics(self):
+        """流式窗口读取与旧全量解码同语义：total_chars 全文计数、
+        truncated 如实、窗口内容正确（不整文件 read_bytes）。"""
+        url = f"/api/redmine-agent/artifacts/{self.artifact_id}/text"
+        payload = b"AssertionError line one\nline two\n"
+        first = self.client.get(url + "?offset=0&limit=10", headers={"x-test-owner": "owner-a"})
+        data = first.json()["data"]
+        self.assertEqual(data["text"], payload[:10].decode("utf-8"))
+        self.assertEqual(data["total_chars"], len(payload.decode("utf-8")))
+        self.assertTrue(data["truncated"])
+        second = self.client.get(url + "?offset=10&limit=100", headers={"x-test-owner": "owner-a"})
+        data = second.json()["data"]
+        self.assertEqual(data["text"], payload[10:].decode("utf-8"))
+        self.assertFalse(data["truncated"])
+
+    def test_artifact_text_falls_back_to_gb18030(self):
+        """utf-8 失败回退 gb18030（replace），中文日志可读。"""
+        from features.redmine.evidence_store import owner_evidence_store
+
+        store = owner_evidence_store("owner-a")
+        artifact = store.create_artifact(
+            snapshot_id=self.snapshot["snapshot_id"],
+            attachment_id="776658",
+            filename="gblog.log",
+            original_filename="gblog.log",
+            content_type="text/plain",
+            kind="log",
+        )
+        rel = f"648526/{self.snapshot['snapshot_id']}/attachments/{artifact['artifact_id']}/gblog.log"
+        target = store.resolve_internal(rel)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes("进程死亡 PID=1234".encode("gb18030"))
+        store.update_artifact(
+            artifact["artifact_id"], status="ready", stored_path=rel
+        )
+        response = self.client.get(
+            f"/api/redmine-agent/artifacts/{artifact['artifact_id']}/text",
+            headers={"x-test-owner": "owner-a"},
+        )
+        data = response.json()["data"]
+        self.assertIn("进程死亡", data["text"])
+        self.assertEqual(data["total_chars"], len("进程死亡 PID=1234"))
+
+    def test_search_covers_zip_members_beyond_one_megabyte(self):
+        """回归（#661066）：v2 成员帧逐成员全文匹配，成员体越过旧
+        1MiB 前缀窗口的命中同样可见。"""
+        from features.redmine.evidence import zip_member_block
+        from features.redmine.evidence_store import owner_evidence_store
+
+        store = owner_evidence_store("owner-a")
+        artifact = store.create_artifact(
+            snapshot_id=self.snapshot["snapshot_id"],
+            attachment_id="776659",
+            filename="big-logs.zip",
+            original_filename="big-logs.zip",
+            content_type="application/zip",
+            kind="archive",
+        )
+        derived_rel = (
+            f"648526/{self.snapshot['snapshot_id']}/derived/{artifact['artifact_id']}.txt"
+        )
+        derived_path = store.resolve_internal(derived_rel)
+        derived_path.parent.mkdir(parents=True, exist_ok=True)
+        big_member = "x" * (1024 * 1024 + 128) + "process died at the very end\n"
+        derived_path.write_text(
+            zip_member_block("logs/logcat.txt", big_member),
+            encoding="utf-8",
+        )
+        store.update_artifact(
+            artifact["artifact_id"],
+            status="ready",
+            stored_path=derived_rel,
+            derived_text_path=derived_rel,
+            detected_content_type="application/zip",
+        )
+        url = f"/api/redmine-agent/evidence/{self.snapshot['snapshot_id']}/search"
+        response = self.client.get(
+            url + "?q=process%20died%20at%20the%20very%20end",
+            headers={"x-test-owner": "owner-a"},
+        )
+        data = response.json()["data"]
+        self.assertTrue(data["coverage_complete"])
+        matches = [
+            m for m in data["matches"] if m.get("zip_member") == "logs/logcat.txt"
+        ]
+        self.assertTrue(matches)
+        self.assertIn("process died at the very end", matches[0]["snippet"])
+
+    def test_batch_search_matches_per_query_and_reports_coverage(self):
+        """批量端点：一次请求多关键词各自命中、独立截断、覆盖诚实。"""
+        url = f"/api/redmine-agent/evidence/{self.snapshot['snapshot_id']}/search/batch"
+        response = self.client.post(
+            url,
+            json={"queries": ["AssertionError", "line two", "nomatch"],
+                  "per_query_limit": 5},
+            headers={"x-test-owner": "owner-a"},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        by_query = {row["query"]: row for row in data["queries"]}
+        self.assertGreaterEqual(by_query["AssertionError"]["total"], 3)
+        self.assertGreaterEqual(by_query["line two"]["total"], 1)
+        self.assertFalse(by_query["nomatch"]["truncated"])
+        self.assertTrue(data["coverage_complete"])
+        self.assertGreaterEqual(data["scanned_bytes"], 1)
+        self.assertEqual(data["scanned_bytes"], data["total_bytes"])
+        # fixture 的 journal notes 含数百个 AssertionError（预算被耗尽
+        # 属预期截断）；artifact 命中用 line two 断言。
+        self.assertLessEqual(len(by_query["AssertionError"]["matches"]), 5)
+        self.assertTrue(by_query["AssertionError"]["truncated"])
+        kinds = {m["kind"] for m in by_query["line two"]["matches"]}
+        self.assertIn("artifact", kinds)
+
+    def test_batch_search_requires_artifacts_scope_and_validates_body(self):
+        url = f"/api/redmine-agent/evidence/{self.snapshot['snapshot_id']}/search/batch"
+        denied = self.client.post(
+            url,
+            json={"queries": ["AssertionError"]},
+            headers={"x-test-owner": "owner-a", "x-test-scopes": "redmine.read"},
+        )
+        self.assertEqual(denied.status_code, 403)
+        empty = self.client.post(
+            url,
+            json={"queries": ["   "]},
+            headers={"x-test-owner": "owner-a"},
+        )
+        self.assertEqual(empty.status_code, 422)
+        unknown = self.client.post(
+            url,
+            json={"queries": ["a"], "bogus": True},
+            headers={"x-test-owner": "owner-a"},
+        )
+        self.assertEqual(unknown.status_code, 422)
+
     def test_latest_endpoint_resolves_newest_snapshot_for_issue(self):
         """issue-show 双参数——latest 端点按 issue 解析。"""
         from features.redmine.evidence_store import owner_evidence_store

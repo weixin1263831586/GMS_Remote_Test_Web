@@ -1,5 +1,6 @@
 """Host workspace selection, scope, desktop and connection lifecycle."""
 
+import itertools
 import json
 import re
 
@@ -1383,7 +1384,7 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                         msg=f"{name} 页右上角 {group['group']} 组竖直中线不一致: {boxes}",
                     )
                     # 同组控件之间不留空隙：相邻控件左边缘 = 前一个右边缘。
-                    for left, right in zip(boxes, boxes[1:]):
+                    for left, right in itertools.pairwise(boxes):
                         self.assertAlmostEqual(
                             left["x"] + left["w"], right["x"], delta=1,
                             msg=f"{name} 页右上角 {group['group']} 组内"

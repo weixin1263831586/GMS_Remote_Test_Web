@@ -19,11 +19,17 @@ server-internal and must never be returned to clients.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import logging
+import os
+import shutil
 import sqlite3
 import threading
+import time
 import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -31,8 +37,32 @@ from . import users as _users
 from .users import _now
 
 
+logger = logging.getLogger(__name__)
+
+
 SNAPSHOT_STATUSES = ("queued", "fetching", "downloading", "ready", "partial", "failed")
 ARTIFACT_STATUSES = ("metadata", "downloading", "ready", "partial", "rejected", "failed")
+# 保留策略（evidence 快照是证据分析链里最大的持续磁盘开销：附件原样落盘，
+# 实测单工单可达 GB 级且历史上无任何清理）。仅终态且非进行中的快照可回收：
+#   - GMS_EVIDENCE_RETENTION_DAYS（默认 90）：按 created_at 年龄回收；
+#   - GMS_EVIDENCE_MAX_SNAPSHOTS_PER_ISSUE（默认 10）：同一工单只保留最新 N 份。
+# queued/fetching/downloading 属于进行中（或崩溃后由启动对账处理），永不回收。
+TERMINAL_SNAPSHOT_STATUSES = ("ready", "partial", "failed")
+ORPHAN_SNAPSHOT_DIR_MIN_AGE_SECONDS = 24 * 60 * 60
+
+
+def _evidence_retention_config() -> dict[str, int]:
+    def _int_env(name: str, default: int, minimum: int) -> int:
+        try:
+            value = int(os.getenv(name, "") or default)
+        except ValueError:
+            value = default
+        return max(minimum, value)
+
+    return {
+        "max_age_days": _int_env("GMS_EVIDENCE_RETENTION_DAYS", 90, 1),
+        "keep_per_issue": _int_env("GMS_EVIDENCE_MAX_SNAPSHOTS_PER_ISSUE", 10, 1),
+    }
 # 派生文本状态与原件 status 正交：原件字节已完整下载即为 ready；派生
 # （OCR/zip 索引/转码）是否可用由 derived_status 表达，避免一次 OCR
 # 失败把"原件可用"误报成"证据不完整"。
@@ -229,6 +259,113 @@ class EvidenceStore:
         except OSError:
             return False
 
+    # ---------------------------------------------------------------- retention
+
+    def apply_retention(
+        self, *, now: datetime | None = None
+    ) -> dict[str, int]:
+        """执行保留策略并回收磁盘，返回 {deleted_snapshots, removed_dirs}。
+
+        回收对象（同时满足）：
+        - 终态快照（ready/partial/failed）；进行中状态永不回收；
+        - 按 created_at 年龄超过 GMS_EVIDENCE_RETENTION_DAYS，或同一工单
+          编号超出 GMS_EVIDENCE_MAX_SNAPSHOTS_PER_ISSUE 的较旧快照。
+
+        文件先删、DB 行后删（单事务）：中断最多留下无 DB 引用的孤儿目录，
+        由 _sweep_orphan_snapshot_dirs 兜底，绝不出现 DB 行指向已删文件。
+        """
+        policy = _evidence_retention_config()
+        now = now or datetime.now()
+        cutoff = (now - timedelta(days=policy["max_age_days"])).isoformat(
+            timespec="seconds"
+        )
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT snapshot_id, issue_id, created_at
+                FROM redmine_evidence_snapshots
+                WHERE status IN ({", ".join("?" for _ in TERMINAL_SNAPSHOT_STATUSES)})
+                ORDER BY issue_id, created_at DESC, rowid DESC
+                """,
+                list(TERMINAL_SNAPSHOT_STATUSES),
+            ).fetchall()
+        victims: list[tuple[str, int]] = []
+        seen_per_issue: dict[int, int] = {}
+        for row in rows:
+            issue_id = int(row["issue_id"])
+            seen_per_issue[issue_id] = seen_per_issue.get(issue_id, 0) + 1
+            too_old = str(row["created_at"]) < cutoff
+            beyond_limit = seen_per_issue[issue_id] > policy["keep_per_issue"]
+            if too_old or beyond_limit:
+                victims.append((str(row["snapshot_id"]), issue_id))
+        removed_dirs = 0
+        for snapshot_id, issue_id in victims:
+            snapshot = {"issue_id": issue_id, "snapshot_id": snapshot_id}
+            with contextlib.suppress(OSError):
+                shutil.rmtree(self.snapshot_dir(snapshot))
+            removed_dirs += 1
+        if victims:
+            victim_ids = [item[0] for item in victims]
+            with self._lock, self._connect() as conn:
+                placeholders = ", ".join("?" for _ in victim_ids)
+                conn.execute(
+                    f"DELETE FROM redmine_evidence_artifacts "
+                    f"WHERE snapshot_id IN ({placeholders})",
+                    victim_ids,
+                )
+                conn.execute(
+                    f"DELETE FROM redmine_evidence_snapshots "
+                    f"WHERE snapshot_id IN ({placeholders})",
+                    victim_ids,
+                )
+                conn.commit()
+            logger.info(
+                "Evidence retention removed %d snapshots (%d dirs)",
+                len(victims), removed_dirs,
+            )
+        removed_dirs += self._sweep_orphan_snapshot_dirs(now=now)
+        return {"deleted_snapshots": len(victims), "removed_dirs": removed_dirs}
+
+    def _sweep_orphan_snapshot_dirs(self, *, now: datetime) -> int:
+        """删除无 DB 引用的快照目录（文件先删/DB 后删之间的崩溃残留）。
+
+        mtime 未满 24h 的目录跳过，避免与正在创建中的快照竞态。
+        """
+        removed = 0
+        cutoff = now.timestamp() - ORPHAN_SNAPSHOT_DIR_MIN_AGE_SECONDS
+        try:
+            issue_entries = list(os.scandir(self.evidence_dir))
+        except OSError:
+            return 0
+        with self._lock, self._connect() as conn:
+            for issue_entry in issue_entries:
+                try:
+                    if not issue_entry.is_dir(follow_symlinks=False):
+                        continue
+                    snapshot_entries = list(os.scandir(issue_entry.path))
+                except OSError:
+                    continue
+                for entry in snapshot_entries:
+                    try:
+                        if not entry.is_dir(follow_symlinks=False):
+                            continue
+                        if entry.stat(follow_symlinks=False).st_mtime >= cutoff:
+                            continue
+                        referenced = conn.execute(
+                            "SELECT 1 FROM redmine_evidence_snapshots "
+                            "WHERE snapshot_id = ?",
+                            (entry.name,),
+                        ).fetchone()
+                        if referenced:
+                            continue
+                        shutil.rmtree(entry.path)
+                        removed += 1
+                    except OSError:
+                        logger.debug(
+                            "Failed to sweep orphan evidence dir %s", entry.path
+                        )
+        return removed
+
     # --------------------------------------------------------------- snapshots
 
     def create_snapshot(
@@ -248,6 +385,7 @@ class EvidenceStore:
                 """,
                 (snapshot_id, int(issue_id), str(download_policy or "none"), created),
             )
+        maybe_apply_retention(self)
         return self.get_snapshot(snapshot_id) or {"snapshot_id": snapshot_id, "status": "queued"}
 
     def update_snapshot(self, snapshot_id: str, **fields: Any) -> None:
@@ -507,6 +645,36 @@ class EvidenceStore:
 
 _STORE_CACHE: dict[str, EvidenceStore] = {}
 _STORE_LOCK = threading.Lock()
+
+RETENTION_SWEEP_MIN_INTERVAL_SECONDS = 6 * 60 * 60
+_retention_sweep_lock = threading.Lock()
+_last_retention_sweep = 0.0
+
+
+def maybe_apply_retention(
+    store: EvidenceStore,
+    *,
+    min_interval: int | None = None,
+) -> dict[str, int] | None:
+    """限频触发保留策略（默认 6 小时一次，随新快照创建顺带执行）。
+
+    返回 apply_retention 统计；未到限频间隔返回 None。测试可通过
+    min_interval=0 强制执行。
+    """
+    global _last_retention_sweep
+    interval = (
+        RETENTION_SWEEP_MIN_INTERVAL_SECONDS
+        if min_interval is None
+        else min_interval
+    )
+    now = time.monotonic()
+    with _retention_sweep_lock:
+        if now - _last_retention_sweep < interval:
+            return None
+        _last_retention_sweep = now
+    with contextlib.suppress(Exception):
+        return store.apply_retention()
+    return None
 
 
 def owner_evidence_store(owner_id: str) -> EvidenceStore:

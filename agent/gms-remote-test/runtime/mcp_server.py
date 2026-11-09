@@ -117,7 +117,7 @@ mcp_debug_tools = _load_typed_tools("mcp_debug_tools")
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.68"
+SERVER_VERSION = "0.22.70"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -2195,6 +2195,7 @@ _TOOLSETS = {
             "gms_rt_redmine_journals",
             "gms_rt_redmine_attachments",
             "gms_rt_redmine_artifact_search",
+            "gms_rt_redmine_artifact_search_batch",
             "gms_rt_redmine_artifact_read",
             "gms_rt_redmine_image",
             "gms_rt_apk_analyze_attachment",
@@ -2435,6 +2436,12 @@ def _int_arg(arguments: dict[str, Any], name: str, default: int, minimum: int, m
     return max(minimum, min(parsed, maximum))
 
 
+# artifact_read 的 offset 合法域上限：与 Controller 端 ge=0 一致地放行
+# 大偏移（仅做合理性防呆），超出时报错并引导先用 search 定位，而不是
+# 旧实现的静默钳制。
+ARTIFACT_READ_OFFSET_MAX = 1_000_000_000
+
+
 def _image_file_result(
     image_b64: str, mime: str, stem: str, meta: dict[str, Any]
 ) -> ToolContent:
@@ -2575,13 +2582,57 @@ def redmine_artifact_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     return run_cli("gms-rt-artifact-search", args)
 
 
+def redmine_artifact_search_batch_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """Multi-keyword one-pass search: one CLI round trip matches every
+    keyword server-side instead of re-scanning the same large logs per
+    keyword (#661066 review). Coverage semantics match the single-query
+    tool: with coverage_complete=false a zero hit is not negative
+    evidence."""
+    snapshot_id = str(arguments.get("snapshot_id") or "").strip()
+    if not snapshot_id:
+        return "snapshot_id is required", True
+    raw_queries = arguments.get("queries")
+    queries: list[str] = []
+    if isinstance(raw_queries, list):
+        for item in raw_queries:
+            text = str(item or "").strip()
+            if text and text not in queries:
+                queries.append(text)
+    if not queries:
+        return "queries must be a non-empty list of strings", True
+    if len(queries) > 16:
+        return "queries accepts at most 16 distinct keywords", True
+    args: list[str] = [snapshot_id, *queries]
+    if arguments.get("per_query_limit"):
+        args.extend([
+            "--per-query-limit",
+            str(_int_arg(arguments, "per_query_limit", 20, 1, 100)),
+        ])
+    return run_cli("gms-rt-artifact-search-batch", args)
+
+
 def redmine_artifact_read_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     artifact_id = str(arguments.get("artifact_id") or "").strip()
     if not artifact_id:
         return "artifact_id is required", True
     args: list[str] = [artifact_id]
     if arguments.get("offset") is not None:
-        args.extend(["--offset", str(_int_arg(arguments, "offset", 0, 0, 10_000_000))])
+        # 显式校验而不是静默钳制（#661066 复审）：旧的 max=10_000_000
+        # 会把超大偏移悄悄压回上限，模型拿到错误窗口却不自知。
+        raw_offset = arguments.get("offset")
+        try:
+            offset = int(raw_offset)
+        except (TypeError, ValueError):
+            return f"offset must be an integer, got {raw_offset!r}", True
+        if offset < 0 or offset > ARTIFACT_READ_OFFSET_MAX:
+            return (
+                f"offset must be within [0, {ARTIFACT_READ_OFFSET_MAX}] "
+                f"(got {offset}); use gms_rt_redmine_artifact_search to "
+                "locate the region first — search hits carry char_index "
+                "offsets usable here",
+                True,
+            )
+        args.extend(["--offset", str(offset)])
     if arguments.get("limit"):
         args.extend(["--limit", str(_int_arg(arguments, "limit", 65536, 1, 262144))])
     return run_cli("gms-rt-artifact-read", args)
@@ -2862,6 +2913,7 @@ _TOOL_HANDLERS = {
     "gms_rt_redmine_journals": redmine_journals_tool,
     "gms_rt_redmine_attachments": redmine_attachments_tool,
     "gms_rt_redmine_artifact_search": redmine_artifact_search_tool,
+    "gms_rt_redmine_artifact_search_batch": redmine_artifact_search_batch_tool,
     "gms_rt_redmine_artifact_read": redmine_artifact_read_tool,
     "gms_rt_redmine_image": redmine_image_tool,
     "gms_rt_devices_screencap": devices_screencap_tool,

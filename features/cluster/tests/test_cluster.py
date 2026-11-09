@@ -71,6 +71,28 @@ class ClusterRepositoryTests(unittest.TestCase):
         self.assertEqual(device["properties"]["product"], "rk")
         self.assertEqual(self.repo.list_suites("worker-246")[0]["suite_key"], "CTS:17_r1")
 
+    def test_refresh_devices_replaces_inventory_without_touching_worker_session(self):
+        """本地烧写完成的库存刷新：只写设备表，不碰会话/状态/心跳时间。"""
+        self.register()
+        before = self.repo.get_worker("worker-246")
+        self.repo.refresh_devices("worker-246", [
+            {"serial": "ABC", "transport": "local_usb", "state": "usb_only",
+             "properties": {"usb": "1-13"}},
+        ])
+        stale = self.repo.list_devices("worker-246")[0]
+        self.assertEqual(stale["state"], "usb_only")
+        self.repo.refresh_devices("worker-246", [
+            {"serial": "ABC", "transport": "local_usb", "state": "available",
+             "properties": {"usb": "1-13", "android_version": "17"}},
+        ])
+        device = self.repo.list_devices("worker-246")[0]
+        self.assertEqual(device["id"], "worker-246:ABC")
+        self.assertEqual(device["state"], "available")
+        self.assertEqual(device["properties"]["android_version"], "17")
+        after = self.repo.get_worker("worker-246")
+        self.assertEqual(after["status"], before["status"])
+        self.assertEqual(after["last_heartbeat_at"], before["last_heartbeat_at"])
+
     def test_heartbeat_updates_transport_for_same_device_id(self):
         self.register()
         base = {

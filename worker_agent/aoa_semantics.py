@@ -168,7 +168,8 @@ def run_semantic_sequence(serial, commands, options, *, on_event=None, on_progre
         result = {"success": True, "serial": serial, "commands_total": len(commands),
             "commands_executed": completed, "verified_steps": verified, "skipped_steps": skipped,
             "mapping_policy": "direct_standard", "certificate_id": plan["certificate_id"],
-            "layout_id": plan["layout_id"], "native_mode_restored": True, "cleanup_errors": []}
+            "layout_id": plan["layout_id"], "native_mode_restored": True, "cleanup_errors": [],
+            "replay_completed": True}
         if options.get("wait_adb_seconds"):
             result.update(_wait_adb_state(serial, int(options["wait_adb_seconds"])))
             result["success"] = result.get("adb_recovered") is True

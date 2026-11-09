@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import base64
+import codecs
 import logging
 from pathlib import Path
 from typing import Any
@@ -482,6 +483,43 @@ async def download_evidence_artifact(artifact_id: str, request: Request):
     )
 
 
+# 文本窗口流式读取的块大小：逐块增量解码并只保留目标窗口，避免把
+# 整个（可能数百 MB 的）日志一次性读进内存再切片。
+_TEXT_WINDOW_CHUNK_BYTES = 256 * 1024
+
+
+def _stream_text_window(path, offset: int, limit: int, encoding: str, errors: str):
+    """流式解码计数到 offset 再收集 limit 个字符。
+
+    内存只持有块级缓冲与窗口内容；字符计数继续到 EOF，保证响应里的
+    ``total_chars`` 与 ``truncated`` 语义与旧全量解码完全一致。
+    """
+    decoder = codecs.getincrementaldecoder(encoding)(errors)
+    total_chars = 0
+    collected: list[str] = []
+    collecting = offset <= 0
+    with path.open("rb") as fh:
+        while True:
+            raw = fh.read(_TEXT_WINDOW_CHUNK_BYTES)
+            if not raw:
+                tail = decoder.decode(b"", True)
+                if tail:
+                    total_chars += len(tail)
+                    if collecting:
+                        collected.append(tail)
+                break
+            text = decoder.decode(raw)
+            total_chars += len(text)
+            if collecting:
+                collected.append(text)
+            elif total_chars >= offset:
+                # 本块跨越 offset 边界：只保留边界之后的字符。
+                extra = total_chars - offset
+                collected.append(text[len(text) - extra:])
+                collecting = True
+    return "".join(collected)[:limit], total_chars
+
+
 @router.get("/artifacts/{artifact_id}/text")
 @handle_api_errors
 async def read_evidence_artifact_text(
@@ -502,24 +540,24 @@ async def read_evidence_artifact_text(
                 raise
         except EvidenceError:
             return _error_response(exc)
-    data = path.read_bytes()
-    size = len(data)
-    # 以字符方式切片：先解码为文本再切片，保证多字节字符不被截半。
+    size = path.stat().st_size
+    # 流式窗口读取：不再整文件 read_bytes()+全量解码（#661066 复审，
+    # 旧实现每个 256KiB 窗口都要分配并解码整个文件）。utf-8 失败回退
+    # gb18030（replace），与旧兜底顺序一致。
     try:
-        text = data.decode("utf-8")
+        window, total_chars = _stream_text_window(path, offset, limit, "utf-8", "strict")
     except UnicodeDecodeError:
-        text = data.decode("gb18030", errors="replace")
-    window = text[offset:offset + limit]
+        window, total_chars = _stream_text_window(path, offset, limit, "gb18030", "replace")
     return {
         "success": True,
         "data": {
             "artifact_id": artifact.get("artifact_id"),
-            "total_chars": len(text),
+            "total_chars": total_chars,
             "total_bytes": size,
             "offset": offset,
             "returned_chars": len(window),
             "text": window,
-            "truncated": offset + limit < len(text),
+            "truncated": offset + limit < total_chars,
         },
     }
 

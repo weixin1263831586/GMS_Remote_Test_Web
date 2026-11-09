@@ -18,6 +18,7 @@ from .monitor import get_usb_monitor
 from .support import (
     DeviceSSHConnection,
     broadcast_device_lock_update,
+    device_fencing_owner_id,
     get_or_create_user_state,
     iter_websocket_targets,
     release_device_locks,
@@ -114,6 +115,7 @@ __all__ = [
     "calibration_store",
     "connect_wifi",
     "create_pair_grant",
+    "device_fencing_owner_id",
     "device_lock_manager",
     "device_manager",
     "ensure_usbip_auto_bind_policies",

@@ -59,6 +59,45 @@ class RuntimeTestExecutionTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_operation_log_tab_switch_survives_same_event_button_disable(self):
+        """回归：act-bridge 的 data-click 处理器（document 上先注册的
+        click 监听器）在处理器入口同步 disable 按钮防止重复点击；
+        同一个 click 事件随后轮到 logging.js 的监听器时，不得因
+        button.disabled 被误杀——否则锁定/解锁/锁定状态/设备信息等
+        同步 disable 的按钮永远无法把日志页签切到系统日志。用
+        capture 阶段监听器复现「同事件先 disable」的真实时序。
+        """
+        page = self.new_page()
+        page_errors = []
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof switchLogTab === 'function'")
+            page.evaluate("switchLogTab('module')")
+            expect(page.locator('.log-tab-btn[data-log-tab="module"]')).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+
+            page.evaluate(
+                """() => {
+                    const button = document.querySelector('#btn-device-info');
+                    document.addEventListener('click', () => {
+                        button.disabled = true;
+                    }, { capture: true, once: true });
+                    button.click();
+                }"""
+            )
+
+            expect(page.locator('.log-tab-btn[data-log-tab="system"]')).to_have_class(
+                re.compile(r"\bactive\b")
+            )
+            expect(page.locator('.log-tab-btn[data-log-tab="module"]')).not_to_have_class(
+                re.compile(r"\bactive\b")
+            )
+            self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
     def test_start_test_wakes_cluster_log_polling_immediately(self):
         page = self.new_page()
         event_requests = []

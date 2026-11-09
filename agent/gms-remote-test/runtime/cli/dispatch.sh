@@ -96,6 +96,7 @@ _gms_rt_command_usage() {
         gms-rt-artifact-read) printf '%s' 'gms-rt-artifact-read <artifact_id> [--offset N] [--limit N]' ;;
         gms-rt-redmine-artifact-image) printf '%s' 'gms-rt-redmine-artifact-image <artifact_id>' ;;
         gms-rt-artifact-search) printf '%s' 'gms-rt-artifact-search <snapshot_id> <query> [--limit N]' ;;
+        gms-rt-artifact-search-batch) printf '%s' 'gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N]' ;;
         gms-rt-apk-analyze-attachment) printf '%s' 'gms-rt-apk-analyze-attachment <snapshot_id> <artifact_id>' ;;
         gms-rt-apk-source-read) printf '%s' 'gms-rt-apk-source-read <task_id> <path> [--offset N] [--limit N]' ;;
         gms-rt-knowledge-search) printf '%s' 'gms-rt-knowledge-search QUERY [--limit N] [--android-api-level N]' ;;
@@ -223,6 +224,7 @@ _gms_rt_command_summary() {
         gms-rt-artifact-read) printf '%s' 'Read a text/log artifact derived text by char window (--offset/--limit)' ;;
         gms-rt-redmine-artifact-image) printf '%s' 'Return an image artifact as JSON with base64 payload and metadata (for MCP image tooling)' ;;
         gms-rt-artifact-search) printf '%s' 'Search description, journals, and artifact text for a fixed query with evidence refs' ;;
+        gms-rt-artifact-search-batch) printf '%s' 'Multi-keyword one-pass search across description/journals/artifact text; per-query totals and truncation with coverage report' ;;
         gms-rt-apk-analyze-attachment) printf '%s' 'Import a Redmine .apk artifact into the JADX analysis pipeline (owner-scoped)' ;;
         gms-rt-apk-source-read) printf '%s' 'Read a window of one decompiled source file by task-relative path' ;;
         gms-rt-knowledge-search) printf '%s' 'Search background Android system-mechanism knowledge from the external wiki (read-only, ADR 0014)' ;;
@@ -280,7 +282,7 @@ gms-rt-system-commands() {
         # 不必逐条试错。data-mixed 表示同一命令
         # 不同参数下形态不同（如 devices-console 带不带 port_key）。
         def output_shape:
-            if test("^(gms-rt-devices-list|gms-rt-devices-info|gms-rt-jobs-list|gms-rt-reports-list|gms-rt-cluster-(devices|workers)|gms-rt-users-list|gms-rt-redmine-attachments|gms-rt-redmine-journals|gms-rt-test-(suites|modules)|gms-rt-sdk-sources|gms-rt-sdk-search|gms-rt-knowledge-search|gms-rt-artifact-search|gms-rt-redmine-history-search|gms-rt-apk-(resolve|search|manifest|source|source-read)|gms-rt-system-commands)$")
+            if test("^(gms-rt-devices-list|gms-rt-devices-info|gms-rt-jobs-list|gms-rt-reports-list|gms-rt-cluster-(devices|workers)|gms-rt-users-list|gms-rt-redmine-attachments|gms-rt-redmine-journals|gms-rt-test-(suites|modules)|gms-rt-sdk-sources|gms-rt-sdk-search|gms-rt-knowledge-search|gms-rt-artifact-search|gms-rt-artifact-search-batch|gms-rt-redmine-history-search|gms-rt-apk-(resolve|search|manifest|source|source-read)|gms-rt-system-commands)$")
             then "data-array"
             elif test("^(gms-rt-devices-console|gms-rt-devices-screencap)$")
             then "data-mixed"
@@ -595,6 +597,7 @@ ${YELLOW}Redmine Evidence (read-only analysis chain):${NC}
   gms-rt-redmine-artifact-image  - Return an image artifact as base64 plus metadata
   gms-rt-artifact-read           - Read artifact derived text by char window
   gms-rt-artifact-search         - Search description/journals/artifact text
+  gms-rt-artifact-search-batch   - Multi-keyword one-pass search with coverage
   gms-rt-apk-analyze-attachment  - Import a Redmine .apk artifact into JADX
   gms-rt-apk-source-read         - Read a window of one decompiled file
   gms-rt-knowledge-search        - Search background Android system-mechanism knowledge (ADR 0014)

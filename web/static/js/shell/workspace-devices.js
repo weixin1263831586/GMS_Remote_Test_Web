@@ -650,8 +650,12 @@ async function loadDevices(forceRefresh = false, options = {}) {
                 .catch((err) => debugLog('[Devices] loadDeviceGroups failed:', err));
         }
 
-        if (!silent) {
-            // 显示设备信息，包含序列号和刷新来源
+        // 烧写会话期间静默周期刷新行（[自动刷新]），避免插进等待门槛的
+        // 迁移日志中间；手动刷新行保留。
+        const burnQuiet = source !== 'manual'
+            && typeof isFirmwareBurnSessionActive === 'function'
+            && isFirmwareBurnSessionActive();
+        if (!silent && !burnQuiet) {
             const sourceLabel = source === 'manual' ? '[手动刷新] ' : '[自动刷新] ';
             let deviceInfo = `${sourceLabel}已刷新设备列表，找到 ${devices.length} 台设备`;
             if (devices.length > 0) {

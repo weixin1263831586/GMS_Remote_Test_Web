@@ -1319,6 +1319,15 @@ class WorkerAgent:
                     suppress_adb_daemon=(not running and not discover_tradefed_processes(running)
                                          and not _adb_proxy_imports_active()),
                     suppress_adb_daemon_gate=_suppression_gate)
+            if recovery:
+                # 恢复收尾（restore_native_mode 重枚举 + adb 会话结束）刚落定：
+                # 周期心跳（可能数分钟）内的库存快照仍停留在 accessory 窗口的
+                # usb_only，完成事件触发的设备列表刷新会拉到它。立即强制上报
+                # 一次终态清单，让完成刷新与下一次心跳都看到 ADB 就绪。
+                try:
+                    self.heartbeat()
+                except Exception:
+                    logger.warning("post-flash inventory heartbeat failed", exc_info=True)
             uploader.flush()  # 收尾：有界等待排空剩余事件
             status = "completed" if result.get("success") else "failed"
             error = "" if status == "completed" else result.get("error") or result.get("output", "firmware flash failed")

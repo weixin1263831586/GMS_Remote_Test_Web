@@ -17,4 +17,5 @@ def recovery_failure_reason(result: dict, error: str = "") -> str:
         "absent": "尚未检测到 ADB，请检查 USB 调试开关及连接",
         "identity_mismatch": "ADB USB 物理端口与回放目标不一致，请核对目标设备",
         "ambiguous": "ADB 目标设备不唯一，请核对 USB 设备身份",
+        "io_dead": "ADB 显示 device 但 I/O 无响应（adbd 半死）；请重启设备后再验证",
     }.get(result.get("adb_state"), "ADB 尚未恢复或尚未授权")

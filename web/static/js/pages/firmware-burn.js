@@ -1,5 +1,13 @@
 // ==================== VNC & Remote Control ====================
 let firmwareBurnSubmitting = false;
+// 烧写会话是否活跃：本地烧写请求从提交到返回（含烧写+AOA 恢复全程，
+// finally 里复位）。等待窗口内 wait_for_boot 的迁移日志（「消失（重枚举
+// 中）/adbd 半死/已就绪」）已逐事件叙述 USB 变化，WebSocket devices_changed
+// 与周期自动刷新的重复日志行由各自出口据此静默；未加载烧写模块的页面
+// 走 typeof 守卫恒为否，行为不变。
+function isFirmwareBurnSessionActive() {
+    return firmwareBurnSubmitting;
+}
 async function burnFirmware() {
     if (selectedBurnableDeviceIds().length === 0) {
         showToast('请先选择要烧写固件的设备', 'warning');
@@ -429,6 +437,11 @@ async function submitFirmwareBurn() {
             addLogEntry(aoaEnabled ? '固件烧写与 AOA 恢复完成，已刷新设备列表'
                                    : '固件烧写完成，已刷新设备列表', 'success');
             await refreshDevicesAfterBurn();
+            // 恢复收尾（accessory→原生重枚举 + adb 会话结束）与 worker 心跳
+            // 之间存在分钟级窗口：完成瞬间的库存快照可能仍是 accessory 窗口
+            // 的 usb_only（徽标停在「USB-HID / AOA（待验证）」）。延迟补一次
+            // 刷新兜住心跳尾巴；refreshDevicesAfterBurn 幂等，重复调用安全。
+            setTimeout(() => { void refreshDevicesAfterBurn(); }, 6000);
         }
     } catch (error) {
         if (!burnStarted) {

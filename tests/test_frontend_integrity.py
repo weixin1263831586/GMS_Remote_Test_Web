@@ -537,6 +537,22 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("updateProgressBar(percentage, '', '固件下载')", websocket)
         self.assertIn("if (routeFirmwareDownloadProgress(data.log))", websocket)
 
+    def test_burn_session_silences_duplicate_usb_and_auto_refresh_logs(self):
+        """烧写会话期间 devices_changed/自动刷新不重复打印；迁移日志是唯一叙述。
+
+        wait_for_boot 逐事件上报「消失（重枚举中）/adbd 半死/已就绪」，全局
+        USB 变化行与 [自动刷新] 行在等待窗口内是同一物理事件的重复叙述；
+        手动刷新与烧写会话之外的插拔行为不变。
+        """
+        burn = read_text("web/static/js/pages/firmware-burn.js")
+        websocket = read_text("web/static/js/shell/websocket-manager.js")
+        devices = read_text("web/static/js/shell/workspace-devices.js")
+
+        self.assertIn("function isFirmwareBurnSessionActive()", burn)
+        self.assertIn("isFirmwareBurnSessionActive()", websocket)
+        self.assertIn("isFirmwareBurnSessionActive()", devices)
+        self.assertIn("source !== 'manual'", devices)
+
     def test_gsi_burn_starts_and_stops_fastboot_transition_refresh(self):
         navigation = read_all_frontend_js()
 

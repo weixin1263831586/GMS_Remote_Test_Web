@@ -826,3 +826,32 @@ def test_suite_download_part_file_carries_unique_suffix(tmp_path):
 
     assert captured == [".suite.zip.0123abcd.part"]
     assert (root / "suite.zip").read_bytes() == b"archive"
+
+
+def test_adb_reconnect_rebuilds_half_dead_transport():
+    from worker_agent.device_actions import _adb_reconnect
+
+    with patch("worker_agent.device_actions.subprocess.run",
+               return_value=Mock(returncode=0)) as run:
+        assert _adb_reconnect("ABC") is True
+    assert run.call_args.args[0] == ["adb", "-s", "ABC", "reconnect"]
+
+
+def test_adb_reconnect_survives_missing_or_hung_adb():
+    from worker_agent.device_actions import _adb_reconnect
+
+    with patch("worker_agent.device_actions.subprocess.run", side_effect=OSError("no adb")):
+        assert _adb_reconnect("ABC") is False
+    with patch("worker_agent.device_actions.subprocess.run",
+               side_effect=subprocess.TimeoutExpired(cmd="adb", timeout=5)):
+        assert _adb_reconnect("ABC") is False
+
+
+def test_post_flash_boot_kick_disabled_while_adb_daemon_suppressed(monkeypatch):
+    """AOA 会话抑制 adb daemon 时禁止 reconnect 踢腿（会拉起被压制的 server）。"""
+    from worker_agent import device_actions
+
+    monkeypatch.setattr(device_actions, "_adb_daemon_suppressed", lambda: True)
+    assert device_actions._post_flash_boot_kick() is None
+    monkeypatch.setattr(device_actions, "_adb_daemon_suppressed", lambda: False)
+    assert device_actions._post_flash_boot_kick() is device_actions._adb_reconnect

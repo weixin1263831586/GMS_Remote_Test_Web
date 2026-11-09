@@ -226,7 +226,7 @@
                 return;
             }
             const el=document.createElement('div');el.className='host-workspace-terminal';body.replaceChildren(el);
-            const term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'Consolas, "Courier New", monospace',theme:createTerminalTheme(),scrollback:2000,termName:'xterm-256color'});
+            const term=new Terminal({cursorBlink:true,fontSize:13,fontFamily:'"DejaVu Sans Mono", "Liberation Mono", Consolas, "Courier New", monospace',theme:createTerminalTheme(),scrollback:2000,termName:'xterm-256color'});
             const fit=new FitAddon.FitAddon();term.loadAddon(fit);term.open(el);fit.fit();
             const workerId=pane.workerId||host.worker_id||(host.id==='default'?workspaceLocalWorkerId():'');
             const instance={type:'terminal',mode:terminalMode,paneIndex:index,hostId:host.id,workerId,serialNo,terminal:term,fit,socket:null,resizeObserver:null,disposed:false,initialData:'',shellReady:false,startupFailed:false,startupFailureStatus:'',startupTimer:null,lastResizeCols:0,lastResizeRows:0};terminalWorkspace.instances.set(index,instance);

@@ -72,6 +72,11 @@ class ToolTrace:
     # 启动反编译任务都不能通过 Evidence Gate。
     source_evidence_valid: bool = False
     source_result_count: int = 0
+    # 搜索工具（artifact_search/batch）输出是否声明 coverage_complete=true
+    # （#661066 复审：False 时零命中不可当否定证据，Gate 也不计入覆盖）。
+    search_coverage_complete: bool = False
+    # 搜索调用命中的 artifact id（从 matches/artifact_id 提取，供覆盖归属）。
+    search_artifact_ids: list[str] = field(default_factory=list)
 
     @property
     def is_error(self) -> bool:
@@ -102,6 +107,8 @@ class ToolTrace:
             "source_reproducible": self.source_reproducible,
             "source_evidence_valid": self.source_evidence_valid,
             "source_result_count": self.source_result_count,
+            "search_coverage_complete": self.search_coverage_complete,
+            "search_artifact_ids": self.search_artifact_ids,
         }
 
 
@@ -314,6 +321,28 @@ class KkAgentTrace:
                 checked.add(artifact_id)
         return checked
 
+    def search_covered_artifact_ids(self) -> set[str]:
+        """搜索已覆盖全文的 artifact（coverage_complete=true 的成功搜索）。
+
+        区分"调用成功"与"日志覆盖完整"（#661066 复审）：coverage_complete
+        为 false 时搜索只扫了部分证据，其命中的 artifact 不计入。
+        """
+        covered: set[str] = set()
+        for call in self.tool_calls:
+            if not call.succeeded or "artifact_search" not in call.tool_name:
+                continue
+            if not call.search_coverage_complete:
+                continue
+            covered.update(call.search_artifact_ids)
+        return covered
+
+    def window_read_only_artifact_ids(self) -> set[str]:
+        """只被 artifact_read 读过窗口、但没有任何覆盖完整搜索的 artifact。
+
+        读过 4096 字符首窗不等于看过日志尾部——这些 artifact 需要
+        search（或更长的 read）才算取证完整。"""
+        return self.read_artifact_ids() - self.search_covered_artifact_ids()
+
     # ---------------------------------------------------- 归属（target-scoped）
 
     @property
@@ -507,6 +536,47 @@ def _attachment_manifest(value: Any) -> tuple[bool, int, list[str], list[str]]:
     return True, len(artifacts), sorted(text_ids), all_ids
 
 
+def _search_coverage(value: Any) -> tuple[bool, list[str]]:
+    """解析搜索工具输出 → (coverage_complete, 命中的 artifact ids)。
+
+    兼容单查询端点（data.coverage_complete + matches[].artifact_id）与
+    批量端点（data.coverage_complete + queries[].matches[].artifact_id）。
+    解析失败按 (False, []) 处理——宁可让 Gate 少记一次覆盖，也不能把
+    未覆盖的搜索当已覆盖。
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return False, []
+    if not isinstance(value, dict):
+        return False, []
+    # CLI/MCP 输出是双层 envelope（CLI data → HTTP success/data），
+    # 循环解包直到不再嵌套（与 run_history.report_snapshot 同模式）。
+    while isinstance(value, dict) and isinstance(value.get("data"), dict):
+        value = value["data"]
+    data = value if isinstance(value, dict) else {}
+    coverage = data.get("coverage_complete", data.get("index_complete"))
+    artifact_ids: set[str] = set()
+
+    def walk(item: Any) -> None:
+        if isinstance(item, dict):
+            artifact_id = str(item.get("artifact_id") or "").strip()
+            if artifact_id:
+                artifact_ids.add(artifact_id)
+            for child in item.values():
+                walk(child)
+        elif isinstance(item, list):
+            for child in item:
+                walk(child)
+
+    walk(data.get("matches"))
+    for row in data.get("queries") or []:
+        if isinstance(row, dict):
+            walk(row.get("matches"))
+    return bool(coverage), sorted(artifact_ids)[:100]
+
+
 def _collect_snapshot_ids(value: Any) -> list[str]:
     """从工具输出里提取 snapshot_id 字段（含嵌套/JSON 字符串）。"""
     if isinstance(value, str):
@@ -574,6 +644,10 @@ def _record_tool_result(trace: KkAgentTrace, event: dict[str, Any]) -> None:
         target.text_artifact_ids = text_ids
         target.all_artifact_ids = all_ids
     target.snapshot_ids = _collect_snapshot_ids(output)
+    if "artifact_search" in target.tool_name:
+        target.search_coverage_complete, target.search_artifact_ids = (
+            _search_coverage(output)
+        )
     if _is_source_evidence_tool(target.tool_name):
         target.source_reproducible = _source_reproducible_flag(output)
         (

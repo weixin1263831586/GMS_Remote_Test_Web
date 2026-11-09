@@ -16,7 +16,12 @@ from features.auth import (
     get_authenticated_user,
     require_elevated_admin,
 )
-from features.devices import resume_usbip_reconnect as _resume_usbip_reconnect
+from features.devices import (
+    device_fencing_owner_id,
+)
+from features.devices import (
+    resume_usbip_reconnect as _resume_usbip_reconnect,
+)
 from features.test_execution import get_default_suites_path
 from features.users import get_client_username_from_request
 from foundation.cluster_port import (
@@ -220,10 +225,16 @@ async def _handle_firmware_chunk_upload(form, client_id: str):
     )
 
 
-async def _lock_devices(request: Request, client_id: str, devices: list, error_prefix="Devices occupied"):
+async def _lock_devices(
+    request: Request, lock_owner_id: str, devices: list, error_prefix="Devices occupied"
+):
+    # 锁属主身份（lock_owner_id）与 websocket/暂存键（client_id）解耦
+    # （ADR 0010）：必须传 resource owner（账号）身份，agent 令牌的合成
+    # actor id（agent:<token_id>）登记为锁属主会让属主账号在设备管理里
+    # 永远看到 occupied 且无法正常释放。
     username = get_client_username_from_request(request)
     return await runtime.lock_firmware_devices(
-        client_id=client_id,
+        client_id=lock_owner_id,
         username=username,
         devices=devices,
         error_prefix=error_prefix,
@@ -361,6 +372,11 @@ async def burn_firmware(
     # resume/schedule 清理必须能安全遍历空表（分支差异导致
     # finally 引用未绑定变量 → UnboundLocalError 500）。
     devices: list[str] = []
+    # 设备锁属主（ADR 0010 resource owner 身份）与 client_id（websocket/
+    # 暂存键）解耦：agent 令牌的 client_id 是合成 actor id，锁登记到它
+    # 名下会让属主账号看到 occupied 且无法释放。finally 释放必须用同一
+    # 身份（unlock_device 按 owner_id+source_id 双重比对）。
+    lock_owner_id = ""
     # multipart 上传分支不产生本地 staging 文件，摘要必须基于测试
     # 主机上实际烧写的 remote_firmware 字节；显式初始化避免分支差异导致
     # NameError 500。
@@ -370,6 +386,7 @@ async def burn_firmware(
     firmware_name = ""
     try:
         client_id = runtime.get_client_id_from_request(request)
+        lock_owner_id = device_fencing_owner_id(request)
 
         form = await request.form()
         finalize_upload = str(form.get("finalize_upload") or "").strip().lower() in {
@@ -413,7 +430,7 @@ async def burn_firmware(
                 status_code=409,
             )
 
-        locked_devices, lock_err = await _lock_devices(request, client_id, devices, "The following devices are occupied")
+        locked_devices, lock_err = await _lock_devices(request, lock_owner_id, devices, "The following devices are occupied")
         if lock_err:
             return lock_err
 
@@ -1096,8 +1113,8 @@ async def burn_firmware(
         chunk_uploads.release_burn_lock(burn_lock_path)
         if burn_succeeded and merged_firmware:
             chunk_uploads.remove_staged_upload(merged_firmware)
-        if locked_devices and client_id:
+        if locked_devices and lock_owner_id:
             with contextlib.suppress(Exception):
                 release_local_firmware_recovery(aoa_recovery)
             with contextlib.suppress(Exception):
-                await runtime.release_firmware_devices(client_id, locked_devices)
+                await runtime.release_firmware_devices(lock_owner_id, locked_devices)

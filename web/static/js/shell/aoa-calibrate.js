@@ -112,9 +112,13 @@ function aoaCommandCalibrateFinish(save = true) {
     if (save && aoaPanelState.commands[calibrate.index] === calibrate.original) {
         const x = Math.max(0, Math.min(AOA_CALIBRATE_MAX_X, Math.round(calibrate.x)));
         const y = Math.max(0, Math.min(AOA_CALIBRATE_MAX_Y, Math.round(calibrate.y)));
-        aoaPanelState.commands[calibrate.index] = `click ${x} ${y}`;
+        // 保留命令原类型（click/longClick）：标定只调整坐标，不能把长按
+        // 命令回写成普通点击，否则依赖长按的回放（开发者选项等）会静默变义。
+        const kind = (String(calibrate.original || '').trim()
+            .match(/^(click|longClick)\s+\d+\s+\d+$/) || [])[1] || 'click';
+        aoaPanelState.commands[calibrate.index] = `${kind} ${x} ${y}`;
         aoaPanelState.editingProfileId = '';
-        aoaSetStatus(`第 ${calibrate.index + 1} 条已标定为 click ${x} ${y}，保存配置后可持久保留`);
+        aoaSetStatus(`第 ${calibrate.index + 1} 条已标定为 ${kind} ${x} ${y}，保存配置后可持久保留`);
     }
     aoaCommandCalibrateCancel();
     aoaRenderCommands();

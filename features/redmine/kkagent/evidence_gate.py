@@ -173,6 +173,25 @@ def evaluate_evidence_gate(
         trace.listed_text_artifact_ids(attachment_calls)
         - trace.read_artifact_ids()
     )
+    # "读过 4096 首窗" ≠ "日志覆盖完整"（#661066 复审）：已读过但没有任何
+    # coverage-complete 搜索覆盖的 artifact 单独列出，供报告与修复提示
+    # 区分"读过"与"看全"。coverage_complete=true 表示整次扫描覆盖了快照
+    # 的全部候选文本（含零命中附件），因此针对当前 issue 的覆盖完整搜索
+    # 解除全部已列附件的 window-only 提示；部分覆盖（饱和截断）只覆盖
+    # matches 里实际引用的 artifact。
+    full_coverage_search = any(
+        call.succeeded
+        and "artifact_search" in call.tool_name
+        and call.search_coverage_complete
+        and _targets_current(call)
+        for call in trace.tool_calls
+    )
+    covered_artifacts = trace.search_covered_artifact_ids()
+    window_read_only_artifact_ids = sorted(
+        trace.listed_text_artifact_ids(attachment_calls)
+        & trace.read_artifact_ids()
+        - covered_artifacts
+    ) if not full_coverage_search else []
     # 快照里的 attachment_count 可能因旧缓存/预采集降级而是 0，但实时
     # attachments manifest 已经列出了附件。此时不能让 ``count == 0``
     # 短路整个门禁，否则 ready/partial 文本附件即使一个都没读也会被标成
@@ -240,6 +259,7 @@ def evaluate_evidence_gate(
         "attachment_manifest_parsed": attachment_manifest_parsed,
         "listed_attachment_count": listed_attachment_count,
         "unread_text_artifact_ids": unread_text_artifact_ids,
+        "window_read_only_artifact_ids": window_read_only_artifact_ids,
         "attachments_checked": attachments_checked,
         "history_search_count": history_count,
         "distinct_history_search_count": distinct_history_count,
@@ -315,6 +335,21 @@ def gate_errors(
             errors.append("text attachments were listed but not read: " + cleaned)
         else:
             errors.append("attachment manifest contained fewer items than the issue snapshot")
+    elif gate.get("window_read_only_artifact_ids"):
+        # 读过首窗 ≠ 看过全文（attachments_checked 已通过，仅提示性 error
+        # 进入 resume 修复输入）：日志尾部（进程死亡/LMKD 等）尚未取证。
+        cleaned = ", ".join(
+            "".join(
+                ch for ch in str(value) if ch.isprintable() and ch not in "\n\r\t"
+            )[:80]
+            for value in gate["window_read_only_artifact_ids"]
+        )
+        errors.append(
+            "text attachments were only window-read (first 4KiB), not "
+            "coverage-completely searched: " + cleaned
+            + " — run gms_rt_redmine_artifact_search (or _batch) covering "
+            "these artifacts, or read the remaining windows"
+        )
     count = int(gate.get("distinct_history_search_count") or 0)
     if gate.get("history_search_required", True) and count < MIN_HISTORY_SEARCHES:
         errors.append(

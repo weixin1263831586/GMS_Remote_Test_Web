@@ -318,6 +318,80 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
             f"burn_firmware:D1,D2:{expected_sha}:wipe=true:mode=auto",
         )
 
+    def test_agent_burn_lock_owner_is_resource_owner_not_actor_id(self):
+        """回归：设备锁属主必须是 ADR 0010 resource owner（ADR 0010）。
+
+        旧实现把 client_id 登记 为锁属主；agent 令牌的 client_id 是合成
+        actor id（agent:<token_id>），导致属主账号在设备管理里只能看到
+        occupied 且无法正常释放（unlock_device 按 owner_id 比对）。
+        断言锁定与 finally 释放收到的是同一账号身份，而不是 principal id。
+        """
+        with tempfile.NamedTemporaryFile(
+            suffix=".img", delete=False
+        ) as firmware:
+            firmware.write(b"GMS-FAKE-FIRMWARE-BYTES")
+            firmware_name = firmware.name
+        self.addCleanup(os.unlink, firmware_name)
+
+        self._set_principal(AGENT_ROLE)
+        lock_calls = []
+        release_calls = []
+
+        async def _capture_lock(_request, lock_owner_id, devices, _prefix=""):
+            lock_calls.append((lock_owner_id, list(devices)))
+            return list(devices), None
+
+        async def _capture_release(lock_owner_id, devices, **_kwargs):
+            release_calls.append((lock_owner_id, list(devices)))
+
+        with patch(
+            "features.firmware.firmware_api.authentication_required",
+            return_value=True,
+        ), patch(
+            "features.auth.service.auth_service.consume_approval_token",
+            return_value=True,
+        ), patch(
+            "features.firmware.firmware_api._adb_proxy_devices",
+            return_value=[],
+        ), patch(
+            "features.firmware.firmware_api.validate_local_update_image",
+        ), patch(
+            "features.firmware.firmware_api._upload_firmware_to_test_host",
+            side_effect=_async_none,
+        ), patch(
+            "features.firmware.firmware_api._lock_devices",
+            side_effect=_capture_lock,
+        ), patch(
+            "features.firmware.firmware_api.validate_remote_update_image",
+            return_value=SimpleNamespace(valid=True, error=""),
+        ), patch(
+            "features.firmware.firmware_api._prepare_usbip_firmware_routes",
+            side_effect=_async_pair_empty,
+        ), patch(
+            "features.firmware.firmware_api._device_flash_protocols",
+            return_value={"D1": "adb"},
+        ), patch(
+            "features.firmware.firmware_api._run_local_firmware_batch",
+            side_effect=_fake_local_batch,
+        ), patch(
+            "features.firmware.firmware_api.device_fencing_owner_id",
+            return_value="enrolling-account",
+        ), patch(
+            "features.firmware.runtime.release_firmware_devices",
+            side_effect=_capture_release,
+        ), _patched_scp_client():
+            response = self.client.post(
+                "/api/burn/firmware?devices=D1&approval_token=tok123"
+                "&burn_mode=auto",
+                data={"firmware_path": firmware_name, "wipe_data": "true"},
+            )
+        self.assertEqual(response.status_code, 200)
+        # 锁属主与释放身份都是 resource owner 账号，而非 actor id
+        # （_set_principal 生成的 principal id 是 "id-agent_service"）。
+        self.assertEqual(lock_calls, [("enrolling-account", ["D1"])])
+        self.assertEqual(release_calls, [("enrolling-account", ["D1"])])
+        self.assertNotIn("id-agent_service", [call[0] for call in lock_calls])
+
     def test_agent_with_rejected_approval_still_blocked(self):
         """审批令牌无效（已被消费/命令不匹配）时 403。
 

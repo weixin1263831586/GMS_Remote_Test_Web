@@ -39,13 +39,22 @@ async def recover_after_burn(prepared: dict, client_id: str, results: list) -> d
     try:
         recovery = await run_local_firmware_recovery(prepared, report)
     except Exception as exc:
-        recovery = {"success": False, "error": str(exc), "reconcile_required": True}
+        recovery = {"success": False, "error": str(exc), "reconcile_required": True,
+                    "replay_completed": False}
+    replayed = bool(recovery.get("replay_completed") or
+                    (recovery.get("result") or {}).get("replay_completed"))
     results[0].update({"flash_success": True, "aoa_recovery": recovery,
-                       "stage": "ADB_READY" if recovery["success"] else "AOA_RECOVERY_FAILED"})
+                       "stage": "ADB_READY" if recovery["success"]
+                       else ("REPLAY_DONE_ADB_UNAVAILABLE" if replayed
+                             else "AOA_RECOVERY_FAILED")})
     if recovery["success"]:
         return recovery
-    detail = (f"固件烧写已完成，AOA 恢复失败：{recovery['error']}。"
-              "请检查设备并单独调试 AOA，无需重新烧写；若显示 unauthorized，请在设备上确认允许 USB 调试")
+    if replayed:
+        detail = (f"固件烧写与 AOA 回放均已完成，但 ADB 恢复未确认：{recovery['error']}。"
+                  "输入已生效，无需重新烧写或回放；请重启设备或人工确认 USB 调试后重新验证 ADB")
+    else:
+        detail = (f"固件烧写已完成，AOA 恢复失败：{recovery['error']}。"
+                  "请检查设备并单独调试 AOA，无需重新烧写；若显示 unauthorized，请在设备上确认允许 USB 调试")
     results[0]["success"] = False
     results[0]["error"] = detail
     await runtime.safe_websocket_send(client_id, {

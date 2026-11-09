@@ -96,6 +96,21 @@ def test_completed_input_retains_adb_failure_details():
                                   Mock(return_value=recovered))
     assert result["aoa_recovery"] == recovered
     assert "RSA" in result["error"] and "无需重新烧写" in result["error"]
+    assert result["stage"] == "AOA_RECOVERY_FAILED"
+
+
+def test_replay_done_with_dead_adbd_is_not_reported_as_input_failure():
+    """69 步输入已全部执行、仅 ADB 未恢复时：如实区分，不再笼统报恢复失败。"""
+    recovered = {"success": False, "adb_recovered": False, "replay_completed": True,
+                 "adb_state": "io_dead",
+                 "adb_hint": "ADB 显示 device 但 I/O 无响应（adbd 半死）；请重启设备后再验证"}
+    result = recover_after_flash({"success": True}, snapshot(), ["w:ABC"], Mock(),
+                                  Mock(return_value=recovered))
+    assert result["success"] is False and result["flash_success"] is True
+    assert result["stage"] == "REPLAY_DONE_ADB_UNAVAILABLE"
+    assert result["replay_completed"] is True
+    assert "回放均已完成" in result["error"] and "无需重新烧写或回放" in result["error"]
+    assert "io_dead" in result["error"] or "adbd 半死" in result["error"]
 
 
 def test_connected_adb_with_failed_usb_restore_is_not_reported_as_missing_adb():
@@ -177,8 +192,100 @@ def test_expired_claim_stops_boot_wait_immediately():
 
 def test_boot_wait_timeout_is_bounded():
     with patch("worker_agent.firmware_recovery.time.monotonic", side_effect=[0, 181]), pytest.raises(
-        RuntimeError, match="原 USB 端口"):
+        RuntimeError, match="未等到原 USB 端口的 Android 设备"):
         wait_for_boot(snapshot(), ["w:ABC"], Mock(), lambda: [])
+
+
+def test_boot_wait_kicks_half_dead_adbd_and_reports_blocker():
+    """半死态放行但趁 settle 窗口踢腿：settle（60s）内首踢，settle 满即回放。"""
+    kick = Mock()
+    events = []
+    snap = snapshot()
+    snap["boot_wait_seconds"] = 60
+    clock = iter([0, 0, 0, 30, 30, 30, 31, 31, 31, 60, 60, 60])
+    with patch("worker_agent.firmware_recovery.time.monotonic",
+               side_effect=lambda: next(clock)), patch(
+        "worker_agent.firmware_recovery.time.sleep"):
+        wait_for_boot(snap, ["w:ABC"], Mock(),
+                      lambda: [device(state="unresponsive")], events.append, kick=kick)
+    assert kick.call_count == 1
+    commands = [event["command"] for event in events]
+    assert any("adb reconnect（第 1/3 次）" in command for command in commands)
+    assert any("回放不依赖 adbd" in command for command in commands)
+
+
+def test_boot_wait_passes_half_dead_adbd_without_kick():
+    """无踢腿能力（如 adb daemon 被抑制）时半死态也放行：不抛未就绪超时。"""
+    probe = Mock(side_effect=lambda: [device(state="unresponsive")])
+    with patch("worker_agent.firmware_recovery.time.sleep"):
+        wait_for_boot(snapshot(), ["w:ABC"], Mock(), probe, None, kick=None)
+    probe.assert_called_once()
+
+
+def test_boot_wait_intercepts_ghost_adb_entry_on_other_port():
+    """同 serial 的 adb 缓存幽灵条目不在冻结端口上：拦截，绝不能回放到别的设备。"""
+    ghost = device(port="1-7", state="device")
+    with pytest.raises(RuntimeError, match="identity changed"):
+        wait_for_boot(snapshot(), ["w:ABC"], Mock(), lambda: [ghost])
+
+
+def test_boot_wait_reports_failed_kick_dispatch():
+    """adb server 不可用导致 reconnect 下发失败时，踢腿事件必须可见。"""
+    kick = Mock(return_value=False)
+    events = []
+    snap = snapshot()
+    snap["boot_wait_seconds"] = 60
+    clock = iter([0, 0, 0, 30, 30, 30, 31, 31, 31, 60, 60, 60])
+    with patch("worker_agent.firmware_recovery.time.monotonic",
+               side_effect=lambda: next(clock)), patch(
+        "worker_agent.firmware_recovery.time.sleep"):
+        wait_for_boot(snap, ["w:ABC"], Mock(),
+                      lambda: [device(state="unresponsive")], events.append, kick=kick)
+    assert any("下发失败" in event["command"] for event in events)
+
+
+def test_boot_wait_does_not_kick_when_device_absent():
+    """设备未回原端口时不做 adb reconnect（踢腿只针对 adbd 半死态）。"""
+    kick = Mock()
+    with patch("worker_agent.firmware_recovery.time.monotonic", side_effect=[0, 181]), pytest.raises(
+        RuntimeError, match="未等到原 USB 端口的 Android 设备"):
+        wait_for_boot(snapshot(), ["w:ABC"], Mock(), lambda: [], None, kick=kick)
+    kick.assert_not_called()
+
+
+def test_boot_wait_reports_situation_transitions_immediately():
+    """状态迁移即时上报：出现/消失/半死即刻成行，缺席不打 0 秒噪音。"""
+    events = []
+    states = iter([[], [device(state="unresponsive")], [],
+                   [device(state="unresponsive")], [device(state="unresponsive")]])
+    probe = Mock(side_effect=lambda: next(states))
+    snap = snapshot()
+    snap["boot_wait_seconds"] = 60
+    clock = iter([0, 0, 5, 10, 20, 90])
+    with patch("worker_agent.firmware_recovery.time.monotonic",
+               side_effect=lambda: next(clock)), patch(
+        "worker_agent.firmware_recovery.time.sleep"):
+        wait_for_boot(snap, ["w:ABC"], Mock(), probe, events.append, kick=Mock())
+    commands = [event["command"] for event in events]
+    assert not any("已等待 0 秒" in command for command in commands)
+    assert any("消失（重枚举中）" in command for command in commands)
+    assert sum("adbd 半死" in command for command in commands) == 2
+
+
+def test_boot_wait_resumes_when_adbd_becomes_ready():
+    """半死态自行恢复且未浪费踢腿：settle 从首次就绪起算，满 60s 回放。"""
+    states = iter(["unresponsive", "device", "device"])
+    probe = Mock(side_effect=lambda: [device(state=next(states))])
+    kick = Mock()
+    snap = snapshot()
+    snap["boot_wait_seconds"] = 60
+    clock = iter([0, 0, 31, 62])
+    with patch("worker_agent.firmware_recovery.time.monotonic",
+               side_effect=lambda: next(clock)), patch(
+        "worker_agent.firmware_recovery.time.sleep"):
+        wait_for_boot(snap, ["w:ABC"], Mock(), probe, None, kick=kick)
+    assert probe.call_count == 3
+    kick.assert_not_called()
 
 
 @pytest.mark.parametrize("recovery_fails", [False, True])
@@ -193,6 +300,7 @@ def test_worker_runs_flash_then_aoa_before_ack_and_fence_release(tmp_path, recov
                                     token="test", data_root=tmp_path / "worker", suite_roots=[]))
     agent.client = MagicMock()
     agent.runtime = Mock()
+    agent.heartbeat = Mock()  # 恢复后的终态清单强制上报不真发心跳
     image = b"firmware"
     agent.client.download.side_effect = lambda endpoint, target, **kw: target.write_bytes(image)
     calls = []
@@ -221,6 +329,7 @@ def test_worker_runs_flash_then_aoa_before_ack_and_fence_release(tmp_path, recov
     args = agent.runtime.save_command.call_args.args
     assert args[1] == ("failed" if recovery_fails else "completed")
     assert args[2]["flash_success"] is True
+    agent.heartbeat.assert_called_once()  # 终态清单随命令收尾强制上报
     agent.runtime.release_fencing.assert_called_once_with(command)
 
 

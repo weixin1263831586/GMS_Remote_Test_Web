@@ -85,6 +85,35 @@ def _adb_transport_alive(serial: str, adb_env: dict[str, str] | None = None) -> 
     return completed.returncode == 0
 
 
+def _adb_reconnect(serial: str) -> bool:
+    """非破坏性重建 adb 传输：adbd 握手可用但 I/O 关闭（unresponsive）。
+
+    烧写后 Android 可能长时间停在半死态：``adb devices`` 显示 device、
+    设备侧接口枚举正常，但任何 shell 往返都 ``error: closed``（实机
+    66df75a34ebde4a4，2026-11-09：e.0.00 镜像烧写后 16 分钟 I/O 始终
+    不通）。``adb reconnect`` 让 server 重建 transport，对正在启动的
+    设备无副作用。是否调用、频率与次数由 firmware_recovery.wait_for_boot
+    限流（非就绪满 30s 首踢，间隔 45s，最多 3 次）。
+    """
+    try:
+        completed = subprocess.run(
+            ["adb", "-s", serial, "reconnect"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
+
+
+def _post_flash_boot_kick() -> Callable[[str], bool] | None:
+    """烧写后等待循环的 adbd 踢腿。AOA 会话抑制 adb daemon 时禁用：
+    ``adb reconnect`` 会拉起被压制的 server，与 accessory 模式抢设备。"""
+    return None if _adb_daemon_suppressed() else _adb_reconnect
+
+
 # 设备详情缓存：heartbeat 高频调用 probe_devices，但每台设备的详情探测
 # 是一次串行 ADB 往返（超时 3s）。多设备 + ADB 卡顿时会拖过 Controller 的
 # offline 阈值造成假离线。详情（model/Android 版本/电量/SoC）变化缓慢，
@@ -495,7 +524,8 @@ def execute_device_action(
 
         options = {**options, **recovery_options(options["post_flash_recovery"])}
         wait_for_boot(options["post_flash_recovery"], device_ids,
-                      options.get("_validate_fencing"), probe_devices, progress_event_callback)
+                      options.get("_validate_fencing"), probe_devices, progress_event_callback,
+                      kick=_post_flash_boot_kick())
     attached = {item["serial"]: item for item in probe_devices()}
     serials = []
     for device_id in device_ids:
