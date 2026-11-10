@@ -22,7 +22,6 @@ class _FakeBuildService:
     def __init__(self, store, running_jobs=None):
         self.store = store
         self.polled = []
-        # 可预置 list_jobs 返回的运行任务。
         self._running_override = running_jobs
 
     def list_jobs(self, status="", limit=50):
@@ -282,7 +281,6 @@ class RunTickSyncTests(unittest.TestCase):
             ).to_run_dict("r1"))
             auto_svc = _FakeAutomationService(auto_store)
 
-            # 首轮执行清理、构建轮询并完成任务。
             result = run_tick_sync(cfg, automation_service=auto_svc, build_service=build_svc)
 
             self.assertEqual(result["polled_builds"], 1)

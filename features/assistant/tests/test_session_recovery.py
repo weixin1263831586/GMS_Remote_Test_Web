@@ -1,4 +1,4 @@
-"""外部深度评审报告项回归：Agent 会话持久关联与 Controller 重启恢复。
+"""Agent 会话持久关联与 Controller 重启恢复回归。
 
 - 执行计划拿到 cluster_job_id 后落盘恢复锚点（不含 pre_actions 密码）；
 - 重启后同 owner 的 GET /sessions/{id} 能重建监控状态并续接监控协程，
@@ -262,7 +262,7 @@ def test_corrupt_store_loads_empty(tmp_path):
 
 
 def test_anchor_store_file_and_tmp_are_owner_only(tmp_path):
-    """锚点文件 0600：umask 022 下不得出现 0644（外部评审报告项）。"""
+    """锚点文件 0600：umask 022 下不得出现 0644。"""
     import os
     import stat
 

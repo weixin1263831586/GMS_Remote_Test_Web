@@ -1,8 +1,8 @@
 """对话 Agent 会话注册表：内存生命周期 + 崩溃恢复锚点。
 
-外部深度评审：``_agent_sessions`` 等状态此前内嵌在 HTTP 入口模块里，
-Controller 重启后 session_id 与 cluster_job_id / attempt_id / 执行阶段
-的关联丢失，监控无法恢复。本模块把会话生命周期从路由层分离，并通过
+会话生命周期独立于 HTTP 入口模块管理：Controller 重启后 session_id 与
+cluster_job_id / attempt_id / 执行阶段的关联不丢失，监控可恢复。
+本模块把会话生命周期从路由层分离，并通过
 ``session_store`` 持久化最小恢复锚点（不含消息正文、asyncio.Task 或
 pre_actions 密码）；消息/步骤等完整 UI 状态仍是可丢弃的。
 """
@@ -27,7 +27,7 @@ from features.users import owner_id_from_request
 AGENT_SESSION_TTL_SECONDS = 6 * 60 * 60
 AGENT_SESSION_MAX_LIFETIME_SECONDS = 24 * 60 * 60
 
-# 单进程内的会话表与监控任务表；跨进程共享属于未来部署事项（外部评审报告），
+# 单进程内的会话表与监控任务表；跨进程共享属于未来部署事项，
 # 当前契约：本表为可丢弃 UI 状态，恢复只依赖 session_store 锚点。
 _agent_sessions: dict[str, dict[str, Any]] = {}
 _agent_sessions_lock = asyncio.Lock()
@@ -157,7 +157,7 @@ def monitor_run_is_current(session: dict[str, Any], monitor_token: str | None) -
     """仅当 active_run 仍是本监控任务登记的那一轮时才允许改共享状态。
 
     同一会话连续提交新计划时，旧监控任务的取消回调可能晚于新一轮
-    ``active_run`` 注册（外部评审报告项），旧任务据此识别自己已过期，
+    ``active_run`` 注册，旧任务据此识别自己已过期，
     不清空新任务的 active_run / 恢复锚点。恢复会话的 active_run 来自
     锚点、没有 token 字段，与恢复监控的 None token 匹配。active_run
     不存在（终态已清理）时必须返回 False：避免"空运行 + None token"
@@ -173,7 +173,7 @@ def save_session_anchor(session: dict[str, Any]) -> None:
     """Persist the crash-recovery anchor，失败时显式标示「不可恢复」。
 
     持久化失败不能静默降级：Controller 重启后的恢复保证已失效，
-    必须在日志与会话诊断里可见（外部评审报告项）。下一次保存成功时
+    必须在日志与会话诊断里可见。下一次保存成功时
     清除失败标记，磁盘短暂不可写恢复后 UI 不再显示过期状态
     。
     """

@@ -3,7 +3,7 @@
 `GET /evidence/{snapshot_id}/search`：manifest（description/journals）+
 artifact 派生文本/原文全文匹配。
 
-检索语义（Redmine #661066 复审后收紧，替代旧的"前缀 1MiB + 每文件首命中"）：
+检索语义：
 - **全量覆盖**：文本按增量块流式扫描整个文件，内存只保留滚动窗口；
   日志末尾的进程死亡/LMKD/Perfetto 异常同样能命中。
 - **多次命中**：每个文件报告每一次出现（最多 limit+1 处，超出即提前
@@ -148,7 +148,7 @@ def _scan_text_multi(
     """滚动窗口全文扫描：返回 ``(命中 needle, 出现)`` 列表（≤ stop_after）。
 
     多关键词单遍交替匹配——批量搜索一次 IO/解码即可完成全部关键词
-    匹配（#661066 复审：12 个关键词逐个搜索会反复扫描同一批文本）。
+    匹配（12 个关键词逐个搜索会反复扫描同一批文本）。
 
     大小写折叠仅在所有 needle 折叠保长时启用（日志文本几乎总是成立），
     否则整批退回精确匹配；snippet 始终取自未折叠原文。命中偏移是拼接
@@ -472,8 +472,8 @@ async def search_evidence_batch(
     payload: BatchSearchRequest,
     request: Request,
 ):
-    """多关键词单遍全文搜索（#661066 复审：MCP→CLI→HTTP 逐关键词重复
-    扫描同一批大日志的调用模式，改为一次服务端遍历完成全部匹配）。
+    """多关键词单遍全文搜索：MCP→CLI→HTTP 逐关键词调用会重复扫描
+    同一批大日志，批量端点一次服务端遍历完成全部匹配。
 
     每个关键词独立计数与截断（``truncated``=该词命中超过 per_query_limit），
     覆盖语义与单查询端点一致：``coverage_complete=false`` 时零命中不可
@@ -702,8 +702,8 @@ async def search_evidence(
 ):
     from features.redmine.evidence import EvidenceError
 
-    # 搜索返回带上下文的原文片段，与 artifact 读取端点同界（#661066
-    # 复审）：限定 redmine.read 的 Agent 不能借搜索提取无权读取的内容。
+    # 搜索返回带上下文的原文片段，与 artifact 读取端点同界：
+    # 限定 redmine.read 的 Agent 不能借搜索提取无权读取的内容。
     require_agent_scope("redmine.read")(request)
     require_agent_scope("artifacts.read_own")(request)
     owner_id = _owner(request)

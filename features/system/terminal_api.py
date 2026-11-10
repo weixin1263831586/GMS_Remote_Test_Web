@@ -34,8 +34,6 @@ router = APIRouter()
 _MAX_UPLOAD_CHUNKS = 100_000
 
 
-# ==================== SSH Terminal Info ====================
-
 @router.get("/api/terminal/open")
 async def get_ssh_terminal_info(
     _admin: CurrentUser = Depends(require_elevated_admin),

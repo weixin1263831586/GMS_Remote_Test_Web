@@ -254,7 +254,6 @@ class EvidencePipelineFixture:
 
 
 class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
-    # ------------------------------------------------------------------ tests
 
     def test_long_journal_preserved_byte_for_byte(self):
         import asyncio

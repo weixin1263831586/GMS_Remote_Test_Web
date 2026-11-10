@@ -1058,7 +1058,6 @@ async function ut_loadToolDir(subpath) {
         const data = await r.json();
         if (!data.success) { showToast('加载失败: ' + (data.error || ''), 'error'); return; }
         state.fileBrowser.currentPath = data.path || '';
-        // 复用 app.js 中的 renderFileList 来渲染文件列表
         const pathDisplay = document.getElementById('file-browser-current-path');
         pathDisplay.textContent = '可下载工具清单';
         const listContainer = document.getElementById('file-browser-list');

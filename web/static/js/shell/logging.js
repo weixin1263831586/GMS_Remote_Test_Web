@@ -157,7 +157,7 @@ function flushLogQueue() {
 
         logOutput.appendChild(fragment);
 
-        // Batch trim old log entries (keep max 500 per container)
+        // Batch trim old log entries (keep max getLogMaxEntries() — default 1000 — per container)
         if (logOutput.children.length > maxLogs) {
             const removeCount = logOutput.children.length - maxLogs;
             const range = document.createRange();

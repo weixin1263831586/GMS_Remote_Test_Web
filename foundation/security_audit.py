@@ -64,11 +64,8 @@ class SecurityAuditLogger:
     ROTATE_KEEP_BYTES = 10 * 1024 * 1024
 
     def __init__(self, log_path: str | None = None, max_read_lines: int = 5000):
-        # 审计日志存放在项目运行数据目录。
-        # data_root (e.g. data/security_audit.json), not next to the feature
-        # module. The previous base_dir math landed in features/data/ because
-        # this file lives at features/system/, so two dirnames up only reaches
-        # features/.
+        # 审计日志固定存放在运行数据目录（settings.data_root，
+        # 如 data/security_audit.json），不随模块位置推导路径。
         if log_path is None:
             from foundation.config import settings
 

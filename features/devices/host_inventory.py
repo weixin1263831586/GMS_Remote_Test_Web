@@ -167,8 +167,8 @@ def _enumerate(device_host: str) -> dict[str, Any]:
         busid = str(item.get("busid") or "").strip()
         if not serial and busid and serial_map:
             # 仅在 (来源主机, BUSID) 精确命中时回填。BUSID 只在单一
-            # 来源主机内有意义：按“全局唯一 busid”兜底曾把另一台来源
-            # 主机的序列号错误显示到本主机清单（跨主机误归属回归）。
+            # 来源主机内有意义，不得按「全局唯一 busid」兜底匹配——
+            # 否则会把另一台来源主机的序列号误显示到本主机清单。
             serial = (
                 serial_map.get((host_token, busid), "")
                 or serial_map.get((attach_host, busid), "")

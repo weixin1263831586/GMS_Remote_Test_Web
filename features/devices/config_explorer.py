@@ -44,7 +44,6 @@ _ANDROID_PACKAGE_RE = re.compile(r"^[A-Za-z0-9._]+$")
 # 有效值位于 Best matching 标记之后。
 _BEST_MATCH_RE = re.compile(r"Best matching is from .*? of ([\w.]+)\s*$")
 
-# 已拉取 APK 的缓存目录。
 _APK_CACHE_DIR = str(settings.data_root / "config_explorer_cache")
 
 
@@ -355,7 +354,6 @@ def _lookup_effective(
         ).strip() or "lookup failed"
         return
     stdout = lookup_result.stdout
-    # 仅采集 Best matching 标记后的有效值行。
     source_pkg = None
     value_lines: list[str] = []
     seen_marker = False

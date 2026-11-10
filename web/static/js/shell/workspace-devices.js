@@ -134,9 +134,9 @@ function workspaceLocalWorkerId() {
 }
 
 function isLocalWorkspaceWorker(workerId) {
-    // 只信 workspace context 同步的真实 local_worker_id；
-    // 'ats-worker-controller' 保留为 Cluster Status 尚未加载时的 fallback，
-    // 不再作为独立判断条件，避免自定义 local_worker_id 时误判双本机。
+    // 与 workspaceLocalWorkerId() 的解析值（context → Cluster Status →
+    // bootstrap 兜底）比较；'ats-worker-controller' 字面量只在
+    // workspaceLocalWorkerId 内部作最后兜底，不参与独立判断。
     return !workerId || workerId === workspaceLocalWorkerId();
 }
 
@@ -221,10 +221,9 @@ function applyClusterMode(enabled) {
     updateClusterToggleUI(enabled);
 }
 
-// Single cleanup used by BOTH switchTestWorker and toggleClusterMode.
-// The mode toggle previously skipped job/attempt/testStopping/sessionStorage
-// cleanup, so switching modes left the previous host's active-job state
-// attached to the new context.
+// toggleClusterMode 的统一清理；switchTestWorker 在下方内联同一组清理，
+// 改动需两处同步。漏掉这组清理会把上一主机的活跃任务状态挂到新模式
+// 上下文（job/attempt/testStopping/sessionStorage）。
 function clearActiveTestContext() {
     state.clusterJobId = '';
     resetClusterEventCursor();
@@ -668,8 +667,8 @@ async function loadDevices(forceRefresh = false, options = {}) {
             addWorkerLog(workerId, deviceInfo, 'info');
         }
 
-        // 不再自动检查 USB/IP 状态，避免覆盖连接状态
-        // USB/IP 状态只在连接/断开操作时更新
+        // 不在此处检查 USB/IP 状态，避免覆盖连接状态
+        // （USB/IP 状态只在连接/断开操作时更新）。
         return devices;
     } catch (error) {
         if (generation !== deviceRefreshGeneration || workspaceWorkerId() !== workerId) {

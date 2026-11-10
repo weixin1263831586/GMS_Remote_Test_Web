@@ -134,8 +134,8 @@ class TestReportManager:
                 'summary': result.get('summary', {}),
                 'details': {
                     'device': result.get('details', {}).get('device', ''),
-                    'suite_version': result.get('details', {}).get('suite_version', ''),       # 套件版本（如 16.1_r2）
-                    'android_version': result.get('details', {}).get('android_version', ''),   # Android版本（build_version_release）
+                    'suite_version': result.get('details', {}).get('suite_version', ''),
+                    'android_version': result.get('details', {}).get('android_version', ''),
                     'start_time': result.get('details', {}).get('start_time', ''),
                     'test_type': result.get('details', {}).get('test_type', ''),
                     'soc_platform': result.get('details', {}).get('soc_platform', '')
@@ -147,7 +147,6 @@ class TestReportManager:
                 if key in result:
                     analysis[key] = result[key]
 
-            # 读取 invocation_summary.txt 获取 log 目录路径
             summary_content = ""
             log_dir = None
             inv_dir = None
@@ -200,7 +199,6 @@ class TestReportManager:
                         ]
                         logger.info(f"Extracted {len(log_result.failures)} module failures from host_log")
 
-            # 解析失败 HTML
             failures_html = os.path.join(result_dir, 'test_result_failures_suite.html')
             if os.path.exists(failures_html):
                 try:
@@ -210,7 +208,6 @@ class TestReportManager:
                 except Exception as e:
                     logger.error(f"Error parsing failures HTML: {e}")
 
-            # 从 log 目录提取 host_log 和 device_log 错误
             if inv_dir:
                 # 单次遍历收集所有日志文件；单文件级的 symlink 出根
                 # （realpath 解析）同样跳过，纵深防御。
@@ -229,7 +226,6 @@ class TestReportManager:
                     elif f.startswith('device_logcat_test') and f.endswith('.txt'):
                         device_log_path = os.path.join(inv_dir, f)
 
-                # 读取并分析 host_log
                 if host_log_path:
                     try:
                         with open(host_log_path, encoding='utf-8') as f:
@@ -238,7 +234,6 @@ class TestReportManager:
                     except Exception as e:
                         logger.error(f"Error reading host log: {e}")
 
-                # 读取并分析 device_log
                 if device_log_path:
                     try:
                         with open(device_log_path, encoding='utf-8') as f:
@@ -333,7 +328,6 @@ class TestReportManager:
                     if block.strip():
                         stack_traces.append(block[:500])
 
-            # 去重
             seen = set()
             unique_errors = []
             for error in stack_traces[:50]:

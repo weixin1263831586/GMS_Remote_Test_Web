@@ -157,7 +157,7 @@ def test_cleanup_sweeps_over_lifetime_monitoring_sessions():
 def test_stale_monitor_cancellation_does_not_clobber_new_run():
     """旧监控任务的取消回调晚于新一轮注册时，不得清空新任务的共享状态。
 
-    回归覆盖外部评审报告项：同一会话连续提交新测试计划时，
+    回归：同一会话连续提交新测试计划时，
     ``_execute_plan`` 取消旧监控任务；若旧任务的 CancelledError 清理
     无条件改写会话状态，会把新一轮的 active_run / 恢复锚点清掉。
     """

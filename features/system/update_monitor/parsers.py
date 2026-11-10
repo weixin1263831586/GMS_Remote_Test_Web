@@ -75,7 +75,6 @@ def _extract_mainline_links(doc: html.HtmlElement, base_url: str) -> list[tuple[
         if not match:
             continue
         dir_year, dir_month, slug = match.group(1), match.group(2).lower(), match.group(3)
-        # 跳过无法识别月份的目录。
         if dir_month not in _MAINLINE_MONTHS:
             continue
         if not _MAINLINE_SLUG_DATE_RE.search(slug):

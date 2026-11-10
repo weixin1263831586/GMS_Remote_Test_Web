@@ -639,9 +639,6 @@ async def download_firmware_share(share_id: str, request: Request):
     )
 
 
-# ---- merged from share_records.py ----
-
-
 def _public_record(record: dict[str, Any]) -> dict[str, Any]:
     allowed = {
         "id",

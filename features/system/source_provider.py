@@ -97,9 +97,8 @@ class LocalGitProvider:
         self._verify_repo()
         commit = self.resolve_commit(revision)
         filter_value = str(path_filter or "").strip().lower()
-        # 单进程 git grep 替代逐文件 cat-file 扫描：旧实现按 ls-tree 文件
-        # 清单逐个 `git show` 再逐行匹配，真实 SDK 树（约 2 万文件）要
-        # 分钟级，HTTP 30s 客户端必超时；git grep 全树只需数秒。
+        # 单进程 git grep 全树匹配只需数秒；逐文件 `git show` 扫描在
+        # 真实 SDK 树（约 2 万文件）要分钟级，HTTP 30s 客户端必超时。
         # --fixed-strings/--ignore-case 与旧 Python 匹配的字面量、大小写
         # 不敏感语义一致；-I 跳过二进制。
         matches, scanned, limited = grep_matches(

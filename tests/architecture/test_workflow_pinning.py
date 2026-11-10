@@ -3,7 +3,7 @@
 供应链加固约束：.github/workflows/ 下所有 `uses:` 引用必须 pin 到完整
 commit SHA（40 位十六进制），并以 `# vX.Y.Z` 注释保留版本可读性。浮动
 tag（`actions/checkout@v4`）可被上游 repo 的写权限静默改写，是已知的
-GitHub Actions 供应链攻击面（tj-actions/changed-events 事件即属此类）。
+GitHub Actions 供应链攻击面（tj-actions/changed-files 事件即属此类）。
 
 规则：
 

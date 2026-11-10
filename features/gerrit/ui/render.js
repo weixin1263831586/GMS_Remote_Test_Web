@@ -41,8 +41,7 @@ function renderReviewOfMeList(pendingMyReview) {
 }
 function renderCards(cards) {
   // 跳转锚点走 act-bridge 委托：data-click 只放 handler 名 + data-a0
-  // 放 section id（此前把整条调用表达式塞进 data-click，按名查表
-  // 查不到函数，点击静默失效）。
+  // 放 section id。
   return '<div class="stats-grid">' + cards.map(card => '<div class="stat-card ' + esc(card.className || '') + '"' + (card.clickSection ? ' data-click="scrollToSection" data-a0="' + esc(card.clickSection) + '"' : '') + '><div class="value">' + esc(card.value) + '</div><div class="label">' + esc(card.label) + '</div></div>').join('') + '</div>';
 }
 function renderTrend(title, rows, key, chartKey) {

@@ -288,7 +288,7 @@ def test_pool_health_check_is_bounded_when_exit_status_never_arrives():
     pooled = MagicMock()
     pooled._gms_pool_identity = ('host-a', '22', 'tester')
     channel = MagicMock(spec=paramiko.Channel)
-    channel.exit_status_ready.return_value = False  # never ready
+    channel.exit_status_ready.return_value = False
     stdout = MagicMock()
     stdout.channel = channel
     pooled.exec_command.return_value = (MagicMock(), stdout, MagicMock())

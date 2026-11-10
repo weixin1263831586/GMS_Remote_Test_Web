@@ -143,8 +143,6 @@ async def search_suite_modules(
     return ApiResponse.success(payload)
 
 
-# ==================== Diagnose Target ====================
-
 @router.post("/api/test/suites/diagnose-target")
 @handle_api_errors
 async def diagnose_suite_target(

@@ -354,10 +354,8 @@ class AuthApiTests(AuthApiMixin, unittest.TestCase):
             "/api/auth/setup",
             json={"username": "admin", "password": "strongpass1"},
         )
-        # Create a normal user directly in the store, then log it in.
         auth_service.create_user("alice", "alicepass1", role="user")
         admin_cookie = self.client.cookies.get("gms_session")
-        # Log out admin, log in alice to grab her cookie.
         self.client.post("/api/auth/logout")
         self.client.post("/api/auth/login", json={"username": "alice", "password": "alicepass1"})
         user_cookie = self.client.cookies.get("gms_session")
@@ -399,7 +397,6 @@ class AuthApiTests(AuthApiMixin, unittest.TestCase):
         self.assertGreater(elevated_until, now)
         self.assertLessEqual(elevated_until, now + timedelta(minutes=30))
 
-        # A new session (logout + login) starts non-elevated.
         self.client.post("/api/auth/logout")
         self.client.post("/api/auth/login", json={"username": "admin", "password": "strongpass1"})
         self.assertFalse(self.client.get("/api/auth/status").json()["elevated"])

@@ -133,7 +133,6 @@ async function loadNotifications() {
         const payload = result.data || {};
         const serverRecords = (payload.records || []).map(normalizeNotification);
 
-        // Merge: keep local-only notifications that the server doesn't have
         const serverIds = new Set(serverRecords.map(r => r.id));
         const localOnly = state.notifications.filter(item => !serverIds.has(item.id));
         const mergedMap = new Map();

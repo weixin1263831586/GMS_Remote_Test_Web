@@ -181,7 +181,7 @@ def enforce_post_extraction_safety(base_dir: str) -> None:
     Without this, ``rar``/``7z`` bypass every safety check that
     :func:`safe_extract_member_path` and :func:`copy_archive_member`
     enforce for zip/tar. Lives in foundation so every feature shares ONE
-    archive security policy (review: unify archive extraction).
+    archive security policy.
     """
     base = os.path.abspath(base_dir)
     file_count = 0

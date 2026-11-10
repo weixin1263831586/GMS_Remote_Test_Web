@@ -1,8 +1,7 @@
 """共享的看板配置工具函数。
 
 Gerrit / Redmine 两套看板配置模块（gerrit_dashboard_config.py、
-redmine_dashboard_config.py）原本各自维护了一份逐字相同的辅助函数，
-这里把它们集中到一处，避免后续两边漂移。
+redmine_dashboard_config.py）共用的辅助函数，集中在此避免两边漂移。
 """
 
 from __future__ import annotations

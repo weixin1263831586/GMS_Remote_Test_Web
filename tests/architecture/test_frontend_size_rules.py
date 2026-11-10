@@ -51,7 +51,7 @@ class FrontendSizeRuleTests(unittest.TestCase):
         """全部第一方前端资产：web 三个根 + features/*/ui。
 
         此前只扫 web/shell 与 web/static，页面模块化到 features/*/ui
-        后（如 features/redmine/ui/page.js ≈ 244KB）完全脱离门禁——
+        后（如 features/redmine/ui 拆分前的单文件 page.js）完全脱离门禁——
         结果等价于绕过 size ratchet。这里把 features/*/ui 下的
         js/css/html 一并纳入同一 budget 体系。
         """

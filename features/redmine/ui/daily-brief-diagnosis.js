@@ -1,7 +1,7 @@
 // Daily Brief / 单号分析的诊断呈现辅助。
-// 从 page.js 拆出（全局审查 P0：246KB 反弹顶穿 size ratchet，禁止抬
-// ceiling，按 diagnosis 呈现域继续拆分回落）：诊断报告正文共用的
-// 取证六态标签、证据门禁提示、系统权威元数据、证据质量提示。
+// 从 page.js 拆出（行数预算见 tests/architecture/test_file_size_rules.py）：
+// 诊断报告正文共用的取证六态标签、证据门禁提示、系统权威元数据、
+// 证据质量提示。
 // 依赖 page.js 的全局 esc（运行时调用，脚本加载顺序与既有辅助模块一致）。
 
 // 单号分析与每日晨报行共用的实机取证六态标签。device_evidence_status 由

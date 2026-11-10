@@ -244,7 +244,7 @@ flowchart LR
 
 ## 7. DiagnosisReadModel（统一诊断读模型）
 
-全局审查第二十节的落地：Web / CLI（`gms-rt-*`）/ MCP（`gms_rt_*`）/
+统一读模型的落地：Web / CLI（`gms-rt-*`）/ MCP（`gms_rt_*`）/
 Assistant 此前各自消费不同的诊断负载形状（reports 的平铺编排 dict、
 Redmine 的 `IssueResult` schema），同一段诊断结论在每个消费面重复适配。
 现在由 `foundation/diagnosis_read_model.py` 定义唯一 canonical 形状，

@@ -76,7 +76,7 @@ if(typeof ResizeObserver!=='undefined'){
  dashResizeObserver=new ResizeObserver(scheduleDashboardChartsResize);
  const dashboard=document.querySelector('#dashboard');if(dashboard)dashResizeObserver.observe(dashboard);
 }
-// 保底通知：page.html 中已在前置 <script> 尽早调用 markReady()，
+// 保底通知：state.js 开头已尽早调用 markReady()，
 // 这里重复调用是幂等的（surfaceReadySent 守卫），确保万无一失。
 window.GmsEmbeddedWorkspace?.markReady();
 function syncClusterAutoRefresh(event){
@@ -90,7 +90,7 @@ window.addEventListener('gms:embedded-visibility',syncClusterAutoRefresh);
 syncClusterAutoRefresh();
 
 
-// act-bridge 委托目标（替代历史 inline handler）。
+// act-bridge 委托目标。
 function selectDashGaugesWorker(id){dashGaugesWorker=id;updateDashGauges();}
 function selectDashTrendWorker(id){dashTrendWorker=id;updateDashTrend();}
 function generateWorkerToken(){

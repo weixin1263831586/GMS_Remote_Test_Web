@@ -49,10 +49,8 @@ class SSHAsyncManager:
         """在线程中建立 SSH 连接并按目标身份缓存。"""
         connection_key = (host, port, username)
         async with self._lock:
-            # 检查是否已有连接
             if connection_key in self.connections:
                 try:
-                    # 测试连接是否仍然有效
                     transport = self.connections[connection_key].get_transport()
                     if transport and transport.is_active():
                         logger.debug(f"[SSH] Reusing existing connection to {host}")
@@ -60,7 +58,6 @@ class SSHAsyncManager:
                 except Exception:
                     pass
 
-            # 建立新连接
             logger.info(f"[SSH] Connecting to {host}...")
 
             def _connect():
@@ -78,7 +75,6 @@ class SSHAsyncManager:
                 return ssh
 
             try:
-                # 在线程池中执行同步的 SSH 连接
                 ssh = await asyncio.to_thread(_connect)
                 self.connections[connection_key] = ssh
                 logger.info(f"[SSH] Connected to {host}")
@@ -140,5 +136,4 @@ class SSHAsyncManager:
             self.close(host)
 
 
-# 全局 SSH 异步管理器实例
 ssh_async_manager = SSHAsyncManager()

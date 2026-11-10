@@ -1,9 +1,8 @@
 """分析时间线不变量：每个 ``analysis_started`` 必须恰好收敛到一条终态。
 
-duplicate AI 调用（execution ledger 防重复）早退路径曾只写
-``analysis_started`` 就直接 return，时间线永远悬在 in-progress，污染
-时长统计与卡死检测（全局审查 P1）。这里用不变量断言兜底该早退路径：
-事件流必须 ended as started。
+duplicate AI 调用（execution ledger 防重复）的早退路径必须也落失败终态，
+否则时间线永远悬在 in-progress，污染时长统计与卡死检测。
+这里用不变量断言兜底该早退路径：事件流必须 ended as started。
 """
 
 from __future__ import annotations

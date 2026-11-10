@@ -49,20 +49,16 @@ class XMLReportParser:
         else:
             self.parent_map = {c: p for p in root.iter() for c in p}
 
-        # 提取基本信息
         test_type = self._get_test_type(root)
         device = self._get_device_info(root)
-        suite_version = self._get_suite_version(root)      # 套件版本（如 16.1_r2）
-        android_version = self._get_android_version(root)  # Android版本（build_version_release）
+        suite_version = self._get_suite_version(root)
+        android_version = self._get_android_version(root)
         start_time = self._get_start_time(root)
 
-        # 提取统计信息
         total, pass_count, fail_count = self._get_summary(root)
 
-        # 解析失败的测试用例
         failures = self._parse_failures(root)
 
-        # 计算通过率
         pass_rate = f"{(pass_count / total * 100):.2f}%" if total > 0 else "0%"
 
         return TestReport(
@@ -166,16 +162,12 @@ class XMLReportParser:
             outcome = test_case.get('outcome', test_case.get('Outcome', ''))
 
             if result_attr.lower() == 'fail' or outcome.lower() == 'fail':
-                # 获取模块名
                 module_name = self._get_module_name(test_case)
 
-                # 获取测试名称
                 test_name = self._get_test_name(test_case)
 
-                # 获取失败原因和堆栈
                 reason, stack_trace = self._get_failure_info(test_case)
 
-                # 组合失败信息（去重）
                 full_reason = self._combine_reason_stack(reason, stack_trace)
 
                 failures.append(TestFailure(
@@ -253,16 +245,13 @@ class XMLReportParser:
         if not stack_trace:
             return reason
 
-        # 检查堆栈第一行是否就是reason
         stack_lines = stack_trace.strip().split('\n')
         if stack_lines and stack_lines[0].strip() == reason.strip():
             return stack_trace
 
-        # 检查reason是否在堆栈中
         if reason in stack_trace:
             return stack_trace
 
-        # 组合显示
         return f"{reason}\n\n{stack_trace}"
 
 

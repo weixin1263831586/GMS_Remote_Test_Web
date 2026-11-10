@@ -1,17 +1,16 @@
 """Inline 事件处理器棘轮（CSP 收紧前置门禁）。
 
-生产 CSP（bootstrap/application.py）的 ``script-src`` 目前仍带
-``'unsafe-inline'``——在 shell.html 与各嵌入式 UI 页面的 inline
-handler 全部迁移到 addEventListener/事件委托之前无法移除。
+生产严格 CSP（bootstrap/application.py ``_STRICT_CSP``）的
+``script-src`` 已不含 ``'unsafe-inline'``（noVNC 代理页与套件 HTML
+预览各用专用放宽策略）；本测试防止 inline handler 回流导致 CSP 重新放宽。
 
 本测试是收敛棘轮：每个文件的 inline handler 数量不得超过当前基线，
-且已清零的文件不得回退。基线只减不增；全部归零后收紧 CSP（移除
-script-src 的 unsafe-inline）并清空基线清单。
+且已清零的文件不得回退。基线只减不增，防止 CSP 重新放宽。
 
 已归零（默认上限 0 防回退）：web/static/js 全部页面与 shell 模块——
 经 act-bridge（web/static/js/shell/act-bridge.js）事件委托迁移。
-剩余债务在嵌入式 UI 页面与 shell.html，由 EMBEDDED_BASELINE /
-SHELL_BASELINE 锁定。
+剩余债务仅在嵌入式 UI 页面，由 EMBEDDED_BASELINE 锁定；shell.html 与
+web/static/js 已全部归零（空基线防回退）。
 """
 
 import re

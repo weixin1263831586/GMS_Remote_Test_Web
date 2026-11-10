@@ -70,8 +70,8 @@ DEFAULT_MAX_HITS = 5
 MAX_OUTPUT_HITS = 10
 #: BM25 候选池上限（与输出上限分离）：先取
 #: min(MAX_RERANK_CANDIDATES, max(limit*3, limit+5)) 个候选，加权重排后
-#: 截到 limit。旧实现候选窗被 MAX_HITS_CAP=10 截死，limit=10 时第
-#: 11~30 名里版本更匹配/更新鲜的页面 reranker 根本看不到。
+#: 截到 limit。候选窗必须宽于输出上限：limit=10 时若候选窗只有
+#: 10 个，第 11~30 名里版本更匹配/更新鲜的页面 reranker 根本看不到。
 MAX_RERANK_CANDIDATES = 50
 GIT_TIMEOUT_SECONDS = 15
 REINDEX_BUSY_TIMEOUT_MS = 2_000
@@ -180,7 +180,7 @@ def _split_sections(body: str, line_offset: int = 0) -> list[dict[str, Any]]:
         [{"heading": "## zygote 启动流程", "start_line": 120,
           "end_line": 168, "content": "...", "content_hash": "..."}, ...]
 
-    行号区间语义（全局审查 off-by-one 修复）：**heading + section 正文**。
+    行号区间语义：**heading + section 正文**。
     有 heading 的 section ``start_line`` 是 heading 行，``end_line`` 是正文
     末行（``start + len(body_lines)``）；首段（第一个 heading 之前）没有
     heading 行，``start_line`` 即正文首行。行区间闭区间、必须覆盖正文

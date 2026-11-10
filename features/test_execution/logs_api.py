@@ -38,8 +38,6 @@ def _request_log_scope(request: Request) -> tuple[str, bool]:
     return runtime.get_client_id_from_request(request), False
 
 
-# ==================== Clean Logs ====================
-
 @router.post("/api/test/clean")
 async def clean_test_logs(request: Request):
     """Clean current user test logs."""
@@ -54,8 +52,6 @@ async def clean_test_logs(request: Request):
         logger.exception("Error cleaning logs: %s", e)
         return error_response("Internal server error", status_code=500)
 
-
-# ==================== Get Logs ====================
 
 @router.get("/api/test/logs/get")
 async def get_test_logs(request: Request):
@@ -88,8 +84,6 @@ async def get_test_logs(request: Request):
         return error_response("Internal server error", status_code=500)
 
 
-# ==================== Batch Download Logs ====================
-
 @router.post("/api/test/logs/batch")
 async def download_test_logs(req: dict, request: Request):
     """Batch download test logs (ZIP)."""
@@ -117,8 +111,6 @@ async def download_test_logs(req: dict, request: Request):
         logger.exception("Error downloading logs: %s", e)
         return error_response("Internal server error", status_code=500)
 
-
-# ==================== Save Log ====================
 
 @router.post("/api/test/logs/save")
 async def save_current_log(req: dict, request: Request):
@@ -168,8 +160,6 @@ async def save_current_log(req: dict, request: Request):
         logger.exception("Error saving log: %s", e)
         return error_response("Internal server error", status_code=500)
 
-
-# ==================== List Logs ====================
 
 @router.get("/api/test/logs/list")
 @handle_api_errors

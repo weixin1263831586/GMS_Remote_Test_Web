@@ -623,6 +623,6 @@ function pollDailyBriefRun(runId, attempt) {
 }
 
 
-// act-bridge 委托目标（替代历史 inline handler）。
+// act-bridge 委托目标。
 function _actStopPropagation(event) { event.stopPropagation(); }
 function _actClickById(elementId) { document.getElementById(elementId).click(); }

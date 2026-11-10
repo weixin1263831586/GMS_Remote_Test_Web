@@ -60,8 +60,7 @@ logger = logging.getLogger(__name__)
 PROMPT_VERSION = "redmine_daily_triage_v28"
 
 # analyzer 实现版本（Ledger logical_key 组成项）：kkagent analyzer 实现
-# 升级但 prompt/model 不变时，逻辑键也必须变化（全局审查：否则错误
-# dedupe）。以 agent 包版本为准，包描述读不到（非仓库部署）时回退
+# 升级但 prompt/model 不变时，逻辑键也必须变化（否则错误 dedupe）。以 agent 包版本为准，包描述读不到（非仓库部署）时回退
 # prompt 版本——宁可键位偏保守，也不能让不同实现共享键。
 @functools.lru_cache(maxsize=1)
 def analyzer_version() -> str:
@@ -882,9 +881,6 @@ __all__ = [
     "ProgressTap",
     "ToolTrace",
 ]
-
-
-# ---- merged from progress_tap.py ----
 
 
 class ProgressTap:

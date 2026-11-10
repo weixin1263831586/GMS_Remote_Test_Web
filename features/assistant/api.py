@@ -1081,7 +1081,7 @@ async def _execute_plan(session: dict[str, Any], request: Request, plan: dict[st
     # 报告基线同样按请求主体的 resource_owner_id 解析（ADR 0010）。
     latest_existing_report = _latest_report_for_client(owner_id_from_request(request))
     # 每轮监控的唯一 token：旧任务的取消回调据此识别自己已过期，不再
-    # 覆盖新一轮的 active_run / 恢复锚点（外部评审报告项）。
+    # 覆盖新一轮的 active_run / 恢复锚点。
     monitor_token = str(uuid.uuid4())
     if not plan.get("operation_id"):
         plan["operation_id"] = str(uuid.uuid4())

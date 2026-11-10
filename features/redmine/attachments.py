@@ -176,8 +176,6 @@ class RedmineAttachmentMixin:
                     return None
                 text = await response.text(errors="ignore")
 
-                # Try multiple patterns to find the correct issue link
-                # Pattern 1: Look for specific parent issue link patterns
                 patterns = [
                     r'href=["\'][^"\']*/issues/(\d+)["\'][^>]*>\s*Show\s*<',  # "Show" link
                     r'<a[^>]+href=["\'][^"\']*/issues/(\d+)["\'][^>]*class=["\']*issue[^"\']*["\']',  # link with issue class

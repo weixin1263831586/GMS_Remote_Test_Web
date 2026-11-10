@@ -335,7 +335,7 @@ class EvidenceApiTests(unittest.TestCase):
         self.assertEqual(entry["zip_member"], "logs/logcat.txt")
 
     def test_search_requires_artifacts_read_own_for_agent_tokens(self):
-        """搜索返回原文片段，与 artifact 读取端点同界（#661066 复审）。
+        """搜索返回原文片段，与 artifact 读取端点同界。
 
         只带 redmine.read 的 Agent 不能再借搜索逐窗口提取无权读取的
         附件内容；两个 scope 都带或人类会话（user 角色）照常放行。
@@ -398,7 +398,7 @@ class EvidenceApiTests(unittest.TestCase):
         self.assertEqual(data["total_chars"], len("进程死亡 PID=1234"))
 
     def test_search_covers_zip_members_beyond_one_megabyte(self):
-        """回归（#661066）：v2 成员帧逐成员全文匹配，成员体越过旧
+        """回归：v2 成员帧逐成员全文匹配，成员体越过旧
         1MiB 前缀窗口的命中同样可见。"""
         from features.redmine.evidence import zip_member_block
         from features.redmine.evidence_store import owner_evidence_store

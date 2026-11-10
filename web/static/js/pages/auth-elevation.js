@@ -174,7 +174,6 @@ async function requestElevatedAccess(actionLabel = '需要管理员权限', opti
             }
         });
         ModalManager.open('elevate-modal');
-        // 默认聚焦账号输入框；账号已预填时才直接聚焦密码框。
         setTimeout(() => {
             if (userEl && userEl.value) {
                 pwdEl && pwdEl.focus();
@@ -433,11 +432,9 @@ async function submitDevicePassword() {
     }
 
     try {
-        // 显示正在连接的提示
         addLogEntry('正在连接 USB/IP...', 'info');
         showToast('正在连接...', 'info');
 
-        // 立即关闭模态框
         closeDevicePasswordModal();
 
         const result = await apiCall('/api/usbip/connect', 'POST', {
@@ -458,7 +455,6 @@ async function submitDevicePassword() {
         // 刷新设备列表（使用防抖版本；强制刷新以便立即看到新接入的设备）
         setTimeout(() => debouncedRefreshDevices(true), 3500);
 
-        // 主函数返回后更新按钮状态。
         const btn = $('usbip-btn');
         if (btn) {
             state.usbipConnected = true;
@@ -470,7 +466,6 @@ async function submitDevicePassword() {
         addLogEntry('启动 USB/IP 失败: ' + error.message, 'error');
         showToast('连接失败: ' + error.message, 'error');
 
-        // 确保按钮状态正确
         const btn = $('usbip-btn');
         if (btn) {
             btn.textContent = '📱 本地设备';

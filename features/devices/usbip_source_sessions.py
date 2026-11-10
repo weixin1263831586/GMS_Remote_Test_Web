@@ -412,7 +412,6 @@ def bind_usbipd_devices(
                 bound.append(busid)
                 continue
             elif re.search(r'\bAttached\b', state_line):
-                # Detach first
                 detach_result = ssh_manager.execute_command(
                     ssh,
                     f"usbipd detach --busid {busid}",
@@ -427,7 +426,6 @@ def bind_usbipd_devices(
                     continue
                 time.sleep(1)
 
-            # Bind
             bind_result = ssh_manager.execute_command(
                 ssh,
                 f"usbipd bind --busid {busid}",

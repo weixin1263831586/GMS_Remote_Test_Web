@@ -1,6 +1,6 @@
 """burn_gsi 锁与执行边界回归。
 
-覆盖 2026-10-09 全库审计的三个 P1/P2 项：
+本文件锁定三条回归护栏：
 1. 锁获取后的 USB/IP 路由预检抛异常时必须释放设备锁（不再占用到锁 TTL）；
 2. partition_devices_by_flash_state 抛出的 ApiError(502) 原样返回信封，
    不被兜底 except 吞成 500；

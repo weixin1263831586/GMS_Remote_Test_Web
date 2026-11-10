@@ -38,7 +38,6 @@ def register_ops_ports() -> None:
     configure_disk_hygiene(run_cleanup)
 
 
-
 __all__ = [
     "advancement_paused",
     "get_ops_store",

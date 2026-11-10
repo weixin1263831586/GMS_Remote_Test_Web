@@ -168,12 +168,8 @@ class AIExecutionLedger:
         self.db_path = db_path
         self._lock = threading.Lock()
 
-    # ------------------------------------------------------------- internals
-
     def _connect(self):
         return connect_sqlite(self.db_path)
-
-    # ------------------------------------------------------------- lifecycle
 
     def begin(
         self,
@@ -354,8 +350,6 @@ class AIExecutionLedger:
             if not changed:
                 logger.info("receipt %s already terminal; unknown not applied", receipt_id)
 
-    # ------------------------------------------------------------- queries
-
     def get(self, receipt_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
@@ -388,8 +382,6 @@ class AIExecutionLedger:
             "total": sum(by_status.values()),
             "unknown": by_status.get(STATUS_UNKNOWN, 0),
         }
-
-    # ------------------------------------------------------------- transition
 
     def _transition(
         self,

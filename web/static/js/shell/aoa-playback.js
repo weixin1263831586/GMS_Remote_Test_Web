@@ -1,6 +1,5 @@
 // AOA 回放过程处理：进度事件、命令行渲染、暂停/继续/停止控制。
-// 从 shell-aoa.js 拆出（frontend size ratchet：web/static/js/shell/shell-aoa.js
-// 预算 51200 字节只减不增）；依赖 shell-aoa.js 的全局
+// 从 shell-aoa.js 拆出（前端体积 ratchet）；依赖 shell-aoa.js 的全局
 // aoaPanelState / aoaEl / aoaApi / aoaSetStatus 与页面级 showToast、
 // showConfirmDialog，均在事件回调运行时解析（defer 脚本加载顺序见 head.html）。
 

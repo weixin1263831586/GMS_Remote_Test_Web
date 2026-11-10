@@ -430,7 +430,7 @@ def issue_payload(
     payload.pop("raw_response", None)
     if execution_statistics:
         payload["ai_statistics"] = execution_statistics
-    # DiagnosisReadModel（全局审查第二十节）：canonical 诊断读模型，供
+    # DiagnosisReadModel：canonical 诊断读模型，供
     # CLI/MCP/Assistant 与 Web 按同一种形状消费；Web 的完整展示字段
     # （suggested_reply_* 等）仍在原生 result 里。
     try:

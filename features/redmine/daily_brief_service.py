@@ -851,7 +851,7 @@ class DailyBriefService:
             # 时间线收敛不变量：上面 start_analysis_progress 已经写入
             # analysis_started，而 duplicate 早退之后没有其他终态写入点；
             # 不在这里落一条失败终态，时间线会永远悬在 in-progress，污染
-            # 时长统计与卡死检测（全局审查 P1）。
+            # 时长统计与卡死检测。
             if progress is not None:
                 progress.analysis_finished(ok=False, error_type=record.error_type)
             self.repository.upsert_issue(record)

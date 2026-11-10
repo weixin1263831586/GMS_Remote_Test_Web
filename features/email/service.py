@@ -140,7 +140,6 @@ def _send_pipeline(
     manager,
 ) -> dict[str, Any]:
     """执行一次发送，返回结果字典（不发台账）。"""
-    # —— 阶段 1：配置解析与全局开关 ——
     email_cfg = load_email_config(manager)
     # 全局总开关：`email.enabled=false`（或 GMS_EMAIL_ENABLED=0）关闭全部
     # 出站邮件——Redmine 提醒、ATS 运行通知、运维告警、通用发送 API 都
@@ -167,7 +166,6 @@ def _send_pipeline(
             "error": "SMTP 未配置：请在 Redmine 看板「设置 → SMTP」保存，或由管理员通过 POST /api/email/smtp 写入全局配置",
         }
 
-    # —— 阶段 2：输入校验（收件人/主题/凭据） ——
     username = str(email_cfg.get("username") or "").strip()
     password = email_password(email_cfg)
     is_qiye_163 = smtp_host.lower().endswith("qiye.163.com")
@@ -200,7 +198,6 @@ def _send_pipeline(
     if not subject:
         return {"sent": False, "mode": "invalid", "error": "邮件主题为空"}
 
-    # —— 阶段 3：MIME 组装（含附件白名单） ——
     message, envelope = build_mime_message(
         from_addr=from_addr,
         display_name=safe_header_text(sender_name or email_cfg.get("sender_name")) or None,
@@ -213,7 +210,6 @@ def _send_pipeline(
         allowed_attachment_roots=allowed_attachment_roots,
     )
 
-    # —— 阶段 4：SMTP 传输 ——
     settings = SmtpSettings(
         host=smtp_host,
         port=int(email_cfg.get("smtp_port") or 465),

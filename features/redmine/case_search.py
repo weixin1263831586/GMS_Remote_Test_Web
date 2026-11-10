@@ -53,8 +53,6 @@ class RedmineCaseSearch:
         results.sort(key=lambda item: item["score"], reverse=True)
         return results[: max(1, min(limit, 50))]
 
-    # Probe construction
-
     @staticmethod
     def _probe_from(issue_or_text: dict[str, Any] | str) -> dict[str, Any]:
         if isinstance(issue_or_text, str):
@@ -92,8 +90,6 @@ class RedmineCaseSearch:
             "module": fact["module"],
             "error_signature": fact["error_signature"],
         }
-
-    # Scoring
 
     @staticmethod
     def _score(probe: dict[str, Any], fact: dict[str, Any]) -> tuple[float, dict[str, Any]]:

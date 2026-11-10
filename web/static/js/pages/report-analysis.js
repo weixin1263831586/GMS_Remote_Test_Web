@@ -1,5 +1,3 @@
-// ==================== Report Analysis ====================
-
 function safeReportExternalUrl(value) {
     try {
         const parsed = new URL(String(value || ''), window.location.origin);
@@ -10,7 +8,6 @@ function safeReportExternalUrl(value) {
 }
 
 function selectReportSource() {
-    // 创建选择对话框
     const modal = document.createElement('div');
     modal.id = 'report-source-modal';
     modal.className = 'modal';
@@ -41,7 +38,6 @@ function selectReportSource() {
     `;
     document.body.appendChild(modal);
 
-    // 注册到 ModalManager
     ModalManager.registerDynamic(modal);
 
     // 点击背景关闭
@@ -84,7 +80,6 @@ async function handleReportDataTransfer(dataTransfer) {
     if (items && items.length > 0) {
         const files = [];
 
-        // 递归读取文件夹中的所有文件
         const readFileEntries = async (entries) => {
             for (const entry of entries) {
                 if (entry.isFile) {
@@ -115,7 +110,6 @@ async function handleReportDataTransfer(dataTransfer) {
             }
         };
 
-        // 处理所有 items
         const itemEntries = [];
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
@@ -136,10 +130,8 @@ async function handleReportDataTransfer(dataTransfer) {
             }
 
             if (files.length === 1 && !files[0].webkitRelativePath.includes('/')) {
-                // 单文件
                 handleReportFile(files[0]);
             } else {
-                // 文件夹或多文件
                 handleReportFolder(files);
             }
             return;
@@ -167,7 +159,6 @@ function initReportAnalysis() {
     // 初始化时添加上传空状态类（占满屏幕）
     uploadZone.classList.add('upload-empty');
 
-    // 拖拽事件
     uploadZone.addEventListener('dragover', (e) => {
         e.preventDefault();
         uploadZone.classList.add('drag-over');
@@ -184,7 +175,6 @@ function initReportAnalysis() {
         await handleReportDataTransfer(e.dataTransfer);
     });
 
-    // 文件选择事件
     fileInput.addEventListener('change', async (e) => {
         if (e.target.files.length > 0) {
             await handleReportFile(e.target.files[0]);
@@ -192,7 +182,6 @@ function initReportAnalysis() {
         }
     });
 
-    // 文件夹选择事件
     folderInput.addEventListener('change', async (e) => {
         if (e.target.files.length > 0) {
             await handleReportFolder(e.target.files);
@@ -230,7 +219,6 @@ async function handleRedmineAttachment(url, context = {}) {
 
     if (!progress || !progressFill) return;
 
-    // 取消之前的请求
     if (currentRedmineRequest) {
         currentRedmineRequest.abort();
         currentRedmineRequest = null;
@@ -256,7 +244,7 @@ async function handleRedmineAttachment(url, context = {}) {
             // 与外层 catch 一致：恢复上传区 UI，避免进度条卡住
             if (progress) progress.style.opacity = '0';
             if (content) content.style.opacity = '1';
-            return; // 终止处理
+            return;
         }
 
         const redminePathUrl = /\/(?:issues|attachments)(?:\/|$)/.test(url);
@@ -273,24 +261,20 @@ async function handleRedmineAttachment(url, context = {}) {
             return;
         }
 
-        // 检测是否为配置中的公网 Redmine URL
         const isRedmineUrl = isConfiguredRedmineUrl;
         if (isRedmineUrl) {
-            // 检查是否是直接的附件 URL (如 /attachments/2604033)
             const attachmentMatch = url.match(/\/attachments\/(\d+)/);
             const issueMatch = url.match(/\/issues\/(\d+)/);
 
             if (attachmentMatch && !issueMatch) {
                 // 直接的附件 URL，跳过提取步骤，直接使用 analyze-url
                 showToast('📎 检测到 Redmine 附件 URL，直接分析...', 'info');
-                // 直接跳到 analyze-url 调用，不执行下面的 issue 提取逻辑
             } else if (issueMatch) {
                 // 是问题页面，尝试获取第一个附件
                 showToast('📋 检测到 Redmine 问题页面，正在提取附件...', 'info');
                 progressFill.style.width = '15%';
 
                 try {
-                    // 调用后端 API 提取附件
                     const extractResponse = await fetch('/api/reports/extract-redmine-attachment', {
                         method: 'POST',
                         headers: {
@@ -323,11 +307,9 @@ async function handleRedmineAttachment(url, context = {}) {
             showToast('🔐 检测到 Redmine URL，使用服务器端处理...', 'info');
             progressFill.style.width = '20%';
 
-            // 创建 AbortController 用于取消请求
             const controller = new AbortController();
             currentRedmineRequest = controller;
 
-            // 调用后端 API（使用服务器端存储的凭证）
             const response = await fetch('/api/reports/analyze-url', {
                 method: 'POST',
                 headers: {
@@ -349,7 +331,7 @@ async function handleRedmineAttachment(url, context = {}) {
             progressFill.style.width = '100%';
 
             if (result.success) {
-                currentRedmineRequest = null;  // 重置请求控制器
+                currentRedmineRequest = null;
                 setTimeout(() => {
                     if (progress) progress.style.opacity = '0';
                     if (content) content.style.opacity = '1';
@@ -363,8 +345,7 @@ async function handleRedmineAttachment(url, context = {}) {
                     );
                 }, 300);
             } else {
-                currentRedmineRequest = null;  // 重置请求控制器
-                // 如果需要凭证，显示凭证输入框
+                currentRedmineRequest = null;
                 if (result.requires_auth) {
                     showRedmineAuthDialog(url, uploadZone, content, progress, progressFill, context);
                 } else {
@@ -385,7 +366,6 @@ async function handleRedmineAttachment(url, context = {}) {
 
         progressFill.style.width = '30%';
 
-        // 创建 AbortController 用于取消请求
         const controller = new AbortController();
         currentRedmineRequest = controller;
 
@@ -405,7 +385,7 @@ async function handleRedmineAttachment(url, context = {}) {
         progressFill.style.width = '100%';
 
         if (result.success) {
-            currentRedmineRequest = null;  // 重置请求控制器
+            currentRedmineRequest = null;
             setTimeout(() => {
                 if (progress) progress.style.opacity = '0';
                 if (content) content.style.opacity = '1';
@@ -419,7 +399,7 @@ async function handleRedmineAttachment(url, context = {}) {
                 );
             }, 300);
         } else {
-            currentRedmineRequest = null;  // 重置请求控制器
+            currentRedmineRequest = null;
             notifyOperationResult('报告分析失败', result.error || '未知错误', 'error', 'report-analysis', {
                 source: 'url'
             });
@@ -429,7 +409,7 @@ async function handleRedmineAttachment(url, context = {}) {
             }, 2000);
         }
     } catch (error) {
-        currentRedmineRequest = null;  // 重置请求控制器
+        currentRedmineRequest = null;
         if (error.name === 'AbortError') {
             debugLog('请求被取消');
             return;
@@ -718,7 +698,6 @@ async function handleReportFolder(files) {
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
 
-            // 使用 webkitRelativePath 或文件名
             const filename = file.webkitRelativePath || file.name;
 
             formData.append('files[]', file, filename);
@@ -827,7 +806,6 @@ function displayReportAnalysis(data) {
     const failuresDiv = $('report-failures');
     const failureList = $('report-failure-list');
 
-    // 清空之前的内容
     if (summaryDiv) summaryDiv.innerHTML = '';
     if (detailsDiv) detailsDiv.innerHTML = '';
     if (failureList) failureList.innerHTML = '';
@@ -851,10 +829,8 @@ function displayReportAnalysis(data) {
         return;
     }
 
-    // 显示结果区域
     resultDiv.style.display = 'block';
 
-    // 生成摘要
     if (summaryDiv && data.summary) {
         const summary = data.summary;
 
@@ -930,7 +906,6 @@ function displayReportAnalysis(data) {
         });
     }
 
-    // 显示失败用例
     if (failuresDiv && failureList && data.failures && data.failures.length > 0) {
         failuresDiv.style.display = 'block';
         if (failuresTitle) failuresTitle.textContent = '❌ 失败用例';
@@ -939,13 +914,10 @@ function displayReportAnalysis(data) {
         const reportTestType = escapeJsAttr((data.details && data.details.test_type) || '');
 
         const failuresHTML = data.failures.map((failure, idx) => {
-            // 解析失败信息
             const reasonText = failure.reason || '无失败原因';
 
-            // 使用后端返回的模块名，如果没有则使用默认值
             const moduleName = failure.module || '未知模块';
 
-            // 使用后端返回的测试用例名
             const testCaseName = failure.name || '未知用例';
 
             // 格式化完整堆栈信息，保留换行和缩进
@@ -958,12 +930,11 @@ function displayReportAnalysis(data) {
                 )
                 .join('<br>');
 
-            // 从 report_name 中提取 Redmine issue ID（使用预编译的正则表达式）
             const reportName = window.currentReportName || '';
             const redmineIssueMatch = reportName.match(/^Redmine-(\d+)-/);
             const issueIdFromReport = redmineIssueMatch ? redmineIssueMatch[1] : '';
 
-            // 转义用于 onclick 属性的参数
+            // 转义用于 data-a* 委托属性的参数
             const escModuleName = escapeJsAttr(moduleName);
             const escTestCaseName = escapeJsAttr(testCaseName);
 
@@ -1752,7 +1723,6 @@ async function enhanceReportDiagnosisWithSource(filePath, sourceCode) {
     }
 }
 
-// 提取类名的辅助函数
 function extractClassNames(testName, errorMessage) {
     const classNames = new Set();
 
@@ -1777,7 +1747,7 @@ function extractClassNames(testName, errorMessage) {
     if (stackFileMatch) {
         const actualFile = stackFileMatch[1]; // 如: AppFunctionManagerTest
         const extension = stackFileMatch[2];  // kt 或 java
-        const lineNumber = stackFileMatch[3]; // 行号
+        const lineNumber = stackFileMatch[3];
 
         // 从文件名提取类名（去掉内部类后缀）
         const actualClass = actualFile.split('$')[0];
@@ -1820,7 +1790,6 @@ function extractClassNames(testName, errorMessage) {
     return result;
 }
 
-// 从堆栈跟踪中提取实际的失败位置信息
 function extractFailureLocation(errorMessage) {
     // 匹配格式: at com.example.ClassName.method(ClassName.kt:294)
     // 或者: at com.example.ClassName.method(Class.java:100)
@@ -1832,7 +1801,6 @@ function extractFailureLocation(errorMessage) {
     for (const pattern of patterns) {
         const match = errorMessage.match(pattern);
         if (match) {
-            // 根据匹配组提取信息
             let fileName, fileType, lineNumber;
 
             if (match.length === 4) {
@@ -1864,7 +1832,6 @@ function extractFailureLocation(errorMessage) {
     return null;
 }
 
-// 从错误信息中提取搜索关键词（优化版）
 function extractKeywordsFromError(testCaseName, errorMessage) {
     debugLog(`[源码分析] 开始提取关键词，测试用例: ${testCaseName}`);
 
@@ -1957,7 +1924,6 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
             </div>
     `;
 
-    // 源码信息
     if (data.source_code_fetched && data.source_url) {
         html += `
             <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); border-left: 4px solid #667eea; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
@@ -1974,7 +1940,6 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
     }
 
 
-    // 根本原因
     if (data.root_cause) {
         html += `
             <div style="background: linear-gradient(135deg, rgba(245, 87, 108, 0.1) 0%, rgba(250, 177, 160, 0.1) 100%); border-left: 4px solid #f5576c; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
@@ -1984,7 +1949,6 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
         `;
     }
 
-    // 详细分析
     if (data.analysis) {
         html += `
             <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
@@ -1994,7 +1958,6 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
         `;
     }
 
-    // 解决建议
     if (data.suggestions && data.suggestions.length > 0) {
         html += `
             <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
@@ -2011,7 +1974,6 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
         `;
     }
 
-    // 相关文档
     if (data.related_docs && data.related_docs.length > 0) {
         html += `
             <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
@@ -2045,10 +2007,8 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
     modal.innerHTML = html;
     document.body.appendChild(modal);
 
-    // 注册到 ModalManager
     ModalManager.registerDynamic(modal);
 
-    // 点击外部关闭
     modal.addEventListener('click', (e) => {
         if (e.target === modal) {
             closeAIAnalysisModal(modalId);
@@ -2072,7 +2032,6 @@ function copyAIAnalysis(modalId) {
     const modal = document.getElementById(modalId);
     if (!modal) return;
 
-    // 提取文本内容
     const textElements = modal.querySelectorAll('div[style*="font-size"]');
     let text = 'CTS测试失败AI分析报告\n';
     text += '=' .repeat(40) + '\n\n';
@@ -2084,7 +2043,6 @@ function copyAIAnalysis(modalId) {
         }
     });
 
-    // 复制到剪贴板
     navigator.clipboard.writeText(text).then(() => {
         showToast('✓ 分析报告已复制', 'success');
     }).catch(() => {
@@ -2093,7 +2051,7 @@ function copyAIAnalysis(modalId) {
 }
 
 
-// act-bridge 委托目标（替代历史 inline handler）。
+// act-bridge 委托目标。
 window._actCloseRedmineAuthModal = function () {
     ModalManager.unregisterDynamic('redmine-auth-modal');
     resetReportUploadProgress();

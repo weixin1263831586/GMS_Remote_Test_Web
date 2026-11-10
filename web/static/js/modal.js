@@ -355,7 +355,8 @@ const ModalManager = {
     _initialFocusTarget(modal) {
         // 标题栏关闭按钮通常排在 DOM 最前面，但不应成为表单弹框的
         // 默认焦点。页面可显式指定目标；否则优先首个表单控件，再选
-        // 正文中的其他操作，最后才回退到关闭按钮。
+        // 正文中的其他操作；关闭控件始终被排除，最终兜底由
+        // _focusModal 落到 modal 内容容器。
         const firstVisible = selector => Array.from(
             modal.querySelectorAll(selector)
         ).find(element => this._isVisibleFocusTarget(element));

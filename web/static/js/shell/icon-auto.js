@@ -232,7 +232,7 @@ function showIconPreview(iconValue) {
 }
 
 
-// act-bridge error 委托目标（替代历史 inline onerror）。
+// act-bridge error 委托目标。
 // 触发语义: `this` = 出错的 <img>。
 function iconErrorToEmoji() {
     this.parentElement.textContent = '🌐';

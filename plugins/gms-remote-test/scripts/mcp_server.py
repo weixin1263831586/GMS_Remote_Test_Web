@@ -117,7 +117,7 @@ mcp_debug_tools = _load_typed_tools("mcp_debug_tools")
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.70"
+SERVER_VERSION = "0.22.71"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -217,7 +217,6 @@ _CATALOG_CACHE: dict[str, Any] = {"loaded_at": 0.0, "commands": None}
 
 # ---------------------------------------------------------------------------
 # Phase 2: direct-HTTP fast path through the gms_agent SDK.
-#
 # The MCP server is a protocol adapter, not a second business layer. When the
 # CLI command maps 1:1 to a Controller REST endpoint (read-only listing and
 # status commands), the SDK call skips the subprocess + jq pipeline entirely
@@ -2437,8 +2436,7 @@ def _int_arg(arguments: dict[str, Any], name: str, default: int, minimum: int, m
 
 
 # artifact_read 的 offset 合法域上限：与 Controller 端 ge=0 一致地放行
-# 大偏移（仅做合理性防呆），超出时报错并引导先用 search 定位，而不是
-# 旧实现的静默钳制。
+# 大偏移（仅做合理性防呆），超出时报错并引导先用 search 定位。
 ARTIFACT_READ_OFFSET_MAX = 1_000_000_000
 
 
@@ -2585,7 +2583,7 @@ def redmine_artifact_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 def redmine_artifact_search_batch_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     """Multi-keyword one-pass search: one CLI round trip matches every
     keyword server-side instead of re-scanning the same large logs per
-    keyword (#661066 review). Coverage semantics match the single-query
+    keyword. Coverage semantics match the single-query
     tool: with coverage_complete=false a zero hit is not negative
     evidence."""
     snapshot_id = str(arguments.get("snapshot_id") or "").strip()
@@ -2617,8 +2615,8 @@ def redmine_artifact_read_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         return "artifact_id is required", True
     args: list[str] = [artifact_id]
     if arguments.get("offset") is not None:
-        # 显式校验而不是静默钳制（#661066 复审）：旧的 max=10_000_000
-        # 会把超大偏移悄悄压回上限，模型拿到错误窗口却不自知。
+        # 显式校验而不是静默钳制：超界 offset 直接报错并引导先用 search
+        # 定位，而不是悄悄钳回上限让模型拿到错误窗口却不自知。
         raw_offset = arguments.get("offset")
         try:
             offset = int(raw_offset)

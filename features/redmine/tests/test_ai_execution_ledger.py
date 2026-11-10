@@ -1,6 +1,6 @@
 """AIExecutionLedger 状态机与防重复发送契约测试。
 
-覆盖全局审查 AI execution governance 意见的最小落地：
+覆盖 AI execution governance 契约的最小落地：
 - logical_key 稳定性 / 输入敏感性；
 - pending → received → completed|failed 主流程；
 - duplicate 拒绝（同一逻辑键的第二次 begin 在活跃租约内必须被拒）；

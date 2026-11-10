@@ -1,7 +1,8 @@
 """终端分片上传的 chunk 范围校验回归。
 
-审核项：/api/terminal/push 的 chunk_index/total_chunks 来自表单且未校验，
-负值/倒置/天文数字会触发 range(total_chunks) 全量轮询与畸形分片文件名。
+锁定契约：/api/terminal/push 的 chunk_index/total_chunks 必须校验
+（正值且 index < total），拒绝负值/倒置/天文数字——否则会触发
+range(total_chunks) 全量轮询与畸形分片文件名。
 """
 
 from __future__ import annotations

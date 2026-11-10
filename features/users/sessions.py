@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 class ClientManager:
     """客户端管理器"""
 
-    # SSH 连接超时设置。
     SSH_TIMEOUT = 3
     SSH_BANNER_TIMEOUT = 3
     SSH_AUTH_TIMEOUT = 3
@@ -28,7 +27,7 @@ class ClientManager:
     def __init__(self):
         self.config_manager = None
         self.client_hosts: dict[str, str] = {}  # {client_ip: username}
-        self.ssh_credentials: list = []  # 保存的SSH凭据
+        self.ssh_credentials: list = []
 
     def load_client_info(self) -> dict[str, Any]:
         """加载客户端信息"""
@@ -55,7 +54,7 @@ class ClientManager:
                 auth_timeout=self.SSH_AUTH_TIMEOUT
             )
             # 统一执行层：whoami 探测走 SSHExecutor，禁止裸 exec_command
-            # （stdout/stderr 双流 drain 由执行器保证，不再有窗口互锁风险）。
+            # （stdout/stderr 双流 drain 由执行器保证，无窗口互锁风险）。
             from foundation.ssh_executor import ssh_executor
 
             raw = ssh_executor.run(ssh, "whoami", timeout=10).stdout
@@ -81,7 +80,6 @@ class ClientManager:
             try:
                 detected_username = self._ssh_whoami(client_ip, username, password)
 
-                # 保存凭据
                 self.client_hosts[client_ip] = detected_username
 
                 self._save_client_runtime(client_ip)
@@ -102,7 +100,6 @@ class ClientManager:
                         ' SSH 服务端，请管理员核对客户端主机密钥指纹并更新'
                         ' known_hosts 信任记录'
                     )
-                # 提供更友好的错误提示
                 if 'banner' in error_msg.lower() or 'timeout' in error_msg.lower():
                     return False, '', f'SSH 连接超时：请检查 {client_ip} 是否开启 SSH 服务，或网络是否通畅'
                 elif 'authentication' in error_msg.lower() or 'password' in error_msg.lower():
@@ -119,12 +116,10 @@ class ClientManager:
                 )
                 return False, '', message
 
-        # 检查已保存的映射
         if client_ip in self.client_hosts:
             detected_username = self.client_hosts[client_ip]
             return True, detected_username, None
 
-        # 尝试已保存的SSH凭据
         for cred in self.ssh_credentials:
             try:
                 detected_username = self._ssh_whoami(client_ip, cred['username'], cred['password'])
@@ -148,7 +143,6 @@ class ClientManager:
         if '@' in local_server:
             local_ip = CommonUtils.extract_ip_from_host(local_server)
             if client_ip == local_ip:
-                # 尝试用已保存的凭据连接并执行 whoami
                 for cred in self.ssh_credentials:
                     try:
                         real_username = self._ssh_whoami(client_ip, cred['username'], cred['password'])
@@ -170,5 +164,4 @@ class ClientManager:
         return f"{username}@{client_ip}"
 
 
-# 全局实例
 client_manager = ClientManager()

@@ -306,7 +306,7 @@ class TokenLifetimeClampTests(unittest.TestCase):
     """expires_days/ttl_minutes 必须是有限且有界的数值。
 
     ``int(float('inf'))`` 抛 OverflowError、超大整数让 timedelta 溢出——
-    两者都不是 ValueError，此前会穿透路由层的 (ValueError, TypeError)
+    两者都不是 ValueError，异常会穿透路由层的 (ValueError, TypeError)
     捕获变成 500。服务层必须统一拒绝为 ValueError（路由映射 400）。
     """
 

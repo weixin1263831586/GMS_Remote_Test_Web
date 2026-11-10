@@ -925,8 +925,8 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("device.protocol === 'fastboot'", main_text)
         self.assertIn("● Fastboot", main_text)
         self.assertIn("config.usbip_vid_pids", controls)
-        # ADR 0007：部署拓扑改为只读展示，VID:PID 列表以逗号连接渲染，
-        # 不再在 Web 端提交去重（saveConfig 只保留 local_server）。
+        # 部署拓扑为只读展示：VID:PID 列表以逗号连接渲染，Web 端不提交
+        # 去重（saveConfig 只保留 local_server）。
         self.assertIn("config.usbip_vid_pids.join(', ')", controls)
         self.assertIn("test-control.js?v=20261107-config-sections", main_text)
 

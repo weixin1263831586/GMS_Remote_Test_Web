@@ -61,7 +61,6 @@ def update_context(
     if result_summary:
         ctx["last_result_summary"] = result_summary
 
-    # 记录轮次
     turns = ctx.get("turns", [])
     if user_summary:
         turns.append({"role": "user", "summary": user_summary[:200]})
@@ -71,7 +70,6 @@ def update_context(
             "tool": tool_name,
             "summary": result_summary[:200] if result_summary else tool_name,
         })
-    # 保留最近 20 轮
     ctx["turns"] = turns[-20:]
 
 
@@ -171,8 +169,6 @@ def resolve_reference(session: dict[str, Any], text: str) -> dict[str, Any]:
 
     return result
 
-
-# ==================== Context Queries ====================
 
 # ==================== Helpers ====================
 

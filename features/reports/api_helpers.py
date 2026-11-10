@@ -196,7 +196,6 @@ def _extract_class_names_from_text(test_name: str, error_message: str) -> list[s
 
 def _extract_failure_keywords(test_name: str, error_message: str, stack_trace: str, module: str, class_names: list[str]) -> list[str]:
     """Extract failure keywords for search."""
-    # Use local parse_cts_failure_info
     failure_info = parse_cts_failure_info(test_name, error_message)
 
     keywords = []
@@ -244,18 +243,15 @@ def parse_cts_failure_info(test_name, error_message):
         'error_keywords': []
     }
 
-    # 解析测试名称
     if test_name and '#' in test_name:
         class_part, method_part = test_name.split('#', 1)
         result['class_name'] = class_part.strip()
         result['method_name'] = method_part.strip()
 
-        # 提取包名
         if '.' in result['class_name']:
             parts = result['class_name'].split('.')
-            result['package'] = '.'.join(parts[:-1])  # 去掉最后的类名
+            result['package'] = '.'.join(parts[:-1])
 
-    # 解析错误类型
     if error_message:
         error_patterns = [
             r'(java\.lang\.(\w+Exception))',
@@ -270,7 +266,6 @@ def parse_cts_failure_info(test_name, error_message):
                 result['error_type'] = match.group(1)
                 break
 
-        # 提取错误关键词
         keyword_patterns = [
             r'Process crashed',
             r'Instrumentation run failed',
@@ -299,7 +294,6 @@ def _rule_based_analysis(test_name, error_message, stack_trace, module):
     root_cause = ""
     related_docs = []
 
-    # 根据错误类型分析
     if 'Process crashed' in error_message or 'Instrumentation run failed' in error_message:
         root_cause = "测试进程崩溃，可能是由于目标应用或服务异常退出导致"
         analysis_parts.append("测试执行过程中进程异常终止")
@@ -366,7 +360,6 @@ def _rule_based_analysis(test_name, error_message, stack_trace, module):
             "验证应用是否与当前Android版本兼容"
         ])
 
-    # 通用建议
     if not suggestions:
         suggestions = [
             "查看完整的测试日志了解详细错误信息",
@@ -375,10 +368,8 @@ def _rule_based_analysis(test_name, error_message, stack_trace, module):
             "查阅CTS/GTS测试文档了解测试要求"
         ]
 
-    # 组合分析结果
     analysis = "\n".join(analysis_parts) if analysis_parts else "测试执行失败，请查看详细错误信息"
 
-    # 如果没有根本原因，从错误消息中推断
     if not root_cause:
         if failure_info.get('error_type'):
             root_cause = f"错误类型: {failure_info['error_type']}"
@@ -387,10 +378,10 @@ def _rule_based_analysis(test_name, error_message, stack_trace, module):
 
     return {
         'analysis': analysis,
-        'suggestions': suggestions[:8],  # 最多8条建议
+        'suggestions': suggestions[:8],
         'root_cause': root_cause,
         'related_docs': related_docs,
-        'ai_enabled': False  # 标记这不是AI分析
+        'ai_enabled': False
     }
 
 
@@ -474,7 +465,6 @@ def _build_patch_draft(diagnosis: dict[str, Any]) -> str:
     return "\n".join(patch_lines)
 
 
-# 环境及配置类根因标记。
 _ENV_ROOT_MARKERS = ("副屏", "多屏", "secondary display", "测试环境", "环境配置", "known limitation", "已知限制")
 
 

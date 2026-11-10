@@ -536,8 +536,6 @@ async function loadApkSourceTree(path = '') {
 
         const items = data.data.items;
 
-        // 不再在加载时构建索引，改为首次搜索时构建
-
         if (items.length === 0) {
             $('apk-source-tree').innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">目录为空</div>';
             return;

@@ -1,4 +1,3 @@
-// ==================== Test Control ====================
 // Start/Stop 按钮是四态状态机：IDLE → STARTING → RUNNING → STOPPING → IDLE。
 // 过渡态（testStarting/testStopping）必须在 await 之前置位：JS 事件循环下
 // “先 await 再置位”会留一个窗口，快速双击触发两次 click 时第二个 click
@@ -215,9 +214,8 @@ function updateTestToggleButton(isTesting) {
         btn.className = 'btn-primary btn-lg';
     }
 
-    // 禁用/启用测试配置控件（CSP 迁移后统一契约：data-test-config-control，
-    // 覆盖测试类型/模块/用例/套件/报告输入及“📁 选择报告”浏览按钮；
-    // 不再按 handler 名（onclick*=）猜测，避免 data-click 迁移后失配）。
+    // 禁用/启用测试配置控件（统一契约：data-test-config-control，
+    // 覆盖测试类型/模块/用例/套件/报告输入及“📁 选择报告”浏览按钮）。
     // 三个非 IDLE 态（启动中/运行中/停止中）都保持禁用。
     const controlsDisabled = Boolean(state.testStarting || state.testing || state.testStopping);
     document.querySelectorAll('[data-test-config-control]').forEach(element => {
@@ -269,7 +267,6 @@ async function downloadTestLog() {
     try {
         addLogEntry('正在保存日志...', 'info');
 
-        // 拼接两个日志容器的实际内容（系统日志 + 测试日志）
         const systemOut = getLogContainer('system');
         const moduleOut = getLogContainer('module');
         const systemContent = systemOut ? systemOut.innerText : '';
@@ -307,7 +304,6 @@ async function showConfig() {
     const modal = document.getElementById('config-modal');
     const modalBody = document.getElementById('config-modal-body');
 
-    // Fetch current config from API
     let config = {};
     try {
         config = await apiCall('/api/config/read', 'GET');
@@ -319,7 +315,6 @@ async function showConfig() {
         ? config.usbip_vid_pids.join(', ')
         : String(config.usbip_vid_pid || '');
 
-    // Generate config form with actual values
     // ADR：结构用 HTML、数据用 DOM property —— 模板不插入任何配置数据，
     // 避免 " < > & 破坏属性 / DOM 注入 / 字段消失类 UI 完整性问题。
     modalBody.innerHTML = `
@@ -780,7 +775,7 @@ async function deleteClientCredential(deviceHost) {
 }
 
 // ==================== 静态路由管理 ====================
-// 配置保存在运行时配置（configs/config_runtime.json），保存后立即应用到本机路由表。
+// 配置保存在运行时配置存储（static_routes 段），保存后立即应用到本机路由表。
 
 function _readStaticRouteRows() {
     const tbody = document.getElementById('static-routes-table-body');
@@ -908,8 +903,9 @@ function closeModal(modalId) {
 
 async function saveConfig() {
     // /api/config/update 只接受运行时字段（client_hosts / local_server）。
-    // 静态部署拓扑（用户/主机/路径/VID:PID/SSH 密码）按 ADR 0007 存放在
-    // configs/local/config.json 与环境变量，Web 端不再提交。
+    // 静态部署拓扑（用户/主机/路径/VID:PID）默认在 configs/local/config.json
+    // （支持 ${ENV} 占位符），SSH 密码存 configs/secrets/runtime_credentials.json；
+    // Web 端不随 /api/config/update 提交。
     const config = {
         local_server: document.getElementById('config-local-server').value,
     };
@@ -924,7 +920,6 @@ async function saveConfig() {
         addLogEntry('正在保存配置...', 'info');
         showToast('正在保存配置...', 'info');
 
-        // 立即关闭模态框
         closeModal();
 
         await apiCall('/api/config/update', 'POST', config);

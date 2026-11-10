@@ -501,7 +501,6 @@ class RedmineClient(RedmineAttachmentMixin):
             label_keys=label_keys,
         )
 
-        # ---- 合并两段 ----
         return self._merge_trend_fields(recent_data, historical_data, granularity_fields, label_keys)
 
     async def _fetch_trend_segment(

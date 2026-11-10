@@ -59,7 +59,7 @@ human user in their own shell.
 | Durable jobs | `gms-rt-jobs-list`, `gms-rt-jobs-status`, `gms-rt-jobs-events`, `gms-rt-jobs-follow`, `gms-rt-jobs-wait`, `gms-rt-jobs-cancel` |
 | Config and files | `gms-rt-config-read`, `gms-rt-config-update` |
 | System | `gms-rt-system-capabilities`, `gms-rt-system-command-describe`, `gms-rt-system-commands`, `gms-rt-system-docs`, `gms-rt-system-doctor`, `gms-rt-system-health`, `gms-rt-system-help`, `gms-rt-system-selfcheck`, `gms-rt-system-skills`, `gms-rt-system-update`, `gms-rt-system-version` |
-| Redmine evidence | `gms-rt-redmine-credentials-status`, `gms-rt-redmine-triage`, `gms-rt-redmine-issue-fetch`, `gms-rt-redmine-issue-show`, `gms-rt-redmine-journals`, `gms-rt-redmine-attachments`, `gms-rt-redmine-attachment-download`, `gms-rt-redmine-artifact-image`, `gms-rt-redmine-history-search`, `gms-rt-artifact-read`, `gms-rt-artifact-search` |
+| Redmine evidence | `gms-rt-redmine-credentials-status`, `gms-rt-redmine-triage`, `gms-rt-redmine-issue-fetch`, `gms-rt-redmine-issue-show`, `gms-rt-redmine-journals`, `gms-rt-redmine-attachments`, `gms-rt-redmine-attachment-download`, `gms-rt-redmine-artifact-image`, `gms-rt-redmine-history-search`, `gms-rt-artifact-read`, `gms-rt-artifact-search`, `gms-rt-artifact-search-batch` |
 | SDK sources | `gms-rt-sdk-sources`, `gms-rt-sdk-search`, `gms-rt-sdk-read` |
 | External knowledge (background only, ADR 0014) | `gms-rt-knowledge-search` |
 
@@ -122,6 +122,11 @@ gms-rt-redmine-attachments SNAP --json --non-interactive
 #    time and searchable too; zip hits are cited as
 #    attachment:<file>.zip!/<member> with a line number.
 gms-rt-artifact-search SNAP --query 'AssertionError' --json --non-interactive
+
+# 5b. Multi-keyword one-pass search: one server-side scan matches every
+#     keyword (per-query totals/truncation + coverage report); prefer it
+#     over repeated single-query scans on large logs.
+gms-rt-artifact-search-batch SNAP 'AssertionError' 'Process died' --json --non-interactive
 
 # 6. Read long text by window (offset/limit chars)
 gms-rt-artifact-read ART --offset 0 --limit 65536 --json --non-interactive

@@ -1,4 +1,4 @@
-"""DiagnosisReadModel：跨消费面的统一诊断读模型（全局审查第二十节）。
+"""DiagnosisReadModel：跨消费面的统一诊断读模型。
 
 Web（报告分析页 / 晨报）、CLI（gms-rt-*）、MCP（gms_rt_*）与 Assistant
 此前各自消费不同的诊断负载形状（reports 的平铺 ``diagnosis`` dict、
@@ -144,7 +144,7 @@ def _normalize_section(item: dict[str, Any]) -> dict[str, Any] | None:
     """归一化 wiki section 行号锚点 ``{heading, start_line, end_line}``。
 
     schema v4 的 section 检索给每条命中提供源文件精确锚点（heading 行
-    起至正文末行，全局审查 off-by-one 修复后的语义）。生产方形状两种：
+    起至正文末行的语义）。生产方形状两种：
     ``item.extra.section``（联邦 ``to_dict`` 白名单透传）或平铺
     ``item.section``；行号非正整数视为缺失，返回 ``None``——锚点是
     Agent 引用用途，坏锚点宁可不给也不能给错的。
@@ -179,8 +179,8 @@ def normalize_background_entries(items: Any) -> list[dict[str, Any]]:
     path_matched / path_missing / unknown）。provenance 键
     （source_revision / license / last_verified）随条目透传：消费方引用
     外部知识时必须能履行 license 署名义务并判断条目新鲜度。
-    ``section`` 携带 wiki 源文件行号锚点（schema v4 闭环，全局审查第七
-    节：索引层已 section-aware，canonical 读模型必须同样携带）。
+    ``section`` 携带 wiki 源文件行号锚点（schema v4：索引层已
+    section-aware，canonical 读模型必须同样携带）。
     显式不带 fact 语义字段——背景条目回答「Android 为什么这样工作」，
     不进入 conclusion。
     """

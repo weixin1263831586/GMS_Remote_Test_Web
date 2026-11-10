@@ -120,9 +120,7 @@ def test_run_stream_keeps_tail_data_that_arrives_after_exit_status():
     assert ("warn", "error") in events
 
 
-# ---------------------------------------------------------------------------
 # channel 生命周期、deadline、输出上限与取消
-# ---------------------------------------------------------------------------
 
 
 class _EndlessOutputChannel(_FakeChannel):

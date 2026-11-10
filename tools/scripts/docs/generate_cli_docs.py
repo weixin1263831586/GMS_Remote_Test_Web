@@ -38,9 +38,14 @@ PROJECT_ROOT = find_repo_root()
 CLI_SCRIPT = PROJECT_ROOT / "agent/gms-remote-test/runtime/gms-remote-test.sh"
 OUTPUT_PATH = PROJECT_ROOT / "docs/cli/command-reference.md"
 
-# case entries binding one or more names to a literal text
+# case entries binding one or more names to a literal text. Text is normally
+# single-quoted; double quotes appear when the text itself contains an
+# apostrophe (e.g. the triage/history-search summaries with "today's …").
+# Double-quoted "$1…" forms stay unmatched — they are grouped printf
+# lines handled by _CASE_GROUP_PRINTF, not literal text.
 _CASE_LITERAL = re.compile(
-    r"^\s+(?P<names>[A-Za-z0-9|*-]+)\)\s*printf '%s' '(?P<text>[^']*)' ;;\s*$"
+    r"^\s+(?P<names>[A-Za-z0-9|*-]+)\)\s*printf '%s' "
+    r"(?:(?P<text_sq>'(?P<text>[^']*)')|\"(?P<text_dq>[^\$\"][^\"]*)\") ;;\s*$"
 )
 # grouped pattern line (names only, printf follows on the next line)
 _CASE_GROUP = re.compile(r"^\s+(?P<names>[A-Za-z0-9|*-]+)\)\s*$")
@@ -95,11 +100,14 @@ def _parse_case_table(body: str) -> tuple[dict[str, str], dict[str, str]]:
                 continue
         literal = _CASE_LITERAL.match(line)
         if literal:
+            text = literal.group("text")
+            if text is None:
+                text = literal.group("text_dq")
             for name in literal.group("names").split("|"):
                 if name.endswith("*"):
-                    wildcard[name[:-1]] = literal.group("text")
+                    wildcard[name[:-1]] = text
                 else:
-                    exact[name] = literal.group("text")
+                    exact[name] = text
             pending_names = None
     return exact, wildcard
 

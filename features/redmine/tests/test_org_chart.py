@@ -70,7 +70,6 @@ class OrgChartTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             set_self_binding("alice", 99)
         self.assertEqual(get_self_binding("alice")["id"], 7)
-        # 解绑。
         set_self_binding("alice", None)
         self.assertIsNone(get_self_binding("alice"))
 

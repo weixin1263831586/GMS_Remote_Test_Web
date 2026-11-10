@@ -23,8 +23,8 @@ from foundation.ssh_security import configure_strict_host_keys
 logger = logging.getLogger(__name__)
 
 # SFTP 性能优化常量
-SFTP_TIMEOUT_SECONDS = 300  # 5分钟超时
-SFTP_WINDOW_SIZE = 2147483647  # 2GB 最大窗口大小
+SFTP_TIMEOUT_SECONDS = 300
+SFTP_WINDOW_SIZE = 2147483647
 SFTP_REKEY_BYTES = pow(2, 40)  # 减少重新密钥协商频率
 SFTP_REKEY_PACKETS = pow(2, 40)
 
@@ -113,7 +113,6 @@ class SSHManager:
                     username=username,
                     password=password,
                     timeout=10,
-                    # 优化连接参数
                     banner_timeout=10,
                     auth_timeout=10
                 )
@@ -190,7 +189,6 @@ class SSHManager:
             except queue.Empty:
                 break
 
-        # 池为空或所有连接都失效，创建新连接
         logger.debug("[SSH] Creating new connection")
         return self.create_connection(config)
 
@@ -231,7 +229,6 @@ class SSHManager:
     def install_sshd(self, ssh, config: dict[str, Any]) -> dict[str, Any]:
         """在 Windows 主机安装并启动 SSHD。"""
         try:
-            # 检查 SSHD 是否已安装
             installed, status = self.check_sshd_installed(ssh)
             if installed:
                 return {
@@ -240,7 +237,6 @@ class SSHManager:
                     'status': status
                 }
 
-            # 尝试执行安装命令（会自动检查权限）
             install_result = self.execute_command(ssh, SSHD_INSTALL_CMD, timeout=180)
 
             if install_result.code == 0:
@@ -248,7 +244,6 @@ class SSHManager:
                 combined_cmd = f'{SSHD_START_CMD}; {SSHD_ENABLE_CMD}'
                 self.execute_command(ssh, combined_cmd, timeout=60)
 
-                # 验证安装
                 installed_verify, status_verify = self.check_sshd_installed(ssh)
                 if installed_verify:
                     return {
@@ -264,7 +259,6 @@ class SSHManager:
             else:
                 error_msg = install_result.stderr or install_result.stdout
 
-                # 检查是否是权限问题
                 if 'Access denied' in error_msg or '管理员' in error_msg or 'administrator' in error_msg.lower():
                     error_msg = '需要管理员权限。请确保 Windows 上的 SSH 服务以管理员权限运行，或手动执行以下命令：\n\n' + SSHD_INSTALL_CMD
 
@@ -331,5 +325,4 @@ class SSHManager:
         sftp.get_channel().transport.packetizer.REKEY_PACKETS = SFTP_REKEY_PACKETS
 
 
-# 全局SSH管理器实例
 ssh_manager = SSHManager()

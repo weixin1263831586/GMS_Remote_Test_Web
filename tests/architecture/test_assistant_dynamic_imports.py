@@ -1,7 +1,7 @@
 """Assistant dynamic-import boundary gate (AGENTS.md hard rule).
 
 ``features/assistant`` reaches platform capabilities through *string* refs:
-``executor_ref="features.devices.api:start_usbip"`` and
+``executor_ref="features.devices.integrations_api:start_usbip"`` and
 ``self._fetch_router_json("features.system.integrations", "get_vpn_status")``.
 Those never appear in the AST import graph, so the cross-feature import gate
 (test_dependency_rules) cannot see them — without this test the assistant can

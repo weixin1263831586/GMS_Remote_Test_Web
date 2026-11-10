@@ -117,9 +117,10 @@ class SecurityHardeningTests(unittest.TestCase):
     def test_release_installer_and_agent_runtime_have_no_tls_downgrade(self):
         """供应链门禁:release installer / agent runtime 不得出现静默 TLS 降级。
 
-        curl -k / --insecure / wget --no-check-certificate / verify=False /
-        ssl=False 只允许出现在显式 opt-in 守护分支，或受控 TOFU 首次
-        获取 Controller CA 的分支；不得用于后续 manifest/包下载。
+        curl -k / --insecure / wget --no-check-certificate / ssl=False
+        只允许出现在显式 opt-in 守护分支，或受控 TOFU 首次获取
+        Controller CA 的分支；verify=False 一律硬禁止（任何位置都不
+        允许）；降级模式不得用于后续 manifest/包下载。
         """
         guarded = (
             'GMS_INSTALL_ALLOW_INSECURE',

@@ -939,7 +939,6 @@ async function aoaViewToggle(show) {
     } else {
         if (aoaDebugState.id) await aoaDebugEnd();
         aoaPanelState.screenRefreshId += 1;
-        // 离开 AOA 页签：结束标定取点、停止实时投屏与截图轮询。
         aoaCommandCalibrateCancel();
         if (window.aoaLiveScreen) {
             window.aoaLiveScreen.stop();

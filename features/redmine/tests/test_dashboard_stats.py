@@ -172,7 +172,6 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             customer_ids = {
                 item["issue_id"] for item in stats["lists"]["waiting_customer_reply"]}
             self.assertIn(641831, customer_ids, "owner 字段动作=等待客户")
-            # 641830 的归因人是客户 C。
             item = next(i for i in stats["lists"]["waiting_my_reply"] if i["issue_id"] == 641830)
             self.assertEqual(item["last_external_reply_by"], "客户C")
 

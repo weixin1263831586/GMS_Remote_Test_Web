@@ -68,7 +68,7 @@ function renderDashboard(){
 }
 function renderDashboardFallback(){
  // echarts 仍在加载时保持骨架占位，避免先闪现降级布局再被图表替换；
- // 仅在 echarts 确认加载失败（本地 vendor 与 CDN 均不可用）后才渲染降级内容。
+ // 仅在 echarts 确认加载失败（本地 vendor 不可用）后才渲染降级内容。
  if(window.dashEchartsStatus!=='failed')return;
  const workers=state.workers.filter(w=>w.status!=='offline');
  const metric=(label,value)=>{const numeric=Math.max(0,Math.min(100,Number(value)||0));return `<div style="display:grid;grid-template-columns:42px 1fr 42px;gap:6px;align-items:center;margin:7px 0"><span>${label}</span><span style="height:7px;background:#303642;border-radius:5px;overflow:hidden"><span style="display:block;width:${numeric}%;height:100%;background:${numeric>=85?dashColor.red:numeric>=70?dashColor.yellow:dashColor.green}"></span></span><strong>${Math.round(numeric)}%</strong></div>`};

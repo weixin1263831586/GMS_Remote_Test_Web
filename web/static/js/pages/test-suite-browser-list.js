@@ -98,13 +98,10 @@ async function selectTestSuiteForBrowser(suitePath, path = '', options = {}) {
 
     state.suiteBrowser.selectedSuitePath = suite.tools_path;
     state.suiteBrowser.currentPath = path || '';
-    // Suite Browser is a browsing context — selecting a suite here
-    // must NOT touch the global test-execution context at all.  Writing
-    // suite_key/suite_path (and the test page's select) made the
-    // execution page show Worker A with Worker B's suite path after a
-    // browse.  Browsing state stays in state.suiteBrowser only; the
-    // "use for test" flow remains the single way to build an execution
-    // context.
+    // Suite Browser 是纯浏览上下文：这里选择套件不得写入全局测试执行
+    // 上下文（suite_key/suite_path 与测试页 select）——否则浏览 Worker B
+    // 后执行页会带着 B 的套件路径显示 Worker A。浏览状态只留在
+    // state.suiteBrowser；「用于测试」流程才是唯一构建执行上下文的入口。
     if (!options.preserveHighlight) {
         state.suiteBrowser.highlightPath = '';
     }

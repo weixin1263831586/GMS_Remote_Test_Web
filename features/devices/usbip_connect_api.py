@@ -976,7 +976,6 @@ async def start_usbip(
                     sorted(set(device_list) - set(source_updates)),
                 )
 
-                # Persist USB/IP device sources to config
                 try:
                     existing_runtime = runtime.config_manager.get_runtime_config()
                     usbip_sources = existing_runtime.get("usbip_devices_source", {})

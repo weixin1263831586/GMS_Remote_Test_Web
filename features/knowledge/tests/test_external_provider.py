@@ -158,7 +158,7 @@ class SectionSplitTests(unittest.TestCase):
 
         body = "intro\n## A\nalpha\nbeta\n### B\ngamma\n"
         sections = _split_sections(body, line_offset=6)
-        # 行号区间 = heading + section 正文（全局审查 off-by-one 修复）：
+        # 行号区间 = heading + section 正文：
         # 有 heading 的 section 从 heading 行起、覆盖正文最后一行；
         # 首 section 无 heading 行，start 即正文首行。
         self.assertEqual(

@@ -1955,7 +1955,7 @@ class RedmineEvidenceToolTests(unittest.TestCase):
         )
 
     def test_artifact_search_batch_args_and_validation(self):
-        # 多关键词单遍搜索：一次 CLI 往返完成全部关键词匹配（#661066）。
+        # 多关键词单遍搜索：一次 CLI 往返完成全部关键词匹配。
         captured = self._capture_run()
         text, is_error = mcp_server.redmine_artifact_search_batch_tool({
             "snapshot_id": "ev_1",
@@ -2003,9 +2003,9 @@ class RedmineEvidenceToolTests(unittest.TestCase):
         )
 
     def test_artifact_read_rejects_out_of_range_offset_explicitly(self):
-        # 回归（#661066）：旧实现把超大 offset 静默钳到 10_000_000，模型
-        # 拿到错误窗口却不自知。现在 1e9 以内的偏移放行（大日志合法），
-        # 越界值必须显式报错并引导先用 search 定位。
+        # 回归：超大 offset 不得静默钳制——模型拿到错误窗口却不自知。
+        # 1e9 以内的偏移放行（大日志合法），越界值必须显式报错并引导
+        # 先用 search 定位。
         captured = self._capture_run()
         text, is_error = mcp_server.redmine_artifact_read_tool({
             "artifact_id": "ART", "offset": 2_000_000_000,

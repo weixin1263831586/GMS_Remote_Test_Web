@@ -3,7 +3,6 @@
 # Device Commands
 # ==============================================================================
 
-# Lock bootloader
 gms-rt-devices-bootloader-lock() {
     local devices="$*"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-bootloader-lock DEVICE1 [DEVICE2 ...]"; return 1; }
@@ -17,7 +16,6 @@ gms-rt-devices-bootloader-lock() {
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "Bootloader锁定成功"
 
-        # 美化输出格式
         local count=$(echo "$response" | jq -r '.data.summary.total // 0')
         local success=$(echo "$response" | jq -r '.data.summary.success // 0')
         local failed=$(echo "$response" | jq -r '.data.summary.failed // 0')
@@ -25,7 +23,6 @@ gms-rt-devices-bootloader-lock() {
         echo "📊 操作统计: 成功 $success 台, 失败 $failed 台"
         echo ""
 
-        # 显示每个设备的详细结果
         echo "$response" | jq -r '.data.results[]? | "📱 \(.device // .device_id): \(.output // .message // "完成")"' 2>/dev/null || echo "$response" | jq '.'
     else
         error "Bootloader锁定失败"
@@ -33,7 +30,6 @@ gms-rt-devices-bootloader-lock() {
     fi
 }
 
-# Unlock bootloader
 gms-rt-devices-bootloader-unlock() {
     local devices="$*"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-bootloader-unlock DEVICE1 [DEVICE2 ...]"; return 1; }
@@ -44,18 +40,15 @@ gms-rt-devices-bootloader-unlock() {
     local data=$(build_devices_json_data "$devices")
     local response=$(api_call "/devices/bootloader-unlock" "POST" "$data")
 
-    # 检查响应是否有效
     if [ -z "$response" ]; then
         error "API 无响应"
         return 1
     fi
 
-    # 尝试解析 JSON，如果失败则显示原始响应
     if echo "$response" | jq -e '.' > /dev/null 2>&1; then
         if echo "$response" | jq -e '.success' > /dev/null; then
             success "Bootloader解锁成功"
 
-            # 美化输出格式
             local count=$(echo "$response" | jq -r '.data.summary.total // 0')
             local success_count=$(echo "$response" | jq -r '.data.summary.success // 0')
             local failed=$(echo "$response" | jq -r '.data.summary.failed // 0')
@@ -63,7 +56,6 @@ gms-rt-devices-bootloader-unlock() {
             echo "📊 操作统计: 成功 $success_count 台, 失败 $failed 台"
             echo ""
 
-            # 显示每个设备的详细结果
             echo "$response" | jq -r '.data.results[]? | "📱 \(.device // .device_id): \(.output // .message // "完成")"' 2>/dev/null || echo "$response" | jq '.'
         else
             local error_msg=$(echo "$response" | jq -r '.error // .message // .detail // "未知错误"')
@@ -78,7 +70,6 @@ gms-rt-devices-bootloader-unlock() {
     fi
 }
 
-# Check bootloader status
 gms-rt-devices-bootloader-status() {
     local devices="$*"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-bootloader-status DEVICE1 [DEVICE2 ...]"; return 1; }
@@ -97,7 +88,6 @@ gms-rt-devices-bootloader-status() {
     fi
 }
 
-# Get device details
 gms-rt-devices-info() {
     local devices="$*"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-info DEVICE1 [DEVICE2 ...]"; return 1; }
@@ -116,7 +106,6 @@ gms-rt-devices-info() {
     fi
 }
 
-# List devices
 gms-rt-devices-list() {
     check_jq
     echo "📱 Listing devices..."
@@ -367,7 +356,6 @@ gms-rt-devices-wait() {
     done
 }
 
-# Reboot multiple devices (parallel)
 gms-rt-devices-reboot() {
     # The help text promises "DEVICE1 [DEVICE2 ...]" but the old
     # implementation only consumed $1, silently dropping extra devices.
@@ -401,7 +389,6 @@ gms-rt-devices-reboot() {
         echo "📊 操作统计: 成功 $success 台, 失败 $failed 台"
         echo ""
 
-        # 显示每个设备的详细结果
         echo "$response" | jq -r '.data.results[]? | "📱 \(.device): 重启完成 (耗时: \(.wait_time // "N/A")秒)"' 2>/dev/null || echo "$response" | jq '.'
     else
         error "设备重启失败"
@@ -410,7 +397,6 @@ gms-rt-devices-reboot() {
     fi
 }
 
-# Remount multiple devices (parallel)
 gms-rt-devices-remount() {
     local devices="$*"
     [ -z "$devices" ] && { error "设备ID必填. 用法: gms-rt-devices-remount DEVICE1 [DEVICE2 ...]"; return 1; }
@@ -418,11 +404,9 @@ gms-rt-devices-remount() {
     devices=$(_resolve_devices "$devices")
     echo "🔄 重新挂载设备..."
 
-    # 首先检查 bootloader 状态
     echo "🔐 检查 Bootloader 状态..."
     local bootloader_check=$(api_call "/devices/bootloader-status" "POST" "$(build_devices_json_data "$devices")")
 
-    # 检查是否有锁定的设备
     local locked_devices=$(echo "$bootloader_check" | jq -r '.data.results[]? | select(.locked == true) | .device' 2>/dev/null)
 
     if [ -n "$locked_devices" ]; then
@@ -445,7 +429,6 @@ gms-rt-devices-remount() {
     if echo "$response" | jq -e '.success' > /dev/null; then
         success "设备重新挂载成功"
 
-        # 美化输出格式
         local count=$(echo "$response" | jq -r '.data.summary.total // 0')
         local success_count=$(echo "$response" | jq -r '.data.summary.success // 0')
         local failed=$(echo "$response" | jq -r '.data.summary.failed // 0')
@@ -453,7 +436,6 @@ gms-rt-devices-remount() {
         echo "📊 操作统计: 成功 $success_count 台, 失败 $failed 台"
         echo ""
 
-        # 检查 verity_mode，只有当设备真正需要重启时才提示
         local needs_reboot_list=()
         local already_rw_list=()
 
@@ -468,7 +450,6 @@ gms-rt-devices-remount() {
             fi
         done < <(echo "$response" | jq -r '.data.results[]? | "\(.device)|\(.verity_mode // "")|\(.needs_reboot // false)|\(.overlayfs_enabled // false)|\(.success // false)"' 2>/dev/null)
 
-        # 显示已经 RW 的设备
         if [ ${#already_rw_list[@]} -gt 0 ]; then
             success "以下设备已处于读写模式，无需重启:"
             for device in "${already_rw_list[@]}"; do
@@ -477,7 +458,6 @@ gms-rt-devices-remount() {
             echo ""
         fi
 
-        # 显示需要重启的设备
         if [ ${#needs_reboot_list[@]} -gt 0 ]; then
             warning "以下设备需要重启才能使 remount 生效:"
             for device in "${needs_reboot_list[@]}"; do
@@ -511,7 +491,6 @@ gms-rt-devices-remount() {
             fi
         fi
 
-        # 显示每个设备的详细结果
         echo ""
         echo "$response" | jq -r '.data.results[]? | "📱 \(.device): \(.output // .message // "完成")"' 2>/dev/null || echo "$response" | jq '.'
     else
@@ -520,7 +499,6 @@ gms-rt-devices-remount() {
     fi
 }
 
-# Show device screen
 # Capture one device screenshot via the controller UI-control endpoint.
 # 供 MCP image tool 使用：返回 {base64, mime_type, ...}（无 data: 前缀），
 # agent 端可直接转 MCP image content；人类终端请用 devices-scrcpy。
@@ -1100,14 +1078,12 @@ gms-rt-devices-push() {
     return $push_result
 }
 
-# User locked devices
 gms-rt-devices-user-locked() {
     check_jq
     echo "🔒 Getting user-locked devices..."
     api_call "/devices/user-locked" | jq '.'
 }
 
-# Connect WiFi
 gms-rt-devices-wifi() {
     local devices="$1"
     local ssid="$2"

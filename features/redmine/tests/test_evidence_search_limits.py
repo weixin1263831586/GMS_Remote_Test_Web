@@ -1,11 +1,8 @@
 """证据检索的限流与覆盖回归。
 
-审核项：search 的原文/派生文本兜底曾无条件 read_text 整个文件，且对
-非文本 kind（image/apk 等）也读原文。现在：非文本 kind 跳过原文读取。
-
-#661066 复审后进一步收紧：旧实现只扫描每个文件的前 1MiB 前缀且每文件
-只报首个命中。现在文本按增量块流式扫描整个文件（内存只保留滚动窗口），
-报告每一次出现（≤limit），默认大小写不敏感，并如实上报覆盖情况
+非文本 kind（image/apk 等）不读原文；文本按增量块流式扫描整个文件
+（内存只保留滚动窗口），报告每一次出现（≤limit），默认大小写不敏感，
+并如实上报覆盖情况
 （coverage_complete/scanned_bytes/total_bytes）——"没搜到"和"还没搜到
 的部分"是两个不同的答案。
 """
@@ -136,7 +133,7 @@ class EvidenceSearchLimitTests(unittest.TestCase):
         self.assertTrue(all(m["kind"] == "description" for m in matches))
 
     def test_match_beyond_one_megabyte_is_found(self):
-        # 回归（#661066）：旧实现只扫前 1MiB，日志尾部的异常完全搜不到。
+        # 回归：1MiB 前缀窗口之外的命中（日志尾部）同样可见。
         result = self._search("NEEDLE-BEYOND-CAP")
         kinds = [m["kind"] for m in result["data"]["matches"]]
         self.assertIn("artifact", kinds)

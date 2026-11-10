@@ -600,7 +600,7 @@ def _install_runtime_normalized(source_root: Path, version: str, sha256: str) ->
         if marker.is_file():
             existing = marker.read_text(encoding="utf-8").strip()
         if existing and existing == sha256:
-            flip_current(target)  # identical payload: reuse, no rewrite
+            flip_current(target)
             return target
         raise RuntimeError(
             f"版本目录 {target} 已存在且内容不一致；版本号不可复用"
@@ -630,7 +630,6 @@ def client_skill_root(client: str) -> Path:
 
 # ---------------------------------------------------------------------------
 # TOML profiles (取代 export env + source 方案)
-#
 # profile 存储/解析/选择收口到 gms_agent.profile_store（ADR 0003）——
 # launcher、
 # lifecycle 与 SDK 共享同一实现；本模块只保留生命周期语义（write_profile 的

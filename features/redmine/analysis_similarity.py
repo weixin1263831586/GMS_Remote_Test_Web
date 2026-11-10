@@ -15,7 +15,6 @@ from features.redmine.utils import to_iso8601
 
 logger = logging.getLogger(__name__)
 
-# Enhanced error patterns for structured extraction
 _ERROR_LINE_PATTERNS = [
     # Stack traces
     r"at\s+[\w.$]+\([^)]*\.\w+:\d+\)",
@@ -39,13 +38,13 @@ _ERROR_LINE_PATTERNS = [
 _ERROR_LINE_RE = re.compile("|".join(_ERROR_LINE_PATTERNS), re.IGNORECASE)
 
 AI_MODEL_TIMEOUT = 120          # seconds for AI model HTTP request
-AI_MODEL_MAX_TOKENS = 2400      # max tokens for AI model response
-MAX_FAILURE_LINES = 30          # max error lines to extract
-MAX_ERROR_BLOCKS = 5            # max grouped error blocks
+AI_MODEL_MAX_TOKENS = 2400
+MAX_FAILURE_LINES = 30
+MAX_ERROR_BLOCKS = 5
 SIMILARITY_THRESHOLD_HIGH = 70  # score >= this → "high" similarity
 SIMILARITY_THRESHOLD_MEDIUM = 40  # score >= this → "medium" similarity
-MAX_REFERENCES = 5              # max similar references to return
-TOP_CANDIDATES_FOR_AI = 8       # top candidates sent to AI semantic scoring
+MAX_REFERENCES = 5
+TOP_CANDIDATES_FOR_AI = 8
 
 
 SYNC_PRESERVE_FIELDS = {
@@ -102,7 +101,6 @@ class SimilarityAnalysisMixin:
         terms = self._similar_terms(issue_payload, failures)
         candidates: dict[int, dict[str, Any]] = {}
 
-        # 1. Local DB FTS search
         for term in terms[:8]:
             for row in self.db.search_similar(term, int(issue_payload["issue_id"]), limit=8):
                 ref_id = int(row["issue_id"])
@@ -120,7 +118,6 @@ class SimilarityAnalysisMixin:
                         "source": "local_db",
                     }
 
-        # 2. Redmine subject search
         for term in self._redmine_search_terms(issue_payload, failures):
             try:
                 rows = await client.search_issues_by_subject(term, project_id="fae", limit=10, status_id="*")
@@ -147,7 +144,6 @@ class SimilarityAnalysisMixin:
                         "updated_on": row.get("updated_on") or "",
                     }
 
-        # 3. 对高分候选执行可选的 AI 语义匹配。
         top_candidates = sorted(candidates.values(), key=lambda item: item["score"], reverse=True)[:TOP_CANDIDATES_FOR_AI]
         if top_candidates and failures:
             semantic_scores = await self._ai_semantic_similarity(issue_payload, top_candidates)
@@ -162,7 +158,6 @@ class SimilarityAnalysisMixin:
                     candidates[ref_id]["match_details"]["ai_semantic_score"] = round(ai_score, 3)
                     candidates[ref_id]["reason"] = (candidates[ref_id].get("reason") or "") + f" | AI语义相似 {ai_score:.2f}"
 
-        # 4. Assign similarity levels
         for ref in candidates.values():
             s = ref["score"]
             if s >= SIMILARITY_THRESHOLD_HIGH:
@@ -171,7 +166,6 @@ class SimilarityAnalysisMixin:
                 ref["similarity_level"] = "medium"
             else:
                 ref["similarity_level"] = "low"
-            # Filter out low similarity
         return sorted(
             [ref for ref in candidates.values() if ref["similarity_level"] != "low"],
             key=lambda item: item["score"],
@@ -349,5 +343,3 @@ class SimilarityAnalysisMixin:
             logger.warning("[RedmineAgent] AI semantic similarity failed: %s", exc)
 
         return results
-
-    # AI model interaction

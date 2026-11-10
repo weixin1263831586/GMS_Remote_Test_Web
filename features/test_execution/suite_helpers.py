@@ -19,8 +19,6 @@ from .suites import (
 logger = logging.getLogger(__name__)
 
 
-# ==================== Suite helpers ====================
-
 def get_available_test_suites(config: dict[str, Any], base_path: str | None = None) -> list[dict[str, str]]:
     """Return all test suites visible to the current host/config."""
     base_path = base_path or config.get("suites_path") or get_default_suites_path(config)

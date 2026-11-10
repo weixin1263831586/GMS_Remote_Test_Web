@@ -303,7 +303,7 @@ class AutomationOrchestratorTests(unittest.TestCase):
 
             # 重新进入 AOA 阶段并注入执行失败 → 终态 aoa_failed。
             store.update_run("run_aoa", status="flash_verified", current_stage="flash_verified", result_json="{}")
-            orchestrator.advance_run("run_aoa")  # flash_verified → aoa_recovering
+            orchestrator.advance_run("run_aoa")
             self.assertEqual(store.get_run("run_aoa")["status"], RUN_STATUS_AOA_RECOVERING)
             failing = AutomationOrchestrator(store, AoaExecutor(fail=True))
             failing.advance_run("run_aoa")

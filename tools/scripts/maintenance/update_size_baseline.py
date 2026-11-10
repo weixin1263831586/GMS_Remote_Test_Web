@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shrink-only size-budget maintenance for the architecture size gates.
 
-The file-size ratchet (ADR 0002 / docs/development.md) means budgets may only
+The file-size ratchet (docs/development.md; tests/architecture/_size_ratchet.py) means budgets may only
 SHRINK after a real split: keeping an old peak budget after extracting a
 module re-opens the debt it just closed. Ceilings live in independent
 persisted baselines (``tests/architecture/baselines/*.json``); the ratchet

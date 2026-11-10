@@ -1,4 +1,4 @@
-"""2026-10-09 全库审计 P1 修复回归（org_chart / case_extractor / reply_drafter）。"""
+"""org_chart / case_extractor / reply_drafter 修复回归。"""
 
 from __future__ import annotations
 

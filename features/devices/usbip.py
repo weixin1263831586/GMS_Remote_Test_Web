@@ -308,7 +308,6 @@ class USBIPManager:
             if not device_host or '@' not in device_host:
                 return {'success': False, 'error': '无效的设备主机地址'}
 
-            # 自动查找密码
             if not device_password:
                 device_password = self.config_manager.find_device_host_password(
                     device_host,
@@ -325,7 +324,6 @@ class USBIPManager:
                     'instructions': '请先在登录页面输入SSH密码'
                 }
 
-            # 连接来源主机（Windows 或 Ubuntu/Linux）
             username, hostname = parse_host_address(device_host)
             ssh_hostname, ssh_port = split_host_port(hostname)
             usbip_attach_host = usbip_attach_host or config.get('usbip_attach_host') or ssh_hostname
@@ -335,7 +333,6 @@ class USBIPManager:
                 return {'success': False, 'error': f'SSH连接失败到 {device_host}'}
 
             try:
-                # 检查系统类型：Windows（usbipd-win）或 Ubuntu/Linux（用户态 usbipd）
                 source_os = self._detect_source_os(source_ssh)
                 if source_os not in ('windows', 'linux'):
                     return {'success': False, 'error': 'USB/IP仅支持Windows或Ubuntu主机'}
@@ -394,7 +391,6 @@ class USBIPManager:
                     if not bound:
                         return {'success': False, 'error': '设备绑定失败'}
                 else:
-                    # Ubuntu/Linux 来源：用户态 usbipd 服务端按 serial/vid 导出。
                     inventory = self._find_android_devices_linux(source_ssh, config)
                     discovered_busids = [item['busid'] for item in inventory]
                     requested = [str(item) for item in selected_busids or []]
@@ -473,7 +469,6 @@ class USBIPManager:
                             network_quality=network_quality,
                         )
 
-                # 连接Ubuntu并attach设备
                 ubuntu_ssh = self.ssh_manager.get_connection(config)
                 if not ubuntu_ssh:
                     rollback_complete = self._rollback_source_side(
@@ -488,7 +483,6 @@ class USBIPManager:
                     )
 
                 try:
-                    # 确保vhci驱动已加载
                     self._ensure_vhci_driver(ubuntu_ssh)
                     # 只清理本次要 attach 的 (host, busid) vhci 端口：
                     # 同一 Windows 主机上其他设备的 USB/IP 会话（如正在跑
@@ -498,7 +492,6 @@ class USBIPManager:
                         busids=busids,
                     )
 
-                    # Attach设备
                     attached, device_list = self._attach_devices(
                         ubuntu_ssh,
                         usbip_attach_host,
@@ -876,7 +869,6 @@ class USBIPManager:
 
             # 没有新设备时返回仍在线的已记录 USB/IP 设备。
             if not new_devices:
-                # 检查是否有之前记录的USB/IP设备现在仍然在线
                 for device_id in devices_after:
                     if device_id in self.device_sources:
                         new_devices = [device_id]
@@ -904,7 +896,6 @@ class USBIPManager:
         return install_usbipd(self.ssh_manager, ssh, config)
 
 
-# 全局USB/IP管理器实例
 usbip_manager = USBIPManager()
 
 

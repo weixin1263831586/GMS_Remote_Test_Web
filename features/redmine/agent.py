@@ -33,7 +33,6 @@ from foundation.config import settings
 logger = logging.getLogger(__name__)
 
 
-# Enhanced error patterns for structured extraction
 _ERROR_LINE_PATTERNS = [
     # Stack traces
     r"at\s+[\w.$]+\([^)]*\.\w+:\d+\)",
@@ -57,13 +56,13 @@ _ERROR_LINE_PATTERNS = [
 _ERROR_LINE_RE = re.compile("|".join(_ERROR_LINE_PATTERNS), re.IGNORECASE)
 
 AI_MODEL_TIMEOUT = 120          # seconds for AI model HTTP request
-AI_MODEL_MAX_TOKENS = 2400      # max tokens for AI model response
-MAX_FAILURE_LINES = 30          # max error lines to extract
-MAX_ERROR_BLOCKS = 5            # max grouped error blocks
+AI_MODEL_MAX_TOKENS = 2400
+MAX_FAILURE_LINES = 30
+MAX_ERROR_BLOCKS = 5
 SIMILARITY_THRESHOLD_HIGH = 70  # score >= this → "high" similarity
 SIMILARITY_THRESHOLD_MEDIUM = 40  # score >= this → "medium" similarity
-MAX_REFERENCES = 5              # max similar references to return
-TOP_CANDIDATES_FOR_AI = 8       # top candidates sent to AI semantic scoring
+MAX_REFERENCES = 5
+TOP_CANDIDATES_FOR_AI = 8
 
 
 def _load_agent_config() -> dict[str, Any]:
@@ -149,8 +148,6 @@ class RedmineAgent(
         self._ai_config_cache: dict[str, Any] | None = None
         self.report_analyzer_factory = report_analyzer_factory
         self.ai_analyzer_factory = ai_analyzer_factory
-
-    # Full sync — build / update complete issue database
 
     async def sync_all_assigned_issues(
         self,
@@ -289,7 +286,6 @@ class RedmineAgent(
                             exc,
                         )
 
-            # Analyze unanalyzed issues
             processed = 0
             failed = 0
             if analyze_new:
@@ -360,8 +356,6 @@ class RedmineAgent(
             if exact_match:
                 return int(exact_match["id"]), exact_match.get("name") or self._get_user_name(exact_match)
         return None, self._get_user_name(current_user)
-
-    # Timed scan (daily midnight run)
 
     async def run(
         self,
@@ -439,8 +433,6 @@ class RedmineAgent(
             if client is not None:
                 await client.close()
 
-    # Single issue analysis
-
     async def analyze_issue(self, client: RedmineClient, issue_id: int, run_id: str = "") -> dict[str, Any]:
         issue = await client.get_issue(str(issue_id), include=["attachments", "journals"])
         attachments = await client.list_issue_attachments(str(issue_id))
@@ -459,21 +451,16 @@ class RedmineAgent(
 
         issue_payload["category"] = self._detect_category(issue_payload.get("subject", ""), issue_payload.get("description", ""))
 
-        # Track status
         status_name = _obj_name(getattr(issue, "status", None))
         issue_payload["is_resolved"] = int(status_name in RESOLVED_STATUSES)
 
-        # Find similar references with similarity scoring
         references = await self._find_similar_references(client, issue_payload, failures)
 
-        # AI structured analysis
         ai_result = await self._summarize_with_model(issue_payload, failures, references)
 
-        # Extract structured seven fields
         structured = self._extract_structured_fields(ai_result, issue_payload, failures, references)
         issue_payload.update(structured)
 
-        # Build document
         document = self._build_issue_document(issue_payload)
         doc_path = self.db.write_issue_doc(issue_id, document)
         issue_payload["doc_path"] = doc_path
@@ -589,8 +576,6 @@ class RedmineAgent(
             "done_ratio": int(getattr(issue_stub, "done_ratio", 0) or 0),
         }
 
-    # Category detection
-
     @staticmethod
     def _detect_category(subject: str, description: str) -> str:
         text = f"{subject} {description}".upper()
@@ -623,8 +608,6 @@ class RedmineAgent(
             if getattr(field, "name", "") == field_name:
                 return str(field.value or "")
         return ""
-
-    # Issue window filter
 
     @staticmethod
     def _issue_created_in_window(issue: Any, start: datetime, end: datetime) -> bool:

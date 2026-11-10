@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
-# 单条 preview / 输入回显的入库上限。
 TOOL_OUTPUT_PREVIEW_CHARS = 200
 TOOL_INPUT_JSON_CHARS = 500
 
@@ -73,7 +72,7 @@ class ToolTrace:
     source_evidence_valid: bool = False
     source_result_count: int = 0
     # 搜索工具（artifact_search/batch）输出是否声明 coverage_complete=true
-    # （#661066 复审：False 时零命中不可当否定证据，Gate 也不计入覆盖）。
+    # （False 时零命中不可当否定证据，Gate 也不计入覆盖）。
     search_coverage_complete: bool = False
     # 搜索调用命中的 artifact id（从 matches/artifact_id 提取，供覆盖归属）。
     search_artifact_ids: list[str] = field(default_factory=list)
@@ -324,7 +323,7 @@ class KkAgentTrace:
     def search_covered_artifact_ids(self) -> set[str]:
         """搜索已覆盖全文的 artifact（coverage_complete=true 的成功搜索）。
 
-        区分"调用成功"与"日志覆盖完整"（#661066 复审）：coverage_complete
+        区分"调用成功"与"日志覆盖完整"：coverage_complete
         为 false 时搜索只扫了部分证据，其命中的 artifact 不计入。
         """
         covered: set[str] = set()

@@ -167,7 +167,7 @@ _KEY_USAGES["_"] = 0x2D  # SHIFT+0x2D
 _KEY_USAGES["+"] = 0x1E  # SHIFT+0x1E
 _SHIFTED = {"@", "_", "+"} | set("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
-# TV/STB 遥控语义别名（ADR 0022：优先虚拟遥控器按键）
+# TV/STB 遥控语义别名（dpad_*/ok 归一为基础方向键与 enter）
 _DPAD_ALIASES = {"dpad_up": "up", "dpad_down": "down", "dpad_left": "left",
                  "dpad_right": "right", "dpad_center": "enter", "ok": "enter"}
 # 官方 WebAOA 语法里的全大写方向/导航键（key RIGHT 2*TAB ENTER）：方向

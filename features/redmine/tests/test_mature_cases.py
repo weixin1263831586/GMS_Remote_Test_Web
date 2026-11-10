@@ -53,7 +53,6 @@ class MatureCaseBuilderTests(unittest.TestCase):
         self.assertEqual(case["canonical_error_signature"], "VBMeta test key")
         self.assertEqual(case["chip_platform"], "RK3576")
         self.assertEqual(set(case["source_issue_ids_json"]), {633454, 635211, 635212})
-        # Links written.
         links = self.db.list_links_for_case(case["case_id"])
         self.assertEqual({link["issue_id"] for link in links}, {633454, 635211, 635212})
 

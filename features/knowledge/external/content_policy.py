@@ -68,8 +68,6 @@ class AIWContentPolicy:
     degraded: bool = False
     raw: dict[str, Any] = field(default_factory=dict)
 
-    # -- 资格判定 -------------------------------------------------------
-
     def is_eligible(self, rel_path: str, tags: list[str] | None = None) -> bool:
         """路径 + 标签双重资格判定；任何一步不满足即排除。"""
         if self.degraded:

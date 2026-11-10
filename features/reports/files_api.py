@@ -152,7 +152,6 @@ def _decorate_report_for_client(
         item.pop(private_key, None)
     return item
 
-# ==================== List Reports ====================
 
 @router.get("/api/reports/list")
 async def list_reports(

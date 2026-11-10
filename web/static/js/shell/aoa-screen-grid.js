@@ -9,7 +9,7 @@
  *
  * 约束：本模块不注入任何设备事件、不参与录制输入路径（overlay
  * pointer-events:none，input 换算仍在 aoa-recorder.js 的 frame 空间）。
- * 「标定标记」是命令坐标的可视化引用（shell-aoa.js 标定模式经
+ * 「标定标记」是命令坐标的可视化引用（aoa-calibrate.js 标定模式经
  * aoaScreenGridCalibrate 下发坐标）：红色准星画在命令坐标处，点击画面
  * 改写命令坐标的交互由录制路径拦截，本模块只画不拦。
  * 几何按 object-fit: contain 的实际内容框计算（黑边不计入网格），
@@ -32,7 +32,7 @@
 
     function el(id) { return document.getElementById(id); }
 
-    // 网格步长：让两条刻度线之间的像素距离尽量均匀可读（≤10 格）。
+// 网格步长：让两条刻度线之间的像素距离尽量均匀可读（≤9 格）。
     function maxStep(axisMax) {
         for (const step of [10, 20, 30, 40, 60, 80, 120, 180]) {
             if (axisMax / step <= 9) return step;
@@ -229,7 +229,7 @@
         ctx.fillText(text, tx + 4, ty + 3);
     }
 
-    // 标定标记入口（shell-aoa.js 标定模式调用）：传入 null 清除。
+    // 标定标记入口（aoa-calibrate.js 标定模式调用）：传入 null 清除。
     function aoaScreenGridCalibrate(mark) {
         state.calibrate = mark && Number.isFinite(mark.x) && Number.isFinite(mark.y)
             ? {index: mark.index, x: Math.round(mark.x), y: Math.round(mark.y)}

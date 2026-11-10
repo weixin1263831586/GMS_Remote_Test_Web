@@ -274,7 +274,6 @@ async def get_connected_devices(
         # 所属分组（仅内存查表，不增加网络往返）
         device_info["groups"] = group_map.get(device_id, [])
 
-        # Check lock status
         lock_status = device_lock_manager.get_lock_status(device_id)
 
         if lock_status:
@@ -290,7 +289,6 @@ async def get_connected_devices(
             device_info["locked_client_id"] = ""
             device_info["locked_by_self"] = False
 
-        # Check USB/IP source
         if device_id in usbip_sources:
             source = usbip_sources[device_id]
             device_info["source"] = source.get("source", "")
@@ -309,7 +307,6 @@ async def get_connected_devices(
             }
         )
 
-    # Update cache
     with runtime.global_state.device_cache_lock:
         runtime.global_state.device_cache = {
             "devices": cache_records,
@@ -331,9 +328,6 @@ from .aoa_api import router as aoa_router  # noqa: E402
 
 
 router.include_router(aoa_router)
-
-
-# ==================== 设备分组：按属性自动分组 ====================
 
 
 # 自动分组可用的属性维度 -> get_device_info 返回的 base_info 键
@@ -384,7 +378,6 @@ async def auto_group_devices(request: Request, req: dict = Body(default={})):
         for device_id, properties in cluster_device_properties().items():
             source_host = properties.get("source_host") or "unknown"
             value_to_devices.setdefault(source_host, []).append(device_id)
-        # 将 worker_id 映射为友好名称
         worker_names: dict[str, str] = {}
         # Worker 友好名称来自集群服务，不可用时退回 worker ID。
         from foundation.cluster_port import get_cluster_service

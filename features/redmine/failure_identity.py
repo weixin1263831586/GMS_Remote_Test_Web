@@ -1,8 +1,7 @@
-"""Failure Identity / Cluster：确定性失败身份层（全局审查：失败身份与关系分层）。
+"""Failure Identity / Cluster：确定性失败身份层（失败身份与关系分层）。
 
 现有 ``analysis_similarity`` 回答的是"值不值得拿出来比较"（retrieval
-score：同用例/同模块/关键词/Jaccard + AI 语义分）。全局审查指出的长期
-问题是 retrieval 高分 ≠ 同一失败：**同一个 CTS testcase 完全可能
+score：同用例/同模块/关键词/Jaccard + AI 语义分）。长期问题是 retrieval 高分 ≠ 同一失败：**同一个 CTS testcase 完全可能
 设备 A = overlay 错、设备 B = framework API 行为变化、设备 C = 环境
 问题**，不能因为 testcase 相同就合并 Cluster。
 
@@ -16,14 +15,14 @@ score：同用例/同模块/关键词/Jaccard + AI 语义分）。全局审查�
    status code、版本号）——``expected <3> but was <5>`` 与
    ``expected <9> but was <2>`` 是不同失败，``vbkey size 0`` 与
    ``vbkey size 32``、``API 36`` 与 ``API 37`` 同理：数字本身常常就是
-   最重要的 failure signature（全局审查 4.3）。
+   最重要的 failure signature。
 2. **Relation（先确定性，后 AI）**：``relation_class`` 先给出纯确定性
    关系（SAME_FAILURE / SAME_TEST_DIFFERENT_CAUSE / SIMILAR_SYMPTOM /
    UNRELATED）。AIHOT 风格的 LLM relation judge（SAME_ROOT_CAUSE、
    REGRESSION_OF、低置信合并的二次确认）是后续 AI 层，**不得**越过
    指纹层直接合并。
 
-设备语义（全局审查 4.2）：``device_class`` 必须是 SoC / product /
+设备语义：``device_class`` 必须是 SoC / product /
 形态这类**设备类**；``device_serial`` 是观察元数据，随身份落库但
 **不进指纹**——同一失败在两台同型号设备上必须得到同一指纹，否则
 跨设备聚合被 serial 阻断。
@@ -180,7 +179,7 @@ def failure_identity(
     ``{"module": ..., "name": ..., "reason": ...}``。
 
     ``device_class`` 必须是设备**类**（SoC/product/形态）；``device_serial``
-    是观察元数据，随身份落库但**不参与指纹**（全局审查 4.2）。
+    是观察元数据，随身份落库但**不参与指纹**。
 
     返回::
 

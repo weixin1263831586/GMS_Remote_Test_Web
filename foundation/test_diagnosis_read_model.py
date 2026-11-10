@@ -1,4 +1,4 @@
-"""DiagnosisReadModel canonical 形状契约测试（全局审查第二十节）。
+"""DiagnosisReadModel canonical 形状契约测试。
 
 覆盖：builder 章节封闭性、归一化器的防御性（非 dict/缺键/超长文本）、
 conclusion 封闭词表 fail-closed、validator 形状校验、适配器纯函数性
@@ -123,7 +123,7 @@ class NormalizerTests(unittest.TestCase):
         self.assertEqual(entries[0]["last_verified"], "2026-09-29")
 
     def test_background_section_anchor_passthrough(self):
-        # schema v4 闭环（全局审查第七节）：索引层已 section-aware，
+        # schema v4：索引层已 section-aware，
         # canonical 读模型必须携带 {heading, start_line, end_line}。
         entries = normalize_background_entries([
             {"title": "LMKD", "source": "s",

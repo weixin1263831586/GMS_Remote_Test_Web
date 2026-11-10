@@ -239,7 +239,6 @@ def _config_view(request: Request) -> dict:
     # local_server 是客户端回传地址；没有显式动态配置时，按当前请求用户/IP 展示。
     config['local_server'] = get_effective_local_server(client_id, request=request)
 
-    # 隐藏敏感信息
     safe_config = hide_sensitive_info(config.copy())
     effective_ubuntu_user = config_manager.get_ubuntu_user(config)
     configured_suites_path = str(config.get("suites_path") or "").strip()
@@ -393,7 +392,6 @@ async def update_config(
     # client_ip 和 client_username 属于运行时状态，不持久化。
     runtime_keys = {'client_hosts', 'local_server'}
 
-    # 检查是否有不允许修改的字段
     invalid_fields = set(req.keys()) - runtime_keys
     if invalid_fields:
         return error_response(
@@ -404,7 +402,6 @@ async def update_config(
     # 只更新允许字段，保留 Gerrit/Redmine/USB-IP 等其他运行时段落。
     runtime_updates = {key: req[key] for key in runtime_keys if key in req}
 
-    # 保存运行时配置
     if _update_runtime_sections(runtime_updates):
         return success_response()
     else:

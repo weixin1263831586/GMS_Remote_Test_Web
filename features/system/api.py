@@ -163,7 +163,6 @@ async def download_skills_zip(
                 content={'success': False, 'error': f'未知技能：{skill_name}'},
                 status_code=404
             )
-        # 新源：agent/gms-remote-test/skill/（arcname 根为 gms-remote-test/）
         skills_dir = os.path.realpath(
             os.path.join(PROJECT_ROOT, "agent", "gms-remote-test", "skill")
         )
@@ -405,12 +404,11 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         'type': 'heartbeat',
                         'timestamp': datetime.now().isoformat()
                     })
-                    continue  # 继续下一次心跳检测
+                    continue
                 except Exception as e:
                     logger.warning(f"[WebSocket] Failed to send heartbeat for {client_id}: {e}")
                     break
 
-            # 处理接收到的消息
             if message_type == 'ping':
                 await websocket.send_json({
                     'type': 'pong',

@@ -129,8 +129,7 @@ function connectTerminalSocket() {
         if (socket !== terminalSocket) return;
         debugLog('Terminal WebSocket transport connected');
         isReconnecting = false;
-        // 传输层打开只说明可以发控制消息，后端 PTY/SSH/ADB 会话
-        // 还未创建，等 terminal_connected 才算真正就绪。
+        // 会话还未创建：等 terminal_connected 才算就绪。
         updateTerminalTransportStatus();
 
         // 检查是否为路由命令模式

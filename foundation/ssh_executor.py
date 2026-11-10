@@ -11,14 +11,12 @@
 
 本模块位于 foundation 层，是 Build / System / Cluster 共用的 SSH 执行
 原语（feature 之间禁止互相 import 内部模块，共享实现必须下沉到这里）。
-历史的 ``features/system/ssh_executor.py`` 薄再导出已删除，所有调用方
-直接 import 本模块。
+各 feature（Build / System / Cluster）直接 import 本模块。
 
 ``SSHManager.execute_command`` / ``SSHAsyncManager`` 只做连接管理与薄委托，
-不存在第二份执行语义；所有结果统一为 :class:`CommandResult`，不再有
-``(stdout, stderr, exit_code)`` 裸 tuple。
+不存在第二份执行语义；所有结果统一为 :class:`CommandResult`。
 
-架构硬规则（由 ``tests/architecture/test_ssh_command_execution.py`` 强制）：
+架构硬规则（由 ``tests/architecture/test_no_regression_rules.py`` 强制）：
 业务模块禁止直接调用 ``ssh.exec_command()``——命令执行必须经过本模块
 （``SSHExecutor``/``SSHManager.execute_command``），例外仅限本文件与
 已登记的 connection-health 原语。直接调用会重新引入 stdout/stderr

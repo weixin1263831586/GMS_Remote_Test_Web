@@ -264,10 +264,10 @@ async def broadcast_device_change(devices: list[str], disconnected: list[str] | 
         notification_title = 'USB设备已连接'
         notification_message = '连接：' + ', '.join(connected)
 
-    # 按 owner（base client_id）分组。旧实现从全部连接中取第一个
-    # base client_id 只为这一个 owner 入库，却把同一通知记录广播给所有
-    # 用户——其他用户实时看到通知，刷新后历史却没有，已读状态也无法
-    # 按 owner 持久化。现在每个 owner 入库一份，并投递自己的通知 ID。
+    # 按 owner（base client_id）分组：每个 owner 各自入库一份并投递
+    # 自己的通知 ID。不能只给一个 owner 入库却向所有用户广播——否则
+    # 其他用户实时看到通知、刷新后历史却没有，已读状态也无法按 owner
+    # 持久化。
     owners: dict[str, list] = {}
     for cid, socket in sockets:
         base = cid.split(':', 1)[0] if cid else ''
@@ -344,13 +344,10 @@ def format_device_list_info(devices: list[str]) -> str:
 async def broadcast_device_lock_update(device_ids: list | None = None):
     """广播设备锁定更新（快速版本，不需要SSH查询）"""
     try:
-        # 获取所有锁定的设备信息
         all_locks = device_lock_manager.get_all_locks()
 
-        # 构建设备更新消息
         device_updates = []
         if device_ids:
-            # 只更新指定的设备
             for device_id in device_ids:
                 if device_id in all_locks:
                     lock_info = all_locks[device_id]
@@ -369,7 +366,6 @@ async def broadcast_device_lock_update(device_ids: list | None = None):
                         'locked': False
                     })
         else:
-            # 更新所有锁定的设备
             for device_id, lock_info in all_locks.items():
                 locked_by = lock_info['username']
                 device_updates.append({
@@ -381,7 +377,6 @@ async def broadcast_device_lock_update(device_ids: list | None = None):
                     'locked_at': lock_info['timestamp']
                 })
 
-        # 广播到所有连接的客户端
         lock_msg = {'type': 'device_lock_update', 'devices': device_updates}
 
         # Also emit via EventBus so event-bus listeners are notified.
@@ -423,7 +418,6 @@ def get_or_create_user_state(client_id: str) -> dict:
                 'last_seen': datetime.now().isoformat()
             }
         else:
-            # 更新last_seen时间
             runtime.global_state.user_states[client_id]['last_seen'] = datetime.now().isoformat()
         return runtime.global_state.user_states[client_id]
 
@@ -437,10 +431,6 @@ def update_user_state_field(client_id: str, updates: dict):
         else:
             logger.warning(f"[State] Client {client_id} not found in user_states")
 
-
-# ==================== 并行设备操作 ====================
-
-# ==================== 设备属性获取 ====================
 
 def get_device_properties_optimized(device_id: str, ssh) -> dict[str, str]:
     """获取设备属性 - 一次SSH调用获取所有属性(同步,阻塞;调用方应在 to_thread 里跑)。"""
@@ -581,7 +571,6 @@ class DeviceSSHConnection:
                 next_actions=({"action": "配置 Windows 设备主机 (user@ip)"},),
             )
 
-        # 从连接池获取或创建连接
         self.ssh = runtime.global_state.device_ssh_pool_get(self._pool_key, self.config)
         if not self.ssh:
             # 避免把内部生成的随机 ID 直接暴露成“主机名”

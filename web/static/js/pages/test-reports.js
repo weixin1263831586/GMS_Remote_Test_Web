@@ -113,7 +113,6 @@ function reportsListUrl(userOnly, cursor = '') {
     return `/api/reports/list${query ? `?${query}` : ''}`;
 }
 
-// 离开页面时清理报告轮询定时器。
 function cleanupReportsPolling() {
     if (reportsRefreshInterval) {
         clearInterval(reportsRefreshInterval);
@@ -253,7 +252,6 @@ function toggleUserReports() {
     const checkbox = document.getElementById('filter-user-checkbox');
     currentUserFilter = checkbox.checked;
 
-    // 重新加载报告列表
     loadTestReports(currentUserFilter, false, true);
 }
 
@@ -272,7 +270,6 @@ function displayTestReports(reports) {
         return;
     }
 
-    // 使用 DocumentFragment 提高渲染性能
     const fragment = document.createDocumentFragment();
 
     // 测试类型颜色映射（定义在循环外，避免重复创建）
@@ -338,12 +335,10 @@ function displayTestReports(reports) {
     tbody.innerHTML = '';
     tbody.appendChild(fragment);
 
-    // 使用事件委托处理按钮点击（提高性能）
     tbody.removeEventListener('click', handleReportAction);
     tbody.addEventListener('click', handleReportAction);
 }
 
-// 事件委托处理函数
 function handleReportAction(event) {
     const button = event.target.closest('button[data-action]');
     if (!button) return;
@@ -460,7 +455,6 @@ async function deleteReport(timestamp, reportId = '', reportName = '') {
 
         if (result.success) {
             showToast('报告已删除', 'success');
-            // 刷新报告列表
             await loadTestReports(currentUserFilter, false, true);
         } else {
             showToast('删除失败: ' + (result.error || '未知错误'), 'error');
@@ -474,14 +468,12 @@ async function deleteReport(timestamp, reportId = '', reportName = '') {
 
 async function retryReport(timestamp, testType) {
     try {
-        // 先切换到测试界面
         switchPage('test');
 
         // 等待页面切换完成后填充数据
         setTimeout(() => {
             debugLog(`[Retry] 开始填充数据, timestamp=${timestamp}, testType=${testType}`);
 
-            // 填入测试报告名称（字段ID是 retry-result）
             const reportNameInput = document.getElementById('retry-result');
             if (reportNameInput) {
                 reportNameInput.value = timestamp;
@@ -493,7 +485,6 @@ async function retryReport(timestamp, testType) {
             // 互斥：填入报告时清空模块和用例
             enforceFieldExclusion('retry');
 
-            // 设置测试类型
             const testTypeSelect = document.getElementById('test-type');
             if (testTypeSelect) {
                 if (testType) {
@@ -506,10 +497,8 @@ async function retryReport(timestamp, testType) {
                 console.error('[Retry] 未找到 test-type 元素');
             }
 
-            // 根据测试类型填入测试套件路径
             const suitePathInput = document.getElementById('test-suite');
             if (suitePathInput) {
-                // 根据测试类型设置默认路径
                 const suitePaths = {
                     'CTS': 'android-cts',
                     'GSI': 'android-gsi',
@@ -519,7 +508,6 @@ async function retryReport(timestamp, testType) {
                     'APTS': 'android-apts'
                 };
 
-                // 如果有匹配的测试类型，使用对应的路径
                 if (testType && suitePaths[testType]) {
                     suitePathInput.value = suitePaths[testType];
                     debugLog(`[Retry] 已设置测试套件路径: ${suitePaths[testType]}, 当前值: ${suitePathInput.value}`);
@@ -530,7 +518,6 @@ async function retryReport(timestamp, testType) {
                 console.error('[Retry] 未找到 test-suite 元素');
             }
 
-            // 打印所有相关元素的值以便调试
             debugLog('[Retry] 当前字段值:', {
                 reportName: document.getElementById('retry-result')?.value,
                 testType: document.getElementById('test-type')?.value,
@@ -561,14 +548,12 @@ async function retryReportWithSuite(timestamp, testType, suitePath, reportContex
                 await switchTestWorker();
             }
         }
-        // 先切换到测试界面
         switchPage('test');
 
         // 等待页面切换完成后填充数据
         setTimeout(() => {
             debugLog(`[Retry] 开始填充数据, timestamp=${timestamp}, testType=${testType}, suitePath=${suitePath}`);
 
-            // 填入测试报告名称（字段ID是 retry-result）
             const reportNameInput = document.getElementById('retry-result');
             if (reportNameInput) {
                 reportNameInput.value = timestamp;
@@ -580,7 +565,6 @@ async function retryReportWithSuite(timestamp, testType, suitePath, reportContex
             // 互斥：填入报告时清空模块和用例
             enforceFieldExclusion('retry');
 
-            // 设置测试类型
             const testTypeSelect = document.getElementById('test-type');
             if (testTypeSelect) {
                 if (testType) {
@@ -593,15 +577,12 @@ async function retryReportWithSuite(timestamp, testType, suitePath, reportContex
                 console.error('[Retry] 未找到 test-type 元素');
             }
 
-            // 填入测试套件路径（优先使用原始路径，否则使用默认路径）
             const suitePathInput = document.getElementById('test-suite');
             if (suitePathInput) {
                 if (suitePath && suitePath !== 'null' && suitePath !== '') {
-                    // 使用报告中的原始测试套件路径
                     suitePathInput.value = suitePath;
                     debugLog(`[Retry] 已设置测试套件路径(原始): ${suitePath}, 当前值: ${suitePathInput.value}`);
                 } else {
-                    // 根据测试类型设置默认路径
                     const suitePaths = {
                         'CTS': 'android-cts',
                         'GSI': 'android-gsi',
@@ -622,7 +603,6 @@ async function retryReportWithSuite(timestamp, testType, suitePath, reportContex
                 console.error('[Retry] 未找到 test-suite 元素');
             }
 
-            // 打印所有相关元素的值以便调试
             debugLog('[Retry] 当前字段值:', {
                 reportName: document.getElementById('retry-result')?.value,
                 testType: document.getElementById('test-type')?.value,
@@ -673,7 +653,6 @@ async function downloadReportAsZip(timestamp, reportId = '', reportName = '') {
             return;
         }
 
-        // 检查 Content-Type
         const contentType = response.headers.get('Content-Type');
         debugLog('Response Content-Type:', contentType);
 
@@ -685,7 +664,6 @@ async function downloadReportAsZip(timestamp, reportId = '', reportName = '') {
             return;
         }
 
-        // 获取文件名
         const contentDisposition = response.headers.get('Content-Disposition');
         let filename = `${reportName || timestamp}.zip`;
 
@@ -697,7 +675,6 @@ async function downloadReportAsZip(timestamp, reportId = '', reportName = '') {
         }
         debugLog('Downloading file as:', filename);
 
-        // 下载文件
         const blob = await response.blob();
         debugLog('Blob size:', blob.size, 'bytes');
 
@@ -739,7 +716,6 @@ async function analyzeReport(timestamp, reportId = '') {
                 {source: 'report-analysis'});
         }
 
-        // 切换到报告分析页面
         const sidebarItem = document.querySelector('[data-page="report-analysis"]');
         if (sidebarItem) {
             sidebarItem.click();
@@ -790,7 +766,6 @@ function showInstallGuide(title, guide) {
 function closeInstallGuide() {
     const modal = document.getElementById('install-guide-modal');
     if (modal) {
-        // 隐藏进度条
         const progressDiv = document.getElementById('install-progress');
         if (progressDiv) {
             progressDiv.style.display = 'none';
@@ -804,23 +779,18 @@ async function autoInstallUsbipd() {
     const progressBar = document.getElementById('install-progress-bar');
     const statusText = document.getElementById('install-status');
 
-    // 显示进度条
     progressDiv.style.display = 'block';
 
     try {
-        // 更新状态：准备安装
         progressBar.style.width = '10%';
         statusText.textContent = '📡 正在连接 Windows 主机...';
 
-        // 调用后端安装 API
         const result = await apiCall('/api/usbip/install', 'POST', {});
 
-        // 更新状态：安装中
         progressBar.style.width = '50%';
         statusText.textContent = '⏳ 正在安装 usbipd，请稍候...';
 
         if (result.success) {
-            // 安装成功
             progressBar.style.width = '100%';
             progressBar.style.background = 'var(--success-color, #28a745)';
             statusText.innerHTML = '✅ 安装成功！usbipd 已就绪';
@@ -828,14 +798,12 @@ async function autoInstallUsbipd() {
 
             addLogEntry('usbipd 自动安装成功', 'success');
 
-            // 3秒后关闭弹窗并刷新设备
             setTimeout(() => {
                 closeInstallGuide();
                 // 直接调用 refreshDevices 而不是 debouncedRefreshDevices，避免防抖延迟
                 refreshDevices();
             }, 3000);
         } else {
-            // 安装失败
             progressBar.style.width = '100%';
             progressBar.style.background = 'var(--danger-color, #dc3545)';
             statusText.textContent = '❌ 安装失败: ' + (result.error || '未知错误');
@@ -847,7 +815,6 @@ async function autoInstallUsbipd() {
             addLogEntry('usbipd 自动安装失败: ' + (result.error || '未知错误'), 'error');
         }
     } catch (error) {
-        // 异常处理
         progressBar.style.width = '100%';
         progressBar.style.background = 'var(--danger-color, #dc3545)';
         statusText.textContent = '❌ 安装失败: ' + error.message;
@@ -868,7 +835,6 @@ function showSshdInstallGuide(guide) {
     }
     const modal = document.getElementById('sshd-install-guide-modal');
     if (modal) {
-        // 设置指南内容
         const guideContent = document.getElementById('sshd-guide-content');
         if (guideContent) {
             guideContent.textContent = guide;

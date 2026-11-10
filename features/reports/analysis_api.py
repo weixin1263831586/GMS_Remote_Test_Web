@@ -103,7 +103,6 @@ def _is_safe_report_delete_dir(result_dir: str) -> bool:
     except OSError:
         return False
 
-# ==================== Analyze Reports ====================
 
 @router.post("/api/reports/analyze")
 async def analyze_reports(
@@ -317,8 +316,6 @@ async def analyze_reports(
         return error_response("Report analysis failed", 500)
 
 
-# 套件日志目录分析。
-
 def _resolve_suite_log_dir(suite_path: str, rel_path: str, config) -> tuple[str, str | None]:
     """Resolve a browsed suite-relative path to an absolute log directory.
 
@@ -438,7 +435,6 @@ async def analyze_suite_log_dir(
     return JSONResponse(content={"success": True, "data": result, "mode": "suite_log_dir"})
 
 
-# ==================== Diagnose Report ====================
 
 @router.post("/api/reports/diagnose")
 async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request: Request):
@@ -461,7 +457,6 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
 
         keywords = _extract_failure_keywords(request.test_name, request.error_message, request.stack_trace, request.module, class_names)
 
-        # Resolve suite target inline (simplified from monolith)
         async def _resolve_suite_target():
             try:
                 if dependencies.resolve_suite_target is None:
@@ -570,7 +565,7 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
         }
         diagnosis["summary"] = ai_result.get("root_cause") or ai_result.get("analysis") or "Diagnosis orchestration complete"
         diagnosis["patch_draft"] = _build_patch_draft(diagnosis)
-        # DiagnosisReadModel（全局审查第二十节）：canonical 诊断读模型，
+        # DiagnosisReadModel：canonical 诊断读模型，
         # CLI/MCP/Assistant 消费该章节，Web 继续用原生字段渲染。
         from .diagnosis_read_model import read_model_from_report_diagnosis
 
@@ -582,7 +577,6 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
         return error_response("Report diagnosis failed", status_code=500)
 
 
-# ==================== Delete Report ====================
 
 @router.delete("/api/reports/delete")
 async def delete_report(

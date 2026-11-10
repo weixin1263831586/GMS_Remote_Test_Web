@@ -232,8 +232,7 @@ function renderStatsCards(cards) {
   return '<div class="stats-grid">' + (cards || []).map(function(card) {
     var cls = card.className ? ' ' + card.className : '';
     // 跳转锚点走 act-bridge 委托：data-click 只放 handler 名 + data-a0
-    // 放 section id（此前把整条调用表达式塞进 data-click，按名查表
-    // 查不到函数，点击静默失效）。
+    // 放 section id。
     var click = card.clickSection ? ' data-click="scrollToSection" data-a0="' + esc(card.clickSection) + '"' : '';
     return '<div class="stat-card' + cls + '"' + click + '><div class="value">' + esc(card.value == null ? 0 : card.value) + '</div><div class="label">' + esc(card.label || '') + '</div></div>';
   }).join('') + '</div>';

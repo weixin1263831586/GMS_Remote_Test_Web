@@ -40,7 +40,6 @@ const state = {
     fileBrowser: { currentPath: '', selectedFile: null, targetInputId: null, mode: null },
     gsiVendorFile: null,
     suiteBrowser: { selectedSuitePath: '', currentPath: '', highlightPath: '', suiteRoot: '' },
-    // 设备分组定义、视图开关和当前筛选。
     deviceGroups: [],
     deviceGroupsLoaded: false,
     groupView: localStorage.getItem('gms_group_view') === '1',
@@ -67,7 +66,8 @@ const state = {
 const DEBUG = false;
 
 // ADB Proxy 操作互斥标志。
-// 注意：workspace-devices.js / firmware-burn.js 在 navigation.js 之前加载并
+// 注意：workspace-devices.js / firmware-burn-adb-proxy.js 在 navigation.js
+// 之前加载并
 // 会读写该变量，声明必须放在更早加载的 state.js，否则页面切换时引用
 // 尚未初始化的全局词法绑定会抛 ReferenceError。
 let adbProxyOperationRunning = false;

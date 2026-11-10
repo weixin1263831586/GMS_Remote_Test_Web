@@ -24,7 +24,7 @@ def patch_preflight_ok():
 
 
 def patch_owner_revalidation_pending():
-    """成功路径必须 mock 实时 revalidation 契约（全局审查 P0）。
+    """成功路径必须 mock 实时 revalidation 契约。
 
     生产语义：AI 成功后要向 Redmine 确认 issue 仍归属当前 owner 且待
     回复，才允许标 completed；单测不 mock 时真实调用会因凭据缺失而
@@ -344,7 +344,7 @@ class OwnerFairnessTests(unittest.TestCase):
         self.assertEqual(first[0], "a")
         self.assertEqual(second[0], "b")
         self.assertEqual(third[0], "c")
-        self.assertEqual(fourth[0], "a")  # 循环
+        self.assertEqual(fourth[0], "a")
         # 轮转不丢成员。
         self.assertEqual(sorted(first), sorted(owners))
 

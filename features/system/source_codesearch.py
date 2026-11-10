@@ -146,8 +146,6 @@ class CodesearchProvider:
             "reproducible": False,
         }
 
-    # -------------------------------------------------------------- search
-
     def search(
         self,
         revision: str,

@@ -84,14 +84,12 @@ def build_case_fact_from_brief(
             keywords.append(str(item["subject"])[:60])
 
     fact: dict[str, Any] = {"issue_id": issue_id}
-    # 1) Redmine 事实字段：优先取扫描库提取结果。
     for key in _REDMINE_FACT_KEYS:
         fact[key] = str(base.get(key) or "")
     # subject 允许在无扫描行时退回工单/摘要文本（仍非 AI 杜撰）。
     if not fact["subject"]:
         fact["subject"] = record.subject or _first_line(result.get("problem_summary"))
 
-    # 2) AI 诊断结论 overlay。
     fact["problem_summary"] = _first_line(result.get("problem_summary"), 500) or str(
         base.get("problem_summary") or ""
     )

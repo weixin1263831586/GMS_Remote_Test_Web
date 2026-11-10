@@ -1,6 +1,6 @@
 """Shared redaction for credentials embedded in free-form text.
 
-设计要点（外部深度评审后）：
+设计要点：
 
 - 自由文本键值对分「带引号」和「不带引号」两段匹配：带引号的值取完整
   引号内容（可含空格与转义引号 ``\"``），不再在第一个空格或转义引号处

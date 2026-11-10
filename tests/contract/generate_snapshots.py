@@ -19,11 +19,10 @@ def main() -> None:
         # Freeze only the versioned static configuration contract here; runtime
         # persistence has dedicated tests and must not make this snapshot vary
         # with the Controller's current devices or users.
-        # The contract source MUST be the checked-in example —
-        # generating from the deployment-local configs/config.json made the
-        # snapshot depend on which machine ran generate_snapshots.py (the
-        # example carries _comment/jadx_java_home keys the deployment copy
-        # does not, so the frozen snapshot and the contract test disagreed).
+        # The contract source MUST be the checked-in example
+        # (configs/examples/config.example.json), never a deployment-local
+        # config: only the example is stable across machines and carries
+        # _comment/jadx_java_home keys a deployment copy may strip.
         config_shape(_static_example_shape_source()),
     )
     write_json('ui_controls.json', ui_controls(ui_source_groups()))

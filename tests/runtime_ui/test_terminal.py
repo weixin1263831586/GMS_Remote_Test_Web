@@ -1119,10 +1119,10 @@ class RuntimeTerminalTests(RuntimeUiHarness):
                 )
             )
 
-            # A later click must replace the one-shot ADB target.  The
-            # renderer previously retained any active ADB instance while a
-            # new pane was opening, even if its serial was different; every
-            # device button then continued to operate the first device.
+            # A later click must replace the one-shot ADB target: retaining
+            # a previous instance (e.g. while a new pane opens for a
+            # different serial) would keep every device button operating
+            # the first device.
             page.evaluate(
                 """async () => {
                   const localWorkerId = workspaceLocalWorkerId();

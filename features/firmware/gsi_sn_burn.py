@@ -52,7 +52,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Moved with burn_gsi (was module-level in firmware_api.py).
 _FASTBOOT_OKAY_RE = re.compile(r"\s+OKAY\s+\[\s*[\d.]+s\]$")
 _ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
@@ -416,13 +415,9 @@ async def burn_sn(
         return ApiError.internal(message).to_response()
 
 
-# ---- merged from models.py ----
 class SNBurnRequest(BaseModel):
     devices: list[str]
     sn_code: str
-
-
-# ---- merged from gsi_diagnostics.py ----
 
 
 def diagnose_gsi_burn_failure(output: str) -> str:

@@ -1276,8 +1276,7 @@ body.apk-resizing {
     }
 }
 
-/* ==================== server-sync 声明式 hover (CSP 前置迁移) ==================== */
-/* 替代历史 inline onmouseover/onmouseout 样式脚本。 */
+/* ==================== server-sync 声明式 hover ==================== */
 .hover-dim:hover {
     opacity: 0.85;
 }
@@ -1288,7 +1287,7 @@ body.apk-resizing {
     border-color: var(--card-accent, var(--border-color));
 }
 
-/* api-docs 复制交互（替代历史 inline hover 脚本） */
+/* api-docs 复制交互 */
 .api-skill-copy {
     color: var(--primary-color);
 }
@@ -1305,7 +1304,7 @@ body.apk-resizing {
     color: var(--primary-color);
 }
 
-/* shell.html 声明式 hover（替代历史 inline 样式脚本，CSP 前置迁移） */
+/* shell.html 声明式 hover */
 .copy-chip {
     transition: background 0.2s;
 }

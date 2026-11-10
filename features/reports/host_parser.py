@@ -15,7 +15,6 @@ class HostLogParser:
     def parse_log_dir(self, log_dir: str) -> TestReport | None:
         """解析日志目录"""
         try:
-            # 查找host_log文件
             host_log_path = self._find_host_log(log_dir)
             if not host_log_path:
                 return None
@@ -71,23 +70,17 @@ class HostLogParser:
 
     def _parse_log_content(self, log_content: str, log_dir: str) -> TestReport | None:
         """解析日志内容"""
-        # 提取测试类型
         test_type = self._extract_test_type(log_content, log_dir)
 
-        # 提取设备信息
         device = self._extract_device_info(log_content)
 
-        # 提取Android版本
         android_version = self._extract_android_version(log_content)
         suite_version = "Unknown"
 
-        # 提取开始时间
         start_time = self._extract_start_time(log_content, log_dir)
 
-        # 提取失败信息
         failures = self._extract_failures(log_content)
 
-        # 生成统计信息（优先从 "completed in" 行获取）
         total, pass_count, fail_count = self._generate_summary(log_content)
 
         # 如果统计信息不准确，使用实际提取的失败数修正
@@ -95,7 +88,6 @@ class HostLogParser:
             fail_count = len(failures)
             total = pass_count + fail_count
 
-        # 计算通过率
         pass_rate = f"{(pass_count / total * 100):.2f}%" if total > 0 else "0%"
 
         return TestReport(
@@ -152,17 +144,15 @@ class HostLogParser:
         if match:
             return match.group(1)
 
-        return ''  # 统一返回空字符串
+        return ''
 
     def _extract_start_time(self, log_content: str, log_dir: str) -> str:
         """提取开始时间"""
-        # 从目录名提取
         dir_name = os.path.basename(log_dir)
         match = re.search(r'(\d{4}\.\d{2}\.\d{2}_\d{2}\.\d{2}\.\d{2})', dir_name)
         if match:
             return match.group(1)
 
-        # 从日志第一行提取
         lines = log_content.split('\n')
         for line in lines[:10]:
             match = re.search(r'(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', line)
@@ -210,9 +200,7 @@ class HostLogParser:
                 if module_match:
                     detailed_module = module_match.group(1)
 
-            # 检测失败（FAILURE 或 ASSUMPTION_FAILURE）
             if 'FAILURE:' in line or 'ASSUMPTION_FAILURE:' in line:
-                # 收集多行失败信息
                 failure_lines = [line]
                 j = i + 1
 
@@ -240,10 +228,8 @@ class HostLogParser:
                 while failure_lines and not failure_lines[-1].strip():
                     failure_lines.pop()
 
-                # 组合多行失败信息
                 full_failure_text = '\n'.join(failure_lines)
 
-                # 使用详细模块名（如果可用）
                 module_to_use = detailed_module or current_module
 
                 if 'ASSUMPTION_FAILURE:' in line:
@@ -276,7 +262,6 @@ class HostLogParser:
         # 格式2: PerInstance/ClassName#MethodName/instance_id (VTS格式)
         # 格式3: module.ClassName#methodName
 
-        # 先尝试从FAILURE行提取
         failure_line = lines[0]
 
         # 匹配完整的测试名称（包括PerInstance/前缀和instance后缀）
@@ -294,7 +279,6 @@ class HostLogParser:
 
             # 移除模块名前缀（如果有）
             # ModuleListener格式: "ModuleName Test/Class#Method" 需要移除 "ModuleName "
-            # 检查是否以模块名开头
             if module and test_name.startswith(module + ' '):
                 test_name = test_name[len(module + ' '):]
             # 也处理常见的Target后缀模块名
@@ -313,12 +297,10 @@ class HostLogParser:
             if test_match:
                 test_name = f"{test_match.group(1)}#{test_match.group(2)}"
             elif '/' in failure_line:
-                # 尝试其他格式
                 parts = failure_line.split('/')
                 if len(parts) >= 2:
                     test_name = f"{parts[-2].strip()}#{parts[-1].split()[0].strip()}"
 
-        # 提取错误信息
         if 'FAILURE:' in lines[0]:
             parts = lines[0].split('FAILURE:', 1)
             if len(parts) > 1:

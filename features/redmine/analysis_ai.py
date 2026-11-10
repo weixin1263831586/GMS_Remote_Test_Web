@@ -18,7 +18,6 @@ from features.redmine.utils import to_iso8601
 
 logger = logging.getLogger(__name__)
 
-# Enhanced error patterns for structured extraction
 _ERROR_LINE_PATTERNS = [
     # Stack traces
     r"at\s+[\w.$]+\([^)]*\.\w+:\d+\)",
@@ -47,8 +46,8 @@ MAX_FAILURE_LINES = 30          # max error lines to extract
 MAX_ERROR_BLOCKS = 5            # max grouped error blocks
 SIMILARITY_THRESHOLD_HIGH = 70  # score >= this → "high" similarity
 SIMILARITY_THRESHOLD_MEDIUM = 40  # score >= this → "medium" similarity
-MAX_REFERENCES = 5              # max similar references to return
-TOP_CANDIDATES_FOR_AI = 8       # top candidates sent to AI semantic scoring
+MAX_REFERENCES = 5
+TOP_CANDIDATES_FOR_AI = 8
 
 
 SYNC_PRESERVE_FIELDS = {
@@ -206,8 +205,6 @@ class AiAnalysisMixin:
         # Delegate response parsing to the analyzer's robust parser
         return analyzer._parse_response_raw(resp.json(), api_format)
 
-    # AI Prompt — structured seven-field output
-
     def _build_ai_prompt(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]], references: list[dict[str, Any]]) -> str:
         journals = issue_payload.get("journals_json") or []
         journals_text = "\n".join(
@@ -262,8 +259,6 @@ Redmine: #{issue_payload.get('issue_id')} {issue_payload.get('subject')}
 6. reference_redmine 从上面的历史参考单中选择确实相关的，并说明为什么相关
 7. 代码块格式：diff内容用```diff（必须有--- a/file, +++ b/file, @@...@@, -/+行），shell命令用```shell（$前缀），XML配置用```xml，纯报错堆栈用```
 """
-
-    # Code block formatting helpers
 
     @staticmethod
     def _ensure_code_block(text: str, lang: str = "") -> str:

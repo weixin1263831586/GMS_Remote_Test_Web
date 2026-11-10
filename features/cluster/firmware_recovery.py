@@ -44,8 +44,7 @@ def freeze_firmware_recovery(request, repository, worker_id: str, devices: list[
     if not profile_id:
         return None
     # ADR 0012 human-only，双层守卫：
-    # ① require_human_principal 先完成认证（无效/被拒 Bearer 在此 401，
-    #    原实现会放行 None 用户、把守卫后移到 principal_owner_id），
+    # ① require_human_principal 先完成认证（无效/被拒 Bearer 在此 401），
     #    并拒绝带 auth_method 标记的 agent/machine 主体；
     # ② 对直接构造的 principal（如内部调用/测试注入，无 auth_method
     #    标记），按角色与主体身份再拒一次。固件审批不包含 UI 操作。
@@ -191,7 +190,7 @@ def validate_local_firmware_recovery(prepared: dict | None) -> None:
 def refresh_post_burn_inventory(repository, worker_id: str) -> None:
     """烧写恢复完成后立即把本机设备清单写入库存（best-effort）。
 
-    真实 agent 守护进程的周期心跳（2-3 分钟）之前，库存还停留在
+    真实 agent 守护进程的下一个周期心跳（默认 15s）之前，库存还停留在
     accessory 窗口的 usb_only；完成触发的设备列表刷新会拿到旧快照。
     本函数让 Controller 主机烧写结束后库存立即可用。探测器经
     local_bridge 同宿主桥（worker_agent.inventory，白名单内）；

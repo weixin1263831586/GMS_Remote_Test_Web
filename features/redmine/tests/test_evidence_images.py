@@ -127,7 +127,7 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         # _load_ocr_dependencies() 取依赖，这里让它直接抛
         # ModuleNotFoundError，模拟无 OCR 依赖的部署。不操纵
         # sys.modules / builtins.__import__（进程级全局状态，OCR 又在
-        # 工作线程执行，组合运行下会互相污染——外部复审 P2）。
+        # 工作线程执行，组合运行下会互相污染）。
         # PNG 原件保持 ready（字节完整落盘），派生状态记 missing、
         # 原因写明"依赖缺失"并进入快照 derive 阶段错误，不阻塞其余
         # 附件，也不把快照整体拉成 partial。

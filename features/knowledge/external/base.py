@@ -219,7 +219,6 @@ def search_terms(query: str, *, limit: int = 12) -> list[str]:
         add(term)
         if len(out) >= limit:
             return out
-    # CJK 无分词：按 2-gram 拆，保证中文查询可召回。
     for block in re.findall(r"[\u4e00-\u9fff]{2,}", raw):
         for i in range(len(block) - 1):
             gram = block[i : i + 2]

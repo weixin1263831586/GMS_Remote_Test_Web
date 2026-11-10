@@ -282,7 +282,6 @@ async def collect_tradefed_results(
             suite_path, get_default_suites_path(config), "suite_path"
         )
 
-    # Build cache key (includes lightweight result-dir probe for local).
     key = _build_cache_key(config, suite_path, is_local)
 
     # Pre-command cache check: skip the expensive tradefed JVM launch

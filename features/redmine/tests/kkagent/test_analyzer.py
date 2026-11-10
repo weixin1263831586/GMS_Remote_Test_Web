@@ -337,7 +337,7 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        # v28: EVIDENCE SEARCH STRATEGY 注入批量搜索/覆盖语义（#661066）。
+        # v28: EVIDENCE SEARCH STRATEGY 注入批量搜索/覆盖语义。
         self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v28")
 
     def test_diagnostic_prompt_has_no_journal_timeline_section(self):

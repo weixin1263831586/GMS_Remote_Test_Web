@@ -738,7 +738,7 @@ def test_suite_download_rejects_hosts_resolving_to_local_addresses(tmp_path, add
     """SSRF 防护：下载主机解析到环回/私网/链路本地/CGNAT 等本地侧地址时拒绝。
 
     断言明确的异常类型（UnsafeOutboundURLError），不绑定具体英文文案
-    （外部评审报告项：文案已随安全传输接口演进）。
+    （不绑定具体文案：文案随安全传输接口演进，异常类型才是稳定契约）。
     """
     root = tmp_path / "suites"
     root.mkdir()

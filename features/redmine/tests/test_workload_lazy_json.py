@@ -1,8 +1,8 @@
 """工作量统计的 JSON 快照列按需 decode 回归。
 
-审核项：get_workload_statistics 曾对全表行 decode journals_json/
-attachments_json/failures_json，而已解决且带 closed_on 的行（表中的
-大头）从不读这些列。现在轻列扫描 + 仅对参与计算的行批量补拉。
+锁定契约：轻列扫描 + 仅对参与计算的行批量补拉
+journals_json/attachments_json/failures_json，不对全表行 decode
+（已解决且带 closed_on 的行不读这些列）。
 """
 
 from __future__ import annotations

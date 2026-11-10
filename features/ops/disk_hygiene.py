@@ -101,7 +101,7 @@ def _dir_fresh_mtime(directory: Path, *, cutoff: float) -> bool:
 
     Directory mtime only updates when direct children change, so a long
     chunked upload writing deep inside an old session dir would otherwise
-    look abandoned (review P0: active uploads were removed whole).
+    look abandoned — otherwise an in-progress upload could be removed whole.
     """
     try:
         if directory.stat().st_mtime > cutoff:
@@ -125,8 +125,7 @@ def _rmtree_stale_dirs(directory: Path, *, max_age_seconds: float) -> tuple[int,
     session dirs may sit at depth two or three — walk the tree instead of
     guessing the depth. A session is only removed when neither the session
     directory nor any nested file was modified within the cutoff window;
-    fresh uploads keep writing chunks and stay untouched (review P0: active
-    uploads were removed whole). Grouping directories are never rmtree'd by
+    fresh uploads keep writing chunks and stay untouched. Grouping directories are never rmtree'd by
     mtime: only verified-empty ones are pruned with rmdir(), so a
     stale-looking owner dir cannot take active sessions with it.
     """
@@ -291,7 +290,7 @@ def run_cleanup(
     the hourly unattended pass runs in that mode; staged firmware removal is
     an explicit admin action (``include_stage=True``) and still skips any
     ``artifact-stage/<run_id>`` whose run is not terminal (queued/in-flight
-    runs may replay the image — fail closed, review P1).
+    runs may replay the image — fail closed).
     """
     stage_root = settings.data_root / STAGE_SUBDIR
     if dry_run:
@@ -301,7 +300,7 @@ def run_cleanup(
     freed = removed = 0
     if include_stage:
         # Preview and execution share _stage_candidates, so the admin always
-        # sees the same set that will be deleted (review P1). Protection
+        # sees the same set that will be deleted. Protection
         # status is re-checked right before deletion: a run could have left
         # the terminal state between preview and execution.
         candidates = [
@@ -310,8 +309,6 @@ def run_cleanup(
             )
             if item["deletable"]
         ]
-        # Protection is re-checked right before deletion: a run could have
-        # left the terminal state between candidate building and removal.
         protected_now = _protected_stage_run_ids()
         if protected_now is None:
             candidates = []  # fail closed: lookup failed, delete nothing

@@ -115,7 +115,7 @@ class EvidenceGateTests(unittest.TestCase):
         self.assertTrue(gate["attachments_checked"])
 
     def test_window_read_only_attachment_is_flagged_without_coverage_search(self):
-        # 回归（#661066）：读过 4096 首窗 ≠ 看过全文。没有 coverage-
+        # 回归：读过 4096 首窗 ≠ 看过全文。没有 coverage-
         # complete 搜索时，已读附件进入 window_read_only_artifact_ids，
         # gate_errors 给出"补 search 或读剩余窗口"的可执行修复提示。
         trace = _full_trace()

@@ -217,8 +217,6 @@ def _issue_id_for_snapshot(owner_id: str, snapshot_id: str) -> int:
     return int(snapshot.get("issue_id") or 0) if snapshot else 0
 
 
-# ------------------------------------------------------- 源码正文搜索/读取
-
 def _apk_task_for_read(task_id: str, owner_id: str) -> dict[str, Any]:
     from features.firmware import get_apk_task
 

@@ -64,7 +64,8 @@
 
                 updateClientDisplay();
 
-                // 已有本地缓存即已登记过: module load ≠ user mutation, 不再写服务器。
+                // 缓存命中即跳过登记（模块加载不算用户变更）；注意缓存
+                // 写入先于服务器登记，登记失败也会留下缓存。
                 if (savedUser && savedUser !== 'guest' && savedUser !== 'unknown') {
                     return;
                 }

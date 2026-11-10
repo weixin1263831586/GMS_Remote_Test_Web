@@ -48,23 +48,19 @@ class UniversalAIAnalyzer:
         """初始化通用AI分析器。config: AI模型配置字典。"""
         self.config = config or {}
         self.timeout = 60
-        # API 格式常量
         self.API_FORMAT_ANTHROPIC = 'anthropic'  # /v1/messages 端点
         self.API_FORMAT_OPENAI = 'openai'  # /v1/chat/completions 端点
 
     def _get_api_format(self, provider_name: str, config: dict) -> str:
         """返回提供商使用的 Anthropic 或 OpenAI API 格式。"""
-        # 优先使用配置中的 api_format 字段
         api_format = config.get('api_format')
         if api_format:
             return api_format
 
-        # 根据 base_url 推断
         base_url = config.get('base_url', '')
         if 'anthropic' in base_url.lower() or base_url.endswith('/messages'):
             return self.API_FORMAT_ANTHROPIC
 
-        # 默认使用 OpenAI 格式
         return self.API_FORMAT_OPENAI
 
     def get_primary_provider(self, preferred: str | None = None) -> str | None:
@@ -82,13 +78,11 @@ class UniversalAIAnalyzer:
             if providers.get(preferred, {}).get('enabled', False):
                 return preferred
 
-        # 使用配置中的 primary_provider，默认为第一个启用的提供商
         primary = self.config.get('primary_provider')
 
         if primary and providers.get(primary, {}).get('enabled', False):
             return primary
 
-        # 否则返回第一个启用的提供商
         for provider_name, provider_config in providers.items():
             if provider_config.get('enabled', False):
                 return provider_name
@@ -218,7 +212,6 @@ class UniversalAIAnalyzer:
         }
 
         try:
-            # 自动获取源码（如果需要）
             if auto_fetch_source and not source_code:
                 source_info = self._fetch_source_code_android(class_name)
                 if source_info and source_info.get('content'):
@@ -305,12 +298,12 @@ class UniversalAIAnalyzer:
             for attempt in range(max_retries):
                 try:
                     response = self._post_chat(url, headers, data, api_format)
-                    break  # 成功则退出重试循环
+                    break
                 except requests.exceptions.ConnectionError as e:
                     if attempt < max_retries - 1:
                         logger.warning(f"[{provider_name}] 连接失败，{retry_delay}秒后重试 ({attempt+1}/{max_retries}): {str(e)[:100]}")
                         time.sleep(retry_delay)
-                        retry_delay *= 2  # 指数退避
+                        retry_delay *= 2
                     else:
                         return {'success': False, 'error': f'连接失败: {redact_sensitive_text(e)}'}
                 except requests.exceptions.Timeout as e:
@@ -331,16 +324,13 @@ class UniversalAIAnalyzer:
                     message = choice.get('message', {})
                     content = message.get('content', '')
 
-                    # 如果 content 为空，检查是否为推理模型且被截断
                     finish_reason = choice.get('finish_reason', '')
                     # GLM-5.x 把推理过程放在 reasoning_content；其他模型可能用 reasoning
                     reasoning = message.get('reasoning_content') or message.get('reasoning') or ''
                     if not content and reasoning:
 
-                        # 检查是否因长度限制被截断
                         if finish_reason == 'length':
                             logger.warning(f"[{provider_name}] 响应被截断（max_tokens太小），只有 reasoning 字段")
-                            # 尝试从 reasoning 中提取 JSON
                             content = self._extract_json_from_reasoning(reasoning)
                             if not content:
                                 content = reasoning
@@ -348,12 +338,10 @@ class UniversalAIAnalyzer:
                             content = reasoning
                         logger.info(f"[{provider_name}] Content 为空，使用 reasoning 字段（长度: {len(content)}）")
 
-                    # 如果仍然为空，尝试其他可能的字段
                     if not content:
                         content = message.get('text', '')
                         logger.info(f"[{provider_name}] Reasoning 也为空，尝试 text 字段")
 
-                    # 最后的回退：将整个 choice 转为字符串
                     if not content:
                         content = str(choice)
                         logger.warning(f"[{provider_name}] 所有字段都为空，使用完整响应")
@@ -367,22 +355,16 @@ class UniversalAIAnalyzer:
                     logger.info(f"[{provider_name}] 检测到推理过程文本，尝试提取最终结果")
 
                     # 尝试提取推理过程后的最终 JSON
-                    # 查找 "Thinking Process" 后的内容
                     thinking_end = content.lower().find('thinking process')
                     if thinking_end > 0:
-                        # 跳过 "Thinking Process" 标题和可能的冒号
                         after_thinking = content[thinking_end + len('thinking process'):]
-                        # 查找下一个可能的 JSON 开始
                         json_start = after_thinking.find('{')
                         if json_start > 0:
-                            # 尝试从找到的 JSON 开始解析
                             potential_json = after_thinking[json_start:]
-                            # 找到匹配的结束括号
                             json_end = potential_json.rfind('}') + 1
                             if json_end > json_start:
                                 extracted_content = potential_json[:json_end]
                                 try:
-                                    # 验证是否为有效 JSON
                                     test_parse = json.loads(extracted_content)
                                     if 'root_cause' in test_parse:
                                         content = extracted_content

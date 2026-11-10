@@ -6,7 +6,7 @@ through the ops store (dedup applies there) and owns notification delivery:
 every sweep first retries events still in ``pending``/``failed`` state
 (with capped exponential backoff), then dispatches newly recorded ones.
 Delivery state is persisted on the event row, so a send that failed during
-one pass is retried by the next one (review P1).
+one pass is retried by the next one.
 
 Watchdog paths (cluster service) only record incidents — they never notify
 directly; this module is the single delivery owner.

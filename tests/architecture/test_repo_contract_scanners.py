@@ -24,8 +24,8 @@ DOCS = ROOT / 'docs'
 
 # 已知未引用但有意保留的资产（写明原因，删除时一并移除）。
 UNREFERENCED_ASSET_ALLOWLIST = {
-    # 由外部（用户浏览器书签/Controller /api/agent/install 直接返回）
-    # 使用，不在仓库 HTML/JS 中出现。
+    # 浏览器按约定 URL 直接请求 /favicon.ico（features/system/api.py
+    # 的路由），页面/模板不按文件名引用。
     'web/static/favicon.ico',
 }
 

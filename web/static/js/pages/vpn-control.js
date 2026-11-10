@@ -1,4 +1,3 @@
-// ==================== VPN Control ====================
 async function checkSshd() {
     try {
         const result = await apiCall('/api/ssh/sshd', 'GET');
@@ -42,7 +41,6 @@ async function checkSshd() {
 }
 
 async function checkRouting(targetHost) {
-    // 创建弹框
     const dialog = document.createElement('div');
     dialog.id = 'route-check-dialog';
     dialog.className = 'route-check-dialog';
@@ -74,7 +72,6 @@ async function checkRouting(targetHost) {
 
     ModalManager.registerDynamic(dialog);
 
-    // 获取配置中的默认值
     try {
         const config = await apiCall('/api/config/read', 'GET');
         if (config.ubuntu_host) {
@@ -90,7 +87,6 @@ async function checkRouting(targetHost) {
         console.error('获取配置失败:', error);
     }
 
-    // 绑定事件
     const pingTestBtn = document.getElementById('ping-test-btn');
     const closeDialogBtn = document.getElementById('close-dialog-btn');
     const closeXBtn = dialog.querySelector('.route-check-close');
@@ -100,7 +96,6 @@ async function checkRouting(targetHost) {
         ModalManager.unregisterDynamic('route-check-dialog');
     };
 
-    // X 按钮关闭
     closeXBtn.addEventListener('click', closeDialog);
 
     closeDialogBtn.addEventListener('click', closeDialog);
@@ -115,7 +110,6 @@ async function checkRouting(targetHost) {
             return;
         }
 
-        // 验证IP格式
         function isValidIP(ip) {
             const parts = ip.split('.');
             if (parts.length !== 4) return false;
@@ -134,7 +128,6 @@ async function checkRouting(targetHost) {
         pingResult.innerHTML = '<div class="ping-testing">🔄 正在测试连通性，请稍候...</div>';
 
         try {
-            // 首先尝试使用SSH ping API
             let result;
             try {
                 result = await apiCall('/api/ssh/ping', 'POST', {
@@ -142,16 +135,14 @@ async function checkRouting(targetHost) {
                     client_ip: clientIp
                 });
             } catch (postError) {
-                // 如果POST API不可用（服务器未重启），使用GET API作为后备
+                // POST 失败时降级为本地 /24 网段比较（不调用接口）：
                 debugLog('POST API不可用，使用GET API作为后备');
                 pingResult.innerHTML = '<div class="ping-testing">🔄 使用备用方法测试中...</div>';
 
-                // 使用现有的GET API，但手动分析结果
                 const testNetwork = testHostIp.split('.').slice(0, 3).join('.') + '.0';
                 const clientNetwork = clientIp.split('.').slice(0, 3).join('.') + '.0';
                 const sameNetwork = (testNetwork === clientNetwork);
 
-                // 生成路由命令
                 // 命令需在测试主机执行。
                 // 需要通过测试主机的网关来访问客户端网段
                 const testGateway = testNetwork.split('.').slice(0, 3).join('.') + '.1';
@@ -263,7 +254,6 @@ async function checkRouting(targetHost) {
                         </div>
                     `;
 
-                    // 绑定打开终端按钮事件
                     const openTerminalBtn = document.getElementById('open-terminal-btn');
                     if (openTerminalBtn) {
                         openTerminalBtn.addEventListener('click', async () => {
@@ -278,10 +268,8 @@ async function checkRouting(targetHost) {
                                 sessionStorage.setItem('pending_terminal_command', command);
                                 sessionStorage.setItem('command_source', 'route_check');
 
-                                // 关闭路由检查弹框
                                 document.body.removeChild(dialog);
 
-                                // 切换到终端页面
                                 if (typeof switchPage === 'function') {
                                     switchPage('terminal');
                                 } else {
@@ -312,7 +300,6 @@ async function checkRouting(targetHost) {
         }
     });
 
-    // 点击背景关闭
     dialog.addEventListener('click', (e) => {
         if (e.target === dialog) {
             document.body.removeChild(dialog);
@@ -326,7 +313,6 @@ async function connectVpn() {
         return;
     }
 
-    // 直接弹出 VPN 选择框让用户选择连接哪个
     showVpnCredentialModal();
 }
 

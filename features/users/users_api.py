@@ -133,7 +133,6 @@ async def set_client_username(
         return error_response("用户名不能为空或unknown", 400)
 
     if runtime.config_manager.save_client_host(client_ip, username):
-        # 更新内存中的映射
         client_manager.client_hosts = runtime.config_manager.get_runtime_config().get('client_hosts', {})
 
         display_client_id = format_client_display_id(username, client_ip)
@@ -279,7 +278,6 @@ async def list_users(
             ip,
         ) or client_id
 
-        # 过滤本地地址和VPN网关地址
         if ip in local_addresses or ip in vpn_gateway_addresses:
             continue
 

@@ -39,20 +39,20 @@ class GlobalState:
         self.ssh_connections = {}  # {client_id: ssh_connection}
         self.scrcpy_sessions = {}  # {device_id: session_info}
         self.device_cache = {'devices': [], 'timestamp': 0}  # 3秒TTL
-        self.device_cache_lock = threading.Lock()  # 设备缓存锁
+        self.device_cache_lock = threading.Lock()
         self.websocket_connections = {}  # {client_id: websocket}
-        self.websocket_connections_lock = threading.Lock()  # WebSocket连接锁
+        self.websocket_connections_lock = threading.Lock()
         self.firmware_upload_progress = {}  # {client_id: {'progress': float, 'filename': str, 'uploaded_size': int, 'total_size': int, 'timestamp': float}}
-        self.firmware_upload_progress_lock = threading.Lock()  # 上传进度锁
+        self.firmware_upload_progress_lock = threading.Lock()
         self.usbip_states = {}  # {client_id: {'connected': bool, 'timestamp': float}}
         self.usbip_devices_source = {}  # {device_id: {'source': device_host, 'timestamp': float}}
         self.terminal_ssh_sessions = {}  # {session_id: {'ssh': ssh, 'channel': channel, 'websocket': websocket}}
-        self.terminal_lock = threading.Lock()  # 终端会话锁
+        self.terminal_lock = threading.Lock()
         self.user_states = {}  # {client_id: {running, devices, logs, created_at, last_seen}}
-        self.user_states_lock = threading.Lock()  # 用户状态锁
-        self.usbip_states_lock = threading.Lock()  # USB/IP状态锁
-        self.usbip_devices_source_lock = threading.Lock()  # USB/IP设备来源锁
-        self.test_logs_lock = threading.Lock()  # 测试日志锁
+        self.user_states_lock = threading.Lock()
+        self.usbip_states_lock = threading.Lock()
+        self.usbip_devices_source_lock = threading.Lock()
+        self.test_logs_lock = threading.Lock()
         self.last_saved_log_file = {}  # {client_id: log_file_path}
         self.device_ssh_pools = {}
         self.device_ssh_pools_lock = threading.Lock()
@@ -112,7 +112,6 @@ class GlobalState:
                     except (ValueError, TypeError):
                         to_remove.append(client_id)
 
-                # 删除用户状态
                 for client_id in to_remove:
                     del self.user_states[client_id]
 
@@ -121,12 +120,10 @@ class GlobalState:
                 with self.test_logs_lock:
                     for client_id in to_remove:
                         self.test_logs.pop(client_id, None)
-                        # 同时清理last_saved_log_file中的旧条目
                         self.last_saved_log_file.pop(client_id, None)
 
             # 以下清理逻辑独立于用户状态清理，每次都执行
 
-            # 清理上传进度（过期超过10分钟的）
             expired_progress = self._cleanup_expired(
                 self.firmware_upload_progress, self.firmware_upload_progress_lock, UPLOAD_PROGRESS_MAX_AGE_SECONDS)
 
@@ -148,7 +145,6 @@ class GlobalState:
                     except Exception:
                         pass
 
-            # 清理USB/IP过期状态（超过24小时的）
             expired_usbip = self._cleanup_expired(
                 self.usbip_states, self.usbip_states_lock, USBIP_STATE_MAX_AGE_SECONDS)
 
@@ -174,7 +170,6 @@ class GlobalState:
             # 限制连接池数量,防止内存泄漏
             if pool_key not in self.device_ssh_pools:
                 if len(self.device_ssh_pools) >= self.device_ssh_pools_max:
-                    # 清理最老的连接池
                     oldest_key = next(iter(self.device_ssh_pools))
                     old_pool = self.device_ssh_pools.pop(oldest_key)
                     while not old_pool.empty():
@@ -186,12 +181,10 @@ class GlobalState:
 
             pool = self.device_ssh_pools[pool_key]
 
-        # 尝试从池中获取有效连接（最多尝试pool_size次）
         max_attempts = pool.maxsize
         for attempt in range(max_attempts):
             try:
                 ssh = pool.get_nowait()
-                # 健康检查
                 try:
                     transport = ssh.get_transport() if ssh else None
                     if transport and transport.is_active():
@@ -206,7 +199,6 @@ class GlobalState:
             except queue.Empty:
                 break
 
-        # 池为空或所有连接都失效，创建新连接
         logger.debug(f"[Device SSH Pool] Creating new connection for {pool_key}")
         return self._create_device_ssh_connection(pool_key, config)
 
@@ -223,10 +215,8 @@ class GlobalState:
                 try:
                     self.device_ssh_pools[pool_key].put_nowait(ssh)
                 except queue.Full:
-                    # 池已满，关闭连接
                     self._close_ssh_safely(ssh)
             else:
-                # 池不存在，关闭连接
                 self._close_ssh_safely(ssh)
 
     def _create_device_ssh_connection(self, pool_key: str, config: dict):

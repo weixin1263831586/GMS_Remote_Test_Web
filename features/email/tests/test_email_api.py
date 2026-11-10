@@ -153,7 +153,6 @@ class EmailApiTests(unittest.TestCase):
                 json={"to": "dev@example.com", "subject": "s", "body": "b"},
             )
             statuses.append(response.status_code)
-        # 前RATE_LIMIT_MAX_SENDS封成功,之后被 429 拒绝。
         self.assertEqual(
             statuses[: email_api.RATE_LIMIT_MAX_SENDS],
             [200] * email_api.RATE_LIMIT_MAX_SENDS,

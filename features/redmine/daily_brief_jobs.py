@@ -38,8 +38,6 @@ class DailyBriefJobStore:
     def __init__(self, repository: DailyBriefRepository):
         self.repo = repository
 
-    # ---------------------------------------------------------------- time
-
     @staticmethod
     def _utc_now() -> str:
         return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -49,8 +47,6 @@ class DailyBriefJobStore:
         return (
             datetime.now(timezone.utc) + timedelta(seconds=max(10, int(seconds)))
         ).isoformat(timespec="seconds").replace("+00:00", "Z")
-
-    # ---------------------------------------------------------------- read
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         with self.repo._connect() as conn:
@@ -88,8 +84,6 @@ class DailyBriefJobStore:
                 (self._utc_now(), run_id),
             )
             return cursor.rowcount
-
-    # -------------------------------------------------------------- mutate
 
     def _active_job(
         self, conn: sqlite3.Connection, run_id: str, kind: str, issue_id: int

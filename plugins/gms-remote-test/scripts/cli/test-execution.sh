@@ -207,7 +207,6 @@ gms-rt-jobs-wait() {
     done
 }
 
-# Clean test environment
 gms-rt-test-clean() {
     check_jq
     echo "🧹 Cleaning test environment..."
@@ -215,7 +214,6 @@ gms-rt-test-clean() {
     echo "$response" | jq '.'
 }
 
-# Stream test logs
 gms-rt-test-logs-stream() {
     echo "📡 Streaming test logs (Ctrl+C to stop)..."
     # 流式响应必须保持裸 curl（api_call 会缓冲整个响应体）。cookie 模式
@@ -224,18 +222,15 @@ gms-rt-test-logs-stream() {
     _gms_curl_authenticated_readonly -N "${API_BASE}/test/logs/stream"
 }
 
-# Start a test - delegates to /api/test/parse-args for intelligent parameter parsing
 gms-rt-test-start() {
     check_jq
 
-    # Collect all arguments into an array; separate out local options.
     local args=()
     local wait_for_job=0
     local wait_max=""
     local worker_id=""
     local first_param="${1:-}"
 
-    # Show help if no arguments
     if [ -z "$first_param" ]; then
         _gms_rt_test_start_help
         return 1
@@ -305,11 +300,9 @@ gms-rt-test-start() {
     done
     args=("${positional[@]}")
 
-    # Call API to parse arguments
     local params_json=$(printf '%s\n' "${args[@]}" | jq -R . | jq -s .)
     local parse_response=$(api_call "/test/parse-args" "POST" "{\"params\":$params_json}")
 
-    # Check if parsing succeeded
     if ! echo "$parse_response" | jq -e '.success' > /dev/null 2>/dev/null; then
         local error_msg=$(extract_api_error "$parse_response")
         error "Failed to parse arguments: $error_msg"
@@ -318,7 +311,6 @@ gms-rt-test-start() {
         return 1
     fi
 
-    # Extract all parsed values in single jq call (efficiency optimization)
     local device=$(echo "$parse_response" | jq -r '.device // ""')
     local test_type=$(echo "$parse_response" | jq -r '.test_type // ""')
     local test_module=$(echo "$parse_response" | jq -r '.test_module // ""')
@@ -330,7 +322,6 @@ gms-rt-test-start() {
         device=$(_resolve_devices "$device")
     fi
 
-    # Display parsed parameters
     if [ -n "$retry_dir" ]; then
         echo "🔄 Starting test retry..."
         echo "  Report: $retry_dir"
@@ -346,7 +337,6 @@ gms-rt-test-start() {
         [ -n "$test_suite" ] && echo "  Test_Suite: $test_suite"
     fi
 
-    # Display warnings
     if [ -n "$warnings" ]; then
         echo ""
         echo "$warnings" | while read -r warning; do
@@ -354,7 +344,6 @@ gms-rt-test-start() {
         done
     fi
 
-    # Build request data for /api/test/start
     # Use simple jq syntax to avoid parsing issues
     local data=$(jq -n \
         --arg rdir "$retry_dir" \
@@ -374,7 +363,6 @@ gms-rt-test-start() {
         }
         + (if $wid == "" then {} else {worker_id: $wid} end)')
 
-    # Call /api/test/start
     local response=$(api_call "/test/start" "POST" "$data")
 
     if echo "$response" | jq -e '.success' > /dev/null; then
@@ -395,7 +383,6 @@ gms-rt-test-start() {
     fi
 }
 
-# Help function for gms-rt-test-start
 _gms_rt_test_start_help() {
     cat << EOF
 Usage:
@@ -446,7 +433,6 @@ gms-rt-test-status() {
     api_call "/test/status" | jq '.'
 }
 
-# Stop running test
 gms-rt-test-stop() {
     local job_id="${1:-}"
     check_jq
@@ -463,7 +449,6 @@ gms-rt-test-stop() {
     fi
 }
 
-# List available test suites
 gms-rt-test-suites() {
     local base_path="${1:-}"
     check_jq
@@ -486,7 +471,6 @@ gms-rt-test-suites() {
     if echo "$response" | jq -e '.success' > /dev/null; then
         local count=$(echo "$response" | jq '.count')
         success "Found $count test suite(s)"
-        # Format output in 3 fixed-width columns
         echo ""
         printf "%-12s %-25s %-70s\n" "TYPE" "VERSION" "PATH"
         printf "%s\n" "$(printf '=%.0s' {1..107})"
@@ -500,7 +484,6 @@ gms-rt-test-suites() {
     fi
 }
 
-# List test suite results (tradefed list results) - Using HTTP API
 gms-rt-test-suites-result() {
     local suite_path=""
     local force_refresh=0
@@ -529,7 +512,6 @@ gms-rt-test-suites-result() {
     [ -z "$suite_path" ] && { error "Suite path required. Usage: gms-rt-test-suites-result <suite_path|suite_name> [--force-refresh]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
 
-    # Expand tilde to home directory
     suite_path="${suite_path/#\~/$HOME}"
 
     # Resolve short suite names (no path separator) against the suite inventory.
@@ -549,14 +531,12 @@ gms-rt-test-suites-result() {
     # Find tradefed binary (optional - API can auto-detect)
     local tradefed_bin=$(find "$suite_path" -maxdepth 1 -type f -executable -name '*-tradefed' 2>/dev/null | head -1)
 
-    # Build request data
     local data
     data=$(jq -cn --arg suite_path "$suite_path" '{suite_path: $suite_path}')
     if [ -n "$tradefed_bin" ]; then
         data=$(echo "$data" | jq --arg bin "$tradefed_bin" '. + {tradefed_bin: $bin}')
     fi
 
-    # Call HTTP API endpoint with optional force_refresh parameter
     local url="/test/suites/result"
     if [ "$force_refresh" = "1" ]; then
         url="$url?force_refresh=true"
@@ -569,7 +549,6 @@ gms-rt-test-suites-result() {
     local end_time=$(date +%s.%3N)
     local elapsed=$(echo "$end_time - $start_time" | bc)
 
-    # Check if api_call succeeded
     if [ $api_call_status -ne 0 ]; then
         return 1
     fi

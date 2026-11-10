@@ -186,7 +186,7 @@ class ApkTaskStore:
             except OSError:
                 continue
             # 会话目录（可续传）按更长的续传 TTL 判定过期，而不是永久
-            # 保留——分块上传中途断网/放弃是最常见的孤儿来源（复审 P1）。
+            # 保留——分块上传中途断网/放弃是最常见的孤儿来源。
             ttl = (
                 UPLOAD_SESSION_TTL_SECONDS if has_session
                 else ORPHAN_UPLOAD_COOLDOWN_SECONDS

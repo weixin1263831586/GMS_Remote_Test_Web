@@ -1,13 +1,11 @@
-// Shell 模块：状态轮询与初始状态检查（从 navigation.js 第二轮拆分）。
+// Shell 模块：状态轮询与初始状态检查（从 navigation.js 拆分）。
 // 依赖 api.js 的 apiCall 与 shell/logging.js 的日志函数；均为全局函数。
 
-// ==================== Status Polling ====================
 function startStatusPolling() {
     stopTestStatusPolling();
-    // 轮询状态和日志
-    let shownPyudevWarning = false;  // 标记是否已显示过 pyudev 警告
-    let pollInterval = 2000;  // 初始轮询间隔：2秒
-    const maxPollInterval = 30000;  // 最大轮询间隔：30秒
+    let shownPyudevWarning = false;
+    let pollInterval = 2000;
+    const maxPollInterval = 30000;
     let pollTimer = null;
     let pollRunning = false;
     let pollRequested = false;
@@ -116,7 +114,6 @@ function startStatusPolling() {
                 pollInterval = active ? 1000 : 3000;
                 return;
             }
-            // 检查是否有 WebSocket 连接
             const hasRealtimeConnection = state.websocket && state.websocket.readyState === WebSocket.OPEN;
 
             // WebSocket 是实时主通道：连接正常时绝不拉增量日志，否则会与 WebSocket
@@ -196,7 +193,6 @@ function startStatusPolling() {
                 updateTestToggleButton(false);
             }
 
-            // Update VPN status
             if (status.vpn_connected !== undefined) {
                 updateVpnStatus(status.vpn_connected);
             }
@@ -211,17 +207,15 @@ function startStatusPolling() {
             }
 
             // 动态调整轮询间隔：如果测试正在运行，使用快速轮询；否则退避
-            // Use exponential backoff when no changes detected
             if (currentWorkerRunning) {
-                pollInterval = 2000;  // 测试运行时：2秒
+                pollInterval = 2000;
             } else {
-                // If nothing changed since last poll, increase backoff faster
                 const stateChanged = (currentWorkerRunning !== state.testing) ||
                                      (status.vpn_connected !== undefined && status.vpn_connected !== state.vpnConnected);
                 if (stateChanged) {
-                    pollInterval = 2000;  // Reset to fast polling on state change
+                    pollInterval = 2000;
                 } else {
-                    pollInterval = Math.min(pollInterval * 1.5, maxPollInterval);  // 测试未运行时：逐渐增加到30秒
+                    pollInterval = Math.min(pollInterval * 1.5, maxPollInterval);
                 }
             }
 

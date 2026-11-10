@@ -1,6 +1,5 @@
-// act-bridge 委托目标（替代历史 inline handler）。
+// act-bridge 委托目标。
 function loadDepartmentForced(){
-  // 切换部门强制重拉（refresh=true）；刷新按钮同步进入忙碌状态。
   withRefreshButtonBusy(function() { return loadDepartment(true); });
 }
 function _actStopPropagation2(event){event.stopPropagation();}
@@ -335,7 +334,6 @@ function onPersonalProfileChange() {
   const profile = findPersonalProfile(id);
   if (profile && profile.owner) document.getElementById('owner').value = profile.owner;
   saveGerritProfileState();
-  // 切换统计身份强制绕过缓存重拉；刷新按钮同步进入忙碌状态。
   withRefreshButtonBusy(function() { return loadPersonal(true); });
 }
 function onPersonalOwnerInput() {
@@ -507,7 +505,6 @@ async function checkGerritRoute() {
       rows.push('</div></div>');
       body.innerHTML = rows.join('');
     }
-    // 同步更新顶部 banner
     if (msg) msg.textContent = (data.level === 'ok' ? '✅ ' : '⚠️ ') + (data.verdict || '');
     if (data.level === 'ok') { banner.classList.add('ok'); }
     const parts = [];

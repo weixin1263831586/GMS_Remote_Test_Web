@@ -20039,7 +20039,7 @@
     },
     "/api/redmine-agent/evidence/{snapshot_id}/search/batch": {
       "post": {
-        "description": "多关键词单遍全文搜索（#661066 复审：MCP→CLI→HTTP 逐关键词重复\n扫描同一批大日志的调用模式，改为一次服务端遍历完成全部匹配）。\n\n每个关键词独立计数与截断（``truncated``=该词命中超过 per_query_limit），\n覆盖语义与单查询端点一致：``coverage_complete=false`` 时零命中不可\n当作否定证据。",
+        "description": "多关键词单遍全文搜索：MCP→CLI→HTTP 逐关键词调用会重复扫描\n同一批大日志，批量端点一次服务端遍历完成全部匹配。\n\n每个关键词独立计数与截断（``truncated``=该词命中超过 per_query_limit），\n覆盖语义与单查询端点一致：``coverage_complete=false`` 时零命中不可\n当作否定证据。",
         "parameters": [
           {
             "in": "path",

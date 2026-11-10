@@ -44,7 +44,7 @@ def recovery_options(snapshot: dict) -> dict:
 
 # 放行集合（_PASSABLE_STATES）：判据是「Android 已启动且物理在位」，
 # 与 adbd 健康度解耦——usb_only（user 固件无 adb）、unresponsive（adbd
-# 半死）、offline 均放行回放；available/device/authorized 为常规就绪态。
+# 半死）、offline 均放行回放；available/device 为常规就绪态，unauthorized 不阻塞。
 # adb_proxy 传输另行排除；唯一拦截是幽灵条目（端口不符，循环内显式抛错）。
 _PASSABLE_STATES = {"available", "device", "usb_only", "unauthorized",
                     "unresponsive", "offline"}

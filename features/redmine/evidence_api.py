@@ -541,9 +541,8 @@ async def read_evidence_artifact_text(
         except EvidenceError:
             return _error_response(exc)
     size = path.stat().st_size
-    # 流式窗口读取：不再整文件 read_bytes()+全量解码（#661066 复审，
-    # 旧实现每个 256KiB 窗口都要分配并解码整个文件）。utf-8 失败回退
-    # gb18030（replace），与旧兜底顺序一致。
+    # 流式窗口读取：增量解码并只保留目标窗口，不把整个（可能数百 MB 的）
+    # 日志读进内存再切片。utf-8 失败回退 gb18030（replace）。
     try:
         window, total_chars = _stream_text_window(path, offset, limit, "utf-8", "strict")
     except UnicodeDecodeError:

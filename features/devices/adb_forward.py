@@ -73,20 +73,17 @@ class ADBForwardManager:
                 is_windows = 'windows' in device_host.lower()
 
                 if is_windows:
-                    # Windows ADB 转发尚未实现。
                     result = {
                         'success': True,
                         'warning': 'Windows设备主机ADB支持待完善',
                         'devices': []
                     }
                 else:
-                    # Linux设备主机
                     safe_device_host = shlex.quote(device_host)
                     start_adb_cmd = f"ssh {safe_device_host} 'adb kill-server; adb -a nodaemon server start &'"
                     self.ssh_manager.execute_command(ssh, start_adb_cmd)
                     time.sleep(2)
 
-                    # 设置SSH隧道
                     forward_target = f"localhost:{ADB_FORWARD_PORT}"
 
                     forward_cmd = (
@@ -98,14 +95,12 @@ class ADBForwardManager:
                     self.ssh_manager.execute_command(ssh, forward_cmd, timeout=10)
                     time.sleep(3)
 
-                    # 测试连接
                     adb_result = self.ssh_manager.execute_command(
                         ssh,
                         "adb devices",
                         timeout=10
                     )
 
-                    # 使用 DeviceUtils 解析设备列表
                     devices = DeviceUtils.parse_adb_devices(adb_result.stdout)
 
                     result = {
@@ -170,5 +165,4 @@ class ADBForwardManager:
             }
 
 
-# 全局ADB转发管理器实例
 adb_forward_manager = ADBForwardManager()

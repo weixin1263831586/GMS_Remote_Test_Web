@@ -453,7 +453,7 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             )
             # mock 的 resolve 句柄在 loadTestReports 真正发出请求时才赋值
             # （内部先 await GmsWorkspace.ready）；先等 mock 被调用，
-            # 否则与页面异步初始化竞争（评审后补的稳定性等待）。
+            # 否则与页面异步初始化竞争。
             page.wait_for_function("typeof window.__resolveStableReports === 'function'")
             page.evaluate(
                 """() => window.__resolveStableReports({

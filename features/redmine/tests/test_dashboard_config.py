@@ -277,7 +277,6 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                     result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
 
                     self.assertEqual(result, {"sent": True, "mode": "smtp", "error": None})
-                    # sendmail(from_addr, recipients, raw_mime)
                     _from_addr, _recipients, raw = smtp.sendmail.call_args.args
                     from email import message_from_string
                     msg = message_from_string(raw)
@@ -334,7 +333,6 @@ class RedmineDashboardConfigTests(unittest.TestCase):
 
                     self.assertFalse(result["sent"])
                     self.assertEqual(result["mode"], "unconfigured")
-                    # 没有发起任何 SMTP 登录
                     smtp_cls.return_value.__enter__.return_value.login.assert_not_called()
 
                 # 配置了专用 SMTP 授权码后应正常发送

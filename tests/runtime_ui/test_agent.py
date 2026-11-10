@@ -255,9 +255,8 @@ class RuntimeAgentTests(RuntimeUiHarness):
             page.close()
 
     def test_admin_init_does_not_prefetch_users_list_or_prompt_elevation(self):
-        # /api/users/list 需要管理员提权，且每个新标签页都会重置提权；
-        # 启动预取只会在页面加载时触发 403 和提权弹框。用户列表应由
-        # 用户管理页的 loadUsersList() 按需加载。
+        # /api/users/list 需要管理员提权；启动预取只会在页面加载时触发
+        # 403 和提权弹框。用户列表由用户管理页的 loadUsersList() 按需加载。
         page = self.new_page()
         users_requests = []
         page.on(

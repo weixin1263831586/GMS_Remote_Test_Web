@@ -289,9 +289,8 @@ async function lookupSingleIssueHistory(issueId) {
 }
 
 // 单号分析与每日晨报行共用的实机取证六态标签 / 证据门禁提示 / 系统权威
-// 元数据 / 证据质量提示已拆至 daily-brief-diagnosis.js（全局审查 P0：
-// size ratchet 反弹，诊断呈现域继续拆分回落；运行时全局函数，加载顺序
-// 与其他辅助模块一致）。
+// 元数据 / 证据质量提示已拆至 daily-brief-diagnosis.js（运行时全局
+// 函数，加载顺序与其他辅助模块一致）。
 
 function findSingleIssueAnalysis(runId) {
   return singleIssueAnalysisHistory.find(function (item) {

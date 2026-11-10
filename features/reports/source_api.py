@@ -74,8 +74,6 @@ def _redmine_credentials_error_message(request: Request) -> str:
     return _request_redmine_config_manager(request).redmine_credentials_error_message()
 
 
-# ==================== Analyze URL ====================
-
 @router.post("/api/reports/analyze-url")
 async def analyze_report_from_url(request: Request):
     """Download and analyze test report from URL (supports Redmine attachment auto-download)."""
@@ -348,7 +346,6 @@ async def analyze_report_from_url(request: Request):
 
             result["report_name"] = report_name
 
-            # Update cache
             if is_redmine and original_issue_id:
                 redmine_attach_match = COMPILED_REDMINE_ATTACHMENT_PATTERN.search(url)
                 if redmine_attach_match:
@@ -371,8 +368,6 @@ async def analyze_report_from_url(request: Request):
         return error_response("Download or analysis failed", 500)
 
 
-# ==================== Redmine Config ====================
-
 @router.get("/api/config/redmine")
 async def get_redmine_config(request: Request):
     """Get Redmine configuration."""
@@ -384,8 +379,6 @@ async def get_redmine_config(request: Request):
     except Exception:
         return error_response("Failed to get Redmine config", status_code=500)
 
-
-# ==================== Extract Redmine Attachment ====================
 
 @router.post("/api/reports/extract-redmine-attachment")
 async def extract_redmine_attachment(request: Request):

@@ -39,7 +39,7 @@ async def redmine_reply(
         files: list[UploadFile] = []
         if content_type.startswith("multipart/form-data"):
             # 在解析 multipart 之前先拒绝声明过大的请求体，防止解析阶段
-            # 先消耗内存/磁盘资源（外部评审报告项）。
+            # 先消耗内存/磁盘资源。
             declared_length = request.headers.get("content-length")
             try:
                 content_length = int(declared_length) if declared_length else 0
@@ -52,7 +52,7 @@ async def redmine_reply(
             reply_text = str(form.get("reply_text") or "").strip()
             # Starlette 的 multipart 解析器产出 starlette.datastructures.UploadFile；
             # fastapi.UploadFile 是它的子类，反向 isinstance 会把合法附件
-            # 静默过滤掉（外部评审报告项），因此必须按基类判定。
+            # 静默过滤掉，因此必须按基类判定。
             files = [item for item in form.getlist("files") if isinstance(item, UploadFile)]
         else:
             body = await request.json()
@@ -93,7 +93,7 @@ async def redmine_reply(
         total_bytes = 0
         for f in files:
             # 限额读取：比上限多读 1 字节即可判定超限，超大附件不再整体
-            # 读入内存（外部评审报告项）。
+            # 读入内存。
             content = await f.read(_MAX_REPLY_ATTACHMENT_BYTES + 1)
             if not content:
                 continue

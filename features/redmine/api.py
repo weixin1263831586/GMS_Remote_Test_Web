@@ -293,8 +293,6 @@ def _clear_user_redmine_service(owner_id: str) -> None:
             pass
 
 
-# Existing endpoints (enhanced)
-
 @router.post("/runs")
 async def create_run(
     request: Request,
@@ -537,8 +535,6 @@ async def download_issue_attachment(issue_id: int, attachment_id: int, request: 
         headers={"Content-Disposition": attachment_content_disposition(filename)},
     )
 
-
-# New endpoints
 
 @router.get("/issues")
 async def list_issues(

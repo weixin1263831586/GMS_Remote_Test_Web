@@ -6,7 +6,7 @@ set -o pipefail
 # propagated here (GMS_RT_VERSION) by tools/scripts/agent/release.py.
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.70"
+GMS_RT_VERSION="0.22.71"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -24,8 +24,6 @@ GMS_RT_EXIT_OPERATION=7
 # keeps the semantic exit code for direct callers.
 GMS_RT_EXIT_PARTIAL=7
 
-# GMS Web App Configuration Directory
-# Can be overridden by environment variable
 GMS_WEB_APP_DIR="${GMS_WEB_APP_DIR:-${HOME}/GMS_Remote_Test/web_app}"
 
 # Default configuration. Profile parsing and equivalence checks stay in the
@@ -155,22 +153,17 @@ if [ "$_gms_profile_mode" != "none" ] && [ "$_gms_profile_mode" != "local" ]; th
 fi
 
 if [ "$_gms_profile_mode" != "local" ] && [ -z "$SERVER_URL" ]; then
-    # Check if we're running on the server machine (use dynamic IP detection)
     # Try to get local IP using the same method as get_local_ip() in Python
     LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
     if [ -z "$LOCAL_IP" ]; then
-        # Fallback: try to get IP from routing table
         LOCAL_IP=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K\S+')
     fi
     if [ -z "$LOCAL_IP" ]; then
-        # Last resort: use hostname
         LOCAL_IP=$(hostname 2>/dev/null || echo "localhost")
     fi
 
-    # Store detected IP for later use
     export DETECTED_LOCAL_IP="$LOCAL_IP"
 
-    # Check if server host is in environment or use detected IP
     CONFIG_SERVER_HOST=""
     for config_file in "${GMS_WEB_APP_DIR}/configs/config.json" "${HOME}/GMS_Remote_Test/web_app/configs/config.json"; do
         if [ -f "$config_file" ]; then
@@ -195,17 +188,14 @@ if [ "$_gms_profile_mode" != "local" ] && [ -z "$SERVER_URL" ]; then
 fi
 API_BASE="${SERVER_URL}/api"
 
-# Default SSH user - use environment variable or current system user
 DEFAULT_SSH_USER="${UBUNTU_USER:-$(whoami)}"
 
-# Colors for output
 RED=$(printf '\033[0;31m')
 GREEN=$(printf '\033[0;32m')
 YELLOW=$(printf '\033[1;33m')
 BLUE=$(printf '\033[0;34m')
 NC=$(printf '\033[0m')
 
-# Network timeout constants
 PING_TIMEOUT=2
 CURL_TIMEOUT="${GMS_CURL_TIMEOUT:-30}"  # 30 seconds for slow API endpoints (e.g., test results)
 CURL_BURN_TIMEOUT="${GMS_CURL_BURN_TIMEOUT:-1800}"  # firmware transfer + burn can take much longer
@@ -213,7 +203,6 @@ CURL_EXIT_CANNOT_CONNECT=7
 CURL_EXIT_OPERATION_TIMEOUT=28
 CURL_EXIT_SSL_CERT=60
 
-# Authentication
 # The current backend authenticates API clients with the gms_session cookie.
 # Keep the cookie outside the repository and allow callers to override its path.
 # Multiple agents running under the same Unix user used to share one
@@ -445,7 +434,6 @@ if [ "$GMS_RT_OUTPUT" = "json" ] || [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then
     NC=""
 fi
 
-# Print functions
 error() {
     GMS_RT_ERROR_SEEN=1
     printf '%sError:%s %s\n' "$RED" "$NC" "$1" >&2
@@ -563,11 +551,10 @@ _gms_curl_authenticated_readonly() {
 
 _server_host_from_url() {
     # Extract host from URL: strip scheme, then path, then port — single pass
-    local url="${1#*://}"  # strip scheme
-    echo "${url%%[:/]*}"    # strip first : or / and everything after
+    local url="${1#*://}"
+    echo "${url%%[:/]*}"
 }
 
-# Show connection error message to stderr
 show_connection_error() {
     local server_host
     server_host=$(_server_host_from_url "$SERVER_URL")
@@ -579,7 +566,6 @@ show_connection_error() {
     error "  4. 服务器日志 (tail -f $GMS_WEB_APP_DIR/fastapi.log)"
 }
 
-# Make an authenticated API call.
 # Usage: api_call <endpoint> [method] [data] [curl_arg ...]
 # The response body is always written to stdout. HTTP and transport failures
 # use stable CLI exit codes and never rely on response text matching alone.
@@ -695,7 +681,6 @@ api_call() {
                     elif [ -n "$_scope_required" ]; then
                         diagnostic "当前 token 缺少 scope '$_scope_required'。scope 目录: GET /api/auth/agent-scopes；请在 Web UI 重新注册并勾选该 scope。"
                     elif [ -n "$_elevation_required" ] && [ "$_elevation_required" != "false" ]; then
-                        # 明确的两步指引：先 step-up 提权（管理员密码），再重跑原命令。
                         diagnostic "需要管理员提权（step-up）：先运行 gms-rt-auth-elevate [用户名] 并输入管理员密码，提权成功后重新运行原命令。"
                     else
                         diagnostic "权限不足。若该操作需要管理员提权，请运行: gms-rt-auth-elevate [用户名]；否则确认当前账号角色/scope 是否覆盖该操作。"
@@ -723,8 +708,6 @@ source "$_gms_runtime_dir/cli/debug.sh" || { echo "Error: incomplete Agent CLI r
 source "$_gms_runtime_dir/cli/system.sh" || { echo "Error: incomplete Agent CLI runtime" >&2; return 7 2>/dev/null || exit 7; }
 source "$_gms_runtime_dir/cli/dispatch.sh" || { echo "Error: incomplete Agent CLI runtime" >&2; return 7 2>/dev/null || exit 7; }
 
-# Main command dispatcher
-# Only execute when run directly, not when sourced
 _is_sourced() {
     if [ -n "$BASH_SOURCE" ]; then
         [[ "${BASH_SOURCE[0]}" != "$0" ]]

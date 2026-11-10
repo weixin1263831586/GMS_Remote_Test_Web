@@ -2,7 +2,7 @@
 // Redmine配置缓存（减少重复API调用）
 let cachedRedmineConfig = null;
 let redmineConfigFetchTime = 0;
-const REDMINE_CONFIG_CACHE_TTL = 300000; // 5分钟缓存
+const REDMINE_CONFIG_CACHE_TTL = 300000;
 
 const OPENGROK_CONFIG = {
     _loaded: false,
@@ -15,12 +15,10 @@ const OPENGROK_CONFIG = {
     },
 
     getProjectForAndroidVersion(androidVersion) {
-        // 根据Android版本获取对应的项目（使用预编译的正则表达式）
         if (!androidVersion || !this._projectMapping) {
             return this._defaultProject;
         }
 
-        // 提取主版本号（复用现有逻辑）
         const versionMatch = androidVersion.match(/^(\d+)/);
         if (versionMatch && versionMatch[1] && this._projectMapping[versionMatch[1]]) {
             return this._projectMapping[versionMatch[1]];
@@ -61,12 +59,12 @@ let apiDocsCacheTime = 0;
 let allApiDocs = []; // 所有API文档数据（已排序）
 let currentCategoryFilter = 'all';
 let currentMethodFilter = 'all';
-const API_DOCS_CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存（生产环境）
+const API_DOCS_CACHE_DURATION = 5 * 60 * 1000;
 const FIRMWARE_UPLOAD_TIMEOUT = 24 * 60 * 60 * 1000; // 服务端分片保留24小时
 
 let activeUsbipSelection = null;
 let usbipSourceLoadPromise = null;
-// 最近一次设备主机密码弹框关联的主机（auth-elevation.js / firmware-burn.js /
+// 最近一次设备主机密码弹框关联的主机（websocket-manager.js /
 // vpn-control.js 共享的状态，未配置时为空字符串）。
 let pendingUsbipDeviceHost = '';
 const usbipSourceDeviceCache = new Map();
@@ -80,7 +78,6 @@ let usbipManualDisconnectUntil = 0;
 let usbipReconnectWaiting = false;
 let usbipOperationGeneration = 0;
 let adbProxyStatus = null;
-// adbProxyOperationRunning 已迁移到 state.js（先于本文件加载）声明。
 let adbProxyDeviceRefreshTimer = null;
 let adbProxyDeviceRefreshRunning = false;
 let usbipSourceRefreshTimer = null;
@@ -132,11 +129,10 @@ const BADGE_PADDINGS = { xs: '1px 4px', sm: '2px 6px', md: '3px 8px', lg: '4px 1
 // APK 分析任务状态轮询间隔（毫秒）
 const STATUS_POLL_INTERVAL = 5000;
 // 报告列表刷新间隔（毫秒）
-const REPORTS_REFRESH_INTERVAL = 15000; // 15 秒
+const REPORTS_REFRESH_INTERVAL = 15000;
 let wakeTestStatusPolling = () => {};
 let stopTestStatusPolling = () => {};
 
-// 辅助函数
 function validateDeviceSelection() {
     if (state.selectedDevices.size === 0) {
         showToast('请先选择设备', 'warning');
@@ -242,16 +238,13 @@ function syncLocalUsbActionButtons() {
     });
 }
 
-// 获取Redmine配置（带缓存）
 async function getRedmineConfig() {
     const now = Date.now();
 
-    // 返回缓存配置（如果仍在有效期内）
     if (cachedRedmineConfig && (now - redmineConfigFetchTime) < REDMINE_CONFIG_CACHE_TTL) {
         return cachedRedmineConfig;
     }
 
-    // 获取新配置
     const configResponse = await fetch('/api/config/redmine');
     const configResult = await configResponse.json();
 
@@ -259,14 +252,12 @@ async function getRedmineConfig() {
         throw new Error(configResult.error || 'Redmine 未配置或配置不完整');
     }
 
-    // 更新缓存
     cachedRedmineConfig = configResult.data;
     redmineConfigFetchTime = now;
 
     return cachedRedmineConfig;
 }
 
-// OpenGrok URL builder utility
 function buildOpenGrokUrl(path, line = null) {
     if (!OPENGROK_CONFIG.isValid) return '';
 
@@ -274,7 +265,6 @@ function buildOpenGrokUrl(path, line = null) {
     return line ? `${url}#${line}` : url;
 }
 
-// 设备操作管理器
 const DeviceOperation = {
     async execute(endpoint, operationName, data = {}, modalCloseFn = null) {
         if (!validateDeviceSelection()) return;
@@ -409,7 +399,6 @@ async function continueAppInitialization() {
     initDragDrop();
     renderNotificationList();
 
-    // 非阻塞加载OpenGrok配置（不等待，让它在后台加载）
     OPENGROK_CONFIG.init();
 
     const clusterModeReady = initializeClusterMode();
@@ -439,7 +428,7 @@ async function continueAppInitialization() {
                         Promise.all(statusChecks).catch(error => {
                             debugLog('[Init] Background status check failed:', error);
                         });
-                    }, 3000);  // 3秒后再检查
+                    }, 3000);
                 }
             }
         } else {
@@ -467,10 +456,8 @@ async function continueAppInitialization() {
     startStatusPolling();
     scheduleDeferredPagePreload(initialPage);
 
-    // 检查是否有未完成的固件上传
     checkPendingFirmwareUpload();
 
-    // 检查URL参数，如果refresh=true则强制刷新API文档
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('refresh') === 'true') {
         debugLog('[Init] Force refresh API docs due to URL parameter');
@@ -479,7 +466,7 @@ async function continueAppInitialization() {
         }
     }
 
-    // 用户列表仅在用户管理页按需加载（shell.html loadUsersList）；
+    // 用户列表仅在用户管理页按需加载（shell-user-management.js loadUsersList）；
     // /api/users/list 需要管理员提权，启动时后台预取只会在每个新
     // 标签页触发一次 403 和提权弹框，因此不做启动预取。
 }
@@ -497,9 +484,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ==================== Firmware Upload Recovery ====================
-/**
- * 检查是否有未完成的固件上传
- */
 function checkPendingFirmwareUpload() {
     const uploadInProgress = sessionStorage.getItem('firmwareUploadInProgress');
     if (uploadInProgress === 'true') {
@@ -543,13 +527,12 @@ function checkPendingFirmwareUpload() {
 
             if (progressFill && progressInfo) {
                 progressFill.style.width = progress + '%';
-                progressFill.style.background = 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)'; // 黄色
+                progressFill.style.background = 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)';
                 progressInfo.textContent = `⚠️ ${fileName} 上传中断于 ${progress.toFixed(1)}%`;
 
-                // 10秒后重置进度条
                 setTimeout(() => {
                     progressFill.style.width = '0%';
-                    progressFill.style.background = ''; // 恢复默认颜色
+                    progressFill.style.background = '';
                     progressInfo.textContent = '';
                 }, 10000);
             }
@@ -590,14 +573,12 @@ function getDefaultSuitesPath() {
 // WebSocket lifecycle lives in shell/websocket-manager.js.
 // ==================== Event Listeners ====================
 function initEventListeners() {
-    // Test type change
     $('test-type').addEventListener('change', onTestTypeChange);
     $('test-suite')?.addEventListener('change', event => {
         const suitePath = String(event.target.value || '');
         window.GmsWorkspace?.update({suite_path: suitePath, suite_key: suitePath}, {source: 'test'});
     });
 
-    // Test module/case input - 使用防抖优化
     const debouncedInputChange = debounce(onInputChange, 300);
     $('test-module').addEventListener('input', debouncedInputChange);
     $('test-case').addEventListener('input', debouncedInputChange);
@@ -609,7 +590,6 @@ function initEventListeners() {
         if (e.key === 'Enter') onLocalServerConfirm();
     });
 
-    // Initialize report analysis drag and drop
     initReportAnalysis();
 }
 
@@ -637,11 +617,9 @@ function escapeJsAttr(str) {
  */
 function enforceFieldExclusion(mode) {
     if (mode === 'module_case') {
-        // 填入模块/用例时，清空测试报告
         const retryInput = $('retry-result');
         if (retryInput) retryInput.value = '';
     } else if (mode === 'retry') {
-        // 填入测试报告时，清空模块和用例
         const moduleInput = $('test-module');
         const caseInput = $('test-case');
         if (moduleInput) moduleInput.value = '';
@@ -655,11 +633,9 @@ function onInputChange() {
     const testCase = $('test-case').value.trim();
     const retryResult = $('retry-result').value.trim();
 
-    // If typing in retry-result, clear module and case
     if (document.activeElement.id === 'retry-result' && retryResult) {
         enforceFieldExclusion('retry');
     }
-    // If typing in module or case, clear retry-result
     else if ((document.activeElement.id === 'test-module' || document.activeElement.id === 'test-case') && (testModule || testCase)) {
         enforceFieldExclusion('module_case');
     }
@@ -669,7 +645,6 @@ function onTestTypeChange() {
     const testType = $('test-type').value;
     addLogEntry(`测试类型已更改为: ${testType}`, 'info');
 
-    // 清空测试报告输入框
     const retryResultInput = $('retry-result');
     if (retryResultInput) {
         retryResultInput.value = '';
@@ -679,7 +654,6 @@ function onTestTypeChange() {
     renderTestSuitesDropdown();
 }
 
-// 自动选择测试套件的函数
 // Whether the currently selected suite still exists in the fresh list.
 // A refresh must not override the user's manual version pick — but an
 // explicit test-TYPE change must still re-select (the old suite belongs to
@@ -698,10 +672,8 @@ function currentTestSuiteStillValid(selectedPath, testType) {
 }
 
 function autoSelectTestSuite(testType) {
-    // A refresh re-render must not override the user's manual suite
-    // version.  If the currently selected suite still exists and matches the
-    // requested test type, keep it; auto-select the latest only on first
-    // entry or when the user explicitly changed the test type.
+    // 手动选择保持不变；首次进入或类型变更才自动选最新
+    // （有效性判定见 currentTestSuiteStillValid）。
     const selectElement = document.getElementById('test-suite');
     const currentSelection = selectElement?.value || '';
     if (currentTestSuiteStillValid(currentSelection, testType)) {
@@ -713,13 +685,11 @@ function autoSelectTestSuite(testType) {
     const testTypeLower = testType.toLowerCase();
 
     if (testTypeLower === 'gsi') {
-        // GSI使用CTS套件
         matchingSuites = testSuitesCache.filter(suite =>
             suite.test_type.toLowerCase() === 'cts'
         );
         addLogEntry('GSI使用CTS测试套件', 'info');
     } else if (testTypeLower === 'gts-root') {
-        // GTS-ROOT使用GTS套件
         matchingSuites = testSuitesCache.filter(suite =>
             suite.test_type.toLowerCase() === 'gts'
         );
@@ -800,7 +770,6 @@ function autoSelectTestSuite(testType) {
             return versionB.revision - versionA.revision; // 降序排列
         });
 
-        // 选择版本号最大的
         const latestSuite = matchingSuites[0];
         $('test-suite').value = latestSuite.tools_path;
 
@@ -811,7 +780,6 @@ function autoSelectTestSuite(testType) {
         });
     } else {
         addLogEntry(`未找到 ${testType} 类型的测试套件`, 'warning');
-        // 清空测试套件选择
         document.getElementById('test-suite').value = '';
     }
 }
@@ -836,12 +804,10 @@ function initDragDrop() {
     const dropZoneText = document.getElementById('drop-zone-text');
     const dropZoneFilename = document.getElementById('drop-zone-filename');
 
-    // Click to select file
     dropZone.addEventListener('click', () => {
         fileInput.click();
     });
 
-    // File input change handler
     fileInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (file) {
@@ -852,21 +818,18 @@ function initDragDrop() {
         }
     });
 
-    // Drag over
     dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
         e.stopPropagation();
         dropZone.classList.add('drag-over');
     });
 
-    // Drag leave
     dropZone.addEventListener('dragleave', (e) => {
         e.preventDefault();
         e.stopPropagation();
         dropZone.classList.remove('drag-over');
     });
 
-    // Drop
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -874,12 +837,10 @@ function initDragDrop() {
 
         const files = e.dataTransfer.files;
         if (files.length > 0) {
-            // Set file to input
             const dataTransfer = new DataTransfer();
             dataTransfer.items.add(files[0]);
             fileInput.files = dataTransfer.files;
 
-            // Update UI
             dropZoneText.style.display = 'none';
             dropZoneFilename.textContent = `📄 ${files[0].name}`;
             dropZoneFilename.style.display = 'block';

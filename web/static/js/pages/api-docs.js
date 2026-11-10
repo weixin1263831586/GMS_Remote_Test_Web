@@ -1,8 +1,4 @@
-// ==================== Tailscale 内网地址 ====================
 
-/**
- * 复制部署脚本命令
- */
 function copyDeployCommand() {
     // 发布包由 install.sh package 生成并签名。用通配符匹配最新的包，避免用户
     // 手填 <VERSION>（bash 会把尖括号当成重定向报错，且版本号默认是时间戳）。
@@ -35,7 +31,6 @@ function copyDeployCommand() {
         document.body.removeChild(textArea);
     });
 }
-
 /**
  * 显示 Tailscale 信息弹框，自动检测并启动 Tailscale
  * 缓存结果 5 分钟，避免每次打开弹框都调用 API
@@ -91,28 +86,24 @@ function copyTailscaleAccessUrl() {
 // 跳转到测试界面，自动填入测试类型、测试模块、测试用例，并匹配测试套件
 function goToTestCase(testType, moduleName, testCaseName) {
     try {
-        // 切换到测试界面
         switchPage('test');
 
         // 等待页面切换完成后填充数据
         setTimeout(() => {
             debugLog(`[goToTestCase] 填充数据: testType=${testType}, module=${moduleName}, testCase=${testCaseName}`);
 
-            // 设置测试类型
             const testTypeSelect = document.getElementById('test-type');
             if (testTypeSelect && testType) {
                 testTypeSelect.value = testType;
                 debugLog(`[goToTestCase] 已设置测试类型: ${testType}`);
             }
 
-            // 填入测试模块
             const testModuleInput = document.getElementById('test-module');
             if (testModuleInput && moduleName && moduleName !== '未知模块') {
                 testModuleInput.value = moduleName;
                 debugLog(`[goToTestCase] 已设置测试模块: ${moduleName}`);
             }
 
-            // 填入测试用例
             const testCaseInput = document.getElementById('test-case');
             if (testCaseInput && testCaseName && testCaseName !== '未知用例') {
                 testCaseInput.value = testCaseName;
@@ -122,7 +113,6 @@ function goToTestCase(testType, moduleName, testCaseName) {
             // 互斥：填入模块/用例时清空测试报告
             enforceFieldExclusion('module_case');
 
-            // 根据测试类型自动选择测试套件
             if (testType && typeof autoSelectTestSuite === 'function') {
                 autoSelectTestSuite(testType);
                 debugLog(`[goToTestCase] 已自动匹配测试套件: ${testType}`);
@@ -136,7 +126,6 @@ function goToTestCase(testType, moduleName, testCaseName) {
     }
 }
 
-// Redmine 回复对话框
 function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFromReport) {
     const modalId = 'redmine-reply-modal-' + Date.now();
     const issueInputId = `${modalId}-issue-id`;
@@ -152,7 +141,6 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
     const failureReasonElement = document.getElementById(`failure-reason-raw-${failureIndex}`);
     const failureReason = failureReasonElement ? failureReasonElement.textContent.trim() : '';
 
-    // 生成默认回复模板
     const defaultReply = '**测试模块**: ' + moduleName + '\n\n' +
         '**测试用例**: ' + testCaseName + '\n\n' +
         '**报错信息**:\n' +
@@ -213,7 +201,6 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
     }
     ModalManager.open(modalId);
 
-    // 绑定拖拽事件
     const dropZone = document.getElementById(`${fileInputId}-drop`);
     if (dropZone) {
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); dropZone.classList.add('drag-over'); });
@@ -260,7 +247,6 @@ function removeRedmineFile(fileInputId, fileListId, index) {
     updateRedmineFileList(fileInputId, fileListId);
 }
 
-// 确认并发送 Redmine 回复
 async function confirmAndSendRedmineReply(modalId) {
     const modal = document.getElementById(modalId);
     const issueId = modal?.querySelector('[data-redmine-issue-input]')?.value?.trim();
@@ -285,7 +271,6 @@ async function confirmAndSendRedmineReply(modalId) {
     const attachHint = hasFiles ? `（含 ${files.length} 个附件）` : '';
     showToast('📤 正在发送回复' + attachHint + '...', 'info');
 
-    // 构建 FormData
     const formData = new FormData();
     formData.append('issue_id', issueId);
     formData.append('reply_text', replyText);
@@ -295,7 +280,6 @@ async function confirmAndSendRedmineReply(modalId) {
         }
     }
 
-    // 异步发送请求，不阻塞 UI
     fetch('/api/redmine/reply', {
         method: 'POST',
         body: formData
@@ -345,7 +329,6 @@ function resetReportAnalysis() {
     if (failuresDiv) failuresDiv.style.display = 'none';
     if (failureList) failureList.innerHTML = '';
 
-    // Reset upload zone to empty state
     if (uploadZone) {
         uploadZone.classList.add('upload-empty');
         const content = uploadZone.querySelector('.report-upload-content');
@@ -444,9 +427,6 @@ async function sendReportAnalysisEmail() {
     }
 }
 
-/**
- * 按分类筛选
- */
 function filterByCategory(category) {
     currentCategoryFilter = category;
 
@@ -479,17 +459,13 @@ function applyFilters() {
     const searchInput = $('api-search-input');
     const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
 
-    // 筛选API
     const filteredApis = allApiDocs.filter(api => {
-        // 搜索关键词匹配
         const matchesSearch = !searchTerm ||
             (api.path && api.path.toLowerCase().includes(searchTerm)) ||
             (api.description && api.description.toLowerCase().includes(searchTerm));
 
-        // 分类匹配
         const matchesCategory = currentCategoryFilter === 'all' || api.category === currentCategoryFilter;
 
-        // 方法匹配
         const matchesMethod = currentMethodFilter === 'all' || api.method === currentMethodFilter;
 
         return matchesSearch && matchesCategory && matchesMethod;
@@ -498,7 +474,6 @@ function applyFilters() {
     // 筛选结果保持原有顺序（allApiDocs已排序），无需重新排序
     displayApiDocs(filteredApis);
 
-    // 更新筛选结果数量
     const filteredCountEl = $('filtered-apis-count');
     if (filteredCountEl) {
         filteredCountEl.textContent = filteredApis.length;
@@ -522,12 +497,10 @@ async function loadApiDocs(forceRefresh = false, signal = window.GmsDocumentAbor
     const hadRenderedDocs = Boolean(apiDocsCache && tbody?.children.length);
     if (tbody) tbody.setAttribute('aria-busy', 'true');
     try {
-        // 检查DOM元素是否存在
         if (!tbody) {
             return;
         }
 
-        // 检查缓存（除非强制刷新）
         const now = Date.now();
         if (!forceRefresh && apiDocsCache && (now - apiDocsCacheTime) < API_DOCS_CACHE_DURATION) {
             displayApiDocs(apiDocsCache);
@@ -546,16 +519,13 @@ async function loadApiDocs(forceRefresh = false, signal = window.GmsDocumentAbor
         if (data.apis && Array.isArray(data.apis)) {
             const filteredApis = data.apis.filter(api => api.path !== '/');
 
-            // 为每个API添加分类信息
             const apisWithCategory = filteredApis.map(api => ({
                 ...api,
                 category: api.category || getApiCategory(api.path || '')
             }));
 
-            // 按分类排序
             const sortedApis = sortApisByCategory(apisWithCategory);
 
-            // 更新缓存
             apiDocsCache = sortedApis;
             allApiDocs = sortedApis;
             apiDocsCacheTime = now;
@@ -569,7 +539,6 @@ async function loadApiDocs(forceRefresh = false, signal = window.GmsDocumentAbor
         if (isApiRequestCancelled(e, signal)) throw e;
         showToast('加载API文档失败: ' + e.message, 'error');
 
-        // 显示错误状态
         if (tbody && !hadRenderedDocs) {
             tbody.innerHTML = `
                 <tr>
@@ -584,15 +553,11 @@ async function loadApiDocs(forceRefresh = false, signal = window.GmsDocumentAbor
     }
 }
 
-/**
- * 更新API统计数据
- */
 function updateApiStats(apis) {
     const totalCount = apis.length;
     const getCount = apis.filter(api => api.method === 'GET').length;
     const postCount = apis.filter(api => api.method === 'POST').length;
 
-    // 统计唯一的技能数量
     const uniqueSkills = new Set();
     apis.forEach(api => {
         if (api.skill && api.skill.trim()) {
@@ -614,10 +579,6 @@ function updateApiStats(apis) {
     if (skillsCountEl) skillsCountEl.textContent = skillsCount;
 }
 
-// API 文档常量。
-/**
- * Badge HTML generation utility
- */
 function createBadge(text, colorVar, size = 'xs') {
     return `<span style="background: var(--${colorVar}); color: white; padding: ${BADGE_PADDINGS[size]}; border-radius: 3px; font-size: ${BADGE_SIZES[size]};">${escapeHtml(text)}</span>`;
 }
@@ -627,26 +588,20 @@ function createBadge(text, colorVar, size = 'xs') {
  */
 function formatJsonResponse(response) {
     try {
-        // Try to parse as JSON
         const parsed = JSON.parse(response);
-        // Format with 2-space indentation
         return JSON.stringify(parsed, null, 2);
     } catch (e) {
-        // If not valid JSON, return as-is
         return response;
     }
 }
 
-/**
- * Normalize API path to handle path parameters
- */
 function normalizeApiPath(apiPath) {
     const matched = PATH_PATTERNS.find(p => p.pattern.test(apiPath));
     return matched ? matched.template : apiPath;
 }
 
 /**
- * OpenAPI fields own the detail view; static metadata enriches legacy entries.
+ * OpenAPI fields own the detail view; static metadata (API_DETAILS_MAP) fills gaps such as usage.
  */
 function getApiDetails(api, method = 'GET') {
     if (typeof api === 'string') {
@@ -765,14 +720,10 @@ function generateParamsHtml(details) {
     return parts.join('');
 }
 
-/**
- * Display API documentation list with collapsible details
- */
 function displayApiDocs(apis) {
     const tbody = document.getElementById('api-docs-table-body');
     if (!tbody) return;
 
-    // 批量拼接 HTML。
     const htmlParts = [];
     apis.forEach((api, index) => {
         const methodClass = api.method === 'GET' ? 'color: var(--success-color);' :
@@ -782,7 +733,6 @@ function displayApiDocs(apis) {
 
         const categoryBadge = getCategoryName(api.category);
 
-        // 获取API详细信息
         const details = getApiDetails(api);
         const curlCmdObj = generateCurlCommand(api, details);
         const paramsHtml = generateParamsHtml(details);
@@ -877,21 +827,16 @@ ${details.content_type ? 'Content-Type: ' + escapeHtml(details.content_type) : '
     tbody.innerHTML = htmlParts.join('');
 }
 
-/**
- * Toggle API details visibility
- */
 window.toggleApiDetails = function(index) {
     const detailsDiv = document.getElementById(`api-details-${index}`);
     const iconSpan = document.getElementById(`expand-icon-${index}`);
     const button = document.getElementById(`expand-btn-${index}`);
 
     if (detailsDiv.style.display === 'none') {
-        // Expand
         detailsDiv.style.display = 'block';
         iconSpan.textContent = '▼';
         button.style.background = 'var(--warning-color)';
     } else {
-        // Collapse
         detailsDiv.style.display = 'none';
         iconSpan.textContent = '▶';
         button.style.background = 'var(--primary-color)';
@@ -924,15 +869,12 @@ window.copyCurlCommandFromData = function(element) {
                                 (text.match(/http:\/\/[^\/]+:\d+\/"$/) !== null);
 
     if (isWebSocketEndpoint) {
-        // WebSocket端点，不添加jq
         commandToCopy = text;
         successMessage = '✓ WebSocket命令已复制';
     } else if (isPlainTextEndpoint) {
-        // 纯文本端点，不添加jq
         commandToCopy = text;
         successMessage = '✓ curl命令已复制';
     } else {
-        // 其他JSON端点，使用 jq "."
         commandToCopy = text + ' | jq "."';
         successMessage = '✓ curl命令已复制 (含jq格式化)';
     }
@@ -940,17 +882,11 @@ window.copyCurlCommandFromData = function(element) {
     copyText(commandToCopy, { successMsg: successMessage });
 };
 
-/**
- * 显示使用实例弹窗
- */
 function showUsageExamples() {
     ModalManager.open('usage-examples-modal');
 }
 
 
-/**
- * 关闭使用实例弹窗
- */
 function closeUsageExamplesModal() {
     ModalManager.close('usage-examples-modal');
 }
@@ -1095,7 +1031,7 @@ window.copySkillCommand = function(element) {
     });
 };
 
-// act-bridge 委托目标（替代历史 inline handler）。
+// act-bridge 委托目标。
 window.updateRedmineFileList = updateRedmineFileList;
 window.removeRedmineFile = removeRedmineFile;
 window.confirmAndSendRedmineReply = confirmAndSendRedmineReply;

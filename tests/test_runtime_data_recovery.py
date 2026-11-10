@@ -25,12 +25,14 @@ class RuntimeDataRecoveryTests(unittest.TestCase):
             browse_root = Path(runtime_parent) / "GMS-Suite"
             browse_root.mkdir()
             (browse_root / "system.img").write_bytes(b"image")
-            # Isolate the static host config (review: test contamination).
-            # Without this, /api/files/list reads the checked-in
-            # configs/local/deployment.json ubuntu_host; on a CI runner that
+            # Isolate the static host config (keep tests independent of
+            # deployment state). Without this, /api/files/list reads the
+            # deployment partition's ubuntu_host (configs/local/deployment.json
+            # — a runtime-local, gitignored file); on a CI runner that
             # address is NOT this machine, so the endpoint SSHes to a remote
-            # host and returns 502. The runtime "devices" overlay
-            # (data_root/devices/runtime.json) is applied last, so pinning
+            # host and returns 502. The "devices" overlay
+            # (data_root/devices/runtime.json) is applied after the deployment
+            # partition (later partitions never carry ubuntu_host), so pinning
             # ubuntu_host=127.0.0.1 here forces the local-filesystem branch.
             override = {"ubuntu_host": "127.0.0.1"}
 

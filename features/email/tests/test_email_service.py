@@ -209,10 +209,8 @@ class SendEmailTests(unittest.TestCase):
         self.assertEqual(result["mode"], "smtp")
         self.assertEqual(result["to"], ["a@x.com", "b@x.com"])
         self.assertEqual(result["cc"], ["b@x.com", "c@x.com"])
-        # recipients 去重后 a/b/c 三个
         _from, recipients, _raw = smtp.sendmail.call_args.args
         self.assertEqual(set(recipients), {"a@x.com", "b@x.com", "c@x.com"})
-        # 登录用授权码
         smtp.login.assert_called_once_with("me@rock-chips.com", "smtp-auth-code")
 
     @patch("features.email.transport.smtplib.SMTP_SSL")
@@ -223,7 +221,6 @@ class SendEmailTests(unittest.TestCase):
         _from, _recipients, raw = smtp.sendmail.call_args.args
         msg = message_from_string(raw)
         self.assertTrue(msg.is_multipart())
-        # 子部分应为 text/html
         subtypes = [part.get_content_type() for part in msg.walk() if part is not msg]
         self.assertIn("text/html", subtypes)
 
@@ -253,7 +250,6 @@ class SendEmailTests(unittest.TestCase):
                 manager=_fake_manager(QIYE_CFG),
             )
             self.assertTrue(result["sent"])
-            # 存在的附件被附上，缺失的记录在 attachments_missing
             _from, _recipients, raw = smtp.sendmail.call_args.args
             msg = message_from_string(raw)
             attachments = [

@@ -62,7 +62,5 @@ _LXML_PARSER = (
     else None
 )
 
-
-
 if USE_LXML:
     ET = None

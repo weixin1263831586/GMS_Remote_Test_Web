@@ -23,13 +23,13 @@ from features.assistant.tools import AgentTool, registry
 @dataclass
 class ResolvedIntent:
     """意图路由结果。"""
-    tool_name: str                      # 匹配的工具名
-    tool: AgentTool | None           # 工具对象
+    tool_name: str
+    tool: AgentTool | None
     confidence: float                   # 0.0 - 1.0
-    params: dict[str, Any]              # 提取的参数
-    needs_confirm: bool                 # 是否需要用户确认
-    is_run_test: bool                   # 是否是测试启动请求
-    context_entities: dict[str, Any]    # 上下文解析出的实体
+    params: dict[str, Any]
+    needs_confirm: bool
+    is_run_test: bool
+    context_entities: dict[str, Any]
     stage: str                          # 匹配阶段: exact/context/keyword/regex/fallback
 
     @staticmethod
@@ -70,7 +70,6 @@ _EXACT_COMMANDS: list[tuple] = [
     (r"^(构建任务|编译任务|Build\s*Jobs?)$", "build_jobs", {}),
 ]
 
-# Navigation aliases
 _NAV_ALIASES: dict[str, str] = {
     "测试界面": "test", "跑测试": "test", "测试日志": "test",
     "主机桌面": "desktop", "桌面": "desktop", "vnc": "desktop",

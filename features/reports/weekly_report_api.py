@@ -512,7 +512,6 @@ async def _collect_redmine(request: Request, start: date, end: date, name: str =
 
     lists = data.get("lists") or {}
     owner_names = (data.get("meta") or {}).get("owner_names") or ([name] if name else [])
-    # 按所有者和关闭时间查询周报所需摘要。
     resolved_list = _resolved_issues_summary(request, owner_names, start, end, limit=30)
 
     return {

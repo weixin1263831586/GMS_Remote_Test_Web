@@ -1,6 +1,6 @@
 """Crash-recovery关联表：持久化对话 Agent 会话的最小恢复锚点。
 
-外部深度评审报告项：会话状态此前只存在于进程内存，Controller 重启后
+会话状态不能只存在于进程内存：Controller 重启后
 ``session_id`` 与 ``cluster_job_id`` / ``attempt_id`` / 执行阶段的关联
 丢失，监控无法恢复。这里只持久化恢复锚点（会话元数据 + 活跃运行关联），
 不持久化消息正文、asyncio.Task 或凭据；完整 UI 状态仍是可丢弃的。
@@ -112,7 +112,7 @@ def _store_file_lock(target: Path):
     """Cross-process advisory lock for the anchor store.
 
     ``_LOCK`` 只保证单进程内互斥；多 Uvicorn Worker 进程并发执行
-    「读入 → 更新 → 替换」时会发生后写覆盖先写（外部评审报告项）。
+    「读入 → 更新 → 替换」时会发生后写覆盖先写。
     与 ``foundation/security_audit.py`` 同款 ``fcntl.flock`` 侧车锁，
     使读改写序列在部署内的多个进程之间串行化。文件锁本身不保护
     ``load_anchors()`` 的纯读路径——``os.replace`` 原子替换保证读者
@@ -168,7 +168,7 @@ def _write_store_unlocked(target: Path, anchors: dict[str, dict[str, Any]]) -> N
     )
     tmp_path = target.with_suffix(".json.tmp")
     # 锚点虽不含明文凭据（字段白名单剥离 plan），但含 owner/client/Job
-    # 关联，按受限权限创建（外部评审报告项）。
+    # 关联，按受限权限创建。
     file_descriptor = os.open(
         tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600
     )

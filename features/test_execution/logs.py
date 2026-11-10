@@ -299,5 +299,4 @@ class TestLogsManager:
             }
 
 
-# 全局实例
 test_logs_manager = TestLogsManager()

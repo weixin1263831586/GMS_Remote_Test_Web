@@ -361,7 +361,7 @@ class RunLifecycleTests(unittest.TestCase):
         self.assertNotEqual(issue.status, "completed")
 
     def test_owner_revalidation_failure_fails_issue_instead_of_completed(self):
-        # 全局审查 P0：revalidate_issue_pending_for_owner 抛异常（Redmine
+        # revalidate_issue_pending_for_owner 抛异常（Redmine
         # live refresh 失败）时，成功的 AI 结论绝不允许标 completed——
         # 刷新失败必须显式 owner_revalidation_failed → failed。
         started = self.service.start_run("nightly")

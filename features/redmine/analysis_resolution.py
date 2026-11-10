@@ -12,7 +12,6 @@ from features.redmine.utils import to_iso8601
 
 logger = logging.getLogger(__name__)
 
-# Enhanced error patterns for structured extraction
 _ERROR_LINE_PATTERNS = [
     # Stack traces
     r"at\s+[\w.$]+\([^)]*\.\w+:\d+\)",
@@ -40,13 +39,13 @@ _ERROR_LINE_PATTERNS = [
 _ERROR_LINE_RE = re.compile("|".join(_ERROR_LINE_PATTERNS), re.IGNORECASE)
 
 AI_MODEL_TIMEOUT = 120          # seconds for AI model HTTP request
-AI_MODEL_MAX_TOKENS = 2400      # max tokens for AI model response
-MAX_FAILURE_LINES = 30          # max error lines to extract
-MAX_ERROR_BLOCKS = 5            # max grouped error blocks
+AI_MODEL_MAX_TOKENS = 2400
+MAX_FAILURE_LINES = 30
+MAX_ERROR_BLOCKS = 5
 SIMILARITY_THRESHOLD_HIGH = 70  # score >= this → "high" similarity
 SIMILARITY_THRESHOLD_MEDIUM = 40  # score >= this → "medium" similarity
-MAX_REFERENCES = 5              # max similar references to return
-TOP_CANDIDATES_FOR_AI = 8       # top candidates sent to AI semantic scoring
+MAX_REFERENCES = 5
+TOP_CANDIDATES_FOR_AI = 8
 
 
 SYNC_PRESERVE_FIELDS = {
@@ -106,7 +105,6 @@ class ResolutionAnalysisMixin:
         for journal in journals:
             notes = str(journal.get("notes") or "")
             user = journal.get("user") or ""
-            # Extract <pre><code class="diff">...</code></pre> blocks
             diff_blocks = re.findall(
                 r'<pre><code\s+class="diff">\s*(.*?)\s*</code></pre>',
                 notes,
@@ -140,7 +138,6 @@ class ResolutionAnalysisMixin:
         patches = ResolutionAnalysisMixin._extract_patch_from_journals(journals)
         confirmed = ResolutionAnalysisMixin._detect_confirmed_in_journals(journals)
 
-        # 按时间查找补丁提供者和确认者。
         provider = ""
         provider_time = ""
         provider_notes = ""
@@ -148,7 +145,6 @@ class ResolutionAnalysisMixin:
         confirmer_time = ""
         confirm_note = ""
 
-        # Patterns indicating someone is providing a solution
         solution_indicators = ["<pre>", "<code", "diff --git", "git diff", "patch", "修改方法", "解决方案", "修改如下", "改法"]
         confirm_indicators = ["测试ok", "测试通过", "验证ok", "验证通过", "已解决", "可以关闭", "没问题了"]
 
@@ -158,7 +154,6 @@ class ResolutionAnalysisMixin:
             created = journal.get("created_on") or ""
             notes_lower = notes.lower()
 
-            # Detect if this journal is providing a solution
             is_solution = False
             if any(ind in notes_lower for ind in solution_indicators):
                 is_solution = True
@@ -171,14 +166,12 @@ class ResolutionAnalysisMixin:
                 pre_idx = notes.find("<pre>")
                 provider_notes = notes[:pre_idx].strip() if pre_idx > 0 else notes[:500].strip()
 
-            # Detect if this journal confirms the solution
             is_confirm = any(ind in notes_lower for ind in confirm_indicators)
             if is_confirm and not confirmer and provider and user != provider:
                 confirmer = user
                 confirmer_time = created
                 confirm_note = notes.strip()
 
-        # Determine resolution status
         has_resolution = bool(patches) or bool(provider)
         if has_resolution and confirmed:
             status = "verified"
@@ -187,7 +180,6 @@ class ResolutionAnalysisMixin:
         else:
             status = "unclear"
 
-        # Build summary
         summary = ""
         if status == "verified":
             summary = f"✅ 已验证: {provider} 提供方案，{confirmer} 确认通过 ({confirm_note[:50]})"
@@ -219,8 +211,6 @@ class ResolutionAnalysisMixin:
             return "SDK"
         return "-"
 
-    # Structured field extraction
-
     @staticmethod
     def _format_journal_patches(patches: list[dict[str, str]]) -> str:
         """Format journal-extracted patches into joined HTML code blocks."""
@@ -238,18 +228,14 @@ class ResolutionAnalysisMixin:
         """Map AI output + rule-based extraction to the seven display fields."""
         subject = issue_payload.get("subject") or ""
         journals = issue_payload.get("journals_json") or []
-        # Analyze resolution from journals (for closed/resolved issues)
         resolution = self._analyze_resolution_from_journals(journals)
 
-        # 1. title
         title = ai_result.get("title") or subject
 
-        # 2. problem_description
         problem_description = ai_result.get("problem_description") or ""
         if not problem_description:
             problem_description = _truncate(issue_payload.get("description") or subject, 500)
 
-        # 3. error_info
         error_info = ai_result.get("error_info") or ""
         if not error_info and failures:
             error_info = self.extract_error_from_failures(failures)
@@ -258,12 +244,10 @@ class ResolutionAnalysisMixin:
         if error_info and not str(error_info).lstrip().startswith("```"):
             error_info = self._ensure_code_block(error_info, "")
 
-        # 4. error_analysis
         error_analysis = ai_result.get("error_analysis") or ai_result.get("root_cause_guess") or ""
         if not error_analysis:
             error_analysis = self._rule_error_analysis(issue_payload, failures, references)
 
-        # 5. solution
         # Priority: AI result > journal resolution > rule-based
         solution = ai_result.get("solution") or ""
         if not solution:
@@ -275,7 +259,6 @@ class ResolutionAnalysisMixin:
             else:
                 solution = self._rule_solution(issue_payload, failures, references)
 
-        # 6. patch_direction
         # 优先级：已验证补丁、AI 结果、日志补丁、规则结果。
         journal_patch_html = self._format_journal_patches(resolution.get("patches") or [])
         patch_direction = ai_result.get("patch_direction") or ai_result.get("risk") or ""
@@ -290,7 +273,6 @@ class ResolutionAnalysisMixin:
                 self._wrap_patch_direction(patch_direction)
             )
 
-        # 7. reference_redmine (formatted)
         ai_refs = ai_result.get("reference_redmine") or []
         if not ai_refs:
             reference_redmine = "; ".join(f"#{r.get('issue_id')}" for r in references[:3]) if references else ""
@@ -481,11 +463,9 @@ class ResolutionAnalysisMixin:
             reason = str(first.get("reason") or "")
             parts.append(f"失败模块: {module}")
             parts.append(f"失败用例: {name}")
-            # Extract key error type from reason
             error_type_match = re.search(r"(\w+(?:Exception|Error))", reason)
             if error_type_match:
                 parts.append(f"异常类型: {error_type_match.group(1)}")
-            # Extract key error message (first line of reason)
             first_reason_line = reason.split("\n")[0].strip()[:200] if reason else ""
             if first_reason_line:
                 parts.append(f"关键报错: {first_reason_line}")
@@ -513,7 +493,6 @@ class ResolutionAnalysisMixin:
                 assertion = re.search(r"Actual:\s*(.+?)\s*Expected:\s*(.+)", extracted)
                 if assertion:
                     parts.append(f"断言失败: 实际={assertion.group(1).strip()} / 期望={assertion.group(2).strip()}")
-        # Check references for similar resolved issues
         if references:
             high_refs = [r for r in references if r.get("similarity_level") == "high"]
             if high_refs:
@@ -538,7 +517,6 @@ class ResolutionAnalysisMixin:
             parts.append("涉及文件:")
             for fp in unique_paths:
                 parts.append(f"  - {fp}")
-        # Suggest checking references
         if references:
             ref_ids = ", ".join(f"#{r.get('issue_id')}" for r in references[:3])
             parts.append(f"建议参考历史单 {ref_ids} 中的补丁方案")
@@ -568,13 +546,10 @@ class ResolutionAnalysisMixin:
         if references:
             lines.append("- 可参考历史单: " + ", ".join(f"#{ref['issue_id']}" for ref in references[:3]))
 
-        # Add solution
         if solution:
-            # Convert any markdown code blocks in solution to HTML
             solution_html = self._markdown_to_html_code_blocks(solution)
             lines.extend(["", "解决方法:", solution_html])
 
-        # Add patch direction
         if patch_direction and patch_direction != "需要进一步分析具体日志和源码":
             patch_html = self._markdown_to_html_code_blocks(patch_direction)
             lines.extend(["", "补丁方向:", patch_html])

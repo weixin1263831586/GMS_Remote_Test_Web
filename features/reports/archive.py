@@ -363,7 +363,6 @@ class ReportAnalyzer:
                 search_results.append(result_item)
                 i += 1
 
-            # 去重：按路径去重
             seen_paths = set()
             unique_results = []
             for item in search_results:
@@ -391,8 +390,8 @@ class ReportAnalyzer:
             'details': {
                 'test_type': report.test_type,
                 'device': report.device,
-                'suite_version': report.suite_version,        # 套件版本（如 16.1_r2）
-                'android_version': report.android_version,    # Android版本（build_version_release）
+                'suite_version': report.suite_version,
+                'android_version': report.android_version,
                 'start_time': report.start_time
             },
             'failures': [

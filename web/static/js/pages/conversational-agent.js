@@ -1,4 +1,3 @@
-// ==================== 对话Agent ====================
 let agentSessionId = localStorage.getItem('gms_agent_session_id') || '';
 let agentPollTimer = null;
 let agentInitialized = false;
@@ -180,7 +179,6 @@ function renderAgentMessages(session) {
         const isPlanLike = kind === 'plan' || plan;
         let actions = '';
 
-        // Plan confirmation buttons
         if (plan && session.status === 'planning') {
             actions += `
                 <div class="agent-actions">
@@ -190,7 +188,6 @@ function renderAgentMessages(session) {
             `;
         }
 
-        // Report analysis buttons
         if (reportTimestamp) {
             actions += `
                 <div class="agent-actions">
@@ -357,7 +354,6 @@ async function sendAgentMessage(execute = false, overrideMessage = '') {
     }
 
     if (input && !overrideMessage) {
-        // Save to history before clearing
         if (message && message !== agentInputHistory[0]) {
             agentInputHistory.unshift(message);
             if (agentInputHistory.length > 50) agentInputHistory.length = 50;
@@ -365,13 +361,11 @@ async function sendAgentMessage(execute = false, overrideMessage = '') {
         }
         input.value = '';
         agentHistoryIndex = -1;
-        // Reset height
         input.style.height = 'auto';
         input.style.height = '100px';
     }
 
     try {
-        // Show typing indicator
         const container = $('agent-chat-messages');
         const typingEl = document.createElement('div');
         typingEl.id = 'agent-typing';
@@ -401,7 +395,6 @@ async function sendAgentMessage(execute = false, overrideMessage = '') {
         }
         const result = await response.json();
 
-        // Remove typing indicator
         const indicator = document.getElementById('agent-typing');
         if (indicator) indicator.remove();
 
@@ -562,7 +555,7 @@ function initAgentPage() {
                     event.preventDefault();
                     sendAgentMessage(false);
                 } else if (event.key === 'ArrowUp') {
-                    // 光标在开头或输入为空时才浏览历史命令。
+                    // 历史命令非空时即可上翻浏览（未限制光标位置）。
                     if (agentInputHistory.length === 0) return;
                     // Save draft on first history navigation
                     if (agentHistoryIndex === -1) {
@@ -573,7 +566,6 @@ function initAgentPage() {
                     }
                     event.preventDefault();
                     input.value = agentInputHistory[agentHistoryIndex];
-                    // Move cursor to end
                     setTimeout(() => { input.selectionStart = input.selectionEnd = input.value.length; }, 0);
                 } else if (event.key === 'ArrowDown') {
                     if (agentHistoryIndex === -1) return;
@@ -582,7 +574,6 @@ function initAgentPage() {
                         agentHistoryIndex--;
                         input.value = agentInputHistory[agentHistoryIndex];
                     } else {
-                        // Restore draft
                         agentHistoryIndex = -1;
                         input.value = agentDraftInput;
                     }
@@ -590,7 +581,6 @@ function initAgentPage() {
                 }
             });
 
-            // Auto-resize textarea based on content
             input.addEventListener('input', () => {
                 // Reset history browsing on manual input
                 agentHistoryIndex = -1;

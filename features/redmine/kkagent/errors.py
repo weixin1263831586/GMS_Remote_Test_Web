@@ -11,7 +11,6 @@ from typing import Any
 # NO_COLOR 也可能残留控制符，入库前统一剥除，避免 Web 端显示乱码。
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\r")
 
-# stderr 摘要长度上限。
 STDERR_SUMMARY_LIMIT = 500
 
 _TEXTUAL_GMS_CALL_RE = re.compile(

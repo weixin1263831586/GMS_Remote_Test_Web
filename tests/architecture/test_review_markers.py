@@ -14,6 +14,12 @@ docs/development.md「文档政策」的工程化约束：源码注释不得引�
   （不扫描裸 `audit` 一词：安全审计日志功能 security_audit 本身是合法
   领域词汇）；
 - `review round` / `评审意见` / `评审项` / `审核意见` 之类评审轮次措辞；
+- `复审` / `外部评审` / `深度评审` / `评审报告` / `全局审查` / `全库审计`
+  等评审/审计出处措辞（这些变体曾长期绕过本门禁）；
+- `review P\\d` / `复审 P\\d` 一类带优先级的评审引用；
+- `#NNNNNN 复审` / `#NNNNNN review`（真实工单号作为实测证据出处是允许的，
+  但「工单号+复审」是过程引用）；
+- `第 N 轮拆分` 一类无出处的拆分轮次叙述；
 - 注释开头的裸优先级编号（如 `# P1:`、`# M3：`）。
 
 已清洗为真实出处的引用不受影响：架构决策引用 `ADR NNNN`（见
@@ -36,8 +42,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 # 生产源码树：features/foundation/bootstrap/worker_agent/workflows 的全部
-# .py（含各自 tests/），agent 源树，顶层 .py 与 scripts/tools 的 .py，
-# 以及 docs/ 的文档——文档同样不得引用不存在的评审轮次。
+# .py（含各自 tests/），agent 源树与 web 前端（第三方 vendor/ 除外），
+# 顶层 .py 与 scripts/tools 的 .py，以及 docs/ 的文档——文档同样不得
+# 引用不存在的评审轮次。
 SCAN_ROOTS = [
     ROOT / "features",
     ROOT / "foundation",
@@ -45,6 +52,7 @@ SCAN_ROOTS = [
     ROOT / "worker_agent",
     ROOT / "workflows",
     ROOT / "agent" / "gms-remote-test",
+    ROOT / "web",
     ROOT / "scripts",
     ROOT / "tools",
     ROOT / "docs",
@@ -64,6 +72,9 @@ EXCEPTIONS: set[str] = {
     # （1.txt/2.txt/3.txt）作为发布树拒绝项——这是发布门禁的数据，不是
     # 评审引用。
     "scripts/verify_release_tree.py",
+    # 文档政策（「文档政策」一节）本身要枚举违禁措辞作为规范内容，
+    # 属结构性例外，不随清理移除。
+    "docs/development.md",
 }
 
 FORBIDDEN_PATTERNS = [
@@ -82,7 +93,16 @@ FORBIDDEN_PATTERNS = [
         "review-round wording",
     ),
     (re.compile(r"评审\s*[MLPR]\d", re.IGNORECASE), "review priority wording"),
+    (re.compile(r"\breview\s*[MLPR]\d", re.IGNORECASE), "review priority wording"),
     (re.compile(r"审核第[一二三四五六七八九十\d]+节"), "review-section wording"),
+    # 评审/审计出处措辞（曾绕过早期正则的变体）。
+    (re.compile(r"复审|外部评审|深度评审|评审报告|全库审计|全局审查"),
+     "review citation wording"),
+    # 「工单号+复审/review」是过程引用；真实工单号+实测证据（如
+    # `#648526 实测`）是允许的出处，不受本条约束。
+    (re.compile(r"#\d{5,}\s*(?:复审|review)\b", re.IGNORECASE),
+     "ticket review citation"),
+    (re.compile(r"第[一二三四五六七八九十\d]+轮拆分"), "split-round citation"),
     (re.compile(r"(?:全局)?(?:审查|审核|评审)问题|[（(]问题\s*\d+|^\s*(?:#|//|\*)?\s*问题\s*\d+"),
      "untraceable review issue"),
     (re.compile(r"^\s*(?:#|//|/\*|\*)\s*[MLPR]\d+[a-z]?[：:]", re.IGNORECASE),
@@ -94,7 +114,7 @@ FORBIDDEN_PATTERNS = [
 # docs/audits/ 是正式审计报告的指定存放处：报告自身按定义就是可追溯的
 # 出处（引用单号/残留文件名是审计内容，不是幽灵引用），不参与扫描。
 _EXCLUDED_DIR_NAMES = {"__pycache__", ".venv", "node_modules", "dist",
-                       "android-internals-wiki", "audits"}
+                       "vendor", "android-internals-wiki", "audits"}
 
 
 def _candidate_files() -> list[Path]:
@@ -125,6 +145,23 @@ class ReviewMarkerTests(unittest.TestCase):
         for marker in ("全局审查问题 3", "（问题 4）", "全局审查问题\n  2", "问题 4", "# 问题 4"):
             with self.subTest(marker=marker):
                 self.assertTrue(any(pattern.search(marker) for pattern, _ in FORBIDDEN_PATTERNS))
+
+    def test_review_citation_variants_are_rejected(self):
+        """曾绕过早期正则的评审出处变体必须全部命中。"""
+        for marker in (
+            "复审 P1", "复审 P2", "外部复审", "外部深度评审：", "外部评审报告项",
+            "全库审计的三个 P1/P2 项", "全局审查第二十节", "全局审查 4.3",
+            "review P0: active uploads", "(#661066 复审)", "(#661066 review)",
+            "从 navigation.js 第二轮拆分", "外部代码复审要求",
+        ):
+            with self.subTest(marker=marker):
+                self.assertTrue(any(pattern.search(marker) for pattern, _ in FORBIDDEN_PATTERNS))
+
+    def test_measured_ticket_provenance_is_allowed(self):
+        """真实工单号 + 实测证据是允许的出处，不得误伤。"""
+        for marker in ("关键证据挤出索引（#646220 实测踩坑）。", "（#648526 实测缺陷）"):
+            with self.subTest(marker=marker):
+                self.assertFalse(any(pattern.search(marker) for pattern, _ in FORBIDDEN_PATTERNS))
 
     def test_production_source_has_no_review_markers(self):
         offenders: list[str] = []

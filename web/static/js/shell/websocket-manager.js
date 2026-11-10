@@ -1,5 +1,4 @@
 // WebSocket lifecycle and server event dispatch extracted from navigation.js.
-// FastAPI WebSocket 连接。
 // 会话失效（401/4401）或服务端不可达时按指数退避重连：固定 5 秒重试
 // 会让未登录的后台标签页无限空转，持续消耗本机连接资源。
 let wsReconnectAttempts = 0;
@@ -76,7 +75,6 @@ function initWebSocket() {
         state.clientId = clientId;
         state.clientDisplayId = data.display_client_id || clientId;
 
-        // 建立WebSocket连接
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/api/system/websocket/${encodeURIComponent(clientId)}`;
 
@@ -159,7 +157,7 @@ function initWebSocket() {
                     case 'test_complete':
                         if (!isLocalWorkspaceWorker(workspaceWorkerId()) || state.clusterJobId) break;
                         state.testing = false;
-                        state.currentBurningProgress = 0;  // 重置进度
+                        state.currentBurningProgress = 0;
                         updateTestToggleButton(false);
                         addLogEntry('测试完成', 'success');
                         if (data.notification) {
@@ -199,7 +197,6 @@ function initWebSocket() {
                                 if (device) {
                                     updated = true;
                                     if (typeof device === 'string') {
-                                        // 转换为对象格式
                                         const idx = state.devices.indexOf(device);
                                         state.devices[idx] = {
                                             device_id: device,
@@ -209,7 +206,6 @@ function initWebSocket() {
                                         };
                                         debugLog(`[Device Lock] Converted to object:`, state.devices[idx]);
                                     } else {
-                                        // 更新现有对象
                                         device.locked = update.locked;
                                         device.locked_by = update.locked_by || '';
                                         device.locked_at = update.locked_at || '';
@@ -220,7 +216,6 @@ function initWebSocket() {
                                 }
                             });
 
-                            // 重新渲染设备列表
                             if (updated) {
                                 debugLog('[Device Lock] Re-rendering devices...');
                                 try {
@@ -251,7 +246,6 @@ function initWebSocket() {
                         // 刷新设备列表（静默：避免再打印一条泛泛的"[自动刷新]"日志，
                         // 下方的"检测到 USB 设备变化"信息量更高，作为 USB 事件的唯一日志）
                         loadDevices(true, {silent: true}).then(() => {
-                            // 构建设备变化消息
                             let changeMessage = '检测到 USB 设备变化';
                             if (connected.length > 0) {
                                 changeMessage += `，连接：${connected.join(' ')}`;
@@ -323,7 +317,6 @@ function initWebSocket() {
                         break;
 
                     case 'firmware_progress':
-                        // 固件烧写进度更新
                         debugLog('[WebSocket] firmware_progress:', data.percentage);
                         if (data.percentage !== undefined) {
                             // 只在百分比大于等于当前值时才更新（避免跳动）
@@ -355,7 +348,6 @@ function initWebSocket() {
                         break;
 
                     case 'ping':
-                        // 响应心跳
                         if (state.websocket.readyState === WebSocket.OPEN) {
                             state.websocket.send(JSON.stringify({ type: 'pong' }));
                         }

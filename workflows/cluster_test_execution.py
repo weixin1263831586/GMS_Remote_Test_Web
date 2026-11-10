@@ -135,7 +135,7 @@ def start_cluster_test(request: Any, client_id: str):
     # 请求都可能在创建前查不到既有任务而各自建 Job。回执与任务同事务
     # 持久化；request_hash 保证同一 ID 换参数时显式冲突而不是静默复用。
     if request.automation_run_id:
-        # 指纹覆盖所有影响任务行为/权限/关联的参数（复审 P2）：核心执行
+        # 指纹覆盖所有影响任务行为/权限/关联的参数：核心执行
         # 参数 + 设备预约（权限边界）+ 构建/Gerrit/Redmine 关联（报告
         # 归属）。local_server 等纯展示字段不纳入。
         fingerprint = request_fingerprint({

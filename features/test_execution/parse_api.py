@@ -23,10 +23,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# --- Upload progress constants ---
 UPLOAD_PROGRESS_EXPIRATION = 10
-
-# ==================== Parse Args ====================
 
 # Positional arguments starting with this prefix and containing no path
 # separator are treated as short suite names (e.g. android-cts-17_r1) and

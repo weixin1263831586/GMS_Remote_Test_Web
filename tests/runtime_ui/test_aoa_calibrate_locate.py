@@ -98,7 +98,8 @@ class RuntimeAoaCalibrateLocateTests(RuntimeUiHarness):
             page.mouse.click(box['x'] + box['width'] * 0.75,
                              box['y'] + box['height'] * 0.75)
             mark = page.evaluate("aoaScreenGridState().calibrate")
-            # direct 模式按轴换算分母 361/641：540px→271、960px→481。
+            # direct 模式按轴换算（宽 ×361/540、高 ×641/960）：
+            # 540px→271、960px→481。
             assert (mark['x'], mark['y']) == (271, 481), mark
             assert inputs == [], inputs    # 标定取点不发设备输入
             # 保存：命令改写为新坐标，准星清除。

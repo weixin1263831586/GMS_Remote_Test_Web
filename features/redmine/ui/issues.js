@@ -33,7 +33,6 @@ async function fetchIssueFromRedmine(issueId) {
       document.getElementById('searchInput').value = '';
       return loadIssues();
     }
-    // Wait for analysis to complete
     btn.textContent = '⏳ 分析 #' + issueId + '...';
     await waitForRun(result.run_id, '拉取');
     document.getElementById('searchInput').value = '';
@@ -90,7 +89,6 @@ function renderIssueCard(item) {
     window.__issueCardCache[String(item.issue_id)] = item;
   }
 
-  // Extract seven fields
   const title = esc(item.subject || ai.title || '-');
   const problemDesc = _buildProblemDescription(item, attachments);
   const errorInfoRaw = item.error_info || _extractErrorHtml(failures) || '-';
@@ -114,10 +112,7 @@ function renderIssueCard(item) {
     if (f0.module) header += '测试模块: ' + f0.module + _NL;
     if (f0.name) header += '测试用例: ' + f0.name + _NL;
     if (header) header += _NL;
-    // Prepend test info before the error code block
-    // If errorInfoRaw starts with ```, insert after the opening fence
     if (errorInfoRaw.startsWith(_F3) || errorInfoRaw.startsWith(_BT+_BT+_BT)) {
-      // Find the first newline after ```
       var nlIdx = errorInfoRaw.indexOf(_NL);
       if (nlIdx > 0) {
         errorInfoCombined = errorInfoRaw.substring(0, nlIdx + 1) + header + errorInfoRaw.substring(nlIdx + 1);
@@ -144,7 +139,6 @@ function renderIssueCard(item) {
   var fv = (item.fixed_version || '').toUpperCase();
   if (comp.includes('GMS') || cat.includes('GMS') || fv.includes('GMS')) issueType = 'GMS';
 
-  // Detect status display
   var statusName = item.status_name || '-';
   var statusIcon = '';
   if (['已关闭','Closed'].includes(statusName)) statusIcon = '✅ ';

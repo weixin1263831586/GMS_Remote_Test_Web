@@ -12,7 +12,6 @@ from features.redmine.utils import to_iso8601
 
 logger = logging.getLogger(__name__)
 
-# Enhanced error patterns for structured extraction
 _ERROR_LINE_PATTERNS = [
     # Stack traces
     r"at\s+[\w.$]+\([^)]*\.\w+:\d+\)",
@@ -36,13 +35,13 @@ _ERROR_LINE_PATTERNS = [
 _ERROR_LINE_RE = re.compile("|".join(_ERROR_LINE_PATTERNS), re.IGNORECASE)
 
 AI_MODEL_TIMEOUT = 120          # seconds for AI model HTTP request
-AI_MODEL_MAX_TOKENS = 2400      # max tokens for AI model response
-MAX_FAILURE_LINES = 30          # max error lines to extract
-MAX_ERROR_BLOCKS = 5            # max grouped error blocks
+AI_MODEL_MAX_TOKENS = 2400
+MAX_FAILURE_LINES = 30
+MAX_ERROR_BLOCKS = 5
 SIMILARITY_THRESHOLD_HIGH = 70  # score >= this → "high" similarity
 SIMILARITY_THRESHOLD_MEDIUM = 40  # score >= this → "medium" similarity
-MAX_REFERENCES = 5              # max similar references to return
-TOP_CANDIDATES_FOR_AI = 8       # top candidates sent to AI semantic scoring
+MAX_REFERENCES = 5
+TOP_CANDIDATES_FOR_AI = 8
 
 
 SYNC_PRESERVE_FIELDS = {
@@ -151,5 +150,3 @@ class IssueAnalysisMixin:
                 "details": details,
             })
         return result
-
-    # Similar reference finding with multi-dimension similarity scoring

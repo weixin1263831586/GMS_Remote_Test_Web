@@ -60,7 +60,8 @@ def _usb_core():
     return usb.core
 
 USB_DEBUG_TITLE = "USB debugging"
-SWITCH_CLASS = "android.widget.Switch"# 同一行开关与标题中心的垂直偏差上限（行高约 96-192px）。
+SWITCH_CLASS = "android.widget.Switch"
+# 同一行开关与标题中心的垂直偏差上限（行高约 96-192px）。
 ROW_Y_TOLERANCE_PX = 120
 SCROLL_MAX_ATTEMPTS = 8
 # OFF 提交后 adb 断开的观察窗口（一般 2-6s，含 gadget 重枚举抖动）。

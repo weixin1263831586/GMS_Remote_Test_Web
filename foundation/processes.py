@@ -69,7 +69,8 @@ def run_local_shell_command(command: str, timeout: int = 30) -> CommandResult:
     process = None
     try:
         # 审计过的 shell-string 边界（见上方 docstring）：调用方负责转义
-        # 动态 token，全仓 shell 出口收敛在此与 SSHExecutor 两处。
+        # 动态 token，本地 shell 出口收敛在此与 features/build/executor.py
+        # 两处；远程执行统一经 SSHExecutor。
         process = subprocess.Popen(  # nosemgrep: gitlab.bandit.B602
             command,
             # Callers use this boundary for audited pipelines/redirection and

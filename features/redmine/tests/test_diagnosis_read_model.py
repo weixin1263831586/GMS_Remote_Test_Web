@@ -1,4 +1,4 @@
-"""Redmine IssueResult → DiagnosisReadModel 适配器测试（全局审查第二十节）。
+"""Redmine IssueResult → DiagnosisReadModel 适配器测试。
 
 覆盖：完整投影、execution 指纹接线、无结果/无指纹的空值语义、
 issue_payload（daily_brief_report）里的 serve-time 接入。

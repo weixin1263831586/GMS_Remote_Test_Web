@@ -1,8 +1,8 @@
 """mainline/update_monitor 读路径的一次性 schema 初始化回归。
 
-审核项：_connect_db 曾在每个请求连接上跑 init_db（mainline 的 init 持
-BEGIN IMMEDIATE 写锁），并发读会互相排队。现在经 foundation 的
-ensure_schema 进程内只初始化一次。
+锁定契约：读连接经 foundation 的 ensure_schema 进程内只初始化一次，
+不得在每个请求连接上跑 init_db（mainline 的 init 持
+BEGIN IMMEDIATE 写锁，并发读会互相排队）。
 """
 
 from __future__ import annotations

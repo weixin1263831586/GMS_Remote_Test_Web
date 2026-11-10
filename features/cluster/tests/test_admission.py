@@ -1,9 +1,7 @@
 """Admission single-source-of-truth tests (UI directory vs scheduler).
 
-Pinned by the external review: ``list_workers`` used to block only on
-offline/draining while ``select_worker`` silently rejected the same Worker on
-the disk threshold, and the memory floor was a UI-only warning. Both (plus
-the claim re-check and the automation manual path) must consume
+``list_workers``, ``select_worker`` (disk threshold, memory floor), the
+claim re-check and the automation manual path must all consume
 ``features/cluster/admission.py`` so they can never disagree.
 """
 

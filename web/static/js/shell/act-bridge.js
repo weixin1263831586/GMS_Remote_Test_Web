@@ -1,11 +1,9 @@
 /**
  * act-bridge —— CSP 安全的事件委托桥。
  *
- * 用途：把历史上的 inline 事件处理器（形如 data-click 出现之前的
- * onclick 字符串属性）迁移为
- * 声明式属性，由本模块在 document 上统一委托分发。inline handler
- * 与 eval 同属 CSP `unsafe-inline`/`unsafe-eval` 管制面；迁移完成后
- * 生产 CSP 的 script-src 即可去掉 'unsafe-inline'。
+ * 用途：元素以 data-* 声明事件处理器，由本模块在 document 上统一
+ * 委托分发，替代 inline 事件处理器。生产 CSP 的 script-src 因此无需
+ * 'unsafe-inline'（bootstrap/application.py）。
  *
  * 属性约定（元素上声明，委托分发）：
  *   data-click / data-change / data-input / data-submit /

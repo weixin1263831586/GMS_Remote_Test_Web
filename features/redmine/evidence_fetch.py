@@ -1,7 +1,8 @@
 """Evidence fetch engine: ``EvidenceFetcher`` for issue/attachment download.
 
-Split from ``evidence.py`` to keep both modules under the
-600-line review limit. All shared limits, errors, credentials helpers and the
+Split from ``evidence.py`` to keep both modules within the file size budget
+(``tests/architecture/test_file_size_rules.py``). All shared limits, errors,
+credentials helpers and the
 owner evidence store stay in ``evidence.py``; this module accesses them via
 ``evidence.`` attributes where tests rely on runtime patching.
 """

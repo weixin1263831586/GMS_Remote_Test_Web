@@ -18,7 +18,6 @@ async function handleUploadFile() {
         const progressInfo = document.getElementById('progress-info');
         const startTime = Date.now();
 
-        // Create FormData
         const formData = new FormData();
         formData.append('file', file);
         if (!isLocalWorkspaceWorker(workerId)) {
@@ -65,8 +64,7 @@ async function handleUploadFile() {
                     setTimeout(() => {
                         progressFill.style.width = '0%';
                         progressInfo.textContent = '';
-                        fileInput.value = ''; // Clear file input
-                        // Reset drop zone UI
+                        fileInput.value = '';
                         document.getElementById('drop-zone-text').style.display = 'block';
                         document.getElementById('drop-zone-filename').style.display = 'none';
                         document.getElementById('drop-zone-filename').textContent = '';
@@ -89,7 +87,6 @@ async function handleUploadFile() {
             progressInfo.textContent = '';
         });
 
-        // Start upload
         xhr.open('POST', '/api/terminal/push');
         xhr.send(formData);
     } catch (error) {
@@ -192,7 +189,6 @@ function clearFirmwareUploadState() {
     sessionStorage.removeItem('firmwareUploadInterrupted');
 }
 
-// 导出到全局
 window.saveFirmwareUploadState = saveFirmwareUploadState;
 window.clearFirmwareUploadState = clearFirmwareUploadState;
 
@@ -210,7 +206,6 @@ function updateUploadProgress(percentage, filename, uploadedSize, totalSize) {
 
         if (percentage >= 100) {
             progressInfo.textContent = `✅ ${filename} 上传完成 (${total})`;
-            // 3秒后重置进度条
             setTimeout(() => {
                 progressFill.style.width = '0%';
                 progressInfo.textContent = '';
@@ -233,23 +228,18 @@ async function browseRemoteFile(mode) {
     const targetInputId = 'retry-result';
     const title = '选择测试报告';
 
-    // Set file browser state
     state.fileBrowser.mode = mode;
     state.fileBrowser.targetInputId = targetInputId;
     state.fileBrowser.selectedFile = null;
     state.fileBrowser.clusterWorkerId = '';
     state.fileBrowser.clusterSuitePath = '';
 
-    // Update modal title
     document.getElementById('file-browser-title').textContent = title;
 
-    // Show modal
     ModalManager.open('file-browser-modal');
 
-    // Load initial directory - use test suite results directory
     let defaultPath = getDefaultSuitesPath();
 
-    // Get current test suite selection
     const testSuiteSelect = document.getElementById('test-suite');
     const toolsPath = testSuiteSelect?.value || '';
     const workerId = workspaceWorkerId();
@@ -446,7 +436,6 @@ function renderFileList(files) {
     const listContainer = document.getElementById('file-browser-list');
     const pathDisplay = document.getElementById('file-browser-current-path');
 
-    // Update current path display
     pathDisplay.textContent = state.fileBrowser.currentPath;
 
     if (files.length === 0) {
@@ -488,10 +477,8 @@ function renderFileList(files) {
 }
 
 function selectFileForSelection(name, type, sourceEvent) {
-    // Select file/directory (highlight it)
     state.fileBrowser.selectedFile = { name, type };
 
-    // Update UI to show selection
     document.querySelectorAll('.file-browser-item').forEach(item => {
         item.classList.remove('selected');
     });
@@ -509,7 +496,6 @@ function openFileOrDirectory(name, type) {
             const newPath = current ? current + '/' + name : name;
             ut_loadToolDir(newPath);
         } else {
-            // Navigate into directory
             const newPath = state.fileBrowser.currentPath === '/'
                 ? `/${name}`
                 : `${state.fileBrowser.currentPath}/${name}`;
@@ -534,24 +520,20 @@ function closeFileBrowserModal() {
 function confirmFileSelection() {
     const targetInput = document.getElementById(state.fileBrowser.targetInputId);
 
-    // For other modes, require file selection
     if (!state.fileBrowser.selectedFile) {
         showToast('请先选择一个文件', 'warning');
         return;
     }
 
-    // Get selected item info
     const selectedItem = state.fileBrowser.selectedFile;
     const isDirectory = selectedItem.type === 'directory';
 
-    // For retry mode, handle directory and file differently
     let fullPath;
     if (state.fileBrowser.mode === 'retry') {
         if (isDirectory) {
             // 重试模式选择目录时使用当前路径。
             fullPath = state.fileBrowser.currentPath;
         } else {
-            // For file selection, include the filename
             fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
         }
 
@@ -574,7 +556,7 @@ function confirmFileSelection() {
         closeFileBrowserModal();
     } else if (state.fileBrowser.mode === 'gsi' || state.fileBrowser.mode === 'gsi-system') {
         // For GSI system image, use the selected path directly
-        fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
+        fullPath
         if (targetInput) {
             targetInput.value = fullPath;
             state.gsiSystemFile = null;
@@ -612,7 +594,6 @@ function confirmFileSelection() {
         }
         closeFileBrowserModal();
     } else if (state.fileBrowser.mode === 'gsi-vendor') {
-        // For GSI vendor image, use the selected path directly
         fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
         if (targetInput) {
             targetInput.value = fullPath;
@@ -625,7 +606,6 @@ function confirmFileSelection() {
         }
         closeFileBrowserModal();
     } else if (state.fileBrowser.mode === 'firmware') {
-        // For firmware, use the selected path directly
         fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
         if (targetInput) {
             targetInput.value = fullPath;
@@ -681,7 +661,6 @@ function confirmFileSelection() {
         }
         closeFileBrowserModal();
     } else {
-        // Default behavior
         fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
         if (targetInput) {
             targetInput.value = fullPath;
@@ -691,7 +670,6 @@ function confirmFileSelection() {
     }
 }
 
-// Navigate to parent directory
 function navigateToParent() {
     const currentPath = state.fileBrowser.currentPath;
 
@@ -707,14 +685,13 @@ function navigateToParent() {
 
     if (currentPath === '/' || !currentPath.includes('/')) {
         showToast('已到达根目录', 'info');
-        return;  // Already at root
+        return;
     }
 
     const parentPath = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/';
     loadFileDirectory(parentPath);
 }
 
-// Navigate to root directory
 function navigateToRoot() {
     if (state.fileBrowser.mode === 'utility-tool') {
         ut_loadToolDir('');
@@ -740,7 +717,6 @@ function navigateToRoot() {
     addLogEntry(`导航到根目录: ${rootPath}`, 'info');
 }
 
-// Refresh current directory
 function refreshCurrentDirectory() {
     const currentPath = state.fileBrowser.currentPath;
     if (state.fileBrowser.mode === 'utility-tool') {

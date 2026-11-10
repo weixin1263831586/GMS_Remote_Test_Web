@@ -1,4 +1,4 @@
-"""FailureIdentity 确定性指纹与关系层契约测试（全局审查：失败身份与关系分层）。"""
+"""FailureIdentity 确定性指纹与关系层契约测试（失败身份与关系分层）。"""
 
 import json
 import unittest
@@ -51,7 +51,7 @@ class NormalizationTests(unittest.TestCase):
 
     def test_domain_numbers_are_preserved(self):
         # expected/actual、size、API level 是根因签名本身，必须区分
-        # （全局审查 4.3：vbkey size 0 vs 32、API 36 vs 37）。
+        # （vbkey size 0 vs 32、API 36 vs 37）。
         self.assertNotEqual(
             normalize_error_signature("AssertionError: expected <3> but was <5>"),
             normalize_error_signature("AssertionError: expected <9> but was <2>"),
@@ -132,7 +132,7 @@ class IdentityTests(unittest.TestCase):
         self.assertNotEqual(base["fingerprint"], other["fingerprint"])
 
     def test_device_serial_is_observation_metadata_never_fingerprint(self):
-        # 全局审查 4.2：同型号两台设备的同一失败必须同一指纹，
+        # 同型号两台设备的同一失败必须同一指纹，
         # serial 只随身份落库作观察元数据。
         failures = [{"module": "M", "name": "T", "reason": "AssertionError: x"}]
         device_a = failure_identity(failures, **_identity(), device_serial="RK3576A001")

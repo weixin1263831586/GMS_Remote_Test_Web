@@ -5,8 +5,6 @@
  * - API_CATEGORIES: Maps API endpoints to functional categories
  * - API_DETAILS_MAP: Detailed documentation for each API endpoint
  * - Helper functions for category management
- *
- * Separated from app.js for better maintainability and reusability.
  */
 
 // ==================== API Categories ====================

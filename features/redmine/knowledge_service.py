@@ -383,14 +383,12 @@ class RedmineKnowledgeService:
                 "error": "无法从 Redmine 拉取或分析该工单(请检查 Redmine 凭据/网络)",
             }
 
-        # Step 2 — AI-produced fields.
         ai_json = issue.get("ai_json") or {}
         root_cause = self._meaningful(issue.get("error_analysis")) or self._meaningful(ai_json.get("root_cause_guess")) or ""
         solution = self._meaningful(issue.get("solution")) or self._meaningful(ai_json.get("solution")) or ""
         patch_raw = self._meaningful(issue.get("patch_direction")) or self._meaningful(ai_json.get("patch_direction")) or ""
         patch_block = self._wrap_patch_block(patch_raw)
 
-        # Step 3 — knowledge-base match.
         fact = RedmineCaseExtractor.extract(issue)
         similar = self.search_similar(fact or issue, limit=similar_limit, exclude_issue_id=issue_id)
         drafter = ReplyDrafter(self.knowledge_db, show_internal_refs=self._show_internal_refs())

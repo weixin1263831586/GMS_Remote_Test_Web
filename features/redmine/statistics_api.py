@@ -205,7 +205,6 @@ async def get_workload_statistics(
     if not _has_redmine_credentials(request):
         return _missing_credentials_payload(request)
     service = _service_for_request(request)
-    # Check cache
     stats_cfg = _get_redmine_stats_config(request)
     stale_days = int(stale_days or stats_cfg["stale_days"])
     freshness_days = int(stats_cfg.get("freshness_days") or 180)

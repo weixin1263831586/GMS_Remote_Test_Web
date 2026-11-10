@@ -194,7 +194,8 @@ async function firmwareShareApiWithAuth(path, body, host) {
     const response = initial.response;
     const data = initial.data;
 
-    // 401（认证失败）或 400（连接超时/网络不通）时，都弹框让用户输入密码重试。
+    // 401（认证失败），或 400（连接超时/网络不通）且本次未带缓存密码时，
+    // 弹框让用户输入密码重试（重试请求会带上新输入的密码）。
     // 因为 "timed out" 等网络错误可能源于认证环节，给用户输入密码的机会更合理。
     const isAuthOrConnectionError = response.status === 401
         || (response.status === 400 && !cached);

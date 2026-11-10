@@ -1,7 +1,7 @@
 """client.search_issues_by_subject 的 None-safe 归一化回归。
 
-审核项：结果字典曾用 ``getattr(issue, "status", None).name`` 链式取值，
-issue 缺 status/project 属性时直接 AttributeError。
+锁定契约：结果字典不得用 ``getattr(issue, "status", None).name`` 链式
+取值——issue 缺 status/project 属性时必须归一化而不是 AttributeError。
 """
 
 from __future__ import annotations

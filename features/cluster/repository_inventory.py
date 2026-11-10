@@ -390,7 +390,7 @@ class ClusterInventoryRepositoryMixin:
     def refresh_devices(self, worker_id: str, devices: list[dict]) -> None:
         """Restore completion writes ONLY the device inventory for this worker.
 
-        真实 agent 守护进程以 2-3 分钟周期心跳喂库存；本地烧写（Controller
+        真实 agent 守护进程以短周期心跳（默认 15s）喂库存；本地烧写（Controller
         进程内执行）完成 AOA 恢复后若只等下一个心跳，完成触发的设备刷新
         会拉到 accessory 窗口的 usb_only 旧快照。这里复用心跳的设备写入
         （含租约/预留 → allocated/reserved 守卫），不触碰 cluster_workers

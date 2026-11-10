@@ -1,4 +1,4 @@
-"""报告诊断 → DiagnosisReadModel 投影（统一读模型，全局审查第二十节）。
+"""报告诊断 → DiagnosisReadModel 投影（统一读模型）。
 
 ``diagnose_report_failure`` 的编排结果是 reports 域原生的平铺 dict
 （ai_result / source_search_results / knowledge_base_results /

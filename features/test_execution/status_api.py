@@ -108,8 +108,6 @@ def _normalize_log_entry(entry: object) -> dict:
     return {"t": "", "msg": text, "type": "info", "source": _infer_log_source(text)}
 
 
-# ==================== Test Status ====================
-
 @router.get("/api/test/status")
 async def get_status(
     request: Request,

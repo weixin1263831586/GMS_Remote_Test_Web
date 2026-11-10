@@ -397,7 +397,7 @@ class TestApply(unittest.TestCase):
         store = OverrideStore(tempfile.mktemp())
         with patch.object(co, "run_local_shell_command") as m:
             result = co.apply_overrides("dev", store)
-            self.assertEqual(m.call_count, 0)  # nothing ran
+            self.assertEqual(m.call_count, 0)
         self.assertTrue(result.success)
         self.assertEqual(result.stage, "validated")
 

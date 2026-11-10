@@ -74,7 +74,6 @@ TOOLS_DATA_FILE = str(user_tools_path(PROJECT_ROOT))
 DEFAULT_WIFI_SSID = ""
 DEFAULT_WIFI_PASSWORD = ""
 
-# 预编译配置占位符正则。
 PLACEHOLDER_PATTERN = re.compile(r'\$\{([^}]+)\}')
 
 
@@ -104,14 +103,12 @@ class ConfigManager(ConfigPersistenceMixin):
         self.runtime_config_path = str(runtime_config_path(self.project_root))
         self._runtime_store = RuntimeConfigStore(self.project_root)
 
-        # 缓存相关
         self._cache: dict[str, Any] | None = None
         self._cache_timestamp: float = 0
         self._cache_ttl: int = cache_ttl
         self._cache_lock: threading.Lock = threading.Lock()
         self._runtime_write_lock = threading.RLock()
 
-        # 文件修改时间追踪
         self._static_mtime: float = 0
         self._runtime_mtime: float = 0
         self._section_normalizers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {}
@@ -218,9 +215,7 @@ class ConfigManager(ConfigPersistenceMixin):
                 '包含 domain 和 base_url 字段'
             )
 
-        # 验证必需字段
         if 'domain' not in redmine_config:
-            # 如果domain字段缺失，从base_url中提取
             from urllib.parse import urlparse
             parsed = urlparse(redmine_config['base_url'])
             redmine_config['domain'] = parsed.netloc
@@ -338,13 +333,10 @@ class ConfigManager(ConfigPersistenceMixin):
             # 配置文件随 checkout/部署目录迁移时无需手工改绝对路径。
             if var_expr == 'PROJECT_ROOT':
                 return PROJECT_ROOT
-            # 检查是否有默认值
             if ':' in var_expr:
                 var_name, default_val = var_expr.split(':', 1)
-                # 优先使用环境变量
                 if var_name in os.environ:
                     return os.environ[var_name]
-                # 其次使用配置中的值
                 elif config and var_name in config:
                     return str(config[var_name])
                 else:
@@ -356,7 +348,6 @@ class ConfigManager(ConfigPersistenceMixin):
                 var_name = var_expr
                 placeholder = match.group(0)
 
-                # 优先使用环境变量
                 if var_name in os.environ:
                     return os.environ[var_name]
 
@@ -374,11 +365,9 @@ class ConfigManager(ConfigPersistenceMixin):
                     if config_value != placeholder:
                         return config_value
 
-                # 保留原样（未找到替换值）
                 logger.warning(f"Placeholder ${{{var_name}}} not found in config or environment")
                 return placeholder
 
-        # 使用预编译的 regex pattern 替换所有 ${...} 格式的占位符
         replaced = PLACEHOLDER_PATTERN.sub(replace_var, value)
         if full_placeholder_match:
             normalized = replaced.strip().lower()
@@ -389,8 +378,9 @@ class ConfigManager(ConfigPersistenceMixin):
     def _load_runtime_config(self) -> dict[str, Any] | None:
         """加载运行时配置。
 
-        configs/config_runtime.json 保存安装脚本写入的部署身份和用户操作产生的数据，
-        覆盖随源码携带的静态默认值（config.json）。
+        运行时配置保存安装脚本写入的部署身份和用户操作产生的数据（规范
+        位置为 runtime store 分片，平铺 configs/config_runtime.json 仅作
+        legacy 回退），覆盖随源码携带的静态默认值（config.json）。
         """
         if self._uses_runtime_store():
             try:
@@ -756,7 +746,7 @@ class ConfigManager(ConfigPersistenceMixin):
             return False
 
     def load_redmine_credentials(self) -> dict[str, str] | None:
-        """从 configs/config_runtime.json 加载并解密 Redmine 凭证。"""
+        """从运行时配置加载并解密 Redmine 凭证（runtime store 凭证分片，legacy 平铺文件回退）。"""
         try:
             runtime = self._load_runtime_config()
             if not runtime:
@@ -780,9 +770,6 @@ class ConfigManager(ConfigPersistenceMixin):
 config_manager = ConfigManager()
 
 
-# ==================== 本地主机信息自动获取 ====================
-
-# 缓存本地主机信息。
 _cached_ubuntu_user: str | None = None
 _cached_ubuntu_host: str | None = None
 
@@ -798,12 +785,10 @@ def get_ubuntu_host() -> str:
     """自动获取 Ubuntu 主机 IP 地址（带缓存）"""
     global _cached_ubuntu_host
     if _cached_ubuntu_host is None:
-        # 优先使用环境变量
         env_host = os.environ.get('UBUNTU_HOST')
         if env_host:
             _cached_ubuntu_host = env_host
         else:
-            # 自动检测本地 IP
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                     s.settimeout(2)

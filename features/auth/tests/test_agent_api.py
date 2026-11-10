@@ -71,10 +71,8 @@ class AgentBearerAuthTests(unittest.TestCase):
         return resp.json()["token"]
 
     def test_create_token_requires_elevation_and_returns_raw_once(self):
-        # Elevated admin session from setup works.
         record = self._create_token(["devices.read", "tests.execute"])
         self.assertIn("token", record)
-        # Listing must not include the raw token.
         resp = self.client.get("/api/auth/agent-tokens")
         self.assertEqual(resp.status_code, 200)
         self.assertNotIn(
@@ -206,7 +204,6 @@ class AgentBearerAuthTests(unittest.TestCase):
         # The code is one-shot.
         resp = bare.post("/api/auth/agent-enroll", json={"code": code})
         self.assertEqual(resp.status_code, 403)
-        # And the enrolled token authenticates.
         resp = bare.get(
             "/api/auth/status",
             headers={"Authorization": f"Bearer {token}"},

@@ -1,7 +1,7 @@
 """Redmine 回复端点输入校验与错误映射回归。
 
-审核项：/api/redmine/reply 曾把任意 issue_id 字符串拼进 Redmine 路径、
-把远端失败一律映射 500、附件无大小上限、文件名写入日志。
+锁定契约：issue_id 必须是数字（不得拼进 Redmine 路径）、远端失败
+不映射 500、附件有大小上限、文件名不写入日志。
 """
 
 from __future__ import annotations

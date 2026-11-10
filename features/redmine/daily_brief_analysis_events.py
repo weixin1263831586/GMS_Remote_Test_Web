@@ -156,8 +156,6 @@ class DailyBriefAnalysisEventStore:
         self._lock = threading.RLock()
         self._ready = False
 
-    # ---------------------------------------------------------------- schema
-
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
@@ -172,8 +170,6 @@ class DailyBriefAnalysisEventStore:
             conn.execute(statement)
         conn.commit()
         self._ready = True
-
-    # ----------------------------------------------------------------- write
 
     def reset(self, run_id: str, issue_id: int) -> None:
         """清空一次 (run, issue) 的旧时间线：每次重分析从干净时间线开始。"""
@@ -220,8 +216,6 @@ class DailyBriefAnalysisEventStore:
             )
             conn.commit()
             return sequence
-
-    # ------------------------------------------------------------------ read
 
     def list_after(
         self, run_id: str, issue_id: int, *, after_sequence: int = 0, limit: int = 100
@@ -336,8 +330,6 @@ class AnalysisProgressRecorder:
         except Exception:
             logger.debug("analysis progress start failed", exc_info=True)
 
-    # ------------------------------------------------------------------ api
-
     def stage_changed(self, summary: str, *, stage: str = "") -> None:
         self._emit("stage_changed", stage=stage, summary=summary)
 
@@ -393,8 +385,6 @@ class AnalysisProgressRecorder:
             return
         reason = scrub_secrets(error_type or "analysis failed")
         self._emit("analysis_failed", status="failed", summary=f"分析失败（{reason}） · {counts}")
-
-    # --------------------------------------------------------------- helper
 
     def _emit(self, event_type: str, *, stage: str = "", tool_name: str = "", status: str = "",
               summary: str = "", duration_ms: int = 0) -> None:

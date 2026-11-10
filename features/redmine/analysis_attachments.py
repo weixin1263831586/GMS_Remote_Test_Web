@@ -33,7 +33,6 @@ logger = logging.getLogger(__name__)
 ATTACHMENT_PROCESSABLE_RE = re.compile(r"\.(zip|7z|rar|tar|tgz|gz|xml|txt|log|png|jpg|jpeg|webp|bmp|docx|pdf)$", re.IGNORECASE)
 IMAGE_ATTACHMENT_RE = re.compile(r"\.(png|jpg|jpeg|webp|bmp)$", re.IGNORECASE)
 
-# Enhanced error patterns for structured extraction
 _ERROR_LINE_PATTERNS = [
     # Stack traces
     r"at\s+[\w.$]+\([^)]*\.\w+:\d+\)",
@@ -116,8 +115,6 @@ def _truncate(text: str, limit: int) -> str:
 
 
 class AttachmentAnalysisMixin:
-    # Attachment processing
-
     async def _process_attachment(self, client: RedmineClient, issue_id: int, attachment: RedmineAttachment) -> dict[str, Any]:
         issue_dir = self.attachments_dir / str(issue_id)
         issue_dir.mkdir(parents=True, exist_ok=True)
@@ -411,8 +408,6 @@ class AttachmentAnalysisMixin:
             "failures": failures,
         }
 
-    # Error extraction
-
     def _extract_failure_like_lines(self, content: str, limit: int = MAX_FAILURE_LINES) -> list[str]:
         """Extract individual error lines from content."""
         return [
@@ -437,5 +432,3 @@ class AttachmentAnalysisMixin:
         if current_block and len(blocks) < max_blocks:
             blocks.append("\n".join(current_block))
         return blocks
-
-    # Issue payload

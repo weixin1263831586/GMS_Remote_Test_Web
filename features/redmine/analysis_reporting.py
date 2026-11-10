@@ -26,7 +26,6 @@ def _doc_line(value: Any) -> str:
     return str(value or "")
 
 
-# Enhanced error patterns for structured extraction
 _ERROR_LINE_PATTERNS = [
     # Stack traces
     r"at\s+[\w.$]+\([^)]*\.\w+:\d+\)",
@@ -118,8 +117,6 @@ class ReportingAnalysisMixin:
             cls = f' class="{lang}"' if lang else ""
             return f"<pre><code{cls}>\n{code}</code></pre>"
         return re.sub(r"```(\w*)\n([\s\S]*?)```", _replace, str(text or ""))
-
-    # Document generation
 
     def _build_issue_document(self, item: dict[str, Any]) -> str:
         failures = item.get("failures_json") or []
@@ -229,10 +226,8 @@ class ReportingAnalysisMixin:
                 "",
             ])
 
-        # Reply draft at the end
         lines.extend(["", "## 建议回复草稿", item.get("reply_draft") or "", ""])
 
-        # 将 AI 和存储字段统一转换为字符串。
         # Coerce every item to a single str so the document always builds.
         return "\n".join(_doc_line(x) for x in lines).strip() + "\n"
 

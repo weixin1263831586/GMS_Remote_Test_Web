@@ -22,7 +22,7 @@ def test_repository_has_root_gitignore():
 
     The ignore policy below is only meaningful if the file is actually
     tracked; a missing root .gitignore silently exposes runtime config,
-    secrets and data on fresh clones (review finding P0-1).
+    secrets and data on fresh clones.
     """
     assert (PROJECT_ROOT / ".gitignore").is_file()
 

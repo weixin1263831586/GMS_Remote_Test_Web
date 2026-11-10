@@ -8,7 +8,6 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# usbipd 安装命令常量
 USBIPD_INSTALL_CMD = 'winget install dorssel.usbipd-win --source winget'
 
 USBIPD_INSTALL_GUIDE = '''在Windows电脑上以【管理员身份】运行PowerShell执行：
@@ -42,7 +41,6 @@ def check_usbipd_installed(ssh_manager, ssh) -> tuple[bool, str]:
 def install_usbipd(ssh_manager, ssh, config: dict[str, Any]) -> dict[str, Any]:
     """在 Windows 主机自动安装 usbipd。"""
     try:
-        # 检查是否已经是管理员权限
         check_admin_cmd = 'whoami /groups | findstr S-1-16-12288'
         admin_result = ssh_manager.execute_command(ssh, check_admin_cmd)
 
@@ -52,12 +50,10 @@ def install_usbipd(ssh_manager, ssh, config: dict[str, Any]) -> dict[str, Any]:
                 'error': f'需要管理员权限。请在 Windows 上以【管理员身份】运行 PowerShell，然后执行: {USBIPD_INSTALL_CMD}'
             }
 
-        # 执行自动安装命令（添加自动接受参数）
         install_cmd = f'{USBIPD_INSTALL_CMD} --accept-package-agreements --accept-source-agreements'
         install_result = ssh_manager.execute_command(ssh, install_cmd, timeout=120)
 
         if install_result.ok:
-            # 验证安装
             installed, version = check_usbipd_installed(ssh_manager, ssh)
             if installed:
                 return {

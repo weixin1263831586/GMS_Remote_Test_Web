@@ -173,7 +173,7 @@ def evaluate_evidence_gate(
         trace.listed_text_artifact_ids(attachment_calls)
         - trace.read_artifact_ids()
     )
-    # "读过 4096 首窗" ≠ "日志覆盖完整"（#661066 复审）：已读过但没有任何
+    # "读过 4096 首窗" ≠ "日志覆盖完整"：已读过但没有任何
     # coverage-complete 搜索覆盖的 artifact 单独列出，供报告与修复提示
     # 区分"读过"与"看全"。coverage_complete=true 表示整次扫描覆盖了快照
     # 的全部候选文本（含零命中附件），因此针对当前 issue 的覆盖完整搜索

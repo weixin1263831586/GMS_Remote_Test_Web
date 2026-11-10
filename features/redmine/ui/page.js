@@ -1,5 +1,4 @@
 // Redmine page; loaded by page.html in dependency order.
-// ---- Init ----
 document.addEventListener('click', function(event) {
   const link = event.target.closest('[data-redmine-issue-id]');
   if (link) selectRedmineWorkspaceIssue(link.dataset.redmineIssueId);

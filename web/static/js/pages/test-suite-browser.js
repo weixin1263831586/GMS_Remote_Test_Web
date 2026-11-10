@@ -266,10 +266,9 @@ async function loadSuiteWorkerSelector(signal = window.GmsPageLifecycle?.signalF
     }
 }
 
-// Suite Browser keeps its OWN cache.  It previously wrote the
-// execution page's shared test-suites cache, so browsing
-// Worker B's suites replaced the execution page's cached list (and the
-// reverse).  A per-browser cache keyed by worker keeps both views intact.
+// Suite Browser keeps its OWN cache, keyed by worker: browsing Worker
+// B's suites must not replace the execution page's shared cached list
+// (and the reverse).
 let _browserSuitesCache = [];
 let _browserSuitesWorkerId = '';
 
@@ -287,10 +286,9 @@ async function loadSuitesForBrowserWorker(force = false, signal = window.GmsPage
     if (!force && _browserSuitesWorkerId === workerId && _browserSuitesCache.length > 0) {
         return _browserSuitesCache;
     }
-    // The LOCAL branch used to call loadTestSuites(), which loads by
-    // the GLOBAL EXECUTION worker — browsing "local" while the execution
-    // target was B cached B's suites under the local label.  Fetch the
-    // local suite list directly instead, independent of execution state.
+    // The LOCAL branch fetches the local suite list directly — never via
+    // loadTestSuites(), which loads by the GLOBAL EXECUTION worker (that
+    // would cache B's suites under the local label).
     if (isLocalWorkspaceWorker(workerId)) {
         const generation = ++_browserSuitesRequestGeneration;
         const url = force ? '/api/test/suites?force_refresh=1' : '/api/test/suites';

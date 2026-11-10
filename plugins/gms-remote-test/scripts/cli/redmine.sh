@@ -513,7 +513,7 @@ gms-rt-artifact-search() {
 }
 
 gms-rt-artifact-search-batch() {
-    # 多关键词单遍搜索（#661066 复审）：一次请求完成全部关键词匹配，
+    # 多关键词单遍搜索：一次请求完成全部关键词匹配，
     # 避免逐词搜索对同一批大日志的重复扫描。用法：
     #   gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N]
     local snapshot_id=""

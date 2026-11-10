@@ -54,7 +54,6 @@
         </div>
     </div>
     <div class="main-container">
-        <!-- 左侧导航栏 -->
         {% include 'components/sidebar.html' %}
 
         {% include 'dialogs/client-account-switch.html' %}
@@ -63,66 +62,45 @@
 
         {% include 'dialogs/guide-image.html' %}
 
-        <!-- 右侧主内容区 -->
-        <!-- 测试界面页面 -->
         {% include 'pages/test.html' %}
-        <!-- End of page-test -->
 
-        <!-- 多主机桌面 -->
         {% include 'pages/desktop.html' %}
 
-        <!-- 终端页面 -->
         {% include 'pages/terminal.html' %}
 
-        <!-- 用户管理页面 -->
         {% include 'pages/users.html' %}
 
-        <!-- 安全审计页面 -->
         {% include 'pages/security-audit.html' %}
 
-        <!-- 设备管理页面 -->
         {% include 'pages/devices.html' %}
 
-        <!-- 报告管理页面 -->
         {% include 'pages/reports.html' %}
 
-        <!-- 报告分析页面 -->
         {% include 'pages/report-analysis.html' %}
 
-        <!-- 测试套件页面 -->
         {% include 'pages/test-suites.html' %}
 
-        <!-- APK分析页面 -->
         {% include 'pages/apk-analysis.html' %}
 
-        <!-- 系统接口页面 -->
         {% include 'pages/api-docs.html' %}
 
-        <!-- 常用网址页面 -->
         {% include 'pages/websites.html' %}
 
-        <!-- 常用工具页面 -->
         {% include 'pages/tools.html' %}
 
-        <!-- GMS助手页面 -->
         {% include 'pages/gms-assistant.html' %}
 
         <!-- GMS ATS页面 -->
         {% include 'pages/automation.html' %}
 
-        <!-- 主机集群页面 -->
         {% include 'pages/cluster.html' %}
 
-        <!-- 设备串口页面 -->
         {% include 'pages/devices-console.html' %}
 
-        <!-- RedmineAgent页面 -->
         {% include 'pages/redmine-agent.html' %}
 
-        <!-- Gerrit看板页面 -->
         {% include 'pages/gerrit-dashboard.html' %}
 
-        <!-- 对话Agent页面 -->
         {% include 'pages/agent.html' %}
 
         <!-- 个人知识库 页面 -->
@@ -131,10 +109,8 @@
         {% include 'dialogs/kb-upload.html' %}
 
 
-        <!-- 添加分类弹框 -->
         {% include 'dialogs/category.html' %}
 
-        <!-- 添加工具弹框 -->
         {% include 'dialogs/tool.html' %}
 
         <!-- 常用工具 - 添加分类弹框 -->
@@ -143,50 +119,37 @@
         <!-- 常用工具 - 添加/编辑工具弹框 -->
         {% include 'dialogs/ut-tool.html' %}
 
-        <!-- 系统架构页面 -->
         {% include 'pages/architecture.html' %}
     </div>
 
-    <!-- 弹框 -->
     {% include 'dialogs/config.html' %}
 
-    <!-- GMS助手配置弹框 -->
     {% include 'dialogs/gms-assistant-config.html' %}
 
-    <!-- WiFi配置弹框 -->
     {% include 'dialogs/wifi.html' %}
 
     <!-- adbproxy-rs ADB设备接入弹框 -->
     {% include 'dialogs/adb-proxy.html' %}
 
-    <!-- USB/IP 设备接入弹框 -->
     {% include 'dialogs/usbip-attach.html' %}
 
-    <!-- 设备主机密码弹框 -->
     {% include 'dialogs/device-password.html' %}
 
-    <!-- VPN Credential Modal -->
     {% include 'dialogs/vpn-credential.html' %}
 
-    <!-- Tailscale Info Modal -->
     {% include 'dialogs/tailscale-info.html' %}
 
-    <!-- Username Detection Modal -->
     {% include 'dialogs/username-detect.html' %}
 
     <!-- 管理员提权弹框（敏感操作：移除用户/设备） -->
     {% include 'dialogs/elevate.html' %}
 
-    <!-- Agent 配对与授权详情弹框 -->
     {% include 'dialogs/agent-enrollment.html' %}
 
-    <!-- 共享固件弹框 -->
     {% include 'dialogs/firmware-share.html' %}
 
-    <!-- 周报总结弹框 -->
     {% include 'dialogs/weekly-report.html' %}
 
-    <!-- 共享固件远端密码弹框 -->
     {% include 'dialogs/firmware-share-password.html' %}
 
     <!-- 测试结果列表弹框 (tradefed list results) -->
@@ -197,25 +160,18 @@
         <button type="button" class="btn-xxs" data-click="closeTestResultsModal">关闭</button>
     </div>
 
-    <!-- 跨主机测试报告拷贝弹框 -->
     {% include 'dialogs/report-copy.html' %}
 
-    <!-- 烧写固件弹框 -->
     {% include 'dialogs/firmware.html' %}
 
-    <!-- 烧写GSI弹框 -->
     {% include 'dialogs/gsi.html' %}
 
-    <!-- 智能 UI 操控弹框：截图 + 布局元素 + 点按 -->
     {% include 'dialogs/ui-control.html' %}
 
-    <!-- 烧写SN码弹框 -->
     {% include 'dialogs/sn.html' %}
 
-    <!-- 文件浏览器弹框 -->
     {% include 'dialogs/file-browser.html' %}
 
-    <!-- 设备 config 资源查看弹框 -->
     {% include 'dialogs/device-config.html' %}
     <div id="device-config-minimized" class="dcfg-minimized" style="display:none;">
         <button type="button" class="btn-xs btn-primary" data-click="restoreDeviceConfigExplorer">ℹ️ device info</button>
@@ -223,13 +179,10 @@
         <button type="button" class="btn-xxs" data-click="closeDeviceConfigExplorer">关闭</button>
     </div>
 
-    <!-- Toast Notification -->
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <!-- Snackbar Notification (右下角弹框) -->
     <div id="snackbar-container" class="snackbar-container"></div>
 
-    <!-- Notification Center -->
     <div id="notification-dismiss-layer" class="notification-dismiss-layer" aria-hidden="true"></div>
     <div id="notification-panel" class="notification-panel">
         <div class="notification-panel-header">
@@ -246,19 +199,14 @@
         </div>
     </div>
 
-    <!-- 添加本地测试套件路径弹框 -->
     {% include 'dialogs/add-local-suite.html' %}
 
-    <!-- 新建/编辑设备分组弹框 -->
     {% include 'dialogs/device-group.html' %}
 
-    <!-- 解压测试套件弹框 -->
     {% include 'dialogs/extract-suite.html' %}
 
-    <!-- 安装指南弹框 -->
     {% include 'dialogs/install-guide.html' %}
 
-    <!-- SSHD 安装指南弹框 -->
     {% include 'dialogs/sshd-install-guide.html' %}
 
     <!-- 统一确认对话框 -->
@@ -274,10 +222,8 @@
 .usage-chip { position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); }
 </style>
 
-    <!-- 使用实例弹框 -->
     {% include 'dialogs/usage-examples.html' %}
 
-    <!-- 报错诊断工作台弹框 -->
     {% include 'dialogs/report-diagnosis.html' %}
     <div id="report-diagnosis-minimized" style="display: none; position: fixed; right: 18px; bottom: 18px; z-index: 10001; align-items: center; gap: 10px; max-width: min(520px, calc(100vw - 36px)); padding: 10px 12px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.32);">
         <button type="button" class="btn-xs btn-primary" data-click="restoreReportDiagnosisWorkbench">🤖 报错诊断</button>

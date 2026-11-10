@@ -1,4 +1,4 @@
-"""Redmine 诊断 → DiagnosisReadModel 投影（统一读模型，全局审查第二十节）。
+"""Redmine 诊断 → DiagnosisReadModel 投影（统一读模型）。
 
 单号分析 / 晨报共用的 AI 结果 schema（``daily_brief_models.IssueResult``）
 是 Redmine 域的原生存储契约；本适配器在 serve 时刻把它投影成

@@ -1,4 +1,4 @@
-"""报告诊断 → DiagnosisReadModel 适配器测试（全局审查第二十节）。
+"""报告诊断 → DiagnosisReadModel 适配器测试。
 
 覆盖：五路召回到 canonical 章节的投影、evidence/background 分层
 （ADR 0014）、AI 降级时的 conclusion 语义、失败指纹派生与降级、

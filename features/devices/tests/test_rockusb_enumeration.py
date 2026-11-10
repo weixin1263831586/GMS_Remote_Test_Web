@@ -90,8 +90,9 @@ class RockusbProbeParsingTests(unittest.TestCase):
 
     def test_rk3576_loader_pid_is_recognized(self):
         # 现场案例（2026-09-15）：RK3576GMS1 烧写时进入 Loader 枚举为
-        # 2207:350e / "USB download gadget"；默认 PID 清单此前只有
-        # RK3572 的 351a，导致 wait_for_single_rockusb_loader 超时误报
+        # 2207:350e / "USB download gadget"；默认 PID 清单必须包含
+        # RK3576 的 350e——只认 RK3572 的 351a 会让
+        # wait_for_single_rockusb_loader 超时误报
         # "未能确认目标设备是唯一 Loader"。
         probe = "350e\tRK3576GMS1\tUSB download gadget\n"
         self.assertEqual(

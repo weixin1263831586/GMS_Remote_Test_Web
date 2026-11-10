@@ -155,8 +155,6 @@ class ApkImportApiTests(unittest.TestCase):
                 }
             )
 
-    # ------------------------------------------------------------------ tests
-
     def test_import_creates_task_with_source_ref(self):
         response = self.client.post(
             f"/api/redmine-agent/artifacts/{self.artifact_id}/apk-analysis",
@@ -169,7 +167,6 @@ class ApkImportApiTests(unittest.TestCase):
         self.assertEqual(data["source_ref"]["snapshot_id"], self.snapshot_id)
         task = self.firmware_runtime.global_state.apk_analysis_tasks[data["task_id"]]
         self.assertEqual(task["source_ref"]["sha256"], self.artifact_sha256)
-        # 伪造完成，清理后台任务
         self._complete_task(data["task_id"])
 
     def test_import_rejects_cross_owner(self):

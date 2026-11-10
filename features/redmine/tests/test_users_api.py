@@ -56,11 +56,9 @@ class UsersApiPermissionTests(unittest.TestCase):
 
         # 普通用户（人工会话）→ 放行 human 检查，admin 由 Depends 层卡。
         self.assertIsNotNone(require_human_principal(_request("alice")))
-        # Agent token → 403。
         with self.assertRaises(HTTPException) as ctx:
             require_human_principal(_request("agent-1", auth_method="agent_token"))
         self.assertEqual(ctx.exception.status_code, 403)
-        # 机器能力 token → 403。
         with self.assertRaises(HTTPException) as ctx:
             require_human_principal(
                 _request("worker-1", auth_method="machine_authority"))

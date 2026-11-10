@@ -311,7 +311,7 @@
         }
         window.submitDeviceGroup = submitDeviceGroup;
 
-        // act-bridge 委托目标（替代历史 inline 多语句 handler）。
+        // act-bridge 委托目标。
         function autoGroupAndReset(value) {
             autoGroupDevices(value);
             // 重置回占位项
