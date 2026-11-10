@@ -496,6 +496,113 @@ def aoa_capabilities() -> dict[str, Any]:
             "aoa_affine_mapping_v2": True, "aoa_calibration_focus_v1": True, "aoa_semantic_v1": True}
 
 
+# 恢复出厂（fastboot 路径）专用超时：等设备进 bootloader / fastbootd
+# 各可达数分钟；format userdata 视分区大小可达数分钟，必须比通用 30s 长。
+FACTORY_RESET_FASTBOOT_WAIT_SECONDS = 120
+FACTORY_RESET_FASTBOOTD_WAIT_SECONDS = 90
+FACTORY_RESET_FORMAT_TIMEOUT_SECONDS = 420
+
+
+def _wait_fastboot_serial(serial: str, wait_seconds: int) -> bool:
+    """轮询 fastboot devices 直到目标序列号出现（bootloader/fastbootd 通用）。"""
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        try:
+            listing = subprocess.run(
+                ["fastboot", "devices"], capture_output=True, text=True,
+                timeout=10, check=False)
+            if serial in (listing.stdout or ""):
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        time.sleep(2)
+    return False
+
+
+def _wait_fastbootd(serial: str, wait_seconds: int) -> bool:
+    """轮询 getvar is-userspace 确认已进入 userspace fastboot（fastbootd）。
+
+    RK 等厂商的 bootloader fastboot 对 erase/format 是静默 no-op（实测
+    OKAY 但分区原封不动），真正擦除必须进 fastbootd。
+    """
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        try:
+            completed = subprocess.run(
+                ["fastboot", "-s", serial, "getvar", "is-userspace"],
+                capture_output=True, text=True, timeout=10, check=False)
+            if "is-userspace: yes" in ((completed.stdout or "") + (completed.stderr or "")):
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        time.sleep(2)
+    return False
+
+
+def _factory_reset_via_fastboot(serial: str) -> dict[str, Any]:
+    """擦除 userdata 恢复出厂（fastbootd format 路径）。
+
+    实测两条死路：user build 静默丢弃 MASTER_CLEAR 广播；RK bootloader
+    fastboot 的 erase/format OKAY 但不落盘。唯一可靠序列：reboot
+    bootloader → reboot fastboot（fastbootd）→ format:f2fs userdata
+    （format 失败按 ext4 → erase 兜底，非 RK 平台 erase 本身有效）→
+    fastboot reboot 并复验离开 fastboot（bootloader 可能吞掉首次 reboot，
+    最多重发 3 次）。
+    """
+    output: list[str] = []
+
+    def run(argv: list[str], timeout: int) -> tuple[bool, str]:
+        try:
+            completed = subprocess.run(
+                argv, capture_output=True, text=True, timeout=timeout, check=False)
+            text = (completed.stdout or completed.stderr or "").strip()
+            output.append(text)
+            return completed.returncode == 0, text
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            output.append(str(exc))
+            return False, str(exc)
+
+    def fail(reason: str) -> dict[str, Any]:
+        output.append(reason)
+        return {"device": serial, "success": False, "output": "\n".join(output)}
+
+    if not run(["adb", "-s", serial, "reboot", "bootloader"], 30)[0]:
+        return fail("进入 bootloader 失败")
+    if not _wait_fastboot_serial(serial, FACTORY_RESET_FASTBOOT_WAIT_SECONDS):
+        return fail("设备未进入 fastboot 模式，无法执行擦除")
+    # 切入 fastbootd：bootloader 模式的擦除命令不落盘（RK 实测）。
+    run(["fastboot", "-s", serial, "reboot", "fastboot"], 60)
+    if not _wait_fastbootd(serial, FACTORY_RESET_FASTBOOTD_WAIT_SECONDS):
+        return fail("设备未进入 fastbootd（userspace fastboot），无法可靠擦除")
+    wiped = False
+    for fs_args in (["format:f2fs", "userdata"], ["format:ext4", "userdata"],
+                    ["erase", "userdata"]):
+        ok, _ = run(["fastboot", "-s", serial, *fs_args],
+                    FACTORY_RESET_FORMAT_TIMEOUT_SECONDS)
+        if ok:
+            wiped = True
+            break
+    if not wiped:
+        return fail("userdata 擦除失败（format/erase 均被设备拒绝）")
+    # cache 可能不存在（super 动态分区板型），失败不阻断。
+    run(["fastboot", "-s", serial, "erase", "cache"], 120)
+    # RK bootloader 可能吞掉 fastboot reboot：复验离开 fastboot，最多重发 3 次。
+    for _ in range(3):
+        run(["fastboot", "-s", serial, "reboot"], 30)
+        for _ in range(6):
+            try:
+                listing = subprocess.run(
+                    ["fastboot", "devices"], capture_output=True, text=True,
+                    timeout=10, check=False)
+                if serial not in (listing.stdout or ""):
+                    return {"device": serial, "success": True,
+                            "output": "\n".join(output)}
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+            time.sleep(3)
+    return fail("擦除完成，但设备多次 reboot 请求后仍停留在 fastboot，请手动重启")
+
+
 def execute_device_action(
     action: str,
     device_ids: list[str],
@@ -778,6 +885,11 @@ def execute_device_action(
                 "success": enabled.returncode == 0 and connected.returncode == 0,
                 "output": "\n".join(filter(None, [enabled.stdout, enabled.stderr,
                                                     connected.stdout, connected.stderr])).strip()})
+        return {"results": results, "summary": {"total": len(results),
+                "success": sum(bool(item["success"]) for item in results),
+                "failed": sum(not item["success"] for item in results)}}
+    if action == "factory_reset":
+        results = [_factory_reset_via_fastboot(serial) for serial in serials]
         return {"results": results, "summary": {"total": len(results),
                 "success": sum(bool(item["success"]) for item in results),
                 "failed": sum(not item["success"] for item in results)}}

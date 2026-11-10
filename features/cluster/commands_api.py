@@ -207,6 +207,7 @@ def _notify_device_action_result(command: dict[str, Any]) -> None:
         "reboot": "设备重启",
         "reboot_bootloader": "进入 Bootloader",
         "remount": "Remount",
+        "factory_reset": "恢复出厂",
     }
     subject = action_labels.get(action, action)
     worker_id = str(command.get("worker_id") or "")

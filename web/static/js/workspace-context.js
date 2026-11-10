@@ -174,7 +174,19 @@
     function navigate(page, patch = {}) {
         update({...patch, origin_page: page}, {source: 'navigate'});
         if (typeof window.switchPage === 'function') window.switchPage(page, null);
-        postToFrame(page, 'workspace-context-navigate');
+        const frame = frameForPage(page);
+        // 懒加载 iframe 尚未完成首帧（surface-ready）时，同步 postMessage
+        // 会落进空白文档而丢失，目标页收不到 navigate 语义。改为在文档
+        // load 后补发一次；已就绪的帧仍走同步通道。
+        if (frame && frame.dataset.surfaceReadyReceived !== 'true') {
+            const deliver = () => postToFrame(page, 'workspace-context-navigate');
+            frame.addEventListener('load', deliver, {once: true});
+            // load 事件可能已经错过（documentLoaded 为 true 的热帧）：
+            // 再补一次同步投递，重复消息由子页 applyingWorkspaceContext 幂等。
+            postToFrame(page, 'workspace-context-navigate');
+        } else {
+            postToFrame(page, 'workspace-context-navigate');
+        }
     }
 
     async function loadClusterStatus() {

@@ -97,7 +97,7 @@ def _deliver_pending(cfg: dict[str, Any]) -> int:
     store = get_ops_store()
     notified = 0
     try:
-        pending = store.pending_events(limit=MAX_RETRY_EVENTS)
+        pending = store.pending_events(limit=MAX_RETRY_EVENTS, ready_only=True)
     except Exception:
         logger.exception("ops pending-event query failed")
         return 0

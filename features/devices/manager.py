@@ -6,13 +6,21 @@ import re
 import shlex
 import subprocess
 import threading
+import time
 from typing import Any
 
 from foundation.error_model import ApiError
 from foundation.networking import is_local_host
 from foundation.security import is_safe_device_id
 
-from .adb_ops import fastboot_reboot_with_runner, reboot_with_runner, root_and_remount
+from .adb_ops import (
+    FACTORY_RESET_FASTBOOT_WAIT_SECONDS,
+    FACTORY_RESET_FASTBOOTD_WAIT_SECONDS,
+    FACTORY_RESET_FORMAT_TIMEOUT_SECONDS,
+    fastboot_reboot_with_runner,
+    reboot_with_runner,
+    root_and_remount,
+)
 from .rockusb import (
     ROCKUSB_SYSFS_PROBE_COMMAND,
     rockusb_loader_serials,
@@ -463,6 +471,99 @@ class DeviceManager:
 
         except Exception as e:
             logger.error(f"[Device] Error rebooting device: {e}")
+            return {'success': False, 'error': str(e)}
+        finally:
+            if created_ssh and ssh:
+                self.ssh_manager.return_connection(ssh)
+
+    def factory_reset_device(
+        self,
+        device_id: str,
+        ssh=None
+    ) -> dict[str, Any]:
+        """擦除 userdata 恢复出厂（fastbootd format 路径，SSH 通道）。
+
+        与 worker_agent.device_actions._factory_reset_via_fastboot 同构：
+        user build 丢 MASTER_CLEAR、RK bootloader fastboot 的 erase 不落盘，
+        必须 reboot bootloader → reboot fastboot 进 userspace fastboot →
+        format:f2fs userdata → reboot 并复验离开 fastboot（吞 reboot 时
+        最多重发 3 次）。耗时可达数分钟，调用方已用 to_thread 隔离事件循环。
+        """
+        _require_safe_device_id(device_id)
+        config = self.config_manager.load_config()
+
+        if ssh is None:
+            ssh = self.ssh_manager.get_connection(config)
+            if not ssh:
+                return {'success': False, 'error': 'SSH连接失败'}
+            created_ssh = True
+        else:
+            created_ssh = False
+
+        try:
+            def run_adb(args: str, timeout: int) -> tuple[str, int]:
+                result = self.ssh_manager.execute_command(
+                    ssh,
+                    f"adb -s {device_id} {args}",
+                    timeout=timeout,
+                )
+                return (result.stdout or result.stderr or ''), result.code
+
+            def run_fastboot(args: str, timeout: int) -> tuple[str, int]:
+                result = self.ssh_manager.execute_command(
+                    ssh,
+                    f"fastboot -s {shlex.quote(device_id)} {args}",
+                    timeout=timeout,
+                )
+                return (result.stdout or result.stderr or ''), result.code
+
+            reboot = run_adb('reboot bootloader', 30)
+            if reboot[1] != 0:
+                return {'success': False, 'error': reboot[0] or '进入 bootloader 失败'}
+            # 等待设备在 fastboot 枚举（bootloader 启动可达数十秒）。
+            in_fastboot = False
+            deadline = time.monotonic() + FACTORY_RESET_FASTBOOT_WAIT_SECONDS
+            while time.monotonic() < deadline:
+                if device_id in self.get_fastboot_devices(ssh):
+                    in_fastboot = True
+                    break
+                time.sleep(2)
+            if not in_fastboot:
+                return {'success': False, 'error': '设备未进入 fastboot 模式，无法执行擦除'}
+            # 切入 fastbootd：bootloader 模式的擦除命令不落盘（RK 实测）。
+            run_fastboot('reboot fastboot', 60)
+            in_fastbootd = False
+            deadline = time.monotonic() + FACTORY_RESET_FASTBOOTD_WAIT_SECONDS
+            while time.monotonic() < deadline:
+                out, code = run_fastboot('getvar is-userspace', 10)
+                if code == 0 and 'is-userspace: yes' in out:
+                    in_fastbootd = True
+                    break
+                time.sleep(2)
+            if not in_fastbootd:
+                return {'success': False, 'error': '设备未进入 fastbootd，无法可靠擦除'}
+            wiped = False
+            for fs_args in ('format:f2fs userdata', 'format:ext4 userdata', 'erase userdata'):
+                out, code = run_fastboot(fs_args, FACTORY_RESET_FORMAT_TIMEOUT_SECONDS)
+                if code == 0:
+                    wiped = True
+                    break
+            if not wiped:
+                return {'success': False, 'error': 'userdata 擦除失败（format/erase 均被设备拒绝）'}
+            # cache 可能不存在（super 动态分区板型），失败不阻断。
+            run_fastboot('erase cache', 120)
+            # bootloader 可能吞掉 reboot：复验离开 fastboot，最多重发 3 次。
+            for _ in range(3):
+                run_fastboot('reboot', 30)
+                for _ in range(6):
+                    if device_id not in self.get_fastboot_devices(ssh):
+                        return {'success': True,
+                                'message': '已擦除 userdata 并重启，设备正在重新开机（首次开机需数分钟）'}
+                    time.sleep(3)
+            return {'success': False,
+                    'error': '擦除完成，但设备多次 reboot 请求后仍停留在 fastboot，请手动重启'}
+        except Exception as e:
+            logger.error(f"[Device] Error factory-resetting device: {e}")
             return {'success': False, 'error': str(e)}
         finally:
             if created_ssh and ssh:

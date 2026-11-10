@@ -4,6 +4,7 @@ let agentInitialized = false;
 let agentInputHistory = JSON.parse(localStorage.getItem('gms_agent_input_history') || '[]');
 let agentHistoryIndex = -1;  // -1 = not browsing history
 let agentModelStatusLoaded = false;
+let agentModelStatusFlight = null;
 const agentHandledAutoOpenMessageIds = new Set();
 
 function agentModelStatusText(status) {
@@ -25,7 +26,15 @@ function agentModelStatusText(status) {
     return {text: `${label}：待检测`, state: 'ready_to_probe', title: `${provider.name} / ${provider.model}；点击“检测”执行一次最小推理`};
 }
 
-async function loadAgentModelStatus(probe = false) {
+function loadAgentModelStatus(probe = false, quiet = false) {
+    if (agentModelStatusFlight) return agentModelStatusFlight;
+    agentModelStatusFlight = fetchAgentModelStatus(probe, quiet).finally(() => {
+        agentModelStatusFlight = null;
+    });
+    return agentModelStatusFlight;
+}
+
+async function fetchAgentModelStatus(probe, quiet) {
     const label = $('agent-model-status');
     const button = $('agent-model-check');
     if (!label || !button) return;
@@ -42,13 +51,13 @@ async function loadAgentModelStatus(probe = false) {
         const view = agentModelStatusText(result.data?.status);
         label.textContent = view.text;
         label.dataset.state = view.state;
-        label.title = `${view.title}。该模型用于报告/知识分析；Agent 指令路由使用确定性规则。`;
-        if (probe) showToast(view.state === 'available' ? 'AI 分析模型可用' : view.text, view.state === 'available' ? 'success' : 'warning');
+        label.title = `${view.title}。该模型用于报告/知识分析；对话引擎状态单独显示。`;
+        if (probe && !quiet) showToast(view.state === 'available' ? 'AI 分析模型可用' : view.text, view.state === 'available' ? 'success' : 'warning');
     } catch (error) {
         label.textContent = '分析模型：不可用';
         label.dataset.state = 'unavailable';
         label.title = error.message;
-        if (probe) showToast(`模型检测失败: ${error.message}`, 'warning');
+        if (probe && !quiet) showToast(`模型检测失败: ${error.message}`, 'warning');
     } finally {
         agentModelStatusLoaded = true;
         button.disabled = false;
@@ -99,7 +108,8 @@ function getAgentStatusLabel(status) {
         analyzing: '分析中',
         done: '完成',
         error: '异常',
-        cancelled: '已取消'
+        cancelled: '已取消',
+        thinking: '思考中'
     };
     return labels[status] || status || '空闲';
 }
@@ -109,11 +119,19 @@ function getCurrentPageName() {
     return active?.id?.replace(/^page-/, '') || '';
 }
 
+const agentBeijingTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai', hourCycle: 'h23',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+});
+
 function formatAgentTime(value) {
     if (!value) return '';
-    const raw = String(value);
-    const match = raw.match(/T(\d{2}:\d{2}:\d{2})/);
-    return match ? match[1] : raw.replace('T', ' ');
+    const raw = String(value).trim();
+    // 兼容旧会话保存的北京时间（无时区）；新时间戳始终携带时区。
+    const timestamp = /^\d{4}-\d{2}-\d{2}T/.test(raw) && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw)
+        ? `${raw}+08:00` : raw;
+    const date = new Date(timestamp);
+    return Number.isNaN(date.getTime()) ? '' : agentBeijingTimeFormatter.format(date);
 }
 
 function getAgentMessageTone(message) {
@@ -131,12 +149,12 @@ function renderAgentPlanContent(content) {
     const notes = [];
 
     lines.forEach(line => {
-        const item = line.replace(/^- /, '');
+        const item = line.replace(/^\s*- /, '');
         const idx = item.indexOf(':');
-        if (line.startsWith('- ') && idx > 0) {
+        if (/^\s*- /.test(line) && idx > 0) {
             fields.push([item.slice(0, idx).trim(), item.slice(idx + 1).trim()]);
-        } else if (/输入|当前没有|不能执行/.test(line)) {
-            notes.push(line);
+        } else if (/输入|当前没有|不能执行|存在阻塞|解决后|重新规划/.test(line)) {
+            notes.push(line.replace(/^\s+/, ''));
         } else {
             intro.push(line);
         }
@@ -179,10 +197,24 @@ function renderAgentMessages(session) {
         const isPlanLike = kind === 'plan' || plan;
         let actions = '';
 
-        if (plan && session.status === 'planning') {
+        if (plan && plan.type === 'workflow_draft') {
+            const planReady = plan.preflight?.ready && session.status !== 'thinking';
+            const blockers = (plan.preflight?.blocks || []).map(item => item.reason || item.stage).join('；')
+                || '资源预检未通过，请点击重新规划刷新';
+            // 多阶段工作流：重新规划走显式 plan 操作（保留实体并升版本）。
             actions += `
                 <div class="agent-actions">
-                    <button class="btn-xs" data-click="confirmAgentPlan">执行计划</button>
+                    <button class="btn-xs" data-click="sendAgentMessage" data-a0="false" data-a1="重新规划">重新规划</button>
+                    <button class="btn-xs" data-click="sendAgentMessage" data-a0="false" data-a1="取消计划">取消计划</button>
+                    <button class="btn-xs" data-click="confirmAgentPlan" ${planReady ? '' : 'disabled'}
+                        title="${escapeHtml(session.status === 'thinking' ? 'Agent 正在规划，请稍候' : planReady ? '确认后执行当前计划' : blockers)}">确认执行</button>
+                </div>
+                ${plan.preflight?.ready ? '' : `<div class="agent-plan-note">暂不可执行：${escapeHtml(blockers)}。解决后点击“重新规划”刷新。</div>`}
+            `;
+        } else if (plan && session.status === 'planning') {
+            actions += `
+                <div class="agent-actions">
+                    <button class="btn-xs" data-click="confirmAgentPlan">确认执行</button>
                     <button class="btn-xs" data-click="sendAgentMessage" data-a0="false" data-a1="重新规划">重新规划</button>
                 </div>
             `;
@@ -204,7 +236,9 @@ function renderAgentMessages(session) {
                 if (a.page) {
                     return `<button class="btn-xs" data-click="openAgentPageAction" data-a0="${escapeJsAttr(a.page)}" data-a1="${escapeJsAttr(JSON.stringify(a.params || {}))}">${escapeHtml(a.label)}</button>`;
                 } else if (a.action) {
-                    return `<button class="btn-xs" data-click="sendAgentAction" data-a0="${escapeJsAttr(a.action)}" data-a1="${escapeJsAttr(JSON.stringify(a.params || {}))}" data-a2="${escapeJsAttr(a.label || a.action)}">${escapeHtml(a.label)}</button>`;
+                    const retryDisabled = a.action === 'agent_retry' && (session.status === 'thinking'
+                        || session.status === 'cancelled' || a.params?.retry_id !== session.agent_retry?.id);
+                    return `<button class="btn-xs" data-click="sendAgentAction" data-a0="${escapeJsAttr(a.action)}" data-a1="${escapeJsAttr(JSON.stringify(a.params || {}))}" data-a2="${escapeJsAttr(a.label || a.action)}" ${retryDisabled ? 'disabled' : ''}>${escapeHtml(a.label)}</button>`;
                 }
                 return '';
             }).filter(Boolean).join('');
@@ -223,7 +257,8 @@ function renderAgentMessages(session) {
         }
 
         const escapedContent = escapeHtml(message.content || '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-        const contentHtml = isPlanLike ? renderAgentPlanContent(message.content || '') : escapedContent;
+        const contentHtml = (isPlanLike ? renderAgentPlanContent(message.content || '') : escapedContent)
+            + (data.question ? renderAgentQuestion(message, session) : '');
         const toneClass = tone ? ` ${tone}` : '';
         const bodyClass = isPlanLike ? 'agent-message-body plan-body' : 'agent-message-body';
 
@@ -255,6 +290,89 @@ function renderAgentMessages(session) {
     }
 }
 
+// 与 features/automation/ui/state.js 的流水线阶段表保持镜像：Agent 页
+// 无法引用 ATS 懒加载帧内的常量，步骤面板独立渲染同一套阶段模型。
+const AGENT_PIPELINE_STAGES = [
+    'queued', 'jenkins_queued', 'jenkins_building', 'artifact_ready', 'artifact_fetching',
+    'waiting_device', 'device_locked', 'flashing', 'flash_completed',
+    'aoa_recovering', 'post_flash_verifying', 'flash_verified',
+    'testing', 'test_running', 'report_collecting', 'analyzing', 'reporting', 'completed',
+];
+const AGENT_STAGE_LABELS_ZH = {
+    queued: '排队', jenkins_queued: '构建排队', jenkins_building: '编译中',
+    artifact_fetching: '固件下载中',
+    artifact_ready: '固件就绪', waiting_device: '等待设备', device_locked: '设备已锁',
+    flashing: '刷机中', flash_completed: '刷机完成', aoa_recovering: '恢复 USB 调试',
+    post_flash_verifying: '固件校验中', flash_verified: '固件已校验', testing: '启动测试',
+    test_running: '测试中', report_collecting: '收集报告', analyzing: '分析中',
+    reporting: '上报中', completed: '完成',
+};
+const AGENT_FAILURE_STATUSES = new Set([
+    'failed', 'jenkins_failed', 'artifact_missing', 'flash_failed', 'aoa_failed',
+    'test_failed', 'analysis_failed', 'reporting_failed',
+]);
+const AGENT_FAILURE_STAGE_INDEX = {
+    jenkins_failed: AGENT_PIPELINE_STAGES.indexOf('jenkins_building'),
+    artifact_missing: AGENT_PIPELINE_STAGES.indexOf('artifact_ready'),
+    flash_failed: AGENT_PIPELINE_STAGES.indexOf('post_flash_verifying'),
+    aoa_failed: AGENT_PIPELINE_STAGES.indexOf('aoa_recovering'),
+    test_failed: AGENT_PIPELINE_STAGES.indexOf('test_running'),
+    analysis_failed: AGENT_PIPELINE_STAGES.indexOf('analyzing'),
+    reporting_failed: AGENT_PIPELINE_STAGES.indexOf('reporting'),
+};
+const AGENT_RUN_STATUS_LABELS_ZH = {
+    ...AGENT_STAGE_LABELS_ZH,
+    cancelled: '已取消', failed: '失败', jenkins_failed: '编译失败',
+    artifact_missing: '固件缺失', flash_failed: '刷机失败', aoa_failed: 'AOA 恢复失败',
+    test_failed: '测试失败', analysis_failed: '分析失败', reporting_failed: '上报失败',
+};
+
+function agentRunProgressHtml(runId, progress) {
+    const status = String(progress?.status || '');
+    if (!status) {
+        return `<div class="agent-run-progress agent-run-progress-empty">Run ${escapeHtml(runId)} 已提交，等待状态上报…</div>`;
+    }
+    const currentStage = String(progress?.current_stage || status);
+    const isCompleted = status === 'completed';
+    const isCancelled = status === 'cancelled';
+    const isFailed = AGENT_FAILURE_STATUSES.has(status);
+    // cursor 模型与 ATS 页 renderStageBar 一致：cursor 之前全部 done，
+    // cursor 落在当前/失败段，completed 时越界表示全 done。
+    let cursor = Math.max(0, AGENT_PIPELINE_STAGES.indexOf(currentStage || status));
+    if (isCompleted) cursor = AGENT_PIPELINE_STAGES.length;
+    else if (isFailed) cursor = AGENT_FAILURE_STAGE_INDEX[status] ?? cursor;
+    const cells = AGENT_PIPELINE_STAGES.map((stage, idx) => {
+        let cls = '';
+        if (idx < cursor) cls = 'done';
+        else if (idx === cursor) cls = isFailed ? 'failed' : (isCompleted ? '' : 'current');
+        const label = AGENT_STAGE_LABELS_ZH[stage] || stage;
+        return `<span class="stage-cell ${cls}" title="${escapeHtml(label)}（${stage}）"></span>`;
+    }).join('');
+    const statusLabel = isCompleted ? '已完成'
+        : isCancelled ? '已取消'
+        : isFailed ? (AGENT_RUN_STATUS_LABELS_ZH[status] || status)
+        : `当前阶段：${AGENT_RUN_STATUS_LABELS_ZH[status] || AGENT_RUN_STATUS_LABELS_ZH[currentStage] || status}`;
+    return `
+        <div class="agent-run-progress" data-run="${escapeHtml(runId)}">
+            <div class="agent-run-progress-head">
+                <span class="agent-run-stage-label">${escapeHtml(statusLabel)}</span>
+                <span class="agent-run-stage-time">${escapeHtml(formatAgentTime(progress?.updated_at))}</span>
+            </div>
+            <div class="agent-run-stage-bar">${cells}</div>
+            ${status === 'artifact_fetching' ? agentArtifactDownloadHtml(progress?.artifact_download) : ''}
+        </div>`;
+}
+
+function agentArtifactDownloadHtml(download) {
+    const total = Number(download?.total_bytes);
+    const done = Number(download?.downloaded_bytes);
+    const speed = Number(download?.bytes_per_second);
+    if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(done) || done < 0 || done > total) return '';
+    const percent = (done * 100 / total).toFixed(1);
+    const rate = Number.isFinite(speed) && speed > 0 ? ` · ${formatBytes(speed)}/s` : '';
+    return `<div class="agent-artifact-download">固件下载 ${percent}% · ${formatBytes(done)} / ${formatBytes(total)}${rate}<br><progress max="100" value="${percent}" aria-label="固件下载进度"></progress></div>`;
+}
+
 function renderAgentSteps(session) {
     const stepsEl = $('agent-steps');
     const statusEl = $('agent-status');
@@ -283,16 +401,41 @@ function renderAgentSteps(session) {
     stepsEl.innerHTML = steps.map(step => {
         const color = colorByStatus[step.status] || 'var(--text-secondary)';
         const icon = iconByStatus[step.status] || '•';
+        const waitStarted = Date.parse(step.data?.started_at || '');
+        const waiting = step.status === 'running' && step.data?.kind === 'agent_model_wait' && Number.isFinite(waitStarted);
+        const waitDetail = waiting ? ` · 已等待 ${Math.max(0, Math.floor((Date.now() - waitStarted) / 1000))} 秒` : '';
+        // Run 卡片：内嵌实时阶段条（后端监控循环回写 data.progress），
+        // 不再只是一个跳转按钮；跳转保留为次级操作。
+        const runId = String(step.data?.automation_run_id || '');
+        const runLink = runId ? `
+                ${agentRunProgressHtml(runId, step.data?.progress || {
+                    status: step.data?.status,
+                    error: step.data?.error,
+                    updated_at: step.created_at,
+                })}
+                <div style="margin-top: 6px;">
+                    <button class="btn-xs" type="button" data-click="openAgentRunInAts" data-a0="${escapeHtml(runId)}">在 GMS ATS 中查看 Run ${escapeHtml(runId)}</button>
+                </div>` : '';
         return `
             <div style="border: 1px solid var(--border-color); border-radius: 6px; padding: 9px; background: var(--darker-bg);">
                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
                     <span style="width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: ${color}; color: #fff; font-size: 11px; flex-shrink: 0;">${icon}</span>
                     <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">${escapeHtml(step.title || '')}</span>
                 </div>
-                <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.45; overflow-wrap: anywhere;">${escapeHtml(step.detail || '')}</div>
+                <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.45; overflow-wrap: anywhere;">${escapeHtml((step.detail || '') + waitDetail)}</div>
+                ${runLink}
             </div>
         `;
     }).join('');
+}
+
+function openAgentRunInAts(runId) {
+    const target = String(runId || '').trim();
+    if (!target) return;
+    window.GmsWorkspace?.navigate('automation', {
+        automation_run_id: target,
+        origin_page: 'agent',
+    });
 }
 
 function renderAgentSession(session) {
@@ -303,9 +446,17 @@ function renderAgentSession(session) {
     }
     renderAgentMessages(session);
     renderAgentSteps(session);
+    const engine = $('agent-engine-status');
+    if (engine) {
+        const backend = session.agent_backend;
+        const kkagentState = {ready: '已连接', thinking: '规划中', retrying: '重试中', timeout: '响应超时', failed: '连接异常'};
+        engine.textContent = backend?.mode === 'kkagent' ? `对话引擎：kkagent ${kkagentState[backend.state] || '连接中'}`
+            : backend?.mode === 'rules' ? '对话引擎：规则兜底' : '对话引擎：待连接';
+        engine.title = backend?.detail || '由 kkagent 规划并选择项目工具，平台负责授权和执行。';
+    }
     applyAgentSessionWorkspace(session);
 
-    if (['running', 'monitoring'].includes(session.status)) {
+    if (['running', 'monitoring', 'thinking'].includes(session.status)) {
         startAgentPolling();
     } else if (agentPollTimer) {
         stopAgentPolling();
@@ -489,6 +640,7 @@ function confirmAgentPlan() {
 }
 
 function newAgentSession() {
+    clearAgentQuestions();
     agentSessionId = '';
     localStorage.removeItem('gms_agent_session_id');
     stopAgentPolling();
@@ -590,7 +742,7 @@ function initAgentPage() {
         }
     }
 
-    if (!agentModelStatusLoaded) loadAgentModelStatus(false);
+    if (!agentModelStatusLoaded) loadAgentModelStatus(true, true);
 
     if (agentSessionId) {
         fetchAgentSession();

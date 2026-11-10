@@ -99,42 +99,19 @@ def _decode_chunks(raw_chunks):
 
 
 def _compile_needles(needles: list[str]):
-    """编译多 needle 的交替正则；返回 (pattern, key→needle 映射, keep)。
+    """Keep an independent matcher for each query, including case aliases."""
+    patterns = {
+        needle: re.compile(
+            re.escape(needle), re.IGNORECASE if len(needle.lower()) == len(needle) else 0
+        )
+        for needle in needles if needle
+    }
+    return patterns, max((len(needle) for needle in patterns), default=1) - 1
 
-    优先大小写不敏感（所有 needle 折叠保长时）；任一 needle 折叠不保长
-    则整批退回大小写敏感的精确匹配。needle 按长度降序进 alternation，
-    同一位置更长（更具体）的词优先命中。keep 是跨块不可见尾巴长度
-    （最长 needle - 1）。映射键即 ``match.group(0)``。
-    """
-    probes: list[str] = []
-    probe_map: dict[str, str] = {}
-    foldable = True
-    for needle in needles:
-        if not needle:
-            continue
-        probe = needle.lower()
-        if len(probe) != len(needle):
-            foldable = False
-    if foldable:
-        for needle in needles:
-            if not needle:
-                continue
-            probe = needle.lower()
-            if probe not in probe_map:
-                probe_map[probe] = needle
-                probes.append(probe)
-    else:
-        for needle in needles:
-            if needle and needle not in probe_map:
-                probe_map[needle] = needle
-                probes.append(needle)
-    if not probes:
-        return None, {}, 0
-    probes.sort(key=len, reverse=True)
-    flags = re.IGNORECASE if foldable else 0
-    pattern = re.compile("|".join(re.escape(probe) for probe in probes), flags)
-    keep = max(len(probe) for probe in probes) - 1
-    return pattern, probe_map, keep
+
+class _TextScanState:
+    def __init__(self):
+        self.complete = False
 
 
 def _scan_text_multi(
@@ -144,119 +121,80 @@ def _scan_text_multi(
     stop_after: int,
     context: int = SNIPPET_CONTEXT_CHARS,
     with_lines: bool = False,
+    limits: dict[str, int] | None = None,
+    scan_state: _TextScanState | None = None,
 ) -> list[tuple[str, _Occurrence]]:
-    """滚动窗口全文扫描：返回 ``(命中 needle, 出现)`` 列表（≤ stop_after）。
+    """Read/decode once, matching overlapping queries with separate budgets.
 
-    多关键词单遍交替匹配——批量搜索一次 IO/解码即可完成全部关键词
-    匹配（12 个关键词逐个搜索会反复扫描同一批文本）。
-
-    大小写折叠仅在所有 needle 折叠保长时启用（日志文本几乎总是成立），
-    否则整批退回精确匹配；snippet 始终取自未折叠原文。命中偏移是拼接
-    流的 0 基字符偏移——对普通文件即 ``artifact_read`` 的 offset 坐标
-    空间。
-
-    跨块正确性：匹配只要在当前缓冲内完整出现即为真命中（literal 交替
-    不会因后文改变）；因此块内无界扫描并按起点去重（``reported_to``），
-    ``searched_to`` 推进到流末尾减 ``keep``——块尾 keep 区的起点可能
-    因 needle 不完整而未匹配，必须留给下一轮/EOF 重扫，已报告的起点由
-    去重跳过。滚动窗口保留 ``max(context, keep)`` 字符。
+    The rolling window keeps both snippet context and incomplete matches.
+    Only starts with enough following context are emitted before EOF.
+    A saturated query retires without consuming another query's budget.
+    ``complete`` is set only after matching reaches EOF, never just because
+    the last raw chunk was read into memory.
     """
     if not needles or stop_after <= 0:
         return []
-    pattern, probe_map, keep = _compile_needles(needles)
-    if pattern is None:
+    patterns, keep = _compile_needles(needles)
+    if not patterns:
         return []
-    retain = max(context, keep)
-
-    low_buf = orig_buf = ""
-    base = 0            # buf[0] 在全流中的字符偏移
-    searched_to = 0     # 已完整检查过的流末尾（起点 < 它-keep 均已匹配）
-    reported_to = 0     # 已报告命中的起点上界（< 它的都已报告，去重）
-    newlines = 0        # orig_buf[0:..] 之前的换行总数
-    pending = None      # (needle, 全局偏移, 头部 snippet, 完成所需流末尾, probe)
+    budgets = {needle: max(0, (limits or {}).get(needle, stop_after)) for needle in patterns}
+    counts = dict.fromkeys(patterns, 0)
+    searched_to = dict.fromkeys(patterns, 0)
+    buffer = ""
+    base = newlines = 0
     results: list[tuple[str, _Occurrence]] = []
 
-    def finish(hold):
-        hit_needle, start, head, need_end, probe = hold
-        rel_start = start - base
-        match_len = len(probe)
-        after = orig_buf[rel_start + match_len:max(rel_start + match_len,
-                                                   need_end - base)]
-        line = None
-        if with_lines:
-            line = newlines + orig_buf.count("\n", 0, rel_start) + 1
-        return hit_needle, _Occurrence(start, head + after, line)
+    def scan(end: int) -> bool:
+        for needle, pattern in patterns.items():
+            resume = max(0, searched_to[needle] - base)
+            while counts[needle] < budgets[needle]:
+                match = pattern.search(buffer, resume)
+                if match is None or match.start() >= end:
+                    break
+                start = match.start()
+                line = newlines + buffer.count("\n", 0, start) + 1 if with_lines else None
+                results.append((needle, _Occurrence(
+                    base + start,
+                    buffer[max(0, start - context):match.end() + context],
+                    line,
+                )))
+                counts[needle] += 1
+                if len(results) >= stop_after:
+                    return True
+                resume = start + 1
+            searched_to[needle] = base + end
+        return all(counts[needle] >= budgets[needle] for needle in patterns)
 
-    def emit(hold) -> bool:
-        results.append(finish(hold))
-        return len(results) >= stop_after
-
-    def hit_at(match) -> None:
-        nonlocal pending, reported_to
-        start = base + match.start()
-        if start < reported_to:
-            return  # 已在更早的 pass 报告过（EOF/下一轮重扫区）
-        if pending is not None and emit(pending):
-            raise _ScanFullError()
-        reported_to = start + 1
-        hit_needle = probe_map.get(match.group(0)) or probe_map.get(
-            match.group(0).lower()
-        )
-        probe = match.group(0).lower() if hit_needle != match.group(0) else match.group(0)
-        head = orig_buf[max(0, match.start() - context):match.end()]
-        pending = (hit_needle, start, head,
-                   start + len(probe) + context, probe)
-
-    try:
-        for chunk in chunks:
-            low_buf += chunk
-            orig_buf += chunk
-            resume = max(searched_to - base, 0)
-            for match in pattern.finditer(low_buf, resume):
-                hit_at(match)
-            # keep 尾区的起点可能因 needle 不完整未匹配，下一轮重扫。
-            searched_to = base + len(low_buf) - keep
-            # 裁剪滚动窗口：先补完会被裁掉的 pending 上下文。
-            drop = len(low_buf) - retain
-            if drop > 0:
-                if pending is not None and base + drop > pending[3]:
-                    if emit(pending):
-                        raise _ScanFullError()
-                    pending = None
-                newlines += orig_buf.count("\n", 0, drop)
-                low_buf = low_buf[drop:]
-                orig_buf = orig_buf[drop:]
-                base += drop
-
-        # EOF：保留区之后的新起点全部报告。
-        resume = max(searched_to - base, 0)
-        for match in pattern.finditer(low_buf, resume):
-            hit_at(match)
-        if pending is not None:
-            emit(pending)
-    except _ScanFullError:
-        pass
+    for chunk in chunks:
+        buffer += chunk
+        end = max(0, len(buffer) - keep - context)
+        if scan(end):
+            return results
+        drop = max(0, end - context)
+        newlines += buffer.count("\n", 0, drop)
+        buffer = buffer[drop:]
+        base += drop
+    if not scan(len(buffer)) and scan_state is not None:
+        scan_state.complete = True
     return results
 
 
 def _scan_text(chunks, needle: str, *, stop_after: int,
                context: int = SNIPPET_CONTEXT_CHARS,
-               with_lines: bool = False) -> list[_Occurrence]:
+               with_lines: bool = False,
+               scan_state: _TextScanState | None = None) -> list[_Occurrence]:
     """单 needle 特例：见 :func:`_scan_text_multi`。"""
     return [
         occ
         for _, occ in _scan_text_multi(
             chunks, [needle], stop_after=stop_after,
-            context=context, with_lines=with_lines,
+            context=context, with_lines=with_lines, scan_state=scan_state,
         )
     ]
 
 
-class _ScanFullError(Exception):
-    """命中数到达 stop_after，提前终止扫描的内部信号。"""
-
-
-def _scan_file_multi(path, needles: list[str], *, stop_after: int):
+def _scan_file_multi(path, needles: list[str], *, stop_after: int,
+                     limits: dict[str, int] | None = None):
     """多关键词全文扫描单个文本文件
     →（[(needle, 命中)]，是否扫到 EOF，已扫字节，总字节）。"""
     total = path.stat().st_size
@@ -272,10 +210,12 @@ def _scan_file_multi(path, needles: list[str], *, stop_after: int):
                 bytes_read += len(raw)
                 yield raw
 
+    state = _TextScanState()
     hits = _scan_text_multi(
-        _decode_chunks(raw_chunks()), needles, stop_after=stop_after
+        _decode_chunks(raw_chunks()), needles, stop_after=stop_after,
+        limits=limits, scan_state=state,
     )
-    return hits, bytes_read >= total, bytes_read, total
+    return hits, state.complete, bytes_read, total
 
 
 def _scan_file(path, needle: str, *, stop_after: int):
@@ -458,13 +398,6 @@ class BatchSearchRequest(BaseModel):
     per_query_limit: int = Field(BATCH_PER_QUERY_DEFAULT_LIMIT, ge=1)
 
 
-def _needle_key(probe: str, probe_map: dict[str, str]) -> str | None:
-    """命中文本 → 原始 needle（折叠匹配按 lower 归一）。"""
-    if probe in probe_map:
-        return probe_map[probe]
-    return probe_map.get(probe.lower())
-
-
 @router.post("/evidence/{snapshot_id}/search/batch")
 @handle_api_errors
 async def search_evidence_batch(
@@ -507,6 +440,9 @@ async def search_evidence_batch(
         for needle in needles
     }
 
+    def remaining_limits() -> dict[str, int]:
+        return {needle: max(0, per_query_stop - row["total"]) for needle, row in rows.items()}
+
     def add_hit(needle: str, entry: dict[str, Any]) -> None:
         row = rows.get(needle)
         if row is None:
@@ -518,7 +454,6 @@ async def search_evidence_batch(
         row["matches"].append(entry)
 
     manifest = snapshot.get("manifest") or {}
-    pattern, probe_map, _ = _compile_needles(needles)
     manifest_texts: list[tuple[str, str, dict[str, Any] | None]] = []
     description = str(manifest.get("description") or "")
     if description:
@@ -531,24 +466,17 @@ async def search_evidence_batch(
             for detail in journal.get("details") or []:
                 blob = json.dumps(detail, ensure_ascii=False)
                 manifest_texts.append(("journal_detail", blob, journal))
-    if pattern is not None:
-        for kind, text, meta in manifest_texts:
-            for match in pattern.finditer(text):
-                needle = _needle_key(match.group(0), probe_map)
-                if needle is None or rows[needle]["total"] >= per_query_stop:
-                    continue
-                entry: dict[str, Any] = {
-                    "kind": kind,
-                    "path": "",
-                    "char_index": match.start(),
-                    "snippet": text[
-                        max(0, match.start() - SNIPPET_CONTEXT_CHARS)
-                        :match.end() + SNIPPET_CONTEXT_CHARS
-                    ],
-                }
-                if kind in {"journal", "journal_detail"} and meta is not None:
-                    entry["journal_id"] = meta.get("id")
-                add_hit(needle, entry)
+    for kind, text, meta in manifest_texts:
+        for needle, occ in _scan_text_multi(
+            iter([text]), needles, stop_after=per_query_stop * len(needles),
+            limits=remaining_limits(),
+        ):
+            entry: dict[str, Any] = {
+                "kind": kind, "path": "", "char_index": occ.offset, "snippet": occ.snippet,
+            }
+            if kind in {"journal", "journal_detail"} and meta is not None:
+                entry["journal_id"] = meta.get("id")
+            add_hit(needle, entry)
 
     store = owner_evidence_store(owner_id)
     artifacts = store.list_artifacts(snapshot["snapshot_id"])
@@ -593,6 +521,7 @@ async def search_evidence_batch(
 
     for artifact in artifacts:
         if saturated():
+            coverage_complete = False
             break
         with store._connect() as conn:
             row = conn.execute(
@@ -624,19 +553,23 @@ async def search_evidence_batch(
                 state = _ZipStreamState()
                 filename = str(artifact.get("filename") or "")
                 member_path = f"attachment:{filename}!"
+                members_complete = True
                 for member, member_text in _iter_zip_members(path, state):
                     if saturated():
+                        members_complete = False
                         break
+                    member_scan = _TextScanState()
                     for hit_needle, occ in _scan_text_multi(
                         iter([member_text]), needles,
                         stop_after=per_query_stop * len(needles),
-                        with_lines=True,
+                        with_lines=True, limits=remaining_limits(), scan_state=member_scan,
                     ):
                         artifact_sink(hit_needle, occ, member_path + member,
                                       artifact, zip_member=member)
+                    members_complete = members_complete and member_scan.complete
                 if state.saw_frame:
                     size = path.stat().st_size
-                    complete = state.complete and not state.truncated_frame
+                    complete = state.complete and not state.truncated_frame and members_complete
                     record_coverage(size if complete else state.chars_scanned,
                                     size, complete)
                     break
@@ -646,22 +579,23 @@ async def search_evidence_batch(
                 if legacy_members:
                     size = path.stat().st_size
                     raw_len = len(text.encode("utf-8"))
-                    record_coverage(
-                        min(raw_len, size), size,
-                        raw_len < _LEGACY_DERIVED_PREFIX_BYTES,
-                    )
+                    legacy_scan = _TextScanState()
                     for legacy_needle, legacy_occ in _scan_text_multi(
                         iter([text]), needles,
                         stop_after=per_query_stop * len(needles),
-                        with_lines=False,
+                        with_lines=False, limits=remaining_limits(), scan_state=legacy_scan,
                     ):
                         # 旧格式无流式帧，无法可靠还原成员行号；只报
                         # 全文级命中，避免伪造 member 引用。
                         artifact_sink(legacy_needle, legacy_occ, "", artifact)
+                    record_coverage(
+                        min(raw_len, size), size,
+                        raw_len < _LEGACY_DERIVED_PREFIX_BYTES and legacy_scan.complete,
+                    )
                     break
                 # 非 v2 且无旧标记：按普通文本全文扫描。
             hits, complete, scanned, size = _scan_file_multi(
-                path, needles, stop_after=per_query_stop * len(needles)
+                path, needles, stop_after=per_query_stop * len(needles), limits=remaining_limits(),
             )
             record_coverage(scanned, size, complete)
             for hit_needle, occ in hits:
@@ -753,6 +687,7 @@ async def search_evidence(
 
     for artifact in artifacts:
         if len(matches) >= stop:
+            coverage_complete = False
             break
         with store._connect() as conn:
             row = conn.execute(
@@ -788,13 +723,17 @@ async def search_evidence(
             if is_derived and str(artifact.get("kind") or "") == "archive":
                 state = _ZipStreamState()
                 filename = str(artifact.get("filename") or "")
+                members_complete = True
                 for member, member_text in _iter_zip_members(path, state):
                     if len(matches) >= stop:
+                        members_complete = False
                         break
+                    member_scan = _TextScanState()
                     hits = _scan_text(
                         iter([member_text]), needle,
-                        stop_after=stop - len(matches), with_lines=True,
+                        stop_after=stop - len(matches), with_lines=True, scan_state=member_scan,
                     )
+                    members_complete = members_complete and member_scan.complete
                     for occ in hits:
                         matches.append(_occurrence_entry(
                             occ, "artifact",
@@ -803,7 +742,7 @@ async def search_evidence(
                         ))
                 if state.saw_frame:
                     size = path.stat().st_size
-                    complete = state.complete and not state.truncated_frame
+                    complete = state.complete and not state.truncated_frame and members_complete
                     record_coverage(size if complete else state.chars_scanned,
                                     size, complete)
                     break

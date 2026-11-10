@@ -20,7 +20,8 @@ def command_reports_running(output: str | None) -> bool:
 
 
 def run_local_command(
-    argv: list[str], timeout: int = 30
+    argv: list[str], timeout: int = 30, *,
+    env: dict[str, str] | None = None, cwd: str | None = None,
 ) -> CommandResult:
     """Run a local command from an argv list (no shell interpretation).
 
@@ -38,6 +39,8 @@ def run_local_command(
             stderr=subprocess.PIPE,
             text=True,
             start_new_session=True,
+            env=env,
+            cwd=cwd,
         )
         stdout, stderr = process.communicate(timeout=timeout)
         return CommandResult(

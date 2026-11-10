@@ -11,11 +11,40 @@ function opsConfirm(title, message) {
         ? window.parent.showConfirmDialog(title, message) : window.confirm(message);
 }
 
+// 受阻横幅：排队/等设备/烧写前的运行依赖平台健康度。自动化 Worker 停止
+// 或推进被暂停时，不在这里的运行会一直"卡住"，用户通常去运行列表猜——
+// 把根因直接顶到运行监控页首，并可一键跳运维处理。
+function renderBlockedRunsBanner() {
+    const host = qs('runs-blocker-banner');
+    if (!host) return;
+    const data = opsStatusCache;
+    if (!data || (!data.advancement_paused && data.worker?.running)) {
+        host.innerHTML = '';
+        return;
+    }
+    const reasons = [];
+    if (data.worker && !data.worker.running) {
+        reasons.push('自动化 Worker 未运行，队列不会推进');
+    }
+    if (data.advancement_paused) {
+        reasons.push('自动化推进已被暂停（kill-switch）');
+    }
+    const alertCount = Number(data.open_alerts || 0);
+    host.innerHTML = `
+        <div class="run-value" style="margin: 10px 16px 0; padding: 10px 12px; border: 1px solid var(--warn); border-radius: 8px; background: rgba(255, 152, 0, 0.08);">
+            <strong>⚠ 新运行受阻：${esc(reasons.join('；'))}</strong>
+            <span class="muted">排队 / 等待设备 / 烧写前的运行将保持等待，直到恢复推进。</span>
+            <button type="button" class="primary" data-click="switchWorkflowPane" data-a0="ops">前往运维${alertCount > 0 ? `（${alertCount} 条未确认告警）` : ''}</button>
+        </div>`;
+}
+
 async function loadOpsStatus() {
     try {
         const data = await api('/api/ops/status');
         opsStatusCache = data;
         renderOpsStatus(data);
+        // 平台健康变化即时反映到运行监控的受阻横幅。
+        if (typeof renderBlockedRunsBanner === 'function') renderBlockedRunsBanner();
     } catch { /* ops status is informational; next tick retries */ }
 }
 

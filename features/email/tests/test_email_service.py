@@ -18,36 +18,8 @@ from features.email.service import send_email, split_emails
 def _fake_manager(email_cfg: dict):
     """构造一个内存 config manager，load_config 返回给定 email 段。"""
     mgr = MagicMock()
-    mgr.load_config.return_value = {"redmine_dashboard": {"email": email_cfg}}
+    mgr.get_runtime_config.return_value = {"redmine_dashboard": {"email": email_cfg}}
     return mgr
-
-
-# 隔离全局配置：resolve_email_config 的全局默认/兼容兜底读取真实 runtime，
-# 部署机上真实 SMTP 的非空字段会覆盖测试 fixture，必须屏蔽。
-_NO_GLOBAL = patch(
-    "foundation.config.config_manager.load_config", return_value={}
-)
-_NO_GLOBAL.start()
-_NO_GLOBAL_stop = _NO_GLOBAL.stop
-
-# 隔离发件台账：send_email 管线每次调用都写 outbox 台账，data_root 默认
-# 指向仓库 data/——不隔离的话单测 fixture（"s"/"b"、头注入样例等）会
-# 污染生产台账（曾以「系统」发件人出现在历史邮件页面）。模块加载即把
-# store 的 data_root 指到临时目录并重置单例。
-import tempfile as _tempfile
-from pathlib import Path as _Path
-from types import SimpleNamespace as _SimpleNamespace
-
-from features.email import store as _store_module
-from features.email.store import reset_email_outbox_store as _reset_outbox
-
-_store_data_root_patch = patch.object(
-    _store_module,
-    "settings",
-    _SimpleNamespace(data_root=_Path(_tempfile.mkdtemp(prefix="gms-email-test-"))),
-)
-_store_data_root_patch.start()
-_reset_outbox()
 
 
 QIYE_CFG = {

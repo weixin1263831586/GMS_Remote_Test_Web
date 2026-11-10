@@ -1,6 +1,9 @@
 """Unit tests for the ops foundation store (phase 1)."""
 
+import sqlite3
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -17,6 +20,50 @@ class OpsStoreTests(unittest.TestCase):
             second = self._store(tmp)  # re-run migration on existing file
             first.set_flag("advancement_paused", True, updated_by="tester")
             self.assertIs(second.get_flag("advancement_paused"), True)
+
+    def test_failed_retry_waits_from_latest_attempt_even_for_old_events(self):
+        with TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            event = store.record_incident(severity="critical", kind="test", message="test")["event"]
+            with store._connect() as conn:
+                conn.execute("UPDATE ops_events SET created_at='2000-01-01T00:00:00Z'")
+            store.mark_delivery_state(event["id"], state="failed", attempts=10000)
+            failed = store.get_event(event["id"])
+            self.assertFalse(store.notify_backoff_ready(failed))
+            retry = datetime.fromisoformat(failed["notify_retry_at"].replace("Z", "+00:00"))
+            self.assertGreater(retry, datetime.now(timezone.utc) + timedelta(minutes=29))
+            self.assertEqual(store.pending_events(ready_only=True), [])
+            self.assertEqual(len(store.pending_events()), 1)
+
+    def test_events_in_backoff_do_not_hide_fresh_alerts(self):
+        with TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            for _ in range(21):
+                event = store.record_incident(severity="critical", kind="old", message="test")["event"]
+                store.mark_delivery_state(event["id"], state="failed", attempts=8)
+            fresh = store.record_incident(severity="critical", kind="fresh", message="test")["event"]
+            self.assertEqual(
+                [event["id"] for event in store.pending_events(limit=1, ready_only=True)],
+                [fresh["id"]],
+            )
+
+    def test_legacy_delivery_migration_is_process_safe_and_idempotent(self):
+        from features.ops.store import OpsStore
+
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "legacy.sqlite3"
+            with sqlite3.connect(path) as conn:
+                conn.execute("""CREATE TABLE ops_events (
+                    id TEXT PRIMARY KEY, created_at TEXT, status TEXT, dedup_key TEXT,
+                    notify_state TEXT, notify_attempts INTEGER
+                )""")
+                conn.execute("INSERT INTO ops_events VALUES ('old', '2000-01-01T00:00:00Z', 'open', '', 'failed', 3)")
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                stores = list(executor.map(OpsStore, [path] * 4))
+            event = stores[0].get_event("old")
+            self.assertEqual(event["notify_attempted_at"], "2000-01-01T00:00:00Z")
+            self.assertEqual(event["notify_retry_at"], "2000-01-01T00:04:00Z")
+            self.assertEqual(stores[-1].get_event("old"), event)
 
     def test_flag_roundtrip_and_meta(self):
         with TemporaryDirectory() as tmp:

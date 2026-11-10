@@ -181,6 +181,26 @@ async def reboot_devices(req: DeviceActionRequest, request: Request):
     return ApiResponse.device_results(results, "Device reboot")
 
 
+@router.post("/api/devices/factory-reset")
+@handle_api_errors
+@device_mutation_guard("factory_reset")
+async def factory_reset_devices(req: DeviceActionRequest, request: Request):
+    """Factory-reset devices via fastboot erase userdata (irreversible)."""
+    devices = sanitize_device_ids(req.devices)
+    if not devices:
+        return error_response("No valid device serials", status_code=400)
+    # fencing 身份与 reboot 同标准（ADR 0010 resource_owner_id）。
+    conflict = device_claim_conflict_response(
+        devices, device_fencing_owner_id(request), allow_owner=True
+    )
+    if conflict:
+        return conflict
+    results = await asyncio.gather(*[
+        asyncio.to_thread(device_manager.factory_reset_device, d) for d in devices
+    ])
+    return ApiResponse.device_results(results, "Device factory reset")
+
+
 @router.post("/api/devices/remount")
 @handle_api_errors
 @device_mutation_guard("remount")

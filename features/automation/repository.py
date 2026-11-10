@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from features.automation.artifact_progress import artifact_download_progress
 from features.automation.models import (
     TERMINAL_STATUSES,
     utc_now_iso,
@@ -348,6 +349,11 @@ class AutomationStore:
             f"json_extract({plan}, '$.{key}') AS {key}"
             for key in ('test_type', 'test_suite', 'test_module')
         )
+        result = "CASE WHEN json_valid(result_json) THEN result_json ELSE '{}' END"
+        columns += (
+            f", json_object('artifact_download', json_extract({result}, '$.artifact_download'))"
+            " AS artifact_progress_json"
+        )
         with self._connect() as conn:
             rows = conn.execute(
                 f'SELECT {columns} FROM automation_runs{where_sql} '
@@ -355,6 +361,10 @@ class AutomationStore:
             ).fetchall()
         has_more = len(rows) > limit
         items = [decorate_run_summary(dict(row)) for row in rows[:limit]]
+        for item in items:
+            item['artifact_download'] = artifact_download_progress({
+                'result_json': item.pop('artifact_progress_json'),
+            })
         return {
             'items': items, 'has_more': has_more,
             'next_cursor': encode_run_cursor(items[-1]) if has_more else '',
@@ -376,7 +386,8 @@ class AutomationStore:
         return self.get_run(run_id)
 
     def update_run_if_status(
-        self, run_id: str, expected_status: str, **updates: Any
+        self, run_id: str, expected_status: str, *,
+        expected_lease_owner: str | None = None, **updates: Any,
     ) -> tuple[dict[str, Any], bool]:
         """Compare-and-swap a transition so cancel and worker races cannot revive a run."""
         allowed = set(RUN_COLUMNS) - {
@@ -389,10 +400,14 @@ class AutomationStore:
         assignments = ", ".join(f"{key} = ?" for key in clean)
         if target_status != expected_status:
             assignments += ", state_version = state_version + 1"
+        condition = "id = ? AND status = ?"
+        parameters = [*clean.values(), run_id, expected_status]
+        if expected_lease_owner is not None:
+            condition += " AND lease_owner = ?"
+            parameters.append(expected_lease_owner)
         with self._connect() as conn:
             cursor = conn.execute(
-                f"UPDATE automation_runs SET {assignments} WHERE id = ? AND status = ?",
-                [*clean.values(), run_id, expected_status],
+                f"UPDATE automation_runs SET {assignments} WHERE {condition}", parameters,
             )
         current = self.get_run(run_id)
         if current is None:

@@ -142,10 +142,26 @@ class AutomationService:
         build_plan = plan.get('build') if isinstance(plan.get('build'), dict) else {}
         flash_plan = plan.get('flash') if isinstance(plan.get('flash'), dict) else {}
         has_build = bool(build_plan.get('provider') or build_plan.get('server_id') or build_plan.get('template_id'))
-        has_artifact = bool(str(body.get('artifact_path') or body.get('artifact_url') or '').strip())
+        has_firmware_share = bool(str(flash_plan.get('firmware_share_id') or '').strip())
+        has_artifact = has_firmware_share or bool(
+            str(body.get('artifact_path') or body.get('artifact_url') or '').strip()
+        )
+        # build 与 firmware_share_id 互斥：带 build 的 run 固化 artifact 后
+        # flash 阶段优先使用 build 产物，share 会被静默忽略——入口拒绝，
+        # 不依赖隐式优先级。
+        if has_build and has_firmware_share:
+            raise ValueError(
+                'test_plan.build and test_plan.flash.firmware_share_id are mutually exclusive'
+            )
         if flash_plan.get('mode') != 'skip' and not (has_build or has_artifact or body.get('jenkins_job')):
             raise ValueError('Firmware artifact or build configuration is required')
-        if not str(plan.get('test_type') or '').strip():
+        # test_mode=skip 表示纯烧写/纯 AOA 工作流（对话 Agent 的 flash_only
+        # 草案），测试阶段显式跳过，因此不要求 test_type；其余情况仍必填，
+        # 避免把漏填静默降级成纯烧写。
+        if (
+            str(plan.get('test_mode') or '').strip().lower() != 'skip'
+            and not str(plan.get('test_type') or '').strip()
+        ):
             raise ValueError('test_plan.test_type is required')
         # ADR 0012: snapshot the capability union the pipeline will need and
         # verify the creator already holds every requested capability. The
@@ -175,16 +191,26 @@ class AutomationService:
         plan = body.get('test_plan') if isinstance(body.get('test_plan'), dict) else {}
         RetryPolicy.model_validate(plan.get('retry_policy') or {})
         validate_execution_options(plan)
-        if not str(plan.get('test_type') or '').strip():
+        # test_mode=skip（纯烧写/纯 AOA）时不要求 test_type，语义同 create。
+        if (
+            str(plan.get('test_mode') or '').strip().lower() != 'skip'
+            and not str(plan.get('test_type') or '').strip()
+        ):
             raise ValueError('test_plan.test_type is required')
         build = plan.get('build') if isinstance(plan.get('build'), dict) else {}
         flash = plan.get('flash') if isinstance(plan.get('flash'), dict) else {}
         has_build = bool(
             build.get('provider') or build.get('server_id') or build.get('template_id')
         )
-        has_artifact = bool(
+        has_firmware_share = bool(str(flash.get('firmware_share_id') or '').strip())
+        has_artifact = has_firmware_share or bool(
             str(body.get('artifact_path') or body.get('artifact_url') or '').strip()
         )
+        # 与 create 同一互斥校验：预检就拒绝会被静默忽略的固件来源组合。
+        if has_build and has_firmware_share:
+            raise ValueError(
+                'test_plan.build and test_plan.flash.firmware_share_id are mutually exclusive'
+            )
         if flash.get('mode') != 'skip' and not (
             has_build or has_artifact or body.get('jenkins_job')
         ):
@@ -245,6 +271,18 @@ class AutomationService:
                 or artifact_origin.netloc != jenkins_origin.netloc
             ):
                 raise ValueError('Artifact URL must use the configured Jenkins origin')
+        # 受控固件来源（firmware_share）：创建前只做轻量校验（存在且未
+        # 过期）；真实取文件在烧写阶段由 executor 完成，避免计划期长阻塞。
+        flash_plan = plan.get('flash') if isinstance(plan.get('flash'), dict) else {}
+        if str(flash_plan.get('firmware_share_id') or '').strip():
+            from features.firmware import firmware_share_record_snapshot
+
+            share_id = str(flash_plan['firmware_share_id']).strip()
+            snapshot = firmware_share_record_snapshot(share_id)
+            if not snapshot:
+                raise ValueError(f'Firmware share not found: {share_id}')
+            if snapshot.get('expired'):
+                raise ValueError(f'Firmware share expired: {share_id}')
         artifact_path = str(body.get('artifact_path') or '').strip()
         if artifact_path and not build:
             from features.automation.executors import _controller_artifact_roots
@@ -259,6 +297,7 @@ class AutomationService:
                 raise ValueError('Firmware artifact is empty')
 
         test_type = str(plan.get('test_type') or '').strip().upper()
+        test_mode_skip = str(plan.get('test_mode') or '').strip().lower() == 'skip'
         # 与主测试界面保持一致：GSI 运行 CTS 套件，GTS-ROOT 运行 GTS 套件。
         suite_test_type = {
             'GSI': 'CTS',
@@ -297,7 +336,18 @@ class AutomationService:
             )
             and (not suite_path or suite.get('tools_path') == suite_path)
         ]
-        if auto_selected:
+        if test_mode_skip:
+            # 纯烧写/纯 AOA run：不要求测试套件，只校验 Worker 可执行性。
+            worker = next(
+                (item for item in cluster.list_workers() if item.get('id') == worker_id),
+                None,
+            )
+            if not worker:
+                raise ValueError(f'Worker {worker_id} is not online')
+            if not cluster.has_command_agent(worker_id):
+                raise ValueError(f'Worker {worker_id} has no durable command Agent')
+            selected = None
+        elif auto_selected:
             selected = None
             last_error = ''
             for suite in sorted(
@@ -384,7 +434,7 @@ class AutomationService:
                     f'{required_memory:.1f} GB is required for full CTS'
                 )
 
-        suite_path = str(selected.get('tools_path') or '')
+        suite_path = str((selected or {}).get('tools_path') or '')
         plan['worker_id'] = worker_id
         plan['test_suite'] = suite_path
         body['test_plan'] = plan
@@ -469,7 +519,7 @@ class AutomationService:
         body['devices'] = requested_devices
         return {
             'runtime_checked': True,
-            'suite_key': selected.get('suite_key', ''),
+            'suite_key': (selected or {}).get('suite_key', ''),
             'available_device_count': sum(
                 item.get('state') == 'available'
                 and (

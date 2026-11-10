@@ -10,7 +10,7 @@
                         <div class="agent-chat-empty">输入测试需求，例如：跑 CtsWifiTestCases，找一台空闲设备，失败 retry 2 次，还失败就报告分析</div>
                     </div>
                     <div style="border-top: 1px solid var(--border-color); padding: 10px; display: flex; gap: 8px; align-items: flex-end; background: var(--darker-bg);">
-                        <textarea id="agent-input" class="entry-field" rows="4" placeholder="告诉 Agent 你要执行的测试、设备选择、retry 策略或分析动作&#10;Shift+Enter 换行，Enter 发送" style="resize: vertical; min-height: 82px; max-height: 220px; flex: 1;"></textarea>
+                        <textarea id="agent-input" class="entry-field" rows="4" placeholder="描述你的目标：设备与固件、测试、报告、构建、工单或知识查询&#10;Shift+Enter 换行，Enter 发送" style="resize: vertical; min-height: 82px; max-height: 220px; flex: 1;"></textarea>
                         <div style="display: flex; flex-direction: column; gap: 6px;">
                             <button class="btn-primary" data-click="sendAgentMessage" data-a0="false" style="padding: 6px 16px; white-space: nowrap; min-width: 64px;">发送</button>
                             <button class="btn-primary" data-click="sendAgentMessage" data-a0="true" style="padding: 6px 16px; background: var(--success-color); white-space: nowrap; min-width: 64px;">执行</button>
@@ -19,14 +19,15 @@
                 </div>
                 <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
                     <div class="agent-run-header">
-                        <div class="agent-run-header-copy">
-                            <div style="font-size: 13px; font-weight: 600;">执行步骤</div>
-                            <div class="agent-model-line">
-                                <span id="agent-model-status" data-state="loading" title="本地/备用模型仅用于报告和知识分析，Agent 指令路由使用确定性规则。">分析模型：读取配置…</span>
-                                <button id="agent-model-check" class="btn-xxs" type="button" data-click="loadAgentModelStatus" data-a0="true">检测</button>
-                            </div>
+                        <div class="agent-run-title-row">
+                            <div class="agent-run-title">执行步骤</div>
+                            <span id="agent-status">idle</span>
                         </div>
-                        <span id="agent-status" style="font-size: 11px; color: var(--text-secondary);">idle</span>
+                        <span id="agent-engine-status">对话引擎：待连接</span>
+                        <div class="agent-model-line">
+                            <span id="agent-model-status" data-state="loading" title="报告与知识分析模型；对话引擎状态单独显示。">分析模型：读取配置…</span>
+                            <button id="agent-model-check" class="btn-xxs" type="button" data-click="loadAgentModelStatus" data-a0="true">检测</button>
+                        </div>
                     </div>
                     <div id="agent-steps" style="flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
                         <div class="suite-empty">等待任务</div>

@@ -14,11 +14,12 @@ function renderDevices() {
         return;
     }
 
+    syncWorkspaceDeviceSelection();
     // 设备数据签名：数据未变化时跳过整表重建。手动刷新是双次渲染
     // （缓存渲染 + worker refresh 回包渲染），叠加 devices_changed /
     // catch-up 补刷并发触发，同数据重复 innerHTML 重建会造成闪屏。
     const renderSignature = JSON.stringify([
-        state.devices, state.selectedDevices, state.deviceGroups,
+        state.devices, Array.from(state.selectedDevices), state.deviceGroups,
         state.followFilter, window.GmsWorkspace?.get?.().device_ids || []
     ]);
     if (renderSignature === leftContainer.dataset.renderSignature) {
@@ -126,8 +127,7 @@ function buildDeviceItemEl({
     displaySerial = ''
 }) {
     const div = document.createElement('div');
-    // 不可选（占用/状态异常）设备保留在选中集合中，但复选框不显示勾选：
-    // 复选框随不可选被禁用，设备恢复可选后勾选自动恢复。
+    // 不可选设备保留在清单中，当前选择已由 renderDevices 同步清理。
     const isSelected = selectable && state.selectedDevices.has(deviceId);
     div.className = `device-item ${isSelected ? 'selected' : ''} ${isLocked ? 'locked' : ''}`;
     div.dataset.deviceId = deviceId;
@@ -384,6 +384,43 @@ async function rebootDevices() {
         }
     } catch (error) {
         addLogEntry('重启设备失败: ' + error.message, 'error');
+    }
+}
+
+// 恢复出厂：MASTER_CLEAR 擦除 userdata 后自动重启，不可逆，确认文案
+// 单独强调后果。通道与 reboot 一致：选了集群 Worker 走 actions 命令，
+// 否则走本地 /api/devices/factory-reset。
+async function factoryResetDevices() {
+    if (!validateRebootDeviceSelection()) return;
+
+    const selectedDeviceSerials = Array.from(state.selectedDevices).map(deviceId => {
+        const device = state.devices.find(d =>
+            (d.device_id && d.device_id === deviceId) ||
+            (d.serial && d.serial === deviceId) ||
+            d === deviceId
+        );
+        return device ? (device.device_id || device.serial || deviceId) : deviceId;
+    });
+
+    const confirmed = await showConfirmDialog(
+        '恢复出厂',
+        `确定要恢复出厂以下 ${state.selectedDevices.size} 台设备吗？\n\n${selectedDeviceSerials.join('\n')}\n\n设备数据将被全部擦除并自动重启，此操作不可撤销！`
+    );
+
+    if (!confirmed) return;
+
+    try {
+        const workerId = selectedClusterWorker();
+        await apiCall(workerId ? '/api/cluster/devices/actions' : '/api/devices/factory-reset', 'POST',
+            workerId ? {worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'factory_reset'}
+                     : {devices: Array.from(state.selectedDevices)});
+        addWorkerLog(workerId, `恢复出厂完成：${state.selectedDevices.size} 台设备已擦除数据并重启`, 'warning');
+        showToast('设备已擦除数据并重启，稍后自动开机', 'success');
+        if (state.usbipConnected) {
+            scheduleUsbipReconnect('USB/IP 设备正在恢复出厂');
+        }
+    } catch (error) {
+        addLogEntry('恢复出厂失败: ' + error.message, 'error');
     }
 }
 

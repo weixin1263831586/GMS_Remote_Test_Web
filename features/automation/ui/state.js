@@ -80,13 +80,14 @@ function workspaceDeviceSerial(value) {
 }
 // 流水线阶段（顺序即推进顺序）
 const PIPELINE_STAGES = [
-    'queued', 'jenkins_queued', 'jenkins_building', 'artifact_ready',
+    'queued', 'jenkins_queued', 'jenkins_building', 'artifact_ready', 'artifact_fetching',
     'waiting_device', 'device_locked', 'flashing', 'flash_completed',
     'aoa_recovering', 'post_flash_verifying', 'flash_verified',
     'testing', 'test_running', 'report_collecting', 'analyzing', 'reporting', 'completed',
 ];
 const STAGE_LABELS_ZH = {
     queued: '排队', jenkins_queued: '构建排队', jenkins_building: '编译中',
+    artifact_fetching: '固件下载中',
     artifact_ready: '固件就绪', waiting_device: '等待设备', device_locked: '设备已锁',
     flashing: '刷机中', flash_completed: '刷机完成', aoa_recovering: '恢复 USB 调试',
     post_flash_verifying: '固件校验中', flash_verified: '固件已校验', testing: '启动测试', test_running: '测试中',
@@ -119,6 +120,7 @@ const STATUS_LABELS_ZH = {
     stopping: '停止后续中',
     jenkins_queued: '构建排队',
     jenkins_building: '编译中', artifact_ready: '固件就绪',
+    artifact_fetching: '固件下载中',
     waiting_device: '等待设备', device_locked: '设备已锁',
     flashing: '刷机中', flash_completed: '刷机完成', aoa_recovering: '恢复 USB 调试',
     post_flash_verifying: '固件校验中', flash_verified: '固件已校验',

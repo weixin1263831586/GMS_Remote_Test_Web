@@ -495,6 +495,7 @@ class RuntimeDevicesTests(RuntimeUiHarness):
                     ];
                     state.selectedDevices = new Set(['READY-1', 'BUSY-1']);
                     renderDevices();
+                    const selectedBefore = Array.from(state.selectedDevices);
                     const originalApiCall = window.apiCall;
                     const originalLoadDevices = window.loadDevices;
                     const originalElevatedAccess = window.requestElevatedAccess;
@@ -511,6 +512,7 @@ class RuntimeDevicesTests(RuntimeUiHarness):
                         );
                         return {
                             requestDevices,
+                            selectedBefore,
                             selectedDevices: Array.from(state.selectedDevices),
                             busyChecked: document.querySelector(
                                 '.device-item[data-device-id="BUSY-1"] input'
@@ -524,7 +526,9 @@ class RuntimeDevicesTests(RuntimeUiHarness):
                 }"""
             )
             self.assertEqual(result["requestDevices"], ["READY-1"])
-            self.assertEqual(result["selectedDevices"], ["READY-1", "BUSY-1"])
+            self.assertEqual(result["selectedBefore"], ["READY-1"])
+            # 烧写开始后的乐观锁同样清除当前选择，避免保留隐藏的操作目标。
+            self.assertEqual(result["selectedDevices"], [])
             self.assertFalse(result["busyChecked"])
         finally:
             page.close()

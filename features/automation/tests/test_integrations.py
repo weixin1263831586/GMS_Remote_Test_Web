@@ -1,3 +1,4 @@
+import json
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -327,6 +328,66 @@ class HttpAutomationExecutorTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(calls, ["http://jenkins/queue/item/9/"])
 
+    def test_resolve_firmware_share_stages_and_validates_controller_path(self):
+        from features.automation.executors import HttpAutomationExecutor
+
+        staged = {"ok": True, "firmware_path": "/stage/run/fw.img",
+                  "sha256": "abc123"}
+        progress = []
+
+        def resolve(share_id, run_id="", max_bytes=0, on_progress=None):
+            on_progress({"downloaded_bytes": 4, "total_bytes": 4})
+            return staged
+
+        with (
+            patch("features.firmware.resolve_firmware_share_record", resolve),
+            patch("features.automation.executors._validated_controller_artifact",
+                  lambda value: Path(value)),
+        ):
+            result = HttpAutomationExecutor().resolve_firmware_share({
+                "id": "run-1",
+                "test_plan_json": json.dumps(
+                    {"flash": {"mode": "firmware", "firmware_share_id": "share-1"}}),
+            }, on_progress=progress.append)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["artifact_path"], "/stage/run/fw.img")
+        self.assertEqual(result["firmware_share_id"], "share-1")
+        self.assertEqual(result["firmware_sha256"], "abc123")
+        self.assertEqual(progress, [{"downloaded_bytes": 4, "total_bytes": 4}])
+
+    def test_resolve_firmware_share_rejects_missing_share_id(self):
+        from features.automation.executors import HttpAutomationExecutor
+
+        result = HttpAutomationExecutor().resolve_firmware_share(
+            {"id": "run-1", "test_plan_json": '{"flash":{"mode":"firmware"}}'})
+        self.assertFalse(result["success"])
+        self.assertIn("firmware_share_id", result["error"])
+
+    def test_resolve_firmware_share_keeps_existing_artifact(self):
+        from features.automation.executors import HttpAutomationExecutor
+
+        run = {"id": "run-1", "artifact_path": "/stage/other/fw.img",
+               "test_plan_json": json.dumps(
+                   {"flash": {"mode": "firmware", "firmware_share_id": "share-1"}})}
+        result = HttpAutomationExecutor().resolve_firmware_share(run)
+        self.assertTrue(result["success"])
+        self.assertEqual(result["artifact_path"], "/stage/other/fw.img")
+
+    def test_resolve_firmware_share_surfaces_share_errors(self):
+        from features.automation.executors import HttpAutomationExecutor
+
+        with patch("features.firmware.resolve_firmware_share_record",
+                   lambda share_id, run_id="", max_bytes=0, on_progress=None:
+                   {"ok": False, "reason": "固件分享不存在: x"}):
+            result = HttpAutomationExecutor().resolve_firmware_share({
+                "id": "run-1",
+                "test_plan_json": json.dumps(
+                    {"flash": {"mode": "firmware", "firmware_share_id": "x"}}),
+            })
+        self.assertFalse(result["success"])
+        self.assertIn("固件分享不存在", result["error"])
+
     def test_http_executor_stages_flash_and_uses_durable_cluster_test_api(self):
         from features.automation.executors import HttpAutomationExecutor
 
@@ -601,3 +662,72 @@ class HttpAutomationExecutorTests(unittest.TestCase):
 
         self.assertFalse(result["success"])
         self.assertIn("exceeds the ATS size limit", result["error"])
+
+    def test_http_executor_adopts_cluster_tls_endpoint_and_pins_ca(self):
+        import json
+        import os
+        import tempfile
+        from pathlib import Path
+
+        from features.automation.executors import HttpAutomationExecutor
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cert = Path(tmp) / "gms-local.crt"
+            cert.write_text("CERT")
+            config = Path(tmp) / "cluster.json"
+            config.write_text(json.dumps({
+                "controller_url": "https://127.0.0.1:5001",
+                "controller_ca": str(cert),
+            }))
+            with patch.dict(os.environ, {
+                "GMS_CLUSTER_CONFIG": str(config),
+                "GMS_PORT": "5001",
+            }):
+                os.environ.pop("GMS_AUTOMATION_BASE_URL", None)
+                os.environ.pop("GMS_CONTROLLER_CA", None)
+                executor = HttpAutomationExecutor()
+
+            self.assertEqual(executor.base_url, "https://127.0.0.1:5001")
+            self.assertEqual(executor.session.verify, str(cert))
+            executor.session.close()
+
+    def test_http_executor_keeps_plain_http_default_without_cluster_url(self):
+        import json
+        import os
+        import tempfile
+        from pathlib import Path
+
+        from features.automation.executors import HttpAutomationExecutor
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "cluster.json"
+            config.write_text(json.dumps({"enabled": True}))
+            with patch.dict(os.environ, {
+                "GMS_CLUSTER_CONFIG": str(config),
+                "GMS_PORT": "5001",
+            }):
+                os.environ.pop("GMS_AUTOMATION_BASE_URL", None)
+                executor = HttpAutomationExecutor()
+
+            self.assertEqual(executor.base_url, "http://127.0.0.1:5001")
+            executor.session.close()
+
+    def test_http_executor_leaves_injected_session_verify_untouched(self):
+        import tempfile
+        from pathlib import Path
+
+        from features.automation.executors import HttpAutomationExecutor
+
+        class MarkerSession:
+            verify = "SENTINEL"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cert = Path(tmp) / "gms-local.crt"
+            cert.write_text("CERT")
+            executor = HttpAutomationExecutor(
+                base_url="https://127.0.0.1:5001",
+                session=MarkerSession(),
+            )
+
+        self.assertIs(executor.session, executor.session)
+        self.assertEqual(executor.session.verify, "SENTINEL")

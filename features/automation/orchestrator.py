@@ -10,12 +10,14 @@ import threading
 import uuid
 from typing import Any
 
+from features.automation.artifact_progress import artifact_progress_callback
 from features.automation.executors import AutomationExecutor
 from features.automation.models import (
     RUN_STATUS_ANALYSIS_FAILED,
     RUN_STATUS_ANALYZING,
     RUN_STATUS_AOA_FAILED,
     RUN_STATUS_AOA_RECOVERING,
+    RUN_STATUS_ARTIFACT_FETCHING,
     RUN_STATUS_ARTIFACT_MISSING,
     RUN_STATUS_ARTIFACT_READY,
     RUN_STATUS_CANCELLED,
@@ -55,6 +57,15 @@ def _run_has_build(run: dict[str, Any]) -> bool:
         return False
     build = plan.get("build") if isinstance(plan.get("build"), dict) else {}
     return bool(build.get("provider") or build.get("server_id") or build.get("template_id"))
+
+
+def _run_flash_plan(run: dict[str, Any]) -> dict[str, Any]:
+    try:
+        plan = json.loads(run.get("test_plan_json") or "{}")
+    except json.JSONDecodeError:
+        return {}
+    flash = plan.get("flash") if isinstance(plan.get("flash"), dict) else {}
+    return flash
 
 
 class AutomationOrchestrator:
@@ -121,7 +132,33 @@ class AutomationOrchestrator:
         if status == RUN_STATUS_QUEUED:
             if run.get("jenkins_job") or _run_has_build(run):
                 return self._transition(run, RUN_STATUS_JENKINS_QUEUED, "Run is queued for firmware build")
+            flash_plan = _run_flash_plan(run)
+            if str(flash_plan.get("firmware_share_id") or "").strip():
+                return self._transition(
+                    run, RUN_STATUS_ARTIFACT_FETCHING, "Downloading firmware share to Controller",
+                )
             return self._transition(run, RUN_STATUS_WAITING_DEVICE, "Run is waiting for device selection")
+        if status == RUN_STATUS_ARTIFACT_FETCHING:
+            result = self.executor.resolve_firmware_share(
+                run, on_progress=artifact_progress_callback(self.store, run["id"], self.claim_owner),
+            )
+            # Callbacks may update counters or observe cancellation/claim loss.
+            # Reload before merging results so the final snapshot survives.
+            run = self.store.get_run(run["id"]) or run
+            if run["status"] != status or run.get("lease_owner") != self.claim_owner:
+                return run
+            if not result.get("success"):
+                return self._fail(
+                    run, RUN_STATUS_ARTIFACT_MISSING,
+                    result.get("error", "firmware share unavailable"), result,
+                )
+            return self._transition(
+                run, RUN_STATUS_WAITING_DEVICE,
+                "Firmware share staged on Controller", result,
+                artifact_url=result.get("artifact_url", ""),
+                artifact_path=result.get("artifact_path", ""),
+                result_json=self._merged_result_json(run, result),
+            )
         if status == RUN_STATUS_JENKINS_QUEUED:
             result = self.executor.trigger_build(run)
             if not result.get("success"):
@@ -214,6 +251,12 @@ class AutomationOrchestrator:
         if status in {RUN_STATUS_FLASH_COMPLETED, RUN_STATUS_FLASH_VERIFIED}:
             previous = json.loads(run.get("result_json") or "{}")
             if status == RUN_STATUS_FLASH_VERIFIED and previous.get("post_flash", {}).get("verified") is True:
+                plan = json.loads(run.get("test_plan_json") or "{}")
+                if str(plan.get("test_mode") or "").strip().lower() == "skip":
+                    # 纯烧写/纯 AOA 工作流：固件身份校验通过即完成，不进测试。
+                    return self._transition(
+                        run, RUN_STATUS_COMPLETED, "Flash-only run completed (test skipped)"
+                    )
                 return self._transition(run, RUN_STATUS_TESTING, "Starting GMS test")
             aoa_enabled = getattr(self.executor, "aoa_enabled", None)
             if callable(aoa_enabled) and aoa_enabled(run):

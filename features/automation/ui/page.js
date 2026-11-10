@@ -202,8 +202,27 @@ document.addEventListener('DOMContentLoaded', () => {
         .finally(() => {
             document.body.dataset.automationReady = 'true';
             window.GmsEmbeddedWorkspace?.markReady();
+            focusRunFromDeepLink();
         });
 });
+
+// 深链直达：shell 侧把 #automation?run=<id> 解析为 sessionStorage 暂存，
+// iframe 首帧加载后消费并打开该 run 的全链路时间线。60 秒新鲜度防止
+// 旧暂存在无 hash 的后续访问中劫持页面。
+function focusRunFromDeepLink() {
+    let stashed = null;
+    try {
+        const raw = window.sessionStorage.getItem('gms_automation_focus_run');
+        if (raw) {
+            window.sessionStorage.removeItem('gms_automation_focus_run');
+            stashed = JSON.parse(raw);
+        }
+    } catch (_error) { return; }
+    const runId = String(stashed?.id || '').trim();
+    const age = Date.now() - Number(stashed?.ts || 0);
+    if (!runId || age < 0 || age > 60000) return;
+    loadEvents(runId).catch(() => {});
+}
 
 
 // act-bridge 委托目标（替代历史 inline handler）。

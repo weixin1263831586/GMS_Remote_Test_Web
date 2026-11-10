@@ -119,6 +119,7 @@ _DANGEROUS_PATHS = {
     "/api/burn/firmware", "/api/burn/gsi", "/api/burn/serial",
     "/api/reports/delete",
     "/api/devices/bootloader-lock", "/api/devices/bootloader-unlock",
+    "/api/devices/factory-reset",
     "/api/config/update",
 }
 _CONFIRM_PATHS = {
@@ -126,6 +127,7 @@ _CONFIRM_PATHS = {
     "/api/burn/firmware", "/api/burn/gsi", "/api/burn/serial",
     "/api/devices/reboot", "/api/devices/remount",
     "/api/devices/bootloader-lock", "/api/devices/bootloader-unlock",
+    "/api/devices/factory-reset",
     "/api/devices/wifi",
     "/api/vpn/connect", "/api/vpn/disconnect",
     "/api/reports/delete", "/api/config/update",
@@ -565,12 +567,15 @@ def register_knowledge_agent_tools(registry: Any) -> None:
 
 def _build_registry() -> ToolRegistry:
     """构建并返回全局工具注册表。"""
+    from features.assistant.project_tools import definitions
     from features.system import API_DOCS_LIST
 
     registry = ToolRegistry()
     registry.register_from_api_docs(API_DOCS_LIST)
     _register_extra_tools(registry)
     register_android_ui_tools(registry)
+    for definition in definitions():
+        registry.register(AgentTool(**definition))
     return registry
 
 

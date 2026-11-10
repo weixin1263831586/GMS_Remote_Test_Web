@@ -65,35 +65,16 @@ function aoaCommandCalibrateStale() {
     return false;
 }
 
-// 标定取点的显示分辨率：标定 context 优先，其次设备清单，缺省退回视频帧
-// 像素（与网格读数同样的估算口径，仅影响换算精度，不影响取点本身）。
-function aoaCalibrateDisplaySize() {
-    const context = aoaPanelState.calibration?.context;
-    if (Array.isArray(context?.display) && context.display.length === 2
-            && context.display.every(value => Number.isInteger(value) && value > 0)) {
-        return {width: context.display[0], height: context.display[1]};
-    }
-    try {
-        const target = aoaRecorderTarget();
-        const deviceContext = aoaDeviceContext(target.device, target.workerId);
-        if (deviceContext?.display?.length === 2
-                && deviceContext.display.every(value => Number.isInteger(value) && value > 0)) {
-            return {width: deviceContext.display[0], height: deviceContext.display[1]};
-        }
-    } catch (error) { /* 未选录制设备：走 frame 兜底 */ }
-    return null;
-}
-
 // 视频帧像素 → AOA HID 逻辑坐标（官方按轴映射的逆变换：direct 361、
-// pointer 360，与 foundation.aoa_profile.real_to_aoa_point 一致）。
+// pointer 360）。point 来自 aoaPointFromPointer，必须按同一视频帧归一化，
+// scrcpy 缩放后的帧尺寸可能小于设备物理分辨率。
 function aoaCalibrateLogicalPoint(frame, point) {
-    const display = aoaCalibrateDisplaySize() || {width: frame.width, height: frame.height};
     const direct = (aoaHidMetadata().hid_touch_mode || 'direct') === 'direct';
     return {
         x: Math.max(0, Math.min(AOA_CALIBRATE_MAX_X,
-            Math.round(point.x * (AOA_CALIBRATE_MAX_X + (direct ? 1 : 0)) / display.width))),
+            Math.round(point.x * (AOA_CALIBRATE_MAX_X + (direct ? 1 : 0)) / frame.width))),
         y: Math.max(0, Math.min(AOA_CALIBRATE_MAX_Y,
-            Math.round(point.y * (AOA_CALIBRATE_MAX_Y + (direct ? 1 : 0)) / display.height))),
+            Math.round(point.y * (AOA_CALIBRATE_MAX_Y + (direct ? 1 : 0)) / frame.height))),
     };
 }
 

@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -77,6 +78,53 @@ def _artifact_limit_bytes() -> int:
         1,
         int(os.getenv("GMS_AUTOMATION_ARTIFACT_MAX_BYTES", str(20 * 1024**3))),
     )
+
+
+def _cluster_tls_profile() -> tuple[str, str]:
+    """(controller_url, controller_ca) the local Worker itself is configured with.
+
+    回环 Feature API 调用必须打到 Worker 实际可达的同一端点：部署
+    （restart_services.sh）以 TLS 启动服务，executor 若落到旧的明文
+    http://127.0.0.1 默认值，TLS 监听端会在返回任何 HTTP 响应前直接
+    断开连接（客户端表现为 RemoteDisconnected）。解析方式与
+    worker_agent 一致：GMS_CONTROLLER_CA / 集群配置里的 controller_url
+    与 controller_ca，配置路径同样支持 GMS_CLUSTER_CONFIG 覆盖。
+    """
+    from foundation.config_paths import cluster_config_path
+
+    root = Path(__file__).resolve().parents[2]
+    default_path = cluster_config_path(root)
+    if not default_path.is_file() and "GMS_CLUSTER_CONFIG" not in os.environ:
+        from foundation.config_paths import example_config_path
+
+        default_path = example_config_path(root, "cluster.json")
+    path = Path(os.getenv("GMS_CLUSTER_CONFIG", default_path))
+    raw: dict[str, Any] = {}
+    if path.is_file():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raw = {}
+    controller_url = str(raw.get("controller_url") or "").strip()
+    controller_ca = os.getenv(
+        "GMS_CONTROLLER_CA", str(raw.get("controller_ca") or "")
+    ).strip()
+    return controller_url, controller_ca
+
+
+def _local_tls_certificate() -> str:
+    """Loopback TLS 的兜底信任源：签发服务端证书的本机 CA。
+
+    gms-local.crt 是 CA 签发的叶子证书，不能代替信任锚。
+    缺少本机 CA 时保留系统信任链校验，不降级为跳过校验。
+    """
+    from foundation.config_paths import certificates_path
+
+    override = os.getenv("GMS_CONTROLLER_CA_FILE", "").strip()
+    if override:
+        return str(Path(override).expanduser())
+    certificate = certificates_path(Path(__file__).resolve().parents[2]) / "gms-local-ca.crt"
+    return str(certificate) if certificate.is_file() else ""
 
 
 def _controller_artifact_roots() -> list[Path]:
@@ -159,8 +207,21 @@ class HttpAutomationExecutor(RecoveryExecutorMixin):
         authority_provider: Any = None,
     ):
         port = os.environ.get("GMS_PORT", "5001")
-        self.base_url = (base_url or os.environ.get("GMS_AUTOMATION_BASE_URL") or f"http://127.0.0.1:{port}").rstrip("/")
+        controller_url, controller_ca = _cluster_tls_profile()
+        self.base_url = (
+            base_url
+            or os.environ.get("GMS_AUTOMATION_BASE_URL")
+            or controller_url
+            or f"http://127.0.0.1:{port}"
+        ).rstrip("/")
+        injected = session is not None
         self.session = session or requests.Session()
+        # TLS 端点必须有匹配的信任源；只设置在自建 session 上，
+        # 测试注入的 session 保持原样。
+        if not injected and self.base_url.startswith("https://"):
+            trust = controller_ca or _local_tls_certificate()
+            # controller_ca 来自配置/env，统一 expanduser，与本地兜底证书一致。
+            self.session.verify = str(Path(trust).expanduser()) if trust else True
         self.jenkins_config = jenkins_config or {}
         self.build_password_provider = build_password_provider
         self.device_manager = device_manager
@@ -312,6 +373,48 @@ class HttpAutomationExecutor(RecoveryExecutorMixin):
         if run.get("artifact_url") or run.get("artifact_path"):
             return {"success": True, "artifact_url": run.get("artifact_url", ""), "artifact_path": run.get("artifact_path", "")}
         return {"success": False, "error": "No artifact selected"}
+
+    def resolve_firmware_share(
+        self, run: dict[str, Any], *, on_progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        """受控固件来源（firmware_share）：烧写前把分享文件暂存到 Controller。
+
+        只凭 flash.firmware_share_id 对应的分享记录取远端文件（存在性、
+        过期、远端路径边界与大小上限在 firmware 模块内校验），暂存产物
+        落在 Controller 的 artifact-stage 根下，按既有 artifact_path 链路
+        烧写；不放宽任意 HTTP URL。
+        """
+        if run.get("artifact_path") or run.get("artifact_url"):
+            return {"success": True, "artifact_url": run.get("artifact_url", ""), "artifact_path": run.get("artifact_path", "")}
+        plan = _run_test_plan(run)
+        flash = plan.get("flash") if isinstance(plan.get("flash"), dict) else {}
+        share_id = str(flash.get("firmware_share_id") or "").strip()
+        if not share_id:
+            return {"success": False, "error": "flash.firmware_share_id is empty"}
+        from features.firmware import resolve_firmware_share_record
+        from foundation.redaction import redact_sensitive_text
+
+        try:
+            result = resolve_firmware_share_record(
+                share_id, run_id=str(run.get("id") or ""), max_bytes=_artifact_limit_bytes(),
+                on_progress=on_progress,
+            )
+        except Exception as exc:
+            return {"success": False, "error": f"固件分享暂存失败：{redact_sensitive_text(str(exc))}"}
+        if not result.get("ok"):
+            return {"success": False, "error": str(result.get("reason") or "firmware share unavailable")}
+        path = str(result.get("firmware_path") or "")
+        try:
+            _validated_controller_artifact(path)
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+        return {
+            "success": True,
+            "artifact_url": "",
+            "artifact_path": path,
+            "firmware_share_id": share_id,
+            "firmware_sha256": str(result.get("sha256") or ""),
+        }
 
     def select_devices(self, run: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -545,20 +648,30 @@ class HttpAutomationExecutor(RecoveryExecutorMixin):
 
         build_plan = _run_build_plan(run)
         is_ssh_build = bool(build_plan.get("provider") == "ssh" or build_plan.get("server_id"))
-        if is_ssh_build:
+        share_id = str(flash_plan.get("firmware_share_id") or "").strip()
+        cleanup_path = ""
+        if share_id:
+            staged = self.resolve_firmware_share(run)
+            if not staged.get("success"):
+                return staged
+            firmware_path = str(staged.get("artifact_path") or staged.get("artifact_url") or "")
+            # 排队阶段已持久化的暂存文件由 retention 管理；旧版在途 Run
+            # 的兜底解析没有持久引用，上传完成后即可清理。
+            if not (run.get("artifact_path") or run.get("artifact_url")):
+                cleanup_path = firmware_path
+        elif is_ssh_build:
             firmware_path = run.get("artifact_path") or run.get("artifact_url")
         else:
             firmware_path = run.get("artifact_url") or run.get("artifact_path")
         if not firmware_path:
             return {"success": False, "error": "No firmware artifact path/url"}
-        cleanup_path = ""
-        if is_ssh_build:
+        if is_ssh_build and not share_id:
             staged = self._stage_ssh_build_artifact(run, str(firmware_path))
             if not staged.get("success"):
                 return staged
             firmware_path = staged["firmware_path"]
             cleanup_path = staged.get("cleanup_path", "")
-        elif str(firmware_path).startswith(("http://", "https://")):
+        elif not share_id and str(firmware_path).startswith(("http://", "https://")):
             staged = self._stage_http_artifact(run, str(firmware_path))
             if not staged.get("success"):
                 return staged
@@ -595,7 +708,11 @@ class HttpAutomationExecutor(RecoveryExecutorMixin):
                 )
             result = self._json_response(response)
         except Exception as exc:
-            return {"success": False, "error": f"failed to stage firmware for Worker: {exc}"}
+            hint = ""
+            if "RemoteDisconnected" in str(exc) or "Connection aborted" in str(exc):
+                hint = ("；端点未返回任何响应即断开连接，请核对 controller_url/"
+                        "GMS_AUTOMATION_BASE_URL 的协议是否与服务的 TLS 监听一致")
+            return {"success": False, "error": f"failed to stage firmware for Worker: {exc}{hint}"}
         finally:
             if cleanup_path:
                 try:

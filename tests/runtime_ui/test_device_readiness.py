@@ -11,6 +11,114 @@ def respond(route, payload, status=200):
 
 
 class RuntimeDeviceReadinessTests(RuntimeUiHarness):
+    def test_new_device_selection_excludes_an_unresponsive_previous_target(self):
+        page = self.new_page()
+        previous = '66df75a34ebde4a4'
+        selected = 'RK3326GMS1'
+        devices = [
+            {'device_id': previous, 'status': 'unresponsive', 'protocol': 'adb'},
+            {'device_id': selected, 'status': 'online', 'protocol': 'adb'},
+        ]
+        info_requests, test_requests = [], []
+
+        def info(route):
+            info_requests.append(route.request.post_data_json)
+            respond(route, {'success': True, 'results': []})
+
+        def start(route):
+            test_requests.append(route.request.post_data_json)
+            respond(route, {'success': False, 'error': 'mock capacity exhausted'}, 409)
+
+        try:
+            page.route('**/api/devices/list*', lambda route: respond(route, devices))
+            page.route('**/api/devices/info', info)
+            page.route('**/api/test/start', start)
+            self.goto_shell(page)
+            page.evaluate("""async devices => {
+                await GmsWorkspace.ready;
+                GmsWorkspace.update({scope_mode: 'single', device_ids: [devices[0].device_id]},
+                    {source: 'ui-smoke', persist: false});
+                state.devices = devices;
+                state.selectedDevices = new Set([devices[0].device_id]);
+                state.followFilter = false;
+                renderDevices();
+            }""", devices)
+            old_card = page.locator(f'.device-item[data-device-id="{previous}"]')
+            expect(old_card.locator('input')).to_be_disabled()
+            expect(old_card.locator('input')).not_to_be_checked()
+            page.locator(f'.device-item[data-device-id="{selected}"] input').click()
+            self.assertEqual(page.evaluate('Array.from(state.selectedDevices)'), [selected])
+            self.assertEqual(page.evaluate('GmsWorkspace.get().device_ids'), [selected])
+            self.assertTrue(page.evaluate('validateDeviceSelection()'))
+            page.locator('#btn-device-info').click()
+            expect(page.locator('#btn-device-info')).to_be_enabled()
+            self.assertEqual(info_requests, [{'devices': [selected]}])
+            page.evaluate("""async () => {
+                const suite = document.getElementById('test-suite');
+                suite.replaceChildren(new Option('/mock/suite', '/mock/suite'));
+                await startTest();
+            }""")
+            self.assertEqual(len(test_requests), 1)
+            self.assertEqual(test_requests[0]['devices'], [selected])
+        finally:
+            page.close()
+
+    def test_inventory_refresh_prunes_inactive_targets_without_writes_or_automatic_reselection(self):
+        page = self.new_page()
+        devices = [
+            {'device_id': 'OLD', 'status': 'unresponsive'},
+            {'device_id': 'READY', 'status': 'online'},
+            {'device_id': 'BUSY', 'status': 'online', 'locked': True},
+        ]
+        writes = []
+        try:
+            page.route('**/api/devices/list*', lambda route: respond(route, devices))
+            page.on('request', lambda request: writes.append(request.url)
+                    if request.method == 'PATCH' and '/workspace-context' in request.url else None)
+            self.goto_shell(page)
+            await_refresh = """async () => {
+                await loadDevices(true, {silent: true});
+                return {selected: Array.from(state.selectedDevices), workspace: GmsWorkspace.get().device_ids};
+            }"""
+            page.evaluate("""async () => {
+                await GmsWorkspace.ready;
+                GmsWorkspace.update({scope_mode: 'single', device_ids: ['OLD', 'READY', 'BUSY', 'GONE']},
+                    {source: 'ui-smoke', persist: false});
+                state.selectedDevices = new Set(['OLD', 'READY', 'BUSY', 'GONE']);
+                state.followFilter = false;
+            }""")
+            self.assertEqual(page.evaluate(await_refresh), {'selected': ['READY'], 'workspace': ['READY']})
+            devices[0]['status'] = 'online'
+            devices[2]['locked'] = False
+            self.assertEqual(page.evaluate(await_refresh), {'selected': ['READY'], 'workspace': ['READY']})
+            expect(page.locator('.device-item[data-device-id="OLD"] input')).not_to_be_checked()
+            expect(page.locator('.device-item[data-device-id="BUSY"] input')).not_to_be_checked()
+            page.wait_for_timeout(200)
+            self.assertEqual(writes, [])
+        finally:
+            page.close()
+
+    def test_selection_change_rerenders_checkboxes_without_workspace_change(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate("""async () => {
+                await GmsWorkspace.ready;
+                GmsWorkspace.update({scope_mode: 'single', device_ids: []},
+                    {source: 'ui-smoke', persist: false});
+                state.devices = [{device_id: 'A', status: 'online'}, {device_id: 'B', status: 'online'}];
+                state.followFilter = false;
+                state.selectedDevices = new Set(['A']);
+                renderDevices();
+                state.selectedDevices = new Set(['B']);
+                renderDevices();
+                return Array.from(document.querySelectorAll('.device-item input:checked'))
+                    .map(input => input.closest('.device-item').dataset.deviceId);
+            }""")
+            self.assertEqual(result, ['B'])
+        finally:
+            page.close()
+
     def test_adb_connection_usb_only_and_unconfirmed_states_are_distinct(self):
         page = self.new_page()
         devices = [

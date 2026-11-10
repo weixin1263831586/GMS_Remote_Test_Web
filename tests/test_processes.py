@@ -1,10 +1,22 @@
+import os
+import sys
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from foundation.processes import start_detached_process
+from foundation.processes import run_local_command, start_detached_process
 
 
 class ProcessHelperTests(unittest.TestCase):
+    def test_local_command_isolates_environment_and_working_directory(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"GMS_PROCESS_PARENT_MARKER": "parent"}):
+            result = run_local_command([
+                sys.executable, "-c",
+                "import os; print(os.getcwd()); print(os.getenv('GMS_PROCESS_FIXTURE')); print(os.getenv('GMS_PROCESS_PARENT_MARKER'))",
+            ], env={"GMS_PROCESS_FIXTURE": "isolated"}, cwd=directory)
+            self.assertTrue(result.ok, result.stderr)
+            self.assertEqual(result.stdout.splitlines(), [directory, "isolated", "None"])
+
     def test_start_detached_process_starts_reaper_thread(self):
         process = Mock()
         process.pid = 1234

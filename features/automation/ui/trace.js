@@ -43,6 +43,29 @@ async function loadDashboard() {
         });
         profileEl.innerHTML = rows.length ? rows.join('') : '<div class="muted">暂无数据。</div>';
     }
+
+    // 进行中迷你列表：概览即可看到正在推进的任务并直达详情，替代
+    // 「先切运行监控再找卡片」的两跳路径。
+    const activeHost = qs('dashboard-active-runs');
+    if (activeHost) {
+        const runs = await api('/api/automation/runs?limit=25').catch(() => ({items: []}));
+        const active = (runs.items || []).filter(run => !TERMINAL_STATUSES.has(run.status)).slice(0, 6);
+        activeHost.innerHTML = active.length ? active.map(run => `
+            <article class="run-card" data-click="loadEvents" data-a0="${esc(run.id)}">
+                <div class="run-main">
+                    <div class="run-title">
+                        <span class="badge ${esc(run.status)}" title="${esc(run.status)}">${esc(statusLabel(run.status))}</span>
+                        <strong>${esc(run.profile_id || 'manual')}</strong>
+                        <span class="muted">${esc(run.id)} · ${esc(compactTime(run.updated_at || run.created_at))}</span>
+                    </div>
+                    ${renderStageBar(run.status, run.current_stage) || ''}
+                </div>
+                <div class="run-actions">
+                    <button type="button" data-click="loadEvents" data-a0="${esc(run.id)}" data-stop>详情</button>
+                </div>
+            </article>`).join('')
+            : '<div class="empty-state">当前没有进行中的运行。</div>';
+    }
 }
 
 async function loadTrace(runId) {

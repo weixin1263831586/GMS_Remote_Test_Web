@@ -10,6 +10,25 @@ from features.ops.sweep import run_ops_sweep
 
 
 class SweepTests(unittest.TestCase):
+    def test_failed_old_event_is_attempted_only_once_per_sweep(self):
+        with TemporaryDirectory() as tmp:
+            store = OpsStore(Path(tmp) / "ops.sqlite3")
+            event = store.record_incident(severity="critical", kind="test", message="test")["event"]
+            store.mark_delivery_state(event["id"], state="failed", attempts=12)
+            with store._connect() as conn:
+                conn.execute(
+                    "UPDATE ops_events SET created_at='2000-01-01T00:00:00Z', "
+                    "notify_retry_at='2000-01-01T00:00:00Z'"
+                )
+            with mock.patch("features.ops.sweep.build_snapshot", return_value={}), \
+                    mock.patch("features.ops.service.get_ops_store", return_value=store), \
+                    mock.patch("features.ops.sweep.notify_incident", return_value={"ok": False}) as notify:
+                run_ops_sweep({"enabled": True})
+            notify.assert_called_once()
+            failed = store.get_event(event["id"])
+            self.assertEqual(failed["notify_attempts"], 13)
+            self.assertFalse(store.notify_backoff_ready(failed))
+
     def test_sweep_records_and_notifies_once(self):
         with TemporaryDirectory() as tmp:
             store = OpsStore(Path(tmp) / "ops.sqlite3")
@@ -70,14 +89,17 @@ class SweepTests(unittest.TestCase):
             notify.assert_not_called()
             self.assertEqual(result["notified"], 0)
 
-            # 把 failed 事件的 created_at 拨回模拟退避到期 → 重试成功 →
+            # 把事件年龄和下次重试时间拨回，模拟退避到期 → 重试成功 →
             # sent 闭环。同时快照仍含同 dedup_key 的活跃 incident，且原事件
             # 已超出抑制窗口：会重新入库一条新事件并立即投递（重报语义），
             # 因此 notify 恰好调用两次：重试的旧行 + 新行。
             import sqlite3
 
             with sqlite3.connect(str(Path(tmp) / "ops.sqlite3")) as conn:
-                conn.execute("UPDATE ops_events SET created_at='2020-01-01T00:00:00Z'")
+                conn.execute(
+                    "UPDATE ops_events SET created_at='2020-01-01T00:00:00Z', "
+                    "notify_retry_at='2020-01-01T00:00:00Z'"
+                )
             with mock.patch(
                 "features.ops.sweep.notify_incident",
                 return_value={"ok": True},

@@ -94,6 +94,15 @@ def _wait_for_adb_online(
     return False, round(wait_timeout, 1)
 
 
+# 恢复出厂（fastbootd format 路径）专用超时：等进 bootloader / fastbootd
+# 各可达数分钟；format userdata 视分区大小可达数分钟，必须比通用 30s 长。
+# worker_agent/device_actions.py 侧有同构实现与同名常量（Worker 不允许
+# import features，两侧独立维护）。
+FACTORY_RESET_FASTBOOT_WAIT_SECONDS = 120
+FACTORY_RESET_FASTBOOTD_WAIT_SECONDS = 90
+FACTORY_RESET_FORMAT_TIMEOUT_SECONDS = 420
+
+
 def reboot_with_runner(
     run_adb: AdbRunner,
     device_id: str | None,

@@ -4,15 +4,19 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from features.automation.artifact_progress import artifact_download_progress
+
 
 def run_progress(run: dict, cluster) -> dict:
+    download = artifact_download_progress(run)
+    base = {'modules': [], 'preparations': [], 'available': bool(download), 'artifact_download': download}
     if not run.get('cluster_job_id'):
-        return {'modules': [], 'preparations': [], 'available': False}
+        return base
     repository = cluster.repository
     job = repository.get_job(run['cluster_job_id'])
     if (not job or job.get('owner_id') != run.get('created_by')
             or job.get('current_attempt_id') != run.get('attempt_id')):
-        return {'modules': [], 'preparations': [], 'available': False}
+        return base
     modules, preparations = {}, {}
     for event in repository.recent_job_progress(job['id'], run['attempt_id']):
         progress = (event.get('payload') or {}).get('progress')
@@ -35,5 +39,6 @@ def run_progress(run: dict, cluster) -> dict:
         except (ValueError, TypeError):
             module['observed_seconds'] = None
     return {'modules': list(modules.values()), 'preparations': list(preparations.values()),
-            'available': bool(modules or preparations), 'last_output_at': repository.job_last_output_at(job['id'], run['attempt_id']),
+            'available': bool(modules or preparations or download), 'artifact_download': download,
+            'last_output_at': repository.job_last_output_at(job['id'], run['attempt_id']),
             'observed_module_count': len(modules), 'partial': True}

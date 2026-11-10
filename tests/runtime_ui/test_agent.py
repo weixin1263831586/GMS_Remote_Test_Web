@@ -623,6 +623,7 @@ class RuntimeAgentTests(RuntimeUiHarness):
         def ai_status(route):
             is_probe = "probe=true" in route.request.url
             probe_requests.append(is_probe)
+            credential_configured = len(probe_requests) > 1
             provider = {
                 "provider": "glm_local",
                 "name": "Local GLM",
@@ -630,9 +631,9 @@ class RuntimeAgentTests(RuntimeUiHarness):
                 "enabled": True,
                 "local": True,
                 "configured": True,
-                "credential_configured": is_probe,
-                "state": "available" if is_probe else "credential_missing",
-                "available": True if is_probe else None,
+                "credential_configured": credential_configured,
+                "state": "available" if credential_configured else "credential_missing",
+                "available": credential_configured,
                 "checked": is_probe,
             }
             if is_probe:
@@ -658,12 +659,12 @@ class RuntimeAgentTests(RuntimeUiHarness):
             page.evaluate("switchPage('agent', null)")
             status = page.locator("#agent-model-status")
             expect(status).to_have_text("本地模型：缺少密钥")
-            self.assertIn("Agent 指令路由使用确定性规则", status.get_attribute("title"))
+            self.assertIn("对话引擎状态单独显示", status.get_attribute("title"))
 
             page.locator("#agent-model-check").click()
             expect(status).to_have_text("本地模型：可用 · 42ms")
             expect(status).to_have_attribute("data-state", "available")
-            self.assertEqual(probe_requests, [False, True])
+            self.assertEqual(probe_requests, [True, True])
         finally:
             page.close()
 

@@ -76,6 +76,89 @@ def test_flash_aoa_verify_test_order(tmp_path):
     assert calls == ["flash", "aoa", "verify", "test"]
 
 
+def test_flash_only_run_completes_without_test(tmp_path):
+    """test_mode=skip：烧写→AOA→固件校验后收尾为 completed，绝不进测试。"""
+    calls = []
+
+    class Executor(StubAutomationExecutor):
+        def flash(self, run):
+            calls.append("flash")
+            return {"success": True}
+
+        def aoa_enabled(self, run):
+            return True
+
+        def aoa_recover(self, run):
+            calls.append("aoa")
+            return {"success": True, "aoa_result": {"success": True, "adb_recovered": True, "adb_state": "device"}}
+
+        def verify_post_flash(self, run):
+            calls.append("verify")
+            return {"success": True, "verified": True}
+
+        def start_test(self, run):  # pragma: no cover - flash-only must not test
+            calls.append("test")
+            return {"success": True}
+
+    store = AutomationStore(tmp_path / "runs.sqlite3")
+    run = AutomationRunCreateRequest().to_run_dict("run")
+    run["status"] = run["current_stage"] = "flashing"
+    run["test_plan_json"] = json.dumps({"test_mode": "skip", "flash": {"mode": "firmware"}})
+    store.create_run(run)
+    orchestrator = AutomationOrchestrator(store, Executor())
+    for _ in range(6):
+        result = orchestrator.advance_run("run")
+    assert calls == ["flash", "aoa", "verify"], "flash-only run must never start a test"
+    assert result["status"] == "completed"
+
+
+def test_firmware_share_queued_run_stages_artifact_before_devices(tmp_path):
+    """受控固件来源：先持久化下载阶段，解析完成后再进等待设备。"""
+    staged_calls = []
+
+    class Executor(StubAutomationExecutor):
+        def resolve_firmware_share(self, run, *, on_progress=None):
+            staged_calls.append(run["id"])
+            return {"success": True, "artifact_url": "",
+                    "artifact_path": "/stage/run/firmware.img"}
+
+    store = AutomationStore(tmp_path / "runs.sqlite3")
+    run = AutomationRunCreateRequest().to_run_dict("run")
+    run["status"] = run["current_stage"] = "queued"
+    run["test_plan_json"] = json.dumps({
+        "test_mode": "skip",
+        "flash": {"mode": "firmware", "firmware_share_id": "share-1"},
+    })
+    store.create_run(run)
+    orchestrator = AutomationOrchestrator(store, Executor())
+    assert orchestrator.advance_run("run")["status"] == "artifact_fetching"
+    assert staged_calls == []
+    result = orchestrator.advance_run("run")
+    assert staged_calls == ["run"]
+    assert result["status"] == "waiting_device"
+    assert result["artifact_path"] == "/stage/run/firmware.img"
+
+
+def test_firmware_share_resolution_failure_fails_run_as_artifact_missing(tmp_path):
+    """分享不存在/过期/下载失败：进入 artifact_missing，不静默进烧写。"""
+
+    class Executor(StubAutomationExecutor):
+        def resolve_firmware_share(self, run, *, on_progress=None):
+            return {"success": False, "error": "固件分享已过期: share-1"}
+
+    store = AutomationStore(tmp_path / "runs.sqlite3")
+    run = AutomationRunCreateRequest().to_run_dict("run")
+    run["status"] = run["current_stage"] = "queued"
+    run["test_plan_json"] = json.dumps({
+        "flash": {"mode": "firmware", "firmware_share_id": "share-1"},
+    })
+    store.create_run(run)
+    orchestrator = AutomationOrchestrator(store, Executor())
+    assert orchestrator.advance_run("run")["status"] == "artifact_fetching"
+    result = orchestrator.advance_run("run")
+    assert result["status"] == "artifact_missing"
+
+
 def test_profile_changes_do_not_change_prepared_run(tmp_path, monkeypatch):
     from features.automation.service import AutomationService
 

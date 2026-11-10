@@ -265,12 +265,11 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 manager.config_path = str(configs / "config.json")
                 manager.runtime_config_path = str(configs / "config_runtime.json")
                 manager.invalidate_cache()
-                # resolve_email_config 的全局默认兜底读 foundation 全局
-                # runtime；部署机真实 SMTP 的非空字段会覆盖本测试 fixture，
-                # 必须一并隔离。
+                # 静态 SMTP 属于全局默认，owner 仅提供运行时显式覆盖；
+                # 用同一测试配置模拟全局默认，避免读取部署机配置。
                 with patch(
                     "foundation.config.config_manager.load_config",
-                    return_value={},
+                    side_effect=manager.load_config,
                 ), patch("features.email.transport.smtplib.SMTP") as smtp_cls:
                     smtp = smtp_cls.return_value.__enter__.return_value
 
@@ -326,7 +325,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 # 即便 Redmine 凭证里有登录密码，也不应被用作 SMTP 授权码
                 with (
                     patch.object(manager, "load_redmine_credentials", return_value={"username": "chaoqun.huang@rock-chips.com", "password": "redmine-login-secret"}),
-                    patch("foundation.config.config_manager.load_config", return_value={}),
+                    patch("foundation.config.config_manager.load_config", side_effect=manager.load_config),
                     patch("features.email.transport.smtplib.SMTP_SSL") as smtp_cls,
                 ):
                     result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
@@ -353,7 +352,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 manager.invalidate_cache()
                 with patch(
                     "foundation.config.config_manager.load_config",
-                    return_value={},
+                    side_effect=manager.load_config,
                 ), patch("features.email.transport.smtplib.SMTP_SSL") as smtp_cls:
                     smtp = smtp_cls.return_value.__enter__.return_value
 
@@ -400,7 +399,9 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 manager.config_path = str(configs / "config.json")
                 manager.runtime_config_path = str(configs / "config_runtime.json")
                 manager.invalidate_cache()
-                with patch("features.email.transport.smtplib.SMTP_SSL") as smtp_cls:
+                with patch(
+                    "foundation.config.config_manager.load_config", side_effect=manager.load_config,
+                ), patch("features.email.transport.smtplib.SMTP_SSL") as smtp_cls:
                     smtp = smtp_cls.return_value.__enter__.return_value
 
                     result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
@@ -447,7 +448,9 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 manager.config_path = str(configs / "config.json")
                 manager.runtime_config_path = str(configs / "config_runtime.json")
                 manager.invalidate_cache()
-                with patch("features.email.transport.smtplib.SMTP_SSL", side_effect=smtplib.SMTPServerDisconnected("Connection unexpectedly closed")):
+                with patch(
+                    "foundation.config.config_manager.load_config", side_effect=manager.load_config,
+                ), patch("features.email.transport.smtplib.SMTP_SSL", side_effect=smtplib.SMTPServerDisconnected("Connection unexpectedly closed")):
                     result = redmine_router._send_reminder_email("dev@example.com", "提醒", "body")
 
                     self.assertFalse(result["sent"])

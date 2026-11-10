@@ -55,7 +55,10 @@ class OpsApiTests(unittest.TestCase):
     def test_automation_page_registers_ops_assets(self):
         ui_dir = Path(__file__).resolve().parents[1].parent / "automation" / "ui"
         html = (ui_dir / "page.html").read_text(encoding="utf-8")
-        self.assertIn('data-workflow="ops"', html)
+        # 五段旅程重构后 ops 不再是顶栏 Tab，但 pane 仍注册且可经页首
+        # 互链（运维 →）进入：入口与资产都不可丢失。
+        self.assertIn('id="workflow-pane-ops"', html)
+        self.assertIn('data-a0="ops"', html)
         self.assertIn('/automation/ops-panel.js', html)
         self.assertIn('id="ops-kill-switch"', html)
         self.assertIn('id="ops-events"', html)

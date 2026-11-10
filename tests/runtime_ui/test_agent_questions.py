@@ -1,0 +1,143 @@
+"""Project-wide questions are schema-driven; blocked confirmation remains visible."""
+
+import json
+
+from tests.runtime_ui.harness import RuntimeUiHarness, expect
+
+
+class RuntimeAgentQuestionTests(RuntimeUiHarness):
+    def test_background_planning_polls_until_resource_choices_are_ready(self):
+        page = self.new_page()
+        planning = {'session_id': 'model-background', 'status': 'thinking', 'messages': [], 'steps': [],
+                    'agent_backend': {'mode': 'kkagent', 'state': 'connecting'}}
+        ready = {**planning, 'status': 'idle', 'agent_backend': {'mode': 'kkagent', 'state': 'ready'},
+                 'agent_question': {'id': 'background-question'}, 'messages': [{
+                     'id': 'background-question', 'role': 'assistant', 'kind': 'question', 'content': '请选择报告',
+                     'data': {'question': {'fields': [{'name': 'report', 'label': '报告', 'options': [
+                         {'value': 'report-1', 'label': '最近失败报告'},
+                     ]}]}},
+                 }]}
+        try:
+            page.route('**/api/agent/chat', lambda route: route.fulfill(status=200, content_type='application/json',
+                       body=json.dumps({'success': True, 'data': {'session': planning}})))
+            page.route('**/api/agent/sessions/model-background', lambda route: route.fulfill(status=200,
+                       content_type='application/json', body=json.dumps({'success': True, 'data': {'session': ready}})))
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            page.locator('#agent-input').fill('分析最近失败的报告')
+            page.locator('#agent-input').press('Enter')
+            expect(page.locator('#agent-status')).to_have_text('思考中')
+            expect(page.locator('#agent-question-background-question')).to_be_visible()
+            expect(page.locator('#agent-engine-status')).to_have_text('对话引擎：kkagent 已连接')
+        finally:
+            page.close()
+
+    def test_blocked_plan_has_a_visible_disabled_confirmation_and_reason(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            page.evaluate("""() => renderAgentMessages({status: 'planning', messages: [{
+                role: 'assistant', kind: 'plan', content: '工作流计划', data: {plan: {
+                    type: 'workflow_draft', preflight: {ready: false, blocks: [{stage: 'device', reason: '设备被 gms 占用'}]}
+                }}
+            }]})""")
+            button = page.locator('#agent-chat-messages button[data-click="confirmAgentPlan"]')
+            expect(button).to_have_text('确认执行')
+            expect(button).to_be_visible()
+            expect(button).to_be_disabled()
+            expect(page.locator('#agent-chat-messages')).to_contain_text('设备被 gms 占用')
+            page.evaluate("""() => renderAgentMessages({status: 'planning', messages: [{
+                role: 'assistant', kind: 'plan', content: '预检通过', data: {plan: {
+                    type: 'workflow_draft', preflight: {ready: true, blocks: []}
+                }}
+            }]})""")
+            expect(button).to_be_enabled()
+        finally:
+            page.close()
+
+    def test_generic_resource_choices_survive_rerender_and_submit_structured_values(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            page.evaluate("""() => {
+                window.questionSession = {status: 'idle', agent_question: {id: 'q-1'}, messages: [{
+                    id: 'q-1', role: 'assistant', kind: 'question', content: '选择资源', data: {question: {fields: [
+                        {name: 'device', label: '设备', required: true, options: [{value: 'DEV-1', label: '<img src=x onerror=alert(1)>'}]},
+                        {name: 'report', label: '报告', required: true, options: [{value: 'REPORT-1', label: '昨天报告'}]},
+                    ]}}
+                }]};
+                renderAgentMessages(questionSession);
+                window.sendAgentAction = async (action, params) => {window.choiceSubmission = {action, ...JSON.parse(params)};};
+            }""")
+            form = page.locator('#agent-question-q-1')
+            form.locator('[data-agent-choice="device"]').select_option('DEV-1')
+            form.locator('[data-agent-choice="report"]').select_option('REPORT-1')
+            page.evaluate('renderAgentMessages(questionSession)')
+            expect(form.locator('[data-agent-choice="device"]')).to_have_value('DEV-1')
+            expect(form.locator('[data-agent-choice="report"]')).to_have_value('REPORT-1')
+            expect(form.locator('img')).to_have_count(0)
+            form.locator('button').click()
+            assert page.evaluate('choiceSubmission') == {
+                'action': 'agent_choices', 'question_id': 'q-1', 'values': {'device': 'DEV-1', 'report': 'REPORT-1'},
+            }
+            page.evaluate("questionSession.agent_question = {id: 'q-2'}; renderAgentMessages(questionSession)")
+            expect(form.locator('button')).to_be_disabled()
+        finally:
+            page.close()
+
+    def test_engine_badge_reports_actual_backend_and_fallback(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            page.evaluate("renderAgentSession({status: 'idle', messages: [], steps: [], agent_backend: {mode: 'kkagent', state: 'ready'}})")
+            expect(page.locator('#agent-engine-status')).to_have_text('对话引擎：kkagent 已连接')
+            page.evaluate("renderAgentSession({status: 'idle', messages: [], steps: [], agent_backend: {mode: 'rules', detail: '模型暂不可用'}})")
+            expect(page.locator('#agent-engine-status')).to_have_text('对话引擎：规则兜底')
+            expect(page.locator('#agent-engine-status')).to_have_attribute('title', '模型暂不可用')
+        finally:
+            page.close()
+
+    def test_planning_wait_and_model_failure_are_visible(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            page.evaluate("""() => renderAgentSession({status: 'thinking', messages: [], steps: [{
+                title: 'Agent 规划', status: 'running', detail: '正在等待模型响应',
+                data: {kind: 'agent_model_wait', started_at: new Date(Date.now() - 15000).toISOString()}
+            }], agent_backend: {mode: 'kkagent', state: 'retrying'}})""")
+            expect(page.locator('#agent-steps')).to_contain_text('已等待 15 秒')
+            expect(page.locator('#agent-engine-status')).to_have_text('对话引擎：kkagent 重试中')
+            page.evaluate("renderAgentSession({status: 'idle', messages: [], steps: [], agent_backend: {mode: 'kkagent', state: 'timeout', detail: '模型回合超时'}})")
+            expect(page.locator('#agent-engine-status')).to_have_text('对话引擎：kkagent 响应超时')
+            expect(page.locator('#agent-engine-status')).to_have_attribute('title', '模型回合超时')
+        finally:
+            page.close()
+
+    def test_retry_button_submits_checkpoint_and_disables_stale_actions(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            page.evaluate("""() => {
+                window.retrySession = {status: 'idle', agent_retry: {id: 'retry-current'}, messages: [{
+                    role: 'assistant', content: '模型响应超时', data: {quick_actions: [{
+                        label: '重试本轮规划', action: 'agent_retry', params: {retry_id: 'retry-current'}
+                    }]}
+                }]};
+                renderAgentMessages(retrySession);
+                window.sendAgentAction = async (action, params) => {window.retrySubmission = {action, ...JSON.parse(params)};};
+            }""")
+            button = page.locator('#agent-chat-messages button[data-a0="agent_retry"]')
+            expect(button).to_be_enabled()
+            button.click()
+            assert page.evaluate('retrySubmission') == {'action': 'agent_retry', 'retry_id': 'retry-current'}
+            page.evaluate("retrySession.status = 'thinking'; renderAgentMessages(retrySession)")
+            expect(button).to_be_disabled()
+            page.evaluate("retrySession.status = 'idle'; retrySession.agent_retry = {id: 'new-retry'}; renderAgentMessages(retrySession)")
+            expect(button).to_be_disabled()
+        finally:
+            page.close()

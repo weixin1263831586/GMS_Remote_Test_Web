@@ -16,6 +16,7 @@ async function loadRuns() {
     state.hasMore = Boolean(data.has_more && data.next_cursor);
     state.nextCursor = data.next_cursor || '';
     renderRunHistoryPager(view);
+    renderBlockedRunsBanner();
     const list = qs('automation-runs');
     const reportList = qs('automation-runs-report');
     if (!atsRuns.length) {
@@ -30,6 +31,7 @@ async function loadRuns() {
                     <span class="badge ${esc(run.status)}" title="${esc(run.status)}">${esc(statusLabel(run.status))}</span>
                     <strong>${esc(run.profile_id || 'manual')}</strong>
                     <span class="muted">${esc(run.source_type || 'manual')}</span>
+                    ${run.source_type === 'assistant_chat' ? `<button type="button" class="btn-xs" data-click="jumpToAgentConversation" data-a0="${esc(run.id)}" data-stop title="回到发起这条运行的对话 Agent 会话">来自对话 Agent ↗</button>` : ''}
                     ${renderTestOutcome(run)}
                 </div>
                 ${runMeta(run) ? `<div class="muted">${esc(runMeta(run))}</div>` : ''}
@@ -66,6 +68,7 @@ async function loadRuns() {
                     </div>` : ''}
                 </div>
                 ${renderStageBar(run.status, run.current_stage)}
+                ${run.status === 'artifact_fetching' ? renderArtifactDownload(run.artifact_download) : ''}
             </div>
             <div class="run-actions">
                 <button type="button" data-click="loadEvents" data-a0="${esc(run.id)}" data-stop>日志</button>
@@ -106,6 +109,16 @@ async function loadRuns() {
             `).join('')
             : '<div class="empty-state">暂无已生成的测试报告。</div>';
     }
+}
+
+function renderArtifactDownload(download) {
+    const total = Number(download?.total_bytes);
+    const done = Number(download?.downloaded_bytes);
+    const speed = Number(download?.bytes_per_second);
+    if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(done) || done < 0 || done > total) return '';
+    const percent = (done * 100 / total).toFixed(1);
+    const rate = Number.isFinite(speed) && speed > 0 ? ` · ${resourceBytes(speed)}/s` : '';
+    return `<div class="artifact-download">固件下载 ${percent}% · ${resourceBytes(done)} / ${resourceBytes(total)}${rate}<br><progress max="100" value="${percent}" aria-label="固件下载进度"></progress></div>`;
 }
 
 function renderTestOutcome(run) {
@@ -175,4 +188,24 @@ async function changeRunHistoryPage(view, direction) {
     qs(`history-previous-${view}`).disabled = true;
     try { await loadRuns(); } catch (error) { state.index = previousIndex; toast(error.message); }
     renderRunHistoryPager(view);
+}
+
+// 反向链：从 ATS 运行卡片跳回发起该运行的对话 Agent 会话页。卡片点击
+// 不经过 loadEvents，先写入目标 run 的上下文再导航，避免 Agent 页续接
+// 上一次查看的 run（act-bridge 只把 data-a0 的 run id 传进来）。
+function jumpToAgentConversation(runId) {
+    const target = String(runId || '').trim();
+    if (!target) return;
+    const run = atsRuns.find(item => item.id === target);
+    window.GmsEmbeddedWorkspace?.update({
+        automation_run_id: target,
+        worker_id: run?.worker_id || selectedWorkerId(),
+        cluster_job_id: run?.cluster_job_id || '',
+        attempt_id: run?.attempt_id || '',
+        report_id: run?.report_id || '',
+        report_timestamp: run?.report_timestamp || '',
+        gerrit_change_id: run?.gerrit_change_id || '',
+        gerrit_patchset: run?.gerrit_patchset || '',
+    });
+    window.GmsEmbeddedWorkspace?.navigate('agent', {origin_page: 'automation'});
 }

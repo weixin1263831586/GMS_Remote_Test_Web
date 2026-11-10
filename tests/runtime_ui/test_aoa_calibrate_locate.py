@@ -137,6 +137,26 @@ class RuntimeAoaCalibrateLocateTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_scaled_video_center_stays_center_with_known_physical_display(self):
+        page, inputs = self.new_page(), []
+        try:
+            self.prepare(page, inputs)
+            page.evaluate("""() => {
+                aoaPanelState.calibration = {context: {display: [1080, 1920]}};
+                const canvas = aoaEl('aoa-screen-canvas');
+                canvas.width = 576; canvas.height = 1024;
+                aoaCommandCalibrateStart(0);
+            }""")
+            box = page.locator('#aoa-screen-canvas').bounding_box()
+            page.mouse.click(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+            mark = page.evaluate("aoaScreenGridState().calibrate")
+            assert (mark['x'], mark['y']) == (181, 321), mark
+            page.evaluate("aoaCommandCalibrateFinish(true)")
+            assert page.evaluate("aoaPanelState.commands[0]") == 'click 181 321'
+            assert inputs == []
+        finally:
+            page.close()
+
     def test_locate_cancel_restores_command_without_change(self):
         page = self.new_page()
         try:

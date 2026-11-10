@@ -124,6 +124,7 @@ __all__ = [
     "get_usb_monitor",
     "incompatible_test_devices",
     "iter_websocket_targets",
+    "list_aoa_profiles",
     "local_proxy_secret",
     "lookup_usbip_source_os",
     "migrate_local_usbip_serial",
@@ -150,3 +151,10 @@ __all__ = [
     "validate_owned_semantic",
     "validate_pair_grant",
 ]
+
+
+def list_aoa_profiles(request):
+    """Owner-scoped AOA catalog for project tool discovery."""
+    from .aoa_api import list_profiles
+
+    return list_profiles(request)

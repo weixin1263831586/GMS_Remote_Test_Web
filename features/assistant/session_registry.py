@@ -1,7 +1,8 @@
 """对话 Agent 会话注册表：内存生命周期 + 崩溃恢复锚点。
 
 会话生命周期独立于 HTTP 入口模块管理：Controller 重启后 session_id 与
-cluster_job_id / attempt_id / 执行阶段的关联不丢失，监控可恢复。
+cluster_job_id / automation_run_id / attempt_id / 执行阶段的关联不丢失，
+监控可恢复。
 本模块把会话生命周期从路由层分离，并通过
 ``session_store`` 持久化最小恢复锚点（不含消息正文、asyncio.Task 或
 pre_actions 密码）；消息/步骤等完整 UI 状态仍是可丢弃的。
@@ -14,7 +15,7 @@ import logging
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -65,7 +66,7 @@ class AgentRequestShim:
 
 
 def _now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def expired_session_payload(session_id: str) -> dict[str, Any]:
@@ -224,7 +225,9 @@ def session_from_anchor(anchor: dict[str, Any]) -> dict[str, Any] | None:
     """Rebuild a minimal monitoring session from a persisted anchor."""
     sid = str(anchor.get("session_id") or "")
     active_run = anchor.get("active_run") or {}
-    if not sid or not active_run.get("cluster_job_id"):
+    if not sid or not (
+        active_run.get("cluster_job_id") or active_run.get("automation_run_id")
+    ):
         return None
     return {
         "session_id": sid,

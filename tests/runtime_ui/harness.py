@@ -43,6 +43,7 @@ class RuntimeUiHarness(unittest.TestCase):
         env["GMS_ENV"] = "development"
         env["GMS_SKIP_RUNTIME_ENV"] = "1"
         env["ATS_WORKER_ENABLED"] = "0"
+        env["GMS_ASSISTANT_KKAGENT_ENABLED"] = "0"
         env["GMS_AUTH_REQUIRED"] = "true"
         env["GMS_SECURE_COOKIES"] = "false"
         # 终端 E2E 需要确定性的本地 PTY 通道：不设置时配置回退到
@@ -142,6 +143,16 @@ class RuntimeUiHarness(unittest.TestCase):
             },
         )
         self.assertTrue(authenticated.ok, authenticated.text())
+        # UI checks never call a real analysis provider; model-status tests
+        # install their own route after this default fixture.
+        page.route(
+            "**/api/config/ai*",
+            lambda route: route.fulfill(
+                status=404,
+                content_type="application/json",
+                body='{"success":false,"error":"AI analysis is isolated in UI tests"}',
+            ),
+        )
         page.route(
             "**/api/websites/load",
             lambda route: route.fulfill(

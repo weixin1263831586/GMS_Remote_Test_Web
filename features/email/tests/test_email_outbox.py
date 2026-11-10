@@ -19,14 +19,8 @@ from features.email.store import EmailOutboxStore, reset_email_outbox_store
 
 def _fake_manager(email_cfg: dict) -> MagicMock:
     mgr = MagicMock()
-    mgr.load_config.return_value = {"redmine_dashboard": {"email": email_cfg}}
+    mgr.get_runtime_config.return_value = {"redmine_dashboard": {"email": email_cfg}}
     return mgr
-
-
-_NO_GLOBAL = patch(
-    "foundation.config.config_manager.load_config", return_value={}
-)
-_NO_GLOBAL.start()
 
 
 class OutboxStoreTests(unittest.TestCase):

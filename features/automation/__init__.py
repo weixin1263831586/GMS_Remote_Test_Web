@@ -1,6 +1,8 @@
+from features.automation.artifact_progress import artifact_download_progress
+from features.automation.models import TERMINAL_STATUSES as AUTOMATION_TERMINAL_STATUSES
 from features.automation.models import AutomationRunCreateRequest
 from features.automation.orchestrator import AutomationOrchestrator
-from features.automation.service import AutomationService
+from features.automation.service import AutomationNotFoundError, AutomationService
 from foundation.automation_port import configure_worker_status_provider
 
 
@@ -45,9 +47,12 @@ def register_worker_status_port() -> None:
 
 
 __all__ = [
+    'AUTOMATION_TERMINAL_STATUSES',
+    'AutomationNotFoundError',
     'AutomationOrchestrator',
     'AutomationRunCreateRequest',
     'AutomationService',
+    'artifact_download_progress',
     'get_automation_service',
     'get_worker_status',
     'register_worker_status_port',

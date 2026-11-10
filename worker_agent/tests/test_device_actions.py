@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from foundation.outbound import ResolvedOutboundTarget, UnsafeOutboundURLError
+from worker_agent import device_actions as _device_actions_module
 from worker_agent.android_inspection import _aapt2_path
 from worker_agent.config import WorkerConfig
 from worker_agent.inventory import (
@@ -41,6 +42,63 @@ def test_device_action_strips_worker_namespace_and_uses_argv():
     assert result["summary"] == {"total": 1, "success": 1, "failed": 0}
     assert run.call_args.args[0] == ["adb", "-s", "ABC", "reboot", "bootloader"]
     assert run.call_args.kwargs["check"] is False
+
+
+def test_factory_reset_formats_userdata_in_fastbootd_and_verifies_reboot():
+    probe = [{"serial": "ABC", "state": "available"}]
+
+    def run_side_effect(argv, **kwargs):
+        if argv[0] == "fastboot" and argv[-1] == "is-userspace":
+            # 第二次轮询起报告已进入 fastbootd。
+            run_side_effect.userspace = True
+            return subprocess.CompletedProcess(
+                [], 0, stdout="is-userspace: yes\n")
+        if argv == ["fastboot", "devices"]:
+            return subprocess.CompletedProcess(
+                [], 0, stdout="ABC\tfastboot\n" if run_side_effect.in_fastboot else "")
+        if argv[-1] == "reboot":
+            # 第一次 reboot 被吞（RK bootloader 实测行为），第二次才生效。
+            run_side_effect.reboots = getattr(run_side_effect, "reboots", 0) + 1
+            if run_side_effect.reboots >= 2:
+                run_side_effect.in_fastboot = False
+            return subprocess.CompletedProcess([], 0)
+        return subprocess.CompletedProcess([], 0, stdout="OKAY\n")
+
+    run_side_effect.in_fastboot = True
+    run_side_effect.userspace = False
+    with patch("worker_agent.device_actions.probe_devices", return_value=probe), patch(
+        "worker_agent.device_actions.subprocess.run", side_effect=run_side_effect
+    ) as run, patch("worker_agent.device_actions.time.sleep"):
+        result = execute_device_action("factory_reset", ["worker-246:ABC"])
+    assert result["summary"] == {"total": 1, "success": 1, "failed": 0}
+    argvs = [call.args[0] for call in run.call_args_list]
+    assert argvs[0] == ["adb", "-s", "ABC", "reboot", "bootloader"]
+    assert ["fastboot", "-s", "ABC", "reboot", "fastboot"] in argvs
+    # format:f2fs 优先，erase 仅作非 RK 兜底且不重复下发。
+    assert ["fastboot", "-s", "ABC", "format:f2fs", "userdata"] in argvs
+    assert ["fastboot", "-s", "ABC", "erase", "userdata"] not in argvs
+    # reboot 复验：第一次被吞后必须重发。
+    assert argvs.count(["fastboot", "-s", "ABC", "reboot"]) >= 2
+
+
+def test_factory_reset_fails_when_fastbootd_not_reachable():
+    probe = [{"serial": "ABC", "state": "available"}]
+
+    def run_side_effect(argv, **kwargs):
+        if argv == ["fastboot", "devices"]:
+            return subprocess.CompletedProcess([], 0, stdout="ABC\tfastboot\n")
+        # getvar is-userspace 永远不报 yes → 判定无法可靠擦除。
+        return subprocess.CompletedProcess([], 0, stdout="is-userspace: no\n", stderr="")
+
+    # 等待窗口缩到 1s：sleep 已被置空，deadline 仍基于真实 monotonic，
+    # 否则该测试会空转真实 90s。
+    with patch.object(_device_actions_module, "FACTORY_RESET_FASTBOOTD_WAIT_SECONDS", 1), \
+        patch("worker_agent.device_actions.probe_devices", return_value=probe), patch(
+        "worker_agent.device_actions.subprocess.run", side_effect=run_side_effect
+    ), patch("worker_agent.device_actions.time.sleep"):
+        result = execute_device_action("factory_reset", ["worker-246:ABC"])
+    assert result["results"][0]["success"] is False
+    assert "fastbootd" in result["results"][0]["output"]
 
 
 def test_device_action_rejects_device_not_attached_to_worker():

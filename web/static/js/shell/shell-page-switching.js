@@ -726,6 +726,13 @@
 
             if (pageName === 'security-audit') {
                 if (!securityAuditState.loaded) await loadSecurityAudit(true);
+                if (sessionStorage.getItem('gms_audit_view') === 'outbox'
+                        && typeof auditOutboxToggle === 'function'
+                        && state.elevated) {
+                    // F5 恢复「历史邮件」页签；审计记录要求提权，未提权会话
+                    // 不自动恢复，保持默认「审计日志」页签的提权提示占位。
+                    await auditOutboxToggle(true);
+                }
             }
             if (pageName === 'devices') {
                 await loadDevicesManagement();

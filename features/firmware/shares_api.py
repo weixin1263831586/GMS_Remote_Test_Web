@@ -8,7 +8,7 @@ import stat as stat_module
 import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -40,6 +40,8 @@ _REMOTE_SPEC_RE = re.compile(r"^(?:(?P<user>[^@:/]+)@)?(?P<host>[^:]+):(?P<path>
 _RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
 _DEFAULT_ALLOWED_PREFIXES = ("/home/", "/data/", "/mnt/")
 _DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+_DOWNLOAD_CONCURRENCY = 32
+_DOWNLOAD_READ_TIMEOUT = 30
 _records_lock = threading.RLock()
 
 
@@ -366,14 +368,25 @@ def _remote_file_iterator(
         _validate_remote_path(path, config, (remote_home,))
         resolved = _canonicalize_remote_path(sftp, path, config, (remote_home,))
         with sftp.open(resolved, "rb") as remote_file:
-            remote_file.seek(start)
+            remote_file.settimeout(_DOWNLOAD_READ_TIMEOUT)
+            offset = start
             remaining = length
             while remaining > 0:
-                chunk = remote_file.read(min(_DOWNLOAD_CHUNK_SIZE, remaining))
+                size = min(_DOWNLOAD_CHUNK_SIZE, remaining)
+                # Paramiko splits each window into 32 KiB READ requests. Keep
+                # them in flight together, without prefetching a whole image's
+                # offsets/buffers into memory (images can exceed 20 GiB).
+                chunk = next(remote_file.readv(
+                    [(offset, size)],
+                    max_concurrent_prefetch_requests=_DOWNLOAD_CONCURRENCY,
+                ))
                 if not chunk:
                     break
+                offset += len(chunk)
                 remaining -= len(chunk)
                 yield chunk
+                if len(chunk) != size:
+                    break
 
 
 @router.get("/api/firmware-shares")
@@ -660,6 +673,122 @@ def _public_record(record: dict[str, Any]) -> dict[str, Any]:
         record.get("password") or record.get("password_encrypted")
     )
     return public
+
+
+def firmware_share_record_snapshot(share_id: str) -> dict[str, Any] | None:
+    """Return a secret-free snapshot of one share record for ATS staging.
+
+    面向 Automation 固件来源（``firmware_share``）：返回无密钥的元数据
+    快照（host/user/path/size/expires），供 executor 在烧写阶段自行建立
+    SFTP 暂存；不返回密码，也不暴露到普通 Web 表面。
+    """
+    _records, record = _find_record(str(share_id or ""))
+    if not record:
+        return None
+    return {
+        "share_id": record.get("id"),
+        "name": record.get("name"),
+        "host": record.get("host"),
+        "user": record.get("user"),
+        "path": record.get("path"),
+        "filename": record.get("filename"),
+        "size": record.get("size"),
+        "mtime": record.get("mtime"),
+        "expires_at": record.get("expires_at"),
+        "expired": bool(
+            record.get("expires_at") and int(record["expires_at"]) <= int(time.time())
+        ),
+    }
+
+
+def resolve_firmware_share_record(
+    share_id: str, *, run_id: str = "", max_bytes: int = 20 * 1024**3,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """Resolve a firmware share into a staged Controller-local file for ATS.
+
+    受控固件来源（``firmware_share``）：只凭分享记录取远端文件——
+    远端路径仍受 allowed_prefixes / symlink 边界约束（复用 ``_stat_remote``），
+    过期分享直接拒绝；文件暂存到 Controller 的 automation artifact-stage
+    固件根（foundation 约定路径，避免跨 feature import），并返回本地路径、
+    大小与 SHA-256，供 automation 状态机按既有 ``artifact_path`` 链路烧写。
+    不放宽任意 HTTP URL，不做未经校验的网络下载。
+    """
+    import hashlib
+
+    from foundation.config import settings
+
+    snapshot = firmware_share_record_snapshot(share_id)
+    if not snapshot:
+        return {"ok": False, "reason": f"固件分享不存在: {share_id}"}
+    if snapshot.get("expired"):
+        return {"ok": False, "reason": f"固件分享已过期: {share_id}"}
+    _records, record = _find_record(share_id)
+    if not record:
+        return {"ok": False, "reason": f"固件分享不存在: {share_id}"}
+    password = _record_password(record)
+    config = runtime.config_manager.load_config()
+    try:
+        info = _stat_remote(
+            snapshot["host"], snapshot.get("user"), snapshot["path"], config,
+            password=password,
+        )
+    except _AuthError as exc:
+        return {"ok": False, "reason": f"固件分享认证失败: {exc}"}
+    except ValueError as exc:
+        return {"ok": False, "reason": f"固件分享不可用: {exc}"}
+    if info.get("size", 0) <= 0:
+        return {"ok": False, "reason": "固件文件为空"}
+    if int(info["size"]) > max_bytes:
+        return {"ok": False, "reason": "固件文件超过 ATS 大小限制"}
+
+    stage_key = run_id or share_id
+    if not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}", stage_key):
+        return {"ok": False, "reason": "固件暂存标识无效"}
+    # Run 隔离避免同名固件相互覆盖；.part 只在完整下载后原子发布。
+    stage_root = settings.data_root / "automation" / "artifact-stage" / stage_key
+    stage_root.mkdir(parents=True, exist_ok=True)
+    target = stage_root / _safe_filename(info["filename"])
+    temporary = stage_root / f".{target.name}.{uuid.uuid4().hex}.part"
+    digest = hashlib.sha256()
+    total = 0
+    started = time.monotonic()
+
+    def report_progress() -> None:
+        if on_progress is not None:
+            elapsed = max(0.0, time.monotonic() - started)
+            on_progress({
+                "downloaded_bytes": total, "total_bytes": int(info["size"]),
+                "elapsed_seconds": elapsed,
+                "bytes_per_second": total / elapsed if elapsed > 0 else 0,
+            })
+
+    try:
+        report_progress()
+        with temporary.open("xb") as output:
+            for chunk in _remote_file_iterator(
+                snapshot["host"], snapshot.get("user"), snapshot["path"], config,
+                0, int(info["size"]), password=password,
+            ):
+                total += len(chunk)
+                if total > min(int(info["size"]), max_bytes):
+                    return {"ok": False, "reason": "固件下载内容超过声明大小或 ATS 限制"}
+                output.write(chunk)
+                digest.update(chunk)
+                report_progress()
+        if total != int(info["size"]):
+            return {"ok": False, "reason": f"固件下载不完整: 期望 {info['size']}，实际 {total}"}
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return {
+        "ok": True,
+        "firmware_path": str(target),
+        "filename": target.name,
+        "size": total,
+        "sha256": digest.hexdigest(),
+        "share_id": share_id,
+    }
 
 
 def _record_password(record: dict[str, Any]) -> str | None:

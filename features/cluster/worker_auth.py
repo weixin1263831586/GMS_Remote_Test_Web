@@ -147,5 +147,6 @@ def authenticate_worker(worker_id: str, authorization: str | None) -> None:
     # 摘要后常量时间比较，不泄露存储令牌长度。
     supplied_digest = hashlib.sha256((supplied or "").encode()).digest()
     expected_digest = hashlib.sha256((expected or "").encode()).digest()
-    if not hmac.compare_digest(supplied_digest, expected_digest):
+    matches = hmac.compare_digest(supplied_digest, expected_digest)
+    if not supplied or not expected or not matches:
         raise HTTPException(401, "invalid worker token")

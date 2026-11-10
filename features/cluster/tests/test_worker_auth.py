@@ -5,13 +5,30 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from fastapi import HTTPException
+
 from features.cluster.worker_auth import (
+    authenticate_worker,
     persist_worker_token,
     restore_worker_token,
     revoke_worker_token,
     worker_tokens,
     write_worker_tokens,
 )
+
+
+class WorkerAuthenticationTests(unittest.TestCase):
+    def test_missing_or_malformed_credentials_fail_closed(self):
+        with patch("features.cluster.worker_auth.worker_tokens", return_value={"known": "valid-token"}):
+            for worker_id in ("known", "unconfigured"):
+                for header in (None, "", "Bearer ", "Basic invalid", "valid-token", "Bearer wrong"):
+                    with self.subTest(worker_id=worker_id, header=header), self.assertRaises(HTTPException) as raised:
+                        authenticate_worker(worker_id, header)
+                    self.assertEqual(raised.exception.status_code, 401)
+
+    def test_valid_bearer_token_is_accepted(self):
+        with patch("features.cluster.worker_auth.worker_tokens", return_value={"known": "valid-token"}):
+            authenticate_worker("known", "bearer valid-token")
 
 
 class WorkerAuthPersistenceTests(unittest.TestCase):

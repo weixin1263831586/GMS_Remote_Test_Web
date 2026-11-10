@@ -29,12 +29,11 @@ def resolve_email_config(manager: Any = None) -> dict[str, Any]:
 
     合并顺序（低 → 高，均为非空字段覆盖）：
 
-    1. 全局默认 ``smtp`` 块（runtime 配置，一次配置全部署生效）；
-    2. 兼容兜底：静态配置遗留的 ``redmine_dashboard.email``
-       （automation owner 历史写入 configs/local/config.json 的位置）；
-    3. owner 覆盖 ``redmine_dashboard.email``（看板「设置 → SMTP」保存的
-       ``enabled: false`` 可作为该 owner 的邮件总开关；
-       per-user 差异化配置；不传 manager 即只用全局默认）。
+    1. 全局配置中的兼容段 ``redmine_dashboard.email``；
+    2. 全局默认 ``smtp`` 块；
+    3. owner 运行时显式保存的 ``redmine_dashboard.email``。
+
+    owner 的静态默认值不属于覆盖层。全局关闭邮件时，owner 不能重新开启。
     """
     from foundation.config import config_manager
 
@@ -45,14 +44,17 @@ def resolve_email_config(manager: Any = None) -> dict[str, Any]:
         global_config = {}
     _merge_non_empty(merged, (global_config.get("redmine_dashboard") or {}).get("email") or {})
     _merge_non_empty(merged, global_config.get("smtp") or {})
+    globally_disabled = merged.get("enabled") is False
     if manager is not None:
         try:
-            owner_config = manager.load_config() or {}
+            owner_config = manager.get_runtime_config() or {}
         except Exception:
             owner_config = {}
         _merge_non_empty(
             merged, (owner_config.get("redmine_dashboard") or {}).get("email") or {}
         )
+    if globally_disabled:
+        merged["enabled"] = False
     return merged
 
 

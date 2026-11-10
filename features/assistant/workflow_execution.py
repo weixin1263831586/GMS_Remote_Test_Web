@@ -1,0 +1,470 @@
+"""WorkflowDraft 执行与计划操作（从 api.py 拆出，file-size baseline）。
+
+职责：把已确认的 WorkflowDraft 提交到 GMS ATS（唯一执行通道），跟踪
+run 终态，并处理待确认草案的 plan.update/replan/cancel/status 操作。
+本模块不实现任何编排状态机；资源预检只读。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+import sqlite3
+import uuid
+from typing import Any
+
+from features.assistant.plan_context import (
+    _list_suites,
+    is_local_worker_id,
+    local_worker_id,
+)
+from features.assistant.workflow_draft import (
+    detect_plan_action,
+    draft_blocks,
+    preflight_draft,
+    summarize_draft,
+    update_draft,
+)
+from foundation.error_model import record_internal_error
+
+
+logger = logging.getLogger(__name__)
+
+WORKFLOW_PLAN_TYPE = "workflow_draft"
+
+# 步骤面板反查标题：update_workflow_run_step 与 execute_workflow_plan 必须共用。
+WORKFLOW_CREATE_STEP_TITLE = "创建 ATS 工作流"
+
+_WORKFLOW_CONFIRM_RE = re.compile(r"^(确认执行|开始执行|执行|确认|start|run|go)$", re.IGNORECASE)
+
+# 复用 api 的会话写入 helpers（同 feature 延迟 import，避免加载环）。
+
+
+def _api():
+    from features.assistant import api
+
+    return api
+
+
+def is_workflow_confirm_message(message: str) -> bool:
+    return bool(_WORKFLOW_CONFIRM_RE.match((message or "").strip()))
+
+
+# automation/ui/state.js STAGE_LABELS_ZH 的后端镜像：步骤面板的实时进展
+# 文案需要中文阶段名，与 GMS ATS 页显示保持一致。
+RUN_STAGE_LABELS_ZH = {
+    "queued": "排队", "jenkins_queued": "构建排队", "jenkins_building": "编译中",
+    "artifact_fetching": "固件下载中",
+    "artifact_ready": "固件就绪", "waiting_device": "等待设备", "device_locked": "设备已锁",
+    "flashing": "刷机中", "flash_completed": "刷机完成", "aoa_recovering": "恢复 USB 调试",
+    "post_flash_verifying": "固件校验中", "flash_verified": "固件已校验", "testing": "启动测试",
+    "test_running": "测试中", "report_collecting": "收集报告", "analyzing": "分析中",
+    "reporting": "上报中", "completed": "完成",
+    "failed": "失败", "cancelled": "已取消", "jenkins_failed": "编译失败",
+    "artifact_missing": "固件缺失", "flash_failed": "刷机失败", "aoa_failed": "AOA 恢复失败",
+    "test_failed": "测试失败", "analysis_failed": "分析失败", "reporting_failed": "上报失败",
+}
+
+
+def workflow_run_progress(run: dict[str, Any]) -> dict[str, Any]:
+    from features.automation import artifact_download_progress
+
+    status = str(run.get("status") or "")
+    return {
+        "status": status,
+        "current_stage": run.get("current_stage") or status,
+        "error": str(run.get("error") or ""),
+        "updated_at": run.get("updated_at") or _api()._now_iso(),
+        "artifact_download": artifact_download_progress(run),
+    }
+
+
+def update_workflow_run_step(
+    session: dict[str, Any], run_id: str, run: dict[str, Any]
+) -> bool:
+    """就地更新「创建 ATS 工作流」步骤的实时进展，供步骤面板轮询展示。
+
+    返回 status 是否发生变化：监控循环只在变化时持久化恢复锚点，
+    避免每 5 秒一次落盘放大写放大。
+    """
+    api = _api()
+    step = next(
+        (item for item in reversed(session.get("steps") or [])
+         if str((item.get("data") or {}).get("automation_run_id") or "") == run_id
+         and item.get("title") == WORKFLOW_CREATE_STEP_TITLE),
+        None,
+    )
+    if not step:
+        # 恢复会话的 steps 不随锚点持久化：补一个可被本函数就地更新的
+        # 进展步骤；run_id 与当前 active_run 不符时不补（旧监控轮次）。
+        if str((session.get("active_run") or {}).get("automation_run_id") or "") != run_id:
+            return False
+        api._append_step(
+            session, WORKFLOW_CREATE_STEP_TITLE, "running",
+            f"恢复监控 Run {run_id}",
+            {"automation_run_id": run_id},
+        )
+        step = session["steps"][-1]
+    status = str(run.get("status") or "")
+    label = RUN_STAGE_LABELS_ZH.get(status) or status or "未知"
+    if status == "completed":
+        step["status"] = "done"
+    elif status == "cancelled":
+        step["status"] = "warning"
+    elif status:
+        from features.automation import AUTOMATION_TERMINAL_STATUSES
+
+        step["status"] = (
+            "error" if status in AUTOMATION_TERMINAL_STATUSES else "running"
+        )
+    else:
+        step["status"] = "running"
+    step["detail"] = f"Run {run_id} · 当前阶段：{label}（{status or 'unknown'}）"
+    progress = workflow_run_progress(run)
+    if progress["error"]:
+        step["detail"] += f"；原因：{progress['error']}"
+    previous = (step.get("data") or {}).get("progress") or {}
+    changed = any(previous.get(key) != progress[key] for key in ("status", "current_stage", "error"))
+    step.setdefault("data", {})["status"] = status
+    step.setdefault("data", {})["progress"] = progress
+    session["updated_at"] = api._now_iso()
+    return changed
+
+
+def wants_message_execution(req, message: str) -> bool:
+    return bool(req.execute) or is_workflow_confirm_message(message)
+
+
+def workflow_preflight_lookups(
+    workspace: dict[str, Any], owner_id: str
+) -> dict[str, Any]:
+    """只读资源查询回调：固件分享 / 全局设备定位 / AOA / 套件。"""
+
+    def share_lookup(share_id: str) -> dict[str, Any]:
+        from features.firmware import firmware_share_record_snapshot
+
+        snapshot = firmware_share_record_snapshot(share_id)
+        if not snapshot:
+            return {"ok": False, "reason": f"固件分享不存在: {share_id}"}
+        if snapshot.get("expired"):
+            return {"ok": False, "reason": f"固件分享已过期: {share_id}"}
+        return {
+            "ok": True,
+            "detail": f"{snapshot.get('filename') or snapshot.get('path')}（{snapshot.get('size', 0)} 字节）",
+        }
+
+    def device_lookup(serial: str, worker_id: str | None) -> dict[str, Any]:
+        from features.cluster import get_cluster_service
+
+        try:
+            rows = get_cluster_service().repository.list_devices()
+        except Exception as exc:
+            return {"ok": False, "reason": f"集群设备库存不可用: {exc}"}
+        for row in rows:
+            if str(row.get("serial") or "") != serial:
+                continue
+            resolved_worker = str(row.get("worker_id") or "")
+            # 与 automation.create_run 的执行期校验同标准：设备必须出现在
+            # 指定 Worker 的清单中，且 state == available（service.py 会以
+            # "Devices are unavailable" 拒绝）；预检放行执行期必挂的组合。
+            if worker_id and resolved_worker != worker_id:
+                return {"ok": False, "reason": f"设备 {serial} 在 {resolved_worker or '未知'} 上，与指定 Worker {worker_id} 不符"}
+            claimed = bool(row.get("claimed"))
+            state = str(row.get("state") or "")
+            detail = f"Worker {resolved_worker} / {state or 'unknown'}"
+            if claimed:
+                return {"ok": False, "reason": f"设备 {serial} 被占用（{row.get('claim_username') or row.get('claim_owner_id') or '其他任务'}），不会自动换设备"}
+            if state != "available":
+                return {"ok": False, "reason": f"设备 {serial} 当前状态 {state or 'unknown'}，非空闲（需 available），不会自动换设备"}
+            return {"ok": True, "worker_id": resolved_worker, "detail": detail}
+        return {"ok": False, "reason": f"设备 {serial} 未出现在任何 Worker 的设备清单中"}
+
+    def aoa_lookup(profile: str, _owner: str) -> dict[str, Any]:
+        from features.devices import profile_store
+
+        try:
+            profiles = profile_store().list_profiles(owner_id, include_all=False)
+        except Exception as exc:
+            return {"ok": False, "reason": f"AOA 配置读取失败: {exc}"}
+        if any(p.get("name") == profile or p.get("id") == profile for p in profiles):
+            return {"ok": True, "detail": f"AOA 配置 {profile} 存在于当前账号"}
+        return {"ok": False, "reason": f"AOA 配置 {profile} 不存在或不属于当前账号"}
+
+    def suite_lookup(test_type: str, worker_id: str | None) -> dict[str, Any]:
+        context = dict(workspace or {})
+        if worker_id:
+            context["worker_id"] = worker_id
+            context["scope_mode"] = "cluster" if not is_local_worker_id(worker_id) else "single"
+        suites = _list_suites(context)
+        matched = [
+            suite for suite in suites
+            if str(suite.get("test_type") or suite.get("suite_type") or "").upper() == test_type
+        ]
+        if matched:
+            suite = matched[0]
+            return {"ok": True, "detail": suite.get("tools_path") or suite.get("full_path") or test_type}
+        return {"ok": False, "reason": f"该 Worker 上没有 {test_type} 的可用测试套件"}
+
+    return {
+        "share_lookup": share_lookup,
+        "device_lookup": device_lookup,
+        "aoa_lookup": aoa_lookup,
+        "suite_lookup": suite_lookup,
+    }
+
+
+def refresh_workflow_preflight(session: dict[str, Any], draft: dict[str, Any]) -> dict[str, Any]:
+    workspace = session.get("workspace_context") or {}
+    owner_id = str(session.get("owner_id") or "")
+    return preflight_draft(draft, **workflow_preflight_lookups(workspace, owner_id))
+
+
+def run_body_from_draft(draft: dict[str, Any], workspace: dict[str, Any]) -> dict[str, Any]:
+    """把草案转换为 automation create_run 的请求体（唯一执行通道）。"""
+    from features.assistant.api import MAX_AGENT_RETRIES
+
+    device = draft.get("device") or {}
+    firmware = draft.get("firmware") or {}
+    aoa = draft.get("aoa") or {}
+    test = draft.get("test") or {}
+    worker_id = str(device.get("worker_id") or workspace.get("worker_id") or "")
+    flash_only = (str(test.get("scope") or "") == "skip")
+    test_plan: dict[str, Any] = {
+        "flash": {"mode": "firmware", "firmware_share_id": firmware.get("share_id") or ""},
+    }
+    if flash_only:
+        # 纯烧写/纯 AOA：显式 test_mode=skip（orchestrator 在固件校验通过后
+        # 直接收尾），不带空 test_type，否则会被契约当作漏填拒绝。
+        test_plan["test_mode"] = "skip"
+    else:
+        test_plan["test_type"] = test.get("type") or ""
+    if worker_id:
+        test_plan["worker_id"] = worker_id
+    if aoa.get("mode") == "user_build_recovery":
+        test_plan["aoa"] = {
+            "mode": "user_build_recovery",
+            "profile": aoa.get("profile") or "",
+        }
+    if test.get("module"):
+        test_plan["test_module"] = test["module"]
+    if test.get("case"):
+        test_plan["test_case"] = test["case"]
+    retry_count = int(test.get("retry_count") or 0)
+    if retry_count > 0:
+        test_plan["retry_policy"] = {"max_retries": min(retry_count, MAX_AGENT_RETRIES)}
+    return {
+        "source_type": "assistant_chat",
+        "source_key": str(draft.get("operation_id") or ""),
+        "devices": [device.get("serial") or ""],
+        "test_plan": test_plan,
+    }
+
+
+async def execute_workflow_plan(
+    session: dict[str, Any], request, draft: dict[str, Any]
+) -> dict[str, Any]:
+    """提交 WorkflowDraft 到 automation 服务并启动状态跟踪。"""
+    from features.auth import get_authenticated_user
+    from features.automation import get_automation_service
+
+    api = _api()
+    automation_service = get_automation_service()
+    blocks = draft_blocks(draft)
+    if blocks:
+        return {"success": False, "error": blocks[0].get("reason") or "工作流缺少必要实体"}
+    try:
+        body = run_body_from_draft(draft, session.get("workspace_context") or {})
+        principal = get_authenticated_user(request)
+        run = automation_service.create_run(
+            body,
+            created_by=str(session.get("owner_id") or ""),
+            principal=principal,
+        )
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    except sqlite3.IntegrityError:
+        # source_key 唯一索引命中：同一草案被重复确认（双击/并发），
+        # 给语义化提示而不是内部错误文案。
+        return {
+            "success": False,
+            "error": "该计划已提交过 ATS 工作流，请勿重复确认；可在 GMS ATS 页查看已有 Run",
+        }
+    except Exception as exc:
+        message = record_internal_error(logger, "工作流创建", "[Agent] workflow run create failed")
+        logger.error("%s: %s", message, exc)
+        return {"success": False, "error": message}
+
+    monitor_token = str(uuid.uuid4())
+    session["status"] = "running"
+    session["active_run"] = {
+        "workflow_draft": draft,
+        "automation_run_id": run.get("id") or "",
+        "operation_id": draft.get("operation_id") or "",
+        "started_at": api._now_iso(),
+        "monitor_token": monitor_token,
+        "worker_id": (draft.get("device") or {}).get("worker_id") or local_worker_id(),
+    }
+    draft["status"] = "submitted"
+    api._save_session_anchor(session)
+    api._append_step(
+        session, WORKFLOW_CREATE_STEP_TITLE, "running",
+        f"Run {run.get('id')}（烧写 → AOA → 测试，状态机推进由 GMS ATS 执行）",
+        {"automation_run_id": run.get("id"), "status": run.get("status"),
+         "progress": workflow_run_progress(run)},
+    )
+    request_shim = api.AgentRequestShim(request)
+    old_task = api._agent_monitor_tasks.pop(session["session_id"], None)
+    if old_task and not old_task.done():
+        old_task.cancel()
+    task = asyncio.create_task(
+        monitor_workflow_run(session["session_id"], request_shim, monitor_token)
+    )
+    api._agent_monitor_tasks[session["session_id"]] = task
+    session["monitor_task_id"] = id(task)
+    return {"success": True, "automation_run_id": run.get("id")}
+
+
+async def monitor_workflow_run(
+    session_id: str, request_shim, monitor_token: str
+) -> None:
+    """跟踪 ATS run 直到终态；不重复实现编排逻辑。"""
+    from features.automation import (
+        AUTOMATION_TERMINAL_STATUSES,
+        AutomationNotFoundError,
+        get_automation_service,
+    )
+
+    api = _api()
+    automation_service = get_automation_service()
+    session = api._agent_sessions.get(session_id)
+    if not session:
+        return
+    run_id = str((session.get("active_run") or {}).get("automation_run_id") or "")
+    if not run_id:
+        return
+    workspace_linked = False
+    status = ""
+    run: dict[str, Any] | None = None
+    try:
+        while True:
+            if not api._monitor_run_is_current(session, monitor_token):
+                return
+            try:
+                run = automation_service.get_run(run_id)
+            except AutomationNotFoundError:
+                run = None
+            if not run:
+                if api._monitor_run_is_current(session, monitor_token):
+                    api._finish_run_state(session, "error")
+                    api._append_step(session, "读取 ATS 工作流", "error", f"运行不存在: {run_id}")
+                return
+            if not workspace_linked and run.get("cluster_job_id"):
+                workspace_linked = True
+                workspace = session.setdefault("workspace_context", {})
+                workspace.update({
+                    "automation_run_id": run_id,
+                    "cluster_job_id": run["cluster_job_id"],
+                    "origin_page": "agent",
+                })
+                api._save_session_anchor(session)
+            status = str(run.get("status") or "")
+            if update_workflow_run_step(session, run_id, run):
+                api._save_session_anchor(session)
+            if status in AUTOMATION_TERMINAL_STATUSES:
+                break
+            await asyncio.sleep(5)
+        if not api._monitor_run_is_current(session, monitor_token):
+            return
+        # cancelled 不是失败：用户/系统主动取消，收尾为 warning，文案不引导 retry。
+        cancelled = status == "cancelled"
+        failed = status not in ("completed", "cancelled")
+        api._append_step(
+            session, "ATS 工作流结束", "warning" if cancelled else ("error" if failed else "done"),
+            f"Run {run_id} → {status}"
+            + (f"，报告 {run.get('report_timestamp')}" if run.get("report_timestamp") else "")
+            + (f"；原因：{run['error']}" if run.get("error") else ""),
+            {"automation_run_id": run_id, "status": status,
+             "progress": workflow_run_progress(run),
+             "report_timestamp": run.get("report_timestamp") or ""},
+        )
+        if run.get("report_timestamp"):
+            workspace = session.setdefault("workspace_context", {})
+            workspace.update({
+                "report_timestamp": run["report_timestamp"],
+                "report_id": run.get("report_id") or "",
+                "automation_run_id": run_id,
+            })
+            api._save_session_anchor(session)
+        api._finish_run_state(session, "warning" if cancelled else ("error" if failed else "done"))
+        closing_hint = (
+            "可在 GMS ATS 页查看时间线。" if not failed and not cancelled
+            else "Run 已取消，可在 GMS ATS 页确认设备与任务状态。"
+            if cancelled
+            else "可在 GMS ATS 页查看失败原因或发起 retry。"
+        )
+        api._append_message(
+            session, "assistant",
+            f"工作流 {run_id} 已结束：{status}。"
+            + (f"原因：{run['error']}。" if run.get("error") else "")
+            + closing_hint,
+            data={"automation_run_id": run_id, "status": status},
+        )
+    except asyncio.CancelledError:
+        if api._monitor_run_is_current(session, monitor_token):
+            api._finish_run_state(session, "cancelled")
+            api._append_step(session, "Agent 监控已停止", "warning", "用户取消了工作流监控；Run 本身未取消，可在 GMS ATS 页停止")
+        raise
+    except Exception:
+        if api._monitor_run_is_current(session, monitor_token):
+            api._finish_run_state(session, "error")
+            err = record_internal_error(logger, "工作流监控", "[Agent] workflow monitor failed")
+            api._append_step(session, "工作流监控异常", "error", err)
+    finally:
+        if api._agent_monitor_tasks.get(session_id) is asyncio.current_task():
+            api._agent_monitor_tasks.pop(session_id, None)
+
+
+async def handle_workflow_plan_message(
+    session: dict[str, Any], message: str, pending_plan: dict[str, Any]
+) -> dict[str, Any] | None:
+    """处理待确认工作流草案的修改/重规划/取消/状态查询。
+
+    返回 None 表示消息与草案无关，交回通用意图路由。
+    """
+    api = _api()
+    draft = pending_plan.setdefault("draft", {})
+    preflight = pending_plan.get("preflight") or {"ready": False, "checks": []}
+    action = detect_plan_action(message)
+    version_bumped = False
+    if not action:
+        draft, applied = update_draft(draft, message)
+        if not applied:
+            return None
+        # update_draft 命中修改规则时已递增 plan_version。
+        version_bumped = True
+        action = "replan"
+    if action == "cancel":
+        session["pending_plan"] = None
+        session["status"] = "idle"
+        api._append_step(session, "工作流计划已取消", "warning", "已保留对话记录；重新发送指令可再次生成计划")
+        api._append_message(session, "assistant", "工作流计划已取消。需要时重新描述指令即可再次生成计划。")
+        return {"handled": True}
+    if action == "replan":
+        # 重新规划：保留已解析实体，刷新资源预检；裸 replan 在此递增版本，
+        # 修改路径已由 update_draft 递增，不重复加。
+        if not version_bumped:
+            draft["plan_version"] = int(draft.get("plan_version") or 1) + 1
+        preflight = refresh_workflow_preflight(session, draft)
+        pending_plan["preflight"] = preflight
+        api._append_step(session, "重新规划", "done", f"计划 v{draft['plan_version']}，资源预检已刷新", {"plan": draft, "preflight": preflight})
+        api._append_message(
+            session, "assistant", summarize_draft(draft, preflight),
+            kind="plan",
+            data={"plan": {"type": WORKFLOW_PLAN_TYPE, "draft": draft, "preflight": preflight}},
+        )
+        return {"handled": True}
+    # status
+    api._append_message(session, "assistant", summarize_draft(draft, preflight), kind="plan",
+                        data={"plan": {"type": WORKFLOW_PLAN_TYPE, "draft": draft, "preflight": preflight}})
+    return {"handled": True}

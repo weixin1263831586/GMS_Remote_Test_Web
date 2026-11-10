@@ -188,8 +188,7 @@ function initWebSocket() {
                             data.devices.forEach(update => {
                                 const deviceId = update.device_id;
                                 debugLog(`[Device Lock] Updating ${deviceId}: locked=${update.locked}, by=${update.locked_by}`);
-                                // 被占用设备保留在选中集合中，仅由渲染层隐藏勾选，
-                                // 解除占用后勾选自动恢复。这里只更新锁定状态。
+                                // 更新锁定状态后，由 renderDevices 同步清理不可选目标。
                                 const device = state.devices.find(d => {
                                     const id = typeof d === 'string' ? d : d.device_id;
                                     return id === deviceId;

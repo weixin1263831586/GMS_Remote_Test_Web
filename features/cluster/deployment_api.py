@@ -776,7 +776,7 @@ def write_remote_private_file(sftp, remote_path: str, payload: bytes) -> None:
     Callers should pass a randomized ``remote_path`` (see
     ``_staged_credential_path``) so pre-placement is infeasible.
     """
-    with sftp.open(remote_path, "x") as handle:
+    with sftp.open(remote_path, "wx") as handle:
         handle.chmod(0o600)
         handle.write(payload)
 

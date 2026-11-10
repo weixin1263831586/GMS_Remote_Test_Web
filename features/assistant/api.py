@@ -56,15 +56,38 @@ from features.assistant.session_registry import (
     save_session_anchor as _save_session_anchor,
 )
 from features.assistant.tools import registry
+from features.assistant.workflow_draft import (
+    build_workflow_draft,
+    detect_composite_intent,
+    draft_blocks,
+    extract_workflow_entities,
+    summarize_draft,
+)
+from features.assistant.workflow_execution import (
+    WORKFLOW_PLAN_TYPE as _WORKFLOW_PLAN_TYPE,
+)
+from features.assistant.workflow_execution import (
+    execute_workflow_plan as _execute_workflow_plan,
+)
+from features.assistant.workflow_execution import (
+    handle_workflow_plan_message as _handle_workflow_plan_message,
+)
+from features.assistant.workflow_execution import (
+    is_workflow_confirm_message as _is_workflow_confirm_message,
+)
+from features.assistant.workflow_execution import (
+    refresh_workflow_preflight as _refresh_workflow_preflight,
+)
+from features.assistant.workflow_execution import (
+    wants_message_execution as _wants_message_execution,
+)
 from features.cluster import (
     ACTIVE_CLUSTER_JOB_STATUSES as _ACTIVE_CLUSTER_JOB_STATUSES,
 )
-from features.devices import device_lock_manager, device_manager, get_or_create_user_state
+from features.devices import get_or_create_user_state
 from features.reports import ReportDiagnosisRequest, test_report_db
 from features.test_execution import (
     SuiteApkAnalyzeRequest,
-    detect_test_type_from_suite_path,
-    get_default_suites_path,
 )
 from features.users import get_client_id_from_request, owner_id_from_request
 from foundation.config import config_manager
@@ -176,199 +199,7 @@ def _extract_device_count(text: str) -> int:
     return 1
 
 
-def _select_devices(
-    intent: dict[str, Any], workspace_context: dict[str, Any] | None = None
-) -> tuple[list[str], list[dict[str, Any]]]:
-    workspace = workspace_context or {}
-    worker_id = workspace.get("worker_id") or _local_worker_id()
-    is_remote = workspace.get("scope_mode") == "cluster" and not _is_local_worker_id(worker_id)
-    workspace_devices = [str(item) for item in workspace.get("device_ids") or []]
-    if is_remote:
-        from features.cluster import get_cluster_service
-
-        rows = get_cluster_service().repository.list_devices(worker_id)
-        details = [{
-            "device_id": item.get("id") or f"{worker_id}:{item.get('serial', '')}",
-            "serial": item.get("serial", ""),
-            "worker_id": worker_id,
-            "state": item.get("state", "unknown"),
-            "locked": item.get("state") != "available",
-            "locked_by": item.get("lease_owner", ""),
-        } for item in rows]
-        available = {item["device_id"]: item for item in details if not item["locked"]}
-
-        def remote_id(value: str) -> str:
-            return value if value.startswith(f"{worker_id}:") else f"{worker_id}:{value}"
-
-        explicit = [remote_id(item) for item in intent.get("devices") or []]
-        preferred = [remote_id(item) for item in workspace_devices]
-        requested = explicit or preferred
-        if requested:
-            return [item for item in requested if item in available], details
-        unlocked = list(available)
-        count = int(intent.get("device_count") or 1)
-        return unlocked if count <= 0 else unlocked[:count], details
-
-    device_ids = device_manager.get_connected_devices(force_refresh=True)
-    details = []
-    for device_id in device_ids:
-        lock_status = device_lock_manager.get_lock_status(device_id)
-        details.append({
-            "device_id": device_id,
-            "locked": bool(lock_status),
-            "locked_by": lock_status.get("locked_by", "") if lock_status else "",
-        })
-
-    requested = intent.get("devices") or [
-        item.split(":", 1)[1]
-        if item.startswith(f"{_local_worker_id()}:") else item
-        for item in workspace_devices
-    ]
-    if requested:
-        available = {item["device_id"]: item for item in details}
-        return [dev for dev in requested if dev in available and not available[dev]["locked"]], details
-
-    unlocked = [item["device_id"] for item in details if not item["locked"]]
-    count = int(intent.get("device_count") or 1)
-    return unlocked if count <= 0 else unlocked[:count], details
-
-
-def _score_suite(suite: dict[str, Any], test_type: str, module: str) -> int:
-    score = 0
-    haystack = " ".join(str(suite.get(key, "")) for key in (
-        "test_type", "suite_type", "version", "suite_version", "tools_path", "binary"
-    )).lower()
-    if test_type and test_type.lower() in haystack:
-        score += 20
-    if module:
-        module_prefix = re.sub(r"TestCases?$", "", module, flags=re.IGNORECASE).lower()
-        if module_prefix and module_prefix in haystack:
-            score += 5
-    if suite.get("tools_path"):
-        score += 1
-    return score
-
-
-def _list_suites(workspace_context: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    workspace = workspace_context or {}
-    worker_id = workspace.get("worker_id") or _local_worker_id()
-    if workspace.get("scope_mode") == "cluster" and not _is_local_worker_id(worker_id):
-        from features.cluster import get_cluster_service
-
-        return [
-            item for item in get_cluster_service().repository.list_suites(worker_id)
-            if item.get("available")
-        ]
-    from features.test_execution import get_available_test_suites
-
-    config = config_manager.load_config()
-    base_path = config.get("suites_path") or get_default_suites_path(config)
-    return get_available_test_suites(config, base_path)
-
-
-def _select_suite(
-    intent: dict[str, Any], workspace_context: dict[str, Any] | None = None
-) -> dict[str, Any] | None:
-    workspace = workspace_context or {}
-    suites = _list_suites(workspace)
-    test_type = intent.get("test_type") or ""
-    module = intent.get("test_module") or ""
-    if not suites:
-        return None
-    selected_path = workspace.get("suite_path") or ""
-    selected_key = workspace.get("suite_key") or ""
-    exact = next((suite for suite in suites if selected_path and
-                  (suite.get("tools_path") or suite.get("full_path")) == selected_path), None)
-    if not exact:
-        exact = next((suite for suite in suites if selected_key and
-                      suite.get("suite_key") == selected_key), None)
-    if exact:
-        return exact
-    return max(suites, key=lambda suite: _score_suite(suite, test_type, module))
-
-
-def _build_plan(
-    intent: dict[str, Any], selected_devices: list[str],
-    device_details: list[dict[str, Any]], suite: dict[str, Any] | None,
-    workspace_context: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    workspace = workspace_context or {}
-    test_suite = (suite.get("tools_path") or suite.get("full_path") or "") if suite else ""
-    test_type = intent.get("test_type") or (suite.get("test_type") or suite.get("suite_type") or "" if suite else "")
-    if not test_type and test_suite:
-        test_type = detect_test_type_from_suite_path(test_suite).upper()
-
-    steps = [
-        {"title": "刷新设备", "detail": f"发现 {len(device_details)} 台设备，选择 {len(selected_devices)} 台可用设备"},
-        {"title": "匹配测试套件", "detail": test_suite or "未找到可用测试套件"},
-    ]
-    pre_actions = []
-    if intent.get("connect_wifi"):
-        _wifi = config_manager.get_wifi_defaults()
-        pre_actions.append({
-            "type": "connect_wifi",
-            "ssid": intent.get("wifi_ssid") or _wifi["ssid"],
-            "password": intent.get("wifi_password") or _wifi["password"],
-        })
-        steps.append({"title": "连接 WiFi", "detail": f"测试前连接到 {_wifi['ssid']}"})
-    steps.append({"title": "启动测试", "detail": intent.get("test_module") or intent.get("test_case") or "按测试套件执行"})
-    retry_count = int(intent.get("retry_count") or 0)
-    if retry_count:
-        steps.append({"title": "失败后自动 retry", "detail": f"最多 retry {retry_count} 次"})
-    if intent.get("analyze_on_failure"):
-        steps.append({"title": "失败后报告分析", "detail": "测试仍失败时定位最近报告并给出分析入口"})
-    if intent.get("apk_source_analysis"):
-        steps.append({"title": "APK/源码分析", "detail": "根据失败信息定位套件 APK/JAR 并建议反编译入口"})
-
-    return {
-        "type": "test_execution",
-        "operation_id": str(uuid.uuid4()),
-        "submit_state": "pending",
-        "intent": intent,
-        "steps": steps,
-        "request": {
-            "worker_id": workspace.get("worker_id") or _local_worker_id(),
-            "test_type": test_type,
-            "test_module": intent.get("test_module", ""),
-            "test_case": intent.get("test_case", ""),
-            "retry_dir": "",
-            "test_suite": test_suite,
-            "local_server": config_manager.load_config().get("local_server", ""),
-            "devices": selected_devices,
-        },
-        "pre_actions": pre_actions,
-        "policy": {
-            "retry_count": retry_count,
-            "analyze_on_failure": bool(intent.get("analyze_on_failure")),
-            "apk_source_analysis": bool(intent.get("apk_source_analysis")),
-        },
-        "device_details": device_details,
-        "suite": suite or {},
-        "workspace_context": workspace,
-    }
-
-
-def _summarize_plan(plan: dict[str, Any]) -> str:
-    req = plan.get("request", {})
-    policy = plan.get("policy", {})
-    lines = [
-        "我已经生成执行计划，确认后开始：",
-        f"- Worker: {req.get('worker_id') or _local_worker_id()}",
-        f"- 设备: {', '.join(req.get('devices') or []) or '未选择'}",
-        f"- 测试前连接 WiFi: {'是' if plan.get('pre_actions') else '否'}",
-        f"- 测试类型: {req.get('test_type') or '自动识别'}",
-        f"- 测试模块: {req.get('test_module') or '未指定'}",
-        f"- 测试用例: {req.get('test_case') or '未指定'}",
-        f"- 测试套件: {req.get('test_suite') or '未找到'}",
-        f"- 失败 retry: {policy.get('retry_count', 0)} 次",
-        f"- 失败后报告分析: {'是' if policy.get('analyze_on_failure') else '否'}",
-    ]
-    if not req.get("devices"):
-        lines.append("当前没有可用未占用设备，不能执行。")
-    if not req.get("test_suite") and not req.get("retry_dir"):
-        lines.append("当前没有匹配到测试套件，不能执行。")
-    lines.append("输入“确认执行”或点击执行按钮后启动。")
-    return "\n".join(lines)
+# 计划资源选择/构建已拆至 plan_context.py（file-size baseline）。
 
 
 def _apply_workspace_tool_params(
@@ -1139,12 +970,37 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
         }
     workspace = session.get("workspace_context") or _normalize_workspace_context({})
     _append_message(session, "user", message)
-
     record_user_message(session, message)
+
+    # --- 0. WorkflowDraft 待确认计划：显式 plan 操作（重新规划/取消/状态）---
+    workflow_pending = session.get("pending_plan")
+    workflow_action_map = {
+        "workflow_replan": "重新规划",
+        "workflow_cancel": "取消计划",
+        "workflow_status": "计划状态",
+    }
+    if (
+        workflow_pending
+        and workflow_pending.get("type") == _WORKFLOW_PLAN_TYPE
+        and not _wants_message_execution(req, message)
+    ):
+        if req.action in workflow_action_map:
+            await _handle_workflow_plan_message(
+                session, workflow_action_map[req.action], workflow_pending
+            )
+            return success_response({"session": _session_payload(session)}, "Agent updated")
+        # 确认执行类消息直接放行到第 1 段确认链；其余先尝试计划修改。
+        if not _is_workflow_confirm_message(message):
+            handled = await _handle_workflow_plan_message(session, message, workflow_pending)
+            if handled:
+                return success_response({"session": _session_payload(session)}, "Agent updated")
 
     # --- 1. Check pending plan confirmation ---
     pending_plan = session.get("pending_plan")
-    wants_execute = req.execute or bool(re.search(r"^(确认执行|开始执行|执行|确认|start|run)$", message, re.IGNORECASE))
+    wants_execute = req.execute or _is_workflow_confirm_message(message)
+    if wants_execute and (session.get("agent_thinking") or session.get("status") == "thinking"):
+        _append_message(session, "assistant", "Agent 正在规划，请等待当前计划生成后再确认执行。")
+        return success_response({"session": _session_payload(session)}, "Agent updated")
     if pending_plan and wants_execute:
         if pending_plan.get("type") == "generic_action":
             intent_data = pending_plan.get("intent")
@@ -1166,7 +1022,14 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
             if missing:
                 _request_missing_params(session, missing)
                 return success_response({"session": _session_payload(session)}, "Agent updated")
-            tool_result = await executor.execute(session, request, tool_name, params)
+            from features.assistant.project_agent import execute_confirmed_tool
+
+            submitted, repeat_hint = await submit_pending_plan_once(
+                pending_plan, lambda _plan: execute_confirmed_tool(session, request, tool_name, params))
+            if submitted is None:
+                _append_message(session, "assistant", repeat_hint)
+                return success_response({"session": _session_payload(session)}, "Agent updated")
+            tool_result = submitted["outcome"]
 
             update_context(
                 session, tool_name=tool_result.tool_name,
@@ -1188,14 +1051,78 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
                 _append_message(session, "assistant", repeat_hint)
             elif not result.get("success"):
                 _append_message(session, "assistant", f"执行失败：{result.get('error') or result.get('message')}")
+        elif pending_plan.get("type") == _WORKFLOW_PLAN_TYPE:
+            # 阻塞未解除时禁用执行，明确告知原因；不再出现“不能执行”
+            # 与“确认后启动”并存。
+            if not pending_plan.get("submit_state"):
+                pending_plan["preflight"] = _refresh_workflow_preflight(session, pending_plan.get("draft") or {})
+            preflight = pending_plan.get("preflight") or {}
+            if not preflight.get("ready"):
+                blocks = preflight.get("blocks") or draft_blocks(pending_plan.get("draft") or {})
+                reasons = "\n".join(f"- {item.get('reason') or item.get('stage')}" for item in blocks) or "- 计划预检未通过"
+                _append_message(
+                    session, "assistant",
+                    "当前工作流存在阻塞项，暂不能执行：\n" + reasons +
+                    "\n解决后输入“重新规划”刷新预检。",
+                    kind="plan",
+                )
+            else:
+                result, repeat_hint = await submit_pending_plan_once(
+                    pending_plan,
+                    lambda _plan: _execute_workflow_plan(
+                        session, request, pending_plan.get("draft") or {}))
+                if result is None:
+                    _append_message(session, "assistant", repeat_hint)
+                elif not result.get("success"):
+                    _append_message(session, "assistant", f"执行失败：{result.get('error') or result.get('message')}")
         else:
             session["pending_plan"] = None
             session["status"] = "idle"
             _append_message(session, "assistant", "待执行计划格式已失效，请重新发起操作。")
         return success_response({"session": _session_payload(session)}, "Agent updated")
 
+    # Model-led discovery covers the project tool catalog; rules remain a fallback.
+    if not req.action or req.action in {"agent_choices", "agent_retry"}:
+        from features.assistant.project_agent import start_project_turn
+
+        if await start_project_turn(session, request, req):
+            return success_response({"session": _session_payload(session)}, "Agent updated")
+
     # --- 2. Resolve intent through multi-stage router ---
     from features.assistant.intent import resolve as resolve_intent
+
+    # --- 1b. 复合工作流：烧写/AOA/测试 ≥2 类意图 → WorkflowDraft ---
+    # 一句话生成完整多阶段计划；执行仍走 automation 状态机。
+    if detect_composite_intent(message):
+        entities = extract_workflow_entities(message)
+        test_requested = bool(
+            entities.get("test_type")
+            or entities.get("test_module")
+            or re.search(r"测试|test|跑", message, re.IGNORECASE)
+        )
+        if not test_requested:
+            entities["flash_only"] = True
+        draft = build_workflow_draft(entities, workspace)
+        draft["operation_id"] = str(uuid.uuid4())
+        preflight = _refresh_workflow_preflight(session, draft)
+        session["pending_plan"] = {
+            "type": _WORKFLOW_PLAN_TYPE,
+            "draft": draft,
+            "preflight": preflight,
+            "intent": {"tool_name": "workflow_draft", "params": entities, "category": "workflow"},
+        }
+        session["status"] = "planning"
+        _append_step(
+            session, "生成工作流计划", "done",
+            "已解析为 烧写 → AOA → 测试 多阶段工作流",
+            {"plan": draft, "preflight": preflight},
+        )
+        _append_message(
+            session, "assistant", summarize_draft(draft, preflight),
+            kind="plan",
+            data={"plan": {"type": _WORKFLOW_PLAN_TYPE, "draft": draft, "preflight": preflight}},
+        )
+        return success_response({"session": _session_payload(session)}, "Agent updated")
 
     if req.action:
         tool = registry.get(req.action)
@@ -1256,8 +1183,13 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
             _append_message(session, "assistant", resp.content, kind=resp.kind, data=resp.to_message_data())
         else:
             _append_message(session, "assistant", generate_capability_overview(), data={"page": "agent"})
-        session["status"] = "idle"
-        session["pending_plan"] = None
+        # 未识别消息不再清空待确认的工作流计划：草案保留在会话中，
+        # 用户仍可“重新规划/取消计划”。
+        if session.get("pending_plan", {}).get("type") == _WORKFLOW_PLAN_TYPE:
+            session["status"] = "planning"
+        else:
+            session["status"] = "idle"
+            session["pending_plan"] = None
         return success_response({"session": _session_payload(session)}, "Agent updated")
 
     # --- 2b. Capabilities: special handling ---
@@ -1302,6 +1234,19 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
 
     # --- 2d. Run test: generate an explicit test-execution plan ---
     if intent.is_run_test:
+        # 计划资源选择/构建已拆至 plan_context.py（file-size baseline）；
+        # 仅此一处使用，函数内 import 避免顶部兼容别名。
+        from features.assistant.plan_context import (
+            _select_devices,
+            _select_suite,
+        )
+        from features.assistant.plan_context import (
+            build_test_plan as _build_plan,
+        )
+        from features.assistant.plan_context import (
+            summarize_test_plan as _summarize_plan,
+        )
+
         test_intent = dict(intent.params)
         test_intent["device_count"] = (len(test_intent.get("devices") or []) or _extract_device_count(message))
         selected_devices, device_details = _select_devices(test_intent, workspace)
@@ -1376,6 +1321,16 @@ def _format_params(params: dict[str, Any]) -> str:
     return "\n".join(lines) if lines else "无"
 
 
+def kkagent_bridge_availability() -> dict[str, Any]:
+    """kkagent 桥接可用性（惰性导入，避免影响基础路由加载）。"""
+    from features.assistant.kkagent_bridge import availability
+
+    try:
+        return availability()
+    except Exception:
+        return {"available": False, "binary": "", "mode": "headless_stream_json"}
+
+
 @router.get("/api/agent/sessions/{session_id}")
 async def get_agent_session(session_id: str, request: Request):
     """Get Agent session status."""
@@ -1390,7 +1345,14 @@ async def get_agent_session(session_id: str, request: Request):
         if session and session_id not in _agent_monitor_tasks:
             request_shim = AgentRequestShim(request)
             _append_step(session, "会话已恢复", "running", "Controller 重启后根据持久任务重建监控状态")
-            task = asyncio.create_task(_monitor_agent_run(session_id, request_shim))
+            if (session.get("active_run") or {}).get("automation_run_id"):
+                # 工作流 run 只在锚点保留 automation_run_id，监控续接走
+                # workflow 监视器（token=None 与恢复锚点 active_run 匹配）。
+                from features.assistant.workflow_execution import monitor_workflow_run
+
+                task = asyncio.create_task(monitor_workflow_run(session_id, request_shim, None))
+            else:
+                task = asyncio.create_task(_monitor_agent_run(session_id, request_shim))
             _agent_monitor_tasks[session_id] = task
     if not session or session.get("client_id") != client_id:
         return success_response(_expired_session_payload(session_id), "Agent session expired")
@@ -1411,6 +1373,9 @@ async def cancel_agent_session(session_id: str, request: Request):
     if task and not task.done():
         task.cancel()
     _finish_run_state(session, "cancelled")
+    from features.assistant.project_agent import cancel_project_turn
+
+    cancel_project_turn(session_id)
     _append_step(session, "Agent 已取消", "warning", "如果测试仍在运行，请到测试界面停止测试")
     _append_message(session, "assistant", "Agent 会话已取消。如果测试仍在运行，请到测试界面停止测试。")
     return success_response({"session": _session_payload(session)})
@@ -1450,4 +1415,11 @@ async def get_agent_capabilities():
         "total_tools": len(registry),
         "limits": {"max_retries": MAX_AGENT_RETRIES},
         "suite_source": "local" if config_manager.is_config_host_local(config) else "ssh",
+        # kkagent 会话桥接（P1）：规划/澄清/诊断走 kkagent，执行仍走状态机。
+        "kkagent_bridge": kkagent_bridge_availability(),
+        "workflow_draft": {
+            "plan_type": _WORKFLOW_PLAN_TYPE,
+            "actions": ["plan.create", "plan.update", "plan.preflight",
+                        "plan.confirm", "plan.cancel", "plan.status"],
+        },
     })

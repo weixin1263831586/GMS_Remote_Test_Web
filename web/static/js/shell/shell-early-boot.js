@@ -35,6 +35,17 @@
             // 确定要显示的页面（在页面渲染前）
             const hash = window.location.hash.substring(1);
             const hashPage = hash.split('?')[0];
+            // 深链 run 参数：#automation?run=<id> → 暂存给 automation
+            // iframe 首帧消费（见 features/automation/ui/page.js），实现
+            // 从对话 Agent / 外部分享直达某个运行的时间线。
+            try {
+                const hashQuery = new URLSearchParams(hash.split('?')[1] || '');
+                const deepRun = String(hashQuery.get('run') || '').trim();
+                if (hashPage === 'automation' && deepRun) {
+                    window.sessionStorage.setItem('gms_automation_focus_run',
+                        JSON.stringify({id: deepRun, ts: Date.now()}));
+                }
+            } catch (_error) { /* 暂存失败时退化为普通页面打开 */ }
             const savedPage = localStorage.getItem('gms_current_page') || readCurrentPageCookie() || 'test';
             let savedVisiblePages = null;
             try {
@@ -108,6 +119,24 @@
                 }).join('') : '');
             document.head.appendChild(style);
         })();
+
+        // 刷新语义区分（reload 发生前唯一能拦截的窗口）：
+        // - 普通 F5 / Ctrl+R：sessionStorage 里的页签视图键保留 → 刷新后
+        //   恢复刷新前页签（设备管理「AOA工作台」/ 用户管理「Agent 接入」/
+        //   安全审计「历史邮件」）。
+        // - Ctrl+Shift+R（Cmd+Shift+R）强制刷新：先清掉页签视图键，刷新后
+        //   各页回到默认页签（设备列表 / 用户列表 / 审计日志）。
+        // 浏览器菜单触发的硬性刷新感知不到，属已知边界。
+        window.addEventListener('keydown', function(e) {
+            if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return;
+            var key = String(e.key || '').toLowerCase();
+            if (key !== 'r') return;
+            try {
+                sessionStorage.removeItem('gms_devices_view');
+                sessionStorage.removeItem('gms_users_view');
+                sessionStorage.removeItem('gms_audit_view');
+            } catch (_error) { /* sessionStorage 不可用时无页签可恢复 */ }
+        }, true);
 
         // 提前在 DOMContentLoaded 触发懒加载 iframe，无需等到 window load。
         // 这样 iframe 的网络请求与剩余资源加载重叠，缩短结构骨架的持续时间。

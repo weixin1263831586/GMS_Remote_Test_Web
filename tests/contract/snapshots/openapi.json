@@ -1817,6 +1817,7 @@
           "reboot",
           "reboot_bootloader",
           "remount",
+          "factory_reset",
           "bootloader_lock",
           "bootloader_unlock",
           "override_apply",
@@ -14720,6 +14721,42 @@
         },
         "security": [],
         "summary": "Review Deployment"
+      }
+    },
+    "/api/devices/factory-reset": {
+      "post": {
+        "description": "Factory-reset devices via fastboot erase userdata (irreversible).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Factory Reset Devices"
       }
     },
     "/api/devices/force-release": {

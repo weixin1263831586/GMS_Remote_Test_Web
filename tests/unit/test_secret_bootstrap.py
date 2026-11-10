@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import os
 import stat
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from multiprocessing import get_context
+from threading import Event
+from types import SimpleNamespace
 
 import pytest
 from cryptography.fernet import Fernet
@@ -37,28 +41,73 @@ def test_master_key_autogenerates_when_file_missing(tmp_path, monkeypatch):
 
 
 def test_master_key_waits_for_concurrent_creator_to_finish(tmp_path, monkeypatch):
-    """The O_EXCL loser must not validate the winner's still-empty file."""
+    """Concurrent bootstrap must wait for the publisher and reuse its key."""
     import foundation.secrets as secrets
 
     key_path = tmp_path / "secrets" / "master.key"
     key_path.parent.mkdir(parents=True)
+    publishing, release = Event(), Event()
+    original_write = secrets._atomic_write_private_file
+
+    def delayed_publish(path, payload):
+        publishing.set()
+        assert release.wait(5)
+        original_write(path, payload)
+
+    monkeypatch.setattr(secrets, "_atomic_write_private_file", delayed_publish)
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        first = executor.submit(secrets._load_key_from_file, key_path)
+        try:
+            assert publishing.wait(5)
+            assert not key_path.exists()
+            others = [executor.submit(secrets._load_key_from_file, key_path) for _ in range(3)]
+        finally:
+            release.set()
+        keys = [first.result(timeout=5), *(future.result(timeout=5) for future in others)]
+    assert set(keys) == {key_path.read_bytes().strip()}
+    ciphertext = Fernet(keys[0]).encrypt(b"test-value")
+    assert all(Fernet(key).decrypt(ciphertext) == b"test-value" for key in keys)
+
+
+def test_empty_master_key_is_recovered_once(tmp_path):
+    import foundation.secrets as secrets
+
+    key_path = tmp_path / "master.key"
+    key_path.touch(mode=0o600)
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        keys = list(executor.map(secrets._load_key_from_file, [key_path] * 4))
+    assert set(keys) == {key_path.read_bytes().strip()}
+    assert stat.S_IMODE(key_path.stat().st_mode) == 0o600
+
+
+def _process_master_key(path):
+    from foundation.secrets import _load_key_from_file
+
+    return _load_key_from_file(path)
+
+
+def test_master_key_is_shared_across_processes(tmp_path):
+    key_path = tmp_path / "master.key"
+    with ProcessPoolExecutor(max_workers=4, mp_context=get_context("fork")) as executor:
+        keys = list(executor.map(_process_master_key, [key_path] * 8))
+    assert set(keys) == {key_path.read_bytes().strip()}
+
+
+def test_legacy_key_migration_preserves_key_across_concurrent_calls(tmp_path, monkeypatch):
+    import foundation.secrets as secrets
+
+    monkeypatch.setattr(secrets, "settings", SimpleNamespace(project_root=tmp_path, data_root=tmp_path / "state"))
+    legacy = tmp_path / "state/secrets/master.key"
+    canonical = tmp_path / "configs/secrets/master.key"
+    legacy.parent.mkdir(parents=True)
+    legacy.touch(mode=0o600)
     expected = Fernet.generate_key()
-    monkeypatch.setenv("GMS_SECRET_KEY_FILE", str(key_path))
-    monkeypatch.delenv("GMS_SECRET_KEY", raising=False)
-
-    def lose_create_race(_path, _flags, _mode):
-        with open(key_path, "wb"):
-            pass
-        os.chmod(key_path, 0o600)
-        raise FileExistsError
-
-    def finish_winner_write(_delay):
-        key_path.write_bytes(expected + b"\n")
-
-    monkeypatch.setattr(secrets.os, "open", lose_create_race)
-    monkeypatch.setattr(secrets.time, "sleep", finish_winner_write)
-
-    assert secrets._load_key() == expected
+    legacy.write_bytes(expected + b"\n")
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        keys = list(executor.map(secrets._load_key_from_file, [legacy] * 4))
+    assert set(keys) == {expected}
+    assert canonical.read_bytes().strip() == expected
+    assert stat.S_IMODE(canonical.stat().st_mode) == 0o600
 
 
 def test_master_key_corrupt_file_still_raises(tmp_path, monkeypatch):

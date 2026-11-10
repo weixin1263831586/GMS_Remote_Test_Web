@@ -6,7 +6,7 @@
     align-items: center;
     justify-content: flex-end;
     gap: 0;
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text-secondary);
 }
 
@@ -16,7 +16,7 @@
     min-height: 26px;
     height: 26px;
     padding: 3px 8px;
-    font-size: 11px;
+    font-size: 10px;
 }
 
 #apk-task-history-refresh {
@@ -93,7 +93,7 @@
 }
 .apk-upload-zone:not(.upload-empty) button {
     padding: 6px 12px;
-    font-size: 11px;
+    font-size: 10px;
 }
 .report-upload-content,
 .apk-upload-content {
@@ -332,7 +332,7 @@
 }
 .apk-perm-short {
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: 10px;
     white-space: nowrap;
     margin-left: 10px;
 }
@@ -390,7 +390,7 @@
 }
 .apk-file-path {
     font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text-secondary);
     padding: 4px 8px;
     background: var(--darker-bg);
@@ -527,7 +527,7 @@ body.apk-resizing {
     border-radius: 6px 6px 0 0;
     background: var(--darker-bg);
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: 10px;
     cursor: pointer;
     white-space: nowrap;
 }
@@ -581,7 +581,7 @@ body.apk-resizing {
 
 .apk-search-result-path {
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: 10px;
     margin-left: 8px;
 }
 
@@ -748,7 +748,7 @@ body.apk-resizing {
 }
 
 .agent-role {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
     color: var(--text-secondary);
 }
@@ -806,6 +806,89 @@ body.apk-resizing {
     font-size: 12px;
 }
 
+.agent-question {
+    display: grid;
+    gap: 10px;
+    margin-top: 10px;
+    white-space: normal;
+}
+
+.agent-question-field {
+    display: grid;
+    gap: 4px;
+    font-size: 12px;
+}
+
+.agent-question-field select,
+.agent-question-field input {
+    width: 100%;
+    min-width: 0;
+    font-size: 12px;
+}
+
+/* Agent 步骤面板：ATS Run 实时进展条（阶段模型与 ATS 页一致） */
+.agent-run-progress {
+    margin-top: 6px;
+}
+
+.agent-run-progress-empty {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.agent-run-progress-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.agent-run-stage-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.agent-run-stage-time {
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+.agent-artifact-download {
+    font-size: 10px;
+}
+
+.agent-run-stage-bar {
+    display: flex;
+    gap: 2px;
+}
+
+.agent-run-stage-bar .stage-cell {
+    flex: 1;
+    height: 6px;
+    border-radius: 2px;
+    background: var(--border-color);
+}
+
+.agent-run-stage-bar .stage-cell.done {
+    background: var(--success-color);
+}
+
+.agent-run-stage-bar .stage-cell.current {
+    background: var(--primary-color);
+    animation: agentStagePulse 1.4s ease-in-out infinite;
+}
+
+.agent-run-stage-bar .stage-cell.failed {
+    background: var(--danger-color);
+}
+
+@keyframes agentStagePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+}
+
 .agent-actions {
     display: flex;
     gap: 6px;
@@ -833,19 +916,45 @@ body.apk-resizing {
     min-height: 58px;
     padding: 8px 10px 8px 12px;
     border-bottom: 1px solid var(--border-color);
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
 }
 
-.agent-run-header-copy {
+.agent-run-title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
     min-width: 0;
+}
+
+.agent-run-title {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+#agent-status {
+    flex: 0 0 auto;
+    color: var(--text-secondary);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+#agent-engine-status {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-muted);
+    font-size: 10px;
 }
 
 .agent-model-line {
     min-height: 24px;
-    margin-top: 3px;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -854,6 +963,7 @@ body.apk-resizing {
 }
 
 #agent-model-status {
+    flex: 1 1 0;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -865,6 +975,8 @@ body.apk-resizing {
 #agent-model-status[data-state="credential_missing"] { color: var(--warning-color); }
 
 #agent-model-check.btn-xxs {
+    flex: 0 0 auto;
+    white-space: nowrap;
     min-width: 44px;
     min-height: 24px;
     padding: 2px 7px;
@@ -1003,7 +1115,7 @@ body.apk-resizing {
 .agent-access-stat span {
     margin-top: 5px;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: 10px;
 }
 
 .users-table-wrap {

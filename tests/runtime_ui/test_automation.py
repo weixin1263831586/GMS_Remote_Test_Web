@@ -18,10 +18,10 @@ class RuntimeAutomationTests(RuntimeUiHarness):
                 "aria-selected", "true"
             )
             page.locator('[data-workflow="create"]').press("End")
-            expect(page.locator('[data-workflow="ops"]')).to_have_attribute(
+            expect(page.locator('[data-workflow="resources"]')).to_have_attribute(
                 "aria-selected", "true"
             )
-            page.locator('[data-workflow="ops"]').press("Home")
+            page.locator('[data-workflow="resources"]').press("Home")
             expect(page.locator('[data-workflow="overview"]')).to_have_attribute(
                 "aria-selected", "true"
             )
@@ -398,7 +398,7 @@ class RuntimeAutomationTests(RuntimeUiHarness):
             )
             self.assertEqual(
                 page.locator(".workflow-tab").all_text_contents(),
-                ["概览", "创建运行", "运行监控", "测试计划", "资源与存储", "构建日志", "事件诊断", "测试报告", "运维"],
+                ["概览", "发起", "追踪与诊断", "测试报告", "平台"],
             )
             page.wait_for_function("!document.querySelector('#build-workspace-refresh').disabled")
             page.evaluate("document.querySelector('#build-workspace-refresh').click()")
@@ -605,8 +605,19 @@ class RuntimeAutomationTests(RuntimeUiHarness):
                 outer_spacing["layoutBottom"] - outer_spacing["launchBottom"],
                 1,
             )
-            for workflow_name in ["overview", "create", "runs", "build", "events", "reports"]:
+            for workflow_name in ["overview", "create", "runs", "reports"]:
                 page.locator(f'.workflow-tab[data-workflow="{workflow_name}"]').click()
+                pane_top_gap = page.locator(f"#workflow-pane-{workflow_name}").evaluate(
+                    """pane => {
+                        const surface = pane.closest('.workflow-surface').getBoundingClientRect();
+                        return pane.getBoundingClientRect().top - surface.top;
+                    }"""
+                )
+                self.assertLessEqual(abs(pane_top_gap), 1)
+            # build / events 已并入「追踪与诊断」组（无顶级 Tab），经 pane
+            # 切换函数进入，验证同一布局契约仍然成立。
+            for workflow_name in ["build", "events"]:
+                page.evaluate(f"switchWorkflowPane('{workflow_name}', {{persist: false}})")
                 pane_top_gap = page.locator(f"#workflow-pane-{workflow_name}").evaluate(
                     """pane => {
                         const surface = pane.closest('.workflow-surface').getBoundingClientRect();

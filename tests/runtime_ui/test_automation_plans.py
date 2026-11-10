@@ -113,7 +113,9 @@ class RuntimeAutomationPlanTests(RuntimeUiHarness):
             for _ in range(3):
                 page.locator('[data-workflow="runs"]').click()
                 with page.expect_response(lambda response: response.url.endswith('/api/automation/plans')):
-                    page.locator('[data-workflow="plans"]').click()
+                    # 测试计划已并入「发起」旅程组（无顶级 Tab），经 pane
+                    # 切换进入；断言目标不变：切换→刷新后恢复且零额外写。
+                    page.evaluate("switchWorkflowPane('plans')")
             page.reload(wait_until='domcontentloaded')
             page.wait_for_function("document.body.dataset.automationReady === 'true'")
             expect(page.locator('#test-plan-list')).to_contain_text('每夜兼容性回归')

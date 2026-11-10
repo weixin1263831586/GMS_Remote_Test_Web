@@ -12,18 +12,14 @@
     <main class="ats-shell">
 <section class="ats-toolbar">
     <div class="workflow-tabs" role="tablist" aria-label="GMS ATS workflow">
+        <!-- 五段旅程：概览 → 发起 → 追踪与诊断 → 测试报告 → 平台。
+             data-workflow 仍是 pane 主键（组内其余 pane 经页首互链进入，
+             高亮归属见 switchWorkflowPane 的 AUTOMATION_TAB_GROUPS）。 -->
         <button type="button" role="tab" aria-selected="true" class="workflow-tab active" data-workflow="overview" data-click="switchWorkflowPane" data-a0="overview">概览</button>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="create" data-click="switchWorkflowPane" data-a0="create">创建运行</button>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="runs" data-click="switchWorkflowPane" data-a0="runs">运行监控</button>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="plans" data-click="switchWorkflowPane" data-a0="plans">测试计划</button>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="resources" data-click="switchWorkflowPane" data-a0="resources">资源与存储</button>
-        <span class="workflow-divider" aria-hidden="true"></span>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="build" data-click="switchWorkflowPane" data-a0="build">构建日志</button>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="events" data-click="switchWorkflowPane" data-a0="events">事件诊断</button>
-        <span class="workflow-divider" aria-hidden="true"></span>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="create" data-click="switchWorkflowPane" data-a0="create">发起</button>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="runs" data-click="switchWorkflowPane" data-a0="runs">追踪与诊断</button>
         <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="reports" data-click="switchWorkflowPane" data-a0="reports">测试报告</button>
-        <span class="workflow-divider" aria-hidden="true"></span>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="ops" data-click="switchWorkflowPane" data-a0="ops">运维</button>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="resources" data-click="switchWorkflowPane" data-a0="resources">平台</button>
         <div class="ats-actions">
             <span id="worker-indicator" class="worker-dot down" title="Worker 状态">Worker</span>
             <span id="ops-indicator" class="worker-dot down" title="运维状态">运维</span>
@@ -59,6 +55,7 @@
             <div id="dashboard-stats" class="dashboard-stats">
                 <div class="empty-state">加载中...</div>
             </div>
+            <div id="dashboard-active-runs" class="run-list muted">加载中...</div>
             <div class="overview-breakdowns">
                 <section class="panel">
                     <div class="panel-header">运行状态分布</div>
@@ -85,6 +82,7 @@
                         <div>运行配置</div>
                         <div class="panel-description">选择自动化 Profile，并确认本次运行的默认参数</div>
                     </div>
+                    <div class="log-actions"><button type="button" data-click="switchWorkflowPane" data-a0="plans">测试计划 →</button></div>
                 </div>
                 <div class="panel-body compact-stack profile-body">
                     <label class="profile-selector">运行配置
@@ -283,7 +281,7 @@
         <section class="panel stage-panel">
             <div class="panel-header stage-header">
                 <div class="stage-title-block"><span class="stage-nav-label">测试计划</span><span class="panel-description">按顺序执行多套件；自动调度需后台 Worker 运行</span></div>
-                <button type="button" data-click="loadTestPlans">刷新计划</button>
+                <div class="log-actions"><button type="button" data-click="switchWorkflowPane" data-a0="create">前往创建运行</button><button type="button" data-click="loadTestPlans">刷新计划</button></div>
             </div>
             <div class="stage-pane plan-workspace">
                 <form id="test-plan-form" data-submit="saveTestPlan" data-prevent>
@@ -325,6 +323,7 @@
                     <button type="button" data-click="loadRuns">刷新</button>
                 </div>
             </div>
+            <div id="runs-blocker-banner"></div>
             <div class="stage-pane">
                 <div class="subtabs">
                     <span class="subtabs-label">状态</span>
@@ -360,7 +359,7 @@
 
     <section id="workflow-pane-resources" class="workflow-pane" aria-hidden="true">
         <section class="panel stage-panel">
-            <div class="panel-header stage-header"><span>资源与存储</span><button type="button" data-click="loadResourceCatalog">刷新资源与预览</button></div>
+            <div class="panel-header stage-header"><span>资源与存储</span><div class="log-actions"><button type="button" data-click="switchWorkflowPane" data-a0="ops">运维 →</button><button type="button" data-click="loadResourceCatalog">刷新资源与预览</button></div></div>
             <div class="stage-pane resource-workspace">
                 <section><h3>套件版本与缓存预热</h3><p class="history-help">先计算 SHA-256，再下发到指定 Worker。校验一致时复用已有缓存；新下载校验失败会保留原缓存。下发需要管理员权限。</p>
                     <label>目标 Worker<select id="resource-worker"></select></label><div id="resource-catalog" class="run-list">加载中…</div><div id="resource-transfers" aria-live="polite"></div>
@@ -382,6 +381,7 @@
                     <span class="panel-description">左侧选择构建任务，右侧查看实时输出和最终结果</span>
                 </div>
                 <div class="log-actions">
+                    <button type="button" data-click="switchWorkflowPane" data-a0="runs">运行监控</button>
                     <button type="button" data-click="loadBuildJobs">刷新任务</button>
                 </div>
             </div>
@@ -421,6 +421,8 @@
                 </div>
             </div>
             <div class="stage-pane monitor-events-body">
+                <div id="events-source-strip" class="events-toolbar" hidden></div>
+                <div id="events-related-alerts" class="events-toolbar" hidden></div>
                 <div class="events-toolbar">
                     <div class="events-heading">
                         <span id="events-title">运行日志</span>
@@ -490,6 +492,7 @@
                     <span class="panel-description">全局停机开关与运维事件台账（无人值守告警）</span>
                 </div>
                 <div class="log-actions">
+                    <button type="button" data-click="switchWorkflowPane" data-a0="resources">资源与存储</button>
                     <button type="button" data-click="loadOpsStatus">刷新状态</button>
                     <button type="button" id="ops-kill-switch" data-click="toggleKillSwitch">暂停推进</button>
                 </div>

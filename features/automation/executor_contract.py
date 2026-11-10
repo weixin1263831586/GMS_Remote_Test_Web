@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any, Protocol
 
 
@@ -14,6 +15,11 @@ class AutomationExecutor(Protocol):
         raise NotImplementedError
 
     def select_artifact(self, run: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def resolve_firmware_share(
+        self, run: dict[str, Any], *, on_progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
         raise NotImplementedError
 
     def select_devices(self, run: dict[str, Any]) -> dict[str, Any]:
@@ -81,6 +87,13 @@ class StubAutomationExecutor:
         return self._result("select_artifact", {
             "artifact_url": f"stub://jenkins/{job}/{number}/update.img",
             "artifact_path": run.get("artifact_path", ""),
+        })
+
+    def resolve_firmware_share(
+        self, run: dict[str, Any], *, on_progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        return self._result("resolve_firmware_share", {
+            "artifact_url": "", "artifact_path": run.get("artifact_path") or "/stub/firmware-share/update.img",
         })
 
     def flash(self, run: dict[str, Any]) -> dict[str, Any]:

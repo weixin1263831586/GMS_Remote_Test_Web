@@ -14,6 +14,14 @@ from .api_hardening_fixture import ClusterApiHardeningFixture
 
 class ClusterApiHardeningTests(ClusterApiHardeningFixture, unittest.TestCase):
 
+    def test_unconfigured_worker_cannot_register_without_token(self):
+        response = self.client.post(
+            "/api/cluster/workers/register",
+            json={"worker_id": "unconfigured", "max_jobs": 1},
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertIsNone(self.repo.get_worker("unconfigured"))
+
     def test_oversized_artifact_is_rejected_without_partial_file(self):
         job = self.repo.create_job_with_leases({
             "worker_id": "worker-246",

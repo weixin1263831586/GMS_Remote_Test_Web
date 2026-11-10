@@ -136,15 +136,59 @@ def _extract_module_and_case(text: str) -> tuple:
     return module, case
 
 
+# URL / IP / AOA 配置名等结构化实体先剥离，再从剩余文本识别设备序列号，
+# 避免把分享链接里的 host、share_id、download 等片段误认成设备 ID。
+_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+_IP_TOKEN_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?$")
+# 设备序列号候选的边界：CJK 与 ASCII 相邻处不构成 \b（如「设备66df…」），
+# 因此用显式字符类前后视断言代替 \b。
+_SERIAL_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9_.:\-/])[A-Za-z0-9][A-Za-z0-9_.:\-/]{5,}(?![A-Za-z0-9_.:\-/])"
+)
+_SERIAL_SKIP_SUBSTRINGS = (
+    "Test", "Cases", "TESTCASES", "Android", "REPORT", "firmware", "share",
+    "download", "wizard", "dpi", "evb", "api", "http", "usb",
+)
+
+
+def _strip_structured_entities(text: str) -> str:
+    """Remove URLs / AOA-style profile names before serial extraction."""
+    cleaned = _URL_RE.sub(" ", text)
+    # AOA/构建配置名：RK 开头并带下划线分段的长 token（如
+    # RK3588_evb1_A17_dpi320_wizard-to-usb-debug）不是设备序列号。
+    cleaned = re.sub(
+        r"(?<![A-Za-z0-9_.:\-/])RK[0-9]+[A-Za-z0-9_]*(?:_[A-Za-z0-9.\-]+)+",
+        " ", cleaned, flags=re.IGNORECASE,
+    )
+    return cleaned
+
+
 def _extract_device_ids(text: str) -> list[str]:
+    cleaned = _strip_structured_entities(text)
     ids = []
-    for token in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9_.:-]{5,}\b", text):
-        if re.fullmatch(r"RK\d+", token, re.IGNORECASE):
-            continue
-        if any(skip in token for skip in ("Test", "Cases", "TESTCASES", "Android", "REPORT")):
+    for match in _SERIAL_TOKEN_RE.finditer(cleaned):
+        token = match.group(0)
+        if not _looks_like_device_serial_with_context(cleaned, match.start(), token):
             continue
         ids.append(token)
     return list(dict.fromkeys(ids))[:8]
+
+
+def _looks_like_device_serial_with_context(cleaned: str, start: int, token: str) -> bool:
+    """Serial-shaped tokens pass directly; generic tokens need a 设备/序列号 cue."""
+    lowered = token.lower()
+    if _IP_TOKEN_RE.match(token):
+        return False
+    if any(skip in lowered for skip in _SERIAL_SKIP_SUBSTRINGS):
+        return False
+    if re.fullmatch(r"RK\d+", token, re.IGNORECASE):
+        return False
+    if re.fullmatch(r"[0-9a-f]{8,}", lowered):
+        return True
+    if not (len(token) >= 8 and re.search(r"[A-Za-z]", token) and re.search(r"[0-9]", token)):
+        return False
+    prefix = cleaned[:start]
+    return bool(re.search(r"(?:设备|序列号|serial|sn)\s*[:：=]?\s*$", prefix, re.IGNORECASE))
 
 
 def _extract_device_keyword(text: str) -> str:

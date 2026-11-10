@@ -43,6 +43,10 @@ def _parse_iso(value: str) -> datetime | None:
     return parsed
 
 
+def _retry_delay_seconds(attempts: int) -> int:
+    return min(1800, 60 * (2 ** min(max(0, attempts - 1), 5)))
+
+
 class OpsStore:
     _REQUIRED_TABLES = frozenset({"ops_events", "ops_flags"})
 
@@ -91,7 +95,9 @@ class OpsStore:
                     acknowledged_by TEXT NOT NULL DEFAULT '',
                     notified_at TEXT NOT NULL DEFAULT '',
                     notify_state TEXT NOT NULL DEFAULT 'pending',
-                    notify_attempts INTEGER NOT NULL DEFAULT 0
+                    notify_attempts INTEGER NOT NULL DEFAULT 0,
+                    notify_attempted_at TEXT NOT NULL DEFAULT '',
+                    notify_retry_at TEXT NOT NULL DEFAULT ''
                 )
             """)
             # Phase migrations: the delivery-state columns were added after
@@ -110,6 +116,32 @@ class OpsStore:
                     "ALTER TABLE ops_events ADD COLUMN notify_attempts "
                     "INTEGER NOT NULL DEFAULT 0"
                 )
+            if "notify_attempted_at" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE ops_events ADD COLUMN notify_attempted_at "
+                    "TEXT NOT NULL DEFAULT ''"
+                )
+            if "notify_retry_at" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE ops_events ADD COLUMN notify_retry_at "
+                    "TEXT NOT NULL DEFAULT ''"
+                )
+                # Older ledgers have no attempt timestamp. Preserve their
+                # previous due time once; subsequent failures use the real attempt.
+                for row in conn.execute(
+                    "SELECT id, created_at, notify_attempts FROM ops_events "
+                    "WHERE notify_state='failed' AND notify_attempts > 0"
+                ).fetchall():
+                    attempted = _parse_iso(row["created_at"]) or datetime.now(timezone.utc)
+                    retry = attempted + timedelta(seconds=_retry_delay_seconds(row["notify_attempts"]))
+                    conn.execute(
+                        "UPDATE ops_events SET notify_attempted_at=?, notify_retry_at=? WHERE id=?",
+                        (attempted.strftime("%Y-%m-%dT%H:%M:%SZ"), retry.strftime("%Y-%m-%dT%H:%M:%SZ"), row["id"]),
+                    )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ops_events_delivery "
+                "ON ops_events(notify_state, notify_retry_at, created_at)"
+            )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ops_events_status "
                 "ON ops_events(status, created_at)"
@@ -280,20 +312,21 @@ class OpsStore:
 
     # ---- delivery state ----------------------------------------------------
 
-    def pending_events(self, *, limit: int = 20) -> list[dict[str, Any]]:
+    def pending_events(self, *, limit: int = 20, ready_only: bool = False) -> list[dict[str, Any]]:
         """Events whose notification is still pending or failed (retryable).
 
-        Kill-switch audit rows are informational and never notify; they are
-        recorded with ``notify_state='sent'`` at insert time via
-        ``mark_delivery_state`` right after creation in service.py.
+        ``ready_only`` filters due times before LIMIT so events in backoff
+        cannot hide fresh alerts behind a fixed-size queue head.
         """
+        query = "SELECT * FROM ops_events WHERE notify_state IN ('pending', 'failed')"
+        params: list[Any] = []
+        if ready_only:
+            query += " AND (notify_retry_at='' OR notify_retry_at <= ?)"
+            params.append(utc_now_iso())
+        query += " ORDER BY created_at ASC, id ASC LIMIT ?"
+        params.append(max(1, min(int(limit), 100)))
         with self._connect() as conn:
-            rows = conn.execute(
-                """SELECT * FROM ops_events
-                   WHERE notify_state IN ('pending', 'failed')
-                   ORDER BY created_at ASC, id ASC LIMIT ?""",
-                (max(1, min(int(limit), 100)),),
-            ).fetchall()
+            rows = conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
     def mark_delivery_state(
@@ -303,16 +336,30 @@ class OpsStore:
         allowed = {"pending", "failed", "sent", "skipped"}
         if state not in allowed:
             raise ValueError(f"invalid notify_state: {state}")
+        attempted_at = utc_now_iso() if state in {"sent", "failed"} else ""
+        retry_at = ""
+        if state == "failed":
+            attempted = _parse_iso(attempted_at)
+            delay = _retry_delay_seconds(attempts)
+            retry_at = (attempted + timedelta(seconds=delay)).replace(microsecond=0)
+            # 秒级存储会截断亚秒部分：若截断让窗口实际缩短（attempted 落在
+            # 秒内后段），补一整秒，保证退避窗口不小于声明的延迟。
+            if retry_at < attempted + timedelta(seconds=delay):
+                retry_at += timedelta(seconds=1)
+            retry_at = retry_at.strftime("%Y-%m-%dT%H:%M:%SZ")
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 """UPDATE ops_events
-                   SET notify_state=?, notify_attempts=?, notified_at=?
+                   SET notify_state=?, notify_attempts=?, notified_at=?,
+                       notify_attempted_at=?, notify_retry_at=?
                    WHERE id=?""",
                 (
                     state,
                     int(attempts),
-                    utc_now_iso() if state == "sent" else "",
+                    attempted_at if state == "sent" else "",
+                    attempted_at,
+                    retry_at,
                     event_id,
                 ),
             )
@@ -327,12 +374,14 @@ class OpsStore:
         attempts = int(event.get("notify_attempts") or 0)
         if attempts <= 0:
             return True
-        delay_seconds = min(1800.0, 60.0 * (2 ** (attempts - 1)))
-        created = _parse_iso(str(event.get("created_at") or ""))
-        if created is None:
+        retry_at = _parse_iso(str(event.get("notify_retry_at") or ""))
+        if retry_at is not None:
+            return datetime.now(timezone.utc) >= retry_at
+        attempted = _parse_iso(str(event.get("notify_attempted_at") or event.get("created_at") or ""))
+        if attempted is None:
             return True
-        age = (datetime.now(timezone.utc) - created).total_seconds()
-        return age >= delay_seconds
+        age = (datetime.now(timezone.utc) - attempted).total_seconds()
+        return age >= _retry_delay_seconds(attempts)
 
     def open_event_count(self) -> int:
         with self._connect() as conn:
