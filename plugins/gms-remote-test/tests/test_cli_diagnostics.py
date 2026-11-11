@@ -222,6 +222,25 @@ _gms_rt_dispatch gms-rt-devices-shell DIAGDEV 'ls /vendor/etc/permissions' --jso
         self.assertFalse(payload["ok"])
         self.assertIn("Worker SSH failed", payload["diagnostics"])
 
+    def test_ssh_configuration_uses_canonical_deployment_without_symlink(self):
+        project = self.root / "project"
+        deployment = project / "configs/local/deployment.json"
+        deployment.parent.mkdir(parents=True)
+        deployment.write_text(json.dumps({
+            "ubuntu_host": "192.0.2.10", "ubuntu_user": "fixture-user", "ssh_port": 2222,
+        }), encoding="utf-8")
+        self.env["GMS_WEB_APP_DIR"] = str(project)
+        for legacy_exists in (False, True):
+            with self.subTest(legacy_exists=legacy_exists):
+                if legacy_exists:
+                    (project / "configs/config.json").write_text(json.dumps({
+                        "ubuntu_host": "192.0.2.99", "ubuntu_user": "legacy-user",
+                    }), encoding="utf-8")
+                result = self.run_snippet("_resolve_ssh_host")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), "192.0.2.10 fixture-user 2222")
+        self.assertFalse((project / "configs/config.json").is_symlink())
+
     def test_missing_debug_apk_reports_actionable_json_diagnostics(self):
         result = self.run_cli("gms-rt-debug-session-request", "worker", "SERIAL", "com.android.vending",
                               "/product/priv-app/Phonesky/Phonesky.apk", "--json", "--non-interactive")

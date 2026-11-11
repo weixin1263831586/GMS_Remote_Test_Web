@@ -13,9 +13,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 
-@pytest.mark.parametrize("layout", ["structured", "legacy", "process_only"])
-@pytest.mark.parametrize("service_case", ["success", "missing", "brief_stop_fails", "brief_restart_fails", "brief_inactive", "device_restart_fails", "web_restart_fails"])
-def test_restart_reports_actual_worker_outcome(tmp_path, layout, service_case):
+def run_restart(tmp_path, layout, service_case, *, legacy_unit=False):
     project = tmp_path / "project"
     project.mkdir()
     # Exercise the actual environment/path loaders, without importing deployment
@@ -23,6 +21,7 @@ def test_restart_reports_actual_worker_outcome(tmp_path, layout, service_case):
     for relative in (
         "bootstrap/env_loader.py", "foundation/config_paths.py",
         "foundation/runtime_settings.py", "foundation/private_config.py",
+        "tools/scripts/deployment/update_systemd_tls.py", "tools/scripts/_common.py",
     ):
         target = project / relative
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -67,6 +66,11 @@ find() { return 0; }
 # --no-ask-password 兜底，破坏契约断言的调用序列。
 sudo() {
     case "$1" in
+        --)
+            shift
+            [[ "$RESTART_CASE" == unit_update_fails ]] && return 1
+            "$@"
+            ;;
         -n) shift; if [[ "$1" == "true" ]]; then return 0; fi; "$@" ;;
         -v) return 0 ;;
         *) "$@" ;;
@@ -75,6 +79,7 @@ sudo() {
 systemctl() {
     printf '%s\n' "$*" >> "$RESTART_CALLS"
     case "$*" in
+        'daemon-reload') [[ "$RESTART_CASE" != unit_reload_fails ]] ;;
         'show gms-redmine-daily-brief-worker.service --property=LoadState --value')
             [[ "$RESTART_CASE" == missing ]] && echo not-found || echo loaded
             ;;
@@ -110,7 +115,18 @@ fi
         "RESTART_CASE": service_case,
         "RESTART_CALLS": str(tmp_path / "service-calls"),
     }
-    (project / "web.service").touch()
+    unit = project / "web.service"
+    if legacy_unit:
+        unit.write_text(
+            f"[Service]\nWorkingDirectory={project}\n"
+            f"ExecStart=/usr/bin/python3 -m uvicorn app:app --port 5001 "
+            f"--ssl-keyfile {project}/configs/certs/gms-local.key "
+            f"--ssl-certfile {project}/configs/certs/gms-local.crt\n"
+            "Restart=always\n",
+            encoding="utf-8",
+        )
+    else:
+        unit.touch()
     user_unit = Path(environment["HOME"]) / ".config/systemd/user/gms-worker-agent.service"
     user_unit.parent.mkdir(parents=True)
     user_unit.touch()
@@ -125,6 +141,13 @@ fi
         env=environment, cwd=project, capture_output=True, text=True, timeout=15,
     )
     calls = Path(environment["RESTART_CALLS"]).read_text().splitlines()
+    return result, calls, project
+
+
+@pytest.mark.parametrize("layout", ["structured", "legacy", "process_only"])
+@pytest.mark.parametrize("service_case", ["success", "missing", "brief_stop_fails", "brief_restart_fails", "brief_inactive", "device_restart_fails", "web_restart_fails"])
+def test_restart_reports_actual_worker_outcome(tmp_path, layout, service_case):
+    result, calls, _project = run_restart(tmp_path, layout, service_case)
     if service_case not in ("success", "missing"):
         assert result.returncode != 0
         assert "服务管理完成" not in result.stdout
@@ -149,3 +172,58 @@ fi
         assert "晨报 Worker 未安装" in result.stdout
         assert not any('restart gms-redmine-daily-brief-worker.service' in call for call in calls)
     assert '--user is-active --quiet gms-worker-agent' in calls
+
+
+def test_restart_updates_installed_tls_paths_before_stopping_services(tmp_path):
+    result, calls, project = run_restart(tmp_path, "structured", "success", legacy_unit=True)
+    assert result.returncode == 0, result.stderr
+    unit = project / "web.service"
+    updated = unit.read_text()
+    assert f"--ssl-keyfile {project}/configs/secrets/certs/gms-local.key" in updated
+    assert f"--ssl-certfile {project}/configs/secrets/certs/gms-local.crt" in updated
+    assert "--port 5001" in updated
+    assert "Restart=always" in updated
+    backups = list(project.glob("web.service.pre-canonical-tls-*"))
+    assert len(backups) == 1
+    assert f"{project}/configs/certs/gms-local.key" in backups[0].read_text()
+    assert calls.index("daemon-reload") < calls.index("stop gms-redmine-daily-brief-worker.service")
+    assert not (project / "configs/certs").is_symlink()
+    assert not (project / "configs/config.json").is_symlink()
+
+
+@pytest.mark.parametrize("service_case", ["unit_update_fails", "unit_reload_fails"])
+def test_tls_update_failure_keeps_services_running(tmp_path, service_case):
+    result, calls, _project = run_restart(tmp_path, "structured", service_case, legacy_unit=True)
+    assert result.returncode != 0
+    assert not any(call.startswith(("stop ", "restart ")) for call in calls)
+    assert "服务管理完成" not in result.stdout
+
+
+def test_systemd_path_update_is_dry_run_and_repeatable(tmp_path):
+    project = tmp_path / "project with spaces"
+    unit = tmp_path / "web.service"
+    original = (
+        "[Service]\n"
+        f'ExecStart=/usr/bin/python3 --ssl-keyfile "{project}/configs/certs/gms-local.key" '
+        f'--ssl-certfile "{project}/configs/certs/gms-local.crt"\n'
+        "Environment=KEEP_THIS=unchanged\n"
+    )
+    unit.write_text(original, encoding="utf-8")
+    unit.chmod(0o640)
+    command = [
+        sys.executable, str(ROOT / "tools/scripts/deployment/update_systemd_tls.py"),
+        "--project-root", str(project), "--unit", str(unit),
+    ]
+    dry_run = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert dry_run.returncode == 3
+    assert unit.read_text() == original
+    assert list(tmp_path.glob("web.service.pre-canonical-tls-*")) == []
+    applied = subprocess.run([*command, "--apply"], capture_output=True, text=True, timeout=10)
+    assert applied.returncode == 0, applied.stderr
+    assert unit.read_text() == original.replace("/configs/certs/", "/configs/secrets/certs/")
+    assert unit.stat().st_mode & 0o777 == 0o640
+    repeated = subprocess.run([*command, "--apply"], capture_output=True, text=True, timeout=10)
+    assert repeated.returncode == 0, repeated.stderr
+    backups = list(tmp_path.glob("web.service.pre-canonical-tls-*"))
+    assert len(backups) == 1
+    assert backups[0].read_text() == original

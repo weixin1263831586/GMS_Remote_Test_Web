@@ -81,4 +81,8 @@ if [[ "${controller_was_active}" == true ]]; then
     systemctl stop "${controller}"
 fi
 as_operator "${python_bin}" "${project_root}/scripts/migrate_config_layout.py" --apply
+unit_file="$(systemctl show "${controller}" -p FragmentPath --value)"
+"${python_bin}" "${project_root}/tools/scripts/deployment/update_systemd_tls.py" \
+    --project-root "${project_root}" --unit "${unit_file}" --apply
+systemctl daemon-reload
 # The EXIT handler restores precisely the services that were active on entry.

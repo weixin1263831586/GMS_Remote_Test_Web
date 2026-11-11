@@ -102,6 +102,11 @@ def _externalize_secrets(config: dict, environment: dict) -> None:
 def _rewrite_moved_path_references(root: Path, environment: dict) -> None:
     """Keep environment overrides aligned with files moved by this migration."""
 
+    certificate_prefixes = {
+        "configs/certs/": "configs/secrets/certs/",
+        "${PROJECT_ROOT}/configs/certs/": "${PROJECT_ROOT}/configs/secrets/certs/",
+        str(root / "configs/certs") + "/": str(root / "configs/secrets/certs") + "/",
+    }
     for key, value in list(environment.items()):
         if not isinstance(value, str):
             continue
@@ -113,6 +118,10 @@ def _rewrite_moved_path_references(root: Path, environment: dict) -> None:
             }
             if value in replacements:
                 environment[key] = replacements[value]
+                break
+        for source, destination in certificate_prefixes.items():
+            if value.startswith(source):
+                environment[key] = destination + value[len(source):]
                 break
 
 
@@ -223,14 +232,8 @@ def migrate(root: Path, *, apply: bool = False) -> dict:
                 certs.rename(target_certs)
                 target_certs.chmod(0o700)
                 certs_moved = True
-                # Existing systemd/Worker TLS arguments may still reference this
-                # directory. Keep a relative compatibility link, without copies.
-                certs.symlink_to("secrets/certs", target_is_directory=True)
             for path in originals:
                 path.unlink()
-            # Older installed agent CLIs read this path only for host/user/port.
-            # Keep discovery working without duplicating static config or secrets.
-            (root / "configs/config.json").symlink_to("local/deployment.json")
             if _effective_configuration(root) != before:
                 raise ValueError("Effective configuration changed; migration rolled back")
         except Exception:
@@ -240,7 +243,6 @@ def migrate(root: Path, *, apply: bool = False) -> dict:
             for destination in reversed(created):
                 destination.unlink(missing_ok=True)
             if certs_moved:
-                certs.unlink(missing_ok=True)
                 target_certs.rename(certs)
             for path in originals:
                 source = backup / path.relative_to(root)

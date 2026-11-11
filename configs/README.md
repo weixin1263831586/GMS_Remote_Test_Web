@@ -113,10 +113,10 @@ sudo bash scripts/migrate_running_config.sh
 ```
 
 第一次命令只显示目标路径。应用迁移时会拒绝覆盖已有目标、备份原文件、
-校验新 JSON、收紧权限，然后移除旧位置的配置文件。证书目录保留相对兼容链接
-`configs/certs -> secrets/certs`，用于现有 systemd/Worker 的 TLS 参数。
-`configs/config.json -> local/deployment.json` 仅用于旧版已安装 CLI 的主机、
-用户名和端口发现；应用本身读取 `local/config.json`，该链接不包含静态密码。
+校验新 JSON、收紧权限，然后移除旧位置的配置文件。证书移入
+`configs/secrets/certs/`，应用读取 `local/config.json` 与 `local/deployment.json`。
+`restart_services.sh` 与在线维护命令会更新已安装 systemd 服务的证书参数，
+并保留原服务文件备份。Agent CLI 使用独立的 profile 连接 Controller。
 重复执行不会重新导入旧数据。工具当前要求待迁移部署的数据根为项目内 `data/`。
 
 静态配置与环境中的密钥值不同时，迁移保留两份原值及各自消费关系：
@@ -136,7 +136,8 @@ python scripts/migrate_config_layout.py --apply --rollback /absolute/path/to/dat
 
 发布流程排除 `configs/local/`、`configs/secrets/`、旧部署文件及 `data/`，
 再从模板生成脱敏的本机默认配置。升级复制不会覆盖目标机器的本机目录。
-加密备份包含新布局的配置、凭证、证书及运行时数据；恢复会重建证书兼容链接。
+加密备份包含新布局的配置、凭证、证书及运行时数据，恢复保留归档中的规范目录。
+恢复后执行 `./restart_services.sh`，同步已安装 systemd 服务的证书参数。
 
 `.gitignore` 不影响已经跟踪的文件，也不会清除历史。提交前应检查索引，
 确保 `configs/` 中只包含说明和模板；对曾进入 Git 历史的凭证，需要在所属

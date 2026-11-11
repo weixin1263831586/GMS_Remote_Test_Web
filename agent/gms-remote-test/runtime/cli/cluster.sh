@@ -168,7 +168,11 @@ _resolve_ssh_host() {
     local user="$DEFAULT_SSH_USER"
     local port="22"
     local config_files=(
+        "${GMS_WEB_APP_DIR}/configs/local/deployment.json"
+        "${GMS_WEB_APP_DIR}/configs/local/config.json"
         "${GMS_WEB_APP_DIR}/configs/config.json"
+        "${HOME}/GMS_Remote_Test/web_app/configs/local/deployment.json"
+        "${HOME}/GMS_Remote_Test/web_app/configs/local/config.json"
         "${HOME}/GMS_Remote_Test/web_app/configs/config.json"
     )
     for config_file in "${config_files[@]}"; do

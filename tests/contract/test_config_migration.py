@@ -34,6 +34,7 @@ def seed(root):
         "GMS_UBUNTU_PASSWORD": "fixture-ssh", "GMS_LOCAL_AI_API_KEY": "fixture-environment-ai",
         "GMS_ENV": "development", "GMS_TEST_ROOT_PATH": "${PROJECT_ROOT}/data",
         "GMS_WORKER_TOKENS_FILE": "${PROJECT_ROOT}/configs/worker_tokens.json",
+        "GMS_CURL_CA_CERT": "${PROJECT_ROOT}/configs/certs/gms-local-ca.crt",
     }
     for name, payload in {
         "config.json": static, "config_runtime.json": runtime, "runtime.json": environment,
@@ -73,8 +74,9 @@ def test_migration_preserves_effective_configuration_and_secret_conflicts(tmp_pa
     result = migrate(tmp_path, apply=True)
     assert result["applied"]
     assert Path(result["backup"]).is_dir()
-    assert (tmp_path / "configs/config.json").is_symlink()
-    assert read_json_object(tmp_path / "configs/config.json")["ubuntu_user"] == "operator"
+    assert not (tmp_path / "configs/config.json").exists()
+    assert not (tmp_path / "configs/config.json").is_symlink()
+    assert read_json_object(tmp_path / "configs/local/deployment.json")["ubuntu_user"] == "operator"
     monkeypatch.setattr(env_loader, "_candidate_paths", lambda: [tmp_path / "configs/local/environment.json"])
     monkeypatch.delenv("GMS_SKIP_RUNTIME_ENV", raising=False)
     with patch.dict(os.environ, {}, clear=True):
@@ -84,6 +86,9 @@ def test_migration_preserves_effective_configuration_and_secret_conflicts(tmp_pa
         assert os.environ["GMS_TEST_ROOT_PATH"] == str(tmp_path / "data")
         assert os.environ["GMS_WORKER_TOKENS_FILE"] == str(
             tmp_path / "configs/secrets/worker_tokens.json"
+        )
+        assert os.environ["GMS_CURL_CA_CERT"] == str(
+            tmp_path / "configs/secrets/certs/gms-local-ca.crt"
         )
     assert before == after
     local = read_json_object(tmp_path / "configs/local/config.json")
@@ -221,6 +226,8 @@ def test_backup_includes_partitioned_configuration_and_certificates(tmp_path):
     certs.mkdir()
     (certs / "fixture.key").write_text("fixture key", encoding="utf-8")
     migrate(root, apply=True)
+    assert not certs.exists()
+    assert not certs.is_symlink()
     stage = tmp_path / "stage"
     _stage_sources(root, None, stage)
     payload = stage / "payload/project"

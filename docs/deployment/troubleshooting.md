@@ -54,6 +54,12 @@ tail -30 fastapi.log                    # nohup 模式
 
 清理 Python 缓存后的冷启动可能超过 20 秒，属正常现象；端口被残留进程占用时脚本会自动清理后重试。
 
+若日志显示 `load_cert_chain` 抛出 `FileNotFoundError`，检查已安装服务的
+证书参数是否与 `configs/secrets/certs/` 一致。重新克隆仅恢复代码，原部署的
+`configs/local/`、`configs/secrets/` 需要从旧项目迁回。执行最新的
+`./restart_services.sh` 会在停止服务前修正旧证书路径、备份原服务文件并重新加载
+systemd。路径修正失败时脚本会直接报错，需要在操作者终端提供 sudo 权限。
+
 ## 5. Worker 注册失败
 
 确认：

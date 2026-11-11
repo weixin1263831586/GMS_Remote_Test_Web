@@ -270,7 +270,11 @@ gms-rt-terminal-open() {
         # 优先尝试本地配置文件（更快，避免网络调用）
         local config_host=""
         local config_files=(
+            "${GMS_WEB_APP_DIR}/configs/local/deployment.json"
+            "${GMS_WEB_APP_DIR}/configs/local/config.json"
             "${GMS_WEB_APP_DIR}/configs/config.json"
+            "${HOME}/GMS_Remote_Test/web_app/configs/local/deployment.json"
+            "${HOME}/GMS_Remote_Test/web_app/configs/local/config.json"
             "${HOME}/GMS_Remote_Test/web_app/configs/config.json"
         )
 

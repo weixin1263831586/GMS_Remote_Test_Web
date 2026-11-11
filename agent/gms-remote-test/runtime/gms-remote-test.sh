@@ -6,7 +6,7 @@ set -o pipefail
 # propagated here (GMS_RT_VERSION) by tools/scripts/agent/release.py.
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.71"
+GMS_RT_VERSION="0.22.72"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -165,7 +165,13 @@ if [ "$_gms_profile_mode" != "local" ] && [ -z "$SERVER_URL" ]; then
     export DETECTED_LOCAL_IP="$LOCAL_IP"
 
     CONFIG_SERVER_HOST=""
-    for config_file in "${GMS_WEB_APP_DIR}/configs/config.json" "${HOME}/GMS_Remote_Test/web_app/configs/config.json"; do
+    for config_file in \
+        "${GMS_WEB_APP_DIR}/configs/local/deployment.json" \
+        "${GMS_WEB_APP_DIR}/configs/local/config.json" \
+        "${GMS_WEB_APP_DIR}/configs/config.json" \
+        "${HOME}/GMS_Remote_Test/web_app/configs/local/deployment.json" \
+        "${HOME}/GMS_Remote_Test/web_app/configs/local/config.json" \
+        "${HOME}/GMS_Remote_Test/web_app/configs/config.json"; do
         if [ -f "$config_file" ]; then
             CONFIG_SERVER_HOST=$(grep -o '"ubuntu_host": *"[^"]*"' "$config_file" 2>/dev/null | cut -d'"' -f4 | head -n 1)
             [ -n "$CONFIG_SERVER_HOST" ] && break

@@ -149,6 +149,24 @@ class BackupToolTests(unittest.TestCase):
             expected=1,
         )
 
+    def test_restore_keeps_canonical_configuration_without_links(self) -> None:
+        certificates = self.project / "configs/secrets/certs"
+        certificates.mkdir(parents=True)
+        (certificates / "gms-local.key").write_text("fixture key", encoding="utf-8")
+        deployment = self.project / "configs/local/deployment.json"
+        deployment.parent.mkdir()
+        deployment.write_text('{"ubuntu_user": "operator"}\n', encoding="utf-8")
+        archive = self.create()
+        self.run_tool(
+            "restore", "--archive", str(archive),
+            "--project-root", str(self.project), "--run-home", str(self.home),
+            "--key-file", str(self.key), "--confirm", "RESTORE",
+        )
+        self.assertEqual((certificates / "gms-local.key").read_text(), "fixture key")
+        self.assertEqual(json.loads(deployment.read_text()), {"ubuntu_user": "operator"})
+        self.assertFalse((self.project / "configs/certs").is_symlink())
+        self.assertFalse((self.project / "configs/config.json").is_symlink())
+
     def test_retention_only_keeps_requested_archives(self) -> None:
         self.create(keep=1)
         latest = self.create(keep=1)

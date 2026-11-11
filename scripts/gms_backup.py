@@ -535,13 +535,6 @@ def restore_backup(args: argparse.Namespace) -> Path:
                         int(entry.get('uid', 0)),
                         int(entry.get('gid', 0)),
                     )
-            canonical_certs = project_root / 'configs/secrets/certs'
-            legacy_certs = project_root / 'configs/certs'
-            if canonical_certs.is_dir() and not legacy_certs.exists():
-                legacy_certs.symlink_to('secrets/certs', target_is_directory=True)
-            compatibility = project_root / 'configs/config.json'
-            if (project_root / 'configs/local/deployment.json').is_file() and not compatibility.exists():
-                compatibility.symlink_to('local/deployment.json')
         except Exception:
             if current_data.exists():
                 shutil.rmtree(current_data)

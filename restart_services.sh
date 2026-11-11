@@ -67,6 +67,30 @@ systemctl_admin() {
     fi
 }
 
+update_systemd_tls_paths() {
+    [[ -f "${SYSTEMD_UNIT_FILE}" ]] || return 0
+    local updater="${PROJECT_DIR}/tools/scripts/deployment/update_systemd_tls.py"
+    local -a update_command=(
+        "${PYTHON_BIN}" "${updater}" --project-root "${PROJECT_DIR}"
+        --unit "${SYSTEMD_UNIT_FILE}" --cert-dir "${CERT_DIR}"
+    )
+    local check_status=0
+    "${update_command[@]}" || check_status=$?
+    [[ "${check_status}" -eq 0 || "${check_status}" -eq 3 ]] \
+        || fail_service_action "无法检查 systemd HTTPS 证书路径"
+
+    if [[ "${check_status}" -eq 3 ]]; then
+        if [[ "${EUID}" -eq 0 ]]; then
+            "${update_command[@]}" --apply \
+                || fail_service_action "无法更新 systemd HTTPS 证书路径"
+        else
+            sudo -- "${update_command[@]}" --apply \
+                || fail_service_action "更新 systemd HTTPS 证书路径需要 sudo 权限"
+        fi
+    fi
+    systemctl_admin daemon-reload || fail_service_action "无法重新加载 systemd 服务配置"
+}
+
 restart_local_vnc() {
     # x11vnc/websockify are application-managed processes rather than systemd
     # units.  Reuse the canonical VNC manager so this script cannot drift from
@@ -155,6 +179,10 @@ echo -e "${BLUE}  GMS Auto Test 服务管理${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
+# Prepare TLS and installed service paths before stopping a working service.
+ensure_https_cert
+update_systemd_tls_paths
+
 # 1. 清理缓存
 echo -e "${YELLOW}[1/6] 清理 Python 缓存...${NC}"
 # 清理 Python 字节码缓存
@@ -207,8 +235,6 @@ echo ""
 
 # 4. 启动新服务
 echo -e "${YELLOW}[4/6] 启动新服务...${NC}"
-
-ensure_https_cert
 
 # 优先通过 systemd 启动（应用加载配置，systemd 管理自动重启）
 # 直接检测 unit 文件是否存在，避免非交互式 shell 中 systemctl 连不上 D-Bus

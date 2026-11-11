@@ -89,10 +89,12 @@ sudo journalctl -u gms-web-app -f
 `restart_services.sh` 是仓库根目录的服务管理脚本，执行流程：
 
 1. 通过 `bootstrap.env_loader` 加载运行环境变量（与 `app.py` 相同的优先级）。
+   启动前准备 HTTPS 证书，并将已安装 systemd 服务的旧证书参数更新到当前证书目录。
+   更新会保留原服务文件备份并执行 `daemon-reload`，需要时由 sudo 在操作者终端提权。
 2. 清理 Python 字节码缓存（`__pycache__`、`.pyc`、`.pytest_cache`）。
 3. 备份旧日志（`fastapi.log` 重命名为 `fastapi.log.backup.<时间戳>`）。
 4. 停止旧服务：若存在 `/etc/systemd/system/gms-web-app.service` 则通过 systemd 停止，并清理端口残留进程。
-5. 证书缺失时自动生成自签 HTTPS 证书。
+5. 使用 `configs/secrets/certs/` 中的证书启动，配置迁移与备份恢复使用规范目录。
 6. 启动新服务：优先通过 systemd 重启 `gms-web-app.service`；unit 不存在时回退为 `nohup` 直接启动 Uvicorn，日志写入 `fastapi.log`、PID 写入 `fastapi.pid`。
 7. 健康检查：轮询 `https://localhost:<端口>/api/system/health/live`，最多 20 次、每次间隔 3 秒（清理缓存后冷启动可能超过 20 秒）。
 8. 若存在用户级 Worker unit（`~/.config/systemd/user/gms-worker-agent.service`），重启本地 Worker Agent。
