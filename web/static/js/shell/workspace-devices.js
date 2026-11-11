@@ -548,16 +548,6 @@ function selectedWorkspaceDeviceIds() {
     return selectedDeviceIdsMatching(isSelectableWorkspaceDevice);
 }
 
-function syncWorkspaceDeviceSelection() {
-    const selected = selectedWorkspaceDeviceIds();
-    if (selected.length === state.selectedDevices.size) return;
-    state.selectedDevices = new Set(selected);
-    // 清单刷新只同步浏览器内存；持久化仍由用户主动选择设备触发。
-    window.GmsWorkspace?.update({device_ids: selected}, {
-        source: 'device-inventory', persist: false
-    });
-}
-
 function selectedBurnableDeviceIds() {
     return selectedDeviceIdsMatching(
         device => isSelectableTestDevice(device) || isSelectableBurnStateDevice(device)
@@ -637,10 +627,17 @@ async function loadDevices(forceRefresh = false, options = {}) {
             return state.devices;
         }
         state.devices = devices;
-        // 恢复工作区选择后，由 renderDevices 统一移除已消失或不可选的设备，
-        // 确保复选框、内存选择和后续操作的目标保持一致。
+        // 设备列表更新后，只清理选中集合里已消失的设备。
+        // 已不可选（占用/状态异常）的设备保留在选中集合和列表展示中：
+        // 复选框由渲染层按"可选才显示勾选"处理，设备恢复可选后勾选自动恢复。
+        const currentIds = new Set(devices.map(d => typeof d === 'string' ? d : d.device_id).filter(Boolean));
+        for (const id of Array.from(state.selectedDevices)) {
+            if (!currentIds.has(id)) {
+                state.selectedDevices.delete(id);
+            }
+        }
         for (const id of window.GmsWorkspace?.get?.().device_ids || []) {
-            state.selectedDevices.add(id);
+            if (currentIds.has(id)) state.selectedDevices.add(id);
         }
         // 先用已有数据渲染设备，让 ADB 区立刻显示，不被分组加载阻塞
         renderDevices();

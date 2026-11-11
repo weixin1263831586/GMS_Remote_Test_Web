@@ -65,13 +65,37 @@ class BridgeTurnResult:
     error_code: str = ""
 
 
+# 最近一回合的模型可用性（installed ≠ 模型可用：配置损坏 / Provider
+# 不可用时仍会先进入 kkagent 路由再失败）。availability() 把它并入返回，
+# UI 可区分「已安装」「模型可用」「当前回合失败」三态。
+_last_turn_state: dict[str, str] = {"state": "unknown", "detail": "", "at": ""}
+
+
+def _record_turn_state(ok: bool, detail: str = "", error_code: str = "") -> None:
+    from datetime import datetime, timezone
+
+    _last_turn_state.update({
+        "state": "ready" if ok else "failed",
+        "detail": "" if ok else (detail or error_code or "turn failed"),
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    })
+
+
 def availability() -> dict[str, Any]:
-    """kkagent 是否可用于桥接（存在性探测，不启动进程）。"""
+    """kkagent 是否可用于桥接（存在性探测，不启动进程）。
+
+    ``available`` 仅表示可执行文件存在；模型链路可用性看 ``model_state``
+    （unknown=尚无回合证据 / ready=最近回合成功 / failed=最近回合失败）。
+    """
     path = shutil.which(KKAGENT_BINARY)
     return {
         "available": bool(path),
+        "installed": bool(path),
         "binary": path or "",
         "mode": "headless_stream_json",
+        "model_state": _last_turn_state["state"],
+        "model_detail": _last_turn_state["detail"],
+        "model_checked_at": _last_turn_state["at"],
     }
 
 
@@ -101,8 +125,13 @@ def link_payload(
 
 
 def _extract_events(raw_lines: list[str]) -> tuple[str, str, list[str]]:
-    """从 stream-json 行里提取最终助手文本、会话 ID 与工具名列表。"""
-    texts: list[str] = []
+    """从 stream-json 行里提取**最终**助手文本、会话 ID 与工具名列表。
+
+    一个回合可能产生多段助手文本（工具调用间的中间叙述）；调用方把整段
+    文本当单个 JSON 决策解析，因此这里只保留最后一段文本——中间段落
+    拼接会产生非法 JSON，让解析永远失败。
+    """
+    last_text = ""
     session_id = ""
     tools: list[str] = []
     for line in raw_lines:
@@ -120,26 +149,28 @@ def _extract_events(raw_lines: list[str]) -> tuple[str, str, list[str]]:
             session_id = str(event.get("session_id") or session_id)
         if event.get("type") == "message" and event.get("role") == "assistant":
             content = event.get("content")
-            if isinstance(content, str):
-                texts.append(content)
+            if isinstance(content, str) and content:
+                last_text = content
             elif isinstance(content, list):
-                texts.extend(str(block["text"]) for block in content
-                             if isinstance(block, dict) and block.get("type") == "text" and block.get("text"))
+                blocks = [str(block["text"]) for block in content
+                          if isinstance(block, dict) and block.get("type") == "text" and block.get("text")]
+                if blocks:
+                    last_text = blocks[-1]
         if event.get("type") == "assistant":
             message = event.get("message") or {}
             for block in message.get("content") or []:
                 if not isinstance(block, dict):
                     continue
                 if block.get("type") == "text" and block.get("text"):
-                    texts.append(str(block["text"]))
+                    last_text = str(block["text"])
                 elif block.get("type") == "tool_use":
                     tools.append(str(block.get("name") or ""))
         if event.get("type") == "result":
             session_id = str(event.get("session_id") or session_id)
             result_text = str(event.get("result") or event.get("message") or "")
-            if result_text and not texts:
-                texts.append(result_text)
-    return "\n".join(texts).strip(), session_id, tools
+            if result_text and not last_text:
+                last_text = result_text
+    return last_text.strip(), session_id, tools
 
 
 async def _terminate_bridge_process(process: asyncio.subprocess.Process) -> None:
@@ -224,17 +255,21 @@ async def run_turn(
     try:
         stdout = await asyncio.wait_for(invoke(), timeout=timeout_seconds)
         if process.returncode != 0:
+            _record_turn_state(False, f"kkagent 退出码 {process.returncode}", "process_error")
             return BridgeTurnResult(
                 ok=False, session_id=resolved_session,
                 error=f"kkagent 退出码 {process.returncode}", error_code="process_error",
             )
         raw_lines = stdout.decode("utf-8", errors="replace").splitlines()
     except FileNotFoundError:
+        _record_turn_state(False, "kkagent 未安装", "unavailable")
         return BridgeTurnResult(ok=False, session_id=resolved_session, error="kkagent 未安装，桥接不可用", error_code="unavailable")
     except asyncio.TimeoutError:
+        _record_turn_state(False, "回合超时", "timeout")
         return BridgeTurnResult(ok=False, session_id=resolved_session, error="kkagent 回合超时", error_code="timeout")
     except Exception:
         logger.debug("kkagent bridge turn failed", exc_info=True)
+        _record_turn_state(False, "调用失败", "bridge_error")
         return BridgeTurnResult(ok=False, session_id=resolved_session,
                                 error="kkagent 调用失败，请检查模型连接或隔离策略", error_code="bridge_error")
     finally:
@@ -243,10 +278,12 @@ async def run_turn(
 
     text, resolved_session, tools = _extract_events(raw_lines)
     if not text:
+        _record_turn_state(False, "未返回文本结果", "empty_response")
         return BridgeTurnResult(
             ok=False, session_id=resolved_session or session_id,
             error="kkagent 未返回文本结果", tools_used=tools, error_code="empty_response",
         )
+    _record_turn_state(True)
     return BridgeTurnResult(
         ok=True, text=text, session_id=resolved_session or session_id, tools_used=tools,
     )

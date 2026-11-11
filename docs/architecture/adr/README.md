@@ -36,3 +36,6 @@
 | 0028 | [AOA 固件绑定恢复与严格环境验证](0028-aoa-firmware-bound-recovery-and-strict-environment.md) | Accepted（补充 0027，标准路径由 0029 补充） | — | 0029（部分） |
 | 0029 | [AOA 设备类别认证与语义回放](0029-aoa-class-certification-and-semantic-playback.md) | Accepted | 0028（部分） | — |
 | 0030 | [无人值守运维底座（kill-switch、告警与磁盘卫生）](0030-unattended-ops-foundation.md) | Accepted | — | — |
+| 0031 | [模型主导的对话 Agent 与项目工具注册表](0031-conversation-project-agent.md) | Accepted | — | — |
+| 0032 | [ATS 运行记录团队可读与操作权限](0032-ats-team-read-access.md) | Accepted | — | — |
+| 0033 | [ATS 完成后的资源释放与遗留清理](0033-completed-run-resource-cleanup.md) | Accepted | — | — |

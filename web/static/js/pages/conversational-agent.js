@@ -5,6 +5,8 @@ let agentInputHistory = JSON.parse(localStorage.getItem('gms_agent_input_history
 let agentHistoryIndex = -1;  // -1 = not browsing history
 let agentModelStatusLoaded = false;
 let agentModelStatusFlight = null;
+let agentElevationFlight = null;
+let agentRetryId = '';
 const agentHandledAutoOpenMessageIds = new Set();
 
 function agentModelStatusText(status) {
@@ -109,6 +111,7 @@ function getAgentStatusLabel(status) {
         done: '完成',
         error: '异常',
         cancelled: '已取消',
+        awaiting_authorization: '等待授权',
         thinking: '思考中'
     };
     return labels[status] || status || '空闲';
@@ -236,7 +239,7 @@ function renderAgentMessages(session) {
                 if (a.page) {
                     return `<button class="btn-xs" data-click="openAgentPageAction" data-a0="${escapeJsAttr(a.page)}" data-a1="${escapeJsAttr(JSON.stringify(a.params || {}))}">${escapeHtml(a.label)}</button>`;
                 } else if (a.action) {
-                    const retryDisabled = a.action === 'agent_retry' && (session.status === 'thinking'
+                    const retryDisabled = ['agent_retry', 'agent_elevate_retry'].includes(a.action) && (session.status === 'thinking'
                         || session.status === 'cancelled' || a.params?.retry_id !== session.agent_retry?.id);
                     return `<button class="btn-xs" data-click="sendAgentAction" data-a0="${escapeJsAttr(a.action)}" data-a1="${escapeJsAttr(JSON.stringify(a.params || {}))}" data-a2="${escapeJsAttr(a.label || a.action)}" ${retryDisabled ? 'disabled' : ''}>${escapeHtml(a.label)}</button>`;
                 }
@@ -441,6 +444,7 @@ function openAgentRunInAts(runId) {
 function renderAgentSession(session) {
     if (!session) return;
     agentSessionId = session.session_id || agentSessionId;
+    agentRetryId = session.agent_retry?.id || '';
     if (agentSessionId) {
         localStorage.setItem('gms_agent_session_id', agentSessionId);
     }
@@ -449,7 +453,7 @@ function renderAgentSession(session) {
     const engine = $('agent-engine-status');
     if (engine) {
         const backend = session.agent_backend;
-        const kkagentState = {ready: '已连接', thinking: '规划中', retrying: '重试中', timeout: '响应超时', failed: '连接异常'};
+        const kkagentState = {ready: '已连接', thinking: '规划中', retrying: '重试中', timeout: '响应超时', failed: '连接异常', awaiting_authorization: '等待授权'};
         engine.textContent = backend?.mode === 'kkagent' ? `对话引擎：kkagent ${kkagentState[backend.state] || '连接中'}`
             : backend?.mode === 'rules' ? '对话引擎：规则兜底' : '对话引擎：待连接';
         engine.title = backend?.detail || '由 kkagent 规划并选择项目工具，平台负责授权和执行。';
@@ -570,6 +574,26 @@ async function sendAgentAction(action, paramsJson = '{}', label = '') {
         return;
     }
 
+    if (action === 'agent_elevate_retry') {
+        if (agentElevationFlight) return;
+        const sessionId = agentSessionId;
+        const retryId = params.retry_id;
+        if (!sessionId || retryId !== agentRetryId) return;
+        const workspace = JSON.stringify(getAgentWorkspaceContext());
+        agentElevationFlight = Promise.resolve().then(() => requestElevatedAccess('继续 Agent 资源查询'));
+        try {
+            const granted = await agentElevationFlight;
+            if (!granted || agentSessionId !== sessionId || agentRetryId !== retryId
+                || JSON.stringify(getAgentWorkspaceContext()) !== workspace) return;
+            action = 'agent_retry';
+            label = '授权完成，继续本轮规划';
+        } catch (error) {
+            showToast(`管理员授权失败: ${error.message}`, 'error');
+            return;
+        } finally {
+            agentElevationFlight = null;
+        }
+    }
     const display = label || action;
     try {
         const container = $('agent-chat-messages');

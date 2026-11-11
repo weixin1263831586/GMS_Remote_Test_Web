@@ -22,6 +22,7 @@ from pathlib import Path
 from features.assistant.workflow_execution import RUN_STAGE_LABELS_ZH
 from features.automation import AUTOMATION_TERMINAL_STATUSES
 
+
 ROOT = Path(__file__).resolve().parents[2]
 
 ATS_STATE_JS = ROOT / "features/automation/ui/state.js"

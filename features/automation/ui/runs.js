@@ -35,7 +35,7 @@ async function loadRuns() {
                     ${renderTestOutcome(run)}
                 </div>
                 ${runMeta(run) ? `<div class="muted">${esc(runMeta(run))}</div>` : ''}
-                <div class="muted run-identifiers">运行 ${esc(run.id)} · Worker ${esc(run.worker_id || '-')}</div>
+                <div class="muted run-identifiers">运行 ${esc(run.id)} · Worker ${esc(run.worker_id || '-')} · 创建者 ${esc(run.created_by_username || run.created_by || '-')}</div>
                 ${run.plan_batch_id ? `<div class="muted">计划批次 ${esc(run.plan_batch_id)}</div>` : ''}
                 ${run.source_type === 'auto_retry' ? `<div class="muted">失败用例自动重试 ${esc(run.retry_index)} / ${esc(run.retry_limit)}${run.not_before ? ` · 最早执行 ${esc(compactTime(run.not_before))} UTC` : ''}</div>` : ''}
                 ${run.retry_of_run_id ? `<div class="run-retry-source">重跑来源：<button type="button" data-click="loadEvents" data-a0="${esc(run.retry_of_run_id)}" data-stop>${esc(run.retry_of_run_id)}</button></div>` : ''}
@@ -73,8 +73,12 @@ async function loadRuns() {
             <div class="run-actions">
                 <button type="button" data-click="loadEvents" data-a0="${esc(run.id)}" data-stop>日志</button>
                 <button type="button" data-click="loadTrace" data-a0="${esc(run.id)}" data-stop>链路</button>
-                ${TERMINAL_STATUSES.has(run.status)
-                    ? `<button type="button" data-click="retryRun" data-a0="${esc(run.id)}" data-stop title="使用原配置重新执行整条流水线，包含已配置的构建和烧写">重跑流水线</button>`
+                ${run.permissions?.can_manage !== true
+                    ? '<span class="muted" title="仅运行创建者或管理员可操作">只读</span>'
+                    : TERMINAL_STATUSES.has(run.status)
+                    ? `<button type="button" data-click="retryRun" data-a0="${esc(run.id)}" data-stop title="使用原配置重新执行整条流水线，包含已配置的构建和烧写">重跑流水线</button>
+                       ${run.status === 'completed' && run.device_reservation_id && run.resource_cleanup_state !== 'released'
+                           ? `<button type="button" data-click="releaseRunReservation" data-a0="${esc(run.id)}" data-stop title="核对预约归属与设备命令结束状态后，释放这笔已完成运行的遗留预约">释放预约</button>` : ''}`
                     : ['flashing', 'aoa_recovering'].includes(run.status)
                     ? '<button type="button" class="danger" disabled title="设备操作完成前不能安全中止">设备操作中不可取消</button>'
                     : `<button type="button" class="danger" data-click="cancelRun" data-a0="${esc(run.id)}" data-stop>取消</button>`}

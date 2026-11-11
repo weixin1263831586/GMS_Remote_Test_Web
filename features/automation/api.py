@@ -11,8 +11,11 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, Response
 
 from features.auth import (
+    AGENT_ROLE,
     CurrentUser,
     get_authenticated_user,
+    is_elevated,
+    is_machine_principal,
     principal_owner_id,
     require_authenticated_user,
     require_authenticated_user_when_auth_required,
@@ -30,10 +33,12 @@ from features.users import owner_id_from_request
 from foundation.config import settings
 from foundation.config_paths import automation_profiles_path
 from foundation.error_model import ApiError
+from foundation.redaction import redact_sensitive_data
 from foundation.responses import error_response
 
 from .plan_api import router as plans_router
 from .profiles import mask_profile_secrets
+from .resource_cleanup import cleanup_state
 from .run_history import decorate_run_summary, run_configuration
 
 
@@ -54,7 +59,7 @@ automation_service = AutomationService(
 
 
 def _request_owner(request: Request) -> tuple[str, bool]:
-    """Return the ATS owner filter and whether the caller may see all runs.
+    """Return the resource owner and administrator authority for mutations.
 
     Ownership compares against the resource-owner ACCOUNT (ADR 0010): an
     agent token sees runs created by its enrolling account, so token
@@ -70,11 +75,40 @@ def _request_owner(request: Request) -> tuple[str, bool]:
     return user.resource_owner_id, False
 
 
+def _is_human_run_user(request: Request, user: CurrentUser | None) -> bool:
+    return bool(user is not None and user.role not in {AGENT_ROLE, 'agent', 'worker_service'}
+                and not is_machine_principal(user)
+                and getattr(request.state, 'auth_method', None) not in {'agent_token', 'machine_authority'})
+
+
+def _run_read_scope(request: Request) -> tuple[str, bool]:
+    """Web records are shared with the team; machine readers keep their scope."""
+    owner, _admin = _request_owner(request)
+    user = get_authenticated_user(request)
+    return (user.resource_owner_id, _is_human_run_user(request, user)) if user is not None else (owner, False)
+
+
+def _public_run(run: dict[str, Any], request: Request) -> dict[str, Any]:
+    user = get_authenticated_user(request)
+    can_manage = bool(_is_human_run_user(request, user)
+                      and (user.role == 'admin' or str(run.get('created_by') or '') == user.resource_owner_id))
+    return redact_sensitive_data({**run, 'permissions': {'can_manage': can_manage},
+                                  'resource_cleanup_state': cleanup_state(run)})
+
+
+def _readable_run(run_id: str, request: Request) -> dict[str, Any]:
+    owner, see_all = _run_read_scope(request)
+    run = automation_service.get_run(run_id)
+    if not see_all and str(run.get('created_by') or '') != owner:
+        raise AutomationNotFoundError('Automation run not found')
+    return run
+
+
 def _owned_run(run_id: str, request: Request) -> dict[str, Any]:
     run = automation_service.get_run(run_id)
     owner, see_all = _request_owner(request)
     if not see_all and str(run.get("created_by") or "") != owner:
-        raise AutomationNotFoundError('Automation run not found')
+        raise ApiError.forbidden('只有运行创建者或管理员可以操作此运行')
     return run
 
 
@@ -85,7 +119,9 @@ def _require_human_run_access(run_id: str, request: Request) -> dict[str, Any]:
     (ADR 0012): only the owning human account (or an admin) may do it.
     """
 
-    require_human_principal(request)
+    user = require_human_principal(request)
+    if not _is_human_run_user(request, user):
+        raise ApiError.forbidden('运行操作需要人类账号')
     return _owned_run(run_id, request)
 
 
@@ -203,12 +239,15 @@ async def create_automation_run(
 ):
     # ADR 0012: runs are a human-operator surface. Agent tokens and machine
     # principals must not create (or chain) runs — the pipeline's authority
-    # is snapshotted from the human creator at this single entry point.
+    # is snapshotted from the human creator at this single entry point. An
+    # elevated human session (admin re-verification) consents to the full
+    # plan capability union, mirroring the firmware workbench's gate.
     try:
         principal = require_human_principal(request)
         owner = principal_owner_id(request)
         run = automation_service.create_run(
-            req, created_by=owner, principal=principal
+            req, created_by=owner, principal=principal,
+            elevated=is_elevated(request),
         )
     except ValueError as exc:
         return error_response(str(exc), 400)
@@ -218,12 +257,16 @@ async def create_automation_run(
 @router.post('/runs/preflight')
 async def preflight_automation_run(
     req: dict[str, Any],
+    request: Request,
     principal: CurrentUser | None = Depends(require_human_principal_when_auth_required),
 ):
     try:
         # ADR 0012: 预检与创建共用同一 capability compiler（审计：Preflight
-        # 必须代表“权限层面确实能跑”，不能出现预检✅创建❌）。
-        data = automation_service.preflight(req, principal=principal)
+        # 必须代表“权限层面确实能跑”，不能出现预检✅创建❌）。提权判定与
+        # create 一致，避免提权会话预检通过、创建被拒（或反向）。
+        data = automation_service.preflight(
+            req, principal=principal, elevated=is_elevated(request)
+        )
     except ValueError as exc:
         return error_response(str(exc), 409)
     return {'success': True, 'data': data}
@@ -241,7 +284,7 @@ async def list_automation_runs(
     reports_only: bool = False,
     cursor: str = '',
 ):
-    owner, see_all = _request_owner(request)
+    owner, see_all = _run_read_scope(request)
     if len(query) > 256 or len(profile_id) > 256 or len(worker_id) > 256:
         raise ApiError.malformed_request('Run filter exceeds 256 characters')
     try:
@@ -252,6 +295,7 @@ async def list_automation_runs(
         )
     except ValueError as exc:
         raise ApiError.malformed_request(str(exc)) from exc
+    page['items'] = [_public_run(run, request) for run in page.get('items', [])]
     return {
         'success': True,
         'data': page,
@@ -261,10 +305,10 @@ async def list_automation_runs(
 @router.get('/runs/{run_id}')
 async def get_automation_run(run_id: str, request: Request):
     try:
-        run = _owned_run(run_id, request)
+        run = _readable_run(run_id, request)
     except AutomationNotFoundError as exc:
         return error_response(str(exc), 404)
-    return {'success': True, 'data': run}
+    return {'success': True, 'data': _public_run(run, request)}
 
 
 @router.get('/dashboard')
@@ -275,7 +319,7 @@ async def automation_dashboard(request: Request):
     from features.automation.models import TERMINAL_STATUSES
     from features.build import get_build_service
 
-    owner, see_all = _request_owner(request)
+    owner, see_all = _run_read_scope(request)
     runs = automation_service.list_run_summaries(
         limit=500, created_by='' if see_all else owner
     )
@@ -318,11 +362,11 @@ async def get_automation_run_events(
     run_id: str, request: Request
 ):
     try:
-        _owned_run(run_id, request)
+        _readable_run(run_id, request)
         events = automation_service.list_events(run_id)
     except AutomationNotFoundError as exc:
         return error_response(str(exc), 404)
-    return {'success': True, 'data': {'items': events}}
+    return {'success': True, 'data': {'items': redact_sensitive_data(events)}}
 
 
 @router.get('/runs/{run_id}/timeline')
@@ -333,7 +377,7 @@ async def get_automation_run_timeline(
 ):
     """Return one correlated timeline across ATS and its Cluster Job."""
     try:
-        run = _owned_run(run_id, request)
+        run = _readable_run(run_id, request)
     except AutomationNotFoundError as exc:
         return error_response(str(exc), 404)
     effective_limit = limit if isinstance(limit, int) else 1000
@@ -363,7 +407,7 @@ async def get_automation_run_timeline(
             'trace_id': run.get('trace_id') or run_id,
             'run_id': run_id,
             'cluster_job_id': cluster_job_id,
-            'items': items[:effective_limit],
+            'items': redact_sensitive_data(items[:effective_limit]),
         },
     }
 
@@ -374,7 +418,7 @@ async def get_automation_run_trace(
 ):
     """Correlate a run with its build job, commit, artifact and report."""
     try:
-        run = _owned_run(run_id, request)
+        run = _readable_run(run_id, request)
     except AutomationNotFoundError as exc:
         return error_response(str(exc), 404)
 
@@ -403,7 +447,7 @@ async def get_automation_run_trace(
             cluster_job = None
     return {
         'success': True,
-        'data': {
+        'data': redact_sensitive_data({
             'run_id': run['id'],
             'trace_id': run.get('trace_id') or run['id'],
             'state_version': run.get('state_version', 1),
@@ -440,7 +484,7 @@ async def get_automation_run_trace(
             'report_timestamp': run.get('report_timestamp') or '',
             'report_id': run.get('report_id') or '',
             'result_summary': result_summary,
-        },
+        }),
     }
 
 
@@ -449,14 +493,14 @@ def get_automation_run_progress(run_id: str, request: Request):
     from .telemetry import run_progress
 
     try:
-        run = _owned_run(run_id, request)
+        run = _readable_run(run_id, request)
     except AutomationNotFoundError as exc:
         raise ApiError.not_found('Automation run not found') from exc
     try:
         cluster = get_cluster_service()
     except RuntimeError as exc:
         raise ApiError.dependency_unavailable('Cluster telemetry is unavailable') from exc
-    return {'success': True, 'data': run_progress(run, cluster)}
+    return {'success': True, 'data': redact_sensitive_data(run_progress(run, cluster))}
 
 
 @router.post('/runs/{run_id}/cancel')
@@ -471,6 +515,31 @@ async def cancel_automation_run(
     except RuntimeError as exc:
         return error_response(str(exc), 409)
     return {'success': True, 'data': run}
+
+
+@router.post('/runs/{run_id}/release-reservation')
+async def release_automation_run_reservation(run_id: str, request: Request):
+    try:
+        _require_human_run_access(run_id, request)
+        run = await asyncio.to_thread(automation_service.release_completed_resources, run_id)
+    except AutomationNotFoundError as exc:
+        raise ApiError.not_found('Automation run not found') from exc
+    except (ValueError, RuntimeError) as exc:
+        raise ApiError.conflict(str(exc)) from exc
+    if cleanup_state(run) == 'pending':
+        cleanup = json.loads(run.get('result_json') or '{}').get('resource_cleanup') or {}
+        if cleanup.get('code') == 'DEPENDENCY_UNAVAILABLE':
+            raise ApiError.dependency_unavailable(cleanup.get('error') or '预约服务暂不可用')
+        raise ApiError.conflict(cleanup.get('error') or '预约尚未释放，请稍后重试')
+    from foundation.security_audit import security_audit_logger
+
+    user = require_human_principal(request)
+    security_audit_logger.log_event({
+        'action_type': 'api', 'source': 'web', 'operation': 'release_completed_run_reservation',
+        'client_id': principal_owner_id(request), 'username': user.username, 'run_id': run_id,
+        'device_reservation_id': run.get('device_reservation_id') or '', 'status_code': 200,
+    })
+    return {'success': True, 'data': _public_run(run, request)}
 
 
 @router.post('/runs/{run_id}/retry')

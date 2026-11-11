@@ -4,7 +4,7 @@ import asyncio
 import json
 from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -198,7 +198,7 @@ async def test_flash_resources_are_model_queries_followed_by_a_generic_question(
     turn.side_effect = [decision("workflow", entities={"device_serials": ["DEV-1"], "firmware_share_id": "share-1",
                                                       "aoa_profile": "profile-1", "flash_only": True})]
     monkeypatch.setattr("features.assistant.workflow_execution.refresh_workflow_preflight",
-                        lambda *args: {"ready": True, "checks": [], "blocks": []})
+                        lambda *args, **kwargs: {"ready": True, "checks": [], "blocks": []})
     assert await agent.handle_project_turn(current, object(), request("提交资源选择", action="agent_choices", params={
         "question_id": question_id, "values": {"device": "DEV-1", "firmware": "share-1", "aoa": "profile-1"},
     }))
@@ -263,7 +263,7 @@ async def test_model_cannot_replace_an_explicit_workflow_device(model, monkeypat
     turn.side_effect = [decision("workflow", entities={"device_serials": [serial], "firmware_share_id": "share-1", "flash_only": True})
                         for serial in ("OTHER-DEVICE", "66df75a34ebde4a4")]
     monkeypatch.setattr("features.assistant.workflow_execution.refresh_workflow_preflight",
-                        lambda *args: {"ready": True, "checks": [], "blocks": []})
+                        lambda *args, **kwargs: {"ready": True, "checks": [], "blocks": []})
     current = session()
     assert await agent.handle_project_turn(current, object(), request("设备66df75a34ebde4a4 烧写固件"))
     assert current["pending_plan"]["draft"]["device"]["serial"] == "66df75a34ebde4a4"
@@ -431,3 +431,51 @@ async def test_planning_deadline_reports_timeout_and_retains_progress(model, mon
     assert current["agent_thinking"] is False
     assert current["agent_retry"]
     execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_guard_pauses_for_human_elevation_then_retries_the_exact_query(model, monkeypatch):
+    from fastapi import HTTPException
+
+    from features.assistant.executor import ActionExecutor
+    from features.assistant.tests.test_agent_session_safety import _bare_request
+    from features.firmware import shares_api
+
+    turn, _ = model
+    # Exercise the real executor dependency graph, rather than model-supplied permission flags.
+    execute = ActionExecutor()
+    monkeypatch.setattr(agent, "executor", execute)
+    monkeypatch.setattr("features.assistant.executor.require_authenticated_user", lambda req: SimpleNamespace(role="user"))
+    monkeypatch.setattr("features.auth.access.authentication_required", lambda: True)
+
+    def gate(req):
+        if not getattr(req.state, "is_elevated", False):
+            raise HTTPException(403, {"message": "Elevation required", "elevation_required": True})
+
+    monkeypatch.setattr("features.auth.access.require_elevated_admin", gate)
+    read = Mock(return_value=[{"id": "share-1", "name": "Firmware", "filename": "update.img"}])
+    monkeypatch.setattr(shares_api, "_load_records", read)
+    turn.side_effect = [decision("call", tool="firmware_shares", params={}), decision("question", text="请选择固件", fields=[{
+        "name": "firmware", "label": "固件", "options": [{"value": "share-1", "label": "Firmware"}],
+    }])]
+    current = session()
+    req = _bare_request()
+    await agent.handle_project_turn(current, req, request("烧写固件"))
+    assert current["status"] == "awaiting_authorization"
+    assert current["agent_backend"]["state"] == "awaiting_authorization"
+    assert current["messages"][-1]["data"]["quick_actions"][0]["action"] == "agent_elevate_retry"
+    assert turn.await_count == 1
+    read.assert_not_called()
+    retry_id = current["agent_retry"]["id"]
+    # Sending retry without real elevation cannot bypass the same guard.
+    await agent.handle_project_turn(current, req, request(action="agent_retry", params={"retry_id": retry_id}))
+    assert turn.await_count == 1
+    read.assert_not_called()
+    retry_id = current["agent_retry"]["id"]
+    req.state.is_elevated = True
+    await agent.handle_project_turn(current, req, request(action="agent_retry", params={"retry_id": retry_id}))
+    read.assert_called_once()
+    assert turn.await_count == 2
+    assert "share-1" in turn.await_args.kwargs["context"]
+    assert current["agent_question"]["fields"][0]["options"][0]["value"] == "share-1"
+    assert not current.get("agent_retry")

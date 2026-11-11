@@ -272,7 +272,7 @@ class AutomationApiTests(unittest.TestCase):
         self.assertIn('/api/automation/runs/preflight', paths)
         self.assertIn('/automation', paths)
 
-    def test_non_admin_cannot_read_another_users_run(self):
+    def test_non_admin_can_read_another_users_run_as_readonly(self):
         with TemporaryDirectory() as tmp:
             service = build_service(tmp)
             with patch.object(automation_api, 'automation_service', service):
@@ -284,7 +284,7 @@ class AutomationApiTests(unittest.TestCase):
                     },
                     self.request_for('alice', role='device_operator'),
                 ))
-                denied = asyncio.run(automation_api.get_automation_run(
+                shared = asyncio.run(automation_api.get_automation_run(
                     created['data']['id'], self.request_for('bob')
                 ))
                 visible = asyncio.run(automation_api.list_automation_runs(
@@ -292,8 +292,10 @@ class AutomationApiTests(unittest.TestCase):
                     status='', limit=50,
                 ))
 
-            self.assertEqual(denied.status_code, 404)
+            self.assertTrue(shared['success'])
+            self.assertEqual(shared['data']['permissions'], {'can_manage': False})
             self.assertEqual([item['id'] for item in visible['data']['items']], [created['data']['id']])
+            self.assertEqual(visible['data']['items'][0]['permissions'], {'can_manage': True})
 
     def test_admin_created_run_is_owned_by_admin_not_global(self):
         with TemporaryDirectory() as tmp:
@@ -839,3 +841,39 @@ class HumanOnlyRunSurfaceTests(unittest.TestCase):
                 )
             self.assertEqual(response.status_code, 400)
             self.assertIn('devices.lease', response.body.decode())
+
+    def test_service_layer_rejects_non_human_creators(self):
+        """服务层 human-only 边界（对话 Agent 直连 service 的路径）。
+
+        路由层 require_human_principal 只覆盖 REST 入口；工作流执行直接
+        调 AutomationService，必须在服务内部同样拒绝四类非人类主体：
+        agent token、machine capability principal、worker_service，
+        以及 ADR 0006 的 'agent' 兼容角色。None（dev 模式/Gerrit 触发）
+        维持既有信任级别放行。
+        """
+        payload = self._run_payload()
+        non_human = [
+            CurrentUser(id='agent:1', username='bot', role='agent_service'),
+            CurrentUser(
+                id='automation:ats_run.1', username='automation:ats_run.1',
+                role='agent_service', extra_permissions=frozenset({
+                    'tests.execute', 'devices.lease', 'firmware.stage',
+                }), resource_owner_id='id-human',
+            ),
+            CurrentUser(id='worker-1', username='worker-1', role='worker_service'),
+            CurrentUser(id='agent-legacy', username='legacy', role='agent'),
+        ]
+        with TemporaryDirectory() as tmp:
+            service = build_service(tmp)
+            for principal in non_human:
+                with self.subTest(role=principal.role, id=principal.id):
+                    with self.assertRaises(ValueError) as raised:
+                        service.create_run(
+                            payload, created_by='id-human', principal=principal
+                        )
+                    self.assertIn('human principal', str(raised.exception))
+                    with self.assertRaises(ValueError):
+                        service.preflight(payload, principal=principal)
+            # None：dev 模式与系统触发（Gerrit/计划重放）的既有信任级别。
+            run = service.create_run(payload, created_by='id-human', principal=None)
+            self.assertTrue(run['id'])

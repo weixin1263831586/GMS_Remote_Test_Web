@@ -38,8 +38,10 @@ def _ready_preflight():
 def _patch_preflight(monkeypatch, payload):
     monkeypatch.setattr(
         "features.assistant.workflow_execution.refresh_workflow_preflight",
-        lambda _session, _draft: payload)
-    monkeypatch.setattr(api, "_refresh_workflow_preflight", lambda _s, _d: payload, raising=False)
+        lambda _session, _draft, **_kw: payload)
+    monkeypatch.setattr(
+        api, "_refresh_workflow_preflight",
+        lambda _s, _d, **_kw: payload, raising=False)
 
 
 def test_composite_message_creates_workflow_plan(monkeypatch):
@@ -180,7 +182,7 @@ def test_ready_plan_confirm_submits_to_automation(monkeypatch):
 
         created = {}
 
-        def fake_create_run(body, *, created_by="", principal=None):
+        def fake_create_run(body, *, created_by="", principal=None, elevated=False):
             created["body"] = body
             created["created_by"] = created_by
             return {"id": "run-123", "status": "queued"}
@@ -222,6 +224,87 @@ def test_cancel_workflow_plan(monkeypatch):
             request, api.AgentChatRequest(session_id="s-confirm", message="取消计划")))
         assert session["pending_plan"] is None
         assert session["status"] == "idle"
+    finally:
+        api._agent_sessions.clear()
+        api._agent_sessions.update(saved)
+
+
+def _plain_user_request(monkeypatch, *, elevated: bool | None):
+    """构造带人类身份的请求：user 角色、可选提权标记。"""
+    from features.auth import CurrentUser
+
+    request = _bare_request()
+    request.state.current_user = CurrentUser(id="u1", username="u1", role="user")
+    if elevated is not None:
+        request.state.is_elevated = elevated
+    return request
+
+
+def test_unprivileged_user_plan_blocked_with_actionable_hint(monkeypatch):
+    """user 角色未提权：计划生成即报权限阻塞，确认不再撞英文 403。"""
+    saved = dict(api._agent_sessions)
+    try:
+        _seed_confirm_session(api, {"type": "test_execution"})
+        user_request = _plain_user_request(monkeypatch, elevated=False)
+        _seed_confirm_session(api, {"type": "test_execution"}, user_request)
+        asyncio.run(api.agent_chat(
+            user_request,
+            api.AgentChatRequest(session_id="s-confirm", message=ORIGINAL_MESSAGE)))
+        session = api._agent_sessions["s-confirm"]
+        plan = session["pending_plan"]
+        assert plan["type"] == api._WORKFLOW_PLAN_TYPE
+        reasons = " ".join(
+            block.get("reason") or "" for block in plan["preflight"]["blocks"])
+        assert "缺少工作流所需权限" in reasons
+        assert "管理员提权" in reasons
+
+        created = []
+        monkeypatch.setattr(
+            "features.automation.get_automation_service",
+            lambda: type("S", (), {"create_run": lambda *a, **k: created.append(1) or {}})())
+        asyncio.run(api.agent_chat(
+            user_request,
+            api.AgentChatRequest(session_id="s-confirm", message="确认执行")))
+        assert not created, "权限阻塞的计划不得提交 automation"
+        assert "暂不能执行" in session["messages"][-1]["content"]
+        assert "缺少工作流所需权限" in session["messages"][-1]["content"]
+    finally:
+        api._agent_sessions.clear()
+        api._agent_sessions.update(saved)
+
+
+def test_elevated_user_confirms_workflow_with_elevated_flag(monkeypatch):
+    """提权会话（管理员重认证）：确认提交并携带 elevated 快照同意。"""
+    saved = dict(api._agent_sessions)
+    try:
+        user_request = _plain_user_request(monkeypatch, elevated=True)
+        _seed_confirm_session(api, {"type": "test_execution"}, user_request)
+        _patch_preflight(monkeypatch, _ready_preflight())
+        asyncio.run(api.agent_chat(
+            user_request,
+            api.AgentChatRequest(session_id="s-confirm", message=ORIGINAL_MESSAGE)))
+
+        created = {}
+
+        def fake_create_run(body, *, created_by="", principal=None, elevated=False):
+            created["elevated"] = elevated
+            return {"id": "run-ehr", "status": "queued"}
+
+        monitor = AsyncMock(return_value=None)
+        monkeypatch.setattr(
+            "features.assistant.workflow_execution.monitor_workflow_run", monitor)
+        monkeypatch.setattr(api, "_monitor_workflow_run", monitor, raising=False)
+        with (
+            patch("features.auth.get_authenticated_user", return_value=None),
+            patch("features.automation.get_automation_service") as get_service,
+        ):
+            service = get_service.return_value
+            service.create_run.side_effect = fake_create_run
+            asyncio.run(api.agent_chat(
+                user_request,
+                api.AgentChatRequest(session_id="s-confirm", message="确认执行")))
+        assert created.get("elevated") is True
+        assert api._agent_sessions["s-confirm"]["active_run"]["automation_run_id"] == "run-ehr"
     finally:
         api._agent_sessions.clear()
         api._agent_sessions.update(saved)

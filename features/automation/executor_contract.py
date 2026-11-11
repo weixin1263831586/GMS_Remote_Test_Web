@@ -49,12 +49,18 @@ class AutomationExecutor(Protocol):
     def report_result(self, run: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
+    def release_resources(self, run: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
 
 class StubAutomationExecutor:
     """Deterministic executor for orchestration tests and dry runs."""
 
     def __init__(self, fail_stage: str = ""):
         self.fail_stage = fail_stage
+
+    def release_resources(self, run: dict[str, Any]) -> dict[str, Any]:
+        return self._result("release_resources", {"released": True})
 
     def _result(self, stage: str, payload: dict[str, Any]) -> dict[str, Any]:
         if self.fail_stage == stage:

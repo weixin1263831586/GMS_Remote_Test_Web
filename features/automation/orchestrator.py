@@ -407,6 +407,19 @@ class AutomationOrchestrator:
         finally:
             self.store.release_claim(run_id, self.claim_owner)
 
+    def release_completed_resources(self, run_id: str) -> dict[str, Any]:
+        from .resource_cleanup import cleanup_completed_run
+
+        run = self.store.get_run(run_id)
+        if not run or run["status"] != RUN_STATUS_COMPLETED:
+            raise ValueError("仅已完成的 Run 可释放遗留预约")
+        if not self.store.claim_run(run_id, self.claim_owner):
+            raise RuntimeError("Run 正在由其他进程处理，请稍后重试")
+        try:
+            return cleanup_completed_run(self.store, self.executor, run, lease_owner=self.claim_owner)
+        finally:
+            self.store.release_claim(run_id, self.claim_owner)
+
     @staticmethod
     def _report_snapshot(run: dict[str, Any], payload: dict[str, Any], *, collected: bool = False) -> str:
         try:
@@ -443,6 +456,8 @@ class AutomationOrchestrator:
             {"stage_started_at": utc_now_iso()},
         )
         update_payload = {"status": status, "current_stage": status, **updates}
+        if status == RUN_STATUS_COMPLETED:
+            update_payload.setdefault("finished_at", utc_now_iso())
         if run["started_at"] == "" and status != RUN_STATUS_QUEUED:
             update_payload["started_at"] = utc_now_iso()
         updated, applied = self.store.update_run_if_status(
@@ -463,6 +478,10 @@ class AutomationOrchestrator:
             to_status=status,
         )
         self._audit(run, run.get("status", ""), status, message)
+        if status == RUN_STATUS_COMPLETED:
+            from .resource_cleanup import cleanup_completed_run
+
+            updated = cleanup_completed_run(self.store, self.executor, updated, lease_owner=self.claim_owner)
         return updated
 
     def _stay(

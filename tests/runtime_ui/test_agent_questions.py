@@ -141,3 +141,74 @@ class RuntimeAgentQuestionTests(RuntimeUiHarness):
             expect(button).to_be_disabled()
         finally:
             page.close()
+
+    def test_human_authorization_continues_the_checkpoint_only_after_grant(self):
+        page = self.new_page()
+        submissions = []
+
+        def chat(route):
+            submissions.append(route.request.post_data_json)
+            route.fulfill(status=200, content_type='application/json', body=json.dumps({
+                'success': True, 'data': {'session': {'session_id': 'auth-flow', 'status': 'idle', 'messages': [], 'steps': []}},
+            }))
+
+        try:
+            page.route('**/api/agent/chat', chat)
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            page.evaluate("""() => {
+                window.elevationCalls = 0;
+                window.requestElevatedAccess = () => {
+                    elevationCalls += 1;
+                    return new Promise(resolve => {window.finishElevation = resolve;});
+                };
+                renderAgentSession({session_id: 'auth-flow', status: 'awaiting_authorization', steps: [],
+                    agent_backend: {mode: 'kkagent', state: 'awaiting_authorization'},
+                    agent_retry: {id: 'auth-retry'}, messages: [{role: 'assistant', content: '需要管理员临时授权',
+                        data: {quick_actions: [{label: '管理员授权后继续', action: 'agent_elevate_retry', params: {retry_id: 'auth-retry'}}]}
+                    }]});
+            }""")
+            expect(page.locator('#agent-status')).to_have_text('等待授权')
+            expect(page.locator('#agent-engine-status')).to_have_text('对话引擎：kkagent 等待授权')
+            button = page.locator('button[data-a0="agent_elevate_retry"]')
+            button.click()
+            button.click()
+            assert page.evaluate('elevationCalls') == 1
+            assert submissions == []
+            page.evaluate('finishElevation(false)')
+            assert submissions == []
+            button.click()
+            page.evaluate('finishElevation(true)')
+            expect(button).to_have_count(0)
+            assert len(submissions) == 1
+            assert submissions[0]['session_id'] == 'auth-flow'
+            assert submissions[0]['action'] == 'agent_retry'
+            assert submissions[0]['params'] == {'retry_id': 'auth-retry'}
+            assert 'password' not in json.dumps(submissions)
+        finally:
+            page.close()
+
+    def test_authorization_does_not_resume_a_replaced_session_or_workspace(self):
+        page = self.new_page()
+        submissions = []
+        try:
+            page.route('**/api/agent/chat', lambda route: (submissions.append(route.request.post_data_json), route.abort()))
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            for change in ['session', 'workspace']:
+                with self.subTest(change=change):
+                    page.evaluate("""() => {
+                        window.testWorker = 'worker-1';
+                        window.getAgentWorkspaceContext = () => ({worker_id: testWorker});
+                        window.requestElevatedAccess = () => new Promise(resolve => {window.finishElevation = resolve;});
+                        renderAgentSession({session_id: 'auth-flow', status: 'awaiting_authorization', steps: [],
+                            agent_retry: {id: 'auth-retry'}, messages: [{role: 'assistant', content: '授权', data: {quick_actions: [{
+                                label: '管理员授权后继续', action: 'agent_elevate_retry', params: {retry_id: 'auth-retry'}
+                            }]}}]});
+                    }""")
+                    page.locator('button[data-a0="agent_elevate_retry"]').click()
+                    page.evaluate("newAgentSession()" if change == 'session' else "testWorker = 'worker-2'")
+                    page.evaluate('finishElevation(true)')
+                    assert submissions == []
+        finally:
+            page.close()

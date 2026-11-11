@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from features.auth import CurrentUser, automation_granted_capabilities
+from features.auth import (
+    CurrentUser,
+    automation_granted_capabilities,
+    require_human_automation_creator,
+)
 from features.automation.executors import (
     HttpAutomationExecutor,
     StubAutomationExecutor,
@@ -111,8 +115,11 @@ class AutomationService:
         *,
         created_by: str = "",
         principal: CurrentUser | None = None,
+        elevated: bool = False,
     ) -> dict[str, Any]:
-        run_data, encrypted_secrets = self.prepare_run(request, created_by=created_by, principal=principal)
+        run_data, encrypted_secrets = self.prepare_run(
+            request, created_by=created_by, principal=principal, elevated=elevated
+        )
         run = self.store.create_run(run_data, encrypted_secrets=encrypted_secrets)
         self.store.append_event(
             run['id'], run['status'], 'info', 'Automation run queued',
@@ -124,6 +131,7 @@ class AutomationService:
 
     def prepare_run(
         self, request: dict[str, Any], *, created_by: str = '', principal: CurrentUser | None = None,
+        elevated: bool = False,
     ) -> tuple[dict[str, Any], dict[str, str]]:
         """Validate and seal a run without scheduling or reserving any resources."""
         # 深拷贝后再移除密码，避免修改调用方请求。
@@ -137,6 +145,10 @@ class AutomationService:
             if isinstance(build, dict):
                 build_password = build_password or str(build.pop('server_password', '') or '')
         plan = test_plan if isinstance(test_plan, dict) else {}
+        # ADR 0012 human-only creation boundary, enforced at the shared
+        # service choke point (route checks alone do not cover the
+        # conversational Agent path, which calls the service directly).
+        require_human_automation_creator(principal)
         retry_policy = RetryPolicy.model_validate(plan.get('retry_policy') or {})
         validate_execution_options(plan)
         build_plan = plan.get('build') if isinstance(plan.get('build'), dict) else {}
@@ -165,9 +177,11 @@ class AutomationService:
             raise ValueError('test_plan.test_type is required')
         # ADR 0012: snapshot the capability union the pipeline will need and
         # verify the creator already holds every requested capability. The
-        # run later executes with exactly this snapshot — never more.
+        # run later executes with exactly this snapshot — never more. An
+        # elevated human session (admin re-verification) counts as consent
+        # for the full union, mirroring the firmware workbench's gate.
         granted_capabilities = automation_granted_capabilities(
-            principal, plan
+            principal, plan, elevated=elevated
         )
         from .aoa_snapshot import freeze_recovery
 
@@ -184,11 +198,16 @@ class AutomationService:
             encrypted_secrets["build_server_password"] = encrypt_secret(build_password)
         return run_data, encrypted_secrets
 
-    def preflight(self, request: dict[str, Any], *, principal: CurrentUser | None = None) -> dict[str, Any]:
+    def preflight(
+        self, request: dict[str, Any], *, principal: CurrentUser | None = None,
+        elevated: bool = False,
+    ) -> dict[str, Any]:
         """Validate a proposed run without creating it (ADR 0012: same capability compiler as create)."""
         body = copy.deepcopy(request or {})
         body.pop('build_server_password', None)
         plan = body.get('test_plan') if isinstance(body.get('test_plan'), dict) else {}
+        # 与 create 同一 human-only 边界：预检结果不能比实际创建更宽松。
+        require_human_automation_creator(principal)
         RetryPolicy.model_validate(plan.get('retry_policy') or {})
         validate_execution_options(plan)
         # test_mode=skip（纯烧写/纯 AOA）时不要求 test_type，语义同 create。
@@ -216,7 +235,9 @@ class AutomationService:
         ):
             raise ValueError('Firmware artifact or build configuration is required')
         # ADR 0012: 与 create 同一 compiler；不可持有→ValueError→路由 409。
-        granted_capabilities = automation_granted_capabilities(principal, plan)
+        granted_capabilities = automation_granted_capabilities(
+            principal, plan, elevated=elevated
+        )
         from .aoa_snapshot import freeze_recovery
 
         freeze_recovery(plan, principal.resource_owner_id if principal else "")
@@ -563,6 +584,10 @@ class AutomationService:
             return self.orchestrator(executor_name).cancel_run(run_id)
         except ValueError as exc:
             raise AutomationNotFoundError('Automation run not found') from exc
+
+    def release_completed_resources(self, run_id: str, executor_name: str = 'http'):
+        self.get_run(run_id)
+        return self.orchestrator(executor_name).release_completed_resources(run_id)
 
     def retry_run(self, run_id: str):
         old = self.get_run(run_id)

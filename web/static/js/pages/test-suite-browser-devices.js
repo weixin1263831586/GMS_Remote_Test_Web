@@ -14,7 +14,6 @@ function renderDevices() {
         return;
     }
 
-    syncWorkspaceDeviceSelection();
     // 设备数据签名：数据未变化时跳过整表重建。手动刷新是双次渲染
     // （缓存渲染 + worker refresh 回包渲染），叠加 devices_changed /
     // catch-up 补刷并发触发，同数据重复 innerHTML 重建会造成闪屏。
@@ -127,7 +126,8 @@ function buildDeviceItemEl({
     displaySerial = ''
 }) {
     const div = document.createElement('div');
-    // 不可选设备保留在清单中，当前选择已由 renderDevices 同步清理。
+    // 不可选（占用/状态异常）设备保留在选中集合中，但复选框不显示勾选：
+    // 复选框随不可选被禁用，设备恢复可选后勾选自动恢复。
     const isSelected = selectable && state.selectedDevices.has(deviceId);
     div.className = `device-item ${isSelected ? 'selected' : ''} ${isLocked ? 'locked' : ''}`;
     div.dataset.deviceId = deviceId;

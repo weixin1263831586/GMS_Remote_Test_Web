@@ -355,18 +355,19 @@ class EvidenceApiTests(unittest.TestCase):
         self.assertEqual(allowed.status_code, 200)
 
     def test_artifact_text_window_keeps_total_chars_semantics(self):
-        """流式窗口读取与旧全量解码同语义：total_chars 全文计数、
-        truncated 如实、窗口内容正确（不整文件 read_bytes）。"""
+        """流式窗口读取：窗口内容正确、窗口填满即停止读取（不为统计
+        扫完整文件）；total_chars=-1 表示后续内容未计数，truncated 如实。"""
         url = f"/api/redmine-agent/artifacts/{self.artifact_id}/text"
         payload = b"AssertionError line one\nline two\n"
         first = self.client.get(url + "?offset=0&limit=10", headers={"x-test-owner": "owner-a"})
         data = first.json()["data"]
         self.assertEqual(data["text"], payload[:10].decode("utf-8"))
-        self.assertEqual(data["total_chars"], len(payload.decode("utf-8")))
+        self.assertEqual(data["total_chars"], -1)  # 窗口填满后提前停止计数
         self.assertTrue(data["truncated"])
         second = self.client.get(url + "?offset=10&limit=100", headers={"x-test-owner": "owner-a"})
         data = second.json()["data"]
         self.assertEqual(data["text"], payload[10:].decode("utf-8"))
+        self.assertEqual(data["total_chars"], len(payload.decode("utf-8")))
         self.assertFalse(data["truncated"])
 
     def test_artifact_text_falls_back_to_gb18030(self):

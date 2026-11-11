@@ -11,6 +11,10 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from fastapi import HTTPException
+
+from foundation.error_model import ApiError
+
 
 @dataclass
 class ToolResult:
@@ -39,6 +43,23 @@ class ToolResult:
         }
 
 
+def http_error_result(tool_name: str, exc: HTTPException, action_label: str = "") -> ToolResult:
+    """Preserve actionable guards without stringifying Python dicts into display text."""
+    detail = exc.detail
+    message = detail.get("message") or detail.get("error") if isinstance(detail, dict) else detail
+    message = message if isinstance(message, str) and message else f"请求被拒绝（HTTP {exc.status_code}）"
+    data = {"status_code": exc.status_code}
+    if exc.status_code == 403:
+        data["code"] = ApiError.forbidden().code
+        if isinstance(detail, dict) and detail.get("elevation_required") is True:
+            data["elevation_required"] = True
+            message = "需要管理员临时授权"
+    elif exc.status_code == 401:
+        data["code"] = ApiError.unauthenticated().code
+    return ToolResult(success=False, tool_name=tool_name, data=data, error=message,
+                      formatted_text=f"{action_label}被拒绝：{message}" if action_label else message)
+
+
 def internal_error_result(tool_name: str, action_label: str) -> ToolResult:
     """未知异常的统一 Agent 出口。
 
@@ -58,4 +79,4 @@ def internal_error_result(tool_name: str, action_label: str) -> ToolResult:
     )
 
 
-__all__ = ["ToolResult", "internal_error_result"]
+__all__ = ["ToolResult", "http_error_result", "internal_error_result"]

@@ -489,15 +489,18 @@ _TEXT_WINDOW_CHUNK_BYTES = 256 * 1024
 
 
 def _stream_text_window(path, offset: int, limit: int, encoding: str, errors: str):
-    """流式解码计数到 offset 再收集 limit 个字符。
+    """流式解码计数到 offset 再收集 limit 个字符，随后停止读取。
 
-    内存只持有块级缓冲与窗口内容；字符计数继续到 EOF，保证响应里的
-    ``total_chars`` 与 ``truncated`` 语义与旧全量解码完全一致。
+    内存只持有块级缓冲与窗口内容；越过 ``offset + limit`` 后不再消耗
+    磁盘 IO。``total_chars`` 在窗口截断时上报 -1（未知），响应里的
+    ``truncated`` 依据窗口是否填满判定——与逐字符精确计数相比，这避免
+    为一个统计字段把整个（可能数百 MB 的）日志扫完。
     """
     decoder = codecs.getincrementaldecoder(encoding)(errors)
     total_chars = 0
     collected: list[str] = []
     collecting = offset <= 0
+    window_end = offset + limit
     with path.open("rb") as fh:
         while True:
             raw = fh.read(_TEXT_WINDOW_CHUNK_BYTES)
@@ -512,12 +515,18 @@ def _stream_text_window(path, offset: int, limit: int, encoding: str, errors: st
             total_chars += len(text)
             if collecting:
                 collected.append(text)
+                if total_chars >= window_end:
+                    break  # 窗口已填满，提前结束读取。
             elif total_chars >= offset:
                 # 本块跨越 offset 边界：只保留边界之后的字符。
                 extra = total_chars - offset
                 collected.append(text[len(text) - extra:])
                 collecting = True
-    return "".join(collected)[:limit], total_chars
+                if total_chars >= window_end:
+                    break
+    window = "".join(collected)[:limit]
+    scanned_complete = total_chars < window_end
+    return window, total_chars if scanned_complete else -1
 
 
 @router.get("/artifacts/{artifact_id}/text")
@@ -542,7 +551,8 @@ async def read_evidence_artifact_text(
             return _error_response(exc)
     size = path.stat().st_size
     # 流式窗口读取：增量解码并只保留目标窗口，不把整个（可能数百 MB 的）
-    # 日志读进内存再切片。utf-8 失败回退 gb18030（replace）。
+    # 日志读进内存，也不为统计 total_chars 读完整个文件——窗口填满即停止。
+    # total_chars=-1 表示还有后续内容未计数；truncated 同步为窗口语义。
     try:
         window, total_chars = _stream_text_window(path, offset, limit, "utf-8", "strict")
     except UnicodeDecodeError:
@@ -556,7 +566,7 @@ async def read_evidence_artifact_text(
             "offset": offset,
             "returned_chars": len(window),
             "text": window,
-            "truncated": offset + limit < total_chars,
+            "truncated": len(window) == limit and total_chars != offset + limit,
         },
     }
 

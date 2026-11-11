@@ -150,8 +150,13 @@ def workflow_preflight_lookups(
         if snapshot.get("expired"):
             return {"ok": False, "reason": f"固件分享已过期: {share_id}"}
         return {
+            # 预检只验证分享记录有效（存在且未过期）；真实 SFTP 认证、
+            # 路径与文件读取发生在执行期暂存阶段，文案不得给过强承诺。
             "ok": True,
-            "detail": f"{snapshot.get('filename') or snapshot.get('path')}（{snapshot.get('size', 0)} 字节）",
+            "detail": (
+                f"{snapshot.get('filename') or snapshot.get('path')}（{snapshot.get('size', 0)} 字节，"
+                "分享记录有效；文件可读取性在烧写暂存时校验）"
+            ),
         }
 
     def device_lookup(serial: str, worker_id: str | None) -> dict[str, Any]:
@@ -161,24 +166,49 @@ def workflow_preflight_lookups(
             rows = get_cluster_service().repository.list_devices()
         except Exception as exc:
             return {"ok": False, "reason": f"集群设备库存不可用: {exc}"}
-        for row in rows:
-            if str(row.get("serial") or "") != serial:
-                continue
-            resolved_worker = str(row.get("worker_id") or "")
-            # 与 automation.create_run 的执行期校验同标准：设备必须出现在
-            # 指定 Worker 的清单中，且 state == available（service.py 会以
-            # "Devices are unavailable" 拒绝）；预检放行执行期必挂的组合。
-            if worker_id and resolved_worker != worker_id:
-                return {"ok": False, "reason": f"设备 {serial} 在 {resolved_worker or '未知'} 上，与指定 Worker {worker_id} 不符"}
-            claimed = bool(row.get("claimed"))
-            state = str(row.get("state") or "")
-            detail = f"Worker {resolved_worker} / {state or 'unknown'}"
-            if claimed:
-                return {"ok": False, "reason": f"设备 {serial} 被占用（{row.get('claim_username') or row.get('claim_owner_id') or '其他任务'}），不会自动换设备"}
-            if state != "available":
-                return {"ok": False, "reason": f"设备 {serial} 当前状态 {state or 'unknown'}，非空闲（需 available），不会自动换设备"}
-            return {"ok": True, "worker_id": resolved_worker, "detail": detail}
-        return {"ok": False, "reason": f"设备 {serial} 未出现在任何 Worker 的设备清单中"}
+        serial_rows = [
+            row for row in rows if str(row.get("serial") or "") == serial
+        ]
+        if not serial_rows:
+            return {"ok": False, "reason": f"设备 {serial} 未出现在任何 Worker 的设备清单中"}
+        matches = [
+            row for row in serial_rows
+            if not worker_id or str(row.get("worker_id") or "") == worker_id
+        ]
+        # 序列号跨 Worker 重复时结果依赖库存顺序——必须消歧：serial 与
+        # Worker 的 USB 物理绑定是唯一身份；未指定 Worker 且跨机重复时
+        # 拒绝预检，要求显式指定 Worker。
+        workers = sorted({str(row.get("worker_id") or "") for row in serial_rows})
+        if len(workers) > 1 and not worker_id:
+            return {
+                "ok": False,
+                "reason": (
+                    f"设备 {serial} 出现在多个 Worker（{', '.join(workers)}）上，"
+                    "无法唯一定位；请指定 Worker（如「worker:<ID>」）后再规划"
+                ),
+            }
+        if not matches:
+            found_on = "、".join(workers)
+            return {
+                "ok": False,
+                "reason": (
+                    f"设备 {serial} 在 {found_on or '未知'} 上，"
+                    f"与指定 Worker {worker_id} 不符，不会自动换设备"
+                ),
+            }
+        row = matches[0]
+        resolved_worker = str(row.get("worker_id") or "")
+        # 与 automation.create_run 的执行期校验同标准：设备必须出现在
+        # 指定 Worker 的清单中，且 state == available（service.py 会以
+        # "Devices are unavailable" 拒绝）；预检放行执行期必挂的组合。
+        claimed = bool(row.get("claimed"))
+        state = str(row.get("state") or "")
+        detail = f"Worker {resolved_worker} / {state or 'unknown'}"
+        if claimed:
+            return {"ok": False, "reason": f"设备 {serial} 被占用（{row.get('claim_username') or row.get('claim_owner_id') or '其他任务'}），不会自动换设备"}
+        if state != "available":
+            return {"ok": False, "reason": f"设备 {serial} 当前状态 {state or 'unknown'}，非空闲（需 available），不会自动换设备"}
+        return {"ok": True, "worker_id": resolved_worker, "detail": detail}
 
     def aoa_lookup(profile: str, _owner: str) -> dict[str, Any]:
         from features.devices import profile_store
@@ -203,7 +233,13 @@ def workflow_preflight_lookups(
         ]
         if matched:
             suite = matched[0]
-            return {"ok": True, "detail": suite.get("tools_path") or suite.get("full_path") or test_type}
+            # 返回 tools_path：preflight_draft 把它冻结进草案 test.test_suite，
+            # 提交 ATS 后执行同一版本；变化时由 create_run 的套件校验拒绝。
+            return {
+                "ok": True,
+                "detail": suite.get("tools_path") or suite.get("full_path") or test_type,
+                "tools_path": suite.get("tools_path") or suite.get("full_path") or "",
+            }
         return {"ok": False, "reason": f"该 Worker 上没有 {test_type} 的可用测试套件"}
 
     return {
@@ -214,10 +250,80 @@ def workflow_preflight_lookups(
     }
 
 
-def refresh_workflow_preflight(session: dict[str, Any], draft: dict[str, Any]) -> dict[str, Any]:
+def refresh_workflow_preflight(
+    session: dict[str, Any],
+    draft: dict[str, Any],
+    *,
+    request: Any = None,
+) -> dict[str, Any]:
     workspace = session.get("workspace_context") or {}
     owner_id = str(session.get("owner_id") or "")
-    return preflight_draft(draft, **workflow_preflight_lookups(workspace, owner_id))
+    preflight = preflight_draft(draft, **workflow_preflight_lookups(workspace, owner_id))
+    permission = workflow_permission_block(draft, workspace, request)
+    if permission is not None:
+        preflight["checks"] = [*list(preflight.get("checks") or []), permission]
+        preflight["blocks"] = [*list(preflight.get("blocks") or []), permission]
+        preflight["ready"] = False
+    return preflight
+
+
+# 能力 → 中文说明：聊天预检与创建失败提示共用同一张表，避免两处文案漂移。
+_WORKFLOW_CAPABILITY_LABELS: dict[str, str] = {
+    "firmware.stage": "烧写固件（firmware.stage）",
+    "devices.lease": "设备预留（devices.lease）",
+    "devices.read": "读取设备（devices.read）",
+    "devices.use_leased": "操作预留设备（devices.use_leased）",
+    "tests.execute": "启动测试（tests.execute）",
+    "tests.cancel": "取消测试（tests.cancel）",
+    "build.read": "读取构建配置（build.read）",
+    "build.execute": "启动构建（build.execute）",
+    "build.cancel": "取消构建（build.cancel）",
+}
+
+
+def workflow_permission_block(
+    draft: dict[str, Any], workspace: dict[str, Any], request: Any = None
+) -> dict[str, Any] | None:
+    """创建者权限预检：与 automation create_run 同一能力编译器。
+
+    返回阻塞项 dict（计入 preflight.ready），无阻塞或无法判定时返回
+    ``None``。匿名/dev 模式调用方与 create_run 的语义一致（空 union 直接
+    放行）；提权会话（管理员重认证）视为同意全部计划能力，与固件工作台
+    的门槛对齐（ADR 0012）。
+    """
+    if request is None:
+        return None
+    from features.auth import (
+        AGENT_ROLE,
+        automation_required_capabilities,
+        get_authenticated_user,
+        is_elevated,
+        is_machine_principal,
+    )
+
+    principal = get_authenticated_user(request)
+    if principal is None:
+        return None
+    if is_machine_principal(principal) or principal.role in {AGENT_ROLE, "worker_service"}:
+        return None
+    if is_elevated(request):
+        return None
+    test_plan = run_body_from_draft(draft, workspace).get("test_plan")
+    missing = [
+        name for name in automation_required_capabilities(test_plan)
+        if not principal.has_permission(name)
+    ]
+    if not missing:
+        return None
+    labels = "、".join(_WORKFLOW_CAPABILITY_LABELS.get(name, name) for name in missing)
+    return {
+        "stage": "permission",
+        "ok": False,
+        "reason": (
+            f"当前账号缺少工作流所需权限：{labels}。"
+            "完成管理员提权（重新验证管理员凭据）后重试，或联系管理员为账号授予相应能力。"
+        ),
+    }
 
 
 def run_body_from_draft(draft: dict[str, Any], workspace: dict[str, Any]) -> dict[str, Any]:
@@ -250,6 +356,15 @@ def run_body_from_draft(draft: dict[str, Any], workspace: dict[str, Any]) -> dic
         test_plan["test_module"] = test["module"]
     if test.get("case"):
         test_plan["test_case"] = test["case"]
+    # 预检冻结的套件精确绑定到 run：执行期不再按 test_type 重新模糊选择，
+    # 避免预检看到的套件与实际执行的版本不一致（automation 会校验该
+    # tools_path 在所选 Worker 上仍可用，变化时显式失败而非静默换版本）。
+    if test.get("test_suite"):
+        test_plan["test_suite"] = str(test["test_suite"])
+    # 连接 WiFi 落入执行期 preparations（worker_agent 测试准备模板），
+    # 仅在测试阶段实际运行时生效。
+    if test.get("connect_wifi") and (test.get("scope") or "full") != "skip":
+        test_plan["preparations"] = ["wifi_on"]
     retry_count = int(test.get("retry_count") or 0)
     if retry_count > 0:
         test_plan["retry_policy"] = {"max_retries": min(retry_count, MAX_AGENT_RETRIES)}
@@ -275,12 +390,37 @@ async def execute_workflow_plan(
         return {"success": False, "error": blocks[0].get("reason") or "工作流缺少必要实体"}
     try:
         body = run_body_from_draft(draft, session.get("workspace_context") or {})
+        from features.auth import MachineAuthorityError, is_elevated
+
         principal = get_authenticated_user(request)
         run = automation_service.create_run(
             body,
             created_by=str(session.get("owner_id") or ""),
             principal=principal,
+            elevated=is_elevated(request),
         )
+    except MachineAuthorityError as exc:
+        # 与聊天预检同一张能力说明表：报错即给下一步（提权或找管理员），
+        # 不透出英文原始能力清单。
+        from features.auth import automation_required_capabilities
+
+        missing = [
+            name for name in automation_required_capabilities(body.get("test_plan"))
+            if principal is None or not principal.has_permission(name)
+        ]
+        if missing:
+            labels = "、".join(
+                _WORKFLOW_CAPABILITY_LABELS.get(name, name) for name in missing
+            )
+            logger.warning("[Agent] workflow run rejected for missing capabilities: %s", exc)
+            return {
+                "success": False,
+                "error": (
+                    f"当前账号缺少工作流所需权限：{labels}。"
+                    "完成管理员提权（重新验证管理员凭据）后重试，或联系管理员为账号授予相应能力。"
+                ),
+            }
+        return {"success": False, "error": str(exc)}
     except ValueError as exc:
         return {"success": False, "error": str(exc)}
     except sqlite3.IntegrityError:
@@ -426,16 +566,33 @@ async def monitor_workflow_run(
 
 
 async def handle_workflow_plan_message(
-    session: dict[str, Any], message: str, pending_plan: dict[str, Any]
+    session: dict[str, Any], message: str, pending_plan: dict[str, Any],
+    request: Any = None,
 ) -> dict[str, Any] | None:
     """处理待确认工作流草案的修改/重规划/取消/状态查询。
 
-    返回 None 表示消息与草案无关，交回通用意图路由。
+    返回 None 表示消息与草案无关，交回通用意图路由。``request`` 用于
+    replan 刷新预检时重算创建者权限阻塞（与计划生成时同一编译器）。
     """
     api = _api()
     draft = pending_plan.setdefault("draft", {})
     preflight = pending_plan.get("preflight") or {"ready": False, "checks": []}
     action = detect_plan_action(message)
+    # 已提交（或提交中）的计划是执行历史，不是活草案：replan/status 只读
+    # 展示；修改意见不套用（v2 无法再执行，会产生“看起来可执行”的假象）。
+    # 新目标必须重新描述指令，由 _make_workflow 生成全新草案与新 operation_id。
+    if str(pending_plan.get("submit_state") or "") in {"submitting", "submitted"}:
+        if action == "status":
+            api._append_message(session, "assistant", summarize_draft(draft, preflight), kind="plan",
+                                data={"plan": {"type": WORKFLOW_PLAN_TYPE, "draft": draft, "preflight": preflight}})
+            return {"handled": True}
+        api._append_message(
+            session, "assistant",
+            "该计划已提交执行，进入只读状态：修改意见与重新规划不再套用（避免与"
+            "已启动的 Run 冲突）。如需变更，请重新描述完整指令生成新计划。",
+            data={"automation_run_id": str((session.get("active_run") or {}).get("automation_run_id") or "")},
+        )
+        return {"handled": True}
     version_bumped = False
     if not action:
         draft, applied = update_draft(draft, message)
@@ -455,7 +612,7 @@ async def handle_workflow_plan_message(
         # 修改路径已由 update_draft 递增，不重复加。
         if not version_bumped:
             draft["plan_version"] = int(draft.get("plan_version") or 1) + 1
-        preflight = refresh_workflow_preflight(session, draft)
+        preflight = refresh_workflow_preflight(session, draft, request=request)
         pending_plan["preflight"] = preflight
         api._append_step(session, "重新规划", "done", f"计划 v{draft['plan_version']}，资源预检已刷新", {"plan": draft, "preflight": preflight})
         api._append_message(

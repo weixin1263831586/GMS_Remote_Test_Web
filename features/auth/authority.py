@@ -40,7 +40,7 @@ from typing import Any
 
 from foundation.secrets import derive_application_key
 
-from .constants import CurrentUser
+from .constants import AGENT_ROLE, CurrentUser
 
 
 CAPABILITY_TOKEN_PREFIX = "gmscap_v1_"
@@ -76,21 +76,14 @@ class MachineAuthorityError(ValueError):
     """Raised when a machine capability token is malformed or stale."""
 
 
-def automation_granted_capabilities(
-    principal: CurrentUser | None,
-    test_plan: dict[str, Any] | None,
-) -> list[str]:
-    """Compile the plan's capability union the creator must already hold.
+def automation_required_capabilities(test_plan: dict[str, Any] | None) -> list[str]:
+    """Compile the stage → capability union a plan needs (principal-independent).
 
-    Stage → capability mapping (ADR 0012): build stages need
-    ``build.execute``, device reservation needs ``devices.lease``, test
-    stages need ``tests.execute`` and firmware flashing needs the explicit
-    ``firmware.stage`` capability. Anonymous/dev-mode creators get an empty
-    union (same trust level as the caller).
+    Used both by :func:`automation_granted_capabilities` for the creator
+    check and by chat-side preflights to explain exactly which capabilities
+    a draft will require before execution.
     """
 
-    if principal is None:
-        return []
     plan = test_plan if isinstance(test_plan, dict) else {}
     granted: list[str] = []
     # Executor semantics (executors.flash): ONLY flash.mode == "skip" skips
@@ -112,7 +105,43 @@ def automation_granted_capabilities(
     granted.append("devices.use_leased")
     granted.append("tests.execute")
     granted.append("tests.cancel")
-    granted = [name for name in AUTOMATION_PLAN_CAPABILITIES if name in set(granted)]
+    return [name for name in AUTOMATION_PLAN_CAPABILITIES if name in set(granted)]
+
+
+def automation_granted_capabilities(
+    principal: CurrentUser | None,
+    test_plan: dict[str, Any] | None,
+    *,
+    elevated: bool = False,
+) -> list[str]:
+    """Compile the plan's capability union the creator must already hold.
+
+    Stage → capability mapping (ADR 0012): build stages need
+    ``build.execute``, device reservation needs ``devices.lease``, test
+    stages need ``tests.execute`` and firmware flashing needs the explicit
+    ``firmware.stage`` capability. Anonymous/dev-mode creators get an empty
+    union (same trust level as the caller).
+
+    ``elevated`` marks a human session re-verified by an administrator
+    (``is_elevated``). Elevation is the same consent humans give when
+    flashing from the firmware workbench, so an elevated creator may grant
+    the full compiled union; the union is still snapshotted onto the run and
+    never exceeds what the plan needs. Machine/agent principals ignore this
+    flag — elevation is a human-session property (ADR 0010) and never
+    amplifies a Bearer identity.
+    """
+
+    if principal is None:
+        return []
+    granted = automation_required_capabilities(test_plan)
+    # Elevation only ever helps human cookie sessions: agent tokens and
+    # machine principals are Bearer identities whose authority is fixed by
+    # their scopes/capability snapshot, so the flag is ignored for them.
+    is_human = not is_machine_principal(principal) and principal.role not in {
+        AGENT_ROLE, "worker_service",
+    }
+    if elevated and is_human:
+        return granted
     missing = [
         name for name in granted
         if not principal.has_permission(name)
@@ -123,6 +152,29 @@ def automation_granted_capabilities(
             + ", ".join(sorted(set(missing)))
         )
     return granted
+
+
+def require_human_automation_creator(principal: CurrentUser | None) -> None:
+    """Refuse machine/agent creators at the run-creation policy layer (ADR 0012).
+
+    ``/api/automation/runs`` already rejects non-human callers at the route
+    layer; the conversational Agent submits runs through
+    ``AutomationService`` directly, so the same human-only rule is enforced
+    here — the single choke point every creation path shares. ``None``
+    (unauthenticated dev mode, Gerrit/system triggers acting for a
+    configured owner) keeps its existing trust level; only an
+    *authenticated* non-human principal is rejected.
+    """
+
+    if principal is None:
+        return
+    if is_machine_principal(principal) or principal.role in {
+        AGENT_ROLE, "agent", "worker_service",
+    }:
+        raise MachineAuthorityError(
+            "Automation runs must be created by a human principal; "
+            f"'{principal.role or 'machine'}' identity is not allowed"
+        )
 
 
 def automation_authority(

@@ -79,11 +79,17 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
 
         page.route("**/api/devices/aoa/**", aoa_api)
         page.route("**/api/cluster/devices/actions", cluster_action)
-        # 库存端点必须钉死：宿主机插着真机时真实 /api/devices/management
-        # 的异步应答会在测试注入设备后覆盖下拉选项（aoaSyncDeviceSources
-        # 跟随设备清单刷新），导致 select_option 找不到注入的设备。
+        # 库存端点必须钉死成与下方 aoaSyncDeviceSources 注入一致的清单：
+        # 页面初始化与 10s 自动刷新都会真实调用 loadDevicesManagement，
+        # 若桩返回空清单，迟到的应答会在注入后、用户选中前把下拉选项
+        # 清空（此时 keepMissing 无前值可保留），select_option 必然超时。
         page.route("**/api/devices/management*", lambda route: json_response(
-            route, {"success": True, "devices": [], "groups": []}))
+            route, {"success": True, "devices": [
+                {"serial_no": "REC-1", "worker_id": "worker-a", "transport": "local_usb",
+                 "state": "available", "status": "available", "model": "Recorder"},
+                {"serial_no": "TARGET-2", "worker_id": "worker-a", "transport": "local_usb",
+                 "state": "usb_only", "status": "usb_only", "model": "User build"},
+            ], "groups": []}))
         page.route("**/api/cluster/devices*", lambda route: json_response(
             route, {"success": True, "devices": []}))
         try:
@@ -435,6 +441,18 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
             page.route('**/api/cluster/devices/actions', submit)
             page.route('**/api/cluster/commands/cmd-debug/events?*', events)
             page.route('**/api/cluster/commands/cmd-debug', status)
+            # 库存端点钉死成与下方注入一致的清单：迟到的空清单应答会在
+            # aoaSyncDeviceSources 注入后把下拉选项清空（同一竞态），
+            # select_option('target-worker') 超时。
+            page.route('**/api/devices/management*', lambda route: json_response(
+                route, {'success': True, 'devices': [
+                    {'serial_no': 'REC', 'worker_id': 'record-worker', 'transport': 'local_usb',
+                     'state': 'available', 'status': 'available'},
+                    {'serial_no': 'TARGET', 'worker_id': 'target-worker', 'transport': 'local_usb',
+                     'state': 'usb_only', 'status': 'usb_only'},
+                ], 'groups': []}))
+            page.route('**/api/cluster/devices*', lambda route: json_response(
+                route, {'success': True, 'devices': []}))
             self.goto_shell(page)
             page.evaluate("switchPage('devices')")
             page.wait_for_function("typeof aoaViewToggle === 'function'")
@@ -655,8 +673,15 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
 
     def test_screen_states_keep_columns_and_bottom_controls_in_place(self):
         page = self.new_page()
+        # 库存端点必须钉死成与下方 aoaSyncDeviceSources 注入一致的清单：
+        # 页面初始化与 10s 自动刷新都会真实调用 loadDevicesManagement，
+        # 迟到的空清单应答会把下拉选项清空，select_option('REC') 后的
+        # 自动连播（aoaRecorderDeviceSelected）拿不到目标。
         page.route('**/api/devices/management*', lambda route: json_response(
-            route, {'success': True, 'devices': [], 'groups': []}))
+            route, {'success': True, 'devices': [
+                {'serial_no': 'REC', 'worker_id': 'worker-a', 'transport': 'local_usb',
+                 'state': 'available', 'status': 'available'},
+            ], 'groups': []}))
         page.route('**/api/cluster/devices*', lambda route: json_response(
             route, {'success': True, 'devices': []}))
 

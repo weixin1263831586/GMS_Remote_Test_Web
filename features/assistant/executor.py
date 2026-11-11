@@ -25,7 +25,7 @@ from features.redmine import (
 )
 from foundation.config import config_manager
 
-from .execution_result import ToolResult
+from .execution_result import ToolResult, http_error_result
 from .executor_formatting import (
     json_body as _json_body,
 )
@@ -125,12 +125,7 @@ class ActionExecutor:
                     detail="Worker service accounts cannot use the assistant",
                 )
         except HTTPException as exc:
-            return ToolResult(
-                success=False,
-                tool_name=tool_name,
-                error=str(exc.detail),
-                formatted_text=str(exc.detail),
-            )
+            return http_error_result(tool_name, exc)
 
         handler = self._handlers.get(tool_name)
         if handler:
@@ -230,6 +225,8 @@ class ActionExecutor:
                     formatted_text=f"查询失败: {error}",
                 ), {}
             return None, payload
+        except HTTPException as exc:
+            return http_error_result(tool_name_for_error or func_name, exc), {}
         except Exception as e:
             label = tool_name_for_error or func_name
             return ToolResult(
@@ -242,8 +239,14 @@ class ActionExecutor:
     async def _query_devices(self, session, request, params) -> ToolResult:
         query = str(params.get("query") or "").strip().lower()
         details = await self._load_device_summaries(request)
+        for device in details:
+            status = str(device.get("status") or "online").lower()
+            protocol = str(device.get("protocol") or "adb").lower()
+            device["available"] = (not device.get("locked") and not device.get("stale")
+                                   and status in {"online", "device", "fastboot", "loader", "rockusb"}
+                                   and protocol in {"adb", "fastboot", "loader", "rockusb"})
         if query == "available":
-            details = [d for d in details if not d.get("locked")]
+            details = [d for d in details if d["available"]]
         elif query == "locked":
             details = [d for d in details if d.get("locked")]
         elif query:
@@ -255,10 +258,14 @@ class ActionExecutor:
             ]
 
         locked = [d for d in details if d["locked"]]
-        unlocked = [d for d in details if not d["locked"]]
+        unlocked = [d for d in details if d["available"]]
+        unavailable = [d for d in details if not d.get("locked") and not d["available"]]
         lines = []
         for d in details[:12]:
-            state = f"🔒 {d.get('locked_by') or '占用'}" if d.get("locked") else "✅ 空闲"
+            unavailable_label = {"unresponsive": "无响应", "usb_only": "仅 USB 可见", "offline": "离线",
+                                 "unauthorized": "ADB 未授权", "unknown": "状态未知"}.get(d.get("status"), "不可用")
+            state = (f"🔒 {d.get('locked_by') or '占用'}" if d.get("locked") else "✅ 空闲可用" if d["available"]
+                     else f"⚠ {unavailable_label}")
             desc = " | ".join(
                 part for part in [
                     d.get("model") or "",
@@ -270,7 +277,7 @@ class ActionExecutor:
             lines.append(f"{state} {d.get('device_id')}" + (f" | {desc}" if desc else ""))
         prefix = f"匹配「{query}」的设备" if query and query not in {"available", "locked"} else "当前设备"
         text = (
-            f"{prefix} {len(details)} 台，空闲 {len(unlocked)} 台，占用 {len(locked)} 台。\n"
+            f"{prefix} {len(details)} 台，空闲 {len(unlocked)} 台，占用 {len(locked)} 台，不可用 {len(unavailable)} 台。\n"
             + ("\n".join(f"- {line}" for line in lines) if lines else "- 未找到匹配设备")
         )
 

@@ -81,10 +81,12 @@ def extract_workflow_entities(message: str) -> dict[str, Any]:
     )
 
     text = message or ""
+    aoa_hint = bool(_AOA_HINT_RE.search(text))
     entities: dict[str, Any] = {
         "device_serials": _extract_device_ids(text),
         "firmware_share_id": _extract_share_id(text),
         "firmware_url": "",
+        "aoa_requested": aoa_hint,
         "aoa_profile": _extract_aoa_profile(text),
         "test_type": _extract_test_type(text),
         "connect_wifi": bool(re.search(r"wifi|wi-fi|无线网络|连接网络", text, re.IGNORECASE)),
@@ -126,6 +128,73 @@ def _extract_aoa_profile(text: str) -> str:
     return ""
 
 
+# ==================== 原始用户约束冻结 ====================
+
+def freeze_user_constraints(
+    entities: dict[str, Any], previous: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """把本轮消息里**显式给出**的实体冻结为用户约束。
+
+    只冻结 stated 字段（有值/为真才记录），未提及的字段保持开放，模型仍
+    可补全；跨轮次时合并 previous（上一轮冻结）与本轮新约束，本轮显式
+    修改覆盖旧值（如“改成 GTS”“去掉 AOA”是用户主动变更，不是违约）。
+    """
+    serials = [str(item) for item in entities.get("device_serials") or []]
+    stated: dict[str, Any] = {
+        "device_serial": serials[0] if serials else "",
+        "firmware_share_id": str(entities.get("firmware_share_id") or ""),
+        "aoa_profile": str(entities.get("aoa_profile") or ""),
+        "aoa_requested": bool(entities.get("aoa_requested")),
+        "test_type": str(entities.get("test_type") or "").upper(),
+        "flash_only": bool(entities.get("flash_only")),
+        "connect_wifi": bool(entities.get("connect_wifi")),
+        "test_module": str(entities.get("test_module") or ""),
+    }
+    constraints = {
+        key: value for key, value in (previous or {}).items()
+        if key != "version" and value not in ("", False)
+    }
+    constraints.update({
+        key: value for key, value in stated.items()
+        if value not in ("", False)
+    })
+    constraints["version"] = int((previous or {}).get("version") or 0) + 1
+    return constraints
+
+
+def constraint_conflicts(
+    entities: dict[str, Any], constraints: dict[str, Any]
+) -> list[str]:
+    """模型草案实体与冻结约束的冲突清单（空列表 = 无冲突）。"""
+    conflicts: list[str] = []
+    serials = [str(item) for item in entities.get("device_serials") or []]
+    stated_serial = str(constraints.get("device_serial") or "")
+    if stated_serial and serials and stated_serial not in serials:
+        conflicts.append(f"设备 {stated_serial}（不得自动替换）")
+    stated_share = str(constraints.get("firmware_share_id") or "")
+    if stated_share and entities.get("firmware_share_id") \
+            and str(entities["firmware_share_id"]) != stated_share:
+        conflicts.append(f"固件分享 {stated_share}（不得换成其他来源）")
+    stated_profile = str(constraints.get("aoa_profile") or "")
+    if stated_profile and entities.get("aoa_profile") \
+            and str(entities["aoa_profile"]) != stated_profile:
+        conflicts.append(f"AOA 配置 {stated_profile}（不得换成其他配置）")
+    if constraints.get("aoa_requested") and entities.get("aoa_profile") is not None \
+            and not entities.get("aoa_profile") and not entities.get("aoa_requested"):
+        conflicts.append("用户明确要求 AOA 恢复（不得静默关闭）")
+    stated_type = str(constraints.get("test_type") or "")
+    if stated_type and entities.get("test_type") \
+            and str(entities["test_type"]).upper() != stated_type:
+        conflicts.append(f"测试类型 {stated_type}（不得更换）")
+    if constraints.get("flash_only") and entities.get("flash_only") is False:
+        conflicts.append("用户明确只烧写不测试（不得追加测试阶段）")
+    stated_module = str(constraints.get("test_module") or "")
+    if stated_module and entities.get("test_module") \
+            and str(entities["test_module"]) != stated_module:
+        conflicts.append(f"测试模块 {stated_module}（不得更换）")
+    return conflicts
+
+
 # ==================== 草案构建与更新 ====================
 
 _WORKFLOW_INTENT = "flash_aoa_test"
@@ -142,6 +211,13 @@ def build_workflow_draft(
     serials = [str(item) for item in entities.get("device_serials") or []]
     test_type = str(entities.get("test_type") or "").upper()
     flash_only = bool(entities.get("flash_only"))
+    share_id = str(entities.get("firmware_share_id") or "")
+    # 平台分享链接是唯一受控固件来源：能从 URL 提取分享 ID 的直接换算，
+    # 其余 URL（外部镜像等）不进入草案——不可暂存、不可校验、不可续传。
+    url = str(entities.get("firmware_url") or "")
+    if not share_id and url:
+        match = _SHARE_ID_RE.search(urlparse(url).path or "")
+        share_id = match.group(1) if match else ""
     return {
         "intent": _WORKFLOW_INTENT,
         "device": {
@@ -151,11 +227,17 @@ def build_workflow_draft(
         },
         "firmware": {
             "source": "firmware_share",
-            "share_id": str(entities.get("firmware_share_id") or ""),
-            "url": str(entities.get("firmware_url") or ""),
+            "share_id": share_id,
+            "url": url,
         },
         "aoa": {
-            "mode": "user_build_recovery" if entities.get("aoa_profile") else "off",
+            # 用户提到 AOA 即启用恢复：缺配置名时由 draft_blocks 显式阻塞，
+            # 绝不静默降级成 off（静默关闭会直接违背原始指令）。
+            "mode": (
+                "user_build_recovery"
+                if (entities.get("aoa_profile") or entities.get("aoa_requested"))
+                else "off"
+            ),
             "profile": str(entities.get("aoa_profile") or ""),
         },
         "test": {
@@ -217,7 +299,39 @@ def update_draft(draft: dict[str, Any], message: str) -> tuple[dict[str, Any], l
     if applied:
         draft["plan_version"] = int(draft.get("plan_version") or 1) + 1
         draft["status"] = "draft"
+        # 用户显式修改是约束变更本身：同步冻结约束（新版本），后续轮次
+        # 以新约束为准，模型不得再回退到旧值。未触及约束字段的规则
+        # （如换 Worker）不 bump 约束版本。
+        merged = freeze_user_constraints(
+            _entities_from_draft(draft), draft.get("user_constraints")
+        )
+        previous = {
+            key: value for key, value in (draft.get("user_constraints") or {}).items()
+            if key != "version"
+        }
+        current = {key: value for key, value in merged.items() if key != "version"}
+        if current != previous:
+            draft["user_constraints"] = merged
     return draft, applied
+
+
+def _entities_from_draft(draft: dict[str, Any]) -> dict[str, Any]:
+    """从草案反向读出实体视图，供约束同步使用。"""
+    device = draft.get("device") or {}
+    firmware = draft.get("firmware") or {}
+    aoa = draft.get("aoa") or {}
+    test = draft.get("test") or {}
+    serial = str(device.get("serial") or "")
+    return {
+        "device_serials": [serial] if serial else [],
+        "firmware_share_id": str(firmware.get("share_id") or ""),
+        "aoa_profile": str(aoa.get("profile") or ""),
+        "aoa_requested": aoa.get("mode") == "user_build_recovery",
+        "test_type": str(test.get("type") or ""),
+        "flash_only": (test.get("scope") or "") == "skip",
+        "connect_wifi": bool(test.get("connect_wifi")),
+        "test_module": str(test.get("module") or ""),
+    }
 
 
 # ==================== 阻塞与摘要 ====================
@@ -237,11 +351,26 @@ def draft_blocks(draft: dict[str, Any]) -> list[dict[str, Any]]:
             "stage": "firmware",
             "reason": "未识别到固件来源。请提供固件分享链接（/api/firmware-shares/<id>/download）。",
         })
+    elif not str(firmware.get("share_id") or "") and str(firmware.get("url") or ""):
+        # 非 平台分享 链接的固件 URL 无法暂存与校验，明确拒绝而非静默通过预检。
+        blocks.append({
+            "stage": "firmware",
+            "reason": "固件来源必须是平台固件分享链接（/api/firmware-shares/<id>/download）；"
+                      "外部 URL 无法暂存与校验，请先在固件分享页上传。",
+        })
     aoa = draft.get("aoa") or {}
     if aoa.get("mode") == "user_build_recovery" and not str(aoa.get("profile") or ""):
         blocks.append({
             "stage": "aoa",
-            "reason": "启用了 AOA 恢复但未指定配置名，请在当前账号下选择 AOA Profile。",
+            "reason": "用户要求 AOA 恢复但未指定配置名：请提供 AOA Profile 名称"
+                      "（不会静默关闭 AOA）。",
+        })
+    test = draft.get("test") or {}
+    if test.get("connect_wifi") and (test.get("scope") or "full") == "skip":
+        blocks.append({
+            "stage": "test",
+            "reason": "「连接 WiFi」依赖测试阶段执行（preparations）；纯烧写工作流"
+                      "不执行测试，请去掉连接 WiFi 要求或允许执行测试。",
         })
     return blocks
 
@@ -303,7 +432,8 @@ def preflight_draft(
     aoa = draft.get("aoa") or {}
     test = draft.get("test") or {}
 
-    # 1. 固件来源
+    # 1. 固件来源：只认平台固件分享（受控来源）；URL-only 一律不可预检，
+    # 与 draft_blocks 同一语义（外部 URL 无法暂存与校验）。
     share_id = str(firmware.get("share_id") or "")
     if share_id and share_lookup:
         record = share_lookup(share_id) or {}
@@ -314,8 +444,16 @@ def preflight_draft(
                 "stage": "firmware", "ok": False,
                 "reason": record.get("reason") or f"固件分享 {share_id} 不可用",
             })
-    elif not share_id and not str(firmware.get("url") or ""):
-        checks.append({"stage": "firmware", "ok": False, "reason": "缺少固件来源"})
+    elif not share_id:
+        checks.append({
+            "stage": "firmware", "ok": False,
+            "reason": (
+                "缺少可执行的固件来源：仅识别平台固件分享链接"
+                "（/api/firmware-shares/<id>/download）"
+                if str(firmware.get("url") or "")
+                else "缺少固件来源"
+            ),
+        })
     else:
         checks.append({"stage": "firmware", "ok": True, "detail": "待执行时暂存"})
 
@@ -351,18 +489,22 @@ def preflight_draft(
                     "reason": found.get("reason") or f"AOA 配置 {profile} 不存在或不属于当前账号",
                 })
         elif not profile:
-            checks.append({"stage": "aoa", "ok": False, "reason": "缺少 AOA 配置名"})
+            checks.append({"stage": "aoa", "ok": False, "reason": "用户要求 AOA 恢复但缺少配置名（不会静默关闭 AOA）"})
         else:
             checks.append({"stage": "aoa", "ok": True, "detail": "待执行时校验"})
     else:
         checks.append({"stage": "aoa", "ok": True, "detail": "未启用"})
 
-    # 4. 测试预检（scope=skip 时跳过；suite 在同一 Worker 上匹配）
+    # 4. 测试预检（scope=skip 时跳过；suite 在同一 Worker 上匹配并冻结进
+    #    草案，提交时以 test_suite 精确绑定，不再由执行期重新模糊选择）
     if (test.get("scope") or "full") != "skip":
         test_type = str(test.get("type") or "").upper()
         if test_type and suite_lookup:
             suite = suite_lookup(test_type, str(draft.get("device", {}).get("worker_id") or "")) or {}
             if suite.get("ok"):
+                tools_path = str(suite.get("tools_path") or "")
+                if tools_path:
+                    test["test_suite"] = tools_path
                 checks.append({"stage": "test", "ok": True, "detail": suite.get("detail", "套件可用")})
             else:
                 checks.append({

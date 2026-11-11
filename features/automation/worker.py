@@ -283,6 +283,19 @@ def run_maintenance_sync(
             "skipped": True,
         }
 
+    cleanup_store = getattr(auto_svc, "store", None)
+    candidates = getattr(cleanup_store, "completed_cleanup_candidates", None)
+    cleanup = getattr(auto_svc, "release_completed_resources", None)
+    if callable(candidates) and callable(cleanup):
+        try:
+            for run_id in candidates():
+                try:
+                    cleanup(run_id, executor_name=cfg["executor"])
+                except Exception:
+                    logger.warning("Completed Run cleanup will retry: %s", run_id, exc_info=True)
+        except Exception:
+            logger.warning("Completed Run cleanup scan will retry", exc_info=True)
+
     global _stale_swept
     if not _stale_swept:
         try:

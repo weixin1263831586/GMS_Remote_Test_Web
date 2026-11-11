@@ -152,7 +152,7 @@ def test_schema_upgrade_is_idempotent_across_connections(store):
     assert migrated[1].list_run_page()['items'][0]['test_summary'] == {}
 
 
-def test_api_pages_remain_owner_scoped_and_reject_invalid_cursors(store, tmp_path):
+def test_api_pages_are_team_visible_and_reject_invalid_cursors(store, tmp_path):
     from features.automation import api
 
     add_run(store, 'a')
@@ -162,8 +162,13 @@ def test_api_pages_remain_owner_scoped_and_reject_invalid_cursors(store, tmp_pat
     service = AutomationService(store=store, profiles_path=tmp_path / 'profiles.json')
     with patch.object(api, 'automation_service', service):
         result = asyncio.run(api.list_automation_runs(request, status='', limit=1))
-        assert [item['id'] for item in result['data']['items']] == ['a']
-        assert result['data']['has_more'] is False
+        assert [item['id'] for item in result['data']['items']] == ['b']
+        assert result['data']['items'][0]['permissions'] == {'can_manage': False}
+        assert result['data']['has_more'] is True
+        second = asyncio.run(api.list_automation_runs(request, status='', limit=1, cursor=result['data']['next_cursor']))
+        assert [item['id'] for item in second['data']['items']] == ['a']
+        assert second['data']['items'][0]['permissions'] == {'can_manage': True}
+        assert second['data']['has_more'] is False
         with pytest.raises(ApiError) as exc:
             asyncio.run(api.list_automation_runs(request, status='', limit=1, cursor='bad'))
         assert exc.value.code == 'MALFORMED_REQUEST'

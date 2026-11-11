@@ -323,8 +323,8 @@ def _bare_request():
     })
 
 
-def _seed_confirm_session(api, plan: dict) -> str:
-    request = _bare_request()
+def _seed_confirm_session(api, plan: dict, request=None) -> str:
+    request = request if request is not None else _bare_request()
     client_id = api.get_client_id_from_request(request)
     session = {
         "session_id": "s-confirm",

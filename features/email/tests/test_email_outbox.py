@@ -63,10 +63,11 @@ class OutboxStoreTests(unittest.TestCase):
     def test_owner_filter_and_detail(self):
         self.store.record({"channel": "manual", "owner_id": "u1", "subject": "a"})
         self.store.record({"channel": "manual", "owner_id": "u2", "subject": "b"})
-        # 系统级记录（owner_id=''，如 ops 运维告警）：owner 视图可见。
+        # 系统级记录（owner_id=''，如 ops 运维告警）不进入普通用户的历史
+        # 邮件列表，只由 admin_view 全量视图查看。
         self.store.record({"channel": "ops", "subject": "system alert"})
-        self.assertEqual(self.store.list(owner_id="u1")["total"], 2)
-        self.assertEqual(self.store.list(owner_id="u2")["total"], 2)
+        self.assertEqual(self.store.list(owner_id="u1")["total"], 1)
+        self.assertEqual(self.store.list(owner_id="u2")["total"], 1)
         # owner_id=None 表示不过滤（管理员视图）。
         self.assertEqual(self.store.list(owner_id=None)["total"], 3)
         # 列表按 created_at DESC, id DESC 排序（同秒内 id 顺序不保证），

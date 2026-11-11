@@ -12,11 +12,13 @@ class RuntimeAutomationHistoryTests(RuntimeUiHarness):
         records = [{
             'id': 'run-new', 'profile_id': 'nightly', 'project': 'rk3576',
             'status': 'completed', 'worker_id': 'worker-1', 'devices_json': '["ABC"]',
+            'created_by': 'alice', 'permissions': {'can_manage': True},
             'report_timestamp': 'report-new', 'test_type': 'CTS', 'test_suite': '/opt/cts',
             'test_summary': {'outcome': 'failed', 'total': 100, 'passed': 98, 'failed': 2},
         }, {
             'id': 'run-old', 'profile_id': '<img src=x onerror=alert(1)>',
             'status': 'completed', 'worker_id': 'worker-1', 'devices_json': '[]',
+            'created_by': 'bob', 'permissions': {'can_manage': False},
             'report_timestamp': 'report-old', 'test_summary': {}, 'retry_of_run_id': 'run-parent',
         }]
 
@@ -127,5 +129,88 @@ class RuntimeAutomationHistoryTests(RuntimeUiHarness):
             expect(page.locator('#workflow-pane-events')).to_have_attribute('aria-hidden', 'false')
             posts = [call for call in calls if call[0] == 'POST']
             self.assertEqual(len(posts), 1)
+        finally:
+            page.close()
+
+    def test_team_runs_show_creator_and_allow_only_owner_or_admin_actions(self):
+        page = self.new_page()
+        calls = self.mock_history(page)
+        records = [
+            {'id': 'peer-queued', 'status': 'queued', 'created_by': 'bob', 'permissions': {'can_manage': False}},
+            {'id': 'peer-finished', 'status': 'completed', 'created_by': 'bob', 'permissions': {'can_manage': False}},
+            {'id': 'own-queued', 'status': 'queued', 'created_by': 'alice', 'permissions': {'can_manage': True}},
+        ]
+
+        def runs(route):
+            route.fulfill(status=200, content_type='application/json', body=json.dumps({
+                'success': True, 'data': {'items': records, 'has_more': False, 'next_cursor': ''},
+            }))
+
+        try:
+            page.route('**/api/automation/runs?*', runs)
+            page.goto(f'{self.base_url}/automation?tab=runs', wait_until='domcontentloaded')
+            page.wait_for_function("document.body.dataset.automationReady === 'true'")
+            cards = page.locator('#automation-runs .run-card')
+            expect(cards).to_have_count(3)
+            for run_id in ['peer-queued', 'peer-finished']:
+                card = cards.filter(has=page.locator(f'button[data-click="loadEvents"][data-a0="{run_id}"]'))
+                expect(card).to_contain_text('创建者 bob')
+                expect(card).to_contain_text('只读')
+                expect(card.locator('button[data-click="cancelRun"], button[data-click="retryRun"]')).to_have_count(0)
+                expect(card.locator('button[data-click="loadTrace"]')).to_be_enabled()
+            expect(page.locator('button[data-click="cancelRun"][data-a0="own-queued"]')).to_be_enabled()
+            # Directly invoking the UI handler must also leave foreign runs untouched.
+            page.evaluate("async () => {await cancelRun('peer-queued'); await retryRun('peer-finished');}")
+            self.assertFalse([call for call in calls if call[0] == 'POST'])
+            # The server supplies administrator authority; the renderer never guesses it from names.
+            records[0]['permissions']['can_manage'] = True
+            records[1]['permissions']['can_manage'] = True
+            page.evaluate('loadRuns()')
+            expect(page.locator('button[data-click="cancelRun"][data-a0="peer-queued"]')).to_be_enabled()
+            expect(page.locator('button[data-click="retryRun"][data-a0="peer-finished"]')).to_be_enabled()
+            self.assertFalse([call for call in calls if call[0] == 'POST'])
+        finally:
+            page.close()
+
+    def test_completed_run_offers_reservation_cleanup_without_rerunning_the_pipeline(self):
+        page = self.new_page()
+        self.mock_history(page)
+        released = []
+        records = [
+            {'id': 'own-completed', 'status': 'completed', 'created_by': 'alice',
+             'permissions': {'can_manage': True}, 'device_reservation_id': 'reservation-old', 'resource_cleanup_state': ''},
+            {'id': 'peer-completed', 'status': 'completed', 'created_by': 'bob',
+             'permissions': {'can_manage': False}, 'device_reservation_id': 'reservation-peer', 'resource_cleanup_state': ''},
+        ]
+
+        def runs(route):
+            route.fulfill(status=200, content_type='application/json', body=json.dumps({
+                'success': True, 'data': {'items': records, 'has_more': False, 'next_cursor': ''},
+            }))
+
+        def release(route):
+            released.append(route.request.url)
+            records[0]['resource_cleanup_state'] = 'released'
+            route.fulfill(status=200, content_type='application/json', body=json.dumps({'success': True, 'data': records[0]}))
+
+        try:
+            page.route('**/api/automation/runs?*', runs)
+            page.route('**/api/automation/runs/*/release-reservation', release)
+            page.goto(f'{self.base_url}/automation?tab=runs', wait_until='domcontentloaded')
+            page.wait_for_function("document.body.dataset.automationReady === 'true'")
+            button = page.locator('button[data-click="releaseRunReservation"]')
+            expect(button).to_have_count(1)
+            expect(button).to_have_attribute('data-a0', 'own-completed')
+            self.assertEqual(released, [])
+            page.evaluate("releaseRunReservation('peer-completed')")
+            self.assertEqual(released, [])
+            button.click()
+            expect(page.locator('#automation-toast')).to_contain_text('设备预约已释放')
+            expect(button).to_have_count(0)
+            self.assertEqual(len(released), 1)
+            self.assertTrue(released[0].endswith('/own-completed/release-reservation'))
+            page.reload(wait_until='domcontentloaded')
+            page.wait_for_function("document.body.dataset.automationReady === 'true'")
+            self.assertEqual(len(released), 1)
         finally:
             page.close()

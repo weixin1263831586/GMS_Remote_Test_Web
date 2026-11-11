@@ -6,7 +6,8 @@
     align-items: center;
     justify-content: flex-end;
     gap: 0;
-    font-size: 10px;
+    /* 全站页头动作区统一 11px 字号（tests/runtime_ui/test_workspaces.py 契约）。 */
+    font-size: 11px;
     color: var(--text-secondary);
 }
 
@@ -16,7 +17,7 @@
     min-height: 26px;
     height: 26px;
     padding: 3px 8px;
-    font-size: 10px;
+    font-size: 11px;
 }
 
 #apk-task-history-refresh {

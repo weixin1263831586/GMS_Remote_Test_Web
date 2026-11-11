@@ -276,19 +276,40 @@ class ClusterReservationRepositoryMixin:
             )
             return True
 
-    def release_reservation(self, reservation_id: str, status: str = "released") -> bool:
+    def release_reservation(
+        self, reservation_id: str, status: str = "released", *, expected_source_id: str = "",
+    ) -> bool:
         if status not in {"released", "cancelled", "converted", "expired"}:
             raise ValueError("invalid reservation release status")
         now = _now()
         with self._lock, self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
-                """SELECT device_id FROM cluster_device_reservations
-                   WHERE reservation_id=? AND status='active'""",
+                """SELECT device_id,source_id,status FROM cluster_device_reservations
+                   WHERE reservation_id=?""",
                 (reservation_id,),
             ).fetchall()
             if not rows:
                 return False
+            if expected_source_id and any(row["source_id"] != expected_source_id for row in rows):
+                raise ValueError("设备预约不属于当前 Run，已保留占用")
+            if expected_source_id and status == "released":
+                for row in rows:
+                    if conn.execute("SELECT 1 FROM device_leases WHERE device_id=? AND status='active' LIMIT 1",
+                                    (row["device_id"],)).fetchone():
+                        raise ValueError("设备仍由集群任务占用，已保留当前任务的租约")
+                payload = "CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END"
+                active = conn.execute(
+                    f"""SELECT 1 FROM cluster_commands WHERE status NOT IN ('completed','failed','cancelled')
+                        AND (json_extract({payload},'$.reservation_id')=?
+                          OR json_extract({payload},'$.device_reservation_id')=?
+                          OR json_extract({payload},'$.claim_source_id')=?) LIMIT 1""",
+                    (reservation_id, reservation_id, f"reservation:{reservation_id}"),
+                ).fetchone()
+                if active:
+                    raise ValueError("关联设备命令尚未结束，已保留预约")
+            had_active = any(row["status"] == "active" for row in rows)
+            claim_status = status if had_active else rows[0]["status"]
             conn.execute(
                 """UPDATE cluster_device_reservations SET status=?,released_at=?
                    WHERE reservation_id=? AND status='active'""",
@@ -306,6 +327,7 @@ class ClusterReservationRepositoryMixin:
                 )
         self.claims.release(
             f"reservation:{reservation_id}",
-            status=status,
+            status=claim_status,
         )
-        return True
+        # Retry claim cleanup if a prior call stopped between the two databases.
+        return had_active

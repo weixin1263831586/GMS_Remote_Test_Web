@@ -183,11 +183,10 @@ class EmailOutboxStore:
             clauses.append("sent = ?")
             params.append(1 if sent else 0)
         if owner_id is not None:
-            # owner 视图同时可见系统级记录（owner_id=''）：ops 运维告警
-            # 等系统发送的邮件不属于任何用户，但告警本来就发给运维邮箱，
-            # 对所有能打开台账的人可见（与日志 scope 哲学一致：无 scope
-            # 条目全员可见）。其他用户的记录仍然互相隔离。
-            clauses.append("(owner_id = ? OR owner_id = '')")
+            # owner 视图只返回该资源所有者的记录；系统级记录（owner_id=''，
+            # ops 运维告警等）是面向运维的全局告警，不进入普通用户的历史
+            # 邮件列表，由 admin_view 全量视图查看。
+            clauses.append("owner_id = ?")
             params.append(owner_id)
         if query:
             # LIKE 的通配符（%/_)按字面匹配：手工转义并显式 ESCAPE。

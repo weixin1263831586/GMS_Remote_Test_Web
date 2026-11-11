@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import shutil
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, Mock
 
@@ -123,3 +124,48 @@ async def test_runtime_fails_closed_when_a_policy_setting_is_rejected(tmp_path, 
     with pytest.raises(RuntimeError, match="隔离工具策略"):
         async with restricted_runtime("kkagent", {}):
             pytest.fail("must not run the model with an incomplete policy")
+
+
+# ==================== 输出契约与健康状态 ====================
+
+
+def test_multi_segment_assistant_stream_keeps_only_the_final_text():
+    # 一个回合可能有多段助手文本（工具调用间的中间叙述）；调用方把整段
+    # 文本当单个 JSON 决策解析，因此必须只保留最后一段，拼接会产生非法
+    # JSON 让解析永远失败。
+    events = [
+        {"type": "assistant", "message": {"content": [
+            {"type": "text", "text": "先查一下设备"}]}},
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "list_devices"},
+            {"type": "text", "text": '{"type":"answer","text":"好"}'}]}},
+    ]
+    text, _sid, tools = bridge._extract_events([json.dumps(e) for e in events])
+    assert json.loads(text)["text"] == "好"
+    assert tools == ["list_devices"]
+
+
+def test_availability_distinguishes_installed_and_model_state(monkeypatch):
+    monkeypatch.setattr(bridge.shutil, "which", lambda _name: "/usr/bin/kkagent")
+    bridge._record_turn_state(False, "回合超时", "timeout")
+    state = bridge.availability()
+    assert state["installed"] is True and state["available"] is True
+    assert state["model_state"] == "failed" and "超时" in state["model_detail"]
+    bridge._record_turn_state(True)
+    assert bridge.availability()["model_state"] == "ready"
+
+
+def test_turn_failure_records_model_state(monkeypatch, tmp_path):
+    monkeypatch.setattr(bridge.shutil, "which", lambda _name: "/usr/bin/kkagent")
+    bridge._record_turn_state(True)  # reset to ready first
+    assert bridge.availability()["model_state"] == "ready"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not shutil.which("kkagent"), reason="kkagent CLI not installed")
+async def test_real_kkagent_cli_turn_returns_a_single_decision():
+    # 真实 CLI 集成冒烟（仅在装有 kkagent 的环境执行）：协议要求单个
+    # JSON 决策，桥接层只保留最终文本后必须仍可解析。
+    result = await bridge.run_turn('{"type":"answer","text":"OK"}', timeout_seconds=60)
+    assert result.ok, result.error
+    assert result.text.strip()

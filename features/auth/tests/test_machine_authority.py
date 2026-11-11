@@ -18,10 +18,11 @@ from features.auth.authority import (
     CAPABILITY_TOKEN_PREFIX,
     automation_authority,
     automation_granted_capabilities,
+    automation_required_capabilities,
     mint_capability_token,
     verify_capability_token,
 )
-from features.auth.constants import CurrentUser
+from features.auth.constants import AGENT_ROLE, CurrentUser
 
 
 def human_principal(
@@ -157,6 +158,50 @@ def test_unheld_capability_is_rejected_not_dropped():
             human_principal(permissions=["tests.execute"]),
             {"test_type": "CTS", "build": {"provider": "ssh"}},
         )
+
+
+def test_elevated_human_session_consents_to_full_union():
+    # 提权即同意：普通 user 角色经管理员重认证后可创建带烧写/设备预留的
+    # 计划（与固件工作台对人类要求的门槛一致，ADR 0012 提权即同意）。
+    plain_user = CurrentUser(id="u1", username="u1", role="user")
+    with pytest.raises(ValueError):
+        automation_granted_capabilities(plain_user, {"test_type": "CTS"})
+    granted = automation_granted_capabilities(plain_user, {"test_type": "CTS"}, elevated=True)
+    assert "firmware.stage" in granted
+    assert "devices.lease" in granted
+    # 快照仍然不超出计划所需：纯测试计划不带 build 能力。
+    assert "build.execute" not in granted
+
+
+def test_elevation_never_amplifies_bearer_identities():
+    # 提权只帮助人类 cookie 会话：agent token 与机器 principal 是 Bearer
+    # 身份，能力由 scope/快照固定，elevated 标志必须被忽略。
+    agent = CurrentUser(id="agent:1", username="agent:1", role=AGENT_ROLE)
+    with pytest.raises(ValueError):
+        automation_granted_capabilities(agent, {"test_type": "CTS"}, elevated=True)
+    machine = CurrentUser(
+        id="automation:run-1", username="automation:run-1", role="agent_service",
+        extra_permissions=frozenset({"jobs.read", "reports.read"}),
+        resource_owner_id="u1",
+    )
+    with pytest.raises(ValueError):
+        automation_granted_capabilities(machine, {"test_type": "CTS"}, elevated=True)
+    worker = CurrentUser(id="w1", username="w1", role="worker_service")
+    with pytest.raises(ValueError):
+        automation_granted_capabilities(worker, {"test_type": "CTS"}, elevated=True)
+
+
+def test_required_capabilities_is_principal_independent():
+    # 需求编译与身份解耦：聊天预检用它解释缺失能力，create/preflight 用
+    # automation_granted_capabilities 做持有校验，两者必须同源。
+    required = automation_required_capabilities({"test_type": "CTS"})
+    assert sorted(required) == sorted([
+        "firmware.stage", "devices.lease", "devices.read",
+        "devices.use_leased", "tests.execute", "tests.cancel",
+    ])
+    assert "build.execute" not in automation_required_capabilities(
+        {"test_type": "CTS", "flash": {"mode": "skip"}}
+    )
 
 
 def test_bearer_principal_never_inherits_browser_elevation():

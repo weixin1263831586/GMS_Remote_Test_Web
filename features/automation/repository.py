@@ -299,6 +299,19 @@ class AutomationStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def completed_cleanup_candidates(self, limit: int = 100) -> list[str]:
+        """Include legacy completed runs without a recent-history window."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT id FROM automation_runs WHERE status='completed'
+                   AND device_reservation_id!=''
+                   AND COALESCE(json_extract(CASE WHEN json_valid(result_json) THEN result_json
+                       ELSE '{}' END,'$.resource_cleanup.state'),'')!='released'
+                   ORDER BY updated_at ASC,id ASC LIMIT ?""",
+                (max(1, min(int(limit), 500)),),
+            ).fetchall()
+        return [row["id"] for row in rows]
+
     def active_run_ids(self) -> list[str]:
         """All non-terminal run IDs, without ``list_runs``' limit cap.
 
@@ -353,6 +366,7 @@ class AutomationStore:
         columns += (
             f", json_object('artifact_download', json_extract({result}, '$.artifact_download'))"
             " AS artifact_progress_json"
+            f", json_extract({result}, '$.resource_cleanup.state') AS resource_cleanup_state"
         )
         with self._connect() as conn:
             rows = conn.execute(

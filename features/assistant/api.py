@@ -986,12 +986,12 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     ):
         if req.action in workflow_action_map:
             await _handle_workflow_plan_message(
-                session, workflow_action_map[req.action], workflow_pending
+                session, workflow_action_map[req.action], workflow_pending, request
             )
             return success_response({"session": _session_payload(session)}, "Agent updated")
         # 确认执行类消息直接放行到第 1 段确认链；其余先尝试计划修改。
         if not _is_workflow_confirm_message(message):
-            handled = await _handle_workflow_plan_message(session, message, workflow_pending)
+            handled = await _handle_workflow_plan_message(session, message, workflow_pending, request)
             if handled:
                 return success_response({"session": _session_payload(session)}, "Agent updated")
 
@@ -1053,9 +1053,12 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
                 _append_message(session, "assistant", f"执行失败：{result.get('error') or result.get('message')}")
         elif pending_plan.get("type") == _WORKFLOW_PLAN_TYPE:
             # 阻塞未解除时禁用执行，明确告知原因；不再出现“不能执行”
-            # 与“确认后启动”并存。
+            # 与“确认后启动”并存。确认时重刷新预检以带上创建者权限状态
+            # （提权可能发生在计划生成之后）。
             if not pending_plan.get("submit_state"):
-                pending_plan["preflight"] = _refresh_workflow_preflight(session, pending_plan.get("draft") or {})
+                pending_plan["preflight"] = _refresh_workflow_preflight(
+                    session, pending_plan.get("draft") or {}, request=request
+                )
             preflight = pending_plan.get("preflight") or {}
             if not preflight.get("ready"):
                 blocks = preflight.get("blocks") or draft_blocks(pending_plan.get("draft") or {})
@@ -1104,7 +1107,7 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
             entities["flash_only"] = True
         draft = build_workflow_draft(entities, workspace)
         draft["operation_id"] = str(uuid.uuid4())
-        preflight = _refresh_workflow_preflight(session, draft)
+        preflight = _refresh_workflow_preflight(session, draft, request=request)
         session["pending_plan"] = {
             "type": _WORKFLOW_PLAN_TYPE,
             "draft": draft,

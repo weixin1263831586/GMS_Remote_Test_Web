@@ -24,11 +24,14 @@ from .access import (
 from .api import router
 from .authority import (
     AUTOMATION_PLAN_CAPABILITIES,
+    MachineAuthorityError,
     automation_authority,
     automation_granted_capabilities,
+    automation_required_capabilities,
     is_machine_principal,
     machine_has_permission,
     mint_capability_token,
+    require_human_automation_creator,
 )
 from .request_security import (
     authentication_required,
@@ -54,10 +57,12 @@ __all__ = [
     "ROLE_PERMISSIONS",
     "AuthService",
     "CurrentUser",
+    "MachineAuthorityError",
     "auth_service",
     "authentication_required",
     "automation_authority",
     "automation_granted_capabilities",
+    "automation_required_capabilities",
     "csrf_rejection_reason",
     "ensure_agent_device_allowed",
     "ensure_agent_worker_allowed",
@@ -75,6 +80,7 @@ __all__ = [
     "require_authenticated_user_when_auth_required",
     "require_elevated_admin",
     "require_elevated_admin_when_auth_required",
+    "require_human_automation_creator",
     "require_human_principal",
     "require_human_principal_when_auth_required",
     "require_permission",

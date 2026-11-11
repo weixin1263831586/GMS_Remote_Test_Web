@@ -578,9 +578,18 @@ class HttpAutomationExecutor(RecoveryExecutorMixin):
             return {"success": True, "released": False}
         from features.cluster import get_cluster_service
 
-        released = get_cluster_service().repository.release_reservation(
-            reservation_id, "cancelled"
-        )
+        repository = get_cluster_service().repository
+        if run.get("status") == "completed":
+            reservation = repository.get_reservation(reservation_id)
+            if not reservation or reservation.get("source_id") != run["id"]:
+                return {"success": False, "error": "无法确认设备预约属于当前 Run，已保留占用"}
+            for command_id in {run.get("flash_command_id"), run.get("aoa_command_id")} - {None, ""}:
+                command = repository.get_command(command_id)
+                if not command or command.get("status") not in {"completed", "failed", "cancelled"}:
+                    return {"success": False, "error": "关联设备命令尚未确认结束，已保留预约"}
+            released = repository.release_reservation(reservation_id, "released", expected_source_id=run["id"])
+        else:
+            released = repository.release_reservation(reservation_id, "cancelled")
         return {"success": True, "released": released}
 
     def flash(self, run: dict[str, Any]) -> dict[str, Any]:

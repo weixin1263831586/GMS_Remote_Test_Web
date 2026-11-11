@@ -15,7 +15,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from features.assistant.execution_result import ToolResult, internal_error_result
+from features.assistant.execution_result import ToolResult, http_error_result, internal_error_result
 from features.assistant.route_binding import build_call_kwargs
 from features.assistant.tools import AgentTool
 
@@ -128,13 +128,9 @@ async def call_router_function(
         # 受控异常：detail 是路由守卫/端点自己的业务语义（401/403 等），
         # 可以原样交给 Agent；单独分支避免与未知异常混在一起。
         logger.warning("[Agent] router call %s rejected: %s", ref, exc.detail)
-        return ToolResult(
-            success=False,
-            tool_name=tool.name,
-            error=str(exc.detail),
-            formatted_text=f"调用「{tool.display_name}」被拒绝：{exc.detail}",
-            page=_TOOL_PAGES.get(tool.category, ""),
-        )
+        result = http_error_result(tool.name, exc, f"调用「{tool.display_name}」")
+        result.page = _TOOL_PAGES.get(tool.category, "")
+        return result
     except Exception:
         # 未知异常的 str(e) 可能内嵌路径/凭据片段，不外显给
         # Agent——完整 traceback 只进日志，Agent 拿到统一错误 + request id
@@ -163,10 +159,7 @@ async def guarded_tool_call(
     try:
         return await awaitable
     except HTTPException as exc:
-        return ToolResult(
-            success=False, tool_name=tool_name,
-            error=str(exc.detail), formatted_text=str(exc.detail),
-        )
+        return http_error_result(tool_name, exc)
     except Exception:
         result = internal_error_result(tool_name, action)
         logger.error(

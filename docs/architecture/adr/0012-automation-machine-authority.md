@@ -33,8 +33,15 @@ ATS（Automation）后台 Worker 按阶段推进一条 run：build → 设备预
    - 设备预留 → `devices.lease` / `devices.read` / `devices.use_leased`
    - 测试阶段 → `tests.execute` / `tests.cancel`
    - 烧写 → `firmware.stage`（显式能力，独立于 admin elevation）
-   创建者必须**已经持有**每个请求的能力，并集存入 run 的
-   `granted_capabilities_json`。之后角色/scope 变化不会隐式扩大在途 run 的能力。
+   创建者必须**已经持有**每个请求的能力（或会话已通过管理员重认证提权，
+   见下），并集存入 run 的 `granted_capabilities_json`。之后角色/scope
+   变化不会隐式扩大在途 run 的能力。
+   **提权即同意**：`POST /runs` 与 `/runs/preflight` 对通过管理员重认证
+   （`is_elevated`）的人类会话视为同意全部计划能力——这与固件工作台
+   `/api/cluster/firmware/stage` 对人类要求的门槛完全一致（工作台烧写
+   只要求提权，不要求角色持有 `firmware.stage`）。编译器只对人类 cookie
+   会话应用该豁免：Agent token 与机器 principal 是 Bearer 身份，提权是
+   人类会话属性（ADR 0010），永不放大 Bearer 授权。
 3. **机器 principal（不模拟浏览器）**。Worker 为每条 run 构造
    `automation:<run_id>` principal（`automation_authority`）：
    `resource_owner_id = created_by`（账号 id，ADR 0010），能力 = 能力快照 +

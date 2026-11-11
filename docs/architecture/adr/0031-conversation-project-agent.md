@@ -38,6 +38,13 @@ Resource observations and operation receipts survive retry; identical routine
 writes are not dispatched again, including writes whose receipt was interrupted.
 Confirmation-required operations retain the existing single-submit plan boundary.
 Waiting progress and engine errors are shown in the UI throughout planning.
+An elevation-required route guard pauses planning with a human authorization
+action. The browser uses the existing administrator verification modal and
+resumes the same checkpoint; it never sends administrator credentials to the
+planner. Resumption retries the refused tool against the current authenticated
+request and the original route dependency before querying any protected data.
+Device catalog availability includes protocol/status and stale observations;
+an unlocked unresponsive device is not advertised as an idle target.
 Model turns run as background tasks so HTTP returns a session immediately;
 the browser polls progress and resource questions, and cancellation terminates
 the active model process before any further tool dispatch.

@@ -26,6 +26,7 @@ class PlanningState:
     rounds: int = 0
     progress_id: str = ""
     automatic_retry_used: bool = False
+    pending_call: dict | None = None
 
 
 # Keep operational state out of the JSON session/history payload.
@@ -95,7 +96,7 @@ async def infer(session: dict, state: PlanningState, context: str):
         retrying = True
 
 
-def fail(session: dict, state: PlanningState, detail: str, error_code: str = "failed") -> None:
+def _checkpoint(session: dict, state: PlanningState) -> str:
     now = time.monotonic()
     for sid, saved in list(_checkpoints.items()):
         if saved[1] <= now:
@@ -108,6 +109,24 @@ def fail(session: dict, state: PlanningState, detail: str, error_code: str = "fa
         deepcopy(session.get("workspace_context") or {}), state,
     )
     session["agent_retry"] = {"id": retry_id}
+    return retry_id
+
+
+def pause_for_elevation(session: dict, state: PlanningState, tool_name: str, tool_label: str, params: dict) -> None:
+    state.pending_call = {"type": "call", "tool": tool_name, "params": deepcopy(params)}
+    retry_id = _checkpoint(session, state)
+    session["status"] = "awaiting_authorization"
+    session["agent_retry"]["elevation_required"] = True
+    session["agent_backend"] = {"mode": "kkagent", "state": "awaiting_authorization", "detail": "等待管理员临时授权"}
+    progress(session, state, "warning", f"「{tool_label}」需要管理员临时授权，授权后继续本轮规划")
+    _api()._append_message(
+        session, "assistant", f"「{tool_label}」需要管理员临时授权。点击下方按钮完成认证后，将继续查询并生成资源选择。",
+        data={"quick_actions": [{"label": "管理员授权后继续", "action": "agent_elevate_retry", "params": {"retry_id": retry_id}}]},
+    )
+
+
+def fail(session: dict, state: PlanningState, detail: str, error_code: str = "failed") -> None:
+    retry_id = _checkpoint(session, state)
     session["agent_backend"] = {"mode": "kkagent", "state": "timeout" if error_code == "timeout" else "failed", "detail": detail}
     progress(session, state, "warning", detail + "；已保留本轮进度，可重试")
     _api()._append_message(

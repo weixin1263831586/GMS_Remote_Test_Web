@@ -130,7 +130,8 @@ class AgentRegressionTests(unittest.TestCase):
         )
 
         self.assertFalse(result.success)
-        self.assertIn("elevation_required", result.error)
+        self.assertEqual(result.error, "需要管理员临时授权")
+        self.assertEqual(result.data, {"status_code": 403, "code": "FORBIDDEN", "elevation_required": True})
 
     def test_agent_cannot_bypass_elevation_dependency_for_config_update(self):
         result = asyncio.run(
@@ -140,7 +141,8 @@ class AgentRegressionTests(unittest.TestCase):
         )
 
         self.assertFalse(result.success)
-        self.assertIn("elevation_required", result.error)
+        self.assertEqual(result.error, "需要管理员临时授权")
+        self.assertEqual(result.data, {"status_code": 403, "code": "FORBIDDEN", "elevation_required": True})
 
     def test_required_agent_params_treat_false_as_a_supplied_value(self):
         cancel_run = registry.get("automation_run_cancel")
