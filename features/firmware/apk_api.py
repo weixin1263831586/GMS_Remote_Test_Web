@@ -258,6 +258,9 @@ async def get_apk_status(task_id: str, request: Request):
         "progress": task["progress"],
         "filename": task.get("filename", ""),
         "error": task.get("error"),
+        "partial": bool(task.get("partial", False)),
+        "jadx_exit_code": task.get("jadx_exit_code"),
+        "jadx_error_count": task.get("jadx_error_count"),
     })
 
 
@@ -568,6 +571,7 @@ async def list_apk_tasks(request: Request):
                 "progress": task["progress"],
                 "timestamp": task.get("timestamp", 0),
                 "error": task.get("error"),
+                "partial": bool(task.get("partial", False)),
             }
             for tid, task in runtime.global_state.apk_analysis_tasks.items()
             if task.get('owner_id') == _owner_id(request)

@@ -224,6 +224,47 @@ def test_cancel_workflow_plan(monkeypatch):
             request, api.AgentChatRequest(session_id="s-confirm", message="取消计划")))
         assert session["pending_plan"] is None
         assert session["status"] == "idle"
+        # 约束作用域绑定未提交计划：取消后冻结约束一并失效，下一次独立
+        # 任务不得再继承本轮 AOA/CTS 要求（审核 P1）。
+        assert session["workflow_user_constraints"] == {}
+    finally:
+        api._agent_sessions.clear()
+        api._agent_sessions.update(saved)
+
+
+def test_submit_plan_closes_constraint_scope(monkeypatch):
+    """计划成功提交执行后清空会话级冻结约束（草案已自含快照）。"""
+    saved = dict(api._agent_sessions)
+    try:
+        _patch_preflight(monkeypatch, _ready_preflight())
+        session = _seed_confirm_session(api, {"type": "test_execution"})
+        request = _bare_request()
+        asyncio.run(api.agent_chat(
+            request, api.AgentChatRequest(session_id="s-confirm", message=ORIGINAL_MESSAGE)))
+        assert session["workflow_user_constraints"]  # 计划期内约束在冻结
+
+        created = {}
+
+        def fake_create_run(body, **kwargs):
+            created["body"] = body
+            return {"id": "run-scope-1", "status": "queued"}
+
+        monitor = AsyncMock(return_value=None)
+        monkeypatch.setattr(
+            "features.assistant.workflow_execution.monitor_workflow_run", monitor)
+        monkeypatch.setattr(api, "_monitor_workflow_run", monitor, raising=False)
+        with (
+            patch("features.auth.get_authenticated_user", return_value=None),
+            patch("features.automation.get_automation_service") as get_service,
+        ):
+            get_service.return_value.create_run.side_effect = fake_create_run
+            asyncio.run(api.agent_chat(
+                request, api.AgentChatRequest(session_id="s-confirm", message="确认执行")))
+
+        assert session["active_run"]["automation_run_id"] == "run-scope-1"
+        # 提交成功即关闭约束作用域：下一个独立任务从干净状态开始。
+        assert session["workflow_user_constraints"] == {}
+        assert session["active_run"]["workflow_draft"]["user_constraints"]  # 草案快照保留
     finally:
         api._agent_sessions.clear()
         api._agent_sessions.update(saved)

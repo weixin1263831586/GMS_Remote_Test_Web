@@ -270,6 +270,13 @@ const DeviceOperation = {
         if (!validateDeviceSelection()) return;
         // 执行集：只提交当前库存里可执行 ADB/测试操作的设备（审核 P2）。
         const devices = selectedTestDeviceIds();
+        // 与 callDeviceApi()/startTest() 同一门槛：勾选残留但库存里已不可
+        // 操作（占用/失联/已消失）时执行集为空，直接拦截，避免提交
+        // devices: [] 让后端报语义不明错误。
+        if (!devices.length) {
+            showToast('所选设备当前不可操作，请重新选择', 'warning');
+            return;
+        }
 
         try {
             if (modalCloseFn) modalCloseFn();

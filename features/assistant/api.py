@@ -1105,7 +1105,28 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
         )
         if not test_requested:
             entities["flash_only"] = True
+        # 约束冻结与 kkagent 路径（project_agent._make_workflow）同源同义：
+        # 本轮显式给出 > 上一轮冻结值；作用域绑定未提交计划（取消/提交
+        # 执行时由 workflow_execution 清空）。两条后端建计划路径必须保持
+        # 一致的生命周期，否则回退路径会静默丢失/复活约束。
+        from features.assistant.workflow_draft import (
+            constraint_conflicts,
+            freeze_user_constraints,
+        )
+        constraints = freeze_user_constraints(
+            entities, session.get("workflow_user_constraints")
+        )
+        session["workflow_user_constraints"] = constraints
+        conflicts = constraint_conflicts(entities, constraints)
+        if conflicts:
+            session["status"] = "idle"
+            _append_message(
+                session, "assistant",
+                "与用户已明确的要求冲突：" + "；".join(conflicts),
+            )
+            return success_response({"session": _session_payload(session)}, "Agent updated")
         draft = build_workflow_draft(entities, workspace)
+        draft["user_constraints"] = constraints
         draft["operation_id"] = str(uuid.uuid4())
         preflight = _refresh_workflow_preflight(session, draft, request=request)
         session["pending_plan"] = {

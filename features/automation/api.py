@@ -457,6 +457,7 @@ async def get_automation_run_trace(
             'profile_id': run['profile_id'],
             'status': run['status'],
             'retry_of_run_id': run.get('retry_of_run_id') or '',
+            'requested_by': run.get('requested_by') or '',
             'retry_root_run_id': run.get('retry_root_run_id') or '',
             'retry_index': run.get('retry_index') or 0,
             'retry_limit': run.get('retry_limit') or 0,

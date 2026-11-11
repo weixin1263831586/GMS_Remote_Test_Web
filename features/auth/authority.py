@@ -96,15 +96,25 @@ def automation_required_capabilities(test_plan: dict[str, Any] | None) -> list[s
     flash_mode = flash.get("mode") if isinstance(flash, dict) else None
     if flash_mode != "skip":
         granted.append("firmware.stage")
-    if isinstance(plan.get("build"), dict):
+    # Build 门控镜像 orchestrator._run_has_build：只有 build 配置真正给出
+    # provider/server_id/template_id 之一才会进入 build 阶段——空 build
+    # 字典（如对话 Agent 生成的占位）不得要求/授予 build 能力。
+    build = plan.get("build")
+    if isinstance(build, dict) and any(
+        build.get(key) for key in ("provider", "server_id", "template_id")
+    ):
         granted.append("build.execute")
         granted.append("build.cancel")
         granted.append("build.read")
     granted.append("devices.lease")
     granted.append("devices.read")
     granted.append("devices.use_leased")
-    granted.append("tests.execute")
-    granted.append("tests.cancel")
+    # test_mode=skip（纯烧写/纯 AOA）在烧写校验通过后直接完成，永不进入
+    # 测试阶段（orchestrator 同一门控）：不要求也不授予测试执行能力，
+    # 让只有固件烧写授权的用户能创建合法的纯烧写工作流，能力快照最小化。
+    if str(plan.get("test_mode") or "").strip().lower() != "skip":
+        granted.append("tests.execute")
+        granted.append("tests.cancel")
     return [name for name in AUTOMATION_PLAN_CAPABILITIES if name in set(granted)]
 
 

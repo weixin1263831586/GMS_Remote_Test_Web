@@ -201,8 +201,10 @@ def _make_workflow(
     serials = entities.get("device_serials") or []
     if not isinstance(serials, list) or any(not isinstance(serial, str) for serial in serials):
         raise ValueError("设备序列号必须是字符串数组")
-    # 原始用户约束（跨轮次冻结）：本轮显式给出 > 上一轮冻结值；模型实体
-    # 只允许补全未提及字段，不得替换/回退已冻结的约束。
+    # 原始用户约束（跨轮次冻结，作用域=当前未提交计划）：本轮显式给出 >
+    # 上一轮冻结值；模型实体只允许补全未提及字段，不得替换/回退已冻结的
+    # 约束。作用域边界在 workflow_execution：取消计划、提交执行时清空，
+    # 独立新任务不被上一轮计划的要求污染。
     stated = extract_workflow_entities(source_message)
     if re.search(r"(?:设备|device)\s*[:：]?\s*[A-Za-z0-9]", source_message, re.I):
         specified = stated.get("device_serials") or []

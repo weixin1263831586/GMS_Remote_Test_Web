@@ -239,7 +239,12 @@ class _FakeJadxProcess:
         return (b"", self._stderr)
 
 
-def _run_analysis(task_id, output_dir, fake_process, monkeypatch, tmp_path):
+def _run_analysis(task_id, output_dir, fake_process, monkeypatch, tmp_path, seed=None):
+    """驱动 run_jadx_analysis；seed 在 jadx 启动时机执行，模拟其产物写入。
+
+    run_jadx_analysis 先清空临时目录再启动子进程，因此模拟 jadx 输出的
+    夹具必须在 create_subprocess_exec 被调用时创建，而不是预先写好。
+    """
     state, task = _analysis_state(tmp_path, task_id)
     monkeypatch.setattr(runtime, "global_state", state)
     monkeypatch.setattr(runtime, "apk_task_store", None)
@@ -247,10 +252,13 @@ def _run_analysis(task_id, output_dir, fake_process, monkeypatch, tmp_path):
     monkeypatch.setattr(runtime, "config_manager", None)
     monkeypatch.setattr(runtime, "jadx_path", "jadx")
 
+    async def fake_exec(*args, **kwargs):
+        if seed is not None:
+            seed()
+        return fake_process
+
     async def exercise():
-        with patch(
-            "asyncio.create_subprocess_exec", AsyncMock(return_value=fake_process)
-        ):
+        with patch("asyncio.create_subprocess_exec", new=fake_exec):
             await apk.run_jadx_analysis(
                 task_id, str(tmp_path / "app.apk"), output_dir
             )
@@ -260,16 +268,19 @@ def _run_analysis(task_id, output_dir, fake_process, monkeypatch, tmp_path):
 
 
 def test_jadx_partial_errors_with_sources_still_complete(tmp_path, monkeypatch):
-    """rc=3（finished with errors）但源码已写出 → 任务按完成处理。
+    """rc=3（finished with errors）但本次临时目录已有源码 → completed+partial。
 
     GtsBackupAgentTestApp.apk 实测：jadx 1.5.6 simple 模式 19/2897 个方法
     代码生成失败，其余 4178 个 .java 与 AndroidManifest.xml 均正常输出，
-    不能整体判死。
+    不能整体判死；同时必须标记 partial 并带回退出码与错误计数。
     """
     task_id = "00000000-0000-0000-0000-000000000020"
     output_dir = tmp_path / "out"
-    (output_dir / "sources" / "a").mkdir(parents=True)
-    (output_dir / "sources" / "a" / "B.java").write_text("class B {}")
+    tmp_output = tmp_path / "out.tmp"  # run_jadx_analysis 实际写入的目录
+
+    def seed_jadx_output():
+        (tmp_output / "sources" / "a").mkdir(parents=True)
+        (tmp_output / "sources" / "a" / "B.java").write_text("class B {}")
 
     task = _run_analysis(
         task_id,
@@ -277,11 +288,70 @@ def test_jadx_partial_errors_with_sources_still_complete(tmp_path, monkeypatch):
         _FakeJadxProcess(returncode=3, stderr=b"ERROR - finished with errors, count: 19"),
         monkeypatch,
         tmp_path,
+        seed=seed_jadx_output,
     )
 
     assert task["status"] == "completed"
     assert task["progress"] == 100
     assert task["output_dir"] == str(output_dir)
+    assert task["partial"] is True
+    assert task["jadx_exit_code"] == 3
+    assert task["jadx_error_count"] == 19
+    # 临时目录已原子切换为正式目录
+    assert (output_dir / "sources" / "a" / "B.java").is_file()
+    assert not tmp_output.exists()
+
+
+def test_jadx_stale_output_does_not_masquerade_as_success(tmp_path, monkeypatch):
+    """上次残留的 .java + 本次立即失败（临时目录无源码）→ error，不得冒充成功。"""
+    task_id = "00000000-0000-0000-0000-000000000022"
+    output_dir = tmp_path / "out"
+    stale = output_dir / "sources" / "old"
+    stale.mkdir(parents=True)
+    (stale / "Stale.java").write_text("class Stale {}")
+
+    task = _run_analysis(
+        task_id,
+        str(output_dir),
+        _FakeJadxProcess(returncode=1, stderr=b"ERROR - failed to load input"),
+        monkeypatch,
+        tmp_path,
+    )
+
+    assert task["status"] == "error"
+    assert task["partial"] is False
+    assert "failed to load input" in task["error"]
+
+
+def test_jadx_success_replaces_stale_output(tmp_path, monkeypatch):
+    """成功运行用本次产物整体替换旧输出，旧残留文件不得留存。"""
+    task_id = "00000000-0000-0000-0000-000000000023"
+    output_dir = tmp_path / "out"
+    stale = output_dir / "sources" / "old"
+    stale.mkdir(parents=True)
+    (stale / "Stale.java").write_text("class Stale {}")
+    tmp_output = tmp_path / "out.tmp"
+
+    def seed_fresh_output():
+        fresh = tmp_output / "sources" / "new"
+        fresh.mkdir(parents=True)
+        (fresh / "Fresh.java").write_text("class Fresh {}")
+
+    task = _run_analysis(
+        task_id,
+        str(output_dir),
+        _FakeJadxProcess(returncode=0, stderr=b""),
+        monkeypatch,
+        tmp_path,
+        seed=seed_fresh_output,
+    )
+
+    assert task["status"] == "completed"
+    assert task["partial"] is False
+    assert task["jadx_exit_code"] == 0
+    assert (output_dir / "sources" / "new" / "Fresh.java").is_file()
+    assert not (output_dir / "sources" / "old").exists()
+    assert not tmp_output.exists()
 
 
 def test_jadx_failure_without_sources_marks_error(tmp_path, monkeypatch):
@@ -299,4 +369,6 @@ def test_jadx_failure_without_sources_marks_error(tmp_path, monkeypatch):
     )
 
     assert task["status"] == "error"
+    assert task["partial"] is False
+    assert task["jadx_exit_code"] == 1
     assert "failed to load input" in task["error"]

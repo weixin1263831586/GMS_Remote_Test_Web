@@ -706,14 +706,12 @@ def _probe_controller_tls(server: str, ca_cert: str, insecure: bool) -> None:
     暴露，而不是留给第一次 CLI 调用失败；网络不可达只提示未验证，离线
     安装不因此失败。探测绝不中断安装。
     """
-    import ssl
-
     if not str(server or "").lower().startswith("https://"):
         return
     url = f"{server.rstrip('/')}/api/agent/packages/gms-remote-test/manifest"
     try:
         http_get(url, ca_cert=ca_cert, timeout=10, insecure=insecure)
-    except Exception as exc:  # noqa: BLE001 — 探测只告警，不影响安装结果
+    except Exception as exc:  # 探测只告警，不影响安装结果
         reason = getattr(exc, "reason", None) or exc
         text = f"{type(reason).__name__}: {reason}"
         if "SSL" in text or "CERTIFICATE_VERIFY_FAILED" in text:

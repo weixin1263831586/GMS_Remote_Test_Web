@@ -11,6 +11,7 @@ from starlette.requests import Request
 
 from bootstrap.application import create_app
 from features.auth import AUTOMATION_PLAN_CAPABILITIES, CurrentUser
+from features.auth.authority import MachineAuthorityError
 from features.automation import api as automation_api
 from features.automation.executors import HttpAutomationExecutor
 from features.automation.profiles import save_profiles
@@ -211,6 +212,47 @@ class AutomationApiTests(unittest.TestCase):
                     retried['data']['granted_capabilities'],
                     ','.join(expected_caps),
                 )
+
+    def test_retry_rejects_machine_principal_at_service_layer(self):
+        # 审核回归：人类身份约束由 Service 公共方法统一执行（与 create_run
+        # 同一卡点），不依赖每个调用方记得先过 Web 路由检查。
+        with TemporaryDirectory() as tmp:
+            service = build_service(tmp)
+            original = service.create_run({
+                'artifact_path': '/tmp/update.img',
+                'devices': ['ABC123'],
+                'test_plan': {'test_type': 'CTS'},
+            }, created_by='id-alice')
+            service.store.update_run(
+                original['id'], status='completed', current_stage='completed'
+            )
+            agent = CurrentUser(id='id-agent', username='agent-bot', role='agent')
+            with self.assertRaises(MachineAuthorityError):
+                service.retry_run(original['id'], agent)
+            # 被拒绝的 Retry 不得留下新 Run
+            self.assertEqual(
+                [r['id'] for r in service.list_run_summaries(limit=10)
+                 if r['id'] != original['id']],
+                [],
+            )
+
+    def test_retry_records_requested_by_while_keeping_original_owner(self):
+        # 审核回归：管理员代其他用户 Retry 时，资源归属（created_by）保持
+        # 原用户，但新 Run 必须单独记录实际操作者（requested_by）。
+        with TemporaryDirectory() as tmp:
+            service = build_service(tmp)
+            original = service.create_run({
+                'artifact_path': '/tmp/update.img',
+                'devices': ['ABC123'],
+                'test_plan': {'test_type': 'CTS'},
+            }, created_by='id-alice')
+            service.store.update_run(
+                original['id'], status='completed', current_stage='completed'
+            )
+            admin = CurrentUser(id='id-bob', username='bob', role='admin')
+            retried = service.retry_run(original['id'], admin)
+            self.assertEqual(retried['created_by'], 'id-alice')
+            self.assertEqual(retried['requested_by'], 'bob')
 
     def test_create_list_get_and_events(self):
         with TemporaryDirectory() as tmp:

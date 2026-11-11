@@ -35,6 +35,7 @@ RUN_COLUMNS = [
     "created_at", "updated_at", "started_at", "finished_at", "lease_owner",
     "lease_expires_at", "granted_capabilities", "retry_of_run_id", "test_summary_json",
     "retry_root_run_id", "retry_index", "retry_limit", "not_before", "followup_state", "plan_id", "plan_batch_id", "created_by_username",
+    "requested_by",
 ]
 
 RUN_SUMMARY_COLUMNS = [
@@ -165,6 +166,7 @@ class AutomationStore:
                 "plan_id": "TEXT NOT NULL DEFAULT ''",
                 "plan_batch_id": "TEXT NOT NULL DEFAULT ''",
                 "created_by_username": "TEXT NOT NULL DEFAULT ''",
+                "requested_by": "TEXT NOT NULL DEFAULT ''",
             }.items():
                 self._ensure_column(conn, "automation_runs", column, definition)
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_runs_source_key ON automation_runs(source_key) WHERE source_key != ''")

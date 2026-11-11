@@ -29,6 +29,11 @@
         retried: false,     // 有界自动重连：每次手动开启后只允许一次
         failing: false,     // 失败处理闩（onerror/onclose 双触发去重）
         lastTarget: null,   // 最近一次开启的 {serial, workerId}
+        generation: 0,      // 会话代次：stop/新 start 递增；过期回调与
+                            // 迟到事件按代次丢弃，防止 A 的重连回调覆盖
+                            // B 的会话（审核 P1 竞态）
+        reconnectTimer: null,
+        streamTarget: null, // 已成功建立服务端会话的 {serial, workerId}
         pollTimer: null,
         pingTimer: null,
         watchdogTimer: null,
@@ -38,6 +43,31 @@
     };
 
     function el(id) { return document.getElementById(id); }
+
+    // 开启新会话前调用：代次 +1 使所有旧回调/迟到事件过期，并取消挂起
+    // 的自动重连定时器。
+    function bumpGeneration() {
+        state.generation += 1;
+        if (state.reconnectTimer) {
+            clearTimeout(state.reconnectTimer);
+            state.reconnectTimer = null;
+        }
+    }
+
+    // 主动停止时释放服务端 scrcpy 会话（审核 P1）：否则编码器/ADB 转发
+    // 要等 180 秒空闲清理，4 个会话额度可能被快速切换耗尽。fire-and-
+    // forget：网络失败交给服务端空闲回收兜底（浏览器崩溃/断网同路径）。
+    // 代次防护：stop 捕获当前代次，若此后已有更新的会话开启（同步代码
+    // 顺序保证检查先于任何新 start），不再发送过期 stop。
+    function releaseServerStream(target) {
+        if (!target) return;
+        const generation = state.generation;
+        fetch(
+            `/api/devices/aoa/record/stream/${encodeURIComponent(target.serial)}/stop`,
+            {method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({worker_id: target.workerId, generation})}
+        ).catch(() => { /* 服务端 180s 空闲清理兜底 */ });
+    }
 
     function wsUrl(serial) {
         const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
@@ -219,6 +249,13 @@
         if (!state.active || state.failing) return;
         state.failing = true;   // onerror/onclose 可能双触发，只走一次
         teardownStream();
+        // 失败诊断（审核要求）：E2E 失败时需要能对出启动状态、代次与帧
+        // 计数，否则无法区分启动请求失败、清单刷新误 stop 还是流竞态。
+        console.debug('[aoa-live-screen] stream failure:', {
+            message, generation: state.generation,
+            serial: state.lastTarget?.serial, framesDecoded: state.framesDecoded,
+            retried: state.retried,
+        });
         // 有界自动重连：USB 重枚举（实机观测：移除→约 4 秒后加回）或 adb
         // 瞬断会杀掉 scrcpy 会话，这类故障几秒内自愈。失败后自动重试一次；
         // 重试再失败才落回截图模式（不循环重试，服务下线时不会刷请求）。
@@ -227,9 +264,13 @@
             const {serial, workerId} = state.lastTarget;
             state.retried = true;
             setStatus(`${message || '实时流断开'}，3 秒后自动重连…`, true);
-            setTimeout(() => {
+            // 代次防护（审核 P1）：回调触发时若用户已停止/切换设备
+            // （generation 变化），立即丢弃，不得覆盖新会话。
+            const generation = state.generation;
+            state.reconnectTimer = setTimeout(() => {
+                state.reconnectTimer = null;
+                if (state.generation !== generation || !state.active || state.ws) return;
                 state.failing = false;
-                if (!state.active) return;
                 state.active = false;   // 让 start() 的 active 守卫放行重启
                 start(serial, workerId, {isRetry: true});
             }, 3000);
@@ -270,8 +311,13 @@
     async function start(serial, workerId, {isRetry = false} = {}) {
         if (state.active) return;
         if (!isRetry) state.retried = false;   // 用户手动开启：复位重试预算
+        // 新会话开启：递增代次使旧重连回调/迟到事件全部过期（含 HTTP
+        // await 期间被 stop()/切换设备废弃的场景）。
+        bumpGeneration();
+        const generation = state.generation;
+        const target = {serial, workerId};
+        state.lastTarget = target;
         state.failing = false;
-        state.lastTarget = {serial, workerId};
         if (typeof VideoDecoder === 'undefined') {
             state.active = true;
             setStatus('浏览器不支持 WebCodecs，使用截图模式（约1秒刷新）', false);
@@ -293,16 +339,31 @@
             }
             hello = payload;
         } catch (error) {
+            if (state.generation !== generation) return;   // 已被 stop/切换废弃
+            console.debug('[aoa-live-screen] start failed:', {
+                message: error.message, generation, serial,
+            });
             state.active = false;
             setStatus(`实时投屏启动失败：${error.message}`, true);
             startScreenshotPolling();
             return;
         }
+        // HTTP await 期间被 stop()/切换设备废弃：服务端会话刚建立但本次
+        // 连接已过期——不同设备才补发 stop（同设备的新会话已接管服务端
+        // 会话，stop 会误杀）；同设备的残留会话由空闲清理兜底。
+        if (state.generation !== generation) {
+            const current = state.lastTarget;
+            if (!current || current.serial !== serial) releaseServerStream(target);
+            return;
+        }
+        state.streamTarget = target;
         state.stopWs = false;
         const socket = new WebSocket(wsUrl(serial));
         socket.binaryType = 'arraybuffer';
         state.ws = socket;
+        const socketAlive = () => state.generation === generation && state.ws === socket;
         socket.onmessage = (event) => {
+            if (!socketAlive()) return;
             if (typeof event.data === 'string') {
                 // 服务端 pong（JSON 文本）：记录接收时间，作为连接判活依据
                 // （静态画面长时间无新帧是正常现象，不能当流死亡）。
@@ -314,11 +375,16 @@
             state.buffer = concat(state.buffer, new Uint8Array(event.data));
             consumeBuffer();
         };
-        socket.onerror = () => handleStreamFailure('实时流连接失败，已回退截图模式');
+        socket.onerror = () => {
+            if (!socketAlive()) return;
+            handleStreamFailure('实时流连接失败，已回退截图模式');
+        };
         socket.onclose = () => {
-            if (state.active && !state.stopWs) handleStreamFailure('实时流已断开，已回退截图模式');
+            // 过期会话的 close（stop/切换/重连替换）不触发失败处理。
+            if (socketAlive() && !state.stopWs) handleStreamFailure('实时流已断开，已回退截图模式');
         };
         socket.onopen = () => {
+            if (!socketAlive()) { try { socket.close(); } catch (_) { /* closing */ } return; }
             showCanvas();
             setStatus('实时投屏中 · 等待首帧…');
             // 判活只看 ping/pong 心跳（15 秒无 pong ≈ 半开连接），绝不因
@@ -362,9 +428,15 @@
     }
 
     function stop() {
+        // 先递增代次：所有挂起重连回调与迟到 WS 事件立即过期。
+        bumpGeneration();
+        const hadServerSession = state.streamTarget;
+        state.streamTarget = null;
         state.active = false;
         teardownStream();
         stopScreenshotPolling();
+        // 用户主动停止：立即释放服务端 scrcpy 会话（不等 180s 空闲清理）。
+        releaseServerStream(hadServerSession);
         const canvas = el('aoa-screen-canvas');
         if (canvas) { canvas.hidden = true; canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); }
     }

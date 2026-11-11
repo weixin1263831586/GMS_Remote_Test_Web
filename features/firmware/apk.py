@@ -306,20 +306,48 @@ def _jadx_output_has_sources(output_dir: str) -> bool:
     )
 
 
+def _jadx_tmp_output_dir(output_dir: str) -> str:
+    """本次反编译的独立临时输出目录，产物检查通过后才切换为正式目录。"""
+    return output_dir + '.tmp'
+
+
+def _swap_jadx_output(tmp_output: str, output_dir: str) -> None:
+    """旧产物不得冒充新结果：切换前移除旧目录，再把本次产物重命名到位。
+
+    rename 在同一文件系统上是原子的；切换完成前任务仍是 analyzing，
+    源码浏览接口要求 completed，因此不会读到中间态。
+    """
+    shutil.rmtree(output_dir, ignore_errors=True)
+    os.rename(tmp_output, output_dir)
+
+
+def _count_jadx_errors(stderr_text: str) -> int | None:
+    match = re.search(r'finished with errors, count:\s*(\d+)', stderr_text)
+    return int(match.group(1)) if match else None
+
+
 async def run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
-    """后台运行 jadx 反编译"""
+    """后台运行 jadx 反编译（写入独立临时目录，产物检查通过后原子切换）。"""
+    tmp_output = _jadx_tmp_output_dir(output_dir)
     try:
         with runtime.global_state.apk_analysis_tasks_lock:
             if task_id in runtime.global_state.apk_analysis_tasks:
-                runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'analyzing'
-                runtime.global_state.apk_analysis_tasks[task_id]['progress'] = 10
-                runtime.global_state.apk_analysis_tasks[task_id]['error'] = None
+                runtime.global_state.apk_analysis_tasks[task_id].update({
+                    'status': 'analyzing',
+                    'progress': 10,
+                    'error': None,
+                    'partial': False,
+                    'jadx_exit_code': None,
+                    'jadx_error_count': None,
+                })
                 persist_apk_task_locked(task_id)
+        # 上次中断遗留的临时目录先清掉，避免旧产物混入本次判定。
+        shutil.rmtree(tmp_output, ignore_errors=True)
 
         jadx_threads = min(max(os.cpu_count() or 2, 2), 8)
         cmd = [
             _resolve_jadx_path(),
-            '-d', output_dir,
+            '-d', tmp_output,
             '-j', str(jadx_threads),
             '-m', 'simple',
             '--log-level', 'error',
@@ -348,6 +376,7 @@ async def run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
         except asyncio.CancelledError:
             process.terminate()
             await process.wait()
+            shutil.rmtree(tmp_output, ignore_errors=True)
             with runtime.global_state.apk_analysis_tasks_lock:
                 if task_id in runtime.global_state.apk_analysis_tasks:
                     runtime.global_state.apk_analysis_tasks[task_id].update({
@@ -363,13 +392,17 @@ async def run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
             # jadx 对真实 APK 的逐方法代码生成失败是常态（Kotlin 协程、
             # protobuf 等代码在 simple 模式下常见 19/2897 级别的失败），
             # "finished with errors"（rc=3）时其余类的源码和
-            # resources/AndroidManifest.xml 已正常写出。输出树里有 .java
-            # 源码就按完成处理（warning 进日志），完全无产出才标记失败。
-            if _jadx_output_has_sources(output_dir):
+            # resources/AndroidManifest.xml 已正常写出：保留产物但标记
+            # partial，页面据此显示警告。判定只针对本次临时目录——旧目录
+            # 残留的 .java 不能把一次失败的分析冒充成成功。
+            if _jadx_output_has_sources(tmp_output):
+                error_count = _count_jadx_errors(decoded_error)
+                _swap_jadx_output(tmp_output, output_dir)
                 logger.warning(
-                    "jadx analysis task %s finished with errors (rc=%s); keeping partial output: %s",
+                    "jadx analysis task %s finished with errors (rc=%s, count=%s); kept partial output: %s",
                     task_id,
                     process.returncode,
+                    error_count,
                     decoded_error[-300:],
                 )
                 with runtime.global_state.apk_analysis_tasks_lock:
@@ -379,36 +412,64 @@ async def run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
                             'progress': 100,
                             'output_dir': output_dir,
                             'error': None,
+                            'partial': True,
+                            'jadx_exit_code': process.returncode,
+                            'jadx_error_count': error_count,
                         })
                         persist_apk_task_locked(task_id)
                 return
+            shutil.rmtree(tmp_output, ignore_errors=True)
             with runtime.global_state.apk_analysis_tasks_lock:
                 if task_id in runtime.global_state.apk_analysis_tasks:
-                    runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'error'
-                    runtime.global_state.apk_analysis_tasks[task_id]['error'] = decoded_error[-500:] if decoded_error else 'jadx 反编译失败'
+                    runtime.global_state.apk_analysis_tasks[task_id].update({
+                        'status': 'error',
+                        'error': decoded_error[-500:] if decoded_error else 'jadx 反编译失败',
+                        'partial': False,
+                        'jadx_exit_code': process.returncode,
+                        'jadx_error_count': None,
+                    })
                     persist_apk_task_locked(task_id)
             return
 
+        _swap_jadx_output(tmp_output, output_dir)
         with runtime.global_state.apk_analysis_tasks_lock:
             if task_id in runtime.global_state.apk_analysis_tasks:
-                runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'completed'
-                runtime.global_state.apk_analysis_tasks[task_id]['progress'] = 100
-                runtime.global_state.apk_analysis_tasks[task_id]['output_dir'] = output_dir
+                runtime.global_state.apk_analysis_tasks[task_id].update({
+                    'status': 'completed',
+                    'progress': 100,
+                    'output_dir': output_dir,
+                    'error': None,
+                    'partial': False,
+                    'jadx_exit_code': 0,
+                    'jadx_error_count': None,
+                })
                 persist_apk_task_locked(task_id)
     except subprocess.TimeoutExpired:
+        shutil.rmtree(tmp_output, ignore_errors=True)
         with runtime.global_state.apk_analysis_tasks_lock:
             if task_id in runtime.global_state.apk_analysis_tasks:
-                runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'error'
-                runtime.global_state.apk_analysis_tasks[task_id]['error'] = f'jadx 反编译超时（超过{runtime.jadx_timeout}秒）'
+                runtime.global_state.apk_analysis_tasks[task_id].update({
+                    'status': 'error',
+                    'error': f'jadx 反编译超时（超过{runtime.jadx_timeout}秒）',
+                    'partial': False,
+                    'jadx_exit_code': None,
+                    'jadx_error_count': None,
+                })
                 persist_apk_task_locked(task_id)
     except Exception as e:
         # 任务 error 字段会随所有者查询接口回传：异常原文（可能含本地路径）
         # 只进日志，任务里存策划文案。
         logger.error("jadx analysis task %s failed: %s", task_id, e, exc_info=True)
+        shutil.rmtree(tmp_output, ignore_errors=True)
         with runtime.global_state.apk_analysis_tasks_lock:
             if task_id in runtime.global_state.apk_analysis_tasks:
-                runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'error'
-                runtime.global_state.apk_analysis_tasks[task_id]['error'] = 'APK 分析失败：内部错误（详见服务端日志）'
+                runtime.global_state.apk_analysis_tasks[task_id].update({
+                    'status': 'error',
+                    'error': 'APK 分析失败：内部错误（详见服务端日志）',
+                    'partial': False,
+                    'jadx_exit_code': None,
+                    'jadx_error_count': None,
+                })
                 persist_apk_task_locked(task_id)
 
 

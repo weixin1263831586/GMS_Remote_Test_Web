@@ -155,11 +155,33 @@ class RuntimeTestExecutionTests(RuntimeUiHarness):
                 ),
             )
             page.route("**/api/cluster/jobs/job-immediate**", handle_job)
+            page.route(
+                "**/api/devices/list**",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps([{
+                        "device_id": "SERIAL-1",
+                        "status": "online",
+                        "protocol": "adb",
+                        "transport": "local_usb",
+                    }]),
+                ),
+            )
             page.evaluate(
                 """async () => {
                     startStatusPolling();
                     await new Promise(resolve => setTimeout(resolve, 300));
                     state.selectedDevices = new Set(['SERIAL-1']);
+                    // selectedTestDeviceIds() 按库存解析执行目标：必须提供
+                    // 结构完整的在线设备，否则执行集为空、startTest 直接退出。
+                    state.devices = [{
+                        device_id: 'SERIAL-1',
+                        status: 'online',
+                        protocol: 'adb',
+                        transport: 'local_usb',
+                        locked: false
+                    }];
                     document.querySelector('#test-module').value = 'MockModule';
                     document.querySelector('#test-case').value = 'MockClass#testCase';
                     const suite = document.querySelector('#test-suite');

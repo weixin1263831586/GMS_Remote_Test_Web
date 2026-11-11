@@ -599,6 +599,10 @@ class AutomationService:
         old = self.get_run(run_id)
         if old.get('status') not in TERMINAL_STATUSES:
             raise ValueError('Only terminal automation runs can be retried')
+        # 与 create_run 同一人类身份约束（ADR 0012）：Service 公共方法是
+        # 统一卡点，不依赖每个调用方自行记得 Web 路由已检查——否则持有
+        # 机器主体的内部调用者可绕过 Web 限制直接 Retry。
+        require_human_automation_creator(principal)
         # ADR 0012: Retry 是一次新的执行授权。按**当前**主体与提权状态重新
         # 计算能力集合并校验，旧 Run 的能力快照仅作审计参考，不自动成为新
         # Run 的授权依据——否则提权过期或权限收回后仍可通过 Retry 复用
@@ -627,6 +631,11 @@ class AutomationService:
         run_data['test_plan_json'] = old['test_plan_json']
         run_data['created_by'] = old.get('created_by', '')
         run_data['created_by_username'] = old.get('created_by_username', '')
+        # 审计：资源归属保留原创建者（created_by 不变），但单独记录本次
+        # 实际发起 Retry 的人类操作者（管理员代重试场景）。
+        run_data['requested_by'] = str(
+            getattr(principal, 'username', '') or getattr(principal, 'id', '') or ''
+        )
         run_data['worker_id'] = old.get('worker_id', '')
         run_data['retry_of_run_id'] = old['id']
         run_data['retry_limit'] = str(RetryPolicy.model_validate(
@@ -643,7 +652,7 @@ class AutomationService:
             run['status'],
             'info',
             f'Retry created from {run_id}',
-            {'source_run_id': run_id},
+            {'source_run_id': run_id, 'requested_by': run_data.get('requested_by', '')},
         )
         return run
 

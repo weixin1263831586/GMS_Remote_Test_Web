@@ -107,7 +107,8 @@ async function loadApkTaskHistory(force = false) {
             select.add(new Option(tasks.length ? '选择最近任务…' : '暂无历史任务', ''));
             tasks.forEach(task => {
                 const state = APK_TASK_STATUS_LABELS[task.status] || task.status || '未知';
-                select.add(new Option(`${task.filename || task.task_id} · ${state}`, task.task_id));
+                const suffix = task.partial ? '（部分）' : '';
+                select.add(new Option(`${task.filename || task.task_id} · ${state}${suffix}`, task.task_id));
             });
             if (previous && tasks.some(task => task.task_id === previous)) {
                 select.value = previous;
@@ -369,7 +370,8 @@ async function pollApkStatus() {
         $('apk-analysis-progress-bar').style.width = status.progress + '%';
         $('apk-analysis-state').textContent =
             status.status === 'analyzing' ? `正在反编译... (${status.progress}%)` :
-            status.status === 'completed' ? '反编译完成' :
+            status.status === 'completed'
+                ? (status.partial ? '反编译完成（部分成功）' : '反编译完成') :
             status.status === 'error' ? `错误: ${status.error}` : status.status;
         const analyzeBtn = $('apk-btn-analyze');
         if (analyzeBtn) {
@@ -384,7 +386,15 @@ async function pollApkStatus() {
             stopApkPolling();
 
             $('apk-btn-download').style.display = 'inline-block';
-            $('apk-analysis-state').textContent = '反编译完成 - 可查看结果';
+            $('apk-analysis-state').textContent = status.partial
+                ? `部分反编译成功 - 源码可浏览${status.jadx_error_count ? `，${status.jadx_error_count} 个方法生成失败` : ''}`
+                : '反编译完成 - 可查看结果';
+            if (status.partial) {
+                showToast(
+                    `jadx 以退出码 ${status.jadx_exit_code ?? '非零'} 结束：部分方法反编译失败，结果可能不完整`,
+                    'warning'
+                );
+            }
             $('apk-analysis-result').style.display = 'block';
             void loadApkTaskHistory(true);
 

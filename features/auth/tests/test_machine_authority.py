@@ -204,6 +204,28 @@ def test_required_capabilities_is_principal_independent():
     )
 
 
+def test_required_capabilities_minimized_for_flash_only_and_empty_build():
+    # 纯烧写工作流（test_mode=skip）永不进入测试阶段（orchestrator 同一门
+    # 控）：不要求也不授予 tests.execute/tests.cancel，让只有固件烧写授权
+    # 的用户能创建合法的纯烧写 Run（审核 P1）。
+    required = automation_required_capabilities({
+        "test_type": "CTS", "test_mode": "skip",
+    })
+    assert "tests.execute" not in required
+    assert "tests.cancel" not in required
+    assert "firmware.stage" in required
+
+    # 空 build 字典（对话 Agent 占位）不触发 build 阶段，不得要求 build
+    # 能力（镜像 orchestrator._run_has_build）。
+    no_build = automation_required_capabilities({"build": {}})
+    assert "build.execute" not in no_build
+    assert "build.cancel" not in no_build
+
+    # 真实 build 配置（provider/server_id/template_id 任一）才要求 build 能力。
+    with_build = automation_required_capabilities({"build": {"provider": "jenkins"}})
+    assert {"build.read", "build.execute", "build.cancel"} <= set(with_build)
+
+
 def test_bearer_principal_never_inherits_browser_elevation():
     # A machine capability (or agent token) riding a request whose browser
     # cookie session is still elevated must NOT be treated as elevated:

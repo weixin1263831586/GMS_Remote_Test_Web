@@ -491,6 +491,11 @@ async def execute_workflow_plan(
 
     monitor_token = str(uuid.uuid4())
     session["status"] = "running"
+    # 审核修正：约束作用域绑定单个未提交计划。计划已成功提交执行，草案
+    # 自含 user_constraints 快照，会话级冻结约束在此关闭作用域——下一个
+    # 独立任务从干净状态开始，不被上一轮已执行完的要求（如 CTS/AOA）
+    # 污染。提交失败时不清理：同一计划仍需按原约束重试。
+    session["workflow_user_constraints"] = {}
     session["active_run"] = {
         "workflow_draft": draft,
         "automation_run_id": run.get("id") or "",
@@ -662,6 +667,9 @@ async def handle_workflow_plan_message(
             session["workflow_user_constraints"] = draft["user_constraints"]
     if action == "cancel":
         session["pending_plan"] = None
+        # 审核修正：约束作用域绑定未提交计划——取消计划后冻结约束一并
+        # 失效，下一次独立任务不被上一轮未执行的 AOA/CTS 要求污染。
+        session["workflow_user_constraints"] = {}
         session["status"] = "idle"
         api._append_step(session, "工作流计划已取消", "warning", "已保留对话记录；重新发送指令可再次生成计划")
         api._append_message(session, "assistant", "工作流计划已取消。需要时重新描述指令即可再次生成计划。")
