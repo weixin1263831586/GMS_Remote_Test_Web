@@ -262,9 +262,10 @@ def _resolve_jadx_path() -> str:
 def _resolve_jadx_java_home() -> str:
     """Resolve an explicit JAVA_HOME for JADX.
 
-    JADX 1.4.0 在较新 JDK 上启动失败（缺 default.policy）。部署可以用
-    config key ``jadx_java_home`` 或环境变量 ``GMS_JADX_JAVA_HOME`` 指定一个
-    已验证的 JDK 11 目录；两者都未设置时返回空串（沿用当前 PATH）。
+    历史上 JADX 1.4.0 在较新 JDK 上启动失败（缺 default.policy）；当前
+    1.5.6 可直接运行于系统 JDK（11+）。部署仍可用 config key
+    ``jadx_java_home`` 或环境变量 ``GMS_JADX_JAVA_HOME`` 指定一个已验证的
+    JDK 目录；两者都未设置时返回空串（沿用当前 PATH）。
     """
     manager = runtime.config_manager
     if manager is not None:
@@ -292,6 +293,17 @@ def _jadx_subprocess_env() -> dict[str, str] | None:
     env["JAVA_HOME"] = java_home
     env["PATH"] = os.path.join(java_home, "bin") + os.pathsep + env.get("PATH", "")
     return env
+
+
+def _jadx_output_has_sources(output_dir: str) -> bool:
+    """True iff jadx 的输出树包含至少一个反编译 .java 源文件。"""
+    sources_dir = os.path.join(output_dir, 'sources')
+    if not os.path.isdir(sources_dir):
+        return False
+    return any(
+        any(filename.endswith('.java') for filename in files)
+        for _root, _dirs, files in os.walk(sources_dir)
+    )
 
 
 async def run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
@@ -347,10 +359,32 @@ async def run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
             raise
 
         if process.returncode != 0:
+            decoded_error = stderr.decode('utf-8', errors='replace')
+            # jadx 对真实 APK 的逐方法代码生成失败是常态（Kotlin 协程、
+            # protobuf 等代码在 simple 模式下常见 19/2897 级别的失败），
+            # "finished with errors"（rc=3）时其余类的源码和
+            # resources/AndroidManifest.xml 已正常写出。输出树里有 .java
+            # 源码就按完成处理（warning 进日志），完全无产出才标记失败。
+            if _jadx_output_has_sources(output_dir):
+                logger.warning(
+                    "jadx analysis task %s finished with errors (rc=%s); keeping partial output: %s",
+                    task_id,
+                    process.returncode,
+                    decoded_error[-300:],
+                )
+                with runtime.global_state.apk_analysis_tasks_lock:
+                    if task_id in runtime.global_state.apk_analysis_tasks:
+                        runtime.global_state.apk_analysis_tasks[task_id].update({
+                            'status': 'completed',
+                            'progress': 100,
+                            'output_dir': output_dir,
+                            'error': None,
+                        })
+                        persist_apk_task_locked(task_id)
+                return
             with runtime.global_state.apk_analysis_tasks_lock:
                 if task_id in runtime.global_state.apk_analysis_tasks:
                     runtime.global_state.apk_analysis_tasks[task_id]['status'] = 'error'
-                    decoded_error = stderr.decode('utf-8', errors='replace')
                     runtime.global_state.apk_analysis_tasks[task_id]['error'] = decoded_error[-500:] if decoded_error else 'jadx 反编译失败'
                     persist_apk_task_locked(task_id)
             return

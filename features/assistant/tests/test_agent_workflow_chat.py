@@ -273,6 +273,78 @@ def test_unprivileged_user_plan_blocked_with_actionable_hint(monkeypatch):
         api._agent_sessions.update(saved)
 
 
+def test_unprivileged_plan_generation_never_touches_remote_lookups(monkeypatch):
+    """审核 P1：权限阻塞的请求不得访问 SSH/Worker/固件下载等远程资源。
+
+    无权限必须短路返回：资源 lookups（套件 SSH 查询、集群设备探测、
+    固件分享快照、AOA 读取）一次都不能被构造或调用，否则网络不可用时
+    用户看到的是连接异常而不是权限提示。
+    """
+    from features.assistant import workflow_execution as we
+
+    saved = dict(api._agent_sessions)
+    try:
+        _seed_confirm_session(api, {"type": "test_execution"})
+        user_request = _plain_user_request(monkeypatch, elevated=False)
+        _seed_confirm_session(api, {"type": "test_execution"}, user_request)
+
+        def _forbidden(*_args, **_kwargs):
+            raise AssertionError("权限阻塞的请求不得发起任何远程资源查询")
+
+        monkeypatch.setattr(we, "workflow_preflight_lookups", _forbidden)
+        monkeypatch.setattr(we, "_list_suites", _forbidden)
+        monkeypatch.setattr(
+            we, "workflow_execution_readiness_block", _forbidden)
+
+        asyncio.run(api.agent_chat(
+            user_request,
+            api.AgentChatRequest(session_id="s-confirm", message=ORIGINAL_MESSAGE)))
+
+        plan = api._agent_sessions["s-confirm"]["pending_plan"]
+        assert plan["type"] == api._WORKFLOW_PLAN_TYPE
+        reasons = " ".join(
+            block.get("reason") or "" for block in plan["preflight"]["blocks"])
+        assert "缺少工作流所需权限" in reasons
+        assert "管理员提权" in reasons
+    finally:
+        api._agent_sessions.clear()
+        api._agent_sessions.update(saved)
+
+
+def test_suite_lookup_isolates_ssh_failures(monkeypatch):
+    """审核 P1：套件 SSH/网络异常转为阻塞项，不得中断对话预检。"""
+    from features.assistant.workflow_draft import preflight_draft
+    from features.assistant.workflow_execution import workflow_preflight_lookups
+
+    draft = {
+        "device": {"serial": "DEV-1", "worker_id": "w1"},
+        "firmware": {"share_id": "abc12345"},
+        "aoa": {"mode": "off"},
+        "test": {"type": "CTS", "scope": "full"},
+    }
+    monkeypatch.setattr(
+        "features.assistant.workflow_execution._list_suites",
+        lambda _context: (_ for _ in ()).throw(RuntimeError("SSH connection failed")))
+    lookups = workflow_preflight_lookups({"worker_id": "w1"}, "u1")
+
+    # 套件闭包自身：异常转为 {"ok": False, "reason": ...}，不再抛出。
+    suite = lookups["suite_lookup"]("CTS", "w1")
+    assert suite["ok"] is False
+    assert "测试套件查询暂不可用" in (suite.get("reason") or "")
+
+    # 完整预检：套件查询失败只产生 test 阶段阻塞，其余检查照常返回。
+    checks = preflight_draft(
+        draft,
+        share_lookup=lambda _sid: {"ok": True, "detail": "分享有效"},
+        device_lookup=lambda _serial, _worker: {"ok": True, "worker_id": "w1", "detail": "在线"},
+        aoa_lookup=lambda _profile, _owner: {"ok": True, "detail": "AOA 可用"},
+        suite_lookup=lookups["suite_lookup"],
+    )
+    test_checks = [item for item in checks["checks"] if item.get("stage") == "test"]
+    assert test_checks and test_checks[0]["ok"] is False
+    assert checks["ready"] is False
+
+
 def test_elevated_user_confirms_workflow_with_elevated_flag(monkeypatch):
     """提权会话（管理员重认证）：确认提交并携带 elevated 快照同意。"""
     saved = dict(api._agent_sessions)

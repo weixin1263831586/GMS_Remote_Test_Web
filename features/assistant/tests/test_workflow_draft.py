@@ -399,3 +399,65 @@ class TestConstraintConflictsOnNormalizedDraft:
         constraints = wd.freeze_user_constraints({"test_type": "CTS"})
         entities = {"test_type": "CTS", "test_module": "CtsCamera"}
         assert wd.constraint_conflicts(entities, constraints) == []
+
+
+class TestDropAoaResetsFrozenConstraints:
+    """审核 P1：显式删除必须产生约束变更事件，不能只合并非空值。
+
+    「去掉 AOA」后冻结的 aoa_requested/aoa_profile 必须被清除，否则
+    后续模型重新规划会误认为用户仍要求 AOA；版本号必须递增保留审计。
+    """
+
+    def _draft_with_frozen_aoa(self):
+        entities = wd.extract_workflow_entities(
+            "设备66df75a34ebde4a4 烧写固件"
+            "https://172.16.14.233:5001/api/firmware-shares/"
+            "16ec2353bc314483b5a8c92e582a540d/download，"
+            "同时执行AOA配置RK3588_wizard，然后支持CTS测试"
+        )
+        draft = wd.build_workflow_draft(entities, {})
+        constraints = wd.freeze_user_constraints(
+            wd.extract_workflow_entities(
+                "设备66df75a34ebde4a4 烧写固件"
+                "https://172.16.14.233:5001/api/firmware-shares/"
+                "16ec2353bc314483b5a8c92e582a540d/download，"
+                "同时执行AOA配置RK3588_wizard，然后支持CTS测试"
+            )
+        )
+        draft["user_constraints"] = constraints
+        return draft
+
+    def test_drop_aoa_clears_frozen_aoa_keys(self):
+        draft = self._draft_with_frozen_aoa()
+        assert draft["user_constraints"]["aoa_requested"] is True
+        assert draft["user_constraints"]["aoa_profile"]
+
+        updated, applied = wd.update_draft(draft, "去掉 AOA")
+        assert "去掉 AOA" in applied
+        constraints = updated["user_constraints"]
+        assert "aoa_requested" not in constraints
+        assert "aoa_profile" not in constraints
+        # 版本历史保留：撤回也是一次约束变更事件
+        assert constraints["version"] >= 2
+        assert updated["aoa"]["mode"] == "off"
+
+    def test_replan_after_drop_does_not_restore_aoa(self):
+        draft = self._draft_with_frozen_aoa()
+        updated, _applied = wd.update_draft(draft, "去掉 AOA")
+        # 模型重新规划时省略 AOA：不再构成冲突（用户已撤回要求）
+        entities = {
+            "device_serials": ["66df75a34ebde4a4"],
+            "firmware_share_id": "16ec2353bc314483b5a8c92e582a540d",
+            "test_type": "CTS",
+        }
+        assert wd.constraint_conflicts(entities, updated["user_constraints"]) == []
+
+    def test_unrelated_edit_keeps_aoa_constraints(self):
+        draft = self._draft_with_frozen_aoa()
+        updated, applied = wd.update_draft(draft, "改成 GTS")
+        assert "改成 GTS/VTS/STS/CTS" in applied
+        constraints = updated["user_constraints"]
+        # 未撤回的要求不得被无关修改误清
+        assert constraints["aoa_requested"] is True
+        assert constraints["aoa_profile"]
+        assert constraints["test_type"] == "GTS"

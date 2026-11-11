@@ -268,14 +268,16 @@ function buildOpenGrokUrl(path, line = null) {
 const DeviceOperation = {
     async execute(endpoint, operationName, data = {}, modalCloseFn = null) {
         if (!validateDeviceSelection()) return;
+        // 执行集：只提交当前库存里可执行 ADB/测试操作的设备（审核 P2）。
+        const devices = selectedTestDeviceIds();
 
         try {
             if (modalCloseFn) modalCloseFn();
-            addLogEntry(`正在${operationName}到 ${state.selectedDevices.size} 台设备...`, 'info');
+            addLogEntry(`正在${operationName}到 ${devices.length} 台设备...`, 'info');
             showToast(`正在${operationName}...`, 'info');
 
             const result = await apiCall(endpoint, 'POST', {
-                devices: Array.from(state.selectedDevices),
+                devices,
                 ...data
             });
 
@@ -313,6 +315,12 @@ const DeviceOperation = {
 
 async function callDeviceApi(endpoint, additionalData = {}) {
     if (!validateDeviceSelection()) return;
+    // 执行集：过滤掉占用/失联设备的恢复记忆勾选（审核 P2）。
+    const devices = selectedTestDeviceIds();
+    if (!devices.length) {
+        showToast('所选设备当前不可操作，请重新选择', 'warning');
+        return;
+    }
     try {
         const workerId = selectedClusterWorker();
         const clusterActions = {
@@ -323,7 +331,7 @@ async function callDeviceApi(endpoint, additionalData = {}) {
         if (workerId && clusterActions[endpoint]) {
             return await apiCall('/api/cluster/devices/actions', 'POST', {
                 worker_id: workerId,
-                devices: Array.from(state.selectedDevices),
+                devices,
                 action: clusterActions[endpoint]
             });
         }
@@ -331,7 +339,7 @@ async function callDeviceApi(endpoint, additionalData = {}) {
             throw new Error(`远端 Worker 暂不支持此结构化设备操作: ${endpoint}`);
         }
         await apiCall(endpoint, 'POST', {
-            devices: Array.from(state.selectedDevices),
+            devices,
             ...additionalData
         });
     } catch (error) {

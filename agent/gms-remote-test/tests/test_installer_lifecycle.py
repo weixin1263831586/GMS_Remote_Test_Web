@@ -43,6 +43,29 @@ from gms_agent import client as gms_client  # noqa: E402
 
 SYNC_SCRIPT = REPO_ROOT / "tools" / "scripts" / "agent" / "sync_package.py"
 
+# 真实自签 CA（测试专用，CN=gms-test-ca，30 天有效期）：内容校验必须
+# 用 ssl 能真正加载的证书，假 PEM 在 P2 修复后不再构成"受信 CA"。
+REAL_TEST_CA_PEM = """-----BEGIN CERTIFICATE-----
+MIIDDTCCAfWgAwIBAgIUGPlSNrgWKuDX7Fvh/ZQs8Ti33oswDQYJKoZIhvcNAQEL
+BQAwFjEUMBIGA1UEAwwLZ21zLXRlc3QtY2EwHhcNMjYxMTExMDgwMDA5WhcNMjYx
+MjExMDgwMDA5WjAWMRQwEgYDVQQDDAtnbXMtdGVzdC1jYTCCASIwDQYJKoZIhvcN
+AQEBBQADggEPADCCAQoCggEBAPCU9F6OJL625F/dqX+QdNpmzaXVHQ8n0ueGEoEm
+FjGedEnJk3Z8HwGsOfq1FRNCUhIDrp9cU6tU+7zJDnM0+MxqMzJzLIGxg1RRaQ8T
+odlF/98SvohQZCeA3tWhsY+57tQruUoEvw68jNiCtUoXygosBBehDDsTBHwNjAmD
+A3MeU87tDqDiBpCqWMmxOrk5JhAOZEW1U/vaJPHvlzW1alhfi/89XY1Q9EyjlhC6
+uS9q6k6F0P6aqCMsnHre3pDwA7wbU/kj6VJbUvZ4UD4B5feSdU7t7hfLyrmVNvXo
+04YvYasSrMrDyFH8OZbe2CoDlYn+Dh1vJW6dzzRQzewXMHUCAwEAAaNTMFEwHQYD
+VR0OBBYEFPpv0VAstQJZKK8Flc8LzcTRSMU4MB8GA1UdIwQYMBaAFPpv0VAstQJZ
+KK8Flc8LzcTRSMU4MA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEB
+ACaY/QrS0sXrfWeDOXPGxBlPkWLGHxZSpOsmEBKY6OgTXdOgYJvnL3kOJb6uXGJh
+oYfXSjaFAoYsQ2DD3NxRVEbPdQUCtIQ5cVDoHws8hdg2cGMIH46yDHMJWICrXhap
+o44cOWST5RrbAJzLHNdj75I/Zil3zdBfwzpQNtHsLYPyiAUAEfpFR1SAaLQTwGdo
+bDKKyfDrHM6LzipQ1iWnNToOe/iZ2jskYx0/1YnXpSqOVw/3U0RQHoESYuYptm0y
+PNFGBNe9ob1Iv2PXdtXGD1pxvoLEdpdg5fgIq7xiZJSx4kahzH4/PqGEVWBJErgZ
+dWuQqzZqWxfl8lyrWO4vR7g=
+-----END CERTIFICATE-----
+"""
+
 
 class EnvSandbox(unittest.TestCase):
     """Base fixture: redirect every package_manager state dir to a tmp dir."""
@@ -90,6 +113,16 @@ class EnvSandbox(unittest.TestCase):
         )
         env_patch.start()
         self.addCleanup(env_patch.stop)
+        # 安装期 TLS 探测（审核 P2）默认替换成记录器：单测不触网；
+        # 探测行为本身由 TestTlsCaPrevalidation 的专用用例覆盖。
+        self.tls_probes: list[dict[str, object]] = []
+        probe_patch = mock.patch.object(
+            pm, "_probe_controller_tls",
+            lambda server, ca_cert, insecure: self.tls_probes.append(
+                {"server": server, "ca_cert": ca_cert, "insecure": insecure}),
+        )
+        probe_patch.start()
+        self.addCleanup(probe_patch.stop)
 
     def make_installed_runtime(self) -> Path:
         """Create a minimal versions/<v>/ tree with current flipped to it."""
@@ -306,13 +339,34 @@ class TestMultiControllerFailClosed(EnvSandbox):
         # CA 即恢复严格校验，粘滞标志失去前提。
         self._seed_sticky_insecure_profile("codex", "https://ctrl:5001")
         ca_file = self.root / "controller-ca.pem"
-        ca_file.write_text("-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----\n", encoding="utf-8")
+        ca_file.write_text(REAL_TEST_CA_PEM, encoding="utf-8")
 
         name = pm.write_profile("codex", "https://ctrl:5001", str(ca_file))
         flat = pm.load_profile(name)
         self.assertNotIn("insecure", flat,
                          "带 CA 安装必须解除粘滞 insecure，恢复严格 TLS 校验")
         self.assertEqual(flat.get("ca_cert"), str(ca_file))
+        # 写入后用最终 TLS 配置探测 Controller（审核 P2）
+        self.assertEqual(
+            self.tls_probes,
+            [{"server": "https://ctrl:5001", "ca_cert": str(ca_file),
+              "insecure": False}],
+        )
+
+    def test_sticky_insecure_persists_when_ca_file_is_not_loadable(self):
+        # 审核 P2：只有路径存在不再构成"携带可用 CA"——损坏/截断/非 PEM
+        # 文件加载不出任何证书，解除粘滞只会写出一个握手必败的 profile。
+        self._seed_sticky_insecure_profile("codex", "https://ctrl-broken:5001")
+        ca_file = self.root / "broken-ca.pem"
+        ca_file.write_text(
+            "-----BEGIN CERTIFICATE-----\nnot-a-real-certificate\n"
+            "-----END CERTIFICATE-----\n",
+            encoding="utf-8",
+        )
+
+        self.assertFalse(pm._installation_has_trusted_ca(str(ca_file)))
+        name = pm.write_profile("codex", "https://ctrl-broken:5001", str(ca_file))
+        self.assertEqual(pm.load_profile(name).get("insecure"), "true")
 
     def test_sticky_insecure_persists_when_no_ca_is_available(self):
         # 本次安装仍无 CA：粘滞标志没有可解除的前提，保持粘滞并告警，
@@ -417,6 +471,56 @@ class TestMultiControllerFailClosed(EnvSandbox):
         pm.write_profile_toml("kimi-default", "kimi", "https://only:5001", "")
         written = pm.write_enrollment_token("tok-9")
         self.assertEqual(len(written), 2)
+
+
+class TestTlsCaPrevalidation(unittest.TestCase):
+    """审核 P2：安装期就发现损坏/不可用的 CA，而不是留给第一次请求失败。"""
+
+    def test_loadable_ca_counts_as_trusted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ca_file = Path(directory) / "ca.pem"
+            ca_file.write_text(REAL_TEST_CA_PEM, encoding="utf-8")
+            self.assertTrue(pm._installation_has_trusted_ca(str(ca_file)))
+
+    def test_garbage_and_missing_files_are_not_trusted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            garbage = Path(directory) / "garbage.pem"
+            garbage.write_text("hello, not a certificate\n", encoding="utf-8")
+            self.assertFalse(pm._installation_has_trusted_ca(str(garbage)))
+            self.assertFalse(
+                pm._installation_has_trusted_ca(str(Path(directory) / "absent.pem")))
+        self.assertFalse(pm._installation_has_trusted_ca(""))
+
+    def test_probe_warns_on_certificate_verification_failure(self):
+        stderr = io.StringIO()
+        with mock.patch.object(pm, "sys") as fake_sys, \
+             mock.patch.object(
+                 pm, "http_get",
+                 side_effect=__import__("urllib").error.URLError(
+                     __import__("ssl").SSLCertVerificationError(1,
+                         "self-signed certificate in certificate chain"))):
+            fake_sys.stderr = stderr
+            pm._probe_controller_tls("https://ctrl:5001", "/tmp/ca.pem", False)
+        self.assertIn("TLS probe", stderr.getvalue())
+        self.assertIn("re-run", stderr.getvalue())
+
+    def test_probe_notes_unreachable_controller_without_failing(self):
+        stderr = io.StringIO()
+        with mock.patch.object(pm, "sys") as fake_sys, \
+             mock.patch.object(
+                 pm, "http_get",
+                 side_effect=__import__("urllib").error.URLError(
+                     OSError("connection refused"))):
+            fake_sys.stderr = stderr
+            # 离线安装不失败：探测吞掉异常，只输出提示
+            pm._probe_controller_tls("https://ctrl:5001", "/tmp/ca.pem", False)
+        self.assertIn("unreachable", stderr.getvalue())
+
+    def test_probe_skips_plain_http_controllers(self):
+        with mock.patch.object(
+                pm, "http_get",
+                side_effect=AssertionError("http Controller 不应触发 TLS 探测")):
+            pm._probe_controller_tls("http://ctrl:5001", "", False)
 
 
 class TestEnrollTomlOnly(EnvSandbox):

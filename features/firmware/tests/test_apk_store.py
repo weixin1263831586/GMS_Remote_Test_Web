@@ -210,3 +210,93 @@ def test_reconcile_ignores_non_uuid_and_files(tmp_path):
     assert store.reconcile_orphan_uploads() == []
     assert foreign.exists()
     assert plain.exists()
+
+
+def _analysis_state(tmp_path, task_id: str):
+    task = {
+        "status": "analyzing",
+        "progress": 10,
+        "apk_path": str(tmp_path / "app.apk"),
+        "output_dir": None,
+        "filename": "app.apk",
+        "timestamp": 1,
+        "error": None,
+        "owner_id": "alice",
+    }
+    state = SimpleNamespace(
+        apk_analysis_tasks={task_id: task},
+        apk_analysis_tasks_lock=threading.RLock(),
+    )
+    return state, task
+
+
+class _FakeJadxProcess:
+    def __init__(self, returncode: int, stderr: bytes = b""):
+        self.returncode = returncode
+        self._stderr = stderr
+
+    async def communicate(self):
+        return (b"", self._stderr)
+
+
+def _run_analysis(task_id, output_dir, fake_process, monkeypatch, tmp_path):
+    state, task = _analysis_state(tmp_path, task_id)
+    monkeypatch.setattr(runtime, "global_state", state)
+    monkeypatch.setattr(runtime, "apk_task_store", None)
+    monkeypatch.setattr(runtime, "jadx_timeout", 10)
+    monkeypatch.setattr(runtime, "config_manager", None)
+    monkeypatch.setattr(runtime, "jadx_path", "jadx")
+
+    async def exercise():
+        with patch(
+            "asyncio.create_subprocess_exec", AsyncMock(return_value=fake_process)
+        ):
+            await apk.run_jadx_analysis(
+                task_id, str(tmp_path / "app.apk"), output_dir
+            )
+
+    asyncio.run(exercise())
+    return task
+
+
+def test_jadx_partial_errors_with_sources_still_complete(tmp_path, monkeypatch):
+    """rc=3（finished with errors）但源码已写出 → 任务按完成处理。
+
+    GtsBackupAgentTestApp.apk 实测：jadx 1.5.6 simple 模式 19/2897 个方法
+    代码生成失败，其余 4178 个 .java 与 AndroidManifest.xml 均正常输出，
+    不能整体判死。
+    """
+    task_id = "00000000-0000-0000-0000-000000000020"
+    output_dir = tmp_path / "out"
+    (output_dir / "sources" / "a").mkdir(parents=True)
+    (output_dir / "sources" / "a" / "B.java").write_text("class B {}")
+
+    task = _run_analysis(
+        task_id,
+        str(output_dir),
+        _FakeJadxProcess(returncode=3, stderr=b"ERROR - finished with errors, count: 19"),
+        monkeypatch,
+        tmp_path,
+    )
+
+    assert task["status"] == "completed"
+    assert task["progress"] == 100
+    assert task["output_dir"] == str(output_dir)
+
+
+def test_jadx_failure_without_sources_marks_error(tmp_path, monkeypatch):
+    """完全无源码产出（如输入损坏）→ 保持 error 且带回 stderr 尾部。"""
+    task_id = "00000000-0000-0000-0000-000000000021"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+
+    task = _run_analysis(
+        task_id,
+        str(output_dir),
+        _FakeJadxProcess(returncode=1, stderr=b"ERROR - failed to load input"),
+        monkeypatch,
+        tmp_path,
+    )
+
+    assert task["status"] == "error"
+    assert "failed to load input" in task["error"]

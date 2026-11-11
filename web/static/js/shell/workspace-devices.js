@@ -531,6 +531,14 @@ function isSelectableRebootDevice(device) {
     return status === 'fastboot' && !device.locked && !device.cluster_worker_id;
 }
 
+// 设备选择的三类概念（审核 P2）：
+// - 历史选择偏好（remembered）：GmsWorkspace.device_ids，跨会话记忆，
+//   loadDevices 恢复勾选时使用，不直接参与执行；
+// - 当前页面有效选择（selected）：state.selectedDevices，勾选框状态，
+//   可能包含暂时不可用的设备（占用/失联时保留勾选以便恢复）；
+// - 实际执行目标（execution）：下面 selected*DeviceIds() 系列——提交
+//   烧写、CTS、设备操作请求时，只能使用经过最新库存与状态校验的集合，
+//   后端仍会重复校验。禁止把 state.selectedDevices 原样发给执行接口。
 function selectedDeviceIdsMatching(predicate) {
     return Array.from(state.selectedDevices).filter(deviceId => {
         const device = state.devices.find(item => (
@@ -542,6 +550,10 @@ function selectedDeviceIdsMatching(predicate) {
 
 function selectedTestDeviceIds() {
     return selectedDeviceIdsMatching(isSelectableTestDevice);
+}
+
+function selectedRebootDeviceIds() {
+    return selectedDeviceIdsMatching(isSelectableRebootDevice);
 }
 
 function selectedWorkspaceDeviceIds() {
@@ -557,15 +569,15 @@ function selectedBurnableDeviceIds() {
 let _pruningSelection = false;
 
 function pruneSelectionToExecutableDevices() {
-    // state.selectedDevices 承担两种语义：历史勾选记忆（设备恢复可选后
-    // 勾选自动恢复）与实际执行目标。执行目标必须是当前库存里至少本机
-    // 可操作（isSelectableWorkspaceDevice：ADB online 或本机 fastboot/
-    // loader，供解锁/bootloader 操作）的设备；设备转为占用、失联、离线
-    // 或已从库存消失后，渲染前把它从集合移除，避免"勾选已消失但提交仍
-    // 包含"的隐性选中。恢复记忆由 loadDevices 从 GmsWorkspace.device_ids
-    // 重新加回，这里是同一语义的执行侧兜底。设备清单未加载时不动集合，
-    // 防止把恢复流程误清空。操作门槛仍由各入口的 validate* 函数把关
-    // （如 fastboot 设备不可执行 ADB 测试）。
+    // state.selectedDevices 是当前页面有效选择（保留勾选记忆语义），而
+    // 执行目标必须是当前库存里至少本机可操作（isSelectableWorkspaceDevice：
+    // ADB online 或本机 fastboot/loader，供解锁/bootloader 操作）的设备；
+    // 设备转为占用、失联、离线或已从库存消失后，渲染前把它从集合移除，
+    // 避免"勾选已消失但提交仍包含"的隐性选中。恢复记忆由 loadDevices 从
+    // GmsWorkspace.device_ids 重新加回，这里是同一语义的执行侧兜底。
+    // 设备清单未加载时不动集合，防止把恢复流程误清空。执行请求本身只
+    // 允许携带 selected*DeviceIds() 执行集；操作门槛仍由各入口的
+    // validate* 函数把关（如 fastboot 设备不可执行 ADB 测试）。
     if (_pruningSelection || state.devices.length === 0) return;
     _pruningSelection = true;
     try {

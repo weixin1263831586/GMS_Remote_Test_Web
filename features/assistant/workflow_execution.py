@@ -226,7 +226,13 @@ def workflow_preflight_lookups(
         if worker_id:
             context["worker_id"] = worker_id
             context["scope_mode"] = "cluster" if not is_local_worker_id(worker_id) else "single"
-        suites = _list_suites(context)
+        try:
+            suites = _list_suites(context)
+        except Exception as exc:  # SSH/网络/超时等基础设施异常
+            # 套件查询涉及远程访问（审核 P1）：失败只把 test 阶段标记为
+            # 阻塞，不得让异常中断整个对话预检（权限等其余检查仍正常展示）。
+            logger.warning("[Agent] suite lookup failed during preflight: %s", exc)
+            return {"ok": False, "reason": f"测试套件查询暂不可用（远程访问失败）：{exc}"}
         matched = [
             suite for suite in suites
             if str(suite.get("test_type") or suite.get("suite_type") or "").upper() == test_type
@@ -258,22 +264,22 @@ def refresh_workflow_preflight(
 ) -> dict[str, Any]:
     workspace = session.get("workspace_context") or {}
     owner_id = str(session.get("owner_id") or "")
-    preflight = preflight_draft(draft, **workflow_preflight_lookups(workspace, owner_id))
+    # 权限门槛必须先于任何远程资源访问（审核 P1）：human-only / 能力缺失
+    # 直接短路返回，未授权请求不得发起 SSH 套件查询、Worker 探测或固件
+    # 下载——否则网络不可用时预检以异常收场，用户看不到权限提示。
     permission = workflow_permission_block(draft, workspace, request)
     if permission is not None:
-        preflight["checks"] = [*list(preflight.get("checks") or []), permission]
-        preflight["blocks"] = [*list(preflight.get("blocks") or []), permission]
+        return {"ready": False, "checks": [permission], "blocks": [permission]}
+    preflight = preflight_draft(draft, **workflow_preflight_lookups(workspace, owner_id))
+    # 权限门槛通过后才做集群执行预检：复用 automation preflight（与
+    # create_run 同一入口校验），覆盖 Worker 在线、命令 Agent、磁盘/
+    # 内存准入、高级执行参数（preparations/sharding）Worker 能力与
+    # retry 策略——聊天预检不允许比最终创建更宽松（ADR 0012）。
+    execution = workflow_execution_readiness_block(draft, workspace, request)
+    if execution is not None:
+        preflight["checks"] = [*list(preflight.get("checks") or []), execution]
+        preflight["blocks"] = [*list(preflight.get("blocks") or []), execution]
         preflight["ready"] = False
-    else:
-        # 权限门槛通过后才做集群执行预检：复用 automation preflight（与
-        # create_run 同一入口校验），覆盖 Worker 在线、命令 Agent、磁盘/
-        # 内存准入、高级执行参数（preparations/sharding）Worker 能力与
-        # retry 策略——聊天预检不允许比最终创建更宽松（ADR 0012）。
-        execution = workflow_execution_readiness_block(draft, workspace, request)
-        if execution is not None:
-            preflight["checks"] = [*list(preflight.get("checks") or []), execution]
-            preflight["blocks"] = [*list(preflight.get("blocks") or []), execution]
-            preflight["ready"] = False
     return preflight
 
 
@@ -649,6 +655,11 @@ async def handle_workflow_plan_message(
         # update_draft 命中修改规则时已递增 plan_version。
         version_bumped = True
         action = "replan"
+        # 约束变更（含显式删除的约束重置）同步回会话级副本：后续模型
+        # 重新生成计划（_make_workflow）以最新冻结约束为准，不得复活
+        # 已撤回的要求（如「去掉 AOA」后的 aoa_requested）。
+        if draft.get("user_constraints"):
+            session["workflow_user_constraints"] = draft["user_constraints"]
     if action == "cancel":
         session["pending_plan"] = None
         session["status"] = "idle"

@@ -156,7 +156,12 @@ def freeze_user_constraints(
 
     只冻结 stated 字段（有值/为真才记录），未提及的字段保持开放，模型仍
     可补全；跨轮次时合并 previous（上一轮冻结）与本轮新约束，本轮显式
-    修改覆盖旧值（如“改成 GTS”“去掉 AOA”是用户主动变更，不是违约）。
+    修改覆盖旧值（如“改成 GTS”是用户主动变更，不是违约）。
+
+    注意：本函数只会合并非空值，无法表达“用户撤回要求”（如“去掉 AOA”
+    后旧的 aoa_requested/aoa_profile 仍会残留）。显式删除由
+    update_draft 的规则级约束重置（constraint resets）处理，撤回后
+    版本号仍然递增，保留变更历史供审计。
     """
     serials = [str(item) for item in entities.get("device_serials") or []]
     stated: dict[str, Any] = {
@@ -311,34 +316,43 @@ def _apply_worker(draft: dict[str, Any], match: re.Match[str]) -> None:
     draft["device"]["worker_id"] = match.group(1)
 
 
-_DRAFT_UPDATE_RULES: list[tuple[str, str, Callable[[dict[str, Any], re.Match[str]], None]]] = [
-    # (说明, 触发正则, 应用函数)
-    ("改成 GTS/VTS/STS/CTS", r"改成\s*(CTS|GTS|VTS|STS)|换成\s*(CTS|GTS|VTS|STS)", _apply_test_type),
-    ("只烧写不测试", r"只\s*烧写|仅\s*烧写|不(跑|执行|做)测试|先\s*只?\s*烧写", _apply_flash_only),
-    ("去掉 AOA", r"(去掉|删除|移除|取消)\s*AOA", _apply_drop_aoa),
-    ("换 Worker", r"(?:换|切换到|使用)\s*worker\s*[:：=]?\s*([A-Za-z0-9_.\-]+)", _apply_worker),
+# 规则元组第 4 项是约束重置键：显式删除类规则命中时，这些键必须从冻结
+# 约束中移除——freeze_user_constraints 只合并非空值，旧的冻结要求（如
+# aoa_requested）若不清除，后续重新规划会误认为用户仍要求 AOA（审核 P1）。
+_DRAFT_UPDATE_RULES: list[tuple[str, str, Callable[[dict[str, Any], re.Match[str]], None], tuple[str, ...]]] = [
+    # (说明, 触发正则, 应用函数, 需重置的冻结约束键)
+    ("改成 GTS/VTS/STS/CTS", r"改成\s*(CTS|GTS|VTS|STS)|换成\s*(CTS|GTS|VTS|STS)", _apply_test_type, ()),
+    ("只烧写不测试", r"只\s*烧写|仅\s*烧写|不(跑|执行|做)测试|先\s*只?\s*烧写", _apply_flash_only, ()),
+    ("去掉 AOA", r"(去掉|删除|移除|取消)\s*AOA", _apply_drop_aoa, ("aoa_profile", "aoa_requested")),
+    ("换 Worker", r"(?:换|切换到|使用)\s*worker\s*[:：=]?\s*([A-Za-z0-9_.\-]+)", _apply_worker, ()),
 ]
 
 
 def update_draft(draft: dict[str, Any], message: str) -> tuple[dict[str, Any], list[str]]:
     """把「重新规划」的修改意见套用到现有草案，保留已解析实体。"""
     applied: list[str] = []
+    constraint_resets: set[str] = set()
     text = message or ""
-    for _desc, pattern, apply in _DRAFT_UPDATE_RULES:
+    for _desc, pattern, apply, resets in _DRAFT_UPDATE_RULES:
         match = re.search(pattern, text, re.IGNORECASE)
         if not match:
             continue
         apply(draft, match)
         applied.append(_desc)
+        constraint_resets.update(resets)
     if applied:
         draft["plan_version"] = int(draft.get("plan_version") or 1) + 1
         draft["status"] = "draft"
         # 用户显式修改是约束变更本身：同步冻结约束（新版本），后续轮次
         # 以新约束为准，模型不得再回退到旧值。未触及约束字段的规则
-        # （如换 Worker）不 bump 约束版本。
+        # （如换 Worker）不 bump 约束版本。显式删除（去掉 AOA）同时重置
+        # 冻结键：撤回的要求不再约束重新规划；版本号随 merged 递增，
+        # 变更历史仍然可审计。
         merged = freeze_user_constraints(
             _entities_from_draft(draft), draft.get("user_constraints")
         )
+        for key in constraint_resets:
+            merged.pop(key, None)
         previous = {
             key: value for key, value in (draft.get("user_constraints") or {}).items()
             if key != "version"

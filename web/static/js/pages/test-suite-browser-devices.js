@@ -378,10 +378,15 @@ async function rebootDevices() {
 
     try {
         const workerId = selectedClusterWorker();
+        const devices = selectedRebootDeviceIds();
+        if (!devices.length) {
+            showToast('所选设备当前不可重启，请重新选择', 'warning');
+            return;
+        }
         await apiCall(workerId ? '/api/cluster/devices/actions' : '/api/devices/reboot', 'POST',
-            workerId ? {worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'reboot'}
-                     : {devices: Array.from(state.selectedDevices)});
-        addWorkerLog(workerId, `正在重启 ${state.selectedDevices.size} 台设备...`, 'info');
+            workerId ? {worker_id: workerId, devices, action: 'reboot'}
+                     : {devices});
+        addWorkerLog(workerId, `正在重启 ${devices.length} 台设备...`, 'info');
         showToast('设备正在重启', 'success');
         if (state.usbipConnected) {
             scheduleUsbipReconnect('USB/IP 设备正在重启');
@@ -415,10 +420,15 @@ async function factoryResetDevices() {
 
     try {
         const workerId = selectedClusterWorker();
+        const devices = selectedRebootDeviceIds();
+        if (!devices.length) {
+            showToast('所选设备当前不可恢复出厂，请重新选择', 'warning');
+            return;
+        }
         await apiCall(workerId ? '/api/cluster/devices/actions' : '/api/devices/factory-reset', 'POST',
-            workerId ? {worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'factory_reset'}
-                     : {devices: Array.from(state.selectedDevices)});
-        addWorkerLog(workerId, `恢复出厂完成：${state.selectedDevices.size} 台设备已擦除数据并重启`, 'warning');
+            workerId ? {worker_id: workerId, devices, action: 'factory_reset'}
+                     : {devices});
+        addWorkerLog(workerId, `恢复出厂完成：${devices.length} 台设备已擦除数据并重启`, 'warning');
         showToast('设备已擦除数据并重启，稍后自动开机', 'success');
         if (state.usbipConnected) {
             scheduleUsbipReconnect('USB/IP 设备正在恢复出厂');
@@ -503,13 +513,18 @@ async function submitWifiConfig() {
         closeWifiModal();
 
         const workerId = selectedClusterWorker();
+        // 执行集：过滤掉不可用设备的恢复记忆勾选（审核 P2）。
+        const devices = selectedTestDeviceIds();
+        if (!devices.length) {
+            showToast('所选设备当前不可连接 Wi-Fi，请重新选择', 'warning');
+            return;
+        }
         addWorkerLog(workerId, `正在连接 Wi-Fi (${ssid})...`, 'info');
         showToast('正在连接 Wi-Fi...', 'info');
 
         await apiCall(workerId ? '/api/cluster/devices/actions' : '/api/devices/wifi', 'POST',
-            workerId ? {worker_id: workerId, devices: Array.from(state.selectedDevices),
-                        action: 'wifi', ssid, password}
-                     : {devices: Array.from(state.selectedDevices), ssid, password});
+            workerId ? {worker_id: workerId, devices, action: 'wifi', ssid, password}
+                     : {devices, ssid, password});
 
         addWorkerLog(workerId, `Wi-Fi 连接命令已发送 (${ssid})`, 'success');
     } catch (error) {
@@ -535,16 +550,22 @@ async function lockSelectedDevices(action) {
         const granted = await requestElevatedAccess(`${actionText}设备 Bootloader`);
         if (!granted) return;
         const workerId = selectedClusterWorker();
+        // 执行集：Bootloader 操作只接受本机 fastboot/ADB 可用设备（审核 P2）。
+        const devices = selectedWorkspaceDeviceIds();
+        if (!devices.length) {
+            showToast('所选设备当前不可执行 Bootloader 操作，请重新选择', 'warning');
+            return;
+        }
         addWorkerLog(workerId, `正在${actionText}设备...`, 'info');
         let result;
         if (workerId) {
             result = await apiCall('/api/cluster/devices/actions', 'POST', {
-                worker_id: workerId, devices: Array.from(state.selectedDevices),
+                worker_id: workerId, devices,
                 action: action === 'lock' ? 'bootloader_lock' : 'bootloader_unlock'
             });
         } else {
             result = await apiCall(`/api/devices/bootloader-${action}`, 'POST', {
-                devices: Array.from(state.selectedDevices)
+                devices
             });
         }
         const operationResults = result?.data?.results || result?.results || [];
@@ -559,7 +580,7 @@ async function lockSelectedDevices(action) {
         // 解锁/锁定后设备会重启并经历 fastboot→正常启动的状态转换，
         // 轮询刷新直到设备重新上线，避免界面停留在旧状态。
         loadDevices(true).catch(() => {});
-        startBurnDeviceProtocolRefresh(Array.from(state.selectedDevices));
+        startBurnDeviceProtocolRefresh(devices);
     } catch (error) {
         addLogEntry(`设备${actionText}失败: ${error.message}`, 'error');
     } finally {
@@ -586,9 +607,14 @@ async function checkDeviceLockStatus() {
 
     try {
         const workerId = selectedClusterWorker();
+        const devices = selectedWorkspaceDeviceIds();
+        if (!devices.length) {
+            showToast('所选设备当前不可查询，请重新选择', 'warning');
+            return;
+        }
         const result = await apiCall(workerId ? '/api/cluster/devices/actions' : '/api/devices/bootloader-status', 'POST',
-            workerId ? {worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'bootloader_status'}
-                     : {devices: Array.from(state.selectedDevices)});
+            workerId ? {worker_id: workerId, devices, action: 'bootloader_status'}
+                     : {devices});
         addWorkerLog(workerId, '设备锁定状态: ' + JSON.stringify(result, null, 2), 'info');
     } catch (error) {
         addLogEntry('获取锁定状态失败: ' + error.message, 'error');
@@ -617,9 +643,14 @@ async function collectDeviceInfo() {
     }
 
     try {
+        const devices = selectedWorkspaceDeviceIds();
+        if (!devices.length) {
+            showToast('所选设备当前不可查询，请重新选择', 'warning');
+            return;
+        }
         const result = await apiCall(workerId ? '/api/cluster/devices/actions' : '/api/devices/info', 'POST',
-            workerId ? {worker_id: workerId, devices: Array.from(state.selectedDevices), action: 'get_properties'}
-                     : {devices: Array.from(state.selectedDevices)});
+            workerId ? {worker_id: workerId, devices, action: 'get_properties'}
+                     : {devices});
         const partial = (result.data?.results || []).some(item => item.complete === false);
         addWorkerLog(workerId, `${partial ? '设备信息（部分字段缺失）' : '设备信息'}: ` + JSON.stringify(result, null, 2), partial ? 'warning' : 'info');
     } catch (error) {

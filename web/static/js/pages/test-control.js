@@ -55,6 +55,14 @@ async function startTest() {
         return;
     }
 
+    // 执行请求只允许携带经过最新库存与状态校验的执行集（审核 P2）：
+    // state.selectedDevices 可能还包含占用/失联设备的恢复记忆勾选。
+    const devices = selectedTestDeviceIds();
+    if (!devices.length) {
+        showToast('所选设备当前不可执行测试，请重新选择', 'warning');
+        return;
+    }
+
     const testType = document.getElementById('test-type').value;
     const testModule = document.getElementById('test-module').value.trim();
     const testCase = document.getElementById('test-case').value.trim();
@@ -80,7 +88,7 @@ async function startTest() {
 
         const startResult = await apiCall('/api/test/start', 'POST', {
             worker_id: workspaceWorkerId(),
-            devices: Array.from(state.selectedDevices),
+            devices,
             test_type: testType,
             test_module: testModule,
             test_case: testCase,
@@ -101,7 +109,7 @@ async function startTest() {
             sessionStorage.setItem('active_cluster_job', clusterJobId);
             window.GmsWorkspace?.update({
                 worker_id: workspaceWorkerId(),
-                device_ids: Array.from(state.selectedDevices),
+                device_ids: devices,
                 suite_key: suitePath,
                 suite_path: suitePath,
                 cluster_job_id: clusterJobId,

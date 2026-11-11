@@ -683,14 +683,54 @@ def _installation_has_trusted_ca(ca_cert: str) -> bool:
     """本次安装是否携带了可用 CA（严格校验的前提）。
 
     TOFU 路径在 bash 阶段把 CA 落盘并导出 GMS_INSTALL_CA_CERT，因此
-    bootstrap 走到 profile 写入时同样满足"带 CA 安装"。
+    bootstrap 走到 profile 写入时同样满足"带 CA 安装"。审核 P2：仅检查
+    路径存在不够——损坏/截断/非 PEM 的文件会让"恢复严格校验"写出一个
+    所有请求都握手失败的 profile；必须能被 ssl 加载且至少含一张证书。
     """
+    import ssl
+
     if not ca_cert:
         return False
     try:
-        return Path(ca_cert).is_file()
-    except OSError:
+        context = ssl.create_default_context(cafile=ca_cert)
+    except (OSError, ssl.SSLError):
         return False
+    return bool(context.get_ca_certs())
+
+
+def _probe_controller_tls(server: str, ca_cert: str, insecure: bool) -> None:
+    """写入 profile 后用最终 TLS 配置对 Controller 做一次真实握手（审核 P2）。
+
+    只读探测安装流程本身就在用的 manifest 端点（无鉴权）。SSL 校验失败
+    说明写入的 CA 与 Controller 证书不匹配——profile 可用性在安装期就
+    暴露，而不是留给第一次 CLI 调用失败；网络不可达只提示未验证，离线
+    安装不因此失败。探测绝不中断安装。
+    """
+    import ssl
+
+    if not str(server or "").lower().startswith("https://"):
+        return
+    url = f"{server.rstrip('/')}/api/agent/packages/gms-remote-test/manifest"
+    try:
+        http_get(url, ca_cert=ca_cert, timeout=10, insecure=insecure)
+    except Exception as exc:  # noqa: BLE001 — 探测只告警，不影响安装结果
+        reason = getattr(exc, "reason", None) or exc
+        text = f"{type(reason).__name__}: {reason}"
+        if "SSL" in text or "CERTIFICATE_VERIFY_FAILED" in text:
+            print(
+                f"Warning: TLS probe of {server} failed with the installed CA "
+                f"({reason}). The profile points at this Controller but HTTPS "
+                "handshakes will keep failing — fix GMS_CURL_CA_CERT and re-run "
+                "`gms-agent install`, or check the Controller certificate.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"Note: Controller {server} unreachable during install TLS probe "
+                f"({reason}); certificate verification could not be confirmed "
+                "now. Re-check with `gms-agent doctor --json` once reachable.",
+                file=sys.stderr,
+            )
 
 
 def _existing_profile_for(client: str, server: str) -> str:
@@ -743,6 +783,9 @@ def write_profile(client: str, server: str, ca_cert: str, profile: str = "") -> 
     if insecure and _installation_has_trusted_ca(ca_cert):
         insecure = False
     profile_store.write_profile_toml(name, client, server, ca_cert, insecure)
+    # 安装期 TLS 探测（审核 P2）：用写入的最终配置确认 CA 能与 Controller
+    # 完成校验握手；失败只告警，不改变已写入的 profile。
+    _probe_controller_tls(server, ca_cert, insecure)
     if insecure:
         # 一次性安装开关被持久化后会放大为运行期常态（launcher 映射为
         # GMS_CURL_INSECURE=1），所有携带服务令牌的 Controller 流量都不再

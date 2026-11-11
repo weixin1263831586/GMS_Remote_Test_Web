@@ -546,7 +546,7 @@ async def apk_doctor(request: Request):
         result["ok"] = False
         result["error"] = (
             "无法运行 java；请配置 jadx_java_home（configs/local/config.json）"
-            "或 GMS_JADX_JAVA_HOME 指向可用的 JDK（JADX 1.4.0 需要 JDK 11）"
+            "或 GMS_JADX_JAVA_HOME 指向可用的 JDK（jadx 需要 JDK 11 及以上）"
         )
     elif not result["jadx_version"]:
         result["ok"] = False

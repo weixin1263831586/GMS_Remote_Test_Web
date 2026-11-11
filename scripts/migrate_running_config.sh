@@ -36,13 +36,16 @@ import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
+# 终态定义必须与运行代码同源（审核 P1）：automation 的真实终态集来自
+# features.automation.models.TERMINAL_STATUSES（含 aoa_failed 等），硬编码
+# 白名单会随状态机演进而漂移，把终态 Run 误判为未完成并阻断迁移。
+sys.path.insert(0, str(root))
+from features.automation.models import TERMINAL_STATUSES as automation_terminal
+
 checks = (
     ('cluster/cluster.sqlite3', 'cluster_jobs', ('completed', 'failed', 'cancelled')),
     ('build/build.sqlite3', 'build_jobs', ('completed', 'failed', 'cancelled')),
-    ('automation/automation.sqlite3', 'automation_runs', (
-        'completed', 'cancelled', 'failed', 'jenkins_failed', 'artifact_missing',
-        'flash_failed', 'test_failed', 'analysis_failed', 'reporting_failed',
-    )),
+    ('automation/automation.sqlite3', 'automation_runs', tuple(sorted(automation_terminal))),
 )
 for name, table, terminal in checks:
     path = root / 'data' / name
