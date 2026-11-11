@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import hmac
 import os
 from urllib.parse import urlsplit
 
 from starlette.requests import HTTPConnection
 
 from foundation.runtime_settings import allowed_origins, runtime_environment
+from foundation.security import secrets_equal
 
 from .service import AUTH_COOKIE_NAME, CurrentUser, auth_service
 
@@ -47,7 +47,7 @@ def bootstrap_token_matches(connection: HTTPConnection) -> bool:
     if not expected:
         return True
     supplied = str(connection.headers.get("x-gms-bootstrap-token") or "")
-    return hmac.compare_digest(expected, supplied)
+    return secrets_equal(expected, supplied)
 
 
 def _normalized_origin(value: str) -> str:

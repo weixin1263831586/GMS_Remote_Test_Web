@@ -1,8 +1,10 @@
 """Desktop/VNC routes - VNC status, start, stop, noVNC proxy, host validation."""
 
 import asyncio
+import ipaddress
 import logging
 import os
+import socket
 import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -38,6 +40,79 @@ _vnc_status_cache: dict[str, float] = {"ts": 0.0, "value": None}
 _NOVNC_ZH_CN_LOCALE = Path(__file__).with_name("novnc_zh_cn.json")
 _NOVNC_ASSET_VERSION = "20260916-keypad-input"
 _NOVNC_HTTP_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
+_NOVNC_MAX_BODY_BYTES = 8 * 1024 * 1024
+_NOVNC_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_NOVNC_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+
+
+class _NovncProxyError(Exception):
+    """Upstream noVNC response that must not be forwarded."""
+
+
+def _novnc_ip_allowed(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Allow LAN and public unicast. Reject loopback, link-local and metadata."""
+
+    if (
+        ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_unspecified
+        or ip.is_reserved
+    ):
+        return False
+    if isinstance(ip, ipaddress.IPv4Address) and ip in _NOVNC_CGNAT:
+        return False
+    return bool(ip.is_private or ip.is_global)
+
+
+def pin_novnc_host(address: str, port: int) -> str:
+    """Resolve a Worker desktop address and return one safe literal.
+
+    Workers can register any IP. Proxying that value reaches the Controller's
+    loopback and link-local metadata addresses (169.254.169.254 is private
+    but link-local). The returned literal is what the HTTP client connects
+    to, so a later DNS answer cannot move the request.
+    """
+
+    raw = str(address or "").strip()
+    if not raw or any(char in raw for char in " \t\r\n/\\?#@"):
+        raise ValueError("Worker 桌面地址无效")
+    if port < 1 or port > 65535:
+        raise ValueError("Worker noVNC 端口无效")
+    try:
+        infos = socket.getaddrinfo(raw, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise ValueError("Worker 桌面地址无法解析") from exc
+    pinned: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    for info in infos:
+        try:
+            parsed = ipaddress.ip_address(str(info[4][0]).split("%", 1)[0])
+        except ValueError as exc:
+            raise ValueError("Worker 桌面地址无法解析") from exc
+        candidate = getattr(parsed, "ipv4_mapped", None) or parsed
+        if not _novnc_ip_allowed(candidate):
+            logger.warning("Rejected noVNC upstream address %s", raw)
+            raise ValueError("Worker 桌面地址不在允许范围内")
+        pinned.append(candidate)
+    if not pinned:
+        raise ValueError("Worker 桌面地址无法解析")
+    chosen = sorted(pinned, key=str)[0]
+    if isinstance(chosen, ipaddress.IPv6Address):
+        return f"[{chosen}]"
+    return str(chosen)
+
+
+async def _read_novnc_body(response) -> bytes:
+    if response.status in _NOVNC_REDIRECT_STATUSES:
+        raise _NovncProxyError("noVNC 上游返回了重定向，已拒绝跟随")
+    total = 0
+    chunks: list[bytes] = []
+    async for chunk in response.content.iter_chunked(64 * 1024):
+        total += len(chunk)
+        if total > _NOVNC_MAX_BODY_BYTES:
+            raise _NovncProxyError("noVNC 响应超过大小限制")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def create_novnc_client_session() -> aiohttp.ClientSession:
@@ -179,8 +254,11 @@ def _cluster_novnc_upstream(worker_id: str) -> str:
     address = str(worker.get("address") or worker.get("hostname") or "").strip()
     if not address:
         raise ValueError("Worker 缺少桌面地址")
-    port = int((worker.get("capabilities") or {}).get("novnc_port") or NOVNC_WEB_PORT)
-    return f"http://{address}:{port}"
+    try:
+        port = int((worker.get("capabilities") or {}).get("novnc_port") or NOVNC_WEB_PORT)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Worker noVNC 端口无效") from exc
+    return f"http://{pin_novnc_host(address, port)}:{port}"
 
 
 def _upstream_query_string(query_string: bytes) -> str:
@@ -495,10 +573,11 @@ async def novnc_http_proxy(
             novnc_client_session(request) as session,
             session.get(
                 upstream_url,
+                allow_redirects=False,
                 timeout=_NOVNC_HTTP_REQUEST_TIMEOUT,
             ) as upstream,
         ):
-            body = await upstream.read()
+            body = await _read_novnc_body(upstream)
             body = novnc_asset_override(path, body)
             # 静态资源缓存一天；入口 HTML/JSON 每次请求重新验证。
             cache_control = (
@@ -512,6 +591,8 @@ async def novnc_http_proxy(
                 media_type=upstream.headers.get("content-type", "application/octet-stream"),
                 headers={"Cache-Control": cache_control}
             )
+    except _NovncProxyError as exc:
+        return error_response(str(exc), status_code=502)
     except aiohttp.ClientConnectorError:
         return error_response("noVNC 服务未运行，请先启动 VNC", status_code=503)
     except Exception:
@@ -546,14 +627,20 @@ async def cluster_novnc_http_proxy(
             url += "?" + upstream_query
         async with (
             novnc_client_session(request) as session,
-            session.get(url, timeout=_NOVNC_HTTP_REQUEST_TIMEOUT) as response,
+            session.get(
+                url,
+                allow_redirects=False,
+                timeout=_NOVNC_HTTP_REQUEST_TIMEOUT,
+            ) as response,
         ):
-            body = await response.read()
+            body = await _read_novnc_body(response)
             body = novnc_asset_override(upstream_path, body)
             cache = "no-cache" if upstream_path.endswith((".html", ".json")) else "public, max-age=86400"
             return Response(content=body, status_code=response.status,
                             media_type=response.headers.get("content-type", "application/octet-stream"),
                             headers={"Cache-Control": cache})
+    except _NovncProxyError as exc:
+        return error_response(str(exc), status_code=502)
     except ValueError as exc:
         return error_response(str(exc), status_code=409)
     except Exception:

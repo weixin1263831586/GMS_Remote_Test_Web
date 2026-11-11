@@ -8,6 +8,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 
 from features.cluster.worker_auth import (
+    WorkerTokenStoreError,
     authenticate_worker,
     persist_worker_token,
     restore_worker_token,
@@ -145,6 +146,38 @@ class WorkerAuthPersistenceTests(unittest.TestCase):
                     worker_tokens(),
                     {"worker-1": "deploy-b", "worker-2": "peer"},
                 )
+
+    def test_unreadable_token_file_is_not_replaced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            token_path = Path(directory) / "worker_tokens.json"
+            token_path.write_text("{not-json", encoding="utf-8")
+            with patch.dict(
+                "os.environ",
+                {"GMS_WORKER_TOKENS_FILE": str(token_path)},
+            ):
+                with self.assertRaises(WorkerTokenStoreError):
+                    worker_tokens()
+                with self.assertRaises(WorkerTokenStoreError):
+                    persist_worker_token("worker-1", "replacement")
+                with self.assertRaises(HTTPException) as raised:
+                    authenticate_worker("worker-1", "Bearer replacement")
+            self.assertEqual(token_path.read_text(encoding="utf-8"), "{not-json")
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertNotIn(str(token_path), str(raised.exception.detail))
+
+    def test_non_object_token_file_is_not_replaced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            token_path = Path(directory) / "worker_tokens.json"
+            token_path.write_text("[1]", encoding="utf-8")
+            with (
+                patch.dict(
+                    "os.environ",
+                    {"GMS_WORKER_TOKENS_FILE": str(token_path)},
+                ),
+                self.assertRaises(WorkerTokenStoreError),
+            ):
+                revoke_worker_token("worker-1")
+            self.assertEqual(token_path.read_text(encoding="utf-8"), "[1]")
 
 
 if __name__ == "__main__":

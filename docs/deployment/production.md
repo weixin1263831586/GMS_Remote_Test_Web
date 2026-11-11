@@ -70,11 +70,15 @@ Environment=GMS_ENV=production
 Environment=GMS_DATA_ROOT=<安装目录>/data
 ExecStart=<安装目录>/.venv/bin/python -m uvicorn app:app \
   --host 0.0.0.0 --port <端口> --workers 1 --backlog 2048 \
-  --limit-concurrency 512 --limit-max-requests 100000 \
-  --timeout-keep-alive 10 --log-level info --access-log \
+  --limit-concurrency 512 --timeout-keep-alive 120 \
+  --log-level info --access-log \
   --ssl-keyfile <证书目录>/gms-local.key --ssl-certfile <证书目录>/gms-local.crt
 Restart=always
 ```
+
+单元不设置 `--limit-max-requests`。请求数上限会周期性回收进程，中断
+WebSocket 和正在进行的分块上传。保持连接超时与 `python app.py` 一样是 120 秒。
+已安装环境需要重新执行安装脚本或手动改 unit 后 `daemon-reload`，才会换上这一组参数。
 
 常用运维命令：
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
 
 
@@ -30,13 +32,9 @@ def bearer_token(authorization: str | None) -> str | None:
 
     Strict scheme parsing: a missing separator or a non-Bearer scheme yields
     ``None`` instead of silently accepting a bare token. Callers must still
-    compare digests under ``hmac.compare_digest`` (hash both sides first so
-    the comparison time cannot leak the stored token's length), e.g.::
-
-        hmac.compare_digest(
-            hashlib.sha256(supplied.encode()).digest(),
-            hashlib.sha256(expected.encode()).digest(),
-        )
+    compare digests under :func:`secrets_equal` (hash both sides first so
+    the comparison time cannot leak the stored token's length and non-ASCII
+    input cannot raise ``TypeError``).
     """
     if not authorization:
         return None
@@ -45,6 +43,21 @@ def bearer_token(authorization: str | None) -> str | None:
         return None
     supplied = supplied.strip()
     return supplied or None
+
+
+def secrets_equal(left: str, right: str) -> bool:
+    """Compare two secrets without leaking length or rejecting non-ASCII.
+
+    ``hmac.compare_digest`` on ``str`` returns as soon as the lengths differ,
+    and raises ``TypeError`` when either side contains a non-ASCII character.
+    Hashing both sides first keeps the accept/reject result for ASCII secrets
+    and turns a non-ASCII password or token into a normal mismatch instead of
+    an unhandled 500.
+    """
+
+    left_digest = hashlib.sha256(str(left).encode("utf-8")).digest()
+    right_digest = hashlib.sha256(str(right).encode("utf-8")).digest()
+    return hmac.compare_digest(left_digest, right_digest)
 
 
 def sanitize_device_ids(values) -> list[str]:

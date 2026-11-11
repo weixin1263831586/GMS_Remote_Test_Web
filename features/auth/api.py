@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hmac
 import ipaddress
 from collections.abc import Callable
 
@@ -11,6 +10,7 @@ from foundation.cache import TTLCache
 from foundation.config import config_manager
 from foundation.networking import get_client_ip
 from foundation.responses import error_response
+from foundation.security import secrets_equal
 from foundation.ssh import SSHD_INSTALL_GUIDE
 
 from .access import (
@@ -185,7 +185,7 @@ def _authenticate_client_ssh_user(
         if not success or not detected_user:
             return None, ssh_error
         canonical_username = f"{detected_user}@{client_host}"
-    elif not hmac.compare_digest(str(expected), str(password or "")):
+    elif not secrets_equal(str(expected), str(password or "")):
         return None, None
 
     username = canonical_username
@@ -374,7 +374,7 @@ async def auth_login(request: Request, req: dict):
             is_source_bound_login = (
                 "@" in username and username.rsplit("@", 1)[1] == source_ip
             )
-            if (expected_client_login and not hmac.compare_digest(
+            if (expected_client_login and not secrets_equal(
                 username, expected_client_login,
             )) or (not expected_client_login and not is_source_bound_login):
                 retry_after = auth_service.record_auth_failure(

@@ -171,6 +171,11 @@ class SSHManager:
                             )
                         time.sleep(0.05)
                     if channel.recv_exit_status() == 0:
+                        # 健康检查占用一条 session。不关闭 channel 时，
+                        # OpenSSH MaxSessions（默认 10）会在几次复用后把
+                        # 这条连接判死，后续命令全部健康检查失败。
+                        with contextlib_suppress(Exception):
+                            channel.close()
                         logger.debug("[SSH] Reused connection from pool")
                         return ssh
                     logger.debug(
@@ -251,11 +256,11 @@ class SSHManager:
                         'message': 'SSHD 安装成功并已启动',
                         'status': status_verify
                     }
-                else:
-                    return {
-                        'success': True,
-                        'message': 'SSHD 安装完成，请验证服务状态'
-                    }
+                return {
+                    'success': False,
+                    'error': 'SSHD 安装命令已执行，但服务未进入可查询状态',
+                    'status': status_verify,
+                }
             else:
                 error_msg = install_result.stderr or install_result.stdout
 

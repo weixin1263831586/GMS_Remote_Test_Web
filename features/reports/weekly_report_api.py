@@ -1093,7 +1093,11 @@ async def get_weekly_report_ai_summary(
 
     factory = dependencies.universal_analyzer_factory
     if factory is None:
-        return error_response("AI 分析器未配置", status_code=500)
+        return error_response(
+            "AI 分析器未配置",
+            status_code=503,
+            code="DEPENDENCY_UNAVAILABLE",
+        )
     try:
         analyzer = factory()
     except Exception:

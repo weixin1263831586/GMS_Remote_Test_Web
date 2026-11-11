@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from features.automation.artifact_fetch import open_jenkins_artifact
 from features.automation.executor_contract import (
     AutomationExecutor as AutomationExecutor,
 )
@@ -816,17 +817,13 @@ class HttpAutomationExecutor(RecoveryExecutorMixin):
             auth = None
             if jenkins.get("username") and (jenkins.get("api_token") or jenkins.get("token")):
                 auth = (jenkins["username"], jenkins.get("api_token") or jenkins.get("token"))
-            response = requests.get(
+            response = open_jenkins_artifact(
                 artifact_url,
+                configured_url=configured_url,
                 auth=auth,
                 verify=bool(jenkins.get("verify_ssl", True)),
-                stream=True,
-                timeout=(20, 3600),
             )
             response.raise_for_status()
-            final_url = urlparse(str(getattr(response, "url", artifact_url) or artifact_url))
-            if final_url.scheme != configured.scheme or final_url.netloc != configured.netloc:
-                return {"success": False, "error": "Jenkins redirected the artifact outside its configured origin"}
             declared_size = int(response.headers.get("Content-Length") or 0)
             limit = _artifact_limit_bytes()
             if declared_size > limit:

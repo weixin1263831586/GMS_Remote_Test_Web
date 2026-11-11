@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 import json
 import os
 from pathlib import Path
@@ -36,6 +35,7 @@ from foundation.config_paths import automation_profiles_path
 from foundation.error_model import ApiError
 from foundation.redaction import redact_sensitive_data
 from foundation.responses import error_response
+from foundation.security import secrets_equal
 
 from .plan_api import router as plans_router
 from .profiles import mask_profile_secrets
@@ -599,7 +599,7 @@ async def handle_gerrit_webhook(
             status_code=503,
             detail='GMS_AUTOMATION_WEBHOOK_TOKEN is required',
         )
-    if not hmac.compare_digest(automation_token, expected):
+    if not secrets_equal(automation_token, expected):
         raise HTTPException(status_code=401, detail='Invalid automation webhook token')
     owner_id = os.getenv('GMS_AUTOMATION_OWNER_ID', '').strip()
     if not owner_id:

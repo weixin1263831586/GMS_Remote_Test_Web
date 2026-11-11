@@ -12,7 +12,11 @@ from fastapi.testclient import TestClient
 
 from bootstrap.application import create_app
 from features.auth import auth_service
-from features.system.desktop import _relay_novnc_websockets, _upstream_query_string
+from features.system.desktop import (
+    _relay_novnc_websockets,
+    _upstream_query_string,
+    pin_novnc_host,
+)
 from features.system.novnc_access import novnc_access_service
 
 
@@ -111,6 +115,13 @@ class NoVNCAccessBoundaryTests(unittest.TestCase):
         self.assertNotIn("&access_token=secret", f"&{query}")
         self.assertIn("autoconnect=true", query)
         self.assertIn("path=websockify%3Faccess_token%3Dsecret", query)
+
+    def test_worker_desktop_address_rejects_loopback_and_metadata(self):
+        self.assertEqual(pin_novnc_host("10.1.2.3", 6080), "10.1.2.3")
+        self.assertEqual(pin_novnc_host("::ffff:192.168.1.9", 6080), "192.168.1.9")
+        for blocked in ("127.0.0.1", "169.254.169.254", "0.0.0.0", "::1", "100.100.100.200"):
+            with self.subTest(blocked=blocked), self.assertRaises(ValueError):
+                pin_novnc_host(blocked, 6080)
 
 
 class NoVNCRelayTests(unittest.IsolatedAsyncioTestCase):

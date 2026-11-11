@@ -731,6 +731,36 @@ def test_recover_managed_state_skips_while_operation_in_progress(tmp_path):
     start.assert_not_called()
 
 
+def test_source_stop_rejects_explicit_older_generation(tmp_path):
+    from worker_agent.adb_proxy import _source_stop
+
+    (tmp_path / "source.json").write_text(
+        '{"generation": 4, "running": true}',
+        encoding="utf-8",
+    )
+    with patch.dict("os.environ", {"GMS_ADB_PROXY_STATE_ROOT": str(tmp_path)}):
+        with pytest.raises(RuntimeError, match="stale"):
+            _source_stop({"generation": 0})
+        assert (tmp_path / "source.json").is_file()
+        _source_stop({})
+    assert not (tmp_path / "source.json").exists()
+
+
+def test_target_disconnect_rejects_explicit_older_generation(tmp_path):
+    from worker_agent.adb_proxy import _target_disconnect
+
+    (tmp_path / "target.json").write_text(
+        '{"imports":[{"source_worker_id":"worker-source","devices":["SERIAL"],"generation":2}]}',
+        encoding="utf-8",
+    )
+    with (
+        patch.dict("os.environ", {"GMS_ADB_PROXY_STATE_ROOT": str(tmp_path)}),
+        pytest.raises(RuntimeError, match="stale"),
+    ):
+        _target_disconnect({"source_worker_id": "worker-source", "generation": 0})
+    assert "generation" in (tmp_path / "target.json").read_text(encoding="utf-8")
+
+
 def test_sync_source_policy_skips_while_operation_in_progress(tmp_path):
     """source_start 进行中时策略刷新跳过本轮，避免用旧 source.json 踩回新策略。"""
     from worker_agent import adb_proxy

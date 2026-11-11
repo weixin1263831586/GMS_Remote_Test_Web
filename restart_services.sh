@@ -278,7 +278,8 @@ else
         GMS_SOFTWARE_ROOT="${GMS_SOFTWARE_ROOT:-${HOME}/Software}" \
         APE_API_KEY="${APE_API_KEY:-${GMS_SOFTWARE_ROOT:-${HOME}/Software}/gts-rockchip.json}" \
         "${PYTHON_BIN}" -m uvicorn app:app \
-        --host 0.0.0.0 --port "${PORT}" --log-level info --access-log \
+        --host 0.0.0.0 --port "${PORT}" --limit-concurrency 512 \
+        --timeout-keep-alive 120 --log-level info --access-log \
         --ssl-keyfile "${CERT_KEY}" --ssl-certfile "${CERT_CRT}" \
         >> fastapi.log 2>&1 < /dev/null &
     echo $! > fastapi.pid
