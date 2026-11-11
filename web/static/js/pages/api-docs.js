@@ -893,7 +893,7 @@ function closeUsageExamplesModal() {
 
 // 生成与当前 Controller 地址绑定的严格 TLS 安装命令。
 function buildSkillInstallCommand() {
-    return `export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt; curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL "${window.location.origin}/api/agent/install.sh" | bash -s -- --paircode-prompt`;
+    return `curl -kfsSL "${window.location.origin}/api/agent/install.sh" | bash -s -- --paircode-prompt`;
 }
 
 /**
@@ -902,6 +902,31 @@ function buildSkillInstallCommand() {
 function copySkillInstallCommand() {
     copyText(buildSkillInstallCommand(), {
         successMsg: '✓ Skill 一键安装/更新命令已复制',
+    });
+}
+
+/**
+ * 配对码弹窗专用：复制自带本次配对码的自包含安装命令。
+ */
+function buildPaircodeInstallCommand(code) {
+    const safeCode = String(code || '').replace(/[^A-Za-z0-9-]/g, '');
+    return [
+        'unset GMS_INSTALL_CA_CERT GMS_INSTALL_ALLOW_INSECURE;',
+        "umask 077; printf '%s\\n' '" + safeCode + "' > /tmp/gms-paircode.txt",
+        `&& curl -kfsSL "${window.location.origin}/api/agent/install.sh"`,
+        '| bash -s -- --paircode-file /tmp/gms-paircode.txt;',
+        'rm -f /tmp/gms-paircode.txt',
+    ].join(' ');
+}
+
+function copyPaircodeInstallCommand() {
+    const code = document.getElementById('agent-access-code-result')?.textContent?.trim();
+    if (!code) {
+        showToast('暂无可用的配对码，请先生成', 'warning');
+        return;
+    }
+    copyText(buildPaircodeInstallCommand(code), {
+        successMsg: '✓ 安装命令已复制（已含本次配对码，5 分钟内有效）',
     });
 }
 
@@ -1015,6 +1040,11 @@ window.copyCommand = function(elementId) {
 window.loadApiDocs = loadApiDocs;
 window.filterApiDocs = filterApiDocs;
 window.autoInstallSshd = autoInstallSshd;
+window.copySkillInstallCommand = copySkillInstallCommand;
+window.copyPaircodeInstallCommand = copyPaircodeInstallCommand;
+window.buildPaircodeInstallCommand = buildPaircodeInstallCommand;
+window.showUsageExamples = showUsageExamples;
+window.closeUsageExamplesModal = closeUsageExamplesModal;
 
 /**
  * 复制 skill 命令到剪贴板

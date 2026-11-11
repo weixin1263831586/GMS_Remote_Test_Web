@@ -1439,7 +1439,7 @@ body.modal-open {
     opacity: 0;
     visibility: hidden;
     transition: var(--transition-normal);
-    z-index: 10000;
+    z-index: 13000;
     font-size: 14px;
     font-weight: 600;
     min-width: 320px;

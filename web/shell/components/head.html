@@ -5,7 +5,7 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="preload" as="script" href="/static/js/shell/shell-early-boot.js" fetchpriority="high">
     <link rel="stylesheet" href="/static/css/common.css?v=20261107-actions-inflow" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-components.css?v=20261107-config-gap" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-components.css?v=20261111-toast-above-modal" data-shell-styles>
     <link rel="stylesheet" href="/static/css/common-layout.css?v=20260930-css-split" data-shell-styles>
     <link rel="stylesheet" href="/static/css/common-page.css?v=20261110-agent-status-layout" data-shell-styles>
     <link rel="stylesheet" href="/static/css/agent-access.css?v=20261014-agent-access" data-shell-styles>
@@ -69,7 +69,7 @@
     <script src="/static/js/shell/status-polling.js?v=20260826-shell-split" defer></script>
     <script src="/static/js/shell/ui-feedback.js?v=20260826-shell-split" defer></script>
     <!-- 加载通用弹框管理 - 页面脚本依赖，须先于其执行 -->
-    <script src="/static/js/modal.js?v=20260723-modal-stack" defer></script>
+    <script src="/static/js/modal.js?v=20261111-keep-toast-alive" defer></script>
     <!-- 加载API调用工具 - 通知中心与页面脚本依赖，须先于其执行 -->
     <script src="/static/js/api.js?v=20260917-client-account-switch-v8" defer></script>
     <script src="/static/js/shell/websocket-manager.js?v=20261105-aoa-device-refresh" defer></script>
@@ -110,8 +110,8 @@
     <script src="/static/js/pages/report-analysis-diagnosis.js?v=20260920-adr0014" defer></script>
     <script src="/static/js/pages/agent-questions.js?v=20261110-project-agent" defer></script>
     <script src="/static/js/pages/conversational-agent.js?v=20261110-agent-authorization" defer></script>
-    <script src="/static/js/pages/agent-access.js?v=20261014-agent-access" defer></script>
-    <script src="/static/js/pages/api-docs.js?v=20260812-stable-surfaces" defer></script>
+    <script src="/static/js/pages/agent-access.js?v=20261111-agent-access-copy" defer></script>
+    <script src="/static/js/pages/api-docs.js?v=20261111-paircode-command" defer></script>
     <script src="/static/js/pages/apk-analysis.js?v=20261107-apk-refresh-width" defer></script>
     <script src="/static/js/pages/security-audit.js?v=20260917-elevation-gate" defer></script>
     <!-- 加载主导航模块 - 使用 defer 异步加载，不阻塞页面渲染 -->

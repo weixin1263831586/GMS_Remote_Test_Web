@@ -254,6 +254,132 @@ class RuntimeAgentTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def _generate_pairing_code(self, page):
+        """打开接入页并生成一枚配对码（mock 后端与提权），返回无。"""
+        now = datetime.now(timezone.utc)
+        page.route("**/api/auth/agent-tokens", lambda route: route.fulfill(
+            content_type="application/json", body=json.dumps({"success": True, "tokens": []})))
+        page.route("**/api/auth/agent-enrollment-codes", lambda route: route.fulfill(
+            content_type="application/json", body=json.dumps({
+                "success": True,
+                "enrollment": {"code": "AAAAAA-BBBBBB-CCCCCC",
+                               "expires_at": (now + timedelta(minutes=5)).isoformat()},
+            })))
+        self.goto_shell(page)
+        page.evaluate("switchPage('users')")
+        self.close_initial_modals(page)
+        page.locator("#agent-access-tab").click()
+        page.evaluate("window.requestElevatedAccess = async () => true")
+        page.locator("#agent-access-create-toggle").click()
+        expect(page.locator("#agent-access-enroll-form")).to_be_visible()
+        page.locator("#agent-access-name").fill("copy-regression")
+        page.locator("#agent-access-create-submit").click()
+        expect(page.locator("#agent-access-code-card")).to_be_visible()
+        self.assertEqual(
+            page.locator("#agent-access-code-result").inner_text(), "AAAAAA-BBBBBB-CCCCCC")
+
+    def _last_toast(self, page):
+        return page.evaluate(
+            "Array.from(document.querySelectorAll('.toast')).map(t => t.textContent.trim()).pop() || ''")
+
+    def test_copy_enrollment_code_shows_feedback_on_every_path(self):
+        # 回归：复制配对码曾有两条静默路径（无码直接 return；clipboard
+        # API 缺失时只记 console），点击后界面毫无反馈。现在任何路径都
+        # 必须给出可见 toast，且 clipboard API 不可用时降级 execCommand。
+        page = self.new_page()
+        console_errors = []
+        page.on("console", lambda m: console_errors.append(m.text) if m.type == "error" else None)
+        try:
+            self._generate_pairing_code(page)
+
+            # 1. clipboard API 成功 → 成功提示
+            page.evaluate("""async () => {
+                navigator.clipboard.writeText = async () => {};
+            }""")
+            page.locator("#agent-access-copy-code").click()
+            hit_check = page.evaluate("""() => {
+                const toast = document.getElementById('toast');
+                if (!toast.classList.contains('show')) return {shown: false};
+                const rect = toast.getBoundingClientRect();
+                const hit = document.elementFromPoint(
+                    rect.left + rect.width / 2, rect.top + rect.height / 2);
+                return {
+                    shown: true,
+                    z: getComputedStyle(toast).zIndex,
+                    covered: !(hit && (hit === toast || toast.contains(hit))),
+                };
+            }""")
+            expect(self._poll_toast(page)).to_contain_text("配对码已复制")
+            expect(self._poll_toast(page)).to_be_visible()
+            self.assertTrue(hit_check["shown"], "点击后 toast 未进入 show 状态")
+            self.assertGreater(int(hit_check["z"]), 12000, "toast 层级低于 modal 栈（12000）会被遮住")
+            self.assertFalse(hit_check["covered"], "toast 显示中却未命中点击测试：被 modal 或其他层级遮住")
+
+            # 2. clipboard API 拒绝 → execCommand 降级仍成功
+            page.evaluate("""async () => {
+                navigator.clipboard.writeText = async () => { throw new Error('denied'); };
+                document.execCommand = () => true;
+            }""")
+            page.locator("#agent-access-copy-code").click()
+            expect(self._poll_toast(page)).to_contain_text("配对码已复制")
+
+            # 3. 全部失败 → 明确的手动复制指引，绝不静默
+            page.evaluate("""async () => {
+                navigator.clipboard.writeText = async () => { throw new Error('denied'); };
+                document.execCommand = () => false;
+            }""")
+            page.locator("#agent-access-copy-code").click()
+            expect(self._poll_toast(page)).to_contain_text("手动选中配对码")
+
+            # 4. 无码（清空后点击）→ 提示先生成，不再静默 return
+            page.evaluate(
+                "document.getElementById('agent-access-code-result').textContent = ''")
+            page.locator("#agent-access-copy-code").click()
+            expect(self._poll_toast(page)).to_contain_text("暂无可复制的配对码")
+
+            self.assertEqual(
+                [e for e in console_errors if "act-bridge" in e], [])
+        finally:
+            page.close()
+
+    def _poll_toast(self, page):
+        return page.locator(".toast").last
+
+    def test_copy_install_command_resolves_and_carries_paircode(self):
+        page = self.new_page()
+        console_errors = []
+        page.on("console", lambda m: console_errors.append(m.text) if m.type == "error" else None)
+        try:
+            self._generate_pairing_code(page)
+            resolved = page.evaluate("""() => ({
+                handler: typeof window.copyPaircodeInstallCommand,
+                command: window.buildPaircodeInstallCommand(
+                    document.getElementById('agent-access-code-result').textContent.trim()),
+            })""")
+            self.assertEqual(resolved["handler"], "function",
+                             "copyPaircodeInstallCommand 必须可被 act-bridge 解析到 window")
+            command = resolved["command"]
+            self.assertIn("unset GMS_INSTALL_CA_CERT", command)
+            self.assertIn("umask 077", command)
+            self.assertIn("printf '%s\\n' 'AAAAAA-BBBBBB-CCCCCC' > /tmp/gms-paircode.txt", command)
+            self.assertIn("--paircode-file /tmp/gms-paircode.txt", command)
+            self.assertIn(f'curl -kfsSL "{self.base_url}/api/agent/install.sh"', command)
+            self.assertIn("rm -f /tmp/gms-paircode.txt", command)
+            self.assertNotIn("/path/to/controller-ca.crt", command,
+                             "复制的命令不得包含未替换的占位符路径")
+
+            page.evaluate(
+                "navigator.clipboard.writeText = t => { window.__clip = t; return Promise.resolve(); }")
+            page.locator("#agent-access-code-card button", has_text="复制安装命令").click()
+            expect(page.locator(".toast").last).to_contain_text("已复制")
+            self.assertIn("AAAAAA-BBBBBB-CCCCCC", page.evaluate("window.__clip || ''"),
+                          "复制到剪贴板的命令必须自带本次配对码")
+            self.assertEqual(
+                [e for e in console_errors if "act-bridge" in e], [],
+                "点击复制安装命令不得出现 handler 解析失败")
+        finally:
+            page.close()
+
     def test_admin_init_does_not_prefetch_users_list_or_prompt_elevation(self):
         # /api/users/list 需要管理员提权；启动预取只会在页面加载时触发
         # 403 和提权弹框。用户列表由用户管理页的 loadUsersList() 按需加载。
@@ -698,8 +824,7 @@ class RuntimeAgentTests(RuntimeUiHarness):
             )
 
             expected = (
-                'export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt; '
-                f'curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL "{self.base_url}/api/agent/install.sh" | '
+                f'curl -kfsSL "{self.base_url}/api/agent/install.sh" | '
                 "bash -s -- --paircode-prompt"
             )
             self.assertEqual(result["install"], expected)

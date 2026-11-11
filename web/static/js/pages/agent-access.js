@@ -349,13 +349,40 @@ function agentAccessDismissCode() {
 
 async function agentAccessCopyEnrollmentCode() {
     const code = document.getElementById('agent-access-code-result')?.textContent?.trim();
-    if (!code) return;
+    if (!code) {
+        showToast('暂无可复制的配对码，请先生成', 'warning');
+        return;
+    }
+    if (navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(code);
+            showToast('配对码已复制', 'success');
+            return;
+        } catch (error) {
+            // 权限被拒或焦点竞争：落到 execCommand 降级路径。
+            debugLog('[AgentAccess] clipboard API failed:', error);
+        }
+    }
+    // 降级复制：隐藏 textarea + execCommand，兼容无 Clipboard API 的
+    // 环境（HTTP 非安全上下文、旧浏览器）。
     try {
-        await navigator.clipboard.writeText(code);
-        showToast('配对码已复制', 'success');
+        const helper = document.createElement('textarea');
+        helper.value = code;
+        helper.setAttribute('readonly', '');
+        helper.style.position = 'fixed';
+        helper.style.opacity = '0';
+        document.body.appendChild(helper);
+        helper.select();
+        const copied = document.execCommand('copy');
+        helper.remove();
+        if (copied) {
+            showToast('配对码已复制', 'success');
+            return;
+        }
+        throw new Error('execCommand returned false');
     } catch (error) {
-        debugLog('[AgentAccess] clipboard failed:', error);
-        showToast('复制失败，请手动选择配对码复制', 'warning');
+        debugLog('[AgentAccess] copy fallback failed:', error);
+        showToast('复制失败，请手动选中配对码后按 Ctrl+C', 'warning');
     }
 }
 
