@@ -287,6 +287,41 @@ class TestMultiControllerFailClosed(EnvSandbox):
             "https://ctrl-b:5001",
         )
 
+    def _seed_sticky_insecure_profile(self, client: str, server: str) -> str:
+        """按 write_profile 的取名规则预置一枚粘滞 insecure=true 的 profile。"""
+        name = pm.profile_store.default_profile_name(client, server)
+        stale = pm.profile_store.PROFILE_ROOT / f"{name}.toml"
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        stale.write_text(
+            f'profile = "{name}"\nclient = "{client}"\n\n[controller]\n'
+            f'url = "{server}"\ninsecure = true\n',
+            encoding="utf-8",
+        )
+        return name
+
+    def test_sticky_insecure_releases_when_install_carries_a_trusted_ca(self):
+        # 回归：TOFU 安装器在 bash 阶段固定 CA 后导出 GMS_INSTALL_CA_CERT，
+        # 但 profile 写入沿用粘滞 insecure=true——警告文案承诺的修复路径
+        # （带 CA 重跑 install）永远无法解除粘滞。现在本次安装携带可用
+        # CA 即恢复严格校验，粘滞标志失去前提。
+        self._seed_sticky_insecure_profile("codex", "https://ctrl:5001")
+        ca_file = self.root / "controller-ca.pem"
+        ca_file.write_text("-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----\n", encoding="utf-8")
+
+        name = pm.write_profile("codex", "https://ctrl:5001", str(ca_file))
+        flat = pm.load_profile(name)
+        self.assertNotIn("insecure", flat,
+                         "带 CA 安装必须解除粘滞 insecure，恢复严格 TLS 校验")
+        self.assertEqual(flat.get("ca_cert"), str(ca_file))
+
+    def test_sticky_insecure_persists_when_no_ca_is_available(self):
+        # 本次安装仍无 CA：粘滞标志没有可解除的前提，保持粘滞并告警，
+        # 绝不静默伪造严格模式。
+        self._seed_sticky_insecure_profile("codex", "https://ctrl2:5001")
+
+        name = pm.write_profile("codex", "https://ctrl2:5001", "")
+        self.assertEqual(pm.load_profile(name).get("insecure"), "true")
+
     def test_resolve_controller_explicit_server_wins(self):
         pm.write_profile_toml(
             "codex-a", "codex", "https://ctrl-a:5001", ""

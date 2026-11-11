@@ -679,6 +679,20 @@ def _profile_insecure(name: str) -> bool:
     return os.environ.get("GMS_INSTALL_INSECURE", "") == "1"
 
 
+def _installation_has_trusted_ca(ca_cert: str) -> bool:
+    """本次安装是否携带了可用 CA（严格校验的前提）。
+
+    TOFU 路径在 bash 阶段把 CA 落盘并导出 GMS_INSTALL_CA_CERT，因此
+    bootstrap 走到 profile 写入时同样满足"带 CA 安装"。
+    """
+    if not ca_cert:
+        return False
+    try:
+        return Path(ca_cert).is_file()
+    except OSError:
+        return False
+
+
 def _existing_profile_for(client: str, server: str) -> str:
     """已有 profile 中与 client+Controller 完全一致的名字, 没有则返回 ""。
 
@@ -723,6 +737,11 @@ def write_profile(client: str, server: str, ca_cert: str, profile: str = "") -> 
     if not profile_store.validate_profile_name(name):
         raise ValueError(f"非法 profile 名: {name!r}")
     insecure = _profile_insecure(name)
+    # 本次安装携带了可用 CA（含 TOFU 固定后的 CA）即恢复严格校验：粘滞
+    # insecure 的前提是"安装期没有受信 CA"，该前提已消失。否则警告文案
+    # 承诺的修复路径（带 CA 重跑 install）永远无法解除粘滞。
+    if insecure and _installation_has_trusted_ca(ca_cert):
+        insecure = False
     profile_store.write_profile_toml(name, client, server, ca_cert, insecure)
     if insecure:
         # 一次性安装开关被持久化后会放大为运行期常态（launcher 映射为
