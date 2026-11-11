@@ -308,3 +308,88 @@ def test_elevated_user_confirms_workflow_with_elevated_flag(monkeypatch):
     finally:
         api._agent_sessions.clear()
         api._agent_sessions.update(saved)
+
+
+def test_machine_principal_gets_human_only_block_before_preflight(monkeypatch):
+    """审核 P1：机器主体在预检期直报 human-only，不得显示 Ready 后创建失败。"""
+    from features.assistant.workflow_execution import workflow_permission_block
+    from features.auth import CurrentUser
+
+    request = _bare_request()
+    request.state.current_user = CurrentUser(
+        id="agent-1", username="agent:token", role="agent_service")
+    block = workflow_permission_block({}, {}, request)
+    assert block is not None
+    assert block["stage"] == "permission"
+    assert "human-only" in block["reason"]
+
+
+def test_execution_readiness_reuses_ats_authoritative_preflight(monkeypatch):
+    """审核 P1：聊天预检复用 automation preflight（create 同一入口校验）。
+
+    资源 lookups 全部放行时，集群准入失败（内存不足/无命令 Agent 等）
+    也必须在预检期阻塞，不能拖到创建 Run 才失败。
+    """
+    from features.assistant.workflow_execution import (
+        refresh_workflow_preflight,
+        workflow_execution_readiness_block,
+    )
+
+    draft = {
+        "device": {"serial": "DEV-1", "worker_id": "w1"},
+        "firmware": {"share_id": "abc12345"},
+        "aoa": {"mode": "off"},
+        "test": {"type": "CTS", "scope": "full"},
+    }
+    session = {"workspace_context": {"worker_id": "w1"}, "owner_id": "u1"}
+    request = _bare_request()
+    from features.auth import CurrentUser
+
+    request.state.current_user = CurrentUser(
+        id="u1", username="u1", role="device_operator",
+        extra_permissions=frozenset({
+            "firmware.stage", "devices.lease", "devices.read",
+            "devices.use_leased", "tests.execute", "tests.cancel"}),
+    )
+    request.state.is_elevated = False
+
+    monkeypatch.setattr(
+        "features.assistant.workflow_execution.preflight_draft",
+        lambda draft, **lookups: {"ready": True, "checks": [], "blocks": []})
+    monkeypatch.setattr(
+        "features.assistant.workflow_execution.workflow_permission_block",
+        lambda draft, workspace, request=None: None)
+
+    class FakeService:
+        def __init__(self, outcome):
+            self.outcome = outcome
+
+        def preflight(self, body, *, principal=None, elevated=False):
+            if isinstance(self.outcome, Exception):
+                raise self.outcome
+            return self.outcome
+
+    # 集群准入失败 → 预检阻塞并携带原始原因
+    monkeypatch.setattr(
+        "features.automation.get_automation_service",
+        lambda: FakeService(ValueError("Worker w1 is not admissible (memory 12.0 GB < 28 GB)")))
+    result = refresh_workflow_preflight(session, draft, request=request)
+    assert result["ready"] is False
+    execution = [b for b in result["blocks"] if b.get("stage") == "execution"]
+    assert execution and "not admissible" in execution[0]["reason"]
+
+    # 通过 → 不追加 execution 阻塞
+    monkeypatch.setattr(
+        "features.automation.get_automation_service",
+        lambda: FakeService({"ready": True}))
+    ok = refresh_workflow_preflight(session, draft, request=request)
+    assert ok["ready"] is True
+    assert not [b for b in ok["blocks"] if b.get("stage") == "execution"]
+
+    # 基础设施异常 → 依赖不可用阻塞而非崩溃
+    monkeypatch.setattr(
+        "features.automation.get_automation_service",
+        lambda: FakeService(RuntimeError("cluster db locked")))
+    degraded = workflow_execution_readiness_block(draft, {}, request)
+    assert degraded is not None
+    assert "暂不可用" in degraded["reason"]

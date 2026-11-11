@@ -9,7 +9,7 @@ PREPARATION_TEMPLATES = {
         ['shell', 'settings', 'put', 'global', key, '0']
         for key in ('window_animation_scale', 'transition_animation_scale', 'animator_duration_scale')
     ]},
-    'wifi_on': {'name': '启用 Wi-Fi（使用设备已有网络）', 'commands': [['shell', 'svc', 'wifi', 'enable']]},
+    'wifi_on': {'name': '启用 Wi-Fi（仅启用，不保证连接指定网络）', 'commands': [['shell', 'svc', 'wifi', 'enable']]},
 }
 
 

@@ -491,10 +491,14 @@ _TEXT_WINDOW_CHUNK_BYTES = 256 * 1024
 def _stream_text_window(path, offset: int, limit: int, encoding: str, errors: str):
     """流式解码计数到 offset 再收集 limit 个字符，随后停止读取。
 
-    内存只持有块级缓冲与窗口内容；越过 ``offset + limit`` 后不再消耗
+    内存只持有块级缓冲与窗口内容；越过 ``offset + limit + 1`` 后不再消耗
     磁盘 IO。``total_chars`` 在窗口截断时上报 -1（未知），响应里的
     ``truncated`` 依据窗口是否填满判定——与逐字符精确计数相比，这避免
     为一个统计字段把整个（可能数百 MB 的）日志扫完。
+
+    探测多读一个字符（比较 ``> window_end`` 而非 ``>=``）：文本恰好等于
+    窗口长度时，仅读到 ``window_end`` 无法区分"读完恰好收尾"与"后面还有
+    内容"，会误报 truncated 让客户端空翻一页；多读一位即可精确判定。
     """
     decoder = codecs.getincrementaldecoder(encoding)(errors)
     total_chars = 0
@@ -515,17 +519,17 @@ def _stream_text_window(path, offset: int, limit: int, encoding: str, errors: st
             total_chars += len(text)
             if collecting:
                 collected.append(text)
-                if total_chars >= window_end:
-                    break  # 窗口已填满，提前结束读取。
+                if total_chars > window_end:
+                    break  # 窗口已填满且确认还有后续内容，提前结束读取。
             elif total_chars >= offset:
                 # 本块跨越 offset 边界：只保留边界之后的字符。
                 extra = total_chars - offset
                 collected.append(text[len(text) - extra:])
                 collecting = True
-                if total_chars >= window_end:
+                if total_chars > window_end:
                     break
     window = "".join(collected)[:limit]
-    scanned_complete = total_chars < window_end
+    scanned_complete = total_chars <= window_end
     return window, total_chars if scanned_complete else -1
 
 

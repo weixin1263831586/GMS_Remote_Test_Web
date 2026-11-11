@@ -167,6 +167,51 @@ class AutomationApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 409)
             self.assertIn('terminal automation runs', response.body.decode())
 
+    def test_retry_reauthorizes_from_current_principal_not_old_snapshot(self):
+        # 审核回归：Retry 是一次新的执行授权。提权会话创建的 Run 在提权
+        # 过期（或权限收回）后，Retry 必须按当前主体重新计算能力，不得
+        # 沿用旧 Run 的 granted_capabilities 快照。
+        plan = {
+            'artifact_path': '/tmp/update.img',
+            'devices': ['ABC123'],
+            'test_plan': {'test_type': 'CTS'},
+        }
+        with TemporaryDirectory() as tmp:
+            service = build_service(tmp)
+            elevated_admin = self.request_for('alice', role='client')
+            elevated_admin.state.is_elevated = True
+            principal = elevated_admin.state.current_user
+            original = service.create_run(plan, created_by='id-alice', principal=principal, elevated=True)
+            # 该计划无 build 阶段，能力并集不含 build.*；提权授予其余全部
+            expected_caps = [c for c in AUTOMATION_PLAN_CAPABILITIES if not c.startswith('build.')]
+            self.assertEqual(original['granted_capabilities'], ','.join(expected_caps))
+            service.store.update_run(original['id'], status='completed', current_stage='completed')
+
+            with patch.object(automation_api, 'automation_service', service):
+                # 提权过期后（同一普通用户、无提权）：403 且不产生新 Run
+                expired = self.request_for('alice')
+                response = asyncio.run(
+                    automation_api.retry_automation_run(original['id'], expired)
+                )
+                self.assertEqual(response.status_code, 403)
+                self.assertIn('does not hold', response.body.decode())
+                self.assertEqual(
+                    [run['id'] for run in service.list_run_summaries(limit=10) if run['id'] != original['id']],
+                    [],
+                )
+
+                # 重新提权后可 Retry，新 Run 能力由当前提权重新授予
+                re_elevated = self.request_for('alice')
+                re_elevated.state.is_elevated = True
+                retried = asyncio.run(
+                    automation_api.retry_automation_run(original['id'], re_elevated)
+                )
+                self.assertEqual(retried['data']['retry_of_run_id'], original['id'])
+                self.assertEqual(
+                    retried['data']['granted_capabilities'],
+                    ','.join(expected_caps),
+                )
+
     def test_create_list_get_and_events(self):
         with TemporaryDirectory() as tmp:
             service = build_service(tmp)

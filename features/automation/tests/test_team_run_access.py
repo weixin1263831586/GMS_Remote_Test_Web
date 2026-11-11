@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from features.auth import CurrentUser
+from features.auth import CurrentUser, is_elevated
 from features.automation import api
 from features.automation.models import AutomationRunCreateRequest
 from features.automation.repository import AutomationStore
@@ -102,7 +102,15 @@ async def test_owner_and_admin_can_operate_the_run(team, monkeypatch, owner, rol
     detail = await api.get_automation_run('run-bob', request)
     assert detail['data']['permissions']['can_manage'] is True
     assert (await getattr(api, operation)('run-bob', request))['success']
-    mutate.assert_called_once_with('run-bob')
+    # retry_run 现在按当前主体重新授权，额外携带 principal/elevated。
+    if method == 'retry_run':
+        mutate.assert_called_once_with(
+            'run-bob',
+            principal=request.state.current_user,
+            elevated=is_elevated(request),
+        )
+    else:
+        mutate.assert_called_once_with('run-bob')
 
 
 @pytest.mark.asyncio

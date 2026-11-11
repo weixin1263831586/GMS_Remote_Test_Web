@@ -264,6 +264,16 @@ def refresh_workflow_preflight(
         preflight["checks"] = [*list(preflight.get("checks") or []), permission]
         preflight["blocks"] = [*list(preflight.get("blocks") or []), permission]
         preflight["ready"] = False
+    else:
+        # 权限门槛通过后才做集群执行预检：复用 automation preflight（与
+        # create_run 同一入口校验），覆盖 Worker 在线、命令 Agent、磁盘/
+        # 内存准入、高级执行参数（preparations/sharding）Worker 能力与
+        # retry 策略——聊天预检不允许比最终创建更宽松（ADR 0012）。
+        execution = workflow_execution_readiness_block(draft, workspace, request)
+        if execution is not None:
+            preflight["checks"] = [*list(preflight.get("checks") or []), execution]
+            preflight["blocks"] = [*list(preflight.get("blocks") or []), execution]
+            preflight["ready"] = False
     return preflight
 
 
@@ -279,6 +289,37 @@ _WORKFLOW_CAPABILITY_LABELS: dict[str, str] = {
     "build.execute": "启动构建（build.execute）",
     "build.cancel": "取消构建（build.cancel）",
 }
+
+
+def workflow_execution_readiness_block(
+    draft: dict[str, Any], workspace: dict[str, Any], request: Any = None
+) -> dict[str, Any] | None:
+    """把 automation preflight（create 的权威校验）作为聊天预检的一部分。
+
+    资源级 lookups 只回答"分享/设备/AOA/套件是否存在"，这里让最终
+    ``create_run`` 会在集群侧做的全部准入校验原样跑一遍；任何 ValueError
+    （含 MachineAuthorityError）转成阻塞项而不是异常，保证预检摘要完整。
+    """
+    from features.auth import get_authenticated_user, is_elevated
+    from features.automation import get_automation_service
+
+    principal = get_authenticated_user(request) if request is not None else None
+    elevated = bool(is_elevated(request)) if request is not None else False
+    try:
+        get_automation_service().preflight(
+            run_body_from_draft(draft, workspace),
+            principal=principal,
+            elevated=elevated,
+        )
+    except ValueError as exc:
+        return {"stage": "execution", "ok": False, "reason": str(exc)}
+    except Exception as exc:  # 基础设施异常：按依赖不可用阻塞，而非崩溃
+        return {
+            "stage": "execution",
+            "ok": False,
+            "reason": f"执行预检暂不可用（依赖服务异常）：{exc}",
+        }
+    return None
 
 
 def workflow_permission_block(
@@ -304,8 +345,15 @@ def workflow_permission_block(
     principal = get_authenticated_user(request)
     if principal is None:
         return None
+    # human-only 是创建边界：机器主体在预检期就显示阻塞，而不是预检
+    # Ready 后由 create_run 拒绝（ADR 0012）。
     if is_machine_principal(principal) or principal.role in {AGENT_ROLE, "worker_service"}:
-        return None
+        return {
+            "stage": "permission",
+            "ok": False,
+            "reason": "ATS 工作流只能由人类账号创建（human-only）；"
+                      "当前会话是机器身份（Agent/Worker），预检不通过。",
+        }
     if is_elevated(request):
         return None
     test_plan = run_body_from_draft(draft, workspace).get("test_plan")

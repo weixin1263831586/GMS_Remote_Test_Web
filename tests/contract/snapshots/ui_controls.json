@@ -60,6 +60,7 @@
       "refreshLunchOptionsForced",
       "refreshSelectedBuildLog",
       "refreshSelectedEvents",
+      "releaseRunReservation",
       "removeTestPlanStep",
       "renderBuildLog",
       "renderEventLog",

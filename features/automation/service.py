@@ -589,10 +589,24 @@ class AutomationService:
         self.get_run(run_id)
         return self.orchestrator(executor_name).release_completed_resources(run_id)
 
-    def retry_run(self, run_id: str):
+    def retry_run(
+        self,
+        run_id: str,
+        principal: CurrentUser | None = None,
+        *,
+        elevated: bool = False,
+    ):
         old = self.get_run(run_id)
         if old.get('status') not in TERMINAL_STATUSES:
             raise ValueError('Only terminal automation runs can be retried')
+        # ADR 0012: Retry 是一次新的执行授权。按**当前**主体与提权状态重新
+        # 计算能力集合并校验，旧 Run 的能力快照仅作审计参考，不自动成为新
+        # Run 的授权依据——否则提权过期或权限收回后仍可通过 Retry 复用
+        # 历史高权限快照。
+        retry_plan = json.loads(old['test_plan_json'])
+        granted_capabilities = automation_granted_capabilities(
+            principal, retry_plan, elevated=elevated
+        )
         create_request = AutomationRunCreateRequest(
             profile_id=old['profile_id'],
             source_type=old['source_type'],
@@ -616,10 +630,9 @@ class AutomationService:
         run_data['worker_id'] = old.get('worker_id', '')
         run_data['retry_of_run_id'] = old['id']
         run_data['retry_limit'] = str(RetryPolicy.model_validate(
-            json.loads(old['test_plan_json']).get('retry_policy') or {}
+            retry_plan.get('retry_policy') or {}
         ).max_retries)
-        # Retry 继承原 run 的能力快照，不重新按当前角色放大（ADR 0012）。
-        run_data['granted_capabilities'] = str(old.get('granted_capabilities', '') or '')
+        run_data['granted_capabilities'] = ",".join(granted_capabilities)
         retry_password = self.get_build_password(run_id)
         encrypted_secrets = {}
         if retry_password:

@@ -291,3 +291,111 @@ class TestFirmwareShareSource:
             return_value=expired,
         ), pytest.raises(ValueError, match="expired"):
             service._prepare_cluster_plan(body, body["test_plan"])
+
+
+# ==================== P0: 冻结约束在规范化草案上校验 ====================
+
+class TestConstraintConflictsOnNormalizedDraft:
+    """回归（深度审核 P0）：模型省略冻结字段同样构成冲突。
+
+    用户原始约束必须在 build_workflow_draft 规范化后的草案上成立：
+    省略 = 缺失，不允许靠模型漏报把「CTS 工作流」静默降级成 flash-only。
+    """
+
+    CONSTRAINTS = {
+        "device_serial": "66df75a34ebde4a4",
+        "firmware_share_id": "abc12345",
+        "aoa_requested": True,
+        "aoa_profile": "RK3588_wizard",
+        "test_type": "CTS",
+        "connect_wifi": True,
+        "test_module": "CtsCamera",
+        "test_case": "android.hardware.camera2",
+        "version": 1,
+    }
+
+    def test_omitted_test_type_conflicts(self):
+        # 用例 1：用户要求 CTS，模型遗漏 test_type → 拒绝，不能变 flash-only
+        entities = {
+            "device_serials": ["66df75a34ebde4a4"],
+            "firmware_share_id": "abc12345",
+        }
+        conflicts = wd.constraint_conflicts(entities, self.CONSTRAINTS)
+        assert any("测试类型 CTS" in item for item in conflicts)
+
+    def test_omitted_firmware_share_conflicts(self):
+        # 用例 2：用户指定 firmware_share_id，模型不返回该字段 → 冲突
+        entities = {
+            "device_serials": ["66df75a34ebde4a4"],
+            "test_type": "cts",
+        }
+        conflicts = wd.constraint_conflicts(entities, self.CONSTRAINTS)
+        assert any("固件分享 abc12345" in item for item in conflicts)
+
+    def test_omitted_aoa_and_test_conflicts(self):
+        # 用例 3：用户要求 AOA + CTS，模型仅返回固件和设备 → 明确缺阶段
+        entities = {
+            "device_serials": ["66df75a34ebde4a4"],
+            "firmware_share_id": "abc12345",
+        }
+        conflicts = wd.constraint_conflicts(entities, self.CONSTRAINTS)
+        assert any("AOA 恢复" in item for item in conflicts)
+        assert any("测试类型 CTS" in item for item in conflicts)
+
+    def test_omitted_wifi_module_case_conflict(self):
+        entities = {
+            "device_serials": ["66df75a34ebde4a4"],
+            "firmware_share_id": "abc12345",
+            "aoa_profile": "RK3588_wizard",
+            "aoa_requested": True,
+            "test_type": "CTS",
+        }
+        conflicts = wd.constraint_conflicts(entities, self.CONSTRAINTS)
+        assert any("Wi-Fi" in item for item in conflicts)
+        assert any("测试模块 CtsCamera" in item for item in conflicts)
+        assert any("测试用例 android.hardware.camera2" in item for item in conflicts)
+
+    def test_full_echo_has_no_conflict(self):
+        entities = {
+            "device_serials": ["66df75a34ebde4a4"],
+            "firmware_share_id": "abc12345",
+            "aoa_profile": "RK3588_wizard",
+            "aoa_requested": True,
+            "test_type": "cts",
+            "connect_wifi": True,
+            "test_module": "CtsCamera",
+            "test_case": "android.hardware.camera2",
+        }
+        assert wd.constraint_conflicts(entities, self.CONSTRAINTS) == []
+
+    def test_substitution_still_conflicts(self):
+        entities = {
+            "device_serials": ["other-device"],
+            "firmware_share_id": "deadbeef",
+            "test_type": "GTS",
+        }
+        conflicts = wd.constraint_conflicts(entities, self.CONSTRAINTS)
+        assert any("设备 66df75a34ebde4a4" in item for item in conflicts)
+        assert any("固件分享 abc12345" in item for item in conflicts)
+        assert any("测试类型 CTS" in item for item in conflicts)
+
+    def test_stated_test_scope_freeze_and_downgrade_conflict(self):
+        # 用户明确"完整跑 CTS"后模型降级成 flash-only → 范围冲突
+        assert wd._stated_test_scope({"flash_only": True}) == "skip"
+        assert wd._stated_test_scope({"test_module": "CtsCamera"}) == "module"
+        assert wd._stated_test_scope({"test_scope_full": True}) == "full"
+        assert wd._stated_test_scope({}) == ""
+        constraints = wd.freeze_user_constraints(
+            {"test_type": "cts", "test_scope_full": True}
+        )
+        assert constraints["test_scope"] == "full"
+        conflicts = wd.constraint_conflicts(
+            {"test_type": "cts", "flash_only": True}, constraints
+        )
+        assert conflicts == ["测试范围 full（不得更换或遗漏）"]
+
+    def test_unstated_fields_stay_open(self):
+        # 未冻结的字段仍允许模型补全（如模型补出测试模块）
+        constraints = wd.freeze_user_constraints({"test_type": "CTS"})
+        entities = {"test_type": "CTS", "test_module": "CtsCamera"}
+        assert wd.constraint_conflicts(entities, constraints) == []

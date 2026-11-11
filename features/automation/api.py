@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, Response
 from features.auth import (
     AGENT_ROLE,
     CurrentUser,
+    MachineAuthorityError,
     get_authenticated_user,
     is_elevated,
     is_machine_principal,
@@ -548,9 +549,17 @@ async def retry_automation_run(
 ):
     try:
         _require_human_run_access(run_id, request)
-        run = automation_service.retry_run(run_id)
+        # ADR 0012: Retry 重新走当前主体的授权计算（含提权状态），旧 Run
+        # 的能力快照不再自动生效。
+        run = automation_service.retry_run(
+            run_id,
+            principal=require_human_principal(request),
+            elevated=is_elevated(request),
+        )
     except AutomationNotFoundError as exc:
         return error_response(str(exc), 404)
+    except MachineAuthorityError as exc:
+        return error_response(str(exc), 403)
     except ValueError as exc:
         return error_response(str(exc), 409)
     return {'success': True, 'data': run}

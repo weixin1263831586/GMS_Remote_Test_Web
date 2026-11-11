@@ -370,6 +370,44 @@ class EvidenceApiTests(unittest.TestCase):
         self.assertEqual(data["total_chars"], len(payload.decode("utf-8")))
         self.assertFalse(data["truncated"])
 
+    def test_artifact_text_exactly_window_length_is_not_truncated(self):
+        """审核 P2 回归：文本恰好等于 offset+limit 时不得误报 truncated。
+
+        窗口读满即停的优化在"恰好收尾"时无法区分读完与还有后续，必须
+        多探测一个字符；否则客户端按 truncated 翻页只会拿到空窗口。
+        """
+        from features.redmine.evidence_store import owner_evidence_store
+
+        store = owner_evidence_store("owner-a")
+        artifact = store.create_artifact(
+            snapshot_id=self.snapshot["snapshot_id"],
+            attachment_id="776659",
+            filename="exact.log",
+            original_filename="exact.log",
+            content_type="text/plain",
+            kind="log",
+        )
+        rel = f"648526/{self.snapshot['snapshot_id']}/attachments/{artifact['artifact_id']}/exact.log"
+        target = store.resolve_internal(rel)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(("x" * 20).encode("utf-8"))
+        store.update_artifact(artifact["artifact_id"], status="ready", stored_path=rel)
+        url = f"/api/redmine-agent/artifacts/{artifact['artifact_id']}/text"
+
+        page = self.client.get(url + "?offset=0&limit=20", headers={"x-test-owner": "owner-a"})
+        data = page.json()["data"]
+        self.assertEqual(data["text"], "x" * 20)
+        self.assertEqual(data["total_chars"], 20)  # 读完恰好收尾：精确计数
+        self.assertFalse(data["truncated"])
+        self.assertEqual(data["returned_chars"], 20)
+
+        # 有第 21 个字符时同样窗口必须如实报 truncated
+        target.write_bytes(("x" * 21).encode("utf-8"))
+        page = self.client.get(url + "?offset=0&limit=20", headers={"x-test-owner": "owner-a"})
+        data = page.json()["data"]
+        self.assertEqual(data["text"], "x" * 20)
+        self.assertTrue(data["truncated"])
+
     def test_artifact_text_falls_back_to_gb18030(self):
         """utf-8 失败回退 gb18030（replace），中文日志可读。"""
         from features.redmine.evidence_store import owner_evidence_store

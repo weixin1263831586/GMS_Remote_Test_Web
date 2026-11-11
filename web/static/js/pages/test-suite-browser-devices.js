@@ -14,6 +14,10 @@ function renderDevices() {
         return;
     }
 
+    // 执行集合规范化必须先于渲染签名：剔除不可选设备会改变
+    // state.selectedDevices，放在签名计算之后会把剔除前后当成两次渲染。
+    pruneSelectionToExecutableDevices();
+
     // 设备数据签名：数据未变化时跳过整表重建。手动刷新是双次渲染
     // （缓存渲染 + worker refresh 回包渲染），叠加 devices_changed /
     // catch-up 补刷并发触发，同数据重复 innerHTML 重建会造成闪屏。

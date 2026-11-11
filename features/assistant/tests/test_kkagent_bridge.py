@@ -169,3 +169,85 @@ async def test_real_kkagent_cli_turn_returns_a_single_decision():
     result = await bridge.run_turn('{"type":"answer","text":"OK"}', timeout_seconds=60)
     assert result.ok, result.error
     assert result.text.strip()
+
+
+# ==================== 真实 CLI 子进程流（fake binary 走完整 spawn 路径） ====================
+
+FAKE_KKAGENT = r'''#!/usr/bin/env python3
+"""fake kkagent CLI：按真实 stream-json 协议应答，验证桥接的完整子进程链路。"""
+import json
+import sys
+
+args = sys.argv[1:]
+if "config" in args:
+    # restricted_runtime 的隔离策略写入：fake CLI 接受即可
+    sys.exit(0)
+
+resume = ""
+if "--resume" in args:
+    resume = args[args.index("--resume") + 1]
+
+events = [
+    {"type": "system", "subtype": "init", "session_id": "real-session-1"},
+    {"type": "assistant", "message": {"content": [
+        {"type": "text", "text": "先查询设备清单"}]}},
+    {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": "list_devices", "input": {}}]}},
+    {"type": "assistant", "message": {"content": [
+        {"type": "text", "text": json.dumps(
+            {"type": "answer", "text": f"resumed={resume}" if resume else "OK"},
+            ensure_ascii=False)}]}},
+    {"type": "result", "session_id": "real-session-1"},
+]
+for event in events:
+    print(json.dumps(event, ensure_ascii=False), flush=True)
+'''
+
+FAKE_KKAGENT_FAILING = r'''#!/usr/bin/env python3
+import sys
+if "config" in sys.argv[1:]:
+    sys.exit(0)
+print("model upstream disconnected", file=sys.stderr)
+sys.exit(7)
+'''
+
+
+def _install_fake_cli(monkeypatch, tmp_path, body):
+    cli = tmp_path / "kkagent"
+    cli.write_text(body)
+    cli.chmod(0o755)
+    monkeypatch.setattr(bridge, "KKAGENT_BINARY", str(cli))
+    monkeypatch.setattr(bridge, "availability", lambda: {"available": True})
+    # 隔离运行时需要一份操作者模型配置
+    monkeypatch.setenv("GMS_ASSISTANT_KKAGENT_CONFIG", str(tmp_path / "operator.toml"))
+    (tmp_path / "operator.toml").write_text('default_permission_mode = "manual"\n')
+    return cli
+
+
+@pytest.mark.asyncio
+async def test_real_subprocess_stream_json_yields_final_json_decision_and_resume(monkeypatch, tmp_path):
+    """审核 P1：真实 CLI 流事件——多段中间文本、tool_use、最终 JSON 决策。
+
+    走 run_turn 的完整子进程路径（不 mock spawn）：中间叙述不得污染
+    最终决策，tool_use 进 tools_used，session_id 用于下一轮 --resume。
+    """
+    _install_fake_cli(monkeypatch, tmp_path, FAKE_KKAGENT)
+    first = await bridge.run_turn("查询设备", timeout_seconds=30)
+    assert first.ok, first.error
+    decision = json.loads(first.text)
+    assert decision["text"] == "OK"
+    assert first.session_id == "real-session-1"
+    assert first.tools_used == ["list_devices"]
+
+    second = await bridge.run_turn("继续", session_id=first.session_id, timeout_seconds=30)
+    assert second.ok, second.error
+    assert json.loads(second.text)["text"] == "resumed=real-session-1"
+
+
+@pytest.mark.asyncio
+async def test_real_subprocess_nonzero_exit_maps_to_process_error(monkeypatch, tmp_path):
+    _install_fake_cli(monkeypatch, tmp_path, FAKE_KKAGENT_FAILING)
+    result = await bridge.run_turn("查询设备", timeout_seconds=30)
+    assert not result.ok
+    assert result.error_code == "process_error"
+    assert "退出码 7" in result.error

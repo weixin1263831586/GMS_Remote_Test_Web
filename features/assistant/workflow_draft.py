@@ -30,6 +30,11 @@ _FLASH_HINT_RE = re.compile(
     r"烧写|烧录|刷机|刷入|flash|固件|firmware", re.IGNORECASE
 )
 _AOA_HINT_RE = re.compile(r"\baoa\b|AOA配置|AOA 恢复|aoa_profile|模拟点击|usb.?debug", re.IGNORECASE)
+_FULL_SCOPE_RE = re.compile(
+    r"完整\s*(?:跑|测试|执行|回归)|全量\s*(?:跑|测试|执行|回归)|整个\s*(?:suite|套件)"
+    r"|full\s*(?:suite|run|regression)",
+    re.IGNORECASE,
+)
 _SHARE_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 _SHARE_ID_RE = re.compile(r"/api/firmware-shares/([0-9a-f]{8,64})/download", re.IGNORECASE)
 _SHARE_ID_BARE_RE = re.compile(
@@ -95,6 +100,7 @@ def extract_workflow_entities(message: str) -> dict[str, Any]:
             re.search(r"报告分析|分析报告|失败分析", text, re.IGNORECASE)
         ),
         "flash_only": bool(re.search(r"只\s*烧写|仅\s*烧写|不(跑|执行|做)测试", text, re.IGNORECASE)),
+        "test_scope_full": bool(_FULL_SCOPE_RE.search(text)),
     }
     url_match = _SHARE_URL_RE.search(text)
     if url_match:
@@ -130,6 +136,19 @@ def _extract_aoa_profile(text: str) -> str:
 
 # ==================== 原始用户约束冻结 ====================
 
+def _stated_test_scope(entities: dict[str, Any]) -> str:
+    """从显式实体推导冻结的测试范围：skip > module > full；未提及为空。
+
+    优先级与 build_workflow_draft 的 scope 推导一致，保证冻结值与草案
+    规范化值语义相同；只有用户显式表达过的范围才会被冻结。
+    """
+    if entities.get("flash_only"):
+        return "skip"
+    if entities.get("test_module"):
+        return "module"
+    return "full" if entities.get("test_scope_full") else ""
+
+
 def freeze_user_constraints(
     entities: dict[str, Any], previous: dict[str, Any] | None = None
 ) -> dict[str, Any]:
@@ -149,6 +168,8 @@ def freeze_user_constraints(
         "flash_only": bool(entities.get("flash_only")),
         "connect_wifi": bool(entities.get("connect_wifi")),
         "test_module": str(entities.get("test_module") or ""),
+        "test_case": str(entities.get("test_case") or ""),
+        "test_scope": _stated_test_scope(entities),
     }
     constraints = {
         key: value for key, value in (previous or {}).items()
@@ -165,33 +186,46 @@ def freeze_user_constraints(
 def constraint_conflicts(
     entities: dict[str, Any], constraints: dict[str, Any]
 ) -> list[str]:
-    """模型草案实体与冻结约束的冲突清单（空列表 = 无冲突）。"""
+    """模型实体（规范化为草案后）与冻结约束的冲突清单（空列表 = 无冲突）。
+
+    比较在 build_workflow_draft 的规范化结果上进行：被冻结的字段必须在
+    草案上存在且相等——模型省略冻结字段同样构成冲突，不允许靠漏报绕过
+    用户原始约束（如用户要求 CTS 而模型只输出烧写实体）。只有用户显式
+    修改（重新规划规则触发约束重新冻结）才允许变更冻结值。
+    """
+    draft = build_workflow_draft(entities)
     conflicts: list[str] = []
-    serials = [str(item) for item in entities.get("device_serials") or []]
+    serial = str((draft.get("device") or {}).get("serial") or "")
     stated_serial = str(constraints.get("device_serial") or "")
-    if stated_serial and serials and stated_serial not in serials:
-        conflicts.append(f"设备 {stated_serial}（不得自动替换）")
+    if stated_serial and serial != stated_serial:
+        conflicts.append(f"设备 {stated_serial}（不得自动替换或遗漏）")
+    share_id = str((draft.get("firmware") or {}).get("share_id") or "")
     stated_share = str(constraints.get("firmware_share_id") or "")
-    if stated_share and entities.get("firmware_share_id") \
-            and str(entities["firmware_share_id"]) != stated_share:
-        conflicts.append(f"固件分享 {stated_share}（不得换成其他来源）")
+    if stated_share and share_id != stated_share:
+        conflicts.append(f"固件分享 {stated_share}（不得换成其他来源或遗漏）")
+    aoa = draft.get("aoa") or {}
     stated_profile = str(constraints.get("aoa_profile") or "")
-    if stated_profile and entities.get("aoa_profile") \
-            and str(entities["aoa_profile"]) != stated_profile:
-        conflicts.append(f"AOA 配置 {stated_profile}（不得换成其他配置）")
-    if constraints.get("aoa_requested") and entities.get("aoa_profile") is not None \
-            and not entities.get("aoa_profile") and not entities.get("aoa_requested"):
+    if stated_profile and str(aoa.get("profile") or "") != stated_profile:
+        conflicts.append(f"AOA 配置 {stated_profile}（不得换成其他配置或遗漏）")
+    if constraints.get("aoa_requested") and aoa.get("mode") != "user_build_recovery":
         conflicts.append("用户明确要求 AOA 恢复（不得静默关闭）")
+    test = draft.get("test") or {}
     stated_type = str(constraints.get("test_type") or "")
-    if stated_type and entities.get("test_type") \
-            and str(entities["test_type"]).upper() != stated_type:
-        conflicts.append(f"测试类型 {stated_type}（不得更换）")
-    if constraints.get("flash_only") and entities.get("flash_only") is False:
+    if stated_type and str(test.get("type") or "") != stated_type:
+        conflicts.append(f"测试类型 {stated_type}（不得更换或遗漏）")
+    if constraints.get("flash_only") and str(test.get("scope") or "") != "skip":
         conflicts.append("用户明确只烧写不测试（不得追加测试阶段）")
+    stated_scope = str(constraints.get("test_scope") or "")
+    if stated_scope and str(test.get("scope") or "") != stated_scope:
+        conflicts.append(f"测试范围 {stated_scope}（不得更换或遗漏）")
     stated_module = str(constraints.get("test_module") or "")
-    if stated_module and entities.get("test_module") \
-            and str(entities["test_module"]) != stated_module:
-        conflicts.append(f"测试模块 {stated_module}（不得更换）")
+    if stated_module and str(test.get("module") or "") != stated_module:
+        conflicts.append(f"测试模块 {stated_module}（不得更换或遗漏）")
+    stated_case = str(constraints.get("test_case") or "")
+    if stated_case and str(test.get("case") or "") != stated_case:
+        conflicts.append(f"测试用例 {stated_case}（不得更换或遗漏）")
+    if constraints.get("connect_wifi") and not test.get("connect_wifi"):
+        conflicts.append("用户明确要求连接 Wi-Fi（不得静默关闭）")
     return conflicts
 
 
@@ -331,6 +365,7 @@ def _entities_from_draft(draft: dict[str, Any]) -> dict[str, Any]:
         "flash_only": (test.get("scope") or "") == "skip",
         "connect_wifi": bool(test.get("connect_wifi")),
         "test_module": str(test.get("module") or ""),
+        "test_case": str(test.get("case") or ""),
     }
 
 
@@ -369,8 +404,8 @@ def draft_blocks(draft: dict[str, Any]) -> list[dict[str, Any]]:
     if test.get("connect_wifi") and (test.get("scope") or "full") == "skip":
         blocks.append({
             "stage": "test",
-            "reason": "「连接 WiFi」依赖测试阶段执行（preparations）；纯烧写工作流"
-                      "不执行测试，请去掉连接 WiFi 要求或允许执行测试。",
+            "reason": "「启用 Wi-Fi」依赖测试阶段执行（preparations）；纯烧写工作流"
+                      "不执行测试，请去掉 Wi-Fi 要求或允许执行测试。",
         })
     return blocks
 
@@ -393,7 +428,7 @@ def summarize_draft(draft: dict[str, Any], preflight: dict[str, Any] | None = No
     if int(test.get("retry_count") or 0):
         lines.append(f"- 失败 retry: {test['retry_count']} 次")
     if test.get("connect_wifi"):
-        lines.append("- 测试前连接 WiFi: 是")
+        lines.append("- 测试前启用 Wi-Fi（仅启用，不保证连接指定网络）")
     if preflight:
         for item in preflight.get("checks") or []:
             status = "通过" if item.get("ok") else "阻塞"

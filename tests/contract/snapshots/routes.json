@@ -447,6 +447,12 @@
     "methods": [
       "POST"
     ],
+    "path": "/api/automation/runs/{run_id}/release-reservation"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
     "path": "/api/automation/runs/{run_id}/retry"
   },
   {

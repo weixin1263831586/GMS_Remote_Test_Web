@@ -554,6 +554,34 @@ function selectedBurnableDeviceIds() {
     );
 }
 
+let _pruningSelection = false;
+
+function pruneSelectionToExecutableDevices() {
+    // state.selectedDevices 承担两种语义：历史勾选记忆（设备恢复可选后
+    // 勾选自动恢复）与实际执行目标。执行目标必须是当前库存里至少本机
+    // 可操作（isSelectableWorkspaceDevice：ADB online 或本机 fastboot/
+    // loader，供解锁/bootloader 操作）的设备；设备转为占用、失联、离线
+    // 或已从库存消失后，渲染前把它从集合移除，避免"勾选已消失但提交仍
+    // 包含"的隐性选中。恢复记忆由 loadDevices 从 GmsWorkspace.device_ids
+    // 重新加回，这里是同一语义的执行侧兜底。设备清单未加载时不动集合，
+    // 防止把恢复流程误清空。操作门槛仍由各入口的 validate* 函数把关
+    // （如 fastboot 设备不可执行 ADB 测试）。
+    if (_pruningSelection || state.devices.length === 0) return;
+    _pruningSelection = true;
+    try {
+        const actionable = new Set(selectedDeviceIdsMatching(isSelectableWorkspaceDevice));
+        const stale = Array.from(state.selectedDevices).filter(id => !actionable.has(id));
+        if (stale.length === 0) return;
+        for (const id of stale) state.selectedDevices.delete(id);
+        window.GmsWorkspace?.update(
+            {device_ids: Array.from(state.selectedDevices)},
+            {source: 'selection-prune', persist: false}
+        );
+    } finally {
+        _pruningSelection = false;
+    }
+}
+
 function fetchDevicesForWorker(workerId, forceRefresh, source) {
     const requestKey = `${workerId}\n${forceRefresh ? 'force' : 'cached'}`;
     const existing = deviceRefreshFlights.get(requestKey);
