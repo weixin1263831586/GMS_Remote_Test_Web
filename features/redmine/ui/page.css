@@ -1,4 +1,4 @@
-    :root { color-scheme: dark; --bg:#0b0d12; --panel:#131720; --panel2:#191f2b; --border:#2b3342; --text:#e8edf7; --muted:#96a1b5; --primary:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --high:#ef4444; --medium:#f59e0b; --low:#6b7280; }
+    :root { color-scheme: dark; --bg:#0b101a; --panel:#151d2a; --panel2:#1d293a; --border:#2b384b; --text:#eaf0f9; --muted:#91a1b7; --primary:#4f8cff; --ok:#39c994; --warn:#e7b854; --bad:#f06b78; --high:#ef4444; --medium:#f59e0b; --low:#6b7280; }
     * { box-sizing: border-box; }
     html { scrollbar-gutter: stable; overflow-y: scroll; overflow-x: hidden; scroll-padding-top:56px; }
     body { min-height:100vh; margin:0; display:flex; flex-direction:column; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
@@ -42,7 +42,7 @@
     .modal { display:none; position:fixed; inset:0; width:100vw; background:rgba(0,0,0,0.7); justify-content:center; align-items:center; z-index:10000; padding:clamp(8px,2.5vw,20px); overflow:hidden; overscroll-behavior:contain; }
     .modal.show { display:flex; }
     .modal-content { background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.4); max-width:400px; width:100%; max-height:min(85vh,calc(100dvh - 16px)); min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
-    .modal-header { background:linear-gradient(135deg,#667eea,#764ba2); border-bottom:1px solid var(--border); padding:12px 16px; display:flex; justify-content:space-between; align-items:center; gap:10px; min-width:0; }
+    .modal-header { background:var(--panel); border-bottom:1px solid var(--border); padding:12px 16px; display:flex; justify-content:space-between; align-items:center; gap:10px; min-width:0; }
     .modal-title { color:#fff; font-size:15px; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .modal-close { color:#fff; font-size:22px; cursor:pointer; line-height:1; background:none; border:none; padding:0; height:auto; }
     .modal-close:hover { color:#ccc; }
@@ -556,3 +556,6 @@
     .workbench-actions { display:flex; flex-wrap:wrap; gap:8px; border-top:1px solid var(--border); padding-top:10px; }
     .workbench-actions button { font-size:12px; }
     @media (max-width:900px) { .workbench-grid { grid-template-columns:1fr; } .kv-line { grid-template-columns:1fr; } }
+
+/* Harmonized shell/embedded UI colors. Preserve page-specific layout and interaction rules. */
+::selection { background: rgba(79,140,255,.32); color: var(--text); }

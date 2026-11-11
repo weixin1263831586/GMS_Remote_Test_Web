@@ -1,4 +1,4 @@
-:root{color-scheme:dark;--bg:#11151c;--panel:#1a202a;--panel-2:#202735;--border:#303949;--text:#e6eaf0;--muted:#96a0af;--blue:#5791ff;--green:#45c486;--yellow:#e6b450;--red:#f06a75;--shadow:0 12px 36px rgba(0,0,0,.25)}
+:root{color-scheme:dark;--bg:#0b101a;--panel:#151d2a;--panel-2:#1d293a;--border:#2b384b;--text:#eaf0f9;--muted:#91a1b7;--blue:#4f8cff;--green:#39c994;--yellow:#e7b854;--red:#f06b78;--shadow:0 12px 36px rgba(0,0,0,.25)}
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font:13px/1.45 Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
 button,input,textarea,select{font:12px/1.4 Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
@@ -107,3 +107,6 @@ html,body{height:100%;min-height:0;overflow:hidden}
 
 /* 每个控制台会话面板独立占满 console-panel，保证输入行不被 overflow 裁掉。 */
 .console-session{flex:1;min-height:0;display:flex;flex-direction:column}
+
+/* Harmonized shell/embedded UI colors. Preserve page-specific layout and interaction rules. */
+::selection { background: rgba(79,140,255,.32); color: var(--text); }

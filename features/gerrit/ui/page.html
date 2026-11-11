@@ -6,7 +6,7 @@
   <title>Gerrit 看板</title>
   <script src="/static/js/utils.js?v=20260601-01"></script>
   <style>
-    :root { color-scheme: dark; --bg:#0b0d12; --panel:#131720; --panel2:#191f2b; --border:#2b3342; --text:#e8edf7; --muted:#96a1b5; --primary:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; }
+    :root { color-scheme: dark; --bg:#0b101a; --panel:#151d2a; --panel2:#1d293a; --border:#2b384b; --text:#eaf0f9; --muted:#91a1b7; --primary:#4f8cff; --ok:#39c994; --warn:#e7b854; --bad:#f06b78; }
     * { box-sizing:border-box; }
     body { margin:0; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
     html { scrollbar-gutter:stable; overflow-y:scroll; scroll-padding-top:86px; }
@@ -102,7 +102,7 @@
     .modal { display:none; position:fixed; inset:0; width:100vw; z-index:10000; background:rgba(0,0,0,.68); align-items:center; justify-content:center; padding:clamp(8px,2.5vw,20px); overflow:hidden; overscroll-behavior:contain; }
     .modal.show { display:flex; }
     .modal-content { width:min(760px, 96vw); max-height:min(85vh,calc(100dvh - 16px)); min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden; box-shadow:0 18px 40px rgba(0,0,0,.4); }
-    .modal-header { display:flex; justify-content:space-between; align-items:center; gap:10px; min-width:0; padding:15px 20px; background:linear-gradient(135deg,#667eea,#764ba2); border-bottom:1px solid var(--border); }
+    .modal-header { display:flex; justify-content:space-between; align-items:center; gap:10px; min-width:0; padding:15px 20px; background:var(--panel); border-bottom:1px solid var(--border); }
     .modal-header h2 { margin:0; font-size:16px; font-weight:600; color:#fff; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .modal-header button.secondary { background:rgba(255,255,255,.15); color:#fff; }
     .modal-header button.secondary:hover { background:rgba(255,255,255,.25); }

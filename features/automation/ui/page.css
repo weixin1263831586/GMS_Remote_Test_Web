@@ -1,19 +1,19 @@
 :root {
     color-scheme: dark;
-    --bg: #0f1117;
-    --panel: #171a22;
-    --panel-2: #1d212b;
-    --panel-3: #222731;
-    --line: #303642;
-    --line-strong: #414957;
-    --text: #e7eaf0;
-    --muted: #9299a8;
-    --subtle: #737b8c;
+    --bg: #0b101a;
+    --panel: #151d2a;
+    --panel-2: #1d293a;
+    --panel-3: #243246;
+    --line: #2b384b;
+    --line-strong: #3b4b60;
+    --text: #eaf0f9;
+    --muted: #91a1b7;
+    --subtle: #7f91a9;
     --primary: #4f8cff;
-    --primary-hover: #75a4ff;
-    --warn: #e5b94f;
-    --danger: #ef6572;
-    --ok: #48c78e;
+    --primary-hover: #82b0ff;
+    --warn: #e7b854;
+    --danger: #f06b78;
+    --ok: #39c994;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -1039,3 +1039,6 @@ body.overlay-open { overflow: hidden; }
     .field-hint,
     .field-status { line-height: 1.2; }
 }
+
+/* Harmonized shell/embedded UI colors. Preserve page-specific layout and interaction rules. */
+::selection { background: rgba(79,140,255,.32); color: var(--text); }

@@ -35,31 +35,31 @@
 
 :root {
     /* 主色调 - 现代蓝色渐变 */
-    --primary-color: #3b82f6;
-    --primary-light: #60a5fa;
-    --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --primary-color: #4f8cff;
+    --primary-light: #82b0ff;
+    --primary-gradient: linear-gradient(135deg, #3778e9 0%, #2457ab 100%);
 
     /* 功能色 */
-    --success-color: #10b981;
-    --danger-color: #ef4444;
-    --warning-color: #f59e0b;
-    --info-color: #06b6d4;
+    --success-color: #39c994;
+    --danger-color: #f06b78;
+    --warning-color: #e7b854;
+    --info-color: #48b9d6;
 
     /* 背景色 - 提高对比度 */
-    --dark-bg: #0a0a0f;
-    --darker-bg: #050508;
-    --light-bg: #141419;
-    --lighter-bg: #1c1c24;
-    --card-bg: #111116;
+    --dark-bg: #0b101a;
+    --darker-bg: #090e17;
+    --light-bg: #151d2a;
+    --lighter-bg: #1d293a;
+    --card-bg: #121b29;
 
     /* 边框和分割线 */
-    --border-color: #2a2a35;
-    --border-light: #3a3a45;
+    --border-color: #2b384b;
+    --border-light: #3b4b60;
 
     /* 文字色 - 提高对比度和可读性 */
-    --text-primary: #fff;
-    --text-secondary: #c0c0d0;
-    --text-muted: #9090a0;
+    --text-primary: #eaf0f9;
+    --text-secondary: #b9c6d8;
+    --text-muted: #91a1b7;
 
     /* 阴影 */
     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
@@ -192,7 +192,7 @@ body {
 /* ==================== Sidebar ==================== */
 .sidebar {
     width: 130px;
-    background: linear-gradient(180deg, var(--light-bg) 0%, var(--darker-bg) 100%);
+    background: linear-gradient(180deg, #151f2e 0%, var(--darker-bg) 100%);
     border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
@@ -471,7 +471,7 @@ body {
 }
 
 .sidebar-item.active {
-    background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
+    background: linear-gradient(135deg, rgba(79, 140, 255, 0.18) 0%, rgba(79, 140, 255, 0.07) 100%);
     color: var(--primary-light);
     font-weight: 600;
     box-shadow: var(--shadow-sm);
@@ -1697,3 +1697,10 @@ body {
     display: flex;
 }
 
+
+/* Shared visual language: do not change the page-header positioning contract here. */
+::selection { background: rgba(79, 140, 255, .32); color: var(--text-primary); }
+.sidebar-item:hover { transform: none; }
+.sidebar-item.active { box-shadow: inset 0 0 0 1px rgba(79, 140, 255, .10); }
+.page-stat-card { background: var(--card-bg); border-color: var(--border-color); }
+.page-stat-card:where(button):hover { border-color: var(--primary-color); }
