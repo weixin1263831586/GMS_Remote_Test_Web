@@ -18,7 +18,7 @@
 在 Web UI 中由管理员铸造一次性配对码（enrollment code）：
 
 - **一次性**：兑换成功即从服务端删除，不可重复使用。
-- **5 分钟 TTL**：过期作废（服务端 `ENROLLMENT_TTL_MINUTES = 5`）。
+- **默认 5 分钟 TTL**：过期作废（服务端 `ENROLLMENT_TTL_MINUTES = 5`），可在签发时指定 1–30 分钟。
 - 配套属性在铸造时确定，兑换方无法自选：scopes（权限范围，
   取自平台 `AGENT_SCOPES` 词表，如 `devices.read`、`tests.execute`、
   `jobs.read` 等）。Web UI 铸造页的默认勾选集合为：`devices.read`、`devices.lease`、`devices.use_leased`、
@@ -160,4 +160,4 @@ gms-agent rollback <version>
 - [docs/agent/profiles.md](profiles.md) — profile 布局
 - [docs/agent/troubleshooting.md](troubleshooting.md) — enrollment/TLS/profile 常见故障
 - [../../agent/gms-remote-test/templates/README.md](../../agent/gms-remote-test/templates/README.md) — 安装后使用
-- 根 README「一键安装与 Enrollment」「包完整性与更新链」两节
+- [平台概览与快速开始](../../README.md)

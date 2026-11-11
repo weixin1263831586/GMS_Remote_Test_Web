@@ -29,7 +29,7 @@ Android Device (USB) → Source Host (usbipd-win / linux usbip) → USB/IP TCP 3
 | Recovery | 仅支持仍提供 ADB 的 Recovery | 支持 |
 | Fastboot / Fastbootd | 不支持 | 支持 |
 | RockUSB Loader / MaskROM | 不支持 | 支持 |
-| 固件/GSI 烧写 | 不支持 | 支持（完整烧写在物理 Source 端执行） |
+| 固件/GSI 烧写 | 不支持 | 按来源与流程区分；Windows Source 支持源端完整烧写，Linux Source full flash 尚不支持，见[烧写边界](firmware-flashing.md) |
 | Bootloader OEM 锁定/解锁 | 不支持 | 支持 |
 | 系统重启 / USB 重枚举 | 有限，ADB 消失后代理链路中断 | 支持，平台按来源与 BUSID 自动重连 |
 | 多设备 / 多 Worker | 强，设备级选择、授权和租约 | 强，BUSID 分配和物理设备池化 |

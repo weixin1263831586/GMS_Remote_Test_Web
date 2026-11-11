@@ -119,18 +119,16 @@ Password login (`gms-rt-auth-login`) and admin elevation
    `gms_rt_describe` answers from cache.
 4. **Compact discovery**: `gms_rt_commands` renders one line per command
    and omits the CLI's no-information `<name> [arguments]` fallback usage
-   strings, instead of asking agents to pull `gms-rt-system-commands --json`
-   (~6x larger). `gms_rt_run("system-docs")` renders the ~24KB API docs
-   listing as one line per endpoint (~80% smaller).
-5. **Compact jobs output** (v0.6.0): `gms_rt_jobs_list` renders one line
+   strings. `gms_rt_run("system-docs")` renders the API listing as one line
+   per endpoint; output size depends on the current catalog.
+5. **Compact jobs output**: `gms_rt_jobs_list` renders one line
    per job (`job_id | status | attempt | devices | module | case | created |
    finished | error`), and `gms_rt_jobs_status` / `gms_rt_jobs_wait` trim
-   the single-job payload to key fields — ~60-80% fewer tokens on real
-   payloads. Error envelopes are never re-rendered.
+   the single-job payload to key fields. Error envelopes are never re-rendered.
 6. **Typed tools for hot paths** (`context`, `devices`, `device_console`,
    `device_info`, `device_wait`, `auth_status`, `test_start`
    including retry mode, `jobs_list`, `jobs_*`, `reports_list`, `shell`,
-   `auth_elevate`, `burn_firmware`) so agents don't pay schema-guessing
+   `burn_firmware`) so agents don't pay schema-guessing
    round trips.
 
 ## Recommended agent workflow

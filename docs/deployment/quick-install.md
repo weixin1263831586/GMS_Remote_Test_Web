@@ -6,7 +6,7 @@
 
 Controller 与 Worker 推荐环境：
 
-- Ubuntu / Debian 系 Linux
+- 受测 Controller / Worker 宿主为 Ubuntu 22.04；其他环境的限制见[支持矩阵](../platform-support-matrix.md)
 - Python 3.10+
 - systemd
 - OpenSSH Client / Server
@@ -174,14 +174,14 @@ curl -sk https://localhost:5001/api/system/health/ready
 curl -sk https://localhost:5001/api/system/health
 ```
 
-3. **TLS**：安装器在证书目录生成自签证书（`configs/secrets/certs` 下的 `gms-local.crt` 与 `gms-local.key`）。浏览器首次访问会出现不受信任警告；如需受控信任，请把 `gms-local.crt` 分发给客户端，不要在公网关闭 TLS 校验。
+3. **TLS**：安装器当前生成 `configs/secrets/certs/gms-local.crt` 与 `gms-local.key`，默认是叶子自签证书；此模式应经可信渠道分发自签证书。部署为 CA 签发模式时分发签发 CA，私钥始终留在服务端。Agent 的 CA 分发端点会优先使用 `gms-local-ca.crt`，否则兼容自签证书。集群页面打包 Worker 默认要求独立 `gms-local-ca.crt`，不能仅凭 Web HTTPS 已启动判断满足该条件，见 [Worker 部署](worker.md)。
 4. **本地 Worker**：安装器同时创建本地 Worker 服务 `gms-web-app-local-worker.service`，配置位于 `<安装目录>/data/local-worker/config.json`。确认它处于运行状态：
 
 ```bash
 systemctl status gms-web-app-local-worker.service
 ```
 
-5. **Agent installer URL**：Controller 暴露 `https://<HOST_IP>:5001/api/agent/install.sh`，供远端 Agent 一行安装与配对，详见[Worker 部署](worker.md)。
+5. **Agent installer URL**：Controller 暴露 `https://<HOST_IP>:5001/api/agent/install.sh`，供远端 Agent 安装与配对，详见[Agent 安装](../agent/installation.md)。
 
 ## 相关文档
 

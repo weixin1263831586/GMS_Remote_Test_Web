@@ -49,7 +49,7 @@ Worker 与 Controller 之间通过带 Token 的 HTTP(S) API 进行注册、Heart
 
 - **浏览器 → Controller**：HTTPS + Session Cookie（含 CSRF 防护），WebSocket 用于日志、进度与终端。
 - **Agent → Controller**：`gms-rt` CLI / MCP，携带 Agent Service Token；破坏性操作需要一次性 Approval Token。
-- **Controller ↔ Worker**：带 Worker Token 的 REST 注册 / Heartbeat / 命令轮询 / ACK，按 session 与 generation 管理重连。
+- **Controller ↔ Worker**：带 Worker Token 的 REST 注册 / Heartbeat / 命令轮询 / ACK，按 session 与 generation 管理重连。Controller 将类型化命令入队，Worker 拉取后执行并回报；需要 SSH 的主机操作仍受 ADR 0004 的统一执行器约束。
 - **Worker ↔ Device**：USB/IP 导入后按本地 USB 设备语义访问（adb server / fastboot / upgrade_tool / Tradefed）。
 - **Controller ↔ 构建服务器**：SSH Backend + 受控 Build Template（见 [ADR-0004](adr/0004-ssh-execution-boundary.md)）。
 - **诊断读模型**：Web / CLI / MCP / Assistant 消费统一的 DiagnosisReadModel（canonical 七节，serve-time 投影、不落库，见 [AI 治理](ai-governance.md)）。

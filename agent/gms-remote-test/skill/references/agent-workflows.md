@@ -296,7 +296,7 @@ gms_rt_logcat(device="RK3562GMS7", args="-s ActivityManager")
 ```
 gms_rt_commands(group="jobs")      # one line per command, filtered
 gms_rt_describe(command="devices-wait")   # risk/usage; close-match suggestions
-gms_rt_run(system-docs)            # API endpoints, one line each (~80% smaller)
+gms_rt_run(system-docs)            # API endpoints, one line each
 ```
 
 ## 7. Error recovery cheat sheet

@@ -58,9 +58,10 @@ gms-agent doctor --client codex --json
 `--client auto` requires at least one detected Codex, Kimi, or kkagent when
 enrollment is requested. On a CLI-only host, either name the client that will
 own the profile explicitly or omit the paircode to install only the runtime.
-When multiple clients are configured, direct `gms-rt-*` calls must set the
-exact profile, for example `GMS_RT_PROFILE=codex-host-uid
-gms-rt-system-selfcheck --json`; the installer prints every valid choice.
+For direct `gms-rt-*` calls, select `GMS_RT_PROFILE=NAME` when profiles are
+ambiguous. Equivalent client aliases may share a direct context only when
+Controller, TLS policy and token contents match. MCP selection remains
+per-client fail-closed; the installer prints valid profile choices.
 
 TOFU is restricted to trusted lab networks where a CA cannot be provisioned:
 
@@ -173,17 +174,15 @@ described in [references/api-catalog.md](references/api-catalog.md).
   [references/agent-workflows.md](references/agent-workflows.md)
 - installation, profiles, Codex/Kimi/kkagent registration:
   [references/agent-integration.md](references/agent-integration.md)
-- repository ownership, architecture, and test routing:
+- repository ownership, architecture, test routing, and maintenance checks:
   [references/project-map.md](references/project-map.md)
-- code-change verification rules:
-  [references/project-maintenance.md](references/project-maintenance.md)
 - daily-brief analysis contract (triage workflow, output schema, safety):
   [references/redmine-daily-triage.md](references/redmine-daily-triage.md)
 
 ## Maintain this repository
 
-Before editing application code, read `project-map.md`,
-`project-maintenance.md`, and the nearest `AGENTS.md`. Trace FastAPI routes
+Before editing application code, read `references/project-map.md` and the
+nearest `AGENTS.md`. Trace FastAPI routes
 through their services, preserve public contracts, and run checks matched
 to the changed layer.
 

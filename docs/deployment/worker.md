@@ -1,44 +1,10 @@
 # Worker 部署
 
-本文说明 Controller 侧的 Agent / Worker 部署入口：Agent enrollment、集群 Worker 安装，以及 Worker Token 以 0600 文件传递的安全要求。
+本文说明集群 Worker 的安装入口、配置与认证。Worker 通过带 Token 的 HTTPS 注册、心跳、轮询命令和回报结果。
 
-## Agent 一键安装与 Enrollment
-
-Controller 暴露安装入口：
-
-```text
-/api/agent/install.sh
-```
-
-先由已登录用户在 Web 端生成一次性 Enrollment Code（配对码），再由管理员
-带外分发 Controller CA。生产安装从第一个字节开始严格校验 TLS：
-
-```bash
-export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt
-curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL \
-  https://CONTROLLER:5001/api/agent/install.sh | \
-  bash -s -- --paircode-prompt --client auto
-```
-
-`--paircode-prompt` 从控制终端静默读取配对码。自动化可改用指向 `0600`
-文件的 `--paircode-file`。可信实验局域网可使用 TOFU 回退：
-
-```bash
-curl -k -fsSL https://CONTROLLER:5001/api/agent/install.sh | \
-  bash -s -- --paircode-prompt --client auto
-```
-
-受控实验环境若使用自签名证书，可以按部署策略使用 installer 支持的 insecure bootstrap；不要在公网或不可信网络中关闭 TLS 校验。
-
-安装完成后，Agent 通过 `GMS_AUTH_TOKEN_FILE` 指向权限为 `0600` 的 Service Token 文件（默认位于 `~/.local/state/gms-remote-test/<profile>.token`）。Agent 不需要、也不应接收平台用户密码。
-
-常用维护入口：
-
-```bash
-gms-agent update
-gms-agent rollback
-gms-rt-system-selfcheck --json
-```
+Agent Runtime 是 Codex / Kimi / kkagent 的 Controller 客户端；安装、配对、
+profile 和验收统一见 [Agent 安装](../agent/installation.md)。下面的 Worker
+运行在连接设备、执行 Tradefed 的主机，使用独立 Worker Token。
 
 ## 集群 Worker 安装
 
@@ -52,14 +18,14 @@ bash scripts/install_cluster_worker.sh \
 - `WORKER_ID`：Worker 唯一标识。
 - `CONTROLLER_URL`：Controller HTTPS 地址。
 - `TOKEN`：Worker Token。推荐传入 0600 Token 文件的路径而不是 Token 字符串本身（脚本会对小于 4096 字节的可读文件按路径读取），避免 Token 出现在远端进程 argv 中被同机用户通过 `ps` 看到。
-- `CONTROLLER_CERT`：Controller CA 证书路径；传 `-` 表示不部署 CA 证书（仅限公钥已知的安全网络）。控制器打包部署 Bundle 时必须存在 CA 证书 `gms-local-ca.crt`（缺失即报错，不会回退到叶子证书 `gms-local.crt`——叶子证书不是 CA 信任锚）。
+- `CONTROLLER_CERT`：Controller CA 证书路径；传 `-` 表示不部署 CA 文件，需要目标环境的系统信任库已信任 Controller。控制器打包部署 Bundle 时必须存在 CA 证书 `gms-local-ca.crt`（缺失即报错，不会回退到叶子证书 `gms-local.crt`——叶子证书不是 CA 信任锚）。
 - `SUITE_ROOT`：GMS Suite 根目录，默认 `~/GMS-Suite`。
 - `WORKER_ADDRESS`：Worker 地址，同时决定 noVNC 监听地址；`0.0.0.0` / `::` 会被拒绝，只允许私有、回环或 CGNAT 地址。
 - `GTS_CREDENTIAL_FILE`：GTS service account 凭证文件（必填），安装时以 0600 权限安装到 `~/Software/gts-rockchip.json`。
 
 脚本执行内容：
 
-1. 安装 Host Tools 到 `~/Software`（`jdk-11`、`platform-tools`、`env.sh` / `verify.sh`），合并 JDK 模块分片，解包 scrcpy。
+1. 安装 Host Tools 到 `~/Software`（`jdk-11`、`platform-tools`、`env.sh` / `verify.sh`），按固定 SHA-256 获取部署工件并解包 scrcpy。
 2. 配置 `~/.bashrc` 的 Host Tools 环境块，安装 adbproxy。
 3. 安装桌面依赖（`x11vnc`、`xvfb`、`novnc`、`websockify`）与 usbip 工具，配置 `/usr/local/libexec/gms-worker-usbip` 与对应 sudoers 规则。
 4. 部署 `worker_agent/`、`foundation/` 与原生工具到 `~/gms-worker-agent`，安装测试启动脚本到 Suite 根目录。
@@ -100,15 +66,15 @@ Controller 的集群部署流程（`features/cluster/deployment_api.py`）会通
 }
 ```
 
-也支持环境变量覆盖：
+Worker Token 文件通过上方 JSON 的 `worker_token_file` 指定；
+`GMS_WORKER_TOKEN` 可覆盖 Token 值，但部署推荐使用文件。其他环境覆盖示例：
 
 ```bash
 export GMS_WORKER_ID=ats-worker-01
 export GMS_CONTROLLER_URL=https://controller.example.com:5001
-export GMS_WORKER_TOKEN='...'
 export GMS_WORKER_ADDRESS=192.0.2.20
 export GMS_WORKER_SSH_USER=operator
-export GMS_CONTROLLER_CA=/path/to/controller-ca.crt   # 自签名部署从 GET /api/agent/ca.crt 获取(推荐 gms-local-ca.crt,旧叶子证书不作数)
+export GMS_CONTROLLER_CA=/path/to/controller-ca.crt   # 使用经可信渠道确认的 Controller CA；叶子自签部署信任其自签证书
 ```
 
 ### Worker Token 的 0600 要求

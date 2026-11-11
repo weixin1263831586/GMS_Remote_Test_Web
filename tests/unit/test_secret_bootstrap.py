@@ -165,6 +165,65 @@ def test_audit_configuration_serializes_key_bootstrap(tmp_path, monkeypatch):
     assert len(keys) == 1
 
 
+@pytest.mark.parametrize("legacy_exists", [False, True])
+def test_audit_uses_canonical_key_and_preserves_existing_chain(tmp_path, monkeypatch, legacy_exists):
+    from foundation import config
+
+    monkeypatch.setattr(config, "settings", SimpleNamespace(project_root=tmp_path, data_root=tmp_path / "state"))
+    monkeypatch.delenv("GMS_AUDIT_HMAC_KEY", raising=False)
+    monkeypatch.delenv("GMS_AUDIT_HMAC_KEY_FILE", raising=False)
+    canonical = tmp_path / "configs/secrets/audit_hmac.key"
+    canonical.parent.mkdir(parents=True)
+    key = b"c" * 64
+    canonical.write_bytes(key)
+    canonical.chmod(0o600)
+    legacy = tmp_path / "state/secrets/audit_hmac.key"
+    if legacy_exists:
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"l" * 64)
+        legacy.chmod(0o600)
+    audit = SecurityAuditLogger(str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("GMS_AUDIT_HMAC_KEY_FILE", str(canonical))
+    audit.log_event({"operation": "existing record"})
+    monkeypatch.delenv("GMS_AUDIT_HMAC_KEY_FILE")
+    resumed = SecurityAuditLogger(audit.log_path)
+    resumed.log_event({"operation": "next record"})
+    assert resumed._audit_key() == key
+    assert resumed.verify_chain()["valid"]
+    assert resumed.verify_chain()["signed_records"] == 2
+
+
+def test_audit_legacy_key_remains_readable(tmp_path, monkeypatch):
+    from foundation import config
+
+    monkeypatch.setattr(config, "settings", SimpleNamespace(project_root=tmp_path, data_root=tmp_path / "state"))
+    monkeypatch.delenv("GMS_AUDIT_HMAC_KEY", raising=False)
+    monkeypatch.delenv("GMS_AUDIT_HMAC_KEY_FILE", raising=False)
+    legacy = tmp_path / "state/secrets/audit_hmac.key"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"l" * 64)
+    legacy.chmod(0o600)
+    audit = SecurityAuditLogger(str(tmp_path / "audit.jsonl"))
+    audit.log_event({"operation": "legacy deployment"})
+    assert audit._audit_key() == b"l" * 64
+    assert audit.verify_chain()["valid"]
+    assert not (tmp_path / "configs/secrets/audit_hmac.key").exists()
+
+
+def test_default_audit_key_is_created_under_configuration(tmp_path, monkeypatch):
+    from foundation import config
+
+    monkeypatch.setattr(config, "settings", SimpleNamespace(project_root=tmp_path, data_root=tmp_path / "state"))
+    monkeypatch.delenv("GMS_AUDIT_HMAC_KEY", raising=False)
+    monkeypatch.delenv("GMS_AUDIT_HMAC_KEY_FILE", raising=False)
+    audit = SecurityAuditLogger(str(tmp_path / "audit.jsonl"))
+    audit.validate_configuration()
+    canonical = tmp_path / "configs/secrets/audit_hmac.key"
+    assert canonical.is_file()
+    assert stat.S_IMODE(canonical.stat().st_mode) == 0o600
+    assert not (tmp_path / "state/secrets/audit_hmac.key").exists()
+
+
 def test_skill_signing_key_autogenerates_when_missing(tmp_path, monkeypatch):
     key_path = tmp_path / "secrets" / "skill-signing-ed25519.pem"
     monkeypatch.setenv(SIGNING_KEY_ENV, str(key_path))

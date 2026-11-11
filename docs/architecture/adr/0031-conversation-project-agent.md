@@ -23,7 +23,8 @@ configuration is never edited. The Controller executes registered tools using
 the authenticated request and existing route authorization, ownership and
 Worker targeting. Dangerous or confirmation-required tools become pending
 plans; other tools retain their existing confirmation semantics.
-Flashing, AOA and test workflows continue through ATS and Cluster (ADR 0004).
+Flashing, AOA and test workflows continue through ATS and the authenticated Cluster command queue (ADR 0001).
+Host operations using SSH retain the audited executor boundary (ADR 0004).
 
 Calls have bounded output, rounds and time. Cancellation stops further tool
 dispatch. Rules apply only when explicitly disabled or the binary is absent.

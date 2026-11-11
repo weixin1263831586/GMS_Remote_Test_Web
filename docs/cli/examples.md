@@ -1,25 +1,21 @@
-# gms-rt 典型工作流示例
+# gms-rt 使用约定与工作流
 
-> 本文档给出 `gms-rt` CLI 的典型工作流示例，命令均取自 Agent 文档中已
-> 验证的真实用法（`agent/gms-remote-test/skill/references/agent-workflows.md`
-> 与 `AGENT_PLAYBOOK.md`）。命令的完整参数以 `gms-rt-system-command-describe
-> <name>` 与 [command-reference.md](command-reference.md) 为准。
-> 注意 MCP 场景应优先使用 `gms_rt_*` typed tools（见
-> [../../agent/gms-remote-test/templates/README.md](../../agent/gms-remote-test/templates/README.md)），
-> 本文聚焦 shell CLI 路径。
+`gms-rt` 是 Agent Package 的 CLI；定位与发行流程见
+[Agent 概览](../agent/overview.md)，完整参数见生成的
+[命令参考](command-reference.md)。MCP 场景优先使用 typed tools，
+CLI 命令用连字符、MCP 工具用下划线。
 
-约定：示例均假设已通过 Service Token 认证（`GMS_AUTH_TOKEN_FILE`）；多
-profile 主机需先 `export GMS_RT_PROFILE=<profile>`。所有命令加
-`--json --non-interactive` 获得稳定 JSON 输出。
+Agent 使用 Service Token；多 Controller 环境先明确 `GMS_RT_PROFILE`。
+自动化调用附加 `--json --non-interactive`，以 JSON 的 `ok` 和退出码判断结果。
+下列命令中的设备、套件、Worker 与 Job ID 都需按当前库存和前序响应替换。
 
 ## 工作流：查询上下文 → 列命令 → 跑测试 → 取报告
 
 ### 1. 环境与凭据自检（无副作用）
 
 ```bash
-gms-rt-system-selfcheck --json     # 凭据模式、认证身份与 scopes、server 健康、设备清单、可行动 hints
-gms-rt-auth-status                 # 当前会话与提权窗口
-gms-rt-system-doctor test          # 二进制、认证、设备、套件按域检查（scope: read/device/test/firmware/gsi）
+gms-agent doctor --json
+gms-rt-system-selfcheck --json
 ```
 
 任何一项失败都带修复提示，优先按返回的 hints 处置。
@@ -96,7 +92,6 @@ token（绑定 tool + 设备 + 命令 SHA-256，5 分钟 TTL、单次使用）�
 
 ## 相关文档
 
-- [docs/cli/gms-rt.md](gms-rt.md) — CLI 设计原则
 - [docs/cli/command-reference.md](command-reference.md) — 生成的命令表
 - [../../agent/gms-remote-test/skill/references/agent-workflows.md](../../agent/gms-remote-test/skill/references/agent-workflows.md) — 端到端验证过的 playbook（含 MCP 变体）
 - [../../agent/gms-remote-test/docs/AGENT_PLAYBOOK.md](../../agent/gms-remote-test/docs/AGENT_PLAYBOOK.md) — 测试执行与设备问题要点

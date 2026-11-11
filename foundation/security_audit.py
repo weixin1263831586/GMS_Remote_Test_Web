@@ -126,7 +126,12 @@ class SecurityAuditLogger:
                 lambda: self._load_audit_key(injected, None),
             )
         configured = os.getenv('GMS_AUDIT_HMAC_KEY_FILE', '').strip()
-        path = Path(configured) if configured else settings.data_root / 'secrets/audit_hmac.key'
+        if configured:
+            path = Path(configured)
+        else:
+            canonical = settings.project_root / 'configs/secrets/audit_hmac.key'
+            legacy = settings.data_root / 'secrets/audit_hmac.key'
+            path = legacy if not canonical.exists() and legacy.exists() else canonical
         return _cached_audit_key(
             f'file:{path}',
             lambda: _audit_key_fingerprint(path),

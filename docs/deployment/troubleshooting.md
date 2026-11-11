@@ -34,7 +34,7 @@ ping cn.archive.ubuntu.com
 
 ## 3. 安装后 HTTPS 打不开或证书告警
 
-- 安装器生成自签证书，浏览器首次访问会告警，属预期行为；把 `<安装目录>/configs/secrets/certs/gms-local.crt` 分发给客户端可建立受控信任。
+- 安装器默认生成叶子自签证书，应经可信渠道分发 `gms-local.crt`；已有 CA 签发部署则分发对应 CA。集群页面 Worker 打包默认要求 `gms-local-ca.crt`，与单纯 Web HTTPS 可访问的条件不同，见 [Worker 部署](worker.md)。
 - 证书缺失时 `restart_services.sh` 会自动重新生成。
 - 确认端口与监听：
 
@@ -56,7 +56,7 @@ tail -30 fastapi.log                    # nohup 模式
 
 若日志显示 `load_cert_chain` 抛出 `FileNotFoundError`，检查已安装服务的
 证书参数是否与 `configs/secrets/certs/` 一致。重新克隆仅恢复代码，原部署的
-`configs/local/`、`configs/secrets/` 需要从旧项目迁回。执行最新的
+本机配置和身份密钥需要按[配置恢复范围](configuration.md#重新克隆后仅恢复必要配置)从实际旧部署恢复；必要文件可能仍被引用于旧数据根，不能只按目录名筛选。执行最新的
 `./restart_services.sh` 会在停止服务前修正旧证书路径、备份原服务文件并重新加载
 systemd。路径修正失败时脚本会直接报错，需要在操作者终端提供 sudo 权限。
 

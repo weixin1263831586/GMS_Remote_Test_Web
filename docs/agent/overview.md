@@ -23,7 +23,16 @@ Package tests
 ```
 
 Agent 与 Worker Agent 的边界：Agent 通过 Controller 的 HTTP API 驱动测试与取证，
-不直接执行 Tradefed；实际测试执行节点见 README 的「Worker Agent」一节。
+不直接执行 Tradefed；实际测试执行节点见 [Worker 部署](../deployment/worker.md)。
+
+## CLI 与 MCP
+
+CLI 使用 `gms-rt-*` 命令，MCP 提供 `gms_rt_*` typed tools；两者共享 Controller
+的授权和操作契约。自动化附加 `--json --non-interactive`，按 `ok` 与退出码判断；
+MCP 通用 runner 只放行目录中的 `agent_safe_unattended` 命令。
+操作示例见 [CLI 使用](../cli/examples.md)，完整命令表由
+[命令参考生成器](../../tools/scripts/docs/generate_cli_docs.py)维护在
+[command-reference.md](../cli/command-reference.md)。
 
 ## 生成链：canonical source → sync → generated plugin → dist
 
@@ -67,8 +76,8 @@ dist 分发包（由 features/system/agent_package_builder.py 与该工具产出
   不持有、也不应接收平台用户密码；安全模型见 [security-model.md](security-model.md)。
 - 平台侧开放与安装流程见 [installation.md](installation.md)；分发包的完整性
   （SHA-256 + Ed25519 manifest 签名、同源下载、禁重定向、安全解包）由
-  bootstrap 与 `GMS_SKILL_SIGNING_KEY_FILE` 配置的签名密钥保证，详见 README
-  「包完整性与更新链」一节。
+  bootstrap 与 `GMS_SKILL_SIGNING_KEY_FILE` 配置的签名密钥保证，见
+  [Agent 安全边界](security-model.md)。
 
 ## 相关文档
 
@@ -79,4 +88,4 @@ dist 分发包（由 features/system/agent_package_builder.py 与该工具产出
 - [../../agent/gms-remote-test/templates/README.md](../../agent/gms-remote-test/templates/README.md) — 安装后使用文档
 - [../../agent/gms-remote-test/docs/AGENT_PLAYBOOK.md](../../agent/gms-remote-test/docs/AGENT_PLAYBOOK.md) — Agent 运维手册
 - [docs/architecture/adr/0003-agent-profile-store.md](../architecture/adr/0003-agent-profile-store.md) — Profile Store 决策记录
-- 根 README「Agent Runtime 与 MCP」「包完整性与更新链」两节
+- [平台概览与快速开始](../../README.md)

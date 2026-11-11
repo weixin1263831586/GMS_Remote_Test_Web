@@ -3,6 +3,10 @@
 - 状态：已采纳（Accepted）
 - 关联代码：`foundation/ssh_executor.py`、`foundation/processes.py`、`features/system/ssh.py`、`features/build/executor.py`、`tests/architecture/test_no_regression_rules.py`、`tests/architecture/test_shell_execution_boundary.py`
 
+适用范围：本 ADR 约束 SSH 与本地 shell 的调用方式。集群 Worker 任务使用
+[ADR 0001](0001-controller-worker-boundary.md) 的认证 HTTP(S) 轮询/ACK 通道；
+任务派发不要求逐条改为 SSH。当前架构见[总览](../overview.md)。
+
 ## 背景
 
 平台大量依赖 SSH：Ubuntu 测试主机（本地 USB 设备操作、upgrade_tool 烧写）、Windows / Ubuntu USB/IP 来源主机（设备发现、usbipd 操作、固件 Source Agent）、SSH 构建服务器（受控 Build Template）。历史上：

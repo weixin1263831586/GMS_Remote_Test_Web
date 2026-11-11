@@ -264,7 +264,7 @@ model + Android 版本 + 指纹 + 密度 + 显示 + 旋转 + HID 模式 + 内核
 Worker 连续、单条回放和调试只转换一次，本机及远程烧写恢复均使用冻结的映射。
 
 需要类别免逐台标定、具名目标、布局匹配及每步页面断言时，使用独立的
-[认证语义模板](aoa-semantic-templates.md)。它要求完成参考机证据签发，只在实测固件/显示配置下
+[认证语义模板](aoa/user-guide.md)。它要求完成参考机证据签发，只在实测固件/显示配置下
 启用 `direct_standard`；普通仿射映射继续不允许自行提升策略。未开启 ADB 的设备需要绑定外部画面源。
 
 `metadata.hid_touch_mode` 为 `pointer`（兼容鼠标）或 `direct`（直接触摸），
@@ -278,7 +278,7 @@ Worker 连续、单条回放和调试只转换一次，本机及远程烧写恢�
 点击“结束调试”、离开 AOA 页签、空闲 2 分钟或累计满 15 分钟后清理；仅支持本机
 Worker。网络故障不自动重发命令，进程中断后的 running 回执不重新执行。
 生命周期细节见 [ADR 0025](architecture/adr/0025-aoa-debug-session-lifecycle.md) 与
-[单条调试说明](aoa-playback-controls.md#单条命令调试)。
+[单条调试说明](aoa/user-guide.md#单条命令调试)。
 
 ## 5. 命令语法与运行约束
 
@@ -315,11 +315,8 @@ Worker。网络故障不自动重发命令，进程中断后的 running 回执�
 
 ## 6. Profile、编辑与调试
 
-仓库中的可复用 JSON 模板统一放在
-[`configs/examples/aoa/`](../configs/examples/aoa/README.md)，采用
-`<model>-<firmware>-<scenario>.json` 命名。
-录制得到的模板属于站点本地数据，默认被 `.gitignore` 忽略、不入库；
-仅 `README.md` 作为目录说明纳入版本管理。
+命令配置的命名与共享约定见 [AOA 用户指南](aoa/user-guide.md#命令配置与共享约定)。
+仓库没有随代码交付的设备命令 JSON，录制得到的配置属于站点本地数据。
 模板文件与账号 Profile 分开管理；需要先通过 Profile API 保存为当前账号的配置，
 才能在 AOA 工作台和固件烧写弹框中选择，文件放入目录不会自动导入。
 
@@ -328,22 +325,9 @@ Profile 使用 SQLite 持久化，按 `owner_id` 隔离；同账号名称唯一�
 `revision` 和创建/更新时间。更新递增 revision；结构迁移在 `BEGIN IMMEDIATE`
 写锁内检查、修改，避免多进程并发迁移。
 
-推荐操作顺序：
-
-1. 选择录制 Worker 和 ADB 可用设备，确认画面与实际设备一致。
-2. 必要时显式标定，开始录制，完成一条已知初始界面的操作路径。
-3. 载入或检查完整命令列表，调整坐标与等待时间。
-4. 选择目标回放 Worker 和设备，使用每行“执行”逐条调试。
-5. 用“开始回放”验证整段路径；确认后“保存当前命令”持久保存。
-
-行内“编辑”打开输入框，“保存”或 Enter 应用修改，“取消”或 Escape 放弃草稿。
-单条执行、回放、导出和保存配置前，会先应用正在编辑的草稿；空命令阻止操作。
-当前列表来自所选 Profile 时，回放使用编辑后的列表；选择其他 Profile 则使用
-该配置内容。编辑和调试本身不会自动向服务器保存配置。
-
-每行“执行”发送 `aoa_commands: [该条命令]`、`wait_adb_seconds: 0`，不附带
-前后步骤，不等于恢复 ADB。每次单条调试也有完整的 USB 建连与清理生命周期，
-所以比连续序列多次切换 USB。整段回放及其暂停期间禁止交叉单条执行和修改。
+Profile 编辑、单条调试、连续回放和持久 HID 会话的操作见
+[AOA 用户指南](aoa/user-guide.md)。单条命令执行不等于恢复 ADB；
+整段回放及暂停期间禁止交叉执行和修改，编辑内容需显式保存。
 
 Web 导出的 JSON 格式示例：
 
@@ -358,12 +342,13 @@ Web 导出的 JSON 格式示例：
     "click 180 320",
     "sleep 800",
     "key TAB ENTER"
-  ]
+  ],
+  "metadata": {"hid_touch_mode": "pointer", "hid_session_mode": "continuous"}
 }
 ```
 
 该示例只说明格式，不是可直接用于任意设备的恢复脚本。当前 Web JSON 导出包含
-上述字段，不是包含 owner、revision、metadata 等字段的数据库完整备份。
+命令、等待配置及 `metadata`（输入模式、映射和语义等）；它不是包含 owner、revision 等数据库字段的完整备份。
 
 ## 7. 持久回放、过程控制与结果
 
@@ -492,7 +477,7 @@ Profile JSON 的 `metadata.firmware_compatibility` 格式如下，字段必须�
 目标固件应先在可控设备上完成标定和验证，将完整目标环境及映射保存在同一账号。
 自动化和烧写后触摸恢复缺少证据时提前拒绝；旧运行缺少冻结映射或声明时重新创建。
 这套声明按固件验证，不能替代设备类别认证。标准 direct 必须使用另行签发的
-[类别认证与语义计划](aoa-semantic-templates.md)，普通映射仍拒绝 `direct_standard`。
+[类别认证与语义计划](aoa/user-guide.md)，普通映射仍拒绝 `direct_standard`。
 严格转换会拒绝不可达点和越界滑动端点。标定时除启动结果外，还在每次探针前检查
 目标显示器、焦点及锁屏/遮挡，远端 Worker 必须支持 `aoa_calibration_focus_v1`。
 实现决策见 [ADR 0028](architecture/adr/0028-aoa-firmware-bound-recovery-and-strict-environment.md)。
@@ -675,7 +660,5 @@ USB 桩和模拟接口回归不能代替真机验收。具体板型至少需要�
 并接、语言/方向变化，以及完整刷机到固件验证再到测试的路径。
 
 后续修改优先同步本说明中的能力范围、预算、接口和结果语义，避免把历史分析中
-的计划或源码旧注释当成当前行为。专项过程说明见
-[命令轨道与控制](aoa-playback-controls.md)，历史背景见
-[接入分析](ats-user-builds-aoa-analysis.md) 和
-[ADR 0022](architecture/adr/0022-web-aoa-recording-and-usb-recovery.md)。
+的计划或源码旧注释当成当前行为。操作步骤见 [AOA 用户指南](aoa/user-guide.md)；初始决策及后续扩展见
+[ADR 索引](architecture/adr/README.md)。

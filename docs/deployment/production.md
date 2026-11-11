@@ -108,7 +108,7 @@ sudo journalctl -u gms-web-app -f
 ## 日志与数据目录
 
 - 服务日志：systemd 模式使用 `journalctl -u gms-web-app -f`；nohup 模式使用项目根目录的 `fastapi.log`。
-- 数据根目录：默认 `<安装目录>/data`（环境变量 `GMS_DATA_ROOT`），保存应用运行数据与 `data/secrets/` 下的密钥文件。
+- 数据根目录：默认 `<安装目录>/data`（环境变量 `GMS_DATA_ROOT`），包含持久账号、任务、AOA 资产及证据。安装器仍将部分身份密钥放在 `data/secrets/`；密钥实际路径由配置决定，迁移与清理范围见[配置主文](configuration.md#身份密钥与-data-的保留范围)。
 - 证书目录：`configs/secrets/certs/`（`gms-local.crt` / `gms-local.key`）。
 - 备份目录：`/var/backups/gms-web-app`，加密密钥为 `/etc/gms-web-app/backup.key`（root-only，需另行托管副本）。手动触发：
 

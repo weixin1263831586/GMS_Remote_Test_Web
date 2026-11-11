@@ -84,10 +84,9 @@ especially before editing a generated file by hand.
    fields, add exit-code `hint` on errors.
 3. Catalog cached per process (5 min TTL); `gms_rt_commands` renders one
    line per command and omits `<name> [arguments]` fallback usage.
-4. `gms_rt_run("system-docs")` renders one line per endpoint (~24KB → ~4.5KB).
+4. `gms_rt_run("system-docs")` renders one line per endpoint.
 5. `gms_rt_jobs_list` renders one line per job and `gms_rt_jobs_status` /
-   `gms_rt_jobs_wait` trim the single-job payload (v0.6.0; ~60-80% smaller
-   on real payloads). Error envelopes are never re-rendered.
+   `gms_rt_jobs_wait` trim the single-job payload to key fields. Error envelopes are never re-rendered.
 6. Typed tools for hot paths so agents skip describe+run round trips.
 7. MCP names use underscores and CLI names use hyphens; typed tool
    descriptions state the CLI equivalent. Optional `GMS_MCP_TOOLSETS`

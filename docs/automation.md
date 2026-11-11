@@ -4,7 +4,7 @@
 
 ## 查看和筛选
 
-进入 **GMS ATS → 运行监控**，可按执行状态、用例结果、Profile ID 和 Worker ID 筛选。
+进入 **GMS ATS → 追踪与诊断 → 运行监控区域**，可按执行状态、用例结果、Profile ID 和 Worker ID 筛选。
 搜索支持项目、分支、设备序列号、Worker、固件路径、运行 ID 和 Gerrit 提交。
 筛选先在服务端执行，再按创建时间倒序分页；每页可选 25、50 或 100 条。
 “测试中”同时包含启动测试与实际测试运行阶段，“执行失败”包含构建、烧写、测试、分析和上报失败。
@@ -34,6 +34,20 @@
 点击来源可查看原运行日志；链路抽屉展示测试配置、重跑来源和用例结果。
 仅失败用例重试仍通过原有报告目录重试流程进行。
 
+## 设备占用与完成后的释放
+
+“完成”说明流水线已结束，不保证存在测试报告：仅烧写和 AOA 的运行可跳过测试。
+成功收敛时会清理运行自己的预约和 claim；清理失败保留原占用及诊断信息，避免误释放其他任务。
+
+历史已完成 Run 如有遗留预约，在 **追踪与诊断 → 运行监控区域 → 已完成** 筛选后搜索
+Run ID，查看卡片的 **释放预约**。创建者或管理员可操作；服务端仍核对预约归属、
+租约 generation 和命令/任务状态，无法证明已安全结束时拒绝释放。
+取消活跃运行也通过该区域的对应卡片操作。取消计划的未来调度不会自动终止已经启动的 Run。
+
+可用 `#automation?run=<RUN_ID>` 打开指定运行追踪；结果与占用原因以当前状态为准。
+权限见 [ADR 0032](architecture/adr/0032-ats-team-read-access.md)，
+清理语义见 [ADR 0033](architecture/adr/0033-completed-run-resource-cleanup.md)。
+
 ## API
 
 `GET /api/automation/runs` 保留 `status`、`limit`，新增：
@@ -48,12 +62,14 @@
 
 返回 `data.items`、`data.has_more` 和 `data.next_cursor`；翻页时应保持其他筛选参数一致。
 记录包含 `test_summary`、`test_type`、`test_suite`、`test_module` 和 `retry_of_run_id`。
-列表不返回完整测试计划或大型分析结果。所有筛选与分页均保持原有所有者隔离。
+列表不返回完整测试计划或大型分析结果。已认证的人类账号可以查看团队所有 Run；
+Agent Token 和机器身份仍按原有账号范围读取。取消、重跑和释放预约只允许创建者或管理员操作，
+前端以每条记录的 `permissions.can_manage` 显示操作入口。
 数据库新增摘要和重跑来源字段，沿用持有 `BEGIN IMMEDIATE` 写锁的幂等迁移。
 
 ## 测试计划与自动失败重试
 
-进入 **创建运行**，配置第一套测试后点击 **加入测试计划草稿**，再重复添加下一套。
+进入 **GMS ATS → 发起**，配置第一套测试后点击 **加入测试计划草稿**，再重复添加下一套。
 草稿可上移、下移和移除步骤，最多 20 步；只保存在当前页面内存中，刷新会清空。
 每一步保存的是完整配置快照，因此通常第一步构建/烧写，后续步骤选择“仅执行测试”。
 后台不会在两个步骤之间自动修改固件或套件配置。
@@ -70,7 +86,7 @@
 
 **暂停调度** 只暂停未来定时触发。**停止后续** 阻止当前批次的新步骤和重试，
 并取消尚未被 Worker 领取的待执行自动重试；已启动的运行继续。直到当前运行终态，
-计划仍保持占用以防重叠。如需终止当前运行，使用运行监控中的取消入口。
+计划仍保持占用以防重叠。如需终止当前运行，使用**追踪与诊断**中对应运行卡片的取消入口。
 失败或未知结果默认停止后续步骤；关闭此选项可以继续，但批次仍保留最终步骤失败事实。
 
 创建运行时可直接设置 **失败用例自动重试上限**（0–5 次，0 为关闭）和
@@ -123,7 +139,7 @@
 
 ## 资源与存储
 
-进入 **资源与存储**，选择 Controller 套件文件，显式点击计算 SHA-256，再选择 Worker
+进入 **GMS ATS → 平台 → 资源与存储区域**，选择 Controller 套件文件，显式点击计算 SHA-256，再选择 Worker
 预热。已有同 SHA 文件直接命中缓存；下载校验失败不会覆盖原文件。
 哈希只描述所选压缩包字节版本，不代表签名认证；解压仍走原有套件管理流程。
 大包计算哈希可能需要等待，普通页面刷新只读取目录元数据。
@@ -150,17 +166,17 @@
 
 ## 升级和边界
 
-本批功能需 Controller、Automation Worker 和目标执行 Worker 加载新代码。
+高级执行、观测和缓存能力需要 Controller、Automation Worker 与目标 Worker 使用兼容实现。
 目标 Worker 重新注册后应声明 `execution_options_v1`、`module_progress_v1` 和
 `suite_cache_sha256_v1`；旧 Worker 的高级选项和 SHA 固定预热会返回明确冲突。
 仅重启 Web 服务不能更新远程 Worker。Agent 部署验收仍使用 `gms-agent doctor --json`
 及 `gms-rt-system-selfcheck --json` 的既有路径。
 
 架构约束见 [ADR 0021](architecture/adr/0021-ats-execution-options-and-evidence-retention.md)。
-User Builds/WebAOA 后续接入方案见 [AOA 分析](ats-user-builds-aoa-analysis.md)。
+刷机后的 AOA 恢复与后续验证流程见 [AOA 架构](aoa-mechanism-and-architecture.md)，
+具体回放、认证和模板操作见 [AOA 用户指南](aoa/user-guide.md)。
 
 ## 参考
 
 - [OmniLab ATS 用户指南](https://source.android.com/docs/core/tests/development/android-test-station/ats-user-guide)
 - [OmniLab ATS FAQ](https://source.android.com/docs/core/tests/development/android-test-station/faq)
-- [现场 API Explorer](http://172.16.14.246:8000/_ah/api_docs)

@@ -4,6 +4,9 @@
 - 日期：2026-09（源码审计定稿）
 - 关联代码：`app.py`、`bootstrap/`、`features/cluster/`、`worker_agent/`
 
+阅读范围：以下描述 Worker Agent 的任务与状态通道。部署维护、构建及来源主机等
+需要 SSH 的操作仍使用 [ADR 0004](0004-ssh-execution-boundary.md) 的统一执行器。
+
 ## 背景
 
 GMS 测试执行涉及两类物理上分离的主机：

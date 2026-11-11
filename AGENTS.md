@@ -39,10 +39,11 @@
   `foundation/` must never import `features/`; cross-feature imports go
   through a feature's public surface (`features/<name>/__init__.py`), not
   its internals. Enforced by `tests/architecture/`.
-- Controller-initiated remote execution crosses the audited SSH boundary only
-  (ADR 0004); Worker→Controller control-plane reporting (registration,
-  heartbeat, job state, artifacts) uses authenticated HTTP(S) with a Worker
-  Token. `worker_agent/` imports inside `features/` stay confined to the
+- Cluster execution uses the authenticated Worker command queue: Workers
+  register, heartbeat, poll commands and ACK over HTTP(S) with a Worker Token
+  and session/generation fencing (ADR 0001). Host operations that use SSH
+  cross the audited SSH executor (ADR 0004). `worker_agent/` imports inside
+  `features/` stay confined to the
   worker-role execution surfaces and the same-host bridge modules and
   must not spread; enforced by
   `tests/architecture/test_controller_worker_boundary.py`.
@@ -51,11 +52,13 @@
   (`~/.config/gms-agent/profiles/<profile>.toml`, token in
   `~/.local/state/gms-remote-test/<profile>.token`). Selection is
   fail-closed: zero profiles → unconfigured, one → use it, multiple →
-  require an explicit `--profile` / `GMS_RT_PROFILE`. Never restore
-  sorted-first or per-client fallback routing.
-- SSH is the only remote execution boundary (ADR 0004): Controller→Worker
-  actions go through the SSH execution service with documented exit codes;
-  no new raw shell channels.
+  require an explicit `--profile` / `GMS_RT_PROFILE`. Direct CLI invocation
+  may collapse equivalent client aliases only when Controller, TLS policy
+  and token contents match; MCP selection remains per-client fail-closed.
+  Never restore sorted-first or per-client fallback routing.
+- SSH commands use the audited execution service with documented exit codes
+  (ADR 0004); do not add raw SSH/shell channels. Worker command dispatch must
+  preserve typed payloads, authentication, claims and generation fencing.
 - Shell out only through the audited helpers covered by
   `tests/architecture/test_shell_execution_boundary.py`; never build
   commands by f-string interpolation of untrusted input.

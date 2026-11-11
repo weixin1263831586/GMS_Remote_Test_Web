@@ -2,8 +2,7 @@
 
 本页描述 GMS 平台的 AI 调用治理（execution receipts）与诊断质量工程
 （golden corpus、failure identity、外部知识 chunk 检索），以及约束它们的
-架构门禁。这些子系统回答全局代码审查指出的核心缺口：**AI / Agent /
-知识快速成长，但缺少质量评测与 AI execution governance**。
+架构门禁。它们负责记录调用、区分不确定结果、约束证据使用并提供诊断质量回归。
 
 设计原则（与 ADR-0013 / ADR-0014 一致）：
 

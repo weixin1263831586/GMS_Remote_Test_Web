@@ -13,15 +13,17 @@ and must not be conflated:
   / release procedures (e.g. `install_cluster_worker.sh`,
   `build_adbproxy_rs.sh`, `gms_backup.py`, `run_GSI_Burn.sh`,
   `check_source_secrets.py`). They ship with a running system.
-- `tools/scripts/` — **developer / maintenance tooling**: repo upkeep,
-  code & doc generation, one-shot migrations, test harnesses (e.g.
-  `sync_package.py`, `update_size_baseline.py`). They only run inside a
-  development checkout and are never invoked by a deployed system.
+- `tools/scripts/` — **developer and deployment-maintenance tooling**:
+  package/doc generation, migrations, test harnesses and host maintenance.
+  Deployment entry points currently call helpers under `tools/scripts/deployment/`,
+  including `update_systemd_tls.py` from `restart_services.sh` and the running-config
+  migration. These helpers must remain in deployed source/package trees.
 
-Do not move files between the two trees merely to "tidy up": placement
-encodes the lifecycle. When adding a file, pick the tree by asking
-"does a deployed system execute this?" — yes → `scripts/`, no →
-`tools/scripts/<category>/`.
+New runtime execution scripts belong in `scripts/`; repository maintenance
+scripts belong in `tools/scripts/<category>/`. Before removing or relocating a
+helper, check deployment entry points and release packaging as well as imports.
+The existing deployment-maintenance category is a supported lifecycle, not a
+reason to exclude all of `tools/scripts/` from a deployed system.
 
 ## Top-level directories
 

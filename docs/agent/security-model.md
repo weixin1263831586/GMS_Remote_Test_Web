@@ -1,131 +1,52 @@
-# Agent 安全模型（平台管理员 / 部署者视角）
+# Agent 认证与操作边界
 
-> 本文档面向平台管理员、部署者与仓库维护者，说明 Agent Service Token、
-> scope/elevation、设备 ACL、审批令牌与 MCP 安全门的设计。Agent 安装后的
-> 使用层面安全纪律见
-> [../../agent/gms-remote-test/templates/README.md](../../agent/gms-remote-test/templates/README.md)
-> 的「Security boundary」一节。
+平台共用的认证、SSH、上传、审计和 TLS 规则见[安全模型](../security.md)。
+本文只说明 Agent 接入时需要额外保持的边界；安装步骤见[安装文档](installation.md)。
 
-## 核心原则
+## 身份、profile 与权限
 
-- **Agent 不碰平台登录密码。** Agent 唯一的凭据是 Agent Service Token；
-  密码登录（`gms-rt-auth-login`）与管理员提权（`gms-rt-auth-elevate`）属于
-  人工 CLI 会话。MCP Server 在 service-token 模式下
-  （`GMS_AGENT_AUTH_MODE=service-token`，由安装器/lancer 强制）甚至不注册
-  这两个密码类工具。
-- **服务端是安全边界。** 不存在也不接受客户端传入的 `authorized=true`
-  之类布尔值作为授权依据；越权行为由服务端拒绝。
+Agent 使用 Service Token。服务端保存 Token 哈希及 scopes、Worker/设备 ACL、所有者、
+有效期等元数据，原始 Token 仅在签发时返回；客户端保存在
+`~/.local/state/gms-remote-test/<profile>.token`，权限 0600。
+profile TOML 保存 Controller URL、CA 和 Token 路径，详见 [profile 选择规则](profiles.md)。
 
-## Agent Service Token
+一次 enrollment 可以为同一 Controller 的多个 client profile 写入等价凭据；
+不同 profile 也可分别 enrollment。吊销针对实际 Token 身份：共享同一 Token 的所有
+profile 都会受影响，文件名不同不代表身份隔离。默认 Token 有效期为 90 天，按管理员
+铸造时的参数生效。
 
-- 由管理员铸造（直接创建，或经一次性 enrollment code 兑换），默认有效期
-  90 天，可随时吊销（按 token / 按 profile 粒度）。
-- 服务端只保存 token 的 SHA-256 哈希及授权元数据，用于后续认证校验；原始
-  token 仅在创建/兑换时返回一次。Agent 客户端必须保存这份原始 token，
-  因为每次 Bearer 认证都需要它。
-- 落盘：`~/.local/state/gms-remote-test/<profile>.token`，权限 `0600`，
-  属主必须是运行 Agent 的用户；profile 与 token 一一对应
-  （`<profile>.toml` 的 `[auth] token_file` 指向它），通过
-  `GMS_AUTH_TOKEN_FILE` 注入运行时。
-- 身份模型：当前为一台主机一个 token、由各 client profile 共享（审计通过
-  `GMS_AGENT_CLIENT` 元数据区分 client）；如需隔离可为不同 profile 分别
-  enroll。
+`agent_service` 权限由 scopes 与 ACL 决定，不能通过角色比较获得 admin 权力。
+`allowed_workers` / `allowed_devices` 限定可访问目标；`*` 表示该维度不限制。
+设备操作仍需通过设备归属、claim、租约和 fencing 校验。
+密码登录、管理员提权和签发操作审批属于人类会话；Agent 无法自提权或自审批。
 
-## Scopes 与 elevation
+## Enrollment 与本地验收
 
-- Agent principal 的角色是 `agent_service`，其权力**完全**来自 scopes
-  （平台权限词表 `AGENT_SCOPES`），不是角色阶梯的一级；基于角色的 admin
-  门（`require_role`）永远不匹配 agent principal。可用 scopes 包括：
-  `devices.read`、`devices.lease`、`devices.use_leased`、`devices.inventory`、
-  `tests.execute`、`tests.cancel`、`jobs.read`、`reports.read`、
-  `redmine.read`、`artifacts.read_own`、`apk.analyze_own`、`sdk.read`。
-- **elevation（管理员提权）对 Agent 不可达**：提权是人工会话的 step-up
-  操作；Agent token 永远无法自审批、自提权（服务端强制）。需要提权的操作
-  只能由人在自己的会话里完成或显式签发审批（见下）。
+管理员在活的提权会话中签发一次性配对码，默认 5 分钟有效，可指定 1–30 分钟。
+兑换端点不要求已有登录，但按来源 IP 限速；成功兑换后配对码不可复用。
+scopes、ACL 和 Token 有效期由签发时确定，兑换方不能自行扩大。
 
-## 设备 / Worker ACL
+安装后使用 `gms-agent doctor --json` 检查 profile、Token 权限、MCP 与 Skill，
+再用 `gms-rt-system-selfcheck --json` 检查 Controller 连通性和账号能力。
+恢复旧认证库或重新建立认证状态时，按实际 Token 是否仍有效决定重新 enrollment。
 
-Agent token 携带 `allowed_workers` 与 `allowed_devices` 两个字段：
-`*` 表示不限制，否则为逗号分隔的显式白名单。服务端在执行设备/worker 相关
-操作时按 ACL 过滤，即使 scopes 允许，越界的 worker/设备也不可达。
-吊销/轮换按 token（即按 profile）粒度进行。
+## 审批与 MCP 安全门
 
-## Token 生命周期
+- `gms_rt_run` 只允许目录中标为 `agent_safe_unattended` 的命令；参数必须是字符串数组。
+- `gms_rt_shell` 只读白名单；`gms_rt_logcat` 只导出，拒绝清除、写文件和 shell 元字符。
+- `gms_rt_shell_exec` 的审批绑定工具、目标和命令哈希；固件审批还绑定对应固件请求。
+  审批由人类会话签发，短时、单次使用，客户端布尔值不能代替服务端审批。
+- APK 部署和有限应用调试使用各自专用审批流程，见
+  [ADR 0017](../architecture/adr/0017-reviewed-apk-deployment.md) 和
+  [ADR 0018](../architecture/adr/0018-scoped-debug-sessions.md)。
+- 交互终端、scrcpy、原始 shell 和销毁诊断证据的操作保留人工入口。
 
-```mermaid
-sequenceDiagram
-    participant Admin as 管理员会话
-    participant Controller
-    participant Agent
-    Admin->>Controller: 创建一次性 Enrollment Code
-    Controller-->>Admin: Code（5 分钟、单次使用）
-    Agent->>Controller: 兑换 Code
-    Controller->>Controller: 保存 Token SHA-256 + scopes/ACL
-    Controller-->>Agent: 原始 Service Token（仅返回一次）
-    Agent->>Agent: 写入 profile 对应的 0600 token 文件
-    Agent->>Controller: Authorization: Bearer 原始 Token
-    Controller->>Controller: 哈希后比对、检查有效期/scopes/ACL
-    Admin->>Controller: 吊销或轮换 Token
-    Controller-->>Agent: 后续请求返回 401
-```
+具体工具参数及审批步骤以包内 Skill 的 `references/agent-workflows.md` 和
+`gms_rt_describe` 为准；不要用直连 ADB/SSH 代替平台调用。
 
-## Approval Token（一次性审批令牌）
+## TLS 信任
 
-破坏性/高风险操作（MCP typed tool `gms_rt_shell_exec` 的任意设备命令、
-`gms_rt_burn_firmware` 烧录）必须携带服务端签发的一次性 approval token：
-
-- 只能由**人工会话**（cookie 登录）通过 `POST /api/auth/approval-tokens`
-  （CLI：`gms-rt-approval-create`）签发；Agent Service Token 不能自批
-  （服务端按认证方式拒绝）。
-- 精确绑定：shell 审批绑定 tool + device + SHA256(command)；烧录审批绑定
-  固件 SHA-256 + wipe_data + burn_mode + 规范化设备列表。5 分钟 TTL、
-  单次使用，执行前由服务端 validate-and-consume。
-- 烧录审批额外要求签发会话处于活的**管理员提权**状态。
-
-## Typed MCP tools 与只读 runner
-
-- 通用 runner `gms_rt_run` 只执行 CLI 目录标记为 `agent_safe_unattended`
-  的（只读）命令；mutating/提权命令与交互式会话
-  （`terminal-open`、`terminal-push`、`devices-scrcpy`）被直接拒绝。
-- 高风险操作只有专用 typed tool 通道：`gms_rt_shell_exec`（每次调用都要
-  新的 approval token）、`gms_rt_burn_firmware`（approval + 签发会话提权）。
-- `gms_rt_logcat` 恒为 dump 模式，拒绝 `-c/-f` 与 shell 元字符——清除日志
-  缓冲属于销毁诊断证据，只能由人经 CLI 执行。
-- `gms_rt_shell` 的只读 allowlist（`getprop`、`dumpsys` 等）无需额外授权。
-
-## 凭据落盘一览
-
-```text
-~/.config/gms-agent/profiles/<profile>.toml          profile（Controller URL、CA、token 路径）0600
-~/.local/state/gms-remote-test/<profile>.token       Agent Service Token，0600
-~/.local/state/gms-remote-test/session.cookies       人工 CLI 会话 cookie（仅人用）
-```
-
-平台侧永不向 Agent 暴露 Web 登录密码；文档与工具链也不应为 Agent 语境
-提供、建议或重实现密码登录。
-
-## TLS 信任的两种部署模式（TOFU 边界）
-
-首次接触信任（TOFU）与预分发 CA 是两条**安全性不同**的路径，部署者必须
-明确选择，不得混同表述：
-
-| 模式 | 流程 | 抵抗能力 |
-| --- | --- | --- |
-| Convenience TOFU | `curl -k` 取安装器这一次不校验；安装器随即从
-`/api/agent/ca.crt` 取 CA 落盘，此后全部严格 TLS + 包签名 | 抵抗"第一接触
-之后"的中间人；第一接触本身只能靠可信局域网/带外确认保障 |
-| Strict pre-distributed CA | 先经带外渠道拿到 Controller CA
-（`GMS_INSTALL_CA_CERT` / `--cacert`），第一个字节起严格校验 | 全程抗
-中间人，生产/跨网段部署的唯一推荐 |
-
-TOFU **不等于**抵抗首次接触 MITM：攻击者在第一接触窗口替换 CA 即可持久
-劫持。信任建立在带外核对的 CA 指纹（`sha256` 比对）上, 而不是"下载成功"
-这个事实本身。
-
-## 相关文档
-
-- [docs/agent/installation.md](installation.md) — enrollment 与 token 落盘流程
-- [docs/agent/profiles.md](profiles.md) — profile 与 token 的一一对应
-- [../../agent/gms-remote-test/templates/README.md](../../agent/gms-remote-test/templates/README.md) — MCP 层安全门与工具清单
-- [../../agent/gms-remote-test/docs/AGENT_PLAYBOOK.md](../../agent/gms-remote-test/docs/AGENT_PLAYBOOK.md) — 凭据与会话处置
-- [docs/architecture/adr/0003-agent-profile-store.md](../architecture/adr/0003-agent-profile-store.md) — profile/token 存储决策
+生产安装先通过可信渠道分发 Controller CA，使用 `--cacert` 和
+`GMS_INSTALL_CA_CERT` 从安装脚本开始严格校验；运行期由 profile 加载 CA。
+可信实验网络的 TOFU 会在系统不信任 Controller 时获取并保存其 CA，之后严格校验。
+TOFU 的首次接触仍依赖可信网络或带外核对；完整安装命令见[安装文档](installation.md)。

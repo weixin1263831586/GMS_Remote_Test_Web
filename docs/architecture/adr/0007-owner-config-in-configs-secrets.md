@@ -7,6 +7,11 @@
   `scripts/migrate_config_layout.py`（`migrate_owner_configs`）、
   `tests/contract/test_config_paths.py`
 
+当前实现说明：本 ADR 保留最初的迁移决策。文内 0.19/0.20 是当时的计划，
+当前 `foundation/config_paths.py` 仍保留旧位置回退且不按版本自动关闭。
+主密钥默认已优先规范目录，既有显式路径与安装器生成位置仍需保留原身份；
+实际加载、密钥与迁移行为统一见[配置体系](../../deployment/configuration.md)。
+
 ## 背景
 
 Redmine / Gerrit 看板支持多用户（owner）隔离配置：每 owner 一份

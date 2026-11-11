@@ -33,7 +33,7 @@ GMS 需要借鉴 ATS 的设备准备、分片、运行进度和资源管理，�
 
 需同步更新 Controller、Automation Worker 和执行 Worker；能力协商允许旧 Worker
 继续使用原有基础选项。准备动作仅覆盖 ADB 已可用的测试前设置。User build 在刷机后
-恢复 USB 调试需要独立的 AOA 阶段，见 [接入分析](../../ats-user-builds-aoa-analysis.md)。
+恢复 USB 调试需要独立的 AOA 阶段，见 [AOA 实现说明](../../aoa-mechanism-and-architecture.md)。
 
 日志清理只覆盖 Controller 已登记的副本；Worker 原始目录及外部构建产物不在此策略范围。
 压缩单文件上限 256 MiB；手动每批最多 25 项，自动每账号每小时最多 5 项。

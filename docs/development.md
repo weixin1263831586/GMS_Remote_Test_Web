@@ -33,9 +33,9 @@ scripts/         部署、运维与脱敏脚本
 - **Feature 之间不互相 import 对方内部模块**，跨 Feature 协作只能经由对方
   的公开包边界或下沉到 `foundation/` 的共享 Port。
 - `worker_agent/` 负责设备探测、ADB/Fastboot/Tradefed 执行、USB/IP、Artifact
-  上传等 Worker 侧工作。通信方向：Worker→Controller 的控制面上报（注册、
-  心跳、任务状态、Artifact）走带 Worker Token 的 HTTP(S)；Controller 发起的
-  远程执行只走 SSH 执行边界（ADR 0004）。
+  上传等 Worker 侧工作。Worker 使用带 Token 和 session/generation 的 HTTP(S)
+  注册、心跳、轮询命令与 ACK；Controller 将类型化任务写入受授权的命令队列
+  （ADR 0001）。需要 SSH 的主机操作统一走审计执行器（ADR 0004）。
 
 依赖方向：
 

@@ -1,19 +1,17 @@
 # GMS Remote Test Web
 
-面向 Android GMS 认证测试场景的远程测试与设备调度平台：以 FastAPI Controller 为控制中心，通过 Worker Agent、USB/IP、ADB/Fastboot、noVNC、SSH 等能力，将分散在不同主机上的 Android 设备、GMS 测试套件、固件、构建服务器和测试结果统一到 Web 平台管理，并向 Codex / Kimi / kkagent 等 Agent 提供受控的 CLI/MCP 接入。
-
-> 测试基础设施工具。生产部署前请阅读 [docs/deployment/production.md](docs/deployment/production.md) 与 [docs/security.md](docs/security.md)；不要将真实密码、Token、API Key 或其他凭据提交到 Git 仓库。
+面向 Android GMS 测试的设备调度与远程测试平台。FastAPI Controller 管理认证、
+Worker、设备租约、CTS/GTS/VTS/STS、固件、构建与报告；Web 和 Codex / Kimi / kkagent
+通过受控接口使用这些能力。
 
 ## 核心能力
 
-- **GMS 测试**：CTS / GTS / VTS / STS 套件统一管理，单/多设备执行，Job 生命周期跟踪，报告与 Artifact 汇总
-- **设备管理**：ADB / Fastboot / Recovery 状态识别，USB/IP 跨主机共享（Windows `usbipd-win` 来源），ADB Proxy，多 Worker 设备清单同步
-- **集群与 Worker**：Controller + Worker Agent 架构，注册 / Heartbeat / Generation 管理，Device Claim / Lease，跨用户只读监控
-- **固件与套件**：Firmware / GSI 烧录工作流（含 Windows Source Agent + RKDevTool 源端烧写），套件扫描 / 导入 / 分发
-- **构建服务器**：SSH 接入，受控 Build Template，Tmux 后台构建与日志跟踪
-- **Web 运维**：noVNC 远程桌面、Web Terminal、用户权限、Security Audit、Health / Metrics
-- **工程辅助**：GMS Assistant、AI Provider 路由、Gerrit / Redmine / OpenGrok / APK 分析、知识库、Automation
-- **Agent Runtime**：Codex / Kimi / kkagent 专用 MCP Plugin 与 `gms-rt` CLI，Service Token + 一次性 Enrollment / Approval Token
+- 测试套件扫描、单/多设备任务、状态跟踪、结果与报告。
+- 本地 USB、Windows / Linux USB/IP 和 ADB Proxy 设备接入，跨 Worker 库存与租约。
+- Rockchip 固件与 GSI 烧写、AOA 输入与刷机后恢复、ATS 多阶段工作流。
+- 构建服务器、远程桌面与终端、用户权限、安全审计和运维观测。
+- Redmine、Gerrit、APK/SDK 分析、知识检索、每日晨报及对话 Agent。
+- 独立 Agent Runtime：CLI、MCP、Service Token、一次性 enrollment 与操作审批。
 
 ## 系统架构
 
@@ -47,13 +45,13 @@ flowchart TB
     Controller --> External
 ```
 
-图的规范源为 [`docs/architecture/platform-topology.mmd`](docs/architecture/platform-topology.mmd)，契约测试确保此处与架构总览保持同步。
+规范图源为 [platform-topology.mmd](docs/architecture/platform-topology.mmd)。
+Worker 使用带 Token 的 HTTPS 注册、心跳、轮询和 ACK，实际任务在 Worker 执行。
+SSH 主机操作统一通过审计执行器；图和职责说明见[架构总览](docs/architecture/overview.md)。
 
-四个角色：**Controller**（Web UI、认证、调度、配置、报告、集成）；**Worker Agent**（执行测试的 Linux 主机上的 ADB / Fastboot / Tradefed / USB/IP / 烧录）；**Device Source**（设备 USB 所在主机，支持 Windows 与 Linux USB/IP 来源，具体烧写能力见支持矩阵）；**Agent Runtime**（Agent 主机上的 `gms-rt` CLI / MCP Adapter，不持有用户密码，不绕过权限与审批边界）。Worker 主动通过带 Token 的 HTTPS 轮询 Controller，命令放在轮询响应中返回；Agent 使用独立 Service Token。
+## 启动 Controller
 
-架构决策与边界详见 [docs/architecture/](docs/architecture/overview.md)。
-
-## 快速开始
+开发环境：
 
 ```bash
 git clone https://github.com/weixin1263831586/GMS_Remote_Test_Web.git
@@ -61,121 +59,71 @@ cd GMS_Remote_Test_Web
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-GMS_ENV=development python app.py   # 默认端口 5001
+GMS_ENV=development python app.py
 ```
 
-生产环境使用一键安装器（安装依赖、创建服务、配置 HTTPS 与备份）：
+默认端口 5001；受测 Python/Ubuntu 版本见[支持矩阵](docs/platform-support-matrix.md)。
+生产部署运行 `./install.sh`，步骤和参数见[快速安装](docs/deployment/quick-install.md)。
+已安装环境使用 `./restart_services.sh` 管理本机服务。
+
+重新克隆不会恢复本机配置。示例值可使应用启动，但不能证明 SSH、套件或 Worker 已配置。
+必要配置、密钥和状态的恢复范围见[配置与迁移](docs/deployment/configuration.md)。
+
+## Agent 安装
+
+先由平台管理员生成一次性配对码，并通过可信渠道取得 Controller CA：
 
 ```bash
-./install.sh
-```
-
-详见 [docs/deployment/quick-install.md](docs/deployment/quick-install.md) 与 [docs/deployment/production.md](docs/deployment/production.md)。
-
-## Agent Quick Start
-
-先在 Web 端生成一次性 Enrollment Code，然后在 Agent 主机（编译服务器）：
-
-```bash
-# <CONTROLLER_HOST> 换成 Controller 的真实 IP/主机名（不要照抄占位符）。
 export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt
 curl --cacert "$GMS_INSTALL_CA_CERT" -fsSL \
   https://<CONTROLLER_HOST>:5001/api/agent/install.sh | \
   bash -s -- --paircode-prompt --client auto
-gms-rt-system-selfcheck --json   # 验收：auth / health / devices / suites
+gms-agent doctor --json
+gms-rt-system-selfcheck --json
 ```
 
-生产环境先带外分发 Controller CA，并使用 `--cacert` 全程严格校验。
-`--paircode-prompt` 从终端静默读取配对码，不写入 argv 或 Shell History。
-可信实验局域网可用 `curl -k` 完成 TOFU 首次引导，但首次响应本身不具备
-MITM 防护；安装器只会对后续下载固定 CA 并校验包签名。
+替换主机占位符；多 Controller 环境明确选择 profile。Agent 主机无需克隆本仓库，
+安装包包含 CLI、MCP、SDK 和 Skill，认证使用 0600 Service Token。
+安装、TLS 信任、profile 与更新见[Agent 安装](docs/agent/installation.md)。
 
-Agent Package 自包含 `gms-rt` CLI、MCP Server、SDK、Skill 与各 Client Manifest，无需 clone 本仓库；Service Token 落盘为 `0600` 文件，Agent 不接触 Web 登录密码。
+## 设备接入与烧写边界
 
-安装即配置：`gms-agent install` 会把 Controller URL / CA / token 路径写入
-Agent profile（TOML，默认名 `<client>-<host>-<sha256(server)[:8]>`）并在
-MCP 启动时自动注入环境，**无需手工 export `GMS_REMOTE_TEST_SERVER`**；
-显式环境变量仅作为覆盖手段。同一台主机可安装多个 Controller（每个
-Controller 一个 profile），enroll / update 支持用 `--profile` 消歧。
+| 接入方式 | 能力与限制 |
+| --- | --- |
+| 本地 USB | Worker 直接运行 ADB/Fastboot；Rockchip 完整烧写在同一 Worker 逐台执行 |
+| Windows USB/IP | 完整烧写由 Source Agent + RKDevTool 在来源主机执行，完成后重建 USB/IP |
+| Linux USB/IP | 支持设备共享、分配与重连；完整固件烧写尚不支持，执行时拒绝 |
+| ADB Proxy | ADB 与测试；不提供 Fastboot、RockUSB 或 AOA HID 通道 |
 
-详见 [docs/agent/](docs/agent/overview.md)、[docs/agent/profiles.md](docs/agent/profiles.md) 与 [docs/cli/gms-rt.md](docs/cli/gms-rt.md)。
+[USB/IP 选型](docs/usbip/overview.md)、[烧写流程](docs/usbip/firmware-flashing.md)和
+[AOA 用户指南](docs/aoa/user-guide.md)给出具体条件；USB 传输能力不代表特定板型已完成真机验收。
 
-## 支持的设备接入路径
+## 仓库与开发
 
-| 路径 | 适用场景 | 说明 |
-|---|---|---|
-| Local USB | Worker 本机直连设备 | 默认路径 |
-| Windows USB/IP | 设备 USB 在 Windows 主机 | `usbipd-win`，支持自动 bind/attach |
-| Linux USB/IP | 设备 USB 在 Linux 主机 | 完整固件烧写暂不支持（fail closed） |
-| ADB Proxy | 多 Worker 间共享设备（adbproxy-rs） | 租约独立于传输协议 |
+| 目录 | 用途 |
+| --- | --- |
+| `bootstrap/`、`foundation/` | 组合根、配置、安全和共享基础设施 |
+| `features/` | 业务路由、服务、存储、测试及部分专题 UI |
+| `worker_agent/` | Worker 执行器、库存与 Controller 通信 |
+| `web/` | 浏览器 Shell 和静态前端 |
+| `agent/gms-remote-test/` | Agent Package 手工维护源 |
+| `plugins/gms-remote-test/` | 由源包生成的发行插件 |
+| `scripts/`、`tools/` | 部署运行脚本、维护工具与依赖工件，见 tools/README.md |
+| `tests/`、`docs/` | 共享测试、契约、架构门禁与说明 |
 
-对比与选型详见 [docs/usbip/overview.md](docs/usbip/overview.md) 与 [docs/usbip/adb-proxy-vs-usbip.md](docs/usbip/adb-proxy-vs-usbip.md)。
+开发约束和定向验证见[开发指南](docs/development.md)及根 AGENTS.md。
+配置、秘密、数据库、日志和用户状态不提交到 Git。插件生成树由
+`python tools/scripts/agent/sync_package.py .` 同步。
 
-## 固件烧写支持矩阵
+## 文档入口
 
-| 环境 | 完整烧写 | 说明 |
-|---|---|---|
-| Local USB（Ubuntu 执行主机 / Worker） | ✅ | 支持一次选择多台设备；因 `upgrade_tool uf` 没有序列号选择参数，同一 Worker 上逐台进入 Loader、烧写并校验设备退出 Loader，ADB 可选 |
-| Windows USB/IP | ✅ | USB 所有权交还 Source 后由 Source Agent + RKDevTool 源端烧写；不同 Source Host 可并行，完成后重建 USB/IP |
-| Linux USB/IP full | ❌ | 暂未支持，fail closed |
+完整目录见 [docs/README.md](docs/README.md)，常用入口：
 
-烧写流程、Loader → MaskROM 状态迁移、所有权状态机与故障恢复详见 [docs/usbip/firmware-flashing.md](docs/usbip/firmware-flashing.md)。
-
-## 仓库结构
-
-```text
-bootstrap/     组合根：依赖装配、生产安全、运行环境装配
-foundation/    共享基座：配置、进程、SSH 执行、响应、持久化
-features/      业务域（FastAPI 路由 + service + repository + tests）
-worker_agent/  Worker 侧执行与 Controller 通信
-agent/         gms-remote-test Agent Package（唯一手改源）
-plugins/       Agent 插件生成树（勿手改，用 tools/scripts/agent/sync_package.py 同步）
-web/           浏览器 Shell 与静态前端
-tests/         单元 / 契约 / 架构门禁 / E2E
-tools/         外部工具与项目维护脚本（维护脚本在 tools/scripts/，见 tools/README.md）
-docs/          架构 / 部署 / USB-IP / Agent / CLI 文档
-```
-
-## 文档
-
-完整文档在 [docs/](docs/README.md)：
-
-- [架构与 ADR](docs/architecture/overview.md)
-- [部署](docs/deployment/quick-install.md)（安装 / 生产 / 配置 / Worker / 排障）
-- [USB/IP 与固件烧写](docs/usbip/overview.md)
-- [Agent Runtime](docs/agent/overview.md)
-- [gms-rt 命令参考](docs/cli/command-reference.md)（由 `tools/scripts/docs/generate_cli_docs.py` 生成）
-- [安全模型](docs/security.md)
-- [开发指南](docs/development.md)
-
-## 开发
-
-```bash
-pip install -r requirements-dev.txt
-PYTHONPATH=. python3 -m pytest features/<feature>/tests -q   # 目标 feature 测试
-PYTHONPATH=. python3 -m pytest tests/architecture -q          # 架构门禁
-python3 -m ruff check .
-python tools/scripts/agent/sync_package.py                            # 修改 agent 源后同步生成树
-python3 tools/scripts/docs/generate_cli_docs.py                            # 新增 CLI 命令后刷新文档
-```
-
-约束与门禁详见 [docs/development.md](docs/development.md)：源码注释不得引用不存在的评审文档编号（架构决策写入 `docs/architecture/adr/`）；`plugins/` 生成树不手改；SSH / shell 执行边界与文件行数预算由 `tests/architecture/` 强制。
-
-## 常见问题
-
-高频问题与处理方式已按主题拆分：
-
-- USB/IP attach 无设备 / 延迟高 / ADB 版本冲突 → [docs/usbip/troubleshooting.md](docs/usbip/troubleshooting.md)
-- Worker 注册失败 / Token 权限 / 生产安全配置报错 → [docs/deployment/troubleshooting.md](docs/deployment/troubleshooting.md)
-- noVNC 黑屏 / Build Server 连接 / 设备串口权限 → [docs/deployment/troubleshooting.md](docs/deployment/troubleshooting.md)
-- Agent 安装后无法访问 Controller / Profile 歧义 → [docs/agent/troubleshooting.md](docs/agent/troubleshooting.md)
-
-## 推荐部署拓扑
-
-- **单机实验室**：Controller 与本地 Worker 同机，设备 USB 直连
-- **多 Worker 测试实验室**：多台 Linux Worker 经 LAN/VPN 注册到 Controller，套件按 Worker 分发
-- **Windows 远端 USB 设备**：Windows 主机运行 `usbipd-win` + OpenSSH，Worker 通过 USB/IP 与 Source Agent 使用设备
-- **Agent / 编译服务器**：编译服务器安装 Agent Package，Codex / Kimi / kkagent 经 `gms-rt` / MCP 使用平台能力
+- [生产部署](docs/deployment/production.md)与[配置迁移](docs/deployment/configuration.md)。
+- [GMS ATS 运行、团队权限与设备释放](docs/automation.md)。
+- [AOA 工作台](docs/aoa/user-guide.md)与[Redmine 每日晨报](docs/redmine-daily-brief.md)。
+- [Agent 概览](docs/agent/overview.md)、[CLI 使用](docs/cli/examples.md)和[命令参考](docs/cli/command-reference.md)。
+- [平台安全模型](docs/security.md)与[ADR 索引](docs/architecture/adr/README.md)。
 
 ## License
 

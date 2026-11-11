@@ -68,7 +68,7 @@ ATS（Automation）后台 Worker 按阶段推进一条 run：build → 设备预
 
 - `features/automation/tests/test_api.py`：Agent token 创建/preflight/cancel/
   retry 全部 403；能力不足的创建者按缺失能力拒绝。
-- `features/auth/tests/test_authority.py`：能力快照编译、机器 principal 归属、
+- `features/auth/tests/test_machine_authority.py`：能力快照编译、机器 principal 归属、
   capability token 签名/过期/防篡改。
 - `features/automation/tests/test_integrations.py`：executor 回环请求带
   Authorization 能力头；owner-scoped 端点（reports/jobs）按创建者账号解析。
