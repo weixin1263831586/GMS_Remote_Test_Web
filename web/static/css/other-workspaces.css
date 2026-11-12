@@ -1,0 +1,240 @@
+/*
+ * 其他工作区重构：跟随已经落地的 Agent 三栏工作区和设备库存表格。
+ * 仅作用于 page-ui-rework，禁止覆盖 #page-agent、#page-devices / AOA。
+ * 统一组件层级与视觉，不改变事件绑定、数据列和页面路由。
+ */
+.page-ui-rework {
+    --workbench-surface: var(--card-bg);
+    --workbench-subtle: var(--light-bg);
+    --workbench-edge: var(--border-color);
+    --workbench-radius: 8px;
+    min-width: 0;
+}
+.page-ui-rework .page-header-row > .section-title { color: var(--text-primary); font-weight: 650; }
+.page-ui-rework :is(.page-title-icon, .section-title .ui-icon) { color: var(--primary-light); }
+.page-ui-rework :is(.btn-xs, .btn-xxs, .btn-small, .btn-primary, .btn-danger) {
+    border-radius: 6px; box-shadow: none;
+    transition: color .15s ease, border-color .15s ease, background-color .15s ease;
+}
+.page-ui-rework :is(.btn-xs, .btn-xxs, .btn-small):hover:not(:disabled) {
+    transform: none; box-shadow: none;
+    border-color: color-mix(in srgb, var(--primary-color) 60%, var(--border-color));
+}
+.page-ui-rework :is(.entry-field, .combo-box, .suite-browser-filter, .suite-file-search, .apk-search-input) {
+    border: 1px solid var(--border-color);
+    background: var(--darker-bg); color: var(--text-primary);
+    border-radius: 6px; box-shadow: none;
+}
+.page-ui-rework :is(.entry-field, .combo-box, .suite-browser-filter, .suite-file-search, .apk-search-input):focus-visible {
+    outline: 2px solid var(--primary-color); outline-offset: 1px;
+}
+.page-ui-rework :is(.pane, .list-table-wrap, .users-table-wrap, .audit-table-wrap, .suite-browser-sidebar, .suite-browser-main) {
+    min-width: 0; border: 1px solid var(--border-color);
+    border-radius: 8px; background: var(--card-bg); box-shadow: none;
+}
+.page-ui-rework :is(.pane-bar, .suite-browser-header, .suite-browser-toolbar, .pane-label) {
+    background: var(--light-bg); border-bottom-color: var(--border-color);
+}
+.page-ui-rework :is(.pane-title, .suite-browser-title, .report-section-head) {
+    color: var(--text-primary); font-size: 13px; font-weight: 650;
+}
+/* 设备管理同构 KPI：复用 page-stat-* 字段，按钮筛选交互保持原样。 */
+.page-ui-rework .page-stat-row { display: flex; gap: 10px; margin-bottom: 12px; }
+.page-ui-rework .page-stat-card.workbench-stat {
+    display: flex; flex: 1 1 0; align-items: center; gap: 12px;
+    padding: 13px 14px; min-width: 0; text-align: left;
+    background: var(--card-bg); border: 1px solid var(--border-color);
+    border-radius: 8px; box-shadow: none; line-height: 1.45;
+}
+.page-ui-rework button.page-stat-card.workbench-stat:hover { border-color: var(--primary-color); }
+.page-ui-rework .workbench-stat-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    flex: none; width: 42px; height: 42px; border-radius: 9px;
+    background: var(--lighter-bg); color: var(--primary-light);
+}
+.page-ui-rework .workbench-stat-icon .ui-icon { width: 22px; height: 22px; margin: 0; }
+.page-ui-rework .workbench-stat-copy {
+    display: flex; flex-direction: column; align-items: flex-start;
+    justify-content: center; min-width: 0; gap: 3px;
+}
+.page-ui-rework .workbench-stat .page-stat-value {
+    order: 2; display: block; font-size: 24px; font-weight: 650;
+    font-variant-numeric: tabular-nums; line-height: 1.2;
+}
+.page-ui-rework .workbench-stat .page-stat-label {
+    order: 1; display: block; margin: 0;
+    color: var(--text-secondary); font-size: 12px;
+}
+.page-ui-rework .workbench-stat.active {
+    background: color-mix(in srgb, var(--primary-color) 7%, var(--card-bg));
+    border-color: var(--primary-color);
+}
+/* 表格和日志：同设备库存 42-44px 行、高亮悬浮、sticky 表头。 */
+.page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) {
+    width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums;
+}
+.page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) thead th {
+    position: sticky; top: 0; z-index: 1; min-height: 42px;
+    padding: 9px 10px; font-size: 11px; font-weight: 600;
+    background: var(--light-bg); border-bottom: 1px solid var(--border-color);
+    color: var(--text-secondary);
+}
+.page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) tbody td {
+    height: 42px; padding: 8px 10px; font-size: 12px;
+    border-bottom: 1px solid var(--border-color); vertical-align: middle;
+}
+.page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) tbody tr:hover {
+    background: color-mix(in srgb, var(--primary-color) 5%, var(--card-bg));
+}
+.page-ui-rework :is(.table-placeholder, .suite-empty) {
+    color: var(--text-muted); font-size: 12px; padding: 20px 12px;
+}
+/* 测试工作台：保留三列配置、设备/操作两列、双日志 Tab 与所有按钮。 */
+#page-test.page-ui-rework :is(.input-container, .adb-frame, .control-frame, .log-frame) {
+    background: var(--card-bg); border: 1px solid var(--border-color);
+    border-radius: 8px; box-shadow: none; backdrop-filter: none;
+}
+#page-test.page-ui-rework .input-container { padding: 12px; margin-bottom: 10px; }
+#page-test.page-ui-rework .input-table td { padding-right: 10px; }
+#page-test.page-ui-rework .input-table td:last-child { padding-right: 0; }
+#page-test.page-ui-rework .middle-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px; margin-bottom: 10px;
+}
+#page-test.page-ui-rework :is(.adb-frame, .control-frame, .log-frame) { padding: 10px; }
+#page-test.page-ui-rework :is(.adb-frame, .control-frame) > .section-title,
+#page-test.page-ui-rework .log-frame-header {
+    min-height: 35px; border-bottom: 1px solid var(--border-color);
+}
+#page-test.page-ui-rework :is(.device-canvas, .log-text) {
+    background: var(--darker-bg); border-color: var(--border-color);
+}
+#page-test.page-ui-rework :is(.adb-button-frame, .vnc-button-frame, .vpn-btn-frame) { gap: 5px; }
+#page-test.page-ui-rework :is(.adb-button-frame, .vnc-button-frame, .vpn-btn-frame) .btn-xxs {
+    min-width: 0; min-height: 29px; padding: 4px 8px; font-size: 11px;
+}
+#page-test.page-ui-rework .test-btn-frame {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 8px; padding-top: 10px; border-top: 1px solid var(--border-color);
+}
+#page-test.page-ui-rework .test-btn-frame .btn-lg { min-height: 34px; }
+#page-test.page-ui-rework .log-tab-btn {
+    min-height: 28px; border-radius: 6px; font-size: 11px;
+}
+#page-test.page-ui-rework .log-tab-btn.active {
+    color: var(--primary-light); border-color: var(--primary-color);
+    background: color-mix(in srgb, var(--primary-color) 16%, var(--card-bg));
+}
+#page-test.page-ui-rework .log-text { font: 12px/1.65 var(--ui-font-mono); }
+/* 主机桌面/终端：不干预 noVNC、xterm 节点尺寸与连接逻辑。 */
+#page-desktop.page-ui-rework .host-workspace-grid,
+#page-terminal.page-ui-rework .host-workspace-grid { gap: 10px; }
+#page-desktop.page-ui-rework .host-workspace-pane,
+#page-terminal.page-ui-rework .host-workspace-pane {
+    border: 1px solid var(--border-color);
+    border-radius: 8px; background: var(--card-bg); overflow: hidden;
+}
+#page-desktop.page-ui-rework .host-workspace-title-state,
+#page-terminal.page-ui-rework .host-workspace-title-state {
+    color: var(--text-secondary); font-size: 11px;
+}
+/* 管理页：筛选和列表使用设备库存同款框架。 */
+#page-users.page-ui-rework :is(.users-table-wrap, .agent-access-table-wrap),
+#page-security-audit.page-ui-rework :is(.audit-table-wrap, .audit-filter-bar),
+#page-reports.page-ui-rework > .list-table-wrap,
+#page-api-docs.page-ui-rework > .list-table-wrap {
+    min-width: 0; border: 1px solid var(--border-color);
+    border-radius: 8px; background: var(--card-bg); box-shadow: none;
+}
+#page-security-audit.page-ui-rework .audit-filter-bar {
+    gap: 8px; padding: 10px;
+}
+#page-api-docs.page-ui-rework :is(.api-toolbar, .api-filter-row) { gap: 8px; }
+#page-reports.page-ui-rework > .list-table-wrap {
+    display: flex; flex-direction: column; min-height: 0; overflow: auto;
+}
+#page-reports.page-ui-rework .list-table { min-width: 1120px; }
+/* 报告分析 / APK：强化上传/结果/失败列表层级，保留原 tab 和内容容器。 */
+#page-report-analysis.page-ui-rework :is(.analysis-upload-frame, .report-result-card),
+#page-apk-analysis.page-ui-rework :is(.analysis-upload-frame, .apk-status-card, .apk-source-frame) {
+    border: 1px solid var(--border-color); border-radius: 8px;
+    background: var(--card-bg); box-shadow: none;
+}
+#page-report-analysis.page-ui-rework .report-upload-zone,
+#page-apk-analysis.page-ui-rework .apk-upload-zone {
+    border: 1px dashed var(--border-light);
+    border-radius: 8px; background: var(--darker-bg);
+}
+#page-report-analysis.page-ui-rework .report-upload-zone:hover,
+#page-apk-analysis.page-ui-rework .apk-upload-zone:hover {
+    border-color: var(--primary-color);
+    background: color-mix(in srgb, var(--primary-color) 5%, var(--darker-bg));
+}
+#page-apk-analysis.page-ui-rework :is(.apk-file-tabs, .apk-section-title) {
+    background: var(--light-bg); border-bottom: 1px solid var(--border-color);
+}
+#page-apk-analysis.page-ui-rework .apk-source-tree { border-right: 1px solid var(--border-color); }
+/* 套件浏览器：左目录右文件，沿用原筛选和文件操作。 */
+#page-test-suites.page-ui-rework .suite-download-section {
+    padding: 12px; border: 1px solid var(--border-color);
+    border-radius: 8px; background: var(--card-bg);
+}
+#page-test-suites.page-ui-rework .suite-browser-layout { gap: 10px; }
+#page-test-suites.page-ui-rework :is(.suite-browser-sidebar, .suite-browser-main) { background: var(--card-bg); }
+#page-test-suites.page-ui-rework :is(.suite-browser-header, .suite-browser-toolbar) {
+    min-height: 45px; padding: 8px 12px; background: var(--light-bg);
+}
+#page-test-suites.page-ui-rework :is(.suite-suite-item, .suite-file-row) { border-radius: 6px; }
+#page-test-suites.page-ui-rework :is(.suite-suite-item, .suite-file-row).active {
+    border-color: var(--primary-color);
+    background: color-mix(in srgb, var(--primary-color) 9%, var(--card-bg));
+}
+/* 个人知识库：沿用 Agent 的三栏 pane 文法和原有滚动归属。 */
+#page-notes.page-ui-rework .kb-layout { gap: 10px; }
+#page-notes.page-ui-rework .kb-layout > .pane {
+    display: flex; flex-direction: column; min-height: 0; background: var(--card-bg);
+}
+#page-notes.page-ui-rework .pane-bar {
+    min-height: 45px; padding: 8px 10px; background: var(--light-bg);
+}
+#page-notes.page-ui-rework #kb-doc-content {
+    min-height: 0; border: 0; padding: 12px;
+    background: var(--card-bg); color: var(--text-primary); line-height: 1.65;
+}
+/* 常用网址/工具以及嵌入 iframe 的统一面板外壳。 */
+#page-websites.page-ui-rework .tools-container,
+#page-tools.page-ui-rework .tools-container {
+    border: 1px solid var(--border-color) !important;
+    border-radius: 8px; background: var(--card-bg); box-shadow: none;
+}
+#page-websites.page-ui-rework :is(.tool-card, .category-section),
+#page-tools.page-ui-rework :is(.tool-card, .category-section) {
+    border: 1px solid var(--border-color);
+    border-radius: 8px; background: var(--light-bg); box-shadow: none;
+}
+#page-websites.page-ui-rework .tool-card:hover,
+#page-tools.page-ui-rework .tool-card:hover {
+    transform: none; border-color: var(--primary-color); box-shadow: none;
+}
+.page-ui-rework .embedded-frame-shell {
+    min-width: 0; min-height: 0;
+    background: var(--card-bg); border-radius: 8px; overflow: hidden;
+}
+.page-ui-rework .embedded-frame-loading { background: var(--card-bg); color: var(--text-secondary); }
+/* 宽度回退：不要缩小表格到丢失操作列，使用局部横向滚动。 */
+@media (max-width: 1100px) {
+    .page-ui-rework .page-stat-row { flex-wrap: wrap; }
+    .page-ui-rework .page-stat-card.workbench-stat { flex: 1 1 160px; }
+    #page-test.page-ui-rework .middle-row { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+    .page-ui-rework .workbench-stat-icon { width: 34px; height: 34px; }
+    .page-ui-rework .workbench-stat-icon .ui-icon { width: 19px; height: 19px; }
+    .page-ui-rework .page-stat-card.workbench-stat { flex: 1 1 45%; padding: 10px; }
+    .page-ui-rework :is(.list-table-wrap, .users-table-wrap, .audit-table-wrap) { overflow-x: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .page-ui-rework *, .page-ui-rework *::before, .page-ui-rework *::after {
+        transition-duration: .01ms !important;
+    }
+}
