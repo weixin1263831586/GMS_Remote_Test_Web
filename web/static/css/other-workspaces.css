@@ -204,7 +204,8 @@
 /* 常用网址/工具以及嵌入 iframe 的统一面板外壳。 */
 #page-websites.page-ui-rework .tools-container,
 #page-tools.page-ui-rework .tools-container {
-    border: 1px solid var(--border-color) !important;
+    /* The full-size page already has a single frame; do not double-frame it. */
+    border: 0 !important;
     border-radius: 8px; background: var(--card-bg); box-shadow: none;
 }
 #page-websites.page-ui-rework :is(.tool-card, .category-section),
