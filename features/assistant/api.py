@@ -98,6 +98,7 @@ from features.assistant.workspace import (
     _normalize_workspace_context,
     _request_missing_params,
 )
+from features.auth import require_human_principal_when_auth_required
 from features.users import get_client_id_from_request, owner_id_from_request
 from foundation.responses import error_response, success_response
 
@@ -523,6 +524,8 @@ async def list_agent_sessions(request: Request):
 
 @router.delete("/api/agent/sessions/{session_id}")
 async def delete_agent_session(session_id: str, request: Request):
+    """Discard one Agent session: drop live state and its recovery anchor."""
+    require_human_principal_when_auth_required(request)
     return delete_session(session_id, get_client_id_from_request(request), owner_id_from_request(request))
 
 
