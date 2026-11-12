@@ -26,6 +26,7 @@ const commonEmojis = [
 ];
 
 function loadToolsList() {
+    initToolsPageBody('websites');
     // 首先尝试从服务器同步数据
     loadToolsFromServer().then(() => {
         // 服务器同步完成后，继续处理本地数据

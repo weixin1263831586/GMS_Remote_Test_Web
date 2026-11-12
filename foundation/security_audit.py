@@ -23,6 +23,8 @@ from foundation.redaction import redact_sensitive_data, redact_sensitive_text
 from foundation.runtime_settings import is_production_environment
 
 
+# 权威敏感字段模式见 foundation/redaction.py；本清单按子串匹配语义
+# 展开，新增字段先对齐 redaction 再来此处补齐。
 SENSITIVE_KEYWORDS = (
     'password',
     'passwd',
@@ -31,9 +33,12 @@ SENSITIVE_KEYWORDS = (
     'secret',
     'api_key',
     'apikey',
+    'api-key',
     'authorization',
     'cookie',
     'pair_code',
+    'private_key',
+    'private-key',
 )
 
 _WORD_BOUNDARY_PATTERN = re.compile(r'(?:' + '|'.join(re.escape(kw) for kw in SENSITIVE_KEYWORDS) + r')', re.IGNORECASE)

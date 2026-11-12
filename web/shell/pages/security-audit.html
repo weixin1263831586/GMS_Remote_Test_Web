@@ -15,24 +15,24 @@
             <div id="audit-main-view">
             <div class="audit-stats page-stat-row">
                 <div class="page-stat-card">
-                    <div class="page-stat-value" style="color: var(--primary-color);" id="audit-total-count">-</div>
+                    <div class="page-stat-value tone-primary" id="audit-total-count">-</div>
                     <div class="page-stat-label">审计记录</div>
                 </div>
                 <div class="page-stat-card">
-                    <div class="page-stat-value" style="color: var(--success-color);" id="audit-web-count">-</div>
+                    <div class="page-stat-value tone-success" id="audit-web-count">-</div>
                     <div class="page-stat-label">Web访问</div>
                 </div>
                 <div class="page-stat-card">
-                    <div class="page-stat-value" style="color: var(--warning-color);" id="audit-cli-count">-</div>
+                    <div class="page-stat-value tone-warning" id="audit-cli-count">-</div>
                     <div class="page-stat-label">CLI操作</div>
                 </div>
                 <div class="page-stat-card">
-                    <div class="page-stat-value" style="color: var(--danger-color);" id="audit-error-count">-</div>
+                    <div class="page-stat-value tone-danger" id="audit-error-count">-</div>
                     <div class="page-stat-label">异常请求</div>
                 </div>
             </div>
 
-            <div class="audit-filter-bar" style="display: grid; grid-template-columns: 120px 140px minmax(180px, 1fr) auto auto; gap: 8px; align-items: center; margin-bottom: 10px;">
+            <div class="audit-filter-bar">
                 <select id="audit-source-filter" class="combo-box" data-change="loadSecurityAudit" data-a0="true">
                     <option value="">全部来源</option>
                     <option value="web">Web</option>
@@ -49,34 +49,32 @@
                 <button class="btn-xs" data-click="exportSecurityAudit">📥 导出</button>
             </div>
 
-            <div class="audit-table-wrap" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); flex: 1; min-height: 0; overflow-y: auto;">
-                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
-                    <thead style="position: sticky; top: 0; z-index: 10;">
-                        <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                            <th style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 145px;">时间</th>
-                            <th style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 70px;">来源</th>
-                            <th style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 70px;">状态</th>
-                            <th style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 220px;">用户/IP</th>
-                            <th style="padding: 10px; text-align: center; font-size: 12px; color: var(--text-secondary);">操作</th>
-                            <th style="padding: 10px 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 80px;">耗时</th>
+            <div class="audit-table-wrap list-table-wrap">
+                <table class="list-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 145px;">时间</th>
+                            <th style="width: 70px;">来源</th>
+                            <th style="width: 70px;">状态</th>
+                            <th style="width: 220px;">用户/IP</th>
+                            <th>操作</th>
+                            <th style="width: 80px;">耗时</th>
                         </tr>
                     </thead>
                     <tbody id="security-audit-table-body">
                         <tr>
-                            <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
-                                加载中...
-                            </td>
+                            <td colspan="6" class="table-placeholder">加载中...</td>
                         </tr>
                     </tbody>
                 </table>
-                <div id="audit-load-more-wrapper" style="padding: 14px; text-align: center;"></div>
+                <div id="audit-load-more-wrapper" class="table-load-more"></div>
             </div>
             </div>
 
             <!-- 历史邮件面板：邮件 outbox 台账（owner 视图；管理员可切全量）。
                  布局与审计日志同构：筛选栏（含管理员全量开关）+ 全宽块级表格。 -->
             <div id="audit-outbox-panel" style="display: none;">
-                <div class="audit-filter-bar" style="display: grid; grid-template-columns: 130px 120px minmax(180px, 1fr) auto auto; gap: 8px; align-items: center; margin-bottom: 10px;">
+                <div class="audit-filter-bar">
                     <select id="email-outbox-channel-filter" class="combo-box" data-change="loadAuditOutbox" data-a0="true">
                         <option value="">全部通道</option>
                         <option value="manual">手动发送</option>
@@ -91,31 +89,29 @@
                     </select>
                     <input id="email-outbox-search-input" class="entry-field" type="text" placeholder="搜索收件人、主题" data-keydown="loadAuditOutbox" data-key="Enter" data-a0="true" />
                     <button class="btn-xs" data-click="loadAuditOutbox" data-a0="true">🔄 刷新</button>
-                    <label id="email-outbox-all-users-label" style="display: none; font-size: 12px; white-space: nowrap;">
-                        <input type="checkbox" id="email-outbox-all-users" data-change="loadAuditOutbox" data-a0="true" style="vertical-align: middle;" />
+                    <label id="email-outbox-all-users-label" style="display: none;">
+                        <input type="checkbox" id="email-outbox-all-users" data-change="loadAuditOutbox" data-a0="true" />
                         全部用户
                     </label>
                 </div>
-                <div class="audit-table-wrap" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); flex: 1; min-height: 0; overflow-y: auto;">
-                    <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
-                        <thead style="position: sticky; top: 0; z-index: 10;">
-                            <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                                <th style="padding: 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 160px;">时间 (UTC)</th>
-                                <th style="padding: 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 165px;">通道</th>
-                                <th style="padding: 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 240px;">收件人</th>
-                                <th style="padding: 8px; text-align: center; font-size: 12px; color: var(--text-secondary);">主题</th>
-                                <th style="padding: 8px; text-align: center; font-size: 12px; color: var(--text-secondary); width: 80px;">结果</th>
+                <div class="audit-table-wrap list-table-wrap">
+                    <table class="list-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 160px;">时间 (UTC)</th>
+                                <th style="width: 165px;">通道</th>
+                                <th style="width: 240px;">收件人</th>
+                                <th>主题</th>
+                                <th style="width: 80px;">结果</th>
                             </tr>
                         </thead>
                         <tbody id="email-outbox-table-body">
                             <tr>
-                                <td colspan="5" style="padding: 40px; text-align: center; color: var(--text-secondary);">
-                                    加载中...
-                                </td>
+                                <td colspan="5" class="table-placeholder">加载中...</td>
                             </tr>
                         </tbody>
                     </table>
-                    <div id="email-outbox-load-more-wrapper" style="padding: 14px; text-align: center;"></div>
+                    <div id="email-outbox-load-more-wrapper" class="table-load-more"></div>
                 </div>
             </div>
         </div>

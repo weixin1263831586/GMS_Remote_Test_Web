@@ -11,6 +11,13 @@ from pathlib import Path
 from typing import Any
 
 
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# 敏感键清单与发布脱敏/源码扫描共用，见 scripts/_sensitive_keys.py。
+from scripts._sensitive_keys import SENSITIVE_KEYS, SENSITIVE_SUFFIXES
+
+
 DENIED_NAMES = {
     ".editorconfig",
     ".gitignore",
@@ -46,19 +53,6 @@ DENIED_COMPONENTS = {
     "jdk-11",
 }
 DENIED_SUFFIXES = {".map"}
-SENSITIVE_KEYS = {
-    "api_key",
-    "authorization",
-    "encrypted_password",
-    "password",
-    "private_key",
-    "rest_password",
-    "secret",
-    "token",
-    "ubuntu_pswd",
-    "vnc_password",
-}
-SENSITIVE_SUFFIXES = ("_api_key", "_password", "_pswd", "_secret", "_token")
 PRIVATE_KEY_BLOCK = re.compile(
     rb"-----BEGIN (?P<kind>(?:OPENSSH |RSA |EC )?PRIVATE KEY)-----[\r\n]+"
     rb"[A-Za-z0-9+/=\r\n]{80,}"

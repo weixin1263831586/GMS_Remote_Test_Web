@@ -6,6 +6,7 @@ from unittest.mock import ANY, MagicMock, patch
 from fastapi.responses import PlainTextResponse
 
 from features.assistant import api as assistant_api
+from features.assistant import test_runs
 from features.assistant.api import _missing_required_params
 from features.assistant.executor import ActionExecutor, _json_body
 from features.assistant.intent import resolve
@@ -215,9 +216,9 @@ class AgentRegressionTests(unittest.TestCase):
             with (
                 patch("features.cluster.get_cluster_service", return_value=cluster),
                 patch.object(
-                    assistant_api, "_report_for_cluster_job", return_value=report
+                    test_runs, "_report_for_cluster_job", return_value=report
                 ),
-                patch.object(assistant_api.asyncio, "sleep", side_effect=no_wait),
+                patch.object(test_runs.asyncio, "sleep", side_effect=no_wait),
             ):
                 asyncio.run(
                     assistant_api._monitor_agent_run(
@@ -271,7 +272,7 @@ class AgentRegressionTests(unittest.TestCase):
 
         with patch("features.test_execution.start_test", side_effect=start_local_durable):
             result = asyncio.run(
-                assistant_api._start_test_with_plan(
+                test_runs._start_test_with_plan(
                     session, SimpleNamespace(), plan
                 )
             )

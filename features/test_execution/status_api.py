@@ -11,7 +11,7 @@ from features.auth import get_authenticated_user
 from features.devices import get_or_create_user_state, get_usb_monitor
 from foundation.responses import error_response
 
-from . import runtime
+from . import models, runtime
 
 
 logger = logging.getLogger(__name__)
@@ -26,10 +26,7 @@ MODULE_LOG_PATTERNS = (
     re.compile(r"\[[0-9]+/[0-9]+\]\s+\S+\s+\S+#\S+"),
 )
 
-ACTIVE_JOB_STATUSES = {
-    "created", "queued", "leasing", "assigned", "dispatching", "running",
-    "stopping", "collecting", "worker_lost",
-}
+ACTIVE_JOB_STATUSES = models.ACTIVE_JOB_STATUSES
 
 
 def _active_durable_jobs(owner_id: str) -> list[dict]:
@@ -188,11 +185,6 @@ async def get_status(
 
 # ==================== Log Stream ====================
 
-_ACTIVE_JOB_STATUSES = {
-    "assigned", "dispatching", "running", "stopping", "leasing",
-    "queued", "created", "collecting", "worker_lost",
-}
-
 
 def _active_durable_job_for_owner(owner_id: str):
     """Return the owner's active durable job, or None.
@@ -215,7 +207,7 @@ def _active_durable_job_for_owner(owner_id: str):
     except Exception:
         return None
     for job in jobs:
-        if job.get("status") in _ACTIVE_JOB_STATUSES:
+        if job.get("status") in ACTIVE_JOB_STATUSES:
             return job
     return None
 

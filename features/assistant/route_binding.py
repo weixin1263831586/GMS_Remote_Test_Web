@@ -96,7 +96,7 @@ def get_model_by_tool() -> dict[str, type]:
 def build_call_kwargs(
     func: Any, tool: AgentTool, request: Any, params: dict[str, Any]
 ) -> dict[str, Any]:
-    from features.assistant.api import AgentRequestShim
+    from features.assistant.session_registry import AgentRequestShim
 
     model_by_tool = get_model_by_tool()
 

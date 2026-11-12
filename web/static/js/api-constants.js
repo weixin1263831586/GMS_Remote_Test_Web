@@ -217,7 +217,7 @@ const API_DETAILS_MAP = {
         params: [],
         response: 'Shell安装脚本',
         usage: '在其他主机或编译服务器一键安装',
-        curl_example: 'curl -kfsSL "https://server:5001/api/agent/install.sh" | bash -s -- --paircode-prompt'
+        curl_example: '(set -o pipefail; curl ${GMS_INSTALL_CA_CERT:+--cacert "$GMS_INSTALL_CA_CERT"} -fsSL "https://server:5001/api/agent/install.sh" | bash -s -- --paircode-prompt)'
     },
     '/api/system/docs': {
         title: '获取API文档',

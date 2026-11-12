@@ -162,20 +162,20 @@ class TomlProfileTests(unittest.TestCase):
         )
         self.assertEqual(result.stdout, "")  # TOML has no $url shell variable
 
-    def test_profile_server_and_ca_prefers_toml(self):
+    def test_profile_toml_round_trip(self):
         self.pm.write_profile_toml("kimi-host02-1000", "kimi", "https://toml-host:5001", "/ca.pem")
-        server, ca = self.pm.profile_server_and_ca("kimi")
-        self.assertEqual(server, "https://toml-host:5001")
-        self.assertEqual(ca, "/ca.pem")
+        flat = self.pm.profile_store.load_profile("kimi-host02-1000")
+        self.assertEqual(self.pm.profile_store.controller_url(flat), "https://toml-host:5001")
+        self.assertEqual(self.pm.profile_store.ca_cert(flat), "/ca.pem")
 
-    def test_profile_server_is_fail_closed_when_client_profile_is_ambiguous(self):
+    def test_client_profile_resolution_is_fail_closed_when_ambiguous(self):
         # 0 个或多个同 client profile 时必须拒绝猜测（ADR 0003，绝不
         # sorted()-first —— 多 Controller 主机要显式选择）。
         self.pm.write_profile_toml("kkagent-hostA-1000", "kkagent", "https://a:5001", "")
         self.pm.write_profile_toml("kkagent-hostB-1000", "kkagent", "https://b:5001", "")
-        self.assertEqual(self.pm.profile_server_and_ca("kkagent"), ("", ""))
-        # 0 profiles 同样返回空而不是报错（update/rollback 只需要提示）。
-        self.assertEqual(self.pm.profile_server_and_ca("codex"), ("", ""))
+        self.assertIsNone(self.pm.profile_store.resolve_profile("kkagent"))
+        # 0 profiles 同样返回 None 而不是报错（update/rollback 只需要提示）。
+        self.assertIsNone(self.pm.profile_store.resolve_profile("codex"))
 
     def test_write_profile_is_toml_only(self):
         name = self.pm.write_profile("codex", "https://ctrl:9000", "")

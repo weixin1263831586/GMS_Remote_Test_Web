@@ -14,6 +14,7 @@ from features.auth import (
     require_elevated_admin,
     require_elevated_admin_when_auth_required,
 )
+from foundation.cluster_port import ACTIVE_JOB_STATUSES
 from foundation.devices_port import host_local_device_inventory
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response
@@ -334,10 +335,6 @@ async def list_users(
         )
     except (RuntimeError, AttributeError):
         jobs = []
-    active_statuses = {
-        "created", "queued", "leasing", "assigned", "dispatching", "running",
-        "stopping", "collecting", "worker_lost",
-    }
     jobs_by_owner: dict[str, list[dict]] = {}
     for job in jobs:
         owner_id = str(job.get("owner_id") or "").strip()
@@ -345,7 +342,7 @@ async def list_users(
             jobs_by_owner.setdefault(owner_id, []).append(job)
     for owner_id, owner_jobs in jobs_by_owner.items():
         owner_display_id = resolve_client_display_id(owner_id)
-        active_jobs = [job for job in owner_jobs if job.get("status") in active_statuses]
+        active_jobs = [job for job in owner_jobs if job.get("status") in ACTIVE_JOB_STATUSES]
         leased_devices = [
             lease.get("device_id")
             for job in active_jobs
@@ -395,10 +392,6 @@ async def list_users(
         } for job in owner_jobs[:20]]
 
     for user_info in users:
-        if user_info.get("running"):
-            user_info["status"] = "testing"
-        elif user_info.get("status") not in {"online", "offline"}:
-            user_info["status"] = "offline"
         if user_info.get("status") == "testing":
             user_info["removable"] = False
             user_info["removal_reason"] = "用户正在测试中，结束测试后才能移除"

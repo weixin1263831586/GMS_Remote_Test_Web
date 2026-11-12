@@ -11,9 +11,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
-import os
 import re
-import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,7 +24,7 @@ from foundation.responses import success_response
 
 from . import runtime
 from .clients import owner_id_from_request
-from .storage_paths import owner_storage_key
+from .storage_paths import atomic_write_json, owner_storage_key
 
 
 router = APIRouter(prefix="/api/users/workspace-context")
@@ -190,18 +188,7 @@ def save_workspace_context(owner_id: str, patch: WorkspaceContextPatch) -> dict:
             current["worker_id"] = _local_worker_id()
         current["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-        fd, temporary = tempfile.mkstemp(prefix="workspace-context-", suffix=".json", dir=path.parent)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(current, handle, ensure_ascii=False, indent=2)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
-        finally:
-            try:
-                os.unlink(temporary)
-            except FileNotFoundError:
-                pass
+        atomic_write_json(path, current)
     return current
 
 

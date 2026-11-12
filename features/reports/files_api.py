@@ -22,6 +22,7 @@ from .access import (
     get_accessible_report_by_timestamp,
     report_request_user,
 )
+from .access import principal_has_reports_read as require_permission_reports_read
 from .api_helpers import (
     APIRouter,
     JSONResponse,
@@ -44,19 +45,6 @@ from .downloads import (
     create_remote_report_bundle,
     remove_report_bundle,
 )
-
-
-def _principal_has_reports_read(principal: object) -> bool:
-    """reports.read gate (mirror of analysis_api helper).
-
-    Agent principals must carry the reports.read scope; human roles get it
-    from ROLE_PERMISSIONS and admin via '*'. getattr fallback keeps unit
-    tests that stub a bare principal object working.
-    """
-    has_permission = getattr(principal, "has_permission", None)
-    if not callable(has_permission):
-        return True
-    return bool(has_permission("reports.read"))
 
 
 router = APIRouter()
@@ -175,7 +163,7 @@ async def list_reports(
     principal = report_request_user(request)
     if principal is None and authentication_required():
         principal = require_authenticated_user(request)
-    if not _principal_has_reports_read(principal):
+    if not require_permission_reports_read(principal):
         return error_response(
             {
                 "message": "Agent token scope 'reports.read' required",
@@ -286,7 +274,7 @@ async def download_report(
     principal = require_authenticated_user(request)
     # Report file browsing/download needs reports.read for agent
     # principals (human roles carry it via ROLE_PERMISSIONS; admin via '*').
-    if not _principal_has_reports_read(principal):
+    if not require_permission_reports_read(principal):
         return error_response(
             {
                 "message": "Agent token scope 'reports.read' required",
@@ -465,7 +453,7 @@ async def report_failure_summary(
     list/download; ownership is enforced through the same access helpers.
     """
     principal = require_authenticated_user(request)
-    if not _principal_has_reports_read(principal):
+    if not require_permission_reports_read(principal):
         return error_response(
             {
                 "message": "Agent token scope 'reports.read' required",

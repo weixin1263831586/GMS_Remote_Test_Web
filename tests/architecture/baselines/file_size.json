@@ -3,7 +3,7 @@
   "unit": "lines",
   "default_limit": 1200,
   "ceilings": {
-    "features/assistant/api.py": 1462,
+    "features/assistant/api.py": 602,
     "features/devices/tests/test_usbip_reconnect.py": 3121,
     "features/redmine/tests/test_dashboard_stats.py": 1286
   },

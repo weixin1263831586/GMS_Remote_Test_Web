@@ -50,6 +50,20 @@ def test_connection_pool_reuses_matching_healthy_connection():
 
     assert result is pooled
     create.assert_not_called()
+    stdout.channel.close.assert_called_once()
+
+
+def test_install_sshd_reports_failure_when_service_does_not_come_up():
+    manager = SSHManager(pool_size=1)
+    command = MagicMock(code=0, stdout="", stderr="")
+    with (
+        patch.object(manager, "check_sshd_installed", side_effect=[(False, ""), (False, "")]),
+        patch.object(manager, "execute_command", return_value=command),
+    ):
+        result = manager.install_sshd(MagicMock(), {})
+
+    assert result["success"] is False
+    assert "未进入可查询状态" in result["error"]
 
 
 def test_pool_health_check_matches_real_paramiko_contract():
@@ -80,6 +94,7 @@ def test_pool_health_check_matches_real_paramiko_contract():
     create.assert_not_called()
     channel.settimeout.assert_called_once_with(2.0)
     channel.recv_exit_status.assert_called_once_with()
+    channel.close.assert_called_once_with()
 
 
 def test_key_auth_falls_back_to_agent_and_default_keys_when_configured_key_is_missing():

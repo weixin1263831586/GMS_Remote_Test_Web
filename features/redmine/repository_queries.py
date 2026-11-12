@@ -512,14 +512,6 @@ class RepositoryQueryMixin:
         return _name_matches_keys(issue.get("assigned_to_name"), owner_keys)
 
     @staticmethod
-    def _last_note_journal(issue: dict[str, Any]) -> dict[str, Any]:
-        journals = issue.get("journals_json") or []
-        note_journals = [j for j in journals if str(j.get("notes") or "").strip()]
-        if not note_journals:
-            return {}
-        return max(note_journals, key=lambda item: _parse_dt(item.get("created_on")) or datetime.min)
-
-    @staticmethod
     def _last_activity_journal(issue: dict[str, Any]) -> dict[str, Any]:
         journals = issue.get("journals_json") or []
         activity_journals = [

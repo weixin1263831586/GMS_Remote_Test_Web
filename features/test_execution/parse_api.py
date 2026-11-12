@@ -23,8 +23,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-UPLOAD_PROGRESS_EXPIRATION = 10
-
 # Positional arguments starting with this prefix and containing no path
 # separator are treated as short suite names (e.g. android-cts-17_r1) and
 # resolved to the suite's tools path before positional parsing.

@@ -91,7 +91,7 @@ async def test_monitor_loop_streams_progress_until_terminal(monkeypatch):
                 return runs.pop(0)
             return runs[0]
 
-    monkeypatch.setattr(api, "_save_session_anchor", lambda _session: None)
+    monkeypatch.setattr(we, "_save_session_anchor", lambda _session: None)
     monkeypatch.setattr(
         "features.assistant.session_registry.clear_session_anchor",
         lambda _session: None)
@@ -134,7 +134,7 @@ async def test_monitor_loop_marks_step_error_on_failed_status(monkeypatch):
                 return runs.pop(0)
             return runs[0]
 
-    monkeypatch.setattr(api, "_save_session_anchor", lambda _session: None)
+    monkeypatch.setattr(we, "_save_session_anchor", lambda _session: None)
     monkeypatch.setattr(
         "features.assistant.session_registry.clear_session_anchor",
         lambda _session: None)

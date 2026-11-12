@@ -1,4 +1,8 @@
-"""Report ownership checks shared by list, analysis, download, and delete APIs."""
+"""Report ownership checks shared by list, analysis, download, and delete APIs.
+
+Also hosts the ``reports.read`` permission gate reused by files_api and
+analysis_api (single definition, imported under each module's local name).
+"""
 
 from __future__ import annotations
 
@@ -65,3 +69,17 @@ def get_accessible_report_by_timestamp(
         include_all=user.role == "admin",
     )
     return report if can_access_report(request, report) else None
+
+
+def principal_has_reports_read(principal: object) -> bool:
+    """reports.read gate for agent principals and human roles.
+
+    Agent principals must carry the reports.read scope; human roles get it
+    from ROLE_PERMISSIONS and admin via '*'. The getattr fallback keeps unit
+    tests that stub a bare principal object working (no has_permission →
+    treated as permitted, exactly like the pre-gate behavior).
+    """
+    has_permission = getattr(principal, "has_permission", None)
+    if not callable(has_permission):
+        return True
+    return bool(has_permission("reports.read"))

@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
+from foundation.log_setup import resolve_log_level
 from foundation.network_quality import probe_tcp_quality
 from foundation.tradefed_progress import parse_progress_line
 from foundation.transport_contract import TransportOperationError
@@ -59,7 +60,9 @@ from .process_inventory import (
 from .runtime import WorkerRuntime
 
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+_log_level = resolve_log_level(os.environ.get("GMS_LOG_LEVEL"))
+logging.basicConfig(level=_log_level, format="%(asctime)s %(levelname)s %(message)s")
+logging.getLogger().setLevel(_log_level)
 logger = logging.getLogger("gms-worker")
 AGENT_VERSION = "0.5.1"
 

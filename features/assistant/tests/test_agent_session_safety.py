@@ -36,7 +36,7 @@ def _agent_request(resource_owner_id: str = "user-42"):
 
 
 def test_execute_plan_resolves_report_owner_from_request_principal():
-    from features.assistant import api
+    from features.assistant import api, failure_analysis, test_runs
 
     session = {
         "session_id": "s1",
@@ -52,17 +52,17 @@ def test_execute_plan_resolves_report_owner_from_request_principal():
 
     async def scenario():
         with patch.object(
-            api.test_report_db,
+            failure_analysis.test_report_db,
             "get_reports",
             return_value=[{"timestamp": "T1"}],
         ) as get_reports, patch.object(
-            api, "_run_pre_actions", new=AsyncMock(return_value={"success": True})
+            test_runs, "_run_pre_actions", new=AsyncMock(return_value={"success": True})
         ), patch.object(
-            api,
+            test_runs,
             "_start_test_with_plan",
             new=AsyncMock(return_value={"success": True}),
         ), patch.object(
-            api, "_monitor_agent_run", new=AsyncMock()
+            test_runs, "_monitor_agent_run", new=AsyncMock()
         ):
             await api._execute_plan(session, request, plan)
         return get_reports
@@ -73,15 +73,15 @@ def test_execute_plan_resolves_report_owner_from_request_principal():
 
 
 def test_analyze_saved_report_uses_request_owner():
-    from features.assistant import api
+    from features.assistant import failure_analysis
 
     session = {"messages": [], "steps": []}
     request = _agent_request("owner-7")
 
     with patch.object(
-        api.test_report_db, "get_report_by_timestamp", return_value=None
+        failure_analysis.test_report_db, "get_report_by_timestamp", return_value=None
     ) as get_by_ts:
-        asyncio.run(api._analyze_saved_report(session, "T9", request))
+        asyncio.run(failure_analysis._analyze_saved_report(session, "T9", request))
 
     assert get_by_ts.call_args.kwargs.get("owner_id") == "owner-7"
 
@@ -161,7 +161,7 @@ def test_stale_monitor_cancellation_does_not_clobber_new_run():
     ``_execute_plan`` 取消旧监控任务；若旧任务的 CancelledError 清理
     无条件改写会话状态，会把新一轮的 active_run / 恢复锚点清掉。
     """
-    from features.assistant import api, session_registry
+    from features.assistant import api, session_registry, test_runs
 
     plan = {"request": {"devices": ["ABC"], "test_suite": "cts"}}
     session = {
@@ -207,14 +207,14 @@ def test_stale_monitor_cancellation_does_not_clobber_new_run():
             await asyncio.sleep(0.01)
 
             with patch.object(
-                api, "_latest_report_for_client", return_value=None
+                test_runs, "_latest_report_for_client", return_value=None
             ), patch.object(
-                api, "_run_pre_actions", new=AsyncMock(return_value={"success": True})
+                test_runs, "_run_pre_actions", new=AsyncMock(return_value={"success": True})
             ), patch.object(
-                api, "_start_test_with_plan",
+                test_runs, "_start_test_with_plan",
                 new=AsyncMock(return_value={"success": True}),
             ), patch.object(
-                api, "_monitor_agent_run", new=AsyncMock()
+                test_runs, "_monitor_agent_run", new=AsyncMock()
             ), patch.object(
                 session_registry.session_store, "save_anchor"
             ) as save_anchor, patch.object(
@@ -324,6 +324,8 @@ def _bare_request():
 
 
 def _seed_confirm_session(api, plan: dict, request=None) -> str:
+    from features.assistant import session_registry
+
     request = request if request is not None else _bare_request()
     client_id = api.get_client_id_from_request(request)
     session = {
@@ -336,8 +338,8 @@ def _seed_confirm_session(api, plan: dict, request=None) -> str:
         "active_run": None,
         # 缺 updated_at 会被 agent_chat 首次触发的过期清扫当作 0 时间戳
         # 删除，导致请求落入新会话的意图解析路径。
-        "created_at": api._now_iso(),
-        "updated_at": api._now_iso(),
+        "created_at": session_registry._now_iso(),
+        "updated_at": session_registry._now_iso(),
     }
     api._agent_sessions["s-confirm"] = session
     return session
@@ -431,7 +433,7 @@ def test_plan_operation_id_flows_to_cluster_idempotency_key(monkeypatch):
     任务持久化在集群仓库、响应丢失时的客户端重试据此返回既有任务；
     retry 链路复用既有任务目录，不注入该键。
     """
-    from features.assistant import api
+    from features.assistant import test_runs
     from features.assistant.session_registry import AgentRequestShim
     from features.test_execution import models as te_models
 
@@ -453,8 +455,8 @@ def test_plan_operation_id_flows_to_cluster_idempotency_key(monkeypatch):
         "request": {"devices": ["ABC"], "test_suite": "cts"},
     }
 
-    asyncio.run(api._start_test_with_plan(session, shim, plan))
+    asyncio.run(test_runs._start_test_with_plan(session, shim, plan))
     assert captured[0].automation_run_id == "agent-op:op-abc"
 
-    asyncio.run(api._start_test_with_plan(session, shim, plan, retry_timestamp="2026.10.27_10.00.00"))
+    asyncio.run(test_runs._start_test_with_plan(session, shim, plan, retry_timestamp="2026.10.27_10.00.00"))
     assert captured[1].automation_run_id == ""

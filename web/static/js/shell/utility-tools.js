@@ -10,6 +10,15 @@ const UT_DEFAULT_CATEGORIES = {
     '报告工具': { icon: '📅', color: '#0ea5e9' },
     '其他工具': { icon: '🔧', color: '#8e8e93' },
 };
+
+// 网址与工具卡片按分类位置共用强调色，分类图标保留各自颜色。
+const TOOLS_CATEGORY_PALETTE = [
+    '#4285f4', '#34a853', '#ea4335', '#7c3aed', '#0ea5e9', '#ff9500', '#8e8e93',
+];
+function toolsCategoryColor(catIndex) {
+    const i = Number.isInteger(catIndex) && catIndex >= 0 ? catIndex : 0;
+    return TOOLS_CATEGORY_PALETTE[i % TOOLS_CATEGORY_PALETTE.length];
+}
 const UT_BUILTIN_TOOLS = {
     '报告工具': [
         {
@@ -115,6 +124,7 @@ function ut_migrateLegacyFilePaths(categories) {
 }
 
 function ut_loadToolsList() {
+    initToolsPageBody('tools');
     try {
         ut_categoryMeta = JSON.parse(localStorage.getItem(UT_CATEGORY_META_KEY) || '{}') || {};
     } catch (e) {
@@ -296,6 +306,7 @@ function ut_renderAllCategories(grid) {
         section.addEventListener('drop', ut_handleCategoryDrop);
 
         const header = document.createElement('div');
+        header.className = 'category-header';
         header.style.cssText = 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); cursor: move;';
 
         const titleWrap = document.createElement('div');
@@ -322,7 +333,7 @@ function ut_renderAllCategories(grid) {
 
         const addBtn = document.createElement('button');
         addBtn.textContent = '添加工具';
-        addBtn.style.cssText = `padding: 6px 16px; background: ${catInfo.color}; color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;`;
+        addBtn.style.cssText = `padding: 6px 16px; background: var(--primary-color); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;`;
         addBtn.addEventListener('mouseenter', () => { addBtn.style.opacity = '0.85'; });
         addBtn.addEventListener('mouseleave', () => { addBtn.style.opacity = '1'; });
         addBtn.addEventListener('click', () => ut_addNewToolToCategory(category));
@@ -344,7 +355,7 @@ function ut_renderAllCategories(grid) {
         const cards = document.createElement('div');
         cards.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px;';
         tools.forEach((tool, index) => {
-            cards.appendChild(ut_createToolCard(tool, category, index, catInfo.color));
+            cards.appendChild(ut_createToolCard(tool, category, index, toolsCategoryColor(catIndex)));
         });
         section.appendChild(cards);
         grid.appendChild(section);
@@ -973,6 +984,39 @@ function ut_closeToolModal() {
 // --- Category CRUD ---
 function ut_showAddCategoryModal() {
     _showAddCategoryModal('ut-category-modal', { name: 'ut-category-name', icon: 'ut-category-icon' }, () => { ut_editingCategory = null; });
+}
+
+// 共享按钮按页面打开各自的分类模态框。
+function toolsPageAddCategory(kind) {
+    if (kind === 'tools') {
+        ut_showAddCategoryModal();
+        return;
+    }
+    showAddCategoryModal();
+}
+
+// 为共享片段设置各页原有 ID 与按钮目标；重复切页不重复初始化。
+function initToolsPageBody(kind) {
+    const host = document.querySelector(`[data-tools-page="${kind}"]`);
+    if (!host || host.dataset.toolsPageReady === 'true') return;
+    host.dataset.toolsPageReady = 'true';
+    const scroll = host.querySelector('[data-tools-scroll]');
+    const grid = host.querySelector('[data-tools-grid]');
+    const addBtn = host.querySelector('[data-tools-add]');
+    if (scroll) {
+        scroll.id = host.dataset.scrollId || '';
+        delete scroll.dataset.toolsScroll;
+    }
+    if (grid) {
+        grid.id = host.dataset.gridId || '';
+        delete grid.dataset.toolsGrid;
+    }
+    if (addBtn) {
+        addBtn.dataset.click = 'toolsPageAddCategory';
+        addBtn.dataset.r0 = 'dataset.toolsKind';
+        addBtn.dataset.toolsKind = host.dataset.addKind || kind;
+        delete addBtn.dataset.toolsAdd;
+    }
 }
 
 function ut_closeCategoryModal() {

@@ -56,7 +56,8 @@ _MAX_JSON_TOTAL_CHARS = 256 * 1024
 _MAX_JSON_FRAGMENTS = 32
 
 
-def _field_is_sensitive(name: str) -> bool:
+def is_sensitive_field(name: str) -> bool:
+    """Identify credential fields while excluding token usage counters."""
     return bool(_SENSITIVE_FIELD_PATTERN.search(name)) and not _is_token_counter_field(name)
 
 
@@ -74,7 +75,7 @@ def redact_sensitive_data(value: Any, *, known_values=(), mask: str = '***') -> 
             return
         if isinstance(item, dict):
             for key, child in item.items():
-                collect(child, secret or _field_is_sensitive(str(key)), depth + 1)
+                collect(child, secret or is_sensitive_field(str(key)), depth + 1)
         elif isinstance(item, (list, tuple)):
             for child in item:
                 collect(child, secret, depth + 1)
@@ -85,7 +86,7 @@ def redact_sensitive_data(value: Any, *, known_values=(), mask: str = '***') -> 
         if depth >= _MAX_REDACTION_DEPTH:
             return mask
         if isinstance(item, dict):
-            return {key: (mask if child else '') if _field_is_sensitive(str(key))
+            return {key: (mask if child else '') if is_sensitive_field(str(key))
                     else public(child, depth + 1) for key, child in item.items()}
         if isinstance(item, (list, tuple)):
             return [public(child, depth + 1) for child in item]
@@ -175,7 +176,7 @@ def _redact_assignments(value: str) -> str:
     cursor = position = 0
     while match := _ASSIGNMENT_KEY_PATTERN.search(value, position):
         position = match.end()
-        if not _field_is_sensitive(match.group('key')):
+        if not is_sensitive_field(match.group('key')):
             # Keep scanning inside ordinary values: a message may itself
             # contain a password assignment that must still be masked.
             continue

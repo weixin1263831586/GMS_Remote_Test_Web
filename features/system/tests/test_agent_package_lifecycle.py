@@ -198,14 +198,17 @@ class LifecycleTests(unittest.TestCase):
         )
         self.assertEqual(result.stdout, "")  # TOML has no $url shell variable
 
-    # --- 5. configured_clients / profile_server round trip --------------
+    # --- 5. configured_clients / profile round trip ---------------------
     def test_configured_clients_round_trip(self):
         self.assertEqual(self.agent.configured_clients(), [])
         self.agent.write_profile("kimi", "https://ctrl:5001", "")
         self.assertEqual(self.agent.configured_clients(), ["kimi"])
-        server, ca = self.agent.profile_server_and_ca("kimi")
-        self.assertEqual(server, "https://ctrl:5001")
-        self.assertEqual(ca, "")
+        selected = self.agent.pm.profile_store.resolve_profile("kimi")
+        self.assertIsNotNone(selected)
+        flat = self.agent.pm.load_profile(selected.stem)
+        store = self.agent.pm.profile_store
+        self.assertEqual(store.controller_url(flat), "https://ctrl:5001")
+        self.assertEqual(store.ca_cert(flat), "")
 
     # --- 6. safe_extract rejects traversal / symlinks / bombs -----------
     def test_safe_extract_rejects_path_traversal(self):

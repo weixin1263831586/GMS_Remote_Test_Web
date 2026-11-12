@@ -751,7 +751,7 @@ Environment=UBUNTU_USER=${RUN_USER}
 Environment=UBUNTU_HOST=${HOST_IP}
 Environment=GMS_LOCAL_SERVER=${RUN_USER}@${HOST_IP}
 Environment=GMS_PRIVATE_KEY_PATH=${SSH_KEY_PATH}
-ExecStart=${INSTALL_DIR}/.venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port ${PORT} --workers 1 --backlog 2048 --limit-concurrency 512 --limit-max-requests 100000 --timeout-keep-alive 10 --log-level info --access-log --ssl-keyfile ${CERT_KEY} --ssl-certfile ${CERT_CRT}
+ExecStart=${INSTALL_DIR}/.venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port ${PORT} --workers 1 --backlog 2048 --limit-concurrency 512 --timeout-keep-alive 120 --log-level info --access-log --ssl-keyfile ${CERT_KEY} --ssl-certfile ${CERT_CRT}
 Restart=always
 RestartSec=3
 UMask=0077

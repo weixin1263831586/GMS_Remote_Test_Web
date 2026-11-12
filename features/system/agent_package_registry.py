@@ -230,7 +230,11 @@ async def agent_bootstrap_installer(request: Request):
         PROJECT_ROOT / "agent" / "gms-remote-test" / "runtime" / "gms-agent"
     )
     if not installer_path.is_file():
-        return error_response("agent installer 不可用", status_code=500)
+        return error_response(
+            "agent installer 不可用",
+            status_code=503,
+            code="DEPENDENCY_UNAVAILABLE",
+        )
     server_url = str(request.base_url).rstrip("/")
     parsed = urlsplit(server_url)
     base_host = parsed.hostname or ""

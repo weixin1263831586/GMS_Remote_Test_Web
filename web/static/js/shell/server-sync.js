@@ -136,7 +136,7 @@ function renderAllCategories(grid) {
                         <span style="margin-left: 10px; padding: 2px 8px; background: var(--light-bg); border-radius: 10px; font-size: 11px; color: var(--text-muted);">${tools.length}</span>
                     </div>
                     <div style="display: flex; gap: 6px;">
-                        <button type="button" data-tools-action="add-tool" data-category="${escapeIconAttr(category)}" style="padding: 6px 16px; background: ${categoryInfo.color}; color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
+                        <button type="button" data-tools-action="add-tool" data-category="${escapeIconAttr(category)}" style="padding: 6px 16px; background: var(--primary-color); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
                             class="hover-dim">
                             添加工具
                         </button>
@@ -151,7 +151,7 @@ function renderAllCategories(grid) {
         `;
 
         tools.forEach((tool, index) => {
-            const cardColor = categoryInfo.color;
+            const cardColor = toolsCategoryColor(catIndex);
             html += renderToolCard(tool, category, index, cardColor);
         });
 
@@ -206,7 +206,8 @@ function renderSingleCategory(grid, category) {
     `;
 
     tools.forEach((tool, index) => {
-        const cardColor = categoryInfo.color;
+        // 单分类视图：固定组位 0（第一组色），与全量视图首组一致。
+        const cardColor = toolsCategoryColor(0);
         html += renderToolCard(tool, category, index, cardColor);
     });
 
@@ -237,7 +238,7 @@ function renderToolCard(tool, category, index, cardColor) {
             </div>
 
             <div class="tool-info" style="text-align: center; width: 100%; pointer-events: none;">
-                <div class="tool-title" style="font-size: 12px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%;">
+                <div class="tool-title" style="font-size: 12px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; margin-bottom: 0;">
                     ${escapeHtml(tool?.title || '')}
                 </div>
             </div>

@@ -27,9 +27,6 @@ from foundation.security import quote_device_shell_arg
 
 logger = logging.getLogger(__name__)
 
-# Resource types we know how to read default + effective values for.
-RESOURCE_TYPES = ("bool", "integer", "string", "dimen", "integer-array", "string-array", "array")
-
 # 匹配 aapt2 资源 ID 行。
 _RESOURCE_RE = re.compile(
     r"^\s*resource\s+0x[0-9a-fA-F]+\s+([a-z-]+)/([A-Za-z0-9_]+)(?:\s+PUBLIC)?\s*$"

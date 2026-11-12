@@ -44,6 +44,8 @@
     --danger-color: #ef4444;
     --warning-color: #f59e0b;
     --info-color: #06b6d4;
+    --cluster-accent: #42a5f5;
+    --skill-accent: #8b5cf6;
 
     /* 背景色 - 提高对比度 */
     --dark-bg: #0a0a0f;
@@ -550,7 +552,8 @@ body {
 }
 
 .users-table-wrap,
-.devices-table-wrap {
+.devices-table-wrap,
+.list-table-wrap {
     flex: 1;
     min-height: 0;
     overflow: auto !important;
@@ -572,6 +575,8 @@ body {
     height: 100%;
     min-height: 0;
     box-sizing: border-box;
+    border: 0;
+    background: transparent;
 }
 
 .embedded-frame-loading {
@@ -763,12 +768,55 @@ body {
 }
 
 /* 已有满尺寸内容面的页面由公共外框统一描边，避免两层边框重合。 */
-#page-reports > div:nth-child(2),
+#page-reports > .list-table-wrap,
 #page-websites > .tools-container,
 #page-tools > .tools-container,
 #gms-assistant-frame {
     border: 0 !important;
     box-shadow: none !important;
+}
+
+.tools-container {
+    background: var(--card-bg);
+    border-radius: 6px;
+    padding: 12px;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.tools-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.tools-grid-frame {
+    padding: 4px 8px 8px;
+}
+
+.tools-footer {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color);
+}
+
+.tools-add-category {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    padding: 8px;
+    border: none;
+    border-radius: 5px;
+    background: var(--success-color);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
 }
 
 /* 分析页空状态的上传面本身就是唯一外框；进入结果态后改用公共外框。 */
@@ -1093,9 +1141,11 @@ body {
     box-sizing: border-box;
     display: flex;
     align-items: center;
+    gap: 6px;
     height: 26px;
     font-size: 11px;
     white-space: nowrap;
+    cursor: pointer;
 }
 
 /* 页面顶部统计卡公共规范（用户/设备/审计/API 页共享；原为各页复制的
@@ -1112,6 +1162,136 @@ body {
 }
 .page-stat-card > .page-stat-value { display: block; font-size: 24px; font-weight: bold; }
 .page-stat-card > .page-stat-label { display: block; color: var(--text-secondary); font-size: 12px; margin-top: 5px; }
+.page-stat-value.tone-primary { color: var(--primary-color); }
+.page-stat-value.tone-success { color: var(--success-color); }
+.page-stat-value.tone-warning { color: var(--warning-color); }
+.page-stat-value.tone-danger { color: var(--danger-color); }
+.page-stat-value.tone-info { color: var(--info-color); }
+.page-stat-value.tone-cluster { color: var(--cluster-accent); }
+.page-stat-value.tone-skill { color: var(--skill-accent); }
+
+/* 设备 / 报告 / 审计 / 接口列表共用的表格壳。列宽仍由页面声明。 */
+.list-table-wrap {
+    background: var(--light-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+.list-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+.list-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+.list-table th {
+    padding: 5px 6px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--darker-bg);
+    color: var(--text-secondary);
+    font-size: 13px;
+    text-align: center;
+}
+.list-table th[data-click] { cursor: pointer; }
+td.table-placeholder {
+    padding: 40px;
+    color: var(--text-secondary);
+    text-align: center;
+}
+.table-load-more {
+    padding: 12px;
+    text-align: center;
+}
+
+.audit-filter-bar {
+    display: grid;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+#audit-main-view > .audit-filter-bar {
+    grid-template-columns: 120px 140px minmax(180px, 1fr) auto auto;
+}
+#audit-outbox-panel > .audit-filter-bar {
+    grid-template-columns: 130px 120px minmax(180px, 1fr) auto auto;
+}
+#email-outbox-all-users-label {
+    font-size: 12px;
+    white-space: nowrap;
+}
+#email-outbox-all-users { vertical-align: middle; }
+#devices-scope-hint {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+#device-group-filter {
+    width: 150px;
+    max-width: 160px;
+    box-sizing: border-box;
+}
+#page-test-suites .page-header-actions label[data-multi-host-control] {
+    color: var(--text-secondary);
+}
+.page-header-actions .header-host-select {
+    width: 130px;
+    box-sizing: border-box;
+    padding: 3px 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--darker-bg);
+    color: var(--text-primary);
+    font-size: 11px;
+}
+.page-header-actions label input[type="checkbox"] { cursor: pointer; }
+
+/* 知识库、对话 Agent 等分栏页共用的面板。列宽由 .kb-layout / .agent-layout 决定。 */
+.split-layout {
+    display: grid;
+    gap: 10px;
+    flex: 1;
+    min-height: 0;
+}
+.agent-layout { grid-template-columns: minmax(0, 1fr) 340px; }
+.kb-layout { grid-template-columns: 220px 300px minmax(0, 1fr); }
+.pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    background: var(--light-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+}
+.pane-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+.pane-bar.spread { justify-content: space-between; }
+.pane-bar.end { align-items: flex-end; }
+.pane-title { font-size: 13px; font-weight: 600; }
+.pane-label {
+    padding: 8px 10px;
+    border-top: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+}
+.pane-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.pane-foot {
+    display: flex;
+    gap: 6px;
+    padding: 8px 10px;
+    border-top: 1px solid var(--border-color);
+}
+.pane-foot > .btn-xs { flex: 1; }
+.pane-foot.single > .btn-xs { flex: none; width: 100%; }
+.pane-grow { flex: 1; min-width: 0; }
+.pane-icon-btn { padding: 1px 6px; font-size: 10px; }
 
 /* 页面标题行公共规范：24px 动作按钮点击目标（只看关注/外部知识库共用）。 */
 .page-title-row { display:flex; align-items:center !important; justify-content:space-between; }

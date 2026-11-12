@@ -280,7 +280,11 @@ async def decompile_device_apk(req: DecompileRequest, request: Request):
     page and starts the analysis (same flow as suite→APK).
     """
     if not _decompile_dependencies_ready():
-        return error_response("APK 分析依赖未初始化", status_code=500)
+        return error_response(
+            "APK 分析依赖未初始化",
+            status_code=503,
+            code="DEPENDENCY_UNAVAILABLE",
+        )
     if not req.path.strip():
         return error_response("缺少 APK 路径", status_code=400)
     on_device_path = req.path.strip()

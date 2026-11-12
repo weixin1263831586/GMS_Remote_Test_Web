@@ -893,7 +893,8 @@ function closeUsageExamplesModal() {
 
 // 生成与当前 Controller 地址绑定的严格 TLS 安装命令。
 function buildSkillInstallCommand() {
-    return `curl -kfsSL "${window.location.origin}/api/agent/install.sh" | bash -s -- --paircode-prompt`;
+    return '(set -o pipefail; curl ${GMS_INSTALL_CA_CERT:+--cacert "$GMS_INSTALL_CA_CERT"} -fsSL '
+        + `"${window.location.origin}/api/agent/install.sh" | bash -s -- --paircode-prompt)`;
 }
 
 /**
@@ -1011,13 +1012,6 @@ function copyText(text, options = {}) {
         doFallback();
     }
 }
-
-/**
- * 复制curl命令到剪贴板（自动添加jq格式化）
- */
-window.copyCurlCommand = function(text) {
-    copyText(text, { addJq: true, successMsg: '✓ curl命令已复制 (含jq格式化)' });
-};
 
 /**
  * 复制命令（使用示例专用）

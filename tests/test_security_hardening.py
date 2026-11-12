@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts import _sensitive_keys, check_source_secrets, sanitize_release_config, verify_release_tree
 from scripts.check_source_secrets import find_literal_secret_paths, scan_tracked_files
 from scripts.sanitize_tracked_config import sanitize_config
 
@@ -38,6 +39,13 @@ class SecurityHardeningTests(unittest.TestCase):
             find_literal_secret_paths(payload),
             ['password', 'provider.api_key'],
         )
+
+    def test_sensitive_key_lists_share_single_source(self):
+        """发布脱敏/发布树校验/源码扫描必须引用同一份敏感键清单，防止漂移。"""
+        self.assertTrue(_sensitive_keys.SENSITIVE_KEYS)
+        for module in (_sensitive_keys, check_source_secrets, sanitize_release_config, verify_release_tree):
+            self.assertIs(_sensitive_keys.SENSITIVE_KEYS, module.SENSITIVE_KEYS)
+            self.assertIs(_sensitive_keys.SENSITIVE_SUFFIXES, module.SENSITIVE_SUFFIXES)
 
     def test_tracked_json_runs_content_marker_scan_after_key_scan(self):
         token = 'gh' + 'p_' + ('A' * 32)

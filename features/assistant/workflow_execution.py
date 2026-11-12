@@ -19,6 +19,23 @@ from features.assistant.plan_context import (
     is_local_worker_id,
     local_worker_id,
 )
+from features.assistant.session_log import _append_message, _append_step
+from features.assistant.session_registry import (
+    AgentRequestShim,
+    _agent_monitor_tasks,
+    _agent_sessions,
+    _now_iso,
+)
+from features.assistant.session_registry import (
+    finish_run_state as _finish_run_state,
+)
+from features.assistant.session_registry import (
+    monitor_run_is_current as _monitor_run_is_current,
+)
+from features.assistant.session_registry import (
+    save_session_anchor as _save_session_anchor,
+)
+from features.assistant.test_runs import MAX_AGENT_RETRIES
 from features.assistant.workflow_draft import (
     detect_plan_action,
     draft_blocks,
@@ -37,15 +54,6 @@ WORKFLOW_PLAN_TYPE = "workflow_draft"
 WORKFLOW_CREATE_STEP_TITLE = "创建 ATS 工作流"
 
 _WORKFLOW_CONFIRM_RE = re.compile(r"^(确认执行|开始执行|执行|确认|start|run|go)$", re.IGNORECASE)
-
-# 复用 api 的会话写入 helpers（同 feature 延迟 import，避免加载环）。
-
-
-def _api():
-    from features.assistant import api
-
-    return api
-
 
 def is_workflow_confirm_message(message: str) -> bool:
     return bool(_WORKFLOW_CONFIRM_RE.match((message or "").strip()))
@@ -75,7 +83,7 @@ def workflow_run_progress(run: dict[str, Any]) -> dict[str, Any]:
         "status": status,
         "current_stage": run.get("current_stage") or status,
         "error": str(run.get("error") or ""),
-        "updated_at": run.get("updated_at") or _api()._now_iso(),
+        "updated_at": run.get("updated_at") or _now_iso(),
         "artifact_download": artifact_download_progress(run),
     }
 
@@ -88,7 +96,6 @@ def update_workflow_run_step(
     返回 status 是否发生变化：监控循环只在变化时持久化恢复锚点，
     避免每 5 秒一次落盘放大写放大。
     """
-    api = _api()
     step = next(
         (item for item in reversed(session.get("steps") or [])
          if str((item.get("data") or {}).get("automation_run_id") or "") == run_id
@@ -100,7 +107,7 @@ def update_workflow_run_step(
         # 进展步骤；run_id 与当前 active_run 不符时不补（旧监控轮次）。
         if str((session.get("active_run") or {}).get("automation_run_id") or "") != run_id:
             return False
-        api._append_step(
+        _append_step(
             session, WORKFLOW_CREATE_STEP_TITLE, "running",
             f"恢复监控 Run {run_id}",
             {"automation_run_id": run_id},
@@ -128,7 +135,7 @@ def update_workflow_run_step(
     changed = any(previous.get(key) != progress[key] for key in ("status", "current_stage", "error"))
     step.setdefault("data", {})["status"] = status
     step.setdefault("data", {})["progress"] = progress
-    session["updated_at"] = api._now_iso()
+    session["updated_at"] = _now_iso()
     return changed
 
 
@@ -382,8 +389,6 @@ def workflow_permission_block(
 
 def run_body_from_draft(draft: dict[str, Any], workspace: dict[str, Any]) -> dict[str, Any]:
     """把草案转换为 automation create_run 的请求体（唯一执行通道）。"""
-    from features.assistant.api import MAX_AGENT_RETRIES
-
     device = draft.get("device") or {}
     firmware = draft.get("firmware") or {}
     aoa = draft.get("aoa") or {}
@@ -437,7 +442,6 @@ async def execute_workflow_plan(
     from features.auth import get_authenticated_user
     from features.automation import get_automation_service
 
-    api = _api()
     automation_service = get_automation_service()
     blocks = draft_blocks(draft)
     if blocks:
@@ -500,26 +504,26 @@ async def execute_workflow_plan(
         "workflow_draft": draft,
         "automation_run_id": run.get("id") or "",
         "operation_id": draft.get("operation_id") or "",
-        "started_at": api._now_iso(),
+        "started_at": _now_iso(),
         "monitor_token": monitor_token,
         "worker_id": (draft.get("device") or {}).get("worker_id") or local_worker_id(),
     }
     draft["status"] = "submitted"
-    api._save_session_anchor(session)
-    api._append_step(
+    _save_session_anchor(session)
+    _append_step(
         session, WORKFLOW_CREATE_STEP_TITLE, "running",
         f"Run {run.get('id')}（烧写 → AOA → 测试，状态机推进由 GMS ATS 执行）",
         {"automation_run_id": run.get("id"), "status": run.get("status"),
          "progress": workflow_run_progress(run)},
     )
-    request_shim = api.AgentRequestShim(request)
-    old_task = api._agent_monitor_tasks.pop(session["session_id"], None)
+    request_shim = AgentRequestShim(request)
+    old_task = _agent_monitor_tasks.pop(session["session_id"], None)
     if old_task and not old_task.done():
         old_task.cancel()
     task = asyncio.create_task(
         monitor_workflow_run(session["session_id"], request_shim, monitor_token)
     )
-    api._agent_monitor_tasks[session["session_id"]] = task
+    _agent_monitor_tasks[session["session_id"]] = task
     session["monitor_task_id"] = id(task)
     return {"success": True, "automation_run_id": run.get("id")}
 
@@ -534,9 +538,8 @@ async def monitor_workflow_run(
         get_automation_service,
     )
 
-    api = _api()
     automation_service = get_automation_service()
-    session = api._agent_sessions.get(session_id)
+    session = _agent_sessions.get(session_id)
     if not session:
         return
     run_id = str((session.get("active_run") or {}).get("automation_run_id") or "")
@@ -547,16 +550,16 @@ async def monitor_workflow_run(
     run: dict[str, Any] | None = None
     try:
         while True:
-            if not api._monitor_run_is_current(session, monitor_token):
+            if not _monitor_run_is_current(session, monitor_token):
                 return
             try:
                 run = automation_service.get_run(run_id)
             except AutomationNotFoundError:
                 run = None
             if not run:
-                if api._monitor_run_is_current(session, monitor_token):
-                    api._finish_run_state(session, "error")
-                    api._append_step(session, "读取 ATS 工作流", "error", f"运行不存在: {run_id}")
+                if _monitor_run_is_current(session, monitor_token):
+                    _finish_run_state(session, "error")
+                    _append_step(session, "读取 ATS 工作流", "error", f"运行不存在: {run_id}")
                 return
             if not workspace_linked and run.get("cluster_job_id"):
                 workspace_linked = True
@@ -566,19 +569,19 @@ async def monitor_workflow_run(
                     "cluster_job_id": run["cluster_job_id"],
                     "origin_page": "agent",
                 })
-                api._save_session_anchor(session)
+                _save_session_anchor(session)
             status = str(run.get("status") or "")
             if update_workflow_run_step(session, run_id, run):
-                api._save_session_anchor(session)
+                _save_session_anchor(session)
             if status in AUTOMATION_TERMINAL_STATUSES:
                 break
             await asyncio.sleep(5)
-        if not api._monitor_run_is_current(session, monitor_token):
+        if not _monitor_run_is_current(session, monitor_token):
             return
         # cancelled 不是失败：用户/系统主动取消，收尾为 warning，文案不引导 retry。
         cancelled = status == "cancelled"
         failed = status not in ("completed", "cancelled")
-        api._append_step(
+        _append_step(
             session, "ATS 工作流结束", "warning" if cancelled else ("error" if failed else "done"),
             f"Run {run_id} → {status}"
             + (f"，报告 {run.get('report_timestamp')}" if run.get("report_timestamp") else "")
@@ -594,15 +597,15 @@ async def monitor_workflow_run(
                 "report_id": run.get("report_id") or "",
                 "automation_run_id": run_id,
             })
-            api._save_session_anchor(session)
-        api._finish_run_state(session, "warning" if cancelled else ("error" if failed else "done"))
+            _save_session_anchor(session)
+        _finish_run_state(session, "warning" if cancelled else ("error" if failed else "done"))
         closing_hint = (
             "可在 GMS ATS 页查看时间线。" if not failed and not cancelled
             else "Run 已取消，可在 GMS ATS 页确认设备与任务状态。"
             if cancelled
             else "可在 GMS ATS 页查看失败原因或发起 retry。"
         )
-        api._append_message(
+        _append_message(
             session, "assistant",
             f"工作流 {run_id} 已结束：{status}。"
             + (f"原因：{run['error']}。" if run.get("error") else "")
@@ -610,18 +613,18 @@ async def monitor_workflow_run(
             data={"automation_run_id": run_id, "status": status},
         )
     except asyncio.CancelledError:
-        if api._monitor_run_is_current(session, monitor_token):
-            api._finish_run_state(session, "cancelled")
-            api._append_step(session, "Agent 监控已停止", "warning", "用户取消了工作流监控；Run 本身未取消，可在 GMS ATS 页停止")
+        if _monitor_run_is_current(session, monitor_token):
+            _finish_run_state(session, "cancelled")
+            _append_step(session, "Agent 监控已停止", "warning", "用户取消了工作流监控；Run 本身未取消，可在 GMS ATS 页停止")
         raise
     except Exception:
-        if api._monitor_run_is_current(session, monitor_token):
-            api._finish_run_state(session, "error")
+        if _monitor_run_is_current(session, monitor_token):
+            _finish_run_state(session, "error")
             err = record_internal_error(logger, "工作流监控", "[Agent] workflow monitor failed")
-            api._append_step(session, "工作流监控异常", "error", err)
+            _append_step(session, "工作流监控异常", "error", err)
     finally:
-        if api._agent_monitor_tasks.get(session_id) is asyncio.current_task():
-            api._agent_monitor_tasks.pop(session_id, None)
+        if _agent_monitor_tasks.get(session_id) is asyncio.current_task():
+            _agent_monitor_tasks.pop(session_id, None)
 
 
 async def handle_workflow_plan_message(
@@ -633,7 +636,6 @@ async def handle_workflow_plan_message(
     返回 None 表示消息与草案无关，交回通用意图路由。``request`` 用于
     replan 刷新预检时重算创建者权限阻塞（与计划生成时同一编译器）。
     """
-    api = _api()
     draft = pending_plan.setdefault("draft", {})
     preflight = pending_plan.get("preflight") or {"ready": False, "checks": []}
     action = detect_plan_action(message)
@@ -642,10 +644,10 @@ async def handle_workflow_plan_message(
     # 新目标必须重新描述指令，由 _make_workflow 生成全新草案与新 operation_id。
     if str(pending_plan.get("submit_state") or "") in {"submitting", "submitted"}:
         if action == "status":
-            api._append_message(session, "assistant", summarize_draft(draft, preflight), kind="plan",
+            _append_message(session, "assistant", summarize_draft(draft, preflight), kind="plan",
                                 data={"plan": {"type": WORKFLOW_PLAN_TYPE, "draft": draft, "preflight": preflight}})
             return {"handled": True}
-        api._append_message(
+        _append_message(
             session, "assistant",
             "该计划已提交执行，进入只读状态：修改意见与重新规划不再套用（避免与"
             "已启动的 Run 冲突）。如需变更，请重新描述完整指令生成新计划。",
@@ -671,8 +673,8 @@ async def handle_workflow_plan_message(
         # 失效，下一次独立任务不被上一轮未执行的 AOA/CTS 要求污染。
         session["workflow_user_constraints"] = {}
         session["status"] = "idle"
-        api._append_step(session, "工作流计划已取消", "warning", "已保留对话记录；重新发送指令可再次生成计划")
-        api._append_message(session, "assistant", "工作流计划已取消。需要时重新描述指令即可再次生成计划。")
+        _append_step(session, "工作流计划已取消", "warning", "已保留对话记录；重新发送指令可再次生成计划")
+        _append_message(session, "assistant", "工作流计划已取消。需要时重新描述指令即可再次生成计划。")
         return {"handled": True}
     if action == "replan":
         # 重新规划：保留已解析实体，刷新资源预检；裸 replan 在此递增版本，
@@ -681,14 +683,14 @@ async def handle_workflow_plan_message(
             draft["plan_version"] = int(draft.get("plan_version") or 1) + 1
         preflight = refresh_workflow_preflight(session, draft, request=request)
         pending_plan["preflight"] = preflight
-        api._append_step(session, "重新规划", "done", f"计划 v{draft['plan_version']}，资源预检已刷新", {"plan": draft, "preflight": preflight})
-        api._append_message(
+        _append_step(session, "重新规划", "done", f"计划 v{draft['plan_version']}，资源预检已刷新", {"plan": draft, "preflight": preflight})
+        _append_message(
             session, "assistant", summarize_draft(draft, preflight),
             kind="plan",
             data={"plan": {"type": WORKFLOW_PLAN_TYPE, "draft": draft, "preflight": preflight}},
         )
         return {"handled": True}
     # status
-    api._append_message(session, "assistant", summarize_draft(draft, preflight), kind="plan",
+    _append_message(session, "assistant", summarize_draft(draft, preflight), kind="plan",
                         data={"plan": {"type": WORKFLOW_PLAN_TYPE, "draft": draft, "preflight": preflight}})
     return {"handled": True}

@@ -55,9 +55,6 @@ DETECTABLE_SUITE_TYPES = (
     frozenset(TRADEFED_BINARY_MAP) | frozenset(SPECIAL_TEST_TYPES.values())
 )
 TRADEFED_BINARY_LIST = list(set(TRADEFED_BINARY_MAP.values()))
-TEST_TYPE_DETECTION_PRIORITY = ['vts', 'gts', 'sts', 'cts']
-
-
 def get_test_type_from_binary(binary_name: str) -> str:
     """Return the suite type for a tradefed launcher name."""
     if result := SPECIAL_TEST_TYPES.get(binary_name):
@@ -79,20 +76,6 @@ def detect_test_type_from_suite_path(suite_path: str) -> str | None:
     return None
 
 
-def detect_test_type_from_dir_path(dir_path: str) -> str | None:
-    """Detect suite type from a result or retry directory path."""
-    if not dir_path:
-        return None
-
-    dir_lower = dir_path.lower()
-    for test_type in TEST_TYPE_DETECTION_PRIORITY:
-        if test_type in dir_lower:
-            if test_type == 'cts' and 'gts' in dir_lower:
-                continue
-            return test_type
-    return None
-
-
 def get_default_suites_path(config: dict[str, Any]) -> str:
     """Get default suites path from config or environment."""
     manager = runtime.config_manager or default_config_manager
@@ -104,26 +87,6 @@ def is_config_host_local(config: dict[str, Any]) -> bool:
     """Return whether the configured Ubuntu host is local."""
     manager = runtime.config_manager or default_config_manager
     return manager.is_config_host_local(config)
-
-
-def get_effective_local_server(client_id: str, requested_local_server: str = "") -> str:
-    """Resolve the callback host for the current client."""
-    if requested_local_server and "@" in requested_local_server:
-        return requested_local_server
-
-    manager = runtime.config_manager or default_config_manager
-    runtime_config = manager.get_runtime_config()
-    runtime_local_server = str(runtime_config.get('local_server') or "")
-    if "@" in runtime_local_server:
-        return runtime_local_server
-
-    with runtime.global_state.user_states_lock:
-        state = runtime.global_state.user_states.get(client_id) or {}
-        display_client_id = str(state.get("display_client_id") or "")
-        if "@" in display_client_id:
-            return display_client_id
-
-    return client_id if "@" in client_id else ""
 
 
 def build_suite_info(full_path: str) -> dict[str, str] | None:

@@ -99,6 +99,13 @@ ROCKUSB_SYSFS_PROBE_COMMAND = (
 )
 
 
+def probe_rockusb_sysfs(ssh_manager, ssh, *, timeout: int = 8):
+    """Read Rockchip sysfs identity on a Worker. Callers do not see the command."""
+    return ssh_manager.execute_command(
+        ssh, ROCKUSB_SYSFS_PROBE_COMMAND, timeout=timeout,
+    )
+
+
 def parse_rockusb_probe_output(output: str) -> list[dict[str, str]]:
     """解析 sysfs 探测输出，返回 [{'pid','serial','product'}, ...]。"""
     entries: list[dict[str, str]] = []

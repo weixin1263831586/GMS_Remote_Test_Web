@@ -56,9 +56,6 @@ LINUX_USBIPD_INSTALL_GUIDE = (
 
 # udevadm info --query=property 输出行，例如 ``ID_VENDOR_ID=2207``。
 _UDEV_PROPERTY_RE = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
-# ``usbip list -r`` 导出行，例如 ``1-17-13: Fuzhou Rockchip ... (2207:0006)``。
-_USBIP_EXPORT_LINE_RE = re.compile(r"^\s+(\d+(?:-\d+)+):\s+(.*)$")
-_VID_PID_TEXT_RE = re.compile(r"\(([0-9a-fA-F]{4}:[0-9a-fA-F]{4})\)")
 
 
 def linux_usbipd_not_installed_error() -> dict[str, Any]:

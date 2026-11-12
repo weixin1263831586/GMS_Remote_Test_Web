@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
-import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -239,7 +238,3 @@ def policy_state_summary(policy: AIWContentPolicy) -> dict[str, Any]:
         "parse_warning": policy.parse_warning,
         "policy_revision": policy.source_revision,
     }
-
-
-def dumps_policy(policy: AIWContentPolicy) -> str:
-    return json.dumps(policy_state_summary(policy), ensure_ascii=False, sort_keys=True)

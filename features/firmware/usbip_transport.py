@@ -5,15 +5,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import re
 import time
 
 from features.devices import (
-    ROCKUSB_SYSFS_PROBE_COMMAND,
     DeviceUtils,
     ensure_usbip_auto_bind_policies,
     parse_adb_device_states,
     pause_usbip_reconnect,
+    probe_rockusb_sysfs,
     resolve_usbip_flash_routes,
     rockusb_loader_serials,
     rockusb_loader_vid_pids,
@@ -90,9 +89,7 @@ def _probe_rockusb_loader_serials(ssh) -> tuple[bool, list[str], str]:
     determine" instead of "no loaders". This mirrors the fail-closed
     re-verification of ``release_usbip_devices_to_source``.
     """
-    probe = runtime.ssh_manager.execute_command(
-        ssh, ROCKUSB_SYSFS_PROBE_COMMAND, timeout=8
-    )
+    probe = probe_rockusb_sysfs(runtime.ssh_manager, ssh, timeout=8)
     adb_result = runtime.ssh_manager.execute_command(ssh, "adb devices", timeout=8)
     detail = (probe.stdout or probe.stderr or "").strip()
     probes_ok = probe.code == 0 and adb_result.code == 0
@@ -253,10 +250,8 @@ async def release_usbip_devices_to_source(
     返回 (released, error)。调用方在 SOURCE_OWNED 状态后才允许下发烧写。
     """
     from features.devices import (
-        USBIP_DETACH_COMMAND_TEMPLATE,
-        USBIP_PORT_COMMAND,
-        parse_usbip_port_entries,
-        resolve_usbip_command,
+        detach_attached_usbip_port,
+        list_attached_usbip_ports,
     )
 
     if not routes:
@@ -283,41 +278,36 @@ async def release_usbip_devices_to_source(
         for busid in route.get("busids") or []
         if _normalize_usbip_host(route.get("device_host"))
     }
-    port_result = await asyncio.to_thread(
-        runtime.ssh_manager.execute_command, ssh, USBIP_PORT_COMMAND, timeout=10,
+    listed, entries, detail = await asyncio.to_thread(
+        list_attached_usbip_ports, runtime.ssh_manager, ssh,
     )
-    if not port_result.ok:
+    if not listed:
         return False, (
-            "无法确认目标主机 USB/IP 端口状态，拒绝进入源端烧写: "
-            + (port_result.stderr or port_result.stdout or "").strip()
+            "无法确认目标主机 USB/IP 端口状态，拒绝进入源端烧写: " + detail
         )
     ports_to_detach = [
-        entry for entry in parse_usbip_port_entries(port_result.stdout or "")
+        entry for entry in entries
         if (_normalize_usbip_host(entry["host"]), entry["busid"])
         in route_targets
     ]
     for entry in ports_to_detach:
-        # port 来自 usbip port 输出的 (\d+) 捕获组；插值前仍强制校验，
-        # 防止未来解析改动把元字符带进命令模板。
-        if not re.fullmatch(r"\d{1,3}", entry["port"]):
+        try:
+            await asyncio.to_thread(
+                detach_attached_usbip_port,
+                runtime.ssh_manager, ssh, entry["port"],
+            )
+        except ValueError:
             return False, f"USB/IP 端口号异常，拒绝 detach: {entry['port']!r}"
-        detach_command = USBIP_DETACH_COMMAND_TEMPLATE.format(
-            usbip=resolve_usbip_command(), port=entry["port"],
-        )
-        await asyncio.to_thread(
-            runtime.ssh_manager.execute_command,
-            ssh, detach_command, timeout=15,
-        )
 
     # 2) fail-closed 复核：目标端口必须已消失；列表不可解析时按未释放
     # 处理（假 detach 教训），由调用方中止烧写。
-    verify = await asyncio.to_thread(
-        runtime.ssh_manager.execute_command, ssh, USBIP_PORT_COMMAND, timeout=10,
+    verified, verified_entries, _detail = await asyncio.to_thread(
+        list_attached_usbip_ports, runtime.ssh_manager, ssh,
     )
-    if not verify.ok:
+    if not verified:
         return False, "USB/IP 释放后无法复核目标主机端口状态，拒绝继续烧写"
     remaining = [
-        entry["port"] for entry in parse_usbip_port_entries(verify.stdout or "")
+        entry["port"] for entry in verified_entries
         if (_normalize_usbip_host(entry["host"]), entry["busid"])
         in route_targets
     ]
@@ -352,9 +342,7 @@ def device_flash_protocols(ssh, devices: list[str]) -> dict[str, str]:
         )
     )
     try:
-        loader_probe = runtime.ssh_manager.execute_command(
-            ssh, ROCKUSB_SYSFS_PROBE_COMMAND, timeout=15
-        )
+        loader_probe = probe_rockusb_sysfs(runtime.ssh_manager, ssh, timeout=15)
         loader_devices = set(
             rockusb_loader_serials(
                 loader_probe.stdout or "",

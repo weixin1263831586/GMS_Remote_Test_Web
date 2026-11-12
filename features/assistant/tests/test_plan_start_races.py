@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from features.assistant import api, session_store
+from features.assistant import api, session_registry, session_store, test_runs
 
 
 @pytest.fixture
@@ -18,13 +18,13 @@ def context(monkeypatch):
     }
     plan = {"request": {"devices": ["ABC"], "test_suite": "cts", "worker_id": "w1"}}
     request = SimpleNamespace(headers={}, cookies={}, client=None)
-    monkeypatch.setattr(api, "owner_id_from_request", lambda _: "alice")
-    monkeypatch.setattr(api, "_latest_report_for_client", lambda _: None)
+    monkeypatch.setattr(test_runs, "owner_id_from_request", lambda _: "alice")
+    monkeypatch.setattr(test_runs, "_latest_report_for_client", lambda _: None)
     monitor = AsyncMock()
-    monkeypatch.setattr(api, "_monitor_agent_run", monitor)
-    monkeypatch.setattr(api, "_run_pre_actions", AsyncMock(return_value={"success": True}))
+    monkeypatch.setattr(test_runs, "_monitor_agent_run", monitor)
+    monkeypatch.setattr(test_runs, "_run_pre_actions", AsyncMock(return_value={"success": True}))
     start = AsyncMock(return_value={"success": True})
-    monkeypatch.setattr(api, "_start_test_with_plan", start)
+    monkeypatch.setattr(test_runs, "_start_test_with_plan", start)
     return session, plan, request, start, monitor
 
 
@@ -42,7 +42,7 @@ async def test_delayed_start_cannot_mutate_replaced_or_cancelled_run(context, mo
         await release.wait()
         return {"success": succeeded}
 
-    monkeypatch.setattr(api, stage, delayed)
+    monkeypatch.setattr(test_runs, stage, delayed)
     task = asyncio.create_task(api._execute_plan(session, request, plan))
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
@@ -50,9 +50,9 @@ async def test_delayed_start_cannot_mutate_replaced_or_cancelled_run(context, mo
         session["active_run"] = replacement
         session["status"] = "monitoring" if replace else "cancelled"
         if replace:
-            api._save_session_anchor(session)
+            session_registry.save_session_anchor(session)
         else:
-            api._finish_run_state(session, "cancelled")
+            session_registry.finish_run_state(session, "cancelled")
         release.set()
         result = await asyncio.wait_for(task, timeout=5)
         await asyncio.sleep(0)
@@ -100,7 +100,7 @@ async def test_late_job_receipt_does_not_overwrite_run_or_workspace(monkeypatch,
         "operation_id": "op-old",
         "request": {"devices": ["ABC"], "test_suite": "cts", "worker_id": "w1"},
     }
-    result = await api._start_test_with_plan(session, SimpleNamespace(), plan)
+    result = await test_runs._start_test_with_plan(session, SimpleNamespace(), plan)
     assert result["success"] is False
     assert result["data"]["cluster_job_id"] == "old-job"
     assert session["active_run"] is replacement

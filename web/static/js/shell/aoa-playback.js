@@ -174,14 +174,11 @@ async function aoaReconcilePlaybackCommand(commandId) {
     } catch (_) { return ''; }
 }
 
-function aoaPlaybackPause() { return aoaPlaybackControlRequest('pause'); }
-
 // 暂停/继续共用按钮的统一入口：按按钮当前模式分发到对应请求。
 function aoaPlaybackPauseResume() {
     const button = aoaEl('aoa-playback-pause');
     return aoaPlaybackControlRequest(button?.dataset.mode === 'resume' ? 'resume' : 'pause');
 }
-function aoaPlaybackResume() { return aoaPlaybackControlRequest('resume'); }
 // 停止合一：回放激活 → 停止回放（带确认，复用 aoaPlaybackCancel 语义）；
 // 否则 → 录制停止。按钮为单个 aoa-record-stop。
 async function aoaPlaybackStop() {

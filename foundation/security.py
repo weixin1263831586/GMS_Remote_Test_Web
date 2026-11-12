@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
 
 
@@ -30,13 +32,7 @@ def bearer_token(authorization: str | None) -> str | None:
 
     Strict scheme parsing: a missing separator or a non-Bearer scheme yields
     ``None`` instead of silently accepting a bare token. Callers must still
-    compare digests under ``hmac.compare_digest`` (hash both sides first so
-    the comparison time cannot leak the stored token's length), e.g.::
-
-        hmac.compare_digest(
-            hashlib.sha256(supplied.encode()).digest(),
-            hashlib.sha256(expected.encode()).digest(),
-        )
+    compare credentials with :func:`secrets_equal`.
     """
     if not authorization:
         return None
@@ -45,6 +41,14 @@ def bearer_token(authorization: str | None) -> str | None:
         return None
     supplied = supplied.strip()
     return supplied or None
+
+
+def secrets_equal(left: str, right: str) -> bool:
+    """Encode secrets as UTF-8 and compare fixed-length SHA-256 digests."""
+
+    left_digest = hashlib.sha256(str(left).encode("utf-8")).digest()
+    right_digest = hashlib.sha256(str(right).encode("utf-8")).digest()
+    return hmac.compare_digest(left_digest, right_digest)
 
 
 def sanitize_device_ids(values) -> list[str]:

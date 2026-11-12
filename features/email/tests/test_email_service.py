@@ -47,21 +47,21 @@ class EmailPasswordResolutionTests(unittest.TestCase):
         self._env.stop()
 
     def test_encrypted_password_is_decrypted(self):
-        from features.email.service import _email_password
+        from features.email.config import email_password
         from foundation.secrets import encrypt_secret
 
         cfg = {"encrypted_password": encrypt_secret("smtp-auth-code")}
-        self.assertEqual(_email_password(cfg), "smtp-auth-code")
+        self.assertEqual(email_password(cfg), "smtp-auth-code")
 
     def test_legacy_plaintext_is_still_read(self):
-        from features.email.service import _email_password
+        from features.email.config import email_password
 
-        self.assertEqual(_email_password({"password": "legacy"}), "legacy")
+        self.assertEqual(email_password({"password": "legacy"}), "legacy")
 
     def test_unreadable_ciphertext_fails_closed(self):
-        from features.email.service import _email_password
+        from features.email.config import email_password
 
-        self.assertEqual(_email_password({"encrypted_password": "not-a-token"}), "")
+        self.assertEqual(email_password({"encrypted_password": "not-a-token"}), "")
 
 
 class SplitEmailsTests(unittest.TestCase):

@@ -55,13 +55,6 @@ def detect_composite_intent(message: str) -> bool:
 
 # ==================== 计划操作识别 ====================
 
-_PLAN_ACTION_RE = re.compile(
-    r"重新规划|重新生成计划|重新安排|再规划|replan|取消计划|取消执行|放弃计划"
-    r"|计划状态|当前计划",
-    re.IGNORECASE,
-)
-
-
 def detect_plan_action(text: str) -> str:
     """显式计划操作：replan / cancel / status；无匹配返回空串。"""
     value = text or ""
@@ -237,8 +230,6 @@ def constraint_conflicts(
 # ==================== 草案构建与更新 ====================
 
 _WORKFLOW_INTENT = "flash_aoa_test"
-
-_TEST_TYPE_TO_SUITE_PREFIX = {"CTS": "android-cts", "GTS": "android-gts", "VTS": "android-vts", "STS": "android-sts"}
 
 
 def build_workflow_draft(
@@ -577,17 +568,3 @@ def preflight_draft(
             for item in blocked_checks
         ],
     }
-
-
-def is_self_referential_url(url: str, own_origin: str) -> bool:
-    """判断固件 URL 是否指向平台自身的 firmware-shares 下载端点。"""
-    try:
-        parsed = urlparse(url or "")
-        own = urlparse(own_origin or "")
-    except ValueError:
-        return False
-    return (
-        bool(parsed.path)
-        and _SHARE_ID_RE.search(parsed.path) is not None
-        and (not own.netloc or parsed.netloc == own.netloc)
-    )

@@ -16,6 +16,10 @@
 
 #apk-tab-manifest > details > summary {
     flex: 0 0 auto;
+    margin-bottom: 10px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
 }
 
 #apk-raw-xml {
@@ -35,4 +39,44 @@
     font-size: 11px;
     line-height: 1.6;
     color: var(--text-secondary);
+    background: var(--darker-bg);
+    padding: 15px;
+    border-radius: 6px;
+}
+
+.apk-status-row,
+.apk-tab-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.apk-status-main { display: flex; align-items: center; gap: 12px; }
+.apk-status-actions { display: flex; gap: 8px; }
+.apk-tab-actions .apk-status-actions { gap: 4px; }
+#apk-file-name { font-size: 14px; font-weight: 600; }
+#apk-analysis-state { color: var(--success-color); font-size: 12px; }
+.apk-progress-track {
+    height: 4px;
+    margin-top: 12px;
+    overflow: hidden;
+    border-radius: 2px;
+    background: var(--darker-bg);
+}
+.apk-section-title { margin-bottom: 12px; font-size: 14px; font-weight: 600; }
+#apk-permissions-list { max-height: 600px; overflow-y: auto; }
+.apk-source-frame {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 280px);
+    background: var(--light-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+.apk-source-layout.fill { flex: 1; overflow: hidden; }
+#apk-source-tree { height: 100%; overflow-y: auto; }
+#apk-file-tabs,
+#apk-file-path { flex-shrink: 0; }
+#apk-file-viewer {
+    flex: 1;
+    flex-direction: column;
 }

@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from features.devices import detach_attached_usbip_port
 from features.firmware import usbip_transport
 
 
@@ -28,10 +29,11 @@ async def test_release_matches_host_and_busid_as_one_route_target():
     with patch.object(
         usbip_transport.runtime.get_runtime(), "ssh_manager", ssh_manager
     ), patch(
-        "features.devices.parse_usbip_port_entries",
+        "features.devices.usbip_transaction.parse_usbip_port_entries",
         side_effect=[initial_entries, []],
     ), patch(
-        "features.devices.resolve_usbip_command", return_value="usbip"
+        "features.devices.usbip_transaction.resolve_usbip_command",
+        return_value="usbip",
     ), patch.object(usbip_transport, "pause_usbip_reconnect"), patch.object(
         usbip_transport.asyncio, "sleep"
     ):
@@ -45,3 +47,12 @@ async def test_release_matches_host_and_busid_as_one_route_target():
         call.args[1] for call in execute.call_args_list if " detach " in call.args[1]
     ]
     assert detach_commands == ["sudo -n usbip detach -p 1"]
+
+
+def test_detach_rejects_a_port_that_is_not_a_number():
+    execute = MagicMock()
+    with pytest.raises(ValueError):
+        detach_attached_usbip_port(
+            SimpleNamespace(execute_command=execute), object(), "1;id",
+        )
+    execute.assert_not_called()

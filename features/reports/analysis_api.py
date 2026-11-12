@@ -10,6 +10,7 @@ from foundation.config import settings
 from foundation.redaction import redact_sensitive_text
 from foundation.uploads import safe_upload_target_path, save_upload_to_path
 
+from .access import principal_has_reports_read as require_permission_reports_read
 from .api_helpers import (
     AnalysisMode,
     APIRouter,
@@ -50,20 +51,6 @@ from .diagnosis_recalls import (
 )
 from .display import report_display_name
 from .knowledge_ranking import android_api_level_from_request
-
-
-def _principal_has_reports_read(principal: object) -> bool:
-    """reports.read gate shared by list/analyze/diagnose.
-
-    Agent principals must carry the reports.read scope; human roles get it
-    from ROLE_PERMISSIONS and admin via '*'. The getattr fallback keeps unit
-    tests that stub a bare principal object working (no has_permission →
-    treated as permitted, exactly like the pre-gate behavior).
-    """
-    has_permission = getattr(principal, "has_permission", None)
-    if not callable(has_permission):
-        return True
-    return bool(has_permission("reports.read"))
 
 
 router = APIRouter()
@@ -123,7 +110,7 @@ async def analyze_reports(
     principal = require_authenticated_user(request)
     # Reading reports (incl. analysis) requires reports.read for
     # agent principals; human roles carry it via ROLE_PERMISSIONS.
-    if not _principal_has_reports_read(principal):
+    if not require_permission_reports_read(principal):
         return error_response(
             {
                 "message": "Agent token scope 'reports.read' required",
@@ -441,7 +428,7 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
     """Diagnose one report failure and locate matching suite APK/JAR source."""
     principal = require_authenticated_user(http_request)
     # Same reports.read gate as list/analyze (agent principals).
-    if not _principal_has_reports_read(principal):
+    if not require_permission_reports_read(principal):
         return error_response(
             {
                 "message": "Agent token scope 'reports.read' required",

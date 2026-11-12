@@ -6,6 +6,50 @@ from tests.runtime_ui.harness import REPO_ROOT, RuntimeUiHarness, expect
 
 
 class RuntimeNavigationTests(RuntimeUiHarness):
+    def test_tools_pages_keep_long_lists_scrollable_after_repeated_navigation(self):
+        page = self.new_page()
+        try:
+            page.add_init_script("""
+                const tools = Array.from({length: 80}, (_, index) => ({
+                    icon: '🔧', title: `Layout ${index}`, url: 'https://example.test/'
+                }));
+                for (const key of ['gms_tools_categories', 'gms_utility_tools_categories']) {
+                    localStorage.setItem(key, JSON.stringify({'Layout test': tools}));
+                }
+            """)
+            self.goto_shell(page)
+            for kind in ("websites", "tools", "websites", "tools"):
+                with self.subTest(page=kind):
+                    page.evaluate("kind => switchPage(kind, null)", kind)
+                    host = page.locator(f'[data-tools-page="{kind}"]')
+                    expect(host.locator('.tool-card').nth(79)).to_be_attached()
+                    geometry = host.evaluate("""host => {
+                        const scroll = host.querySelector('.tools-scroll');
+                        const footer = host.querySelector('.tools-footer');
+                        const page = host.closest('.page-content');
+                        scroll.scrollTop = scroll.scrollHeight;
+                        return {
+                            clientHeight: scroll.clientHeight,
+                            scrollHeight: scroll.scrollHeight,
+                            scrollTop: scroll.scrollTop,
+                            footerBottom: footer.getBoundingClientRect().bottom,
+                            pageBottom: page.getBoundingClientRect().bottom,
+                        };
+                    }""")
+                    self.assertGreater(geometry['clientHeight'], 0)
+                    self.assertGreater(geometry['scrollHeight'], geometry['clientHeight'])
+                    self.assertGreater(geometry['scrollTop'], 0)
+                    self.assertLessEqual(geometry['footerBottom'], geometry['pageBottom'])
+                    host.locator('.tools-add-category').click()
+                    modal = page.locator('#ut-category-modal' if kind == 'tools' else '#category-modal')
+                    expect(modal).to_have_class(re.compile(r"show"))
+                    page.keyboard.press('Escape')
+                    expect(modal).not_to_have_class(re.compile(r"show"))
+            self.assertEqual(page.locator('#tools-grid').count(), 1)
+            self.assertEqual(page.locator('#ut-grid').count(), 1)
+        finally:
+            page.close()
+
     def test_repeated_category_initialization_binds_each_node_once(self):
         page = self.new_page()
         try:

@@ -10,6 +10,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 
 from features.assistant import kkagent_bridge
+from features.assistant.session_log import _append_message, _append_step
+from features.assistant.session_registry import _now_iso
 
 
 MODEL_TIMEOUT_SECONDS = 120
@@ -33,12 +35,6 @@ class PlanningState:
 _checkpoints: dict[str, tuple[str, float, str, dict, PlanningState]] = {}
 
 
-def _api():
-    from features.assistant import api
-
-    return api
-
-
 def discard(session_id: str) -> None:
     _checkpoints.pop(session_id, None)
 
@@ -58,18 +54,17 @@ def restore(session: dict, retry_id: str) -> PlanningState:
 
 
 def progress(session: dict, state: PlanningState, status: str, detail: str, *, waiting=False) -> None:
-    api = _api()
     if not state.progress_id:
-        api._append_step(session, "Agent 规划", status, detail)
+        _append_step(session, "Agent 规划", status, detail)
         state.progress_id = session["steps"][-1]["id"]
     # display_record replaces records when appending; find the current copy.
     step = next((item for item in session["steps"] if item["id"] == state.progress_id), None)
     if step:
         step.update(status=status, detail=detail, data={
             "kind": "agent_model_wait" if waiting else "agent_planning",
-            "started_at": api._now_iso(),
+            "started_at": _now_iso(),
         })
-        session["updated_at"] = api._now_iso()
+        session["updated_at"] = _now_iso()
 
 
 async def infer(session: dict, state: PlanningState, context: str):
@@ -119,7 +114,7 @@ def pause_for_elevation(session: dict, state: PlanningState, tool_name: str, too
     session["agent_retry"]["elevation_required"] = True
     session["agent_backend"] = {"mode": "kkagent", "state": "awaiting_authorization", "detail": "等待管理员临时授权"}
     progress(session, state, "warning", f"「{tool_label}」需要管理员临时授权，授权后继续本轮规划")
-    _api()._append_message(
+    _append_message(
         session, "assistant", f"「{tool_label}」需要管理员临时授权。点击下方按钮完成认证后，将继续查询并生成资源选择。",
         data={"quick_actions": [{"label": "管理员授权后继续", "action": "agent_elevate_retry", "params": {"retry_id": retry_id}}]},
     )
@@ -129,7 +124,7 @@ def fail(session: dict, state: PlanningState, detail: str, error_code: str = "fa
     retry_id = _checkpoint(session, state)
     session["agent_backend"] = {"mode": "kkagent", "state": "timeout" if error_code == "timeout" else "failed", "detail": detail}
     progress(session, state, "warning", detail + "；已保留本轮进度，可重试")
-    _api()._append_message(
+    _append_message(
         session, "assistant", detail + "。本轮规划尚未完成，已保留查询结果和操作回执，点击下方按钮继续。",
         data={"quick_actions": [{"label": "重试本轮规划", "action": "agent_retry", "params": {"retry_id": retry_id}}]},
     )

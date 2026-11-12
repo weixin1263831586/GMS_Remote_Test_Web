@@ -3,6 +3,9 @@
 import json
 import os
 import re
+import subprocess
+import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -813,6 +816,8 @@ class RuntimeAgentTests(RuntimeUiHarness):
                         install,
                         installApi,
                         archiveApi,
+                        guideInstall: document.getElementById('cmd-1').textContent.trim(),
+                        sampleInstall: API_DETAILS_MAP['/api/agent/install.sh'].curl_example,
                         primaryLabel: Array.from(document.querySelectorAll('button'))
                             .find(button => button.textContent.includes('安装/更新命令'))
                             ?.textContent.trim(),
@@ -824,14 +829,58 @@ class RuntimeAgentTests(RuntimeUiHarness):
             )
 
             expected = (
-                f'curl -kfsSL "{self.base_url}/api/agent/install.sh" | '
-                "bash -s -- --paircode-prompt"
+                '(set -o pipefail; curl ${GMS_INSTALL_CA_CERT:+--cacert "$GMS_INSTALL_CA_CERT"} -fsSL '
+                f'"{self.base_url}/api/agent/install.sh" | bash -s -- --paircode-prompt)'
             )
             self.assertEqual(result["install"], expected)
             self.assertEqual(result["installApi"]["full"], expected)
+            self.assertEqual(result["guideInstall"], expected)
             self.assertIn("-OJ", result["archiveApi"]["full"])
             self.assertNotIn("| bash", result["archiveApi"]["full"])
             self.assertEqual(result["primaryLabel"], "📋 安装/更新命令")
             self.assertEqual(result["offlineLabel"], "📦 离线包")
+
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                curl = root / "curl"
+                curl.write_text(
+                    f"#!{sys.executable}\n"
+                    "import json, os, sys\n"
+                    "from pathlib import Path\n"
+                    "Path(os.environ['INSTALL_COMMAND_ARGS']).write_text(json.dumps(sys.argv[1:]))\n"
+                    "if os.environ.get('INSTALL_COMMAND_FAIL'):\n"
+                    "    raise SystemExit(22)\n"
+                    "print('printf install-script-executed')\n",
+                    encoding="utf-8",
+                )
+                curl.chmod(0o755)
+                for source in ("install", "guideInstall", "sampleInstall"):
+                    for scenario in ("fresh", "custom_ca", "download_failure"):
+                        with self.subTest(source=source, scenario=scenario):
+                            env = os.environ.copy()
+                            env.pop("GMS_INSTALL_CA_CERT", None)
+                            env.pop("INSTALL_COMMAND_FAIL", None)
+                            env.update(
+                                HOME=str(root),
+                                PATH=f"{root}{os.pathsep}{os.defpath}",
+                                INSTALL_COMMAND_ARGS=str(root / "args.json"),
+                            )
+                            ca = str(root / "custom CA.pem")
+                            if scenario == "custom_ca":
+                                env["GMS_INSTALL_CA_CERT"] = ca
+                            if scenario == "download_failure":
+                                env["INSTALL_COMMAND_FAIL"] = "1"
+                            completed = subprocess.run(
+                                ["/bin/bash", "-c", result[source]],
+                                env=env, capture_output=True, text=True, timeout=10,
+                            )
+                            args = json.loads((root / "args.json").read_text())
+                            if scenario == "custom_ca":
+                                self.assertEqual(args[:2], ["--cacert", ca])
+                            else:
+                                self.assertNotIn("--cacert", args)
+                            self.assertIn("-fsSL", args)
+                            self.assertEqual(completed.returncode, 22 if scenario == "download_failure" else 0)
+                            self.assertEqual(completed.stdout, "" if scenario == "download_failure" else "install-script-executed")
         finally:
             page.close()

@@ -4,20 +4,20 @@
                 <button class="btn-xs" data-click="cancelAgentSession">取消Agent</button>
             {% include 'components/page-header-end.html' %}
 
-            <div style="display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 10px; flex: 1; min-height: 0;">
-                <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
-                    <div id="agent-chat-messages" style="flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: rgba(0, 0, 0, 0.08);">
+            <div class="split-layout agent-layout">
+                <div class="pane">
+                    <div id="agent-chat-messages">
                         <div class="agent-chat-empty">输入测试需求，例如：跑 CtsWifiTestCases，找一台空闲设备，失败 retry 2 次，还失败就报告分析</div>
                     </div>
-                    <div style="border-top: 1px solid var(--border-color); padding: 10px; display: flex; gap: 8px; align-items: flex-end; background: var(--darker-bg);">
-                        <textarea id="agent-input" class="entry-field" rows="4" placeholder="描述你的目标：设备与固件、测试、报告、构建、工单或知识查询&#10;Shift+Enter 换行，Enter 发送" style="resize: vertical; min-height: 82px; max-height: 220px; flex: 1;"></textarea>
-                        <div style="display: flex; flex-direction: column; gap: 6px;">
-                            <button class="btn-primary" data-click="sendAgentMessage" data-a0="false" style="padding: 6px 16px; white-space: nowrap; min-width: 64px;">发送</button>
-                            <button class="btn-primary" data-click="sendAgentMessage" data-a0="true" style="padding: 6px 16px; background: var(--success-color); white-space: nowrap; min-width: 64px;">执行</button>
+                    <div class="agent-composer">
+                        <textarea id="agent-input" class="entry-field" rows="4" placeholder="描述你的目标：设备与固件、测试、报告、构建、工单或知识查询&#10;Shift+Enter 换行，Enter 发送"></textarea>
+                        <div class="agent-send-actions">
+                            <button class="btn-primary" data-click="sendAgentMessage" data-a0="false">发送</button>
+                            <button class="btn-primary is-execute" data-click="sendAgentMessage" data-a0="true">执行</button>
                         </div>
                     </div>
                 </div>
-                <div style="display: flex; flex-direction: column; min-width: 0; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
+                <div class="pane">
                     <div class="agent-run-header">
                         <div class="agent-run-title-row">
                             <div class="agent-run-title">执行步骤</div>
@@ -29,7 +29,7 @@
                             <button id="agent-model-check" class="btn-xxs" type="button" data-click="loadAgentModelStatus" data-a0="true">检测</button>
                         </div>
                     </div>
-                    <div id="agent-steps" style="flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+                    <div id="agent-steps">
                         <div class="suite-empty">等待任务</div>
                     </div>
                 </div>

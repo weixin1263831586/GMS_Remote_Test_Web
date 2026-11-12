@@ -2,6 +2,17 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from foundation.cluster_port import ACTIVE_JOB_STATUSES
+
+
+__all__ = [
+    "ACTIVE_JOB_STATUSES",
+    "SuiteApkAnalyzeRequest",
+    "TestParseArgsRequest",
+    "TestStartRequest",
+    "TradefedListResultsRequest",
+]
+
 
 class TestStartRequest(BaseModel):
     # 空值表示部署配置中的本地 Worker。

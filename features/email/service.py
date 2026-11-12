@@ -43,23 +43,6 @@ __all__ = [
 ]
 
 
-def _email_password(email_cfg: dict[str, Any]) -> str:
-    """兼容别名：历史测试与调用方通过 service 引用密码读取。"""
-    return email_password(email_cfg)
-
-
-def _safe_header_text(value: Any) -> str:
-    """兼容别名：MIME 头折叠清洗。"""
-    return safe_header_text(value)
-
-
-def _resolve_allowed_attachment(path: str, allowed_roots):
-    """兼容别名：附件白名单解析（历史上从 service 导出过）。"""
-    from features.email.message import resolve_allowed_attachment
-
-    return resolve_allowed_attachment(path, allowed_roots)
-
-
 def send_email(
     to: str | list[str],
     subject: str,

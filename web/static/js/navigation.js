@@ -1,57 +1,7 @@
-// OpenGrok配置 - 从后端API获取（异步加载，不阻塞启动）
 // Redmine配置缓存（减少重复API调用）
 let cachedRedmineConfig = null;
 let redmineConfigFetchTime = 0;
 const REDMINE_CONFIG_CACHE_TTL = 300000;
-
-const OPENGROK_CONFIG = {
-    _loaded: false,
-    _baseUrl: '',
-    _defaultProject: '',
-    _projectMapping: {},
-
-    get isValid() {
-        return !!(this._loaded && this._baseUrl && this._defaultProject);
-    },
-
-    getProjectForAndroidVersion(androidVersion) {
-        if (!androidVersion || !this._projectMapping) {
-            return this._defaultProject;
-        }
-
-        const versionMatch = androidVersion.match(/^(\d+)/);
-        if (versionMatch && versionMatch[1] && this._projectMapping[versionMatch[1]]) {
-            return this._projectMapping[versionMatch[1]];
-        }
-
-        return this._defaultProject;
-    },
-
-    init() {
-        debugLog('[OpenGrok] 开始加载配置...');
-        fetch('/api/config/opengrok')
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(result => {
-                if (result.success && result.data) {
-                    this._baseUrl = result.data.base_url;
-                    this._defaultProject = result.data.default_project;
-                    this._projectMapping = result.data.project_mapping || {};
-                    this._loaded = true;
-                    debugLog('[OpenGrok] ✅ 配置已加载:', { baseUrl: this._baseUrl, defaultProject: this._defaultProject, projectMapping: this._projectMapping });
-                } else {
-                    debugLog('[OpenGrok] 配置响应格式异常:', result);
-                }
-            })
-            .catch(error => {
-                debugLog('[OpenGrok] 配置加载失败:', error.message);
-            });
-    }
-};
 
 // API文档缓存（全局变量，避免重复请求）
 let apiDocsCache = null;
@@ -258,13 +208,6 @@ async function getRedmineConfig() {
     return cachedRedmineConfig;
 }
 
-function buildOpenGrokUrl(path, line = null) {
-    if (!OPENGROK_CONFIG.isValid) return '';
-
-    const url = `${OPENGROK_CONFIG._baseUrl}/xref/${OPENGROK_CONFIG._defaultProject}/${path}`;
-    return line ? `${url}#${line}` : url;
-}
-
 const DeviceOperation = {
     async execute(endpoint, operationName, data = {}, modalCloseFn = null) {
         if (!validateDeviceSelection()) return;
@@ -413,8 +356,6 @@ async function continueAppInitialization() {
     initEventListeners();
     initDragDrop();
     renderNotificationList();
-
-    OPENGROK_CONFIG.init();
 
     const clusterModeReady = initializeClusterMode();
     if (needsTestWorkspace) {

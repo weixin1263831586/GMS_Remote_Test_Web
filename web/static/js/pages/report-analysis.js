@@ -753,19 +753,19 @@ function ensureReportAnalysisResultStructure() {
 
     if (!$('report-summary') || !$('report-details') || !$('report-failures') || !$('report-failure-list')) {
         resultDiv.innerHTML = `
-            <div style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; margin-bottom: 10px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <div style="font-size: 16px; font-weight: 600;">📊 分析结果</div>
+            <div class="report-result-card">
+                <div class="report-section-head">
+                    <div class="report-section-title">📊 分析结果</div>
                     <button class="btn-xs" data-click="resetReportAnalysis">清除</button>
                 </div>
-                <div id="report-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 20px;"></div>
-                <div id="report-details" style="font-size: 12px; color: var(--text-primary);"></div>
+                <div id="report-summary" class="report-summary-grid"></div>
+                <div id="report-details" class="report-details"></div>
             </div>
-            <div id="report-failures" style="background: var(--light-bg); border-radius: 8px; border: 1px solid var(--border-color); padding: 20px; display: none;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <div id="report-failures-title" style="font-size: 12px; font-weight: 600;">❌ 失败用例</div>
+            <div id="report-failures" class="report-result-card" style="display: none;">
+                <div class="report-section-head">
+                    <div id="report-failures-title">❌ 失败用例</div>
                 </div>
-                <div id="report-failure-list" style="max-height: 580px; overflow-y: auto;"></div>
+                <div id="report-failure-list" class="report-failure-list"></div>
             </div>
         `;
     }
@@ -1926,7 +1926,7 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
 
     if (data.source_code_fetched && data.source_url) {
         html += `
-            <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); border-left: 4px solid #667eea; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+            <div style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); border-left: 4px solid #667eea; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
                 <div style="font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #667eea;">💻 源码信息</div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">文件路径: ${escapeHtml(data.source_file_path || 'N/A')}</div>
                 <a href="${escapeHtml(safeReportExternalUrl(data.source_url))}" target="_blank" rel="noopener" style="font-size: 11px; color: #667eea; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">

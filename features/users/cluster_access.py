@@ -7,20 +7,9 @@ None-on-unavailable semantics for single-host fallback.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
 from foundation import cluster_port
-
-
-def configure_cluster_service_provider(
-    provider: Callable[[], Any] | None,
-) -> None:
-    """Register the callable returning the cluster service.
-
-    Passing ``None`` explicitly clears the registration.
-    """
-    cluster_port.configure_cluster_access(service_provider=provider)
 
 
 def get_cluster_service() -> Any:

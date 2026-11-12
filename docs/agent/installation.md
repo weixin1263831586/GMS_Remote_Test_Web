@@ -77,9 +77,10 @@ Controller CA，后续 bootstrap、manifest 与包下载恢复严格 TLS；首�
 
 说明：
 
-- install.sh 与前端复制的安装命令默认严格校验 TLS（系统信任链）；
-  自签名部署由安装器自动 TOFU 获取 CA（见上），也可用
-  `GMS_INSTALL_CA_CERT` 走全程严格路径。
+- 前端复制的安装命令默认使用系统信任链；若已设置
+  `GMS_INSTALL_CA_CERT`，则使用该 CA，保留其原值。自签名 Controller
+  首次安装前应先带外取得 CA 并导出该变量；默认命令不会自动关闭 TLS
+  校验。下载失败会向调用方返回非零状态。
 - 受控实验环境若使用自签名证书且无法下发 CA，可按部署策略使用 installer
   的显式降级开关（`GMS_INSTALL_ALLOW_INSECURE=1`，bootstrap 阶段传导为
   `GMS_INSTALL_INSECURE=1`）；生产环境 Controller 渲染的 install.sh 会

@@ -208,3 +208,11 @@ def release_local_firmware_recovery(*args: Any, **kwargs: Any) -> Any:
     if _release_local_firmware_recovery is None:
         raise RuntimeError("local firmware recovery is not configured")
     return _release_local_firmware_recovery(*args, **kwargs)
+
+
+# 持久化 Cluster Job 视角"仍在进行"的状态全集。定义在 foundation 侧
+# 组合接缝上，test_execution/users 等 features 共同消费且互不依赖。
+ACTIVE_JOB_STATUSES = frozenset({
+    "created", "queued", "leasing", "assigned", "dispatching", "running",
+    "stopping", "collecting", "worker_lost",
+})

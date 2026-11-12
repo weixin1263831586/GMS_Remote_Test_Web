@@ -40,7 +40,7 @@ def _tmp_store(tmp_path):
 
 
 def test_execute_plan_persists_anchor_with_job_link(tmp_path):
-    from features.assistant import api, session_registry, session_store
+    from features.assistant import api, failure_analysis, session_registry, session_store, test_runs
 
     store = _tmp_store(tmp_path)
     session = {
@@ -59,13 +59,13 @@ def test_execute_plan_persists_anchor_with_job_link(tmp_path):
 
     async def scenario():
         with patch.object(
-            api.test_report_db, "get_reports", return_value=[]
+            failure_analysis.test_report_db, "get_reports", return_value=[]
         ), patch.object(
-            api, "_run_pre_actions", new=AsyncMock(return_value={"success": True})
+            test_runs, "_run_pre_actions", new=AsyncMock(return_value={"success": True})
         ), patch.object(
-            api, "_start_test_with_plan", new=AsyncMock(return_value={"success": True})
+            test_runs, "_start_test_with_plan", new=AsyncMock(return_value={"success": True})
         ), patch.object(
-            api, "_monitor_agent_run", new=AsyncMock()
+            test_runs, "_monitor_agent_run", new=AsyncMock()
         ):
             await api._execute_plan(session, request, plan)
 
@@ -75,7 +75,7 @@ def test_execute_plan_persists_anchor_with_job_link(tmp_path):
         "cluster_job_id": "job-9", "attempt_id": "a1", "worker_id": "w1",
     })
     with patch.object(session_registry.session_store, "default_sessions_path", return_value=store):
-        api._save_session_anchor(session)
+        session_registry.save_session_anchor(session)
 
     anchors = session_store.load_anchors(store)
     assert anchors["s-anchor"]["active_run"]["cluster_job_id"] == "job-9"
@@ -136,7 +136,7 @@ def test_restored_session_rebuilds_monitoring_state_for_owner(tmp_path):
 
 def test_recovered_session_without_plan_still_tracked_to_terminal(tmp_path):
     """恢复会话无持久化 plan：降级为纯跟踪，等任务终态并清锚点。"""
-    from features.assistant import api
+    from features.assistant import api, test_runs
 
     session = {
         "session_id": "s-track",
@@ -173,8 +173,8 @@ def test_recovered_session_without_plan_still_tracked_to_terminal(tmp_path):
     try:
         with (
             patch("features.cluster.get_cluster_service", return_value=cluster),
-            patch.object(api, "_report_for_cluster_job", return_value=report),
-            patch.object(api.asyncio, "sleep", side_effect=no_wait),
+            patch.object(test_runs, "_report_for_cluster_job", return_value=report),
+            patch.object(test_runs.asyncio, "sleep", side_effect=no_wait),
         ):
             asyncio.run(api._monitor_agent_run("s-track", request))
     finally:
@@ -231,7 +231,7 @@ def test_get_agent_session_restores_and_resumes_monitoring(tmp_path):
 
 
 def test_terminal_states_clear_anchor(tmp_path):
-    from features.assistant import api, session_registry
+    from features.assistant import session_registry
 
     store = _tmp_store(tmp_path)
     session = {
@@ -244,7 +244,7 @@ def test_terminal_states_clear_anchor(tmp_path):
         "active_run": {"cluster_job_id": "job-3", "attempt_id": "a"},
     }
     with patch.object(session_registry.session_store, "default_sessions_path", return_value=store):
-        api._save_session_anchor(session)
+        session_registry.save_session_anchor(session)
         assert json.loads(store.read_text(encoding="utf-8"))["sessions"].get("s-term")
         session["active_run"] = None
         session_registry.clear_session_anchor(session)
@@ -292,7 +292,7 @@ def test_save_anchor_failure_marks_session_unrecoverable(caplog):
     with caplog.at_level(logging.WARNING, logger=api.logger.name), patch.object(
         session_registry.session_store, "save_anchor", side_effect=OSError("disk full")
     ):
-        api._save_session_anchor(session)
+        session_registry.save_session_anchor(session)
     assert session.get("recovery_anchor_failed") is True
     assert any("不可恢复" in record.message for record in caplog.records)
 
@@ -354,7 +354,7 @@ def test_restore_reuses_live_session_for_same_owner_instead_of_rebuild(tmp_path)
 
 def test_failed_plan_start_clears_active_run_and_anchor(tmp_path):
     """启动失败终态：状态、active_run 与恢复锚点一起清理，UI 不残留。"""
-    from features.assistant import api, session_registry, session_store
+    from features.assistant import api, failure_analysis, session_registry, session_store, test_runs
 
     store = _tmp_store(tmp_path)
     session = {
@@ -372,9 +372,9 @@ def test_failed_plan_start_clears_active_run_and_anchor(tmp_path):
 
     async def scenario():
         with patch.object(
-            api.test_report_db, "get_reports", return_value=[]
+            failure_analysis.test_report_db, "get_reports", return_value=[]
         ), patch.object(
-            api, "_run_pre_actions",
+            test_runs, "_run_pre_actions",
             new=AsyncMock(return_value={"success": False, "error": "烧写失败"}),
         ), patch.object(
             session_registry.session_store, "default_sessions_path", return_value=store,

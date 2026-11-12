@@ -30,11 +30,7 @@ MAX_SUITE_ARCHIVE_BYTES = 50 * 1024 * 1024 * 1024
 _last_suite_cleanup = 0.0
 
 
-def update_suite_download_task(task_id: str, **updates):
-    runtime.suite_task_store.update(task_id, **updates)
-
-
-def update_suite_extract_task(task_id: str, **updates):
+def update_suite_task(task_id: str, **updates):
     runtime.suite_task_store.update(task_id, **updates)
 
 
@@ -72,7 +68,7 @@ async def run_suite_download_task(task_id: str, url: str, archive_path: str):
     try:
         target = await asyncio.to_thread(_resolve_suite_download_target, url)
     except ValueError as exc:
-        update_suite_download_task(
+        update_suite_task(
             task_id,
             status="error",
             error=f"Download target rejected: {exc}",
@@ -82,7 +78,7 @@ async def run_suite_download_task(task_id: str, url: str, archive_path: str):
     # --fail：HTTP 4xx/5xx 时 curl 以 22 退出而不是把错误页 body 存成
     # “下载完成”的归档；--max-redirs 0 防止 Location 绕过 SSRF 校验。
     cmd = ["curl", "--proto", "=http,https", "--fail", "--max-redirs", "0", *_curl_resolve_arguments(target), "-C", "-", "--max-filesize", str(MAX_SUITE_ARCHIVE_BYTES), "--connect-timeout", "30", "--max-time", "7200", "--retry", "3", "--retry-delay", "5", "-o", part_path, target.url]
-    update_suite_download_task(task_id, status="downloading", progress=0, message=f"Downloading: {filename}")
+    update_suite_task(task_id, status="downloading", progress=0, message=f"Downloading: {filename}")
 
     process = None
     try:
@@ -106,7 +102,7 @@ async def run_suite_download_task(task_id: str, url: str, archive_path: str):
                         speed = _parse_curl_size(parts[-1])
                         downloaded = total * pct / 100
                         progress = pct if pct > 0 else 0
-                        update_suite_download_task(task_id, progress=min(progress, 99.0), downloaded_size=int(downloaded), total_size=int(total), speed_bps=int(speed))
+                        update_suite_task(task_id, progress=min(progress, 99.0), downloaded_size=int(downloaded), total_size=int(total), speed_bps=int(speed))
                     except (ValueError, ZeroDivisionError):
                         pass
 
@@ -118,7 +114,7 @@ async def run_suite_download_task(task_id: str, url: str, archive_path: str):
             if process.returncode == 63 and os.path.exists(part_path):
                 with contextlib.suppress(OSError):
                     os.remove(part_path)
-            update_suite_download_task(
+            update_suite_task(
                 task_id,
                 status="error",
                 progress=0,
@@ -129,7 +125,7 @@ async def run_suite_download_task(task_id: str, url: str, archive_path: str):
 
         os.replace(part_path, archive_path)
         file_size = os.path.getsize(archive_path)
-        update_suite_download_task(task_id, status="completed", progress=100, downloaded_size=file_size, archive_path=archive_path, speed_bps=0, message=f"Download complete: {filename}")
+        update_suite_task(task_id, status="completed", progress=100, downloaded_size=file_size, archive_path=archive_path, speed_bps=0, message=f"Download complete: {filename}")
     except asyncio.CancelledError:
         if process and process.returncode is None:
             process.terminate()
@@ -138,7 +134,7 @@ async def run_suite_download_task(task_id: str, url: str, archive_path: str):
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-        update_suite_download_task(
+        update_suite_task(
             task_id,
             status="recovering",
             message="Download paused during Controller shutdown",
@@ -151,7 +147,7 @@ async def run_suite_download_task(task_id: str, url: str, archive_path: str):
             await process.wait()
         # 任务 error 会随任务状态接口回传给所有者：原文只进日志。
         logger.error(f"[Suite Download] Failed: {e}", exc_info=True)
-        update_suite_download_task(
+        update_suite_task(
             task_id, status="error", error="套件下载失败（详见服务端日志）"
         )
 
@@ -162,17 +158,17 @@ def _extract_archive_with_progress(archive_path: str, extract_dir: str, target_d
         extract_dir,
         target_dir_name,
         task_id,
-        update_suite_extract_task,
+        update_suite_task,
     )
 
 
 async def run_suite_extract_task(task_id: str, archive_path: str, extract_dir: str, target_dir_name: str):
     try:
-        update_suite_extract_task(task_id, status="extracting", progress=0, message="Extracting...")
+        update_suite_task(task_id, status="extracting", progress=0, message="Extracting...")
         result = await asyncio.to_thread(
             _extract_archive_with_progress,
             archive_path, extract_dir, target_dir_name, task_id)
-        update_suite_extract_task(task_id, status="completed", progress=100, **result)
+        update_suite_task(task_id, status="completed", progress=100, **result)
     except Exception as e:
         logger.error(f"[Suite Extract] Failed: {e}")
-        update_suite_extract_task(task_id, status="error", error=f"Extraction failed: {e!s}")
+        update_suite_task(task_id, status="error", error=f"Extraction failed: {e!s}")

@@ -611,18 +611,18 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("📦 离线包", shell)
         self.assertIn("function buildSkillInstallCommand()", navigation)
         self.assertIn("function copySkillInstallCommand()", navigation)
-        # 复制的命令自包含可执行：-k 仅首次拉取安装器（TOFU），安装器
-        # 随后自动获取并固定 Controller CA，恢复严格 TLS；已预置 CA 的
-        # 部署按 docs/agent/installation.md 用 GMS_INSTALL_CA_CERT 覆盖。
+        # 未指定 CA 时使用系统信任链；显式 CA 保留原值，下载失败向外返回。
+        transport = '(set -o pipefail; curl ${GMS_INSTALL_CA_CERT:+--cacert "$GMS_INSTALL_CA_CERT"} -fsSL '
+        self.assertIn(transport, navigation)
         self.assertIn(
-            'curl -kfsSL "${window.location.origin}/api/agent/install.sh" | bash -s -- --paircode-prompt',
+            '"${window.location.origin}/api/agent/install.sh" | bash -s -- --paircode-prompt)',
             navigation,
         )
         self.assertIn(
-            'curl -kfsSL "https://server:5001/api/agent/install.sh" | bash -s -- --paircode-prompt',
+            transport + '"https://server:5001/api/agent/install.sh" | bash -s -- --paircode-prompt)',
             api_constants,
         )
-        self.assertIn('curl -kfsSL "{{ request.url.scheme }}://', shell)
+        self.assertIn(transport + '"{{ request.url.scheme }}://', shell)
         self.assertIn('bash -s -- --paircode-prompt', shell)
         self.assertIn('安装器随后固定 CA 并严格校验下载', shell)
         self.assertIn("path === '/api/agent/install.sh'", navigation)

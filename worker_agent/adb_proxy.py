@@ -425,11 +425,30 @@ def _source_start(payload: dict[str, Any], pair_code: str) -> dict[str, Any]:
     }
 
 
+def _optional_generation(payload: dict[str, Any] | None) -> int | None:
+    """Return an explicit generation, or None when the caller omitted it.
+
+    ``0`` is a real generation. Treating it as missing let a replay of the
+    first session stop a newer source or target. Callers that intentionally
+    omit the field (the connect-failure rollback) still proceed.
+    """
+
+    if not payload or "generation" not in payload:
+        return None
+    value = payload.get("generation")
+    if value is None or value == "":
+        return None
+    return int(value)
+
+
 def _source_stop(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     root = _state_root()
     current = _read_json(root / "source.json")
-    requested_generation = int((payload or {}).get("generation") or 0)
-    if requested_generation and int(current.get("generation") or 0) > requested_generation:
+    requested_generation = _optional_generation(payload)
+    if (
+        requested_generation is not None
+        and int(current.get("generation") or 0) > requested_generation
+    ):
         raise RuntimeError("stale ADB Proxy source generation")
     stopped = _stop_managed(root / "proxy.pid", "adb-proxy")
     (root / "source.json").unlink(missing_ok=True)
@@ -572,13 +591,13 @@ def _target_disconnect(payload: dict[str, Any]) -> dict[str, Any]:
     backend_name = _backend_name(source_worker_id)
     root = _state_root()
     state = _read_json(root / "target.json")
-    requested_generation = int(payload.get("generation") or 0)
+    requested_generation = _optional_generation(payload)
     current_import = next((
         item for item in state.get("imports") or []
         if item.get("source_worker_id") == source_worker_id
     ), None)
     if (
-        requested_generation
+        requested_generation is not None
         and current_import
         and int(current_import.get("generation") or 0) > requested_generation
     ):

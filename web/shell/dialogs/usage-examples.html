@@ -11,7 +11,7 @@
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color); font-weight: 700; margin-bottom: 8px; font-size: 12px;">📦 步骤1: 一键安装Skill和CLI（可在任意Linux主机执行）</div>
                         <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
-                            <code id="cmd-1" class="usage-cmd">curl -kfsSL "{{ request.url.scheme }}://{{ request.url.netloc }}/api/agent/install.sh" | bash -s -- --paircode-prompt</code>
+                            <code id="cmd-1" class="usage-cmd">(set -o pipefail; curl ${GMS_INSTALL_CA_CERT:+--cacert "$GMS_INSTALL_CA_CERT"} -fsSL "{{ request.url.scheme }}://{{ request.url.netloc }}/api/agent/install.sh" | bash -s -- --paircode-prompt)</code>
                             <span class="copy-chip usage-chip" data-click="copyCommand" data-a0="cmd-1">📋 复制</span>
                         </div>
                     </div>
@@ -21,7 +21,7 @@
                             <code id="cmd-1-5" class="usage-cmd">gms-rt-system-selfcheck &amp;&amp; gms-rt-devices-list</code>
                             <span class="copy-chip usage-chip" data-click="copyCommand" data-a0="cmd-1-5">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 -k 仅用于自签名 Controller 的首次取脚本；安装器随后固定 CA 并严格校验下载。管理员在 Web 生成配对码完成安装；selfcheck 通过即可使用，升级用 gms-agent update。</div>
+                        <div style="margin-top: 4px; font-size: 11px; color: var(--text-muted);">💡 默认使用系统信任链；自签名 Controller 请先带外取得 CA，并执行 export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt。命令保留已有 CA 设置，下载失败会返回非零状态。仅在可信实验网络采用 TOFU 时才显式改用 -kfsSL 首次取脚本，安装器随后固定 CA 并严格校验下载。管理员在 Web 生成配对码完成安装，升级用 gms-agent update。</div>
                     </div>
 
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">

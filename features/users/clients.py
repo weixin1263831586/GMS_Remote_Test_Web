@@ -10,6 +10,7 @@ from features.auth import get_authenticated_user
 # features/users 与 features/auth 共用同一实现，避免 feature 间依赖环。
 # See docs/architecture/adr/0002-feature-foundation-boundary.md.
 from foundation.networking import get_client_ip, parse_host_address
+from foundation.redaction import is_sensitive_field
 
 from . import runtime
 
@@ -287,9 +288,6 @@ def is_manual_username_fallback_error(error: str | None) -> bool:
     ))
 
 
-_SENSITIVE_FIELDS = ('password', 'pswd', 'api_key', 'secret', 'token', 'private_key')
-
-
 def _mask_value(value: str) -> str:
     return value[:4] + '*' * (len(value) - 4) if len(value) > 4 else '****'
 
@@ -300,7 +298,7 @@ def hide_sensitive_info(config: dict) -> dict:
         return config
     safe = {}
     for key, value in config.items():
-        if any(s in key.lower() for s in _SENSITIVE_FIELDS) and isinstance(value, str) and value:
+        if is_sensitive_field(str(key)) and isinstance(value, str) and value:
             safe[key] = _mask_value(value)
         elif isinstance(value, dict):
             safe[key] = hide_sensitive_info(value)

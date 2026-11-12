@@ -10,8 +10,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from bootstrap.application import create_app
-from features.auth import AUTOMATION_PLAN_CAPABILITIES, CurrentUser
-from features.auth.authority import MachineAuthorityError
+from features.auth import AUTOMATION_PLAN_CAPABILITIES, CurrentUser, MachineAuthorityError
 from features.automation import api as automation_api
 from features.automation.executors import HttpAutomationExecutor
 from features.automation.profiles import save_profiles

@@ -34,7 +34,6 @@ ALLOWED_TYPES = (
     "string", "bool", "integer", "dimen", "fraction",
     "integer-array", "string-array", "array",
 )
-_SCALAR_TYPES = ("string", "bool", "integer", "dimen", "fraction")
 _ARRAY_TYPES = ("integer-array", "string-array", "array")
 
 # Android dimension units (resource type "dimen").

@@ -21,7 +21,6 @@ class ClientManager:
     """客户端管理器"""
 
     SSH_TIMEOUT = 3
-    SSH_BANNER_TIMEOUT = 3
     SSH_AUTH_TIMEOUT = 3
 
     def __init__(self):

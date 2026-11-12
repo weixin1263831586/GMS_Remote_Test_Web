@@ -125,11 +125,6 @@ async function getFirmwareUploadFingerprint(file) {
     return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function getFirmwareUploadId(file) {
-    const fingerprint = await getFirmwareUploadFingerprint(file);
-    return {uploadId: `fw-v2-${fingerprint}`, fingerprint};
-}
-
 async function getReusableFirmwareUploadId(file) {
     const fingerprint = await getFirmwareUploadFingerprint(file);
     const savedName = sessionStorage.getItem('firmwareUploadFileName');

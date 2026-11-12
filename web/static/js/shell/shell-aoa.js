@@ -977,10 +977,6 @@ function aoaInitializeWorkbench() {
     aoaSetBusy(aoaPanelState.running);
 }
 
-// 兼容初版 AOA 页签导出的调用名。
-function aoaRecordStart() { return aoaRecordingStart(); }
-function aoaProfileReplay(profileId) { return aoaReplaySelected(profileId); }
-function aoaProfileDelete() { return aoaProfileDeleteSelected(); }
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', aoaInitializeWorkbench, {once: true});
 } else { aoaInitializeWorkbench(); }

@@ -66,6 +66,33 @@ class ClientIpResolutionTests(unittest.TestCase):
         self.assertEqual(resolved, '192.0.2.30')
 
 
+class ClientConfigRedactionTests(unittest.TestCase):
+    def test_config_masks_secret_aliases_and_preserves_token_counters(self):
+        secret = 'demo-credential'
+        aliases = (
+            'password', 'Passwd', 'pswd', 'token', 'secret', 'api_key', 'apikey',
+            'api-key', 'authorization', 'cookie', 'pair_code', 'pair-code',
+            'paircode', 'private_key', 'private-key', 'privatekey',
+        )
+        config = {
+            'username': 'alice',
+            'input_tokens': '120',
+            'nested': dict.fromkeys(aliases, secret),
+            'entries': [{'api-key': secret}],
+        }
+
+        masked = clients.hide_sensitive_info(config)
+
+        self.assertEqual(masked['username'], 'alice')
+        self.assertEqual(masked['input_tokens'], '120')
+        for key in aliases:
+            with self.subTest(key=key):
+                self.assertNotEqual(masked['nested'][key], secret)
+                self.assertNotIn('credential', masked['nested'][key])
+                self.assertEqual(config['nested'][key], secret)
+        self.assertNotEqual(masked['entries'][0]['api-key'], secret)
+
+
 class DetectUsernameHostKeyTests(unittest.TestCase):
     """主机密钥校验失败必须映射为明确的信任类错误。
 

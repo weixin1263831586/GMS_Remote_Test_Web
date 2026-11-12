@@ -322,7 +322,7 @@
             loadUsbipAssignments();
         }
         function copyTailscaleInstallCmd() {
-            copyText('curl -fsSL https://tailscale.com/install.sh | sh', {successMsg: '✓ 安装命令已复制'});
+            copyText('sudo bash scripts/setup_tailscale.sh', {successMsg: '✓ 安装命令已复制'});
         }
         async function autoGroupDevices(by) {
             if (!by) return;

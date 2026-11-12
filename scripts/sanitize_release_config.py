@@ -11,17 +11,11 @@ from pathlib import Path
 from typing import Any
 
 
-SENSITIVE_KEYS = {
-    "api_key",
-    "encrypted_password",
-    "password",
-    "rest_password",
-    "secret",
-    "token",
-    "ubuntu_pswd",
-    "vnc_password",
-}
-SENSITIVE_SUFFIXES = ("_api_key", "_password", "_pswd", "_secret", "_token")
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# 敏感键清单与发布树校验/源码扫描共用，见 scripts/_sensitive_keys.py。
+from scripts._sensitive_keys import SENSITIVE_KEYS, SENSITIVE_SUFFIXES
 
 
 def _empty_like(value: Any) -> Any:

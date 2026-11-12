@@ -163,10 +163,6 @@ def installed_version() -> str | None:
 # HTTP / registry
 # ---------------------------------------------------------------------------
 
-def server_url_from_env(profile: str = "") -> str:
-    return resolve_controller("", profile)[0]
-
-
 def resolve_controller(explicit_server: str = "", explicit_profile: str = "") -> tuple[str, str]:
     """Resolve the (Controller URL, CA cert) for update/enroll/rollback.
 
@@ -643,26 +639,6 @@ profile_candidates = profile_store.profile_candidates
 read_profile_toml = profile_store.read_profile_toml
 load_profile = profile_store.load_profile
 write_profile_toml = profile_store.write_profile_toml
-
-
-def profile_server_and_ca(client: str) -> tuple[str, str]:
-    """Re-read Controller URL / CA from the client's TOML profile
-    (update/rollback re-activation must not need the user to repeat
-    --server).
-
-    Fail-closed (ADR 0003): with zero or multiple profiles for this client
-    this returns ("", "") — a multi-Controller host must resolve the
-    ambiguity via GMS_REMOTE_TEST_SERVER / an explicit profile, never via
-    sorted()-first guessing. The legacy <client>.env fallback was removed
-    together with the launcher's first-.env-wins glob."""
-
-    selected = profile_store.resolve_profile(client)
-    if selected is None:
-        return "", ""
-    flat = profile_store.load_profile(selected.stem)
-    if not flat.get("profile"):
-        return "", ""
-    return profile_store.controller_url(flat), profile_store.ca_cert(flat)
 
 
 def _profile_insecure(name: str) -> bool:

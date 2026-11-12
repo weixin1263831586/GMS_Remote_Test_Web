@@ -43,6 +43,7 @@ def _resolve_usbip_command() -> str:
 USBIP_PORT_COMMAND = f"sudo -n {_resolve_usbip_command()} port"
 
 USBIP_DETACH_COMMAND_TEMPLATE = "sudo -n {usbip} detach -p {port}"
+_USBIP_PORT_NUMBER_RE = re.compile(r"\d{1,3}")
 
 # usbip port 输出的设备行，例如：
 #     1-2 | 05ac:12a8 | Remix Mini | Remote USB/IP host 10.0.0.5
@@ -98,6 +99,29 @@ def parse_usbip_port_entries(output: str) -> list[dict[str, str]]:
                 'local_busid': url_match.group('local_busid'),
             })
     return entries
+
+
+def list_attached_usbip_ports(ssh_manager, ssh, *, timeout: int = 10):
+    """List target-side USB/IP ports without handing the command to callers.
+
+    Returns ``(ok, entries, detail)``. A failed listing is not an empty port
+    set: callers must keep the firmware gate closed.
+    """
+    result = ssh_manager.execute_command(ssh, USBIP_PORT_COMMAND, timeout=timeout)
+    detail = (result.stderr or result.stdout or "").strip()
+    if not result.ok:
+        return False, [], detail
+    return True, parse_usbip_port_entries(result.stdout or ""), detail
+
+
+def detach_attached_usbip_port(ssh_manager, ssh, port: str, *, timeout: int = 15):
+    """Detach one vhci port. ``port`` must be the numeric field from ``usbip port``."""
+    if _USBIP_PORT_NUMBER_RE.fullmatch(str(port or "")) is None:
+        raise ValueError(f"USB/IP port is not a numeric port: {port!r}")
+    command = USBIP_DETACH_COMMAND_TEMPLATE.format(
+        usbip=resolve_usbip_command(), port=port,
+    )
+    return ssh_manager.execute_command(ssh, command, timeout=timeout)
 
 
 def usbip_attached_ports(ssh_manager, ssh) -> set[str] | None:

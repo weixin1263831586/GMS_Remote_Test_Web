@@ -17,7 +17,7 @@ from foundation.responses import error_response, success_response
 
 from . import runtime
 from .clients import get_client_id_from_request
-from .storage_paths import owner_storage_key
+from .storage_paths import atomic_write_json, owner_storage_key
 
 
 router = APIRouter()
@@ -328,20 +328,12 @@ def save_device_groups(
         return False
 
     path = _device_groups_path(username)
-    temporary = path.with_suffix(f'{path.suffix}.tmp')
     with _storage_lock:
         try:
-            temporary.write_text(
-                json.dumps({'groups': groups}, ensure_ascii=False, indent=2),
-                encoding='utf-8',
-            )
-            temporary.replace(path)
+            atomic_write_json(path, {'groups': groups})
             return True
         except OSError:
-            try:
-                temporary.unlink(missing_ok=True)
-            except OSError:
-                pass
+            pass
             return False
 
 

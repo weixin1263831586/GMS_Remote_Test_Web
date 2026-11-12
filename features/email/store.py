@@ -25,7 +25,6 @@ from foundation.config import settings
 # 正文预览长度：足够辨认是哪封邮件，不足以成为第二个正文存储。
 _BODY_PREVIEW_CHARS = 500
 _MAX_ROWS = 5000
-_PRUNE_BATCH = 500
 
 
 def utc_now_iso() -> str:

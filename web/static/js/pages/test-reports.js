@@ -246,8 +246,6 @@ async function loadTestReports(userOnly = false, append = false, force = false) 
     }
 }
 
-window.loadMoreTestReports = () => loadTestReports(currentUserFilter, true);
-
 function toggleUserReports() {
     const checkbox = document.getElementById('filter-user-checkbox');
     currentUserFilter = checkbox.checked;
@@ -465,77 +463,6 @@ async function deleteReport(timestamp, reportId = '', reportName = '') {
     }
 }
 
-
-async function retryReport(timestamp, testType) {
-    try {
-        switchPage('test');
-
-        // 等待页面切换完成后填充数据
-        setTimeout(() => {
-            debugLog(`[Retry] 开始填充数据, timestamp=${timestamp}, testType=${testType}`);
-
-            const reportNameInput = document.getElementById('retry-result');
-            if (reportNameInput) {
-                reportNameInput.value = timestamp;
-                debugLog(`[Retry] 已填入报告名称: ${timestamp}`);
-            } else {
-                console.error('[Retry] 未找到 retry-result 元素');
-            }
-
-            // 互斥：填入报告时清空模块和用例
-            enforceFieldExclusion('retry');
-
-            const testTypeSelect = document.getElementById('test-type');
-            if (testTypeSelect) {
-                if (testType) {
-                    testTypeSelect.value = testType;
-                    debugLog(`[Retry] 已设置测试类型: ${testType}, 当前值: ${testTypeSelect.value}`);
-                } else {
-                    console.warn('[Retry] testType 为空');
-                }
-            } else {
-                console.error('[Retry] 未找到 test-type 元素');
-            }
-
-            const suitePathInput = document.getElementById('test-suite');
-            if (suitePathInput) {
-                const suitePaths = {
-                    'CTS': 'android-cts',
-                    'GSI': 'android-gsi',
-                    'GTS': 'android-gts',
-                    'STS': 'android-sts',
-                    'VTS': 'android-vts',
-                    'APTS': 'android-apts'
-                };
-
-                if (testType && suitePaths[testType]) {
-                    suitePathInput.value = suitePaths[testType];
-                    debugLog(`[Retry] 已设置测试套件路径: ${suitePaths[testType]}, 当前值: ${suitePathInput.value}`);
-                } else {
-                    console.warn(`[Retry] testType=${testType} 没有对应的套件路径`);
-                }
-            } else {
-                console.error('[Retry] 未找到 test-suite 元素');
-            }
-
-            debugLog('[Retry] 当前字段值:', {
-                reportName: document.getElementById('retry-result')?.value,
-                testType: document.getElementById('test-type')?.value,
-                suitePath: document.getElementById('test-suite')?.value
-            });
-        }, 200);
-
-        showToast(`已填入报告名称: ${timestamp}${testType ? ' (类型: ' + testType + ')' : ''}`, 'success');
-
-        // 可选：自动开始测试（如果需要的话，取消下面的注释）
-        // setTimeout(() => {
-        //     startTest();
-        // }, 500);
-    } catch (error) {
-        console.error('Retry report error:', error);
-        showToast('操作失败: ' + error.message, 'error');
-    }
-}
 
 async function retryReportWithSuite(timestamp, testType, suitePath, reportContext = {}) {
     try {

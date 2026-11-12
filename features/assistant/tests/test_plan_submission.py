@@ -56,16 +56,16 @@ async def test_legacy_plan_gets_one_operation_id_before_first_submission():
 @pytest.mark.parametrize("stage", ["_run_pre_actions", "_start_test_with_plan"])
 @pytest.mark.parametrize("cancelled", [False, True])
 async def test_start_exception_clears_run_and_anchor(monkeypatch, stage, cancelled):
-    from features.assistant import api, session_store
+    from features.assistant import api, session_store, test_runs
 
     session = {"session_id": "s-start-error", "owner_id": "alice", "active_run": None}
     plan = {"request": {"devices": ["ABC"], "test_suite": "cts", "worker_id": "w1"}}
     request = SimpleNamespace(headers={}, cookies={}, client=None)
     failure = asyncio.CancelledError() if cancelled else RuntimeError("start failed")
-    monkeypatch.setattr(api, "owner_id_from_request", lambda _: "alice")
-    monkeypatch.setattr(api, "_latest_report_for_client", lambda _: None)
-    monkeypatch.setattr(api, "_run_pre_actions", AsyncMock(return_value={"success": True}))
-    monkeypatch.setattr(api, stage, AsyncMock(side_effect=failure))
+    monkeypatch.setattr(test_runs, "owner_id_from_request", lambda _: "alice")
+    monkeypatch.setattr(test_runs, "_latest_report_for_client", lambda _: None)
+    monkeypatch.setattr(test_runs, "_run_pre_actions", AsyncMock(return_value={"success": True}))
+    monkeypatch.setattr(test_runs, stage, AsyncMock(side_effect=failure))
 
     with pytest.raises(type(failure)):
         await api._execute_plan(session, request, plan)
@@ -77,7 +77,7 @@ async def test_start_exception_clears_run_and_anchor(monkeypatch, stage, cancell
 
 @pytest.mark.asyncio
 async def test_old_monitor_finishing_analysis_keeps_new_run(monkeypatch):
-    from features.assistant import api, session_registry
+    from features.assistant import api, session_registry, test_runs
 
     session = {
         "session_id": "s-analysis", "client_id": "alice", "owner_id": "alice",
@@ -93,10 +93,10 @@ async def test_old_monitor_finishing_analysis_keeps_new_run(monkeypatch):
         session["status"] = "monitoring"
 
     monkeypatch.setitem(api._agent_sessions, session["session_id"], session)
-    monkeypatch.setattr(api, "get_or_create_user_state", lambda _: {"running": False})
-    monkeypatch.setattr(api, "_latest_report_for_client", lambda *_a, **_kw: {"timestamp": "r1"})
-    monkeypatch.setattr(api, "_report_failed", lambda _: True)
-    monkeypatch.setattr(api, "_run_failure_analysis_pipeline", finish_analysis)
+    monkeypatch.setattr(test_runs, "get_or_create_user_state", lambda _: {"running": False})
+    monkeypatch.setattr(test_runs, "_latest_report_for_client", lambda *_a, **_kw: {"timestamp": "r1"})
+    monkeypatch.setattr(test_runs, "_report_failed", lambda _: True)
+    monkeypatch.setattr(test_runs, "_run_failure_analysis_pipeline", finish_analysis)
     clear_anchor = Mock()
     monkeypatch.setattr(session_registry, "clear_session_anchor", clear_anchor)
     await api._monitor_agent_run(session["session_id"], SimpleNamespace(), "old")

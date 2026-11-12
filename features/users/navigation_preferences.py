@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 import threading
 from pathlib import Path
 from typing import Any
 
 from . import runtime
-from .storage_paths import owner_storage_key
+from .storage_paths import atomic_write_json, owner_storage_key
 
 
 _storage_lock = threading.RLock()
@@ -51,18 +49,5 @@ def save_navigation_preferences(
         for key in ("order", "visible_pages"):
             if key in updates:
                 current[key] = list(updates[key])
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix="navigation-",
-            suffix=".json",
-            dir=path.parent,
-        )
-        temporary = Path(temporary_name)
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                json.dump(current, handle, ensure_ascii=False, indent=2)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
-        finally:
-            temporary.unlink(missing_ok=True)
+        atomic_write_json(path, current)
     return current

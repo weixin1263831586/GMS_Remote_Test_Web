@@ -36,7 +36,7 @@ def _safe_import_call(module: str, func: str) -> Any:
         return None
 
 
-def build_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_snapshot() -> dict[str, Any]:
     from foundation.config import settings
 
     snapshot: dict[str, Any] = {}
@@ -120,7 +120,7 @@ def run_ops_sweep(cfg: dict[str, Any] | None = None) -> dict[str, int]:
     effective = cfg or load_ops_alerts_config()
     notified = _deliver_pending(effective)
     try:
-        snapshot = build_snapshot(effective)
+        snapshot = build_snapshot()
     except Exception:
         # 快照失败只丢一轮评估；投递闭环由 pending 重试兜底，sweep 不外抛。
         logger.exception("ops sweep snapshot failed")
@@ -145,8 +145,6 @@ def run_ops_sweep(cfg: dict[str, Any] | None = None) -> dict[str, int]:
         if not event:
             continue
         recorded += 1
-        if result.get("suppressed"):
-            continue
     # 新记录的事件进入 pending 状态，统一走 _deliver_pending 的投递/重试闭环。
     notified += _deliver_pending(effective)
     return {"evaluated": len(incidents), "recorded": recorded, "notified": notified}

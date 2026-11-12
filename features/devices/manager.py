@@ -61,6 +61,45 @@ def _require_safe_device_id(device_id: str) -> None:
         raise ValueError(f"unsafe device id: {device_id!r}")
 
 
+def _make_ssh_adb_runner(ssh_manager, ssh, device_id: str):
+    """构造 SSH 通道 ADB runner：``(args, timeout) -> (output, code)``。"""
+    def run_adb(args: str, timeout: int) -> tuple[str, int]:
+        result = ssh_manager.execute_command(
+            ssh,
+            f"adb -s {device_id} {args}",
+            timeout=timeout,
+        )
+        return (result.stdout or result.stderr or ''), result.code
+
+    return run_adb
+
+
+def _make_ssh_fastboot_runner(ssh_manager, ssh, device_id: str):
+    """构造 SSH 通道 fastboot runner：``(args, timeout) -> (output, code)``。"""
+    def run_fastboot(args: str, timeout: int) -> tuple[str, int]:
+        result = ssh_manager.execute_command(
+            ssh,
+            f"fastboot -s {shlex.quote(device_id)} {args}",
+            timeout=timeout,
+        )
+        return (result.stdout or result.stderr or ''), result.code
+
+    return run_fastboot
+
+
+def _make_ssh_adb_runner_for_adb_ops(ssh_manager, ssh, device_id: str):
+    """按 adb_ops.AdbRunner 协议 ``(device_id, args, timeout)`` 适配 SSH runner。
+
+    SSH runner 已绑定 device_id，忽略协议传入的设备参数。
+    """
+    runner = _make_ssh_adb_runner(ssh_manager, ssh, device_id)
+
+    def run_adb(_device_id: str | None, args: str, timeout: int) -> tuple[str, int]:
+        return runner(args, timeout)
+
+    return run_adb
+
+
 def has_blocked_adb_process() -> bool:
     try:
         result = subprocess.run(
@@ -419,21 +458,10 @@ class DeviceManager:
             created_ssh = False
 
         try:
-            def run_adb(_device_id: str | None, args: str, timeout: int) -> tuple[str, int]:
-                result = self.ssh_manager.execute_command(
-                    ssh,
-                    f"adb -s {device_id} {args}",
-                    timeout=timeout,
-                )
-                return (result.stdout or result.stderr or ''), result.code
-
-            def run_fastboot(args: str, timeout: int) -> tuple[str, int]:
-                result = self.ssh_manager.execute_command(
-                    ssh,
-                    f"fastboot -s {shlex.quote(device_id)} {args}",
-                    timeout=timeout,
-                )
-                return (result.stdout or result.stderr or ''), result.code
+            # adb_ops.AdbRunner 协议为 (device_id, args, timeout) 三参，
+            # SSH 通道实现已绑定 device_id，由适配工厂做协议转发。
+            run_adb = _make_ssh_adb_runner_for_adb_ops(self.ssh_manager, ssh, device_id)
+            run_fastboot = _make_ssh_fastboot_runner(self.ssh_manager, ssh, device_id)
 
             # 停在 Fastboot/Fastbootd（如烧写后等待人工处理）的设备没有
             # ADB 通道，改用 fastboot reboot 重启。
@@ -501,21 +529,8 @@ class DeviceManager:
             created_ssh = False
 
         try:
-            def run_adb(args: str, timeout: int) -> tuple[str, int]:
-                result = self.ssh_manager.execute_command(
-                    ssh,
-                    f"adb -s {device_id} {args}",
-                    timeout=timeout,
-                )
-                return (result.stdout or result.stderr or ''), result.code
-
-            def run_fastboot(args: str, timeout: int) -> tuple[str, int]:
-                result = self.ssh_manager.execute_command(
-                    ssh,
-                    f"fastboot -s {shlex.quote(device_id)} {args}",
-                    timeout=timeout,
-                )
-                return (result.stdout or result.stderr or ''), result.code
+            run_adb = _make_ssh_adb_runner(self.ssh_manager, ssh, device_id)
+            run_fastboot = _make_ssh_fastboot_runner(self.ssh_manager, ssh, device_id)
 
             reboot = run_adb('reboot bootloader', 30)
             if reboot[1] != 0:
@@ -587,13 +602,7 @@ class DeviceManager:
             created_ssh = False
 
         try:
-            def run_adb(_device_id: str | None, args: str, timeout: int) -> tuple[str, int]:
-                result = self.ssh_manager.execute_command(
-                    ssh,
-                    f"adb -s {device_id} {args}",
-                    timeout=timeout,
-                )
-                return (result.stdout or result.stderr or ''), result.code
+            run_adb = _make_ssh_adb_runner_for_adb_ops(self.ssh_manager, ssh, device_id)
 
             remount = root_and_remount(
                 run_adb,

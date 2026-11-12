@@ -16,7 +16,7 @@ from fastapi import APIRouter, Body, Query, Request
 from foundation.responses import error_response
 
 from . import runtime
-from .models import TestStartRequest
+from .models import ACTIVE_JOB_STATUSES, TestStartRequest
 
 
 logger = logging.getLogger(__name__)
@@ -208,21 +208,10 @@ async def stop_test(
             "The durable test execution service is unavailable", 503
         )
 
-    active_statuses = {
-        "created",
-        "queued",
-        "leasing",
-        "assigned",
-        "dispatching",
-        "running",
-        "stopping",
-        "collecting",
-        "worker_lost",
-    }
     active_jobs = [
         item
         for item in repository.list_jobs(limit=500, owner_id=owner_id)
-        if item.get("status") in active_statuses
+        if item.get("status") in ACTIVE_JOB_STATUSES
     ]
     if job_id:
         if not any(item.get("id") == job_id for item in active_jobs):
