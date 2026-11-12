@@ -27,8 +27,6 @@ from features.assistant.response import (
 )
 from features.assistant.session_directory import (
     _restore_session_from_transcript as _restore_session_from_transcript,
-)
-from features.assistant.session_directory import (
     _session_directory,
     delete_session,
 )
