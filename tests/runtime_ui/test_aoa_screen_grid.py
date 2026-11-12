@@ -338,6 +338,19 @@ class RuntimeAoaScreenGridTests(RuntimeUiHarness):
                 FakeSocket.OPEN = 1;
                 window.WebSocket = FakeSocket;
             }""")
+            # Keep the real AOA workbench selector consistent with the mocked stream.
+            # Inventory refreshes may otherwise select the empty target and call
+            # aoaLiveScreen.stop() while these transport-only tests are running.
+            page.evaluate("""() => {
+                aoaSyncDeviceSources([{
+                    serial_no: 'REC', worker_id: 'worker-a',
+                    status: 'online', cluster_state: 'available',
+                }]);
+                document.getElementById('aoa-record-worker').value = 'worker-a';
+                aoaSyncDeviceOptions();
+                document.getElementById('aoa-record-device').value = 'REC';
+                aoaRecorderDeviceChanged();
+            }""")
             page.evaluate("aoaLiveScreen.start('REC', 'worker-a')")
             page.wait_for_timeout(400)
             assert page.evaluate("aoaLiveScreen.isActive()") is True
@@ -404,6 +417,19 @@ class RuntimeAoaScreenGridTests(RuntimeUiHarness):
                 FakeSocket.OPEN = 1;
                 window.WebSocket = FakeSocket;
             }""")
+            # Keep the real AOA workbench selector consistent with the mocked stream.
+            # Inventory refreshes may otherwise select the empty target and call
+            # aoaLiveScreen.stop() while these transport-only tests are running.
+            page.evaluate("""() => {
+                aoaSyncDeviceSources([{
+                    serial_no: 'REC', worker_id: 'worker-a',
+                    status: 'online', cluster_state: 'available',
+                }]);
+                document.getElementById('aoa-record-worker').value = 'worker-a';
+                aoaSyncDeviceOptions();
+                document.getElementById('aoa-record-device').value = 'REC';
+                aoaRecorderDeviceChanged();
+            }""")
             page.evaluate("aoaLiveScreen.start('REC', 'worker-a')")
             page.wait_for_timeout(400)
             assert page.evaluate("aoaLiveScreen.isActive()") is True
@@ -459,6 +485,19 @@ class RuntimeAoaScreenGridTests(RuntimeUiHarness):
                 }
                 FakeSocket.OPEN = 1;
                 window.WebSocket = FakeSocket;
+            }""")
+            # Keep the real AOA workbench selector consistent with the mocked stream.
+            # Inventory refreshes may otherwise select the empty target and call
+            # aoaLiveScreen.stop() while these transport-only tests are running.
+            page.evaluate("""() => {
+                aoaSyncDeviceSources([{
+                    serial_no: 'REC', worker_id: 'worker-a',
+                    status: 'online', cluster_state: 'available',
+                }]);
+                document.getElementById('aoa-record-worker').value = 'worker-a';
+                aoaSyncDeviceOptions();
+                document.getElementById('aoa-record-device').value = 'REC';
+                aoaRecorderDeviceChanged();
             }""")
             page.evaluate("aoaLiveScreen.start('REC', 'worker-a')")
             page.wait_for_timeout(200)
