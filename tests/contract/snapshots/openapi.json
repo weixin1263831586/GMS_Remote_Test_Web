@@ -4408,7 +4408,6 @@
     },
     "/api/agent/sessions/{session_id}": {
       "delete": {
-        "description": "Discard one Agent session: drop live state and its recovery anchor.",
         "parameters": [
           {
             "in": "path",

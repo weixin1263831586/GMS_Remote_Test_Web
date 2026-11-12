@@ -188,6 +188,9 @@ function switchTab(tab, force) {
     x.setAttribute('aria-selected', active ? 'true' : 'false');
   });
   document.querySelectorAll('.tab-content').forEach(x => x.classList.toggle('active', x.id === 'tab-' + tab));
+  // 顶部 Tab 行控件跟随（Redmine 同构）：显隐与内容统一由
+  // renderHeaderTabControls 管理，异步加载完成后也会重进这里。
+  renderHeaderTabControls();
   saveGerritProfileState();
   // force=true 供成员跳转等场景绕过缓存直达目标数据；返回加载
   // promise 供调用方（act-bridge / viewMemberInPersonal）跟踪完成。
@@ -397,7 +400,10 @@ async function loadPersonal(refresh) {
     notifyUser('Gerrit 个人统计失败', e.message, 'error');
     refreshConnBanner({error: e.message, source: ''});
   } finally {
-    if (requestGeneration === gerritDashboardRequestGeneration.personal) content.setAttribute('aria-busy', 'false');
+    if (requestGeneration === gerritDashboardRequestGeneration.personal) {
+      content.setAttribute('aria-busy', 'false');
+      renderHeaderTabControls();
+    }
   }
 }
 async function loadDepartment(refresh) {
@@ -426,7 +432,10 @@ async function loadDepartment(refresh) {
     if (!hadRenderedDashboard) content.innerHTML = placeholderHtml('<span class="error">' + esc(e.message) + '</span>');
     notifyUser('Gerrit 部门统计失败', e.message, 'error');
   } finally {
-    if (requestGeneration === gerritDashboardRequestGeneration.department) content.setAttribute('aria-busy', 'false');
+    if (requestGeneration === gerritDashboardRequestGeneration.department) {
+      content.setAttribute('aria-busy', 'false');
+      renderHeaderTabControls();
+    }
   }
 }
 async function loadChanges() {
@@ -437,7 +446,7 @@ async function loadChanges() {
   document.getElementById('status').textContent = '查询中...';
   try {
     const data = await api('/api/gerrit-dashboard/changes?profile_id=' + encodeURIComponent(profileId) + '&query=' + encodeURIComponent(query));
-    document.getElementById('status').innerHTML = data.error ? '<span class="error">' + esc(data.error) + '</span>' : esc((data.source || 'unknown') + ' / 查询: ' + data.query + '，结果 ' + (data.items || []).length + ' 条');
+    document.getElementById('status').innerHTML = data.error ? '<span class="error">' + esc(data.error) + '</span>' : '';
     document.getElementById('rows').innerHTML = (data.items || []).map(renderRow).join('') || '<tr><td colspan="6" class="muted">无记录</td></tr>';
   } catch (e) {
     document.getElementById('status').innerHTML = '<span class="error">' + esc(e.message) + '</span>';
@@ -445,9 +454,6 @@ async function loadChanges() {
 }
 function placeholderHtml(innerHtml) {
   return '<div class="muted" style="padding:40px;text-align:center">' + innerHtml + '</div>';
-}
-function renderSummaryHeader(title, controlsHtml, metaHtml) {
-  return '<div class="dashboard-summary-header"><h2 class="dashboard-summary-title">' + esc(title) + '</h2>' + (controlsHtml ? '<div class="dashboard-summary-controls">' + controlsHtml + '</div>' : '') + (metaHtml ? '<div class="muted dashboard-summary-meta">' + metaHtml + '</div>' : '') + '</div>';
 }
 // 根据 Gerrit 查询结果刷新顶部连接告警条：只有明确网络/连接类错误才提示检查路由。
 async function refreshConnBanner(data) {

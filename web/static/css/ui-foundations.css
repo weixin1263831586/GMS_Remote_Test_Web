@@ -15,6 +15,9 @@
     pointer-events: none;
 }
 .page-title-icon { display: inline-flex; align-items: center; justify-content: center; width: 20px; flex: none; margin-right: 4px; font-size: 18px; line-height: 1; }
+/* 图片版标题图标（如 APK 分析的 jadx logo）：与 emoji 同盒 20px、
+   字形同高 18px，跟随 page-title-icon 的垂直几何。 */
+img.page-title-icon { height: 18px; object-fit: contain; }
 .section-title > .ui-icon { margin-right: 6px; }
 button > .ui-icon { margin-right: 5px; }
 button > .ui-icon:last-child:first-child { margin-right: 0; }

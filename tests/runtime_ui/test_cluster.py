@@ -617,14 +617,12 @@ class RuntimeClusterTests(RuntimeUiHarness):
                         : {}
                     ));
                   });
-                  document.querySelector('#dash-refresh-charts').click();
+                  document.querySelector('#refresh').click();
                 }"""
             )
-            for selector in ["#dash-refresh-charts", "#refresh"]:
-                button = page.locator(selector)
-                expect(button).to_be_disabled()
-                expect(button).to_have_text("刷新中…")
-                expect(button).to_have_attribute("aria-busy", "true")
+            button = page.locator("#refresh")
+            expect(button).to_be_disabled()
+            expect(button).to_have_attribute("aria-busy", "true")
 
             page.evaluate(
                 "window.__clusterRefreshResolvers.splice(0).forEach(resolve => resolve())"
@@ -636,11 +634,27 @@ class RuntimeClusterTests(RuntimeUiHarness):
                   api = window.__clusterOriginalApi;
                 }"""
             )
-            for selector in ["#dash-refresh-charts", "#refresh"]:
-                button = page.locator(selector)
-                expect(button).to_be_enabled()
-                # 图标已改为 SVG use，textContent 只剩「 刷新」（可含空格）。
-                expect(button).to_have_text(re.compile(r"^刷新$"))
-                expect(button).not_to_have_attribute("aria-busy", "true")
+            button = page.locator("#refresh")
+            expect(button).to_be_enabled()
+            # busy 只切 disabled/aria-busy，textContent 保持 SVG 图标 + 刷新。
+            expect(button).to_have_text(re.compile(r"^\s*刷新\s*$"))
+            expect(button).not_to_have_attribute("aria-busy", "true")
+        finally:
+            page.close()
+
+    def test_cluster_tab_row_actions_follow_active_tab(self):
+        page = self.new_page()
+        try:
+            page.goto(f"{self.base_url}/cluster", wait_until="domcontentloaded")
+            page.wait_for_function("refreshPromise === null")
+            # 概览 Tab：顶部只有刷新；搜索/添加主机隐藏。
+            expect(page.locator("#refresh")).to_be_visible()
+            expect(page.locator("#cluster-search")).to_be_hidden()
+            expect(page.locator("#show-onboarding")).to_be_hidden()
+            # 管理 Tab：搜索与添加主机移入 Tab 行并显示。
+            page.locator('[data-dash-tab="management"]').click()
+            expect(page.locator("#cluster-search")).to_be_visible()
+            expect(page.locator("#show-onboarding")).to_be_visible()
+            expect(page.locator("#refresh")).to_be_visible()
         finally:
             page.close()

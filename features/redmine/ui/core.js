@@ -248,14 +248,21 @@ function redmineTabKeydown(event) {
 
 function updateRedmineToolbar() {
   var filters = document.getElementById('issuesToolbarFilters');
+  var statsToolbar = document.getElementById('statsToolbar');
   var action = document.getElementById('scanBtn');
   var refresh = document.getElementById('refreshBtn');
   var isIssues = currentTab === 'issues';
   var isAnalysisTab = ['issues', 'cases', 'runs'].includes(currentTab);
+  var isStatsTab = ['stats', 'department'].includes(currentTab);
 
   if (filters) {
     filters.hidden = !isIssues;
     filters.setAttribute('aria-hidden', String(!isIssues));
+  }
+  if (statsToolbar) {
+    // 个人/部门看板的统计身份与部门选择控件随 Tab 显示（内容区不再保留）。
+    statsToolbar.hidden = !isStatsTab;
+    statsToolbar.setAttribute('aria-hidden', String(!isStatsTab));
   }
   if (action) {
     action.hidden = !isAnalysisTab;

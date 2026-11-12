@@ -238,6 +238,7 @@
             session.tab.tabIndex = active ? 0 : -1;
             session.pane.hidden = !active;
         });
+        syncConsoleToolbar();
         renderPorts();
         if (target) {
             requestAnimationFrame(() => {
@@ -398,9 +399,8 @@
 
     function syncSessionHeading(session, port) {
         session.title = portTitle(port);
-        session.pane.querySelector('.console-title').textContent = session.title;
-        session.pane.querySelector('.console-subtitle').textContent =
-            `${port.devname || '当前离线'} · ${port.binding?.baudrate || ''} baud · ${port.port_key}`;
+        // 标题/副标题行已删（信息在右侧栏设备信息里），只更新 Tab 标题
+        // 与 header 操作区（激活会话）。
         const details = session.pane.querySelector('.console-info-grid');
         details.replaceChildren();
         for (const [label, value] of [
@@ -426,6 +426,42 @@
         if (!port.online) setSocketStatus(session, '串口离线', 'offline');
         else if (port.capture_active) setSocketStatus(session, '串口已打开', 'online');
         else if (session.socket?.readyState === WebSocket.OPEN) setSocketStatus(session, '等待串口', 'waiting');
+        syncConsoleToolbar();
+    }
+
+    // 控制台操作区跟随激活 Tab：激活的是控制台会话时显示，按钮作用于
+    // 该会话；激活本机串口列表时隐藏。状态胶囊取当前会话的实时状态。
+    function activeConsoleSession() {
+        if (state.activeView !== 'console') return null;
+        return sessionByKey(state.activeKey);
+    }
+
+    function syncConsoleToolbar() {
+        const toolbar = $('console-toolbar');
+        if (!toolbar) return;
+        const session = activeConsoleSession();
+        toolbar.hidden = !session;
+        // 刷新端口/更新时间是本机串口列表专属，控制台激活时让位给操作区。
+        const portsActions = document.querySelector('.toolbar-actions');
+        if (portsActions) portsActions.hidden = Boolean(session);
+        if (!session) return;
+        const pill = session.pane.querySelector('.socket-status');
+        const mirror = $('console-socket-status');
+        if (pill && mirror) {
+            mirror.className = pill.className;
+            mirror.innerHTML = pill.innerHTML;
+        }
+        const pause = $('console-pause');
+        if (pause) pause.textContent = session.paused ? '继续' : '暂停';
+    }
+
+    function setSocketStatus(session, text, className) {
+        const pill = session.pane.querySelector('.socket-status');
+        if (pill) {
+            pill.innerHTML = GmsUi.icon(className === 'online' ? 'check' : className === 'offline' ? 'close' : 'clock') + GmsUi.escape(text);
+            pill.className = `socket-status status-pill ${className}`;
+        }
+        if (session === activeConsoleSession()) syncConsoleToolbar();
     }
 
     function syncSessionHeadings() {
@@ -440,12 +476,6 @@
         pane.querySelector('.terminal-input').disabled = !writable;
         pane.querySelector('.send-input').disabled = !writable;
         pane.querySelector('.send-ctrl-c').disabled = !writable;
-    }
-
-    function setSocketStatus(session, text, className) {
-        const node = session.pane.querySelector('.socket-status');
-        node.innerHTML = GmsUi.icon(className === 'online' ? 'check' : className === 'offline' ? 'close' : 'clock') + GmsUi.escape(text);
-        node.className = `socket-status status-pill ${className}`;
     }
 
     function rememberConsoleAction(session, label) {
@@ -675,20 +705,6 @@
         pane.setAttribute('role', 'tabpanel');
         pane.hidden = true;
         pane.innerHTML = `
-            <div class="section-heading console-heading">
-                <div class="heading-main">
-                    <h2 class="console-title"></h2>
-                    <p class="console-subtitle"></p>
-                </div>
-                <div class="console-actions">
-                    <span class="socket-status status-pill offline">未连接</span>
-                    <button class="reconnect-socket" type="button">${GmsUi.icon('refresh')}重连</button>
-                    <button class="pause-output" type="button">${GmsUi.icon('pause')}暂停</button>
-                    <button class="clear-screen" type="button">${GmsUi.icon('trash')}清屏</button>
-                    <button class="copy-output" type="button">${GmsUi.icon('copy')}复制</button>
-                    <button class="close-console" type="button">${GmsUi.icon('close')}关闭</button>
-                </div>
-            </div>
             <div class="console-layout">
                 <div class="terminal-column">
                     <div class="terminal-output terminal" tabindex="0" aria-label="串口输出"></div>
@@ -741,22 +757,8 @@
 
     function bindConsolePaneEvents(session) {
         const pane = session.pane;
-        pane.querySelector('.close-console').addEventListener('click', () => closeConsole(session.portKey));
-        pane.querySelector('.reconnect-socket').addEventListener('click', () => connectSocket(session));
-        pane.querySelector('.clear-screen').addEventListener('click', () => clearTerminal(session));
-        pane.querySelector('.copy-output').addEventListener('click', async () => {
-            try { await navigator.clipboard.writeText(terminalText(session)); notice('控制台内容已复制', 'success'); }
-            catch (error) { notice(`复制失败：${error.message}`, 'error'); }
-        });
-        pane.querySelector('.pause-output').addEventListener('click', () => {
-            session.paused = !session.paused;
-            pane.querySelector('.pause-output').textContent = session.paused ? '继续' : '暂停';
-            if (!session.paused && session.pendingOutput) {
-                const pending = session.pendingOutput;
-                session.pendingOutput = '';
-                appendOutput(session, pending);
-            }
-        });
+        // 重连/暂停/清屏/复制/关闭已上移 header 操作区（#console-toolbar），
+        // 按 data-console-action 委托绑定，统一作用于当前激活会话。
         pane.querySelector('.send-input').addEventListener('click', () => sendInputField(session));
         pane.querySelector('.terminal-input').addEventListener('keydown', event => {
             if (event.key === 'Enter') { event.preventDefault(); sendInputField(session); }
@@ -870,6 +872,28 @@
             switchView(nextTab === portsTab ? 'ports' : 'console', nextTab.dataset.portKey || '');
         });
         $('refresh-ports').addEventListener('click', () => loadPorts());
+        // header 控制台操作区：按钮作用于当前激活会话（data-console-action 分发）。
+        const consoleToolbar = $('console-toolbar');
+        consoleToolbar.addEventListener('click', async event => {
+            const session = activeConsoleSession();
+            if (!session) return;
+            const action = event.target.closest('[data-console-action]')?.dataset.consoleAction;
+            if (action === 'reconnect') connectSocket(session);
+            else if (action === 'clear') clearTerminal(session);
+            else if (action === 'copy') {
+                try { await navigator.clipboard.writeText(terminalText(session)); notice('控制台内容已复制', 'success'); }
+                catch (error) { notice(`复制失败：${error.message}`, 'error'); }
+            } else if (action === 'close') closeConsole(session.portKey);
+            else if (action === 'pause') {
+                session.paused = !session.paused;
+                syncConsoleToolbar();
+                if (!session.paused && session.pendingOutput) {
+                    const pending = session.pendingOutput;
+                    session.pendingOutput = '';
+                    appendOutput(session, pending);
+                }
+            }
+        });
         $('binding-form').addEventListener('submit', saveBinding);
         $('close-binding').addEventListener('click', closeBinding);
         $('cancel-binding').addEventListener('click', closeBinding);

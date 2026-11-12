@@ -20,6 +20,17 @@
             <span id="refresh-status" class="muted">准备中</span>
             <button id="refresh-ports" type="button">刷新端口</button>
         </div>
+        <!-- 控制台操作区（Redmine 同构）：会话打开后填充，随激活 Tab 切换内容。 -->
+        <div id="console-toolbar" class="header-toolbar" hidden>
+            <span id="console-socket-status" class="socket-status status-pill offline">未连接</span>
+            <div class="btn-group">
+                <button id="console-reconnect" type="button" data-console-action="reconnect">重连</button>
+                <button id="console-pause" type="button" data-console-action="pause">暂停</button>
+                <button id="console-clear" type="button" data-console-action="clear">清屏</button>
+                <button id="console-copy" type="button" data-console-action="copy">复制</button>
+                <button id="console-close" type="button" data-console-action="close">关闭</button>
+            </div>
+        </div>
     </header>
 
     <div id="page-notice" class="notice" hidden></div>

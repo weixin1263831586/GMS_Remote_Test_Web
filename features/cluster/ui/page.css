@@ -47,7 +47,12 @@
 
 /* 与内嵌工作区的其余页面共用 Tab 栏尺寸和顶部位置。 */
 main{padding:0}
-.dash-tabs{display:flex;align-items:stretch;gap:0;height:44px;border-bottom:0;padding:0 16px}
+.dash-tabs{display:flex;align-items:stretch;gap:0;height:44px;border-bottom:0;padding:0}
+.dash-tabs-row{display:flex;align-items:center;height:44px;padding:0 16px}
+.dash-tabs-actions{display:flex;align-items:center;gap:8px;margin-left:auto;min-width:0}
+/* author 的 display 覆盖会压掉 UA 的 [hidden]，显式兜底。 */
+.dash-tabs-actions [hidden]{display:none}
+.dash-tabs-actions .compact-filter{height:30px}
 .dash-tab{position:relative;width:112px;min-width:112px;height:44px;padding:0 14px;font-size:13px;font-weight:600;border:none;border-radius:0;background:none;color:var(--muted);cursor:pointer;margin:0;transition:color .2s;white-space:nowrap}
 .dash-tab:focus-visible{outline:0;background:color-mix(in srgb, var(--primary-color) 12%, transparent)}
 .dash-tab.active::after{content:"";position:absolute;right:0;bottom:-1px;left:0;height:2px;background:var(--blue)}

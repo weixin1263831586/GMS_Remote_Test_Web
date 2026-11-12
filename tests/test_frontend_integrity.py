@@ -396,11 +396,15 @@ class FrontendIntegrityTests(unittest.TestCase):
         # 同模式，见 snapshot_tools.read_page_scripts）。
         script = read_page_scripts("features/cluster/ui/page.html")
 
-        for control_id in ("dash-refresh-charts", "refresh", "reload-library"):
+        for control_id in ("refresh", "reload-library"):
             self.assertRegex(
                 html,
-                rf'id="{control_id}" class="[^"]*refresh-action[^"]*"',
+                rf'id="{control_id}" class="[^"]*refresh-action[^"]*',
             )
+        # 顶部操作区与 Tab 同行（Redmine 看板同构）：管理 Tab 的搜索与
+        # 添加主机由 selectClusterDashboardTab 按 active tab 切显隐。
+        self.assertIn('class="dash-tabs-actions"', html)
+        self.assertIn('id="show-onboarding"', html)
         self.assertIn('class="section-head-copy"', html)
         self.assertIn('id="cluster-search"', html)
         self.assertIn('id="job-status-filter"', html)
@@ -412,8 +416,10 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn('data-action="redeploy-worker"', script)
         self.assertNotIn('onclick="redeployWorker(', script)
         self.assertIn("function setClusterRefreshBusy(busy)", script)
-        self.assertIn("button.textContent=busy?'刷新中…':button.dataset.idleLabel", script)
-        self.assertIn("document.querySelector('#refresh').onclick=()=>refresh(true)", script)
+        # busy 只切 disabled/aria-busy；重写 textContent 会吞掉按钮里的 SVG 图标。
+        self.assertIn("button.setAttribute('aria-busy',busy?'true':'false')", script)
+        # 概览 Tab 刷新时强制重拉趋势数据（合并原 dash-refresh-charts 语义）。
+        self.assertIn("if(document.querySelector('.dash-tab.active')?.dataset.dashTab==='dashboard')dashTrendLastFetch=0;refresh(true)", script)
         self.assertIn("scheduleDashboardChartsResize", script)
         self.assertIn("state.status.enabled&&clusterWorkspace.scope_mode==='cluster'", script)
         self.assertIn("renderModeStatus();renderJobForm()", script)

@@ -1081,6 +1081,12 @@ body {
 /* 拉丁混排标题（Gerrit/Redmine）保持输入原样，不吃基类 uppercase。 */
 #page-gerrit-dashboard .page-header-row > .section-title,
 #page-redmine-agent .page-header-row > .section-title { text-transform: none; }
+/* emoji 基线微调（仅此三页）：🐧👥🧰 字形 ink 相对文字偏低 2.5~3.5px
+   （Noto Color Emoji 基线度量差异，逐字形不同），按像素量测分别上移；
+   其他页面 emoji 无明显偏移，保持默认。 */
+#page-terminal .page-title-icon { transform: translateY(-2.5px); }
+#page-users .page-title-icon,
+#page-tools .page-title-icon { transform: translateY(-3.5px); }
 /* 动作区控件统一规范：26px 高、11px 字号、单行不换行（历史上各页
    22~28px 混杂；btn-xs 基类 min-height:28 在此被覆盖为统一 26）。
    devices 页签组是独立容器（#devices-view-tabs），与动作区共用同一

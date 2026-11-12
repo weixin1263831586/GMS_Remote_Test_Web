@@ -57,6 +57,14 @@ def dashboard():
                     ROOT / "web/static/js/shell/act-bridge.js",
                     "text/javascript",
                 ),
+                # SVG 图标依赖这两项：缺省时 .ui-icon 落到浏览器默认
+                # 300×150，透明框会盖住内容区并拦截卡片点击。
+                "/static/css/ui-foundations.css": (
+                    ROOT / "web/static/css/ui-foundations.css", "text/css",
+                ),
+                "/static/icons/ui.svg": (
+                    ROOT / "web/static/icons/ui.svg", "image/svg+xml",
+                ),
             }
             if url.path in assets:
                 if url.path == "/gerrit-dashboard/page.js" and state.get("before_entry"):

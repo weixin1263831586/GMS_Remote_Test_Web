@@ -106,17 +106,20 @@ class RuntimeTerminalTests(RuntimeUiHarness):
             expect(tabs.nth(0)).to_have_class(re.compile(r"\bactive\b"))
             expect(page.locator("#console-pane-1")).to_be_visible()
             expect(page.locator("#console-pane-2")).to_be_hidden()
-            # 关闭当前 tab 后自动切到剩余控制台。
-            page.locator("#console-pane-1 .close-console").click()
+            # 关闭当前 tab 后自动切到剩余控制台（关闭按钮在 header 操作区，
+            # 作用于当前激活会话）。
+            expect(page.locator("#console-toolbar")).to_be_visible()
+            page.locator("#console-close").click()
             expect(page.locator(".console-tab")).to_have_count(1)
             expect(page.locator(".console-tab").nth(0)).to_have_class(
                 re.compile(r"\bactive\b")
             )
             expect(page.locator("#console-pane-2")).to_be_visible()
             # 关闭最后一个控制台回到本机串口视图。
-            page.locator("#console-pane-2 .close-console").click()
+            page.locator("#console-close").click()
             expect(page.locator(".console-tab")).to_have_count(0)
             expect(page.locator("#ports-section")).to_be_visible()
+            expect(page.locator("#console-toolbar")).to_be_hidden()
         finally:
             page.close()
 

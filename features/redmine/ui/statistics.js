@@ -453,12 +453,14 @@ function renderDepartmentOverdue(data) {
   </div>`;
   document.getElementById('departmentContent').innerHTML = `
     <section class="stats-section">
-      ${renderSummaryHeader((profile.name || '部门') + ' Redmine 未回复汇总', '<div class="filter-bar">' + profileSelect + '</div>', '更新时间: ' + esc(generatedAt) + ' | 阈值: ' + esc(data.stale_days || 3) + ' 天 | 缓存: ' + (data.cache_hit ? '是' : '否'))}
       ${cards}
     </section>
     ${trendPanels}
     ${table}
   `;
+  // 部门选择移入 header 的 Tab 行（#statsToolbar），内容区不再重复。
+  const statsToolbar = document.getElementById('statsToolbar');
+  if (statsToolbar) statsToolbar.innerHTML = profileSelect;
   document.getElementById('departmentContent').dataset.loaded = 'true';
 }
 
@@ -539,10 +541,12 @@ async function loadStatistics(force) {
       + '</select>'
       + '<button class="select-add-btn" data-click="showAddUserModal" title="添加用户">＋</button>'
       + '</div>';
+    // 统计身份选择移入 header 的 Tab 行（#statsToolbar），内容区只留数据卡片。
+    const statsToolbar = document.getElementById('statsToolbar');
+    if (statsToolbar) statsToolbar.innerHTML = userSelectHtml;
 
     box.innerHTML = `
       <section class="stats-section">
-        ${renderSummaryHeader('Redmine概览', '<div class="filter-bar">' + userSelectHtml + '</div>', '统计身份: ' + ((meta.owner_names || []).map(esc).join(' / ') || '未识别') + ' | 统计口径: ' + (meta.count_source === 'redmine_live' ? 'Redmine实时全历史' : '本地同步快照') + ' | 更新时间: ' + esc((meta.generated_at || '-').replace('T', ' ').replace(/:\d{2}$/, '')))}
         ${renderStatsCards([
           {value: workload.open_count || 0, label: '当前未关闭', className: 'warn'},
           {value: workload.waiting_my_reply || 0, label: '待回复 ⬇', className: 'bad clickable-stat', clickSection: 'sec-waiting-reply'},

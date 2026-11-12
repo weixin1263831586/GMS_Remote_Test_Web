@@ -683,7 +683,10 @@ def _set_cache(cache_key: str, data: dict[str, Any]) -> None:
 @page_router.get("/gerrit-dashboard", response_class=HTMLResponse)
 async def gerrit_dashboard_page():
     page_path = Path(__file__).with_name("ui") / "page.html"
-    return HTMLResponse(page_path.read_text(encoding="utf-8"))
+    # 与 page.js 的 no-store 配套：HTML 缓存会让旧 DOM 搭配新脚本，
+    # 已搬进 header 的控件被旧 render.js 重新画回内容区。
+    return HTMLResponse(page_path.read_text(encoding="utf-8"),
+                        headers={"Cache-Control": "no-store"})
 
 
 # 显式白名单的页面资产（ADR 0015 同款模式）：只允许列名的 JS 文件，

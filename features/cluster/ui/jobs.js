@@ -91,13 +91,10 @@ async function checkWorkerVpn(){
  await Promise.all(promises);
 }
 function setClusterRefreshBusy(busy){
- ['#refresh','#dash-refresh-charts'].forEach(selector=>{
-  const button=document.querySelector(selector);if(!button)return;
-  if(!button.dataset.idleLabel)button.dataset.idleLabel=(button.textContent||'↻ 刷新').trim()||'↻ 刷新';
-  button.disabled=busy;
-  button.textContent=busy?'刷新中…':button.dataset.idleLabel;
-  if(busy)button.setAttribute('aria-busy','true');else button.removeAttribute('aria-busy');
- });
+ // 只切 disabled/aria-busy，不重写 textContent（重写会吞掉按钮里的 SVG 图标）。
+ const button=document.querySelector('#refresh');if(!button)return;
+ button.disabled=busy;
+ button.setAttribute('aria-busy',busy?'true':'false');
 }
 async function refresh(showBusy=false){
  if(showBusy)setClusterRefreshBusy(true);

@@ -25,8 +25,19 @@
     .tab:focus-visible { outline:0; background:color-mix(in srgb, var(--primary-color) 12%, transparent); }
     .tab.active { color:var(--primary); }
     .tab.active::after { content:''; position:absolute; right:0; bottom:-1px; left:0; height:2px; background:var(--primary); }
-    .btn-group { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; margin-left:auto; }
-    .toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+    .btn-group { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+    /* Redmine 同构：筛选与操作按钮整体右对齐聚在 Tab 行右侧，按钮组
+       以左边框分隔。查询工具行是静态搬移（#profile 选项由 init 填充），
+       个人/部门控件随数据渲染重建，值保留链在各自构造函数里。 */
+    .header-toolbar { flex:1 1 auto; display:flex; align-items:center; justify-content:flex-end; gap:8px; min-width:0; overflow-x:auto; overflow-y:hidden; padding-bottom:1px; scrollbar-width:thin; }
+    .header-toolbar .filter-bar { flex:0 1 auto; display:flex; align-items:center; justify-content:flex-end; gap:6px; min-width:0; flex-wrap:nowrap; }
+    .header-toolbar .filter-bar > div { display:flex; align-items:center; gap:6px; min-width:0; }
+    .header-toolbar .filter-bar > div[hidden] { display:none; }
+    .header-toolbar .filter-bar[hidden] { display:none; }
+    .header-toolbar .btn-group { flex:0 0 auto; flex-wrap:nowrap; justify-content:flex-end; gap:5px; padding-left:9px; margin-left:1px; border-left:1px solid var(--border); }
+    /* 右对齐聚簇内的输入限宽，避免把 Tab 行挤爆（Redmine searchInput 同款）。 */
+    #query { width:clamp(180px, 24vw, 320px); min-width:180px; }
+    #owner { width:clamp(180px, 18vw, 260px); min-width:180px; }
     .select-with-add { position:relative; display:inline-flex; align-items:center; }
     .select-with-add select { padding-right:28px; min-width:180px; }
     .select-add-btn { position:absolute; right:2px; top:50%; transform:translateY(-50%); background:none; border:0; color:var(--muted); font-size:15px; padding:0 6px; line-height:1; cursor:pointer; height:24px; min-width:22px; }
@@ -42,10 +53,6 @@
     .stat-card.bad .value { color:var(--bad); }
     .clickable-stat { cursor:pointer; transition:transform .15s,box-shadow .15s; }
     .clickable-stat:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.3); }
-    .dashboard-summary-header { display:flex; align-items:center; margin-bottom:10px; gap:12px; flex-wrap:wrap; min-height:30px; }
-    .dashboard-summary-title { margin:0; font-size:15px; line-height:30px; }
-    .dashboard-summary-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-height:30px; margin-left:auto; }
-    .dashboard-summary-meta { font-size:12px; min-height:30px; display:flex; align-items:center; }
     .trend-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr)); gap:12px; margin-bottom:18px; }
     .trend-panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px; min-height:180px; display:flex; flex-direction:column; }
     .trend-panel h2, .list-section h2 { margin:0 0 10px; font-size:14px; }
@@ -125,7 +132,7 @@
     #routeCheckModal .modal-close:active { transform:scale(.95); }
     #routeCheckModal .modal-body { display:block; padding:20px; overflow-y:auto; }
     html.modal-open, body.modal-open { overflow:hidden; }
-    @media (max-width:800px) { header { grid-template-columns:1fr; align-items:flex-start; row-gap:8px; } input { min-width:180px; width:100%; } .toolbar { align-items:stretch; } }
+    @media (max-width:800px) { header { grid-template-columns:1fr; align-items:flex-start; row-gap:8px; } input { min-width:180px; width:100%; } .header-toolbar { flex:1 1 100%; justify-content:flex-start; flex-wrap:wrap; } .header-toolbar .filter-bar { flex-wrap:wrap; } .header-toolbar .btn-group { flex-wrap:wrap; border-left:0; padding-left:0; margin-left:0; } }
     @media (max-width:560px) { .trend-grid { grid-template-columns:minmax(0,1fr); } .form-grid { grid-template-columns:1fr; } .field.full { grid-column:auto; } .modal-actions { flex-direction:column; } .modal-actions button { width:100%; } .tab { padding:10px 14px; min-height:40px; } button { min-height:40px; } .select-add-btn { height:40px; min-width:40px; } .trend-start-btn { width:40px; min-width:40px; min-height:40px; } .modal-close { width:40px; height:40px; min-width:40px; min-height:40px; } }
     @media (max-height:560px) { .modal { align-items:stretch; } .modal-content { max-height:calc(100dvh - 16px); } }
   
@@ -188,9 +195,20 @@ header { background: var(--panel); border-bottom: 1px solid var(--border); box-s
     <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="personal" data-click="switchTab" data-a0="personal"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#trend"></use></svg> 个人看板</button>
     <button type="button" class="tab" role="tab" aria-selected="false" data-tab="query" data-click="switchTab" data-a0="query"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg> 查询</button>
   </div>
-  <div class="btn-group">
-    <button id="refreshBtn" class="secondary" data-click="refreshCurrentTab"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
-    <button class="secondary" data-click="showSettings" title="设置"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></button>
+  <div class="header-toolbar">
+    <div id="tabFilters" class="filter-bar" hidden>
+      <div id="queryFilters" hidden>
+        <select id="profile" data-change="loadChanges" aria-label="查询场景"></select>
+        <input id="query" placeholder="Gerrit query，例如 status:open owner:self">
+        <button class="secondary" data-click="loadChanges">查询</button>
+      </div>
+      <div id="dynamicFilters" hidden></div>
+    </div>
+    <div class="btn-group">
+      <button id="syncMembersBtn" class="secondary" data-click="syncRedmineMembers" data-r0="el" hidden>同步成员</button>
+      <button id="refreshBtn" class="secondary" data-click="refreshCurrentTab"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+      <button class="secondary" data-click="showSettings" title="设置"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></button>
+    </div>
   </div>
 </header>
 <div id="connBanner" class="conn-banner">
@@ -210,11 +228,6 @@ header { background: var(--panel); border-bottom: 1px solid var(--border); box-s
     <div id="departmentContent"><div class="muted" style="padding:40px;text-align:center">⏳ 正在统计部门 Gerrit 提交...</div></div>
   </section>
   <section id="tab-query" class="tab-content">
-    <div class="toolbar">
-      <select id="profile" data-change="loadChanges"></select>
-      <input id="query" placeholder="Gerrit query，例如 status:open owner:self">
-      <button data-click="loadChanges">查询</button>
-    </div>
     <div id="status" class="muted status-line">加载中...</div>
     <div class="wrap"><table class="ui-table"><thead><tr><th>变更</th><th>项目</th><th>分支</th><th>状态</th><th>Owner</th><th>更新时间</th></tr></thead><tbody id="rows"></tbody></table></div>
   </section>

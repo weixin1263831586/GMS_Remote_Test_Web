@@ -8,7 +8,7 @@ button:disabled,input:disabled{cursor:not-allowed;opacity:.5}
 button.primary{background:var(--primary-gradient);border-color:var(--primary-color);color:white}
 button.danger{color:#ff8a94;border-color:rgba(240,106,117,.45)}
 .page-shell{display:flex;flex-direction:column;gap:14px;padding:14px 16px;max-width:1600px;margin:auto}
-.toolbar,.section-heading,.console-actions,.toolbar-actions,.history-head,.history-actions,.modal-head,.modal-actions,.input-row{display:flex;align-items:center;gap:8px}
+.toolbar,.section-heading,.toolbar-actions,.history-head,.history-actions,.modal-head,.modal-actions,.input-row{display:flex;align-items:center;gap:8px}
 .toolbar{justify-content:space-between}
 h1,h2,h3,p{margin:0}
 h1{font-size:20px}h2{font-size:15px}h3{font-size:13px}
@@ -66,7 +66,7 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue);box-shadow:0 0 
 .modal label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:12px}.modal label input,.modal label textarea,.modal label select{color:var(--text)}
 .modal .switch-row{flex-direction:row;align-items:center}.switch-row input{width:auto}.modal-actions{margin-top:4px}.spacer{flex:1}
 @media(max-width:850px){.console-layout{grid-template-columns:1fr}.history-output{height:220px}.terminal{height:48vh}}
-@media(max-width:600px){.page-shell{padding:9px}.toolbar,.section-heading{align-items:flex-start}.toolbar{gap:10px}.toolbar-actions{flex-direction:column;align-items:flex-end}.ports-grid{grid-template-columns:1fr}.console-heading{flex-direction:column}.console-actions{justify-content:flex-start}.input-row{flex-wrap:wrap}.input-row input{flex-basis:100%}}
+@media(max-width:600px){.page-shell{padding:9px}.toolbar,.section-heading{align-items:flex-start}.toolbar{gap:10px}.toolbar-actions{flex-direction:column;align-items:flex-end}.ports-grid{grid-template-columns:1fr}#console-toolbar{flex-wrap:wrap}.input-row{flex-wrap:wrap}.input-row input{flex-basis:100%}}
 
 /* iframe 内采用单层工作区：Tab 切换列表/控制台，控制台自身填满可视高度。 */
 html,body{height:100%;min-height:0;overflow:hidden}
@@ -110,9 +110,12 @@ html,body{height:100%;min-height:0;overflow:hidden}
 
 /* Terminal workspace: live output stays primary; metadata and retained logs stay adjacent. */
 .console-layout{grid-template-columns:minmax(0,1fr) minmax(280px,340px);gap:12px}
-.console-heading{padding:11px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel);margin-bottom:10px;align-items:center}
-.console-title{font-size:14px}.console-subtitle{font-size:11px!important;color:var(--muted)}
-.console-actions button{min-height:30px;padding:5px 8px}.socket-status{display:inline-flex;align-items:center;gap:5px}.socket-status::before{display:none}
+/* 控制台操作区上移 header（Redmine 同构）：状态 + 按钮组右对齐单行。 */
+#console-toolbar{display:flex;flex:1 1 auto;align-items:center;justify-content:flex-end;gap:8px;min-width:0}
+#console-toolbar[hidden]{display:none}
+#console-toolbar .btn-group{display:flex;flex:0 0 auto;align-items:center;gap:5px;padding-left:9px;margin-left:1px;border-left:1px solid var(--border)}
+#console-toolbar button{min-height:30px;padding:5px 10px;white-space:nowrap}
+.socket-status{display:inline-flex;align-items:center;gap:5px}.socket-status::before{display:none}
 .terminal-column{border:1px solid var(--border);border-radius:8px;background:var(--darker-bg);overflow:hidden}
 .terminal{border:0;border-radius:0;padding:10px;min-height:260px}
 .input-dock{background:var(--panel);border-top:1px solid var(--border);padding:10px}
@@ -130,8 +133,8 @@ html,body{height:100%;min-height:0;overflow:hidden}
 .console-sidebar .history-output{min-height:100px;height:120px;font-size:11px;color:var(--muted)}
 .console-other-list{display:grid;gap:8px}.console-other-port{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px}
 .console-other-port>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.console-other-port button{flex-shrink:0;font-size:11px}
-@media(max-width:1000px){.console-actions{gap:5px}.console-layout{grid-template-columns:minmax(0,1fr) 280px}.console-subtitle{max-width:50vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
-@media(max-width:850px){.console-layout{grid-template-columns:1fr}.console-heading{align-items:flex-start;flex-direction:column}.console-sidebar{overflow:visible}.console-sidebar .history-column{flex:none}.terminal{height:55vh}.console-subtitle{max-width:85vw}.input-dock{position:static}}
+@media(max-width:1000px){#console-toolbar .btn-group{gap:4px}.console-layout{grid-template-columns:minmax(0,1fr) 280px}}
+@media(max-width:850px){.console-layout{grid-template-columns:1fr}.console-sidebar{overflow:visible}.console-sidebar .history-column{flex:none}.terminal{height:55vh}.input-dock{position:static}}
 
 button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 

@@ -39,10 +39,12 @@
     color: var(--text-primary); font-size: 13px; font-weight: 650;
 }
 /* 设备管理同构 KPI：复用 page-stat-* 字段，按钮筛选交互保持原样。 */
-.page-ui-rework .page-stat-row { display: flex; gap: 10px; margin-bottom: 12px; }
+.page-ui-rework .page-stat-row { display: flex; gap: 10px; margin-bottom: 10px; }
+/* 与设备管理 inventory-stat 模板同规格：padding 14/15、value 行高 1.3、
+   图标 25px；devices 卡多一行 small 副标题，min-height 95px 对齐卡高。 */
 .page-ui-rework .page-stat-card.workbench-stat {
     display: flex; flex: 1 1 0; align-items: center; gap: 12px;
-    padding: 13px 14px; min-width: 0; text-align: left;
+    padding: 14px 15px; min-height: 95px; min-width: 0; text-align: left;
     background: var(--card-bg); border: 1px solid var(--border-color);
     border-radius: 8px; box-shadow: none; line-height: 1.45;
 }
@@ -52,14 +54,14 @@
     flex: none; width: 42px; height: 42px; border-radius: 9px;
     background: var(--lighter-bg); color: var(--primary-light);
 }
-.page-ui-rework .workbench-stat-icon .ui-icon { width: 22px; height: 22px; margin: 0; }
+.page-ui-rework .workbench-stat-icon .ui-icon { width: 25px; height: 25px; margin: 0; }
 .page-ui-rework .workbench-stat-copy {
     display: flex; flex-direction: column; align-items: flex-start;
     justify-content: center; min-width: 0; gap: 3px;
 }
 .page-ui-rework .workbench-stat .page-stat-value {
     order: 2; display: block; font-size: 24px; font-weight: 650;
-    font-variant-numeric: tabular-nums; line-height: 1.2;
+    font-variant-numeric: tabular-nums; line-height: 1.3;
 }
 .page-ui-rework .workbench-stat .page-stat-label {
     order: 1; display: block; margin: 0;

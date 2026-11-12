@@ -8,8 +8,6 @@ async function loadPendingReviewQueue(owner, refresh) {
 }
 function renderDashboard(data, pendingMyReview) {
   const isPersonal = currentTab === 'personal';
-  const controls = isPersonal ? personalControlsHtml() : '';
-  const title = isPersonal ? 'Gerrit 个人提交汇总' : 'Gerrit 提交汇总';
   const s = data.summary || {};
   const reviewCount = (pendingMyReview && typeof pendingMyReview.count === 'number') ? pendingMyReview.count : null;
   // 汇总卡片按处理优先级排序：待我评审 → 待评审 → 未合并 → 已合并
@@ -26,7 +24,6 @@ function renderDashboard(data, pendingMyReview) {
     {label:'已废弃', value:s.abandoned_count || 0, className:'clickable-stat', clickSection:'sec-abandoned'}
   );
   return '<section class="list-section">'
-    + renderSummaryHeader(title, controls)
     + renderCards(cards) + '</section><div class="trend-grid">'
     + renderTrend('每天提交', (data.trends || {}).daily || [], 'date', 'personal_daily')
     + renderTrend('每周提交', (data.trends || {}).weekly || [], 'week', 'personal_weekly')
@@ -233,8 +230,7 @@ function compareMembers(a, b) {
     String(b.name || b.owner || b.id).trim(), 'zh');
 }
 function personalPlaceholderHtml(message) {
-  return '<section class="list-section">' + renderSummaryHeader('Gerrit 个人提交汇总', personalControlsHtml(), '')
-    + placeholderHtml(message) + '</section>';
+  return '<section class="list-section">' + placeholderHtml(message) + '</section>';
 }
 function personalControlsHtml() {
   const profiles = config.personal_profiles || [];
@@ -247,14 +243,38 @@ function personalControlsHtml() {
     + '<input id="owner" value="' + esc(ownerValue) + '" placeholder="owner 邮箱" data-input="onPersonalOwnerInput">';
 }
 function departmentControlsHtml(profileId) {
-  return '<div class="select-with-add"><select id="departmentProfile" data-change="loadDepartmentForced" style="min-width:160px">' + departmentOptionsHtml(profileId, true) + '</select><button class="select-add-btn" type="button" data-click="showAddDepartmentModal" data-a0="departmentProfile" title="添加部门">＋</button></div>'
-    + '<button class="secondary" data-click="syncRedmineMembers" data-r0="el">同步成员</button>';
+  return '<div class="select-with-add"><select id="departmentProfile" data-change="loadDepartmentForced" style="min-width:160px">' + departmentOptionsHtml(profileId, true) + '</select><button class="select-add-btn" type="button" data-click="showAddDepartmentModal" data-a0="departmentProfile" title="添加部门">＋</button></div>';
+}
+// 个人/部门看板的筛选控件统一渲染进 header 的 filter-bar（与 Redmine
+// 看板同构）。显隐与内容都在这里统一管理：switchTab 与异步加载完成
+// （loadPersonal/loadDepartment 的 finally）都会调它，初始直连加载
+// 路径不经过 switchTab 也能正确显示。
+function renderHeaderTabControls() {
+  const bar = document.getElementById('tabFilters');
+  const dynamic = document.getElementById('dynamicFilters');
+  const queryFilters = document.getElementById('queryFilters');
+  const syncButton = document.getElementById('syncMembersBtn');
+  if (!dynamic || !bar) return;
+  queryFilters.hidden = currentTab !== 'query';
+  syncButton.hidden = currentTab !== 'department';
+  bar.hidden = !['query', 'personal', 'department'].includes(currentTab);
+  if (currentTab === 'personal') {
+    dynamic.hidden = false;
+    dynamic.innerHTML = personalControlsHtml();
+  } else if (currentTab === 'department') {
+    dynamic.hidden = false;
+    dynamic.innerHTML = departmentControlsHtml(currentDepartmentProfileId);
+  } else {
+    // 查询 Tab 用静态 queryFilters，动态区清空避免控件残留。
+    dynamic.hidden = true;
+    dynamic.innerHTML = '';
+  }
 }
 function renderDepartmentDashboard(data) {
   const profile = data.profile || {};
   currentDepartmentProfileId = profile.id || currentDepartmentProfileId || '';
   const s = data.summary || {};
-  const header = '<section class="list-section">' + renderSummaryHeader((profile.name || '部门') + ' Gerrit 提交汇总', departmentControlsHtml(currentDepartmentProfileId), '成员: ' + ((data.users || []).length))
+  const cards = '<section class="list-section">'
     + renderCards([
       {label:'历史提交', value:s.total_count || 0},
       {label:'已合并', value:s.merged_count || 0, className:'ok'},
@@ -263,7 +283,7 @@ function renderDepartmentDashboard(data) {
       {label:'已废弃', value:s.abandoned_count || 0}
     ]) + '</section>';
   const trends = '<div class="trend-grid">' + renderTrend('每天提交', (data.trends || {}).daily || [], 'date', 'department_daily') + renderTrend('每周提交', (data.trends || {}).weekly || [], 'week', 'department_weekly') + renderTrend('每月提交', (data.trends || {}).monthly || [], 'month', 'department_monthly') + renderTrend('每年提交', (data.trends || {}).yearly || [], 'year', 'department_yearly') + '</div>';
-  return header + trends + renderDepartmentUsers(data.users || []);
+  return cards + trends + renderDepartmentUsers(data.users || []);
 }
 function showAddPersonalModal() {
   document.getElementById('addPersonalName').value='';
