@@ -1,11 +1,11 @@
 <div class="container page-content" id="page-apk-analysis">
-            {% include 'components/page-header.html' %}<img src="/static/icons/jadx-icon.webp" alt="" class="section-title-icon" aria-hidden="true"><span>APK分析</span>{% include 'components/page-header-actions.html' %}
+            {% include 'components/page-header.html' %}<img class="section-title-icon" src="/static/icons/jadx-icon.webp" alt="APK"> <span>APK分析</span>{% include 'components/page-header-actions.html' %}
                 <div class="apk-task-history-controls">
                     <label for="apk-task-history">最近任务</label>
                     <select id="apk-task-history" class="entry-field" data-change="restoreApkTask" data-r0="value">
                         <option value="">正在读取…</option>
                     </select>
-                    <button id="apk-task-history-refresh" class="btn-xs ui-refresh-action" type="button" data-click="loadApkTaskHistory" data-a0="true">↻ 刷新</button>
+                    <button id="apk-task-history-refresh" class="btn-xs ui-refresh-action" type="button" data-click="loadApkTaskHistory" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
                 </div>
             {% include 'components/page-header-end.html' %}
 
@@ -24,7 +24,7 @@
                             </div>
                         </div>
                         <button class="btn-xs" data-click="_actClickById" data-a0="apk-file-input">
-                            📤 选择 APK/JAR 文件
+                            <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg> 选择 APK/JAR 文件
                         </button>
                     </div>
                     <div class="apk-upload-progress" id="apk-upload-progress" style="display: none;">
@@ -42,8 +42,8 @@
                             <div id="apk-analysis-state">准备分析...</div>
                         </div>
                         <div class="apk-status-actions">
-                            <button class="btn-xs" id="apk-btn-analyze" data-click="startApkAnalysis" style="display: none;">🔬 开始分析</button>
-                            <button class="btn-xs" id="apk-btn-download" data-click="downloadApkSource" style="display: none;">📥 下载源码</button>
+                            <button class="btn-xs" id="apk-btn-analyze" data-click="startApkAnalysis" style="display: none;"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg> 开始分析</button>
+                            <button class="btn-xs" id="apk-btn-download" data-click="downloadApkSource" style="display: none;"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 下载源码</button>
                             <button class="btn-xs" data-click="resetApkAnalysis">关闭</button>
                         </div>
                     </div>
@@ -60,9 +60,9 @@
                 <!-- 标签页导航 + 搜索框 -->
                 <div class="apk-tab-actions">
                     <div class="apk-status-actions">
-                        <button class="filter-btn active" data-apk-tab="manifest" data-click="switchApkTab" data-a0="manifest">📋 AndroidManifest</button>
-                        <button class="filter-btn" data-apk-tab="permissions" data-click="switchApkTab" data-a0="permissions">🔐 权限列表</button>
-                        <button class="filter-btn" data-apk-tab="source" data-click="switchApkTab" data-a0="source">💻 源码浏览</button>
+                        <button class="filter-btn active" data-apk-tab="manifest" data-click="switchApkTab" data-a0="manifest"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> AndroidManifest</button>
+                        <button class="filter-btn" data-apk-tab="permissions" data-click="switchApkTab" data-a0="permissions"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg> 权限列表</button>
+                        <button class="filter-btn" data-apk-tab="source" data-click="switchApkTab" data-a0="source"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#terminal"></use></svg> 源码浏览</button>
                     </div>
                     <div class="apk-search-container">
                         <input type="text" id="apk-file-search" class="apk-search-input" placeholder="🔍 搜索文件名..."

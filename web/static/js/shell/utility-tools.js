@@ -333,7 +333,7 @@ function ut_renderAllCategories(grid) {
 
         const addBtn = document.createElement('button');
         addBtn.textContent = '添加工具';
-        addBtn.style.cssText = `padding: 6px 16px; background: var(--primary-color); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;`;
+        addBtn.style.cssText = `padding: 6px 16px; background: var(--primary-gradient); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;`;
         addBtn.addEventListener('mouseenter', () => { addBtn.style.opacity = '0.85'; });
         addBtn.addEventListener('mouseleave', () => { addBtn.style.opacity = '1'; });
         addBtn.addEventListener('click', () => ut_addNewToolToCategory(category));
@@ -452,7 +452,7 @@ function ut_createToolCard(tool, category, index, cardColor) {
         editBtn.textContent = '✏️';
         editBtn.style.cssText = 'flex: 1; padding: 2px 3px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
         editBtn.addEventListener('mouseenter', () => {
-            editBtn.style.background = 'var(--primary-color)';
+            editBtn.style.background = 'var(--primary-gradient)';
             editBtn.style.color = 'white';
             editBtn.style.borderColor = 'var(--primary-color)';
         });

@@ -483,7 +483,7 @@ function checkPendingFirmwareUpload() {
 
             if (progressFill && progressInfo) {
                 progressFill.style.width = progress + '%';
-                progressFill.style.background = 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)';
+                progressFill.style.background = 'var(--warning-color)';
                 progressInfo.textContent = `⚠️ ${fileName} 上传中断于 ${progress.toFixed(1)}%`;
 
                 setTimeout(() => {

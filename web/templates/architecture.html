@@ -4,28 +4,29 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GMS Remote Test - 系统架构</title>
+  <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
   <style>
-    :root { color-scheme: dark; --bg: #020617; --panel: #0f172a; --line: #334155; --text: #e2e8f0; --muted: #94a3b8; --blue: #38bdf8; --green: #34d399; --amber: #fbbf24; --violet: #a78bfa; }
+    :root { color-scheme: dark; --bg:var(--dark-bg); --panel:var(--card-bg); --line:var(--border-color); --text:var(--text-primary); --muted:var(--text-secondary); --blue:var(--primary-color); --green:var(--success-color); --amber:var(--warning-color); --violet:var(--primary-light); }
     * { box-sizing: border-box; }
-    body { margin: 0; padding: 24px; background: var(--bg); color: var(--text); font-family: "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace; }
+    body { margin: 0; padding: 24px; background: var(--page-background); color: var(--text); font-family: "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace; }
     main { margin: 0 auto; }
     h1 { margin: 0; font-size: 28px; }
     .lead { color: var(--muted); line-height: 1.7; margin: 8px 0 18px; }
-    .arch-tabs { display: flex; align-items: center; gap: 0; margin: 0 0 18px; border: 1px solid var(--line); border-radius: 10px; background: rgba(2, 6, 23, .6); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+    .arch-tabs { display: flex; align-items: center; gap: 0; margin: 0 0 18px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--darker-bg) 60%, transparent); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
     .arch-tabs::-webkit-scrollbar { display: none; }
     .arch-tab { flex: 0 0 auto; padding: 11px 20px; border: 0; border-right: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
     .arch-tab:last-child { border-right: 0; }
     .arch-tab:hover { color: var(--text); }
-    .arch-tab:focus-visible { outline: 0; background: rgba(56, 189, 248, .12); }
-    .arch-tab.active { color: var(--blue); background: rgba(56, 189, 248, .10); box-shadow: inset 0 -2px 0 var(--blue); }
+    .arch-tab:focus-visible { outline: 0; background: color-mix(in srgb, var(--primary-color) 12%, transparent); }
+    .arch-tab.active { color: var(--blue); background: color-mix(in srgb, var(--primary-color) 10%, transparent); box-shadow: inset 0 -2px 0 var(--blue); }
     .arch-pane { min-width: 0; }
-    section { margin: 18px 0; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(145deg, rgba(15, 23, 42, .98), rgba(15, 23, 42, .78)); }
+    section { margin: 18px 0; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(145deg, color-mix(in srgb, var(--card-bg) 98%, transparent), color-mix(in srgb, var(--card-bg) 78%, transparent)); }
     h2 { margin: 0 0 16px; font-size: 18px; color: var(--blue); }
     .grid { display: grid; gap: 14px; }
     .roles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .workers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .sources { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .card { min-height: 120px; padding: 16px; border: 1px solid var(--line); border-top: 3px solid var(--blue); border-radius: 10px; background: rgba(2, 6, 23, .72); }
+    .card { min-height: 120px; padding: 16px; border: 1px solid var(--line); border-top: 3px solid var(--blue); border-radius: 10px; background: color-mix(in srgb, var(--darker-bg) 72%, transparent); }
     .card.agent { border-top-color: var(--violet); }
     .card.worker { border-top-color: var(--amber); }
     .card.source { border-top-color: var(--green); }

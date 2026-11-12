@@ -1,5 +1,5 @@
 <div class="container page-content" id="page-terminal">
-            {% include 'components/page-header.html' %}🐧 主机终端{% include 'components/page-header-actions.html' %}
+            {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">🐧</span> 主机终端{% include 'components/page-header-actions.html' %}
                 <div class="host-workspace-layouts" role="group" aria-label="终端布局">
                     <button class="btn-xs" data-terminal-layout="single" data-click="setTerminalWorkspaceLayout" data-a0="single">单屏</button>
                     <button class="btn-xs" data-terminal-layout="horizontal" data-click="setTerminalWorkspaceLayout" data-a0="horizontal">左右</button>
@@ -8,8 +8,8 @@
                 </div>
                 <div class="host-workspace-single-bar host-workspace-title-state">
                     <span class="host-workspace-pane-status" id="terminal-workspace-status-single">准备中</span>
-                    <button id="terminal-workspace-host-mode-btn" class="btn-xs" data-click="restoreHostTerminalWorkspacePane" data-a0="0" title="关闭当前 ADB Shell，返回这台主机的 SSH 终端" style="display:none">↩ 主机终端</button>
-                    <button class="btn-xs host-workspace-refresh-btn" data-click="refreshTerminalWorkspacePane" data-a0="0" title="重新连接" aria-label="刷新主机终端">🔄</button>
+                    <button id="terminal-workspace-host-mode-btn" class="btn-xs" data-click="restoreHostTerminalWorkspacePane" data-a0="0" title="关闭当前 ADB Shell，返回这台主机的 SSH 终端" style="display:none"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#back"></use></svg> 主机终端</button>
+                    <button class="btn-xs host-workspace-refresh-btn" data-click="refreshTerminalWorkspacePane" data-a0="0" title="重新连接" aria-label="刷新主机终端"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg></button>
                 </div>
                 <div class="host-workspace-mode-pending host-workspace-title-state">
                     <span class="host-workspace-pane-status">正在准备工作区…</span>

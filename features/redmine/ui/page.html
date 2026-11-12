@@ -5,21 +5,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RedmineAgent</title>
+  <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
   <style>
 {{REDMINE_CSS}}
   </style>
+  <link rel="stylesheet" href="/redmine-agent/assets/case-library.css">
   <link rel="stylesheet" href="/redmine-agent/assets/daily-brief-session.css">
+<link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-ui-foundations">
 </head>
 <body>
 <header>
   <div class="tabs" role="tablist" aria-label="看板视图" data-keydown="redmineTabKeydown" data-key="ArrowLeft,ArrowRight,Home,End" data-r0="event">
     <button type="button" class="tab" role="tab" aria-selected="false" data-tab="department" data-click="switchTab" data-a0="department">🏢 部门看板</button>
-    <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="stats" data-click="switchTab" data-a0="stats">📈 个人看板</button>
+    <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="stats" data-click="switchTab" data-a0="stats"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#trend"></use></svg> 个人看板</button>
     <button type="button" class="tab" role="tab" aria-selected="false" data-tab="project" data-click="switchTab" data-a0="project">🧩 项目看板</button>
-    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="daily-brief" data-click="switchTab" data-a0="daily-brief">🤖 每日晨报</button>
-    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="issues" data-click="switchTab" data-a0="issues">📋 工单列表</button>
-    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="cases" data-click="switchTab" data-a0="cases">📚 成熟案例</button>
-    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="runs" data-click="switchTab" data-a0="runs">📊 扫描记录</button>
+    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="daily-brief" data-click="switchTab" data-a0="daily-brief"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#bot"></use></svg> 每日晨报</button>
+    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="issues" data-click="switchTab" data-a0="issues"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> 工单列表</button>
+    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="cases" data-click="switchTab" data-a0="cases"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#book"></use></svg> 成熟案例</button>
+    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="runs" data-click="switchTab" data-a0="runs"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg> 扫描记录</button>
   </div>
   <div class="header-toolbar">
     <div id="issuesToolbarFilters" class="filter-bar">
@@ -41,10 +44,10 @@
       </select>
     </div>
     <div class="btn-group">
-      <button id="scanBtn" class="secondary" data-click="runRedmineContextAction" hidden>🔍 扫描</button>
-      <button id="refreshBtn" class="secondary" data-click="refreshCurrentTab" title="绕过缓存，重新从 Redmine 拉取当前页数据">🔃 刷新</button>
-      <button class="secondary" data-click="showResetModal">🗑️ 重置</button>
-      <button class="secondary settings-btn" data-click="showSettingsModal" title="设置" aria-label="设置">⚙️ 设置</button>
+      <button id="scanBtn" class="secondary" data-click="runRedmineContextAction" hidden><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg> 扫描</button>
+      <button id="refreshBtn" class="secondary" data-click="refreshCurrentTab" title="绕过缓存，重新从 Redmine 拉取当前页数据"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+      <button class="secondary" data-click="showResetModal"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#trash"></use></svg> 重置</button>
+      <button class="secondary settings-btn" data-click="showSettingsModal" title="设置" aria-label="设置"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg> 设置</button>
     </div>
   </div>
 </header>
@@ -74,7 +77,7 @@
     <summary>⚙️ 高级同步</summary>
     <div class="redmine-advanced-sync-body">
       <input type="text" id="syncAssigneeInput" placeholder="同步负责人" title="姓名或登录名；留空则同步当前登录用户">
-      <button id="syncBtn" class="secondary" data-click="triggerSync" title="全量同步指派工单并分析新工单，耗时较长">🔄 全量同步</button>
+      <button id="syncBtn" class="secondary" data-click="triggerSync" title="全量同步指派工单并分析新工单，耗时较长"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 全量同步</button>
       <span class="muted">首次初始化、数据修复或切换负责人时使用</span>
     </div>
   </details>
@@ -88,8 +91,8 @@
       <h2>📚 知识库</h2>
       <div class="filter-bar" style="margin:6px 0 10px;display:flex;gap:8px;align-items:center">
         <div class="case-view-toggle">
-          <button id="viewBtnFacts" class="active" data-click="switchCaseView" data-a0="facts">📋 工单事实</button>
-          <button id="viewBtnCases" data-click="switchCaseView" data-a0="cases">🏗️ 成熟案例</button>
+          <button id="viewBtnFacts" class="active" data-click="switchCaseView" data-a0="facts"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> 工单事实</button>
+          <button id="viewBtnCases" data-click="switchCaseView" data-a0="cases"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#layout"></use></svg> 成熟案例</button>
         </div>
         <input type="text" id="caseSearchInput" placeholder="搜索（模块/签名/关键词）..." data-keydown="loadCases" data-key="Enter" style="flex:1;min-width:120px">
         <button data-click="loadCases">搜索</button>
@@ -258,7 +261,7 @@
 <!-- Settings Modal -->
 <div id="settingsModal" class="modal">
   <div class="modal-content" style="width:min(760px,96vw);max-width:min(760px,96vw);height:min(560px,72vh)">
-    <div class="modal-header" style="background:linear-gradient(135deg,#667eea,#764ba2);padding:15px 20px">
+    <div class="modal-header" style="background:var(--primary-gradient);padding:15px 20px">
       <span class="modal-title">⚙️ 统计设置</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideSettingsModal">&times;</button>
     </div>
@@ -369,7 +372,7 @@
 <!-- Trend Start Date Modal -->
 <div id="trendStartModal" class="modal">
   <div class="modal-content">
-    <div class="modal-header" style="background:linear-gradient(135deg,#2563eb,#4f46e5)">
+    <div class="modal-header" style="background:var(--primary-gradient)">
       <span class="modal-title" id="trendStartModalTitle">设置统计日期范围</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideTrendStartModal">&times;</button>
     </div>
@@ -393,7 +396,7 @@
 </div>
 <div id="trendDetailModal" class="modal">
   <div class="modal-content" style="max-width:900px">
-    <div class="modal-header" style="background:linear-gradient(135deg,#2563eb,#4f46e5)">
+    <div class="modal-header" style="background:var(--primary-gradient)">
       <span class="modal-title" id="trendDetailTitle">解决Redmine问题明细</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="trendDetailModal">&times;</button>
     </div>
@@ -420,7 +423,7 @@
 <!-- Batch Import Modal -->
 <div id="batchImportModal" class="modal">
   <div class="modal-content">
-    <div class="modal-header" style="background:linear-gradient(135deg,#7c3aed,#4f46e5)">
+    <div class="modal-header" style="background:var(--primary-gradient)">
       <span class="modal-title">📥 批量导入历史工单到知识库</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="batchImportModal">&times;</button>
     </div>
@@ -433,7 +436,7 @@
       <div id="batchImportResult" class="muted" style="margin-top:8px;font-size:12px"></div>
       <div class="modal-buttons">
         <button class="secondary" data-click="hideModal" data-a0="batchImportModal">取消</button>
-        <button class="secondary" data-click="submitImportRecent" data-a0="20">📥 导入最近20个(我的指派)</button>
+        <button class="secondary" data-click="submitImportRecent" data-a0="20"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 导入最近20个(我的指派)</button>
         <button data-click="submitBatchImport">按工单号导入</button>
       </div>
     </div>
@@ -443,7 +446,7 @@
 <!-- Knowledge Case Detail / Reply Modal -->
 <div id="knowledgeModal" class="modal">
   <div class="modal-content" style="max-width:880px">
-    <div class="modal-header" style="background:linear-gradient(135deg,#0ea5e9,#6366f1)">
+    <div class="modal-header" style="background:var(--primary-gradient)">
       <span class="modal-title" id="knowledgeTitle">知识库</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="knowledgeModal">&times;</button>
     </div>

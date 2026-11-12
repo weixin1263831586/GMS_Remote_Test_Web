@@ -27,8 +27,8 @@
     padding: 6px 4px;
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
-    border-radius: 6px;
-    color: #fff;
+    border-radius: var(--radius-control);
+    color: var(--text-primary);
     font-size: 12px;
     transition: var(--transition-normal);
     height: 30px;
@@ -39,7 +39,7 @@
 .entry-field:focus {
     outline: none;
     border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    box-shadow: var(--shadow-glow);
     background: var(--light-bg);
 }
 
@@ -65,7 +65,7 @@ select:disabled {
 .entry-field:-webkit-autofill:focus,
 .entry-field:-webkit-autofill:active {
     -webkit-box-shadow: 0 0 0 30px var(--darker-bg) inset !important;
-    -webkit-text-fill-color: #fff !important;
+    -webkit-text-fill-color: var(--text-primary) !important;
     transition: background-color 5000s ease-in-out 0s;
 }
 
@@ -93,7 +93,7 @@ button:disabled {
 /* 确保 select 元素在各种状态下保持正确的背景色 */
 select {
     background-color: var(--darker-bg) !important;
-    color: #fff !important;
+    color: var(--text-primary) !important;
 }
 
 select:focus {
@@ -102,7 +102,7 @@ select:focus {
 
 select option {
     background-color: var(--darker-bg);
-    color: #fff;
+    color: var(--text-primary);
 }
 
 /* ==================== Drop Zone ==================== */
@@ -128,12 +128,12 @@ select option {
 
 .drop-zone:hover {
     border-color: var(--primary-color);
-    background: rgba(59, 130, 246, 0.05);
+    background: color-mix(in srgb, var(--primary-color) 5%, transparent);
 }
 
 .drop-zone.drag-over {
     border-color: var(--primary-color);
-    background: rgba(59, 130, 246, 0.1);
+    background: color-mix(in srgb, var(--primary-color) 10%, transparent);
     transform: scale(1.02);
 }
 
@@ -221,7 +221,7 @@ select option {
     background: var(--primary-gradient);
     width: 0%;
     transition: width 0.3s ease;
-    box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--primary-color) 50%, transparent);
     position: absolute;
     left: 0;
     top: 0;
@@ -297,7 +297,7 @@ select option {
 }
 
 .btn-primary, .btn-danger {
-    color: var(--text-primary);
+    color: var(--text-on-accent);
     border: none;
     display: inline-flex;
     align-items: center;
@@ -307,22 +307,25 @@ select option {
 
 .btn-primary {
     background: var(--primary-gradient);
-    box-shadow: var(--shadow-md);
+    color: var(--text-on-accent);
+    box-shadow: none;
     font-weight: 700;
 }
 
 .btn-primary:hover:not(:disabled) {
+    background: var(--primary-gradient-hover);
     transform: translateY(-1px);
     box-shadow: var(--shadow-glow);
 }
 
 .btn-danger {
-    background: linear-gradient(135deg, var(--danger-color), #dc2626);
-    box-shadow: var(--shadow-sm);
+    background: var(--danger-color);
+    color: var(--text-on-accent);
+    box-shadow: none;
 }
 
 .btn-danger:hover:not(:disabled) {
-    background: linear-gradient(135deg, #f87171, var(--danger-color));
+    background: color-mix(in srgb, var(--danger-color) 82%, white);
     transform: translateY(-1px);
     box-shadow: var(--shadow-md);
 }
@@ -590,7 +593,7 @@ select option {
     padding: 10px;
     border: 1px solid var(--border-color);
     border-radius: 4px;
-    background: rgba(59, 130, 246, 0.06);
+    background: color-mix(in srgb, var(--primary-color) 6%, transparent);
 }
 
 .adb-proxy-inline-actions {
@@ -1193,7 +1196,7 @@ body.modal-open {
 .config-section-accent-routes { --accent: #22d3ee; }
 
 .modal-form-row input.readonly {
-    background: #1a1a1a;
+    background: var(--light-bg);
     color: var(--text-muted);
     cursor: not-allowed;
 }
@@ -1380,7 +1383,7 @@ body.modal-open {
 }
 
 .file-browser-item.selected {
-    background: var(--primary-color);
+    background: var(--primary-gradient);
     color: var(--text-primary);
 }
 
@@ -1456,22 +1459,22 @@ body.modal-open {
 
 .toast.success {
     border-left: 5px solid var(--success-color);
-    background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, var(--card-bg) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--success-color) 10%, transparent) 0%, var(--card-bg) 100%);
 }
 
 .toast.error {
     border-left: 5px solid var(--danger-color);
-    background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, var(--card-bg) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--danger-color) 10%, transparent) 0%, var(--card-bg) 100%);
 }
 
 .toast.info {
     border-left: 5px solid var(--primary-color);
-    background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, var(--card-bg) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--primary-color) 10%, transparent) 0%, var(--card-bg) 100%);
 }
 
 .toast.warning {
     border-left: 5px solid var(--warning-color);
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, var(--card-bg) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--warning-color) 10%, transparent) 0%, var(--card-bg) 100%);
 }
 
 .notification-panel {
@@ -1559,7 +1562,7 @@ body.modal-open {
 }
 
 .notification-item.unread {
-    background: rgba(59, 130, 246, 0.08);
+    background: color-mix(in srgb, var(--primary-color) 8%, transparent);
 }
 
 .notification-level-dot {
@@ -1567,7 +1570,7 @@ body.modal-open {
     height: 8px;
     border-radius: 50%;
     margin-top: 7px;
-    background: var(--primary-color);
+    background: var(--primary-gradient);
 }
 
 .notification-item.success .notification-level-dot { background: var(--success-color); }

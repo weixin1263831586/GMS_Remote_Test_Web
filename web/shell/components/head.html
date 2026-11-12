@@ -4,14 +4,16 @@
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="preload" as="script" href="/static/js/shell/shell-early-boot.js" fetchpriority="high">
-    <link rel="stylesheet" href="/static/css/common.css?v=20261111-tools-grid-frame" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-components.css?v=20261111-toast-above-modal" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-layout.css?v=20261111-tools-grid-frame" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-page.css?v=20261110-agent-status-layout" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common.css?v=20261112-purple-surfaces" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-components.css?v=20261112-primary-gradient" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-layout.css?v=20261112-primary-gradient" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-page.css?v=20261112-agent-run-row" data-shell-styles>
     <link rel="stylesheet" href="/static/css/agent-access.css?v=20261014-agent-access" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-device-row" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/workspace-panels.css?v=20261112-agent-run-row" data-shell-styles>
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <link rel="stylesheet" href="/static/css/shell-extra.css?v=20260930-shell-extra">
-    <link rel="stylesheet" href="/static/css/aoa-workbench.css?v=20261107-heading-row">
+    <link rel="stylesheet" href="/static/css/aoa-workbench.css?v=20261112-primary-gradient">
     <!-- 运行时配置以 JSON 数据标签注入：type="application/json" 不被
          执行，因此不受 CSP script-src 管制，也消除了 tojson 内容
          逃逸出 JS 上下文的可能。shell-config.js 优先解析为
@@ -27,13 +29,15 @@
     <script src="/static/js/shell/shell-config.js?v=20261008-deferred" defer></script>
     <!-- Shell 定义保持在页面模块之前执行；defer 让下载并行且不阻塞 HTML 解析。 -->
     <script src="/static/js/shell/shell-xterm-loader.js" defer></script>
+    <script src="/static/js/shell/ui-primitives.js?v=20261112-ui-foundations" defer></script>
+    <script src="/static/js/shell/device-presentation.js?v=20261112-ui-foundations" defer></script>
     <script src="/static/js/shell/shell-client-identity.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-host-management.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-workspace.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-terminal-workspace.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-user-management.js?v=20260930-shell-split" defer data-shell-runtime></script>
-    <script src="/static/js/shell/shell-device-management.js?v=20261106-noadb-pause" defer data-shell-runtime></script>
-    <script src="/static/js/shell/shell-device-groups.js?v=20261104-aoa-force-release" defer data-shell-runtime></script>
+    <script src="/static/js/shell/shell-device-management.js?v=20261112-primary-gradient" defer data-shell-runtime></script>
+    <script src="/static/js/shell/shell-device-groups.js?v=20261112-primary-gradient" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-uiaction.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-config-viewer.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-override.js?v=20260930-shell-split" defer data-shell-runtime></script>
@@ -106,16 +110,16 @@
     <script src="/static/js/pages/file-browser.js?v=20260904-gsi-worker-browse" defer></script>
     <script src="/static/js/pages/test-control.js?v=20261107-config-sections" defer></script>
     <script src="/static/js/pages/test-reports.js?v=20260812-stable-surfaces" defer></script>
-    <script src="/static/js/pages/report-analysis.js?v=20260920-adr0014" defer></script>
+    <script src="/static/js/pages/report-analysis.js?v=20261112-primary-gradient" defer></script>
     <script src="/static/js/pages/report-analysis-diagnosis.js?v=20260920-adr0014" defer></script>
     <script src="/static/js/pages/agent-questions.js?v=20261110-project-agent" defer></script>
     <script src="/static/js/pages/conversational-agent.js?v=20261110-agent-authorization" defer></script>
     <script src="/static/js/pages/agent-access.js?v=20261111-agent-access-copy" defer></script>
-    <script src="/static/js/pages/api-docs.js?v=20261111-paircode-command" defer></script>
+    <script src="/static/js/pages/api-docs.js?v=20261112-primary-gradient" defer></script>
     <script src="/static/js/pages/apk-analysis.js?v=20261107-apk-refresh-width" defer></script>
     <script src="/static/js/pages/security-audit.js?v=20260917-elevation-gate" defer></script>
     <!-- 加载主导航模块 - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20260902-adbproxy-state" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20261112-primary-gradient" defer crossorigin="anonymous"></script>
 
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
 <script src="/static/js/shell/shell-early-boot.js" fetchpriority="high"></script>
@@ -129,7 +133,7 @@
         .cluster-mode-toggle .mode-label { font-size: 11px; color: var(--text-secondary); }
         .cluster-mode-toggle .mode-switch { position: relative; width: 36px; height: 18px; background: var(--border-color); border-radius: 9px; transition: background 0.2s; flex-shrink: 0; }
         .cluster-mode-toggle .mode-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; background: white; border-radius: 50%; transition: transform 0.2s; }
-        .cluster-mode-toggle.active .mode-switch { background: var(--primary-color); }
+        .cluster-mode-toggle.active .mode-switch { background: var(--primary-gradient); }
         .cluster-mode-toggle.active .mode-switch::after { transform: translateX(18px); }
         .cluster-mode-toggle .mode-text { font-size: 11px; font-weight: 600; }
         #sidebar-visibility-modal .modal-content { width: 96vw; max-width: 1500px; height: 92vh; max-height: 92vh; }
@@ -137,7 +141,7 @@
         .sidebar-settings-tabs { display: flex; gap: 6px; padding: 4px; border-radius: 8px; background: var(--darker-bg); flex-shrink: 0; }
         .sidebar-settings-tab { flex: 1; padding: 9px 14px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-secondary); font-weight: 600; cursor: pointer; }
         .sidebar-settings-tab:hover { color: var(--text-primary); border-color: var(--border-color); }
-        .sidebar-settings-tab.active { color: white; background: var(--primary-color); }
+        .sidebar-settings-tab.active { color: white; background: var(--primary-gradient); }
         .sidebar-settings-panel { min-height: 0; flex: 1; }
         .sidebar-settings-panel[hidden] { display: none !important; }
         #sidebar-settings-panel-visibility { display: flex; flex-direction: column; min-height: 0; }
@@ -272,7 +276,7 @@
         .project-guide-section h4 { margin: 0 0 9px; font-size: 14px; }
         .project-guide-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; counter-reset: guide-step; }
         .project-guide-steps li { position: relative; min-height: 72px; padding: 10px 10px 10px 38px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg); font-size: 11px; line-height: 1.55; color: var(--text-secondary); counter-increment: guide-step; }
-        .project-guide-steps li::before { content: counter(guide-step); position: absolute; top: 10px; left: 10px; width: 20px; height: 20px; border-radius: 50%; background: var(--primary-color); color: #fff; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+        .project-guide-steps li::before { content: counter(guide-step); position: absolute; top: 10px; left: 10px; width: 20px; height: 20px; border-radius: 50%; background: var(--primary-gradient); color: #fff; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
         .project-guide-steps strong { display: block; color: var(--text-primary); font-size: 12px; margin-bottom: 2px; }
         .project-guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
         .project-guide-card { padding: 12px 14px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg); }
@@ -283,7 +287,7 @@
         .project-guide-map th, .project-guide-map td { padding: 8px 10px; border: 1px solid var(--border-color); text-align: left; vertical-align: top; }
         .project-guide-map th { width: 25%; color: var(--text-primary); background: var(--darker-bg); }
         .project-guide-map td { color: var(--text-secondary); }
-        .project-guide-notice { margin-top: 10px; padding: 10px 12px; border-left: 3px solid #f59e0b; border-radius: 4px; background: rgba(245,158,11,0.10); color: var(--text-secondary); font-size: 11px; line-height: 1.65; }
+        .project-guide-notice { margin-top: 10px; padding: 10px 12px; border-left: 3px solid var(--warning-color); border-radius: 4px; background: color-mix(in srgb, var(--warning-color) 10%, transparent); color: var(--text-secondary); font-size: 11px; line-height: 1.65; }
         .project-guide-gallery { display: grid; grid-template-columns: 1fr; gap: 12px; }
         .project-guide-example { min-width: 0; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--darker-bg); display: flex; flex-direction: column; gap: 6px; }
         .project-guide-example-header { order: 1; display: flex; align-items: baseline; gap: 8px; margin: 3px 2px 4px; min-width: 0; }
@@ -319,20 +323,21 @@
         .host-input::placeholder { color: var(--text-secondary); }
         .filter-btn { padding: 6px 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); color: var(--text-primary); font-size: 12px; cursor: pointer; transition: all 0.2s; }
         .filter-btn:hover { background: var(--darker-bg); border-color: var(--primary-color); }
-        .filter-btn.active { background: var(--primary-color); color: white; border-color: var(--primary-color); }
+        .filter-btn.active { background: var(--primary-gradient); color: white; border-color: var(--primary-color); }
         /* 弹框居中样式 - 通用 */
         .modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: var(--modal-z-index, 10000); padding: clamp(8px, 2.5vw, 20px); box-sizing: border-box; overflow: hidden; overscroll-behavior: contain; }
         #usage-examples-modal .modal-content { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); width: min(760px, 96vw); max-width: min(760px, 96vw); height: min(560px, 72vh); overflow: hidden; display: flex; flex-direction: column; }
-        #usage-examples-modal .modal-header { background: linear-gradient(135deg, #667eea, #764ba2); border-bottom: 1px solid var(--border-color); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
-        #usage-examples-modal .modal-title { color: #fff; font-size: 16px; font-weight: 600; }
-        #usage-examples-modal .modal-close { color: #fff; font-size: 24px; cursor: pointer; line-height: 1; }
-        #usage-examples-modal .modal-close:hover { color: #ccc; }
+        #usage-examples-modal .modal-header { background: var(--light-bg); border-bottom: 1px solid var(--border-color); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
+        #usage-examples-modal .modal-title { color: var(--text-primary); font-size: 16px; font-weight: 600; }
+        #usage-examples-modal .modal-close { color: var(--text-secondary); font-size: 24px; cursor: pointer; line-height: 1; }
+        #usage-examples-modal .modal-close:hover { color: var(--text-primary); }
         #usage-examples-modal .modal-body { padding: 20px; overflow-y: auto; background: var(--card-bg); }
         #usage-examples-modal.modal.show { display: flex !important; }
-        /* 系统配置：渐变标题栏与统一标准对齐 */
-        #config-modal .modal-header { background: linear-gradient(135deg, #667eea, #764ba2); border-bottom: 1px solid var(--border-color); }
-        #config-modal .modal-title, #config-modal .modal-close { color: #fff; }
+        /* 系统配置：标题栏与全站弹框同一表面 */
+        #config-modal .modal-header { background: var(--light-bg); border-bottom: 1px solid var(--border-color); }
+        #config-modal .modal-title { color: var(--text-primary); }
+        #config-modal .modal-close { color: var(--text-secondary); }
         #page-architecture .architecture-container { background: transparent; border-radius: 8px; border: 0; padding: 0; flex: 1; min-height: 0; overflow: hidden; }
-        #page-architecture .architecture-container iframe { width: 100%; height: 100%; display: block; border: none; border-radius: 7px; background: #020617; }
+        #page-architecture .architecture-container iframe { width: 100%; height: 100%; display: block; border: none; border-radius: 7px; background: var(--dark-bg); }
     </style>
 </head>

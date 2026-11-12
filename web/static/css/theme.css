@@ -1,0 +1,30 @@
+/* 共用主题：中性深灰表面，紫色强调。 */
+:root {
+    color-scheme: dark;
+    --primary-color: #8b74e8;
+    --primary-light: #c4b5fd;
+    --primary-strong: #5b3d91;
+    --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --primary-gradient-hover: linear-gradient(135deg, #7b8ef2 0%, #8a5cb8 100%);
+    --text-on-accent: #fff;
+
+    --success-color: #39c994;
+    --danger-color: #f06b78;
+    --warning-color: #e7b854;
+    --info-color: #6aa6ff;
+    --cluster-accent: var(--primary-color);
+    --skill-accent: var(--primary-light);
+
+    --dark-bg: #15151b;
+    --darker-bg: #101015;
+    --light-bg: #202027;
+    --lighter-bg: #2a2a34;
+    --card-bg: #1b1b23;
+    --page-background: linear-gradient(135deg, #191920 0%, var(--dark-bg) 60%, #131319 100%);
+
+    --border-color: #353540;
+    --border-light: #4a4a58;
+    --text-primary: #ededf2;
+    --text-secondary: #b2b2c1;
+    --text-muted: #878796;
+}

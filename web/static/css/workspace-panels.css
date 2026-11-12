@@ -1,0 +1,116 @@
+.agent-layout { grid-template-columns: minmax(0, 1.18fr) minmax(360px, 1fr); gap: 12px; }
+.agent-conversation-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 12px 16px; min-height: 46px; border-bottom: 1px solid var(--border-color); }
+.agent-conversation-heading strong { font-size: 13px; }
+#agent-chat-messages { gap: 18px; padding: 18px 16px; background: var(--card-bg); min-height: 0; }
+.agent-message-row, .agent-message-row.user { justify-content: flex-start; align-items: flex-start; gap: 10px; }
+.agent-avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 30px; height: 30px; border: 1px solid var(--border-light); border-radius: 50%; background: var(--lighter-bg); color: var(--primary-light); }
+.agent-message-row.user .agent-avatar { color: var(--text-primary); }
+.agent-message { max-width: calc(100% - 40px); min-width: 0; box-shadow: none; }
+.agent-message.assistant { flex: 1; background: var(--light-bg); }
+.agent-message.user { background: var(--lighter-bg); border-color: var(--border-color); }
+.agent-message-header { padding: 8px 12px; background: transparent; border-bottom: 0; }
+.agent-role { font-size: 12px; color: var(--text-primary); }
+.agent-message-body { padding-top: 2px; line-height: 1.7; }
+.agent-message.plan { border-color: color-mix(in srgb, var(--primary-color) 45%, var(--border-color)); }
+.agent-composer { align-items: stretch; padding: 12px; background: var(--card-bg); }
+#agent-input { min-height: 76px; font-size: 13px; line-height: 1.6; padding: 10px; }
+.agent-send-actions { justify-content: flex-end; }
+.agent-send-actions :is(.btn-primary, .btn-xs) { min-width: 76px; min-height: 32px; padding: 6px 12px; }
+.agent-execute-action { border-color: color-mix(in srgb, var(--success-color) 55%, transparent); color: var(--success-color); }
+/* 头部单行与左栏同构；padding/字号不再覆盖 common-page 基准。 */
+.agent-run-header { background: var(--card-bg); }
+#agent-steps { min-height: 0; padding: 16px 14px; gap: 12px; }
+.agent-step { --step-color: var(--text-secondary); display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; position: relative; }
+.agent-step:not(:last-child)::before { content: ''; position: absolute; left: 11px; top: 27px; bottom: -16px; width: 1px; background: var(--border-light); }
+.agent-step[data-status="done"] { --step-color: var(--success-color); }
+.agent-step[data-status="running"] { --step-color: var(--primary-light); }
+.agent-step[data-status="warning"] { --step-color: var(--warning-color); }
+.agent-step[data-status="error"] { --step-color: var(--danger-color); }
+.agent-step-marker { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin-top: 10px; color: var(--step-color); background: var(--card-bg); border: 1px solid var(--step-color); border-radius: 50%; z-index: 1; }
+.agent-step-card { min-width: 0; border: 1px solid var(--border-color); border-radius: 8px; background: var(--card-bg); padding: 11px 12px; }
+.agent-step[data-status="running"] .agent-step-card { border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color)); }
+.agent-step[data-status="error"] .agent-step-card { border-color: color-mix(in srgb, var(--danger-color) 45%, var(--border-color)); }
+.agent-step-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 5px; }
+.agent-step-title { min-width: 0; overflow-wrap: anywhere; font-size: 13px; font-weight: 600; }
+.agent-step-detail { color: var(--text-secondary); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.agent-step-time { display: block; margin-top: 6px; color: var(--text-muted); font: 10px/1.5 var(--ui-font-mono); }
+.agent-run-progress { margin-top: 10px; }
+
+/* Three work areas keep their own scroll surfaces and existing control IDs. */
+#aoa-panel .aoa-workbench-header { min-height: 36px; height: auto; padding: 4px 0; margin-bottom: 10px; align-items: center; }
+#aoa-panel .aoa-workbench-header > div:first-child { flex: 1; min-width: 0; }
+#aoa-panel .aoa-header-status { flex: 1; align-self: center; max-width: 45%; }
+#aoa-panel .aoa-status-pill { min-height: 28px; max-height: 30px; max-width: 100%; padding: 4px 10px; line-height: 18px; }
+#aoa-panel .aoa-column { border-radius: 8px; padding: 12px; gap: 10px; background: var(--card-bg); }
+#aoa-panel .aoa-column-heading { min-height: 38px; padding: 0 0 10px; }
+#aoa-panel .aoa-screen-column .aoa-column-heading,
+#aoa-panel .aoa-command-column .aoa-column-heading { flex-wrap: wrap; }
+#aoa-panel .aoa-screen-column .aoa-column-heading > div:first-child { flex: 1 0 120px; }
+#aoa-panel .aoa-command-column .aoa-column-heading > div:first-child { flex: 1 0 185px; }
+#aoa-panel .aoa-screen-toolbar { flex-wrap: wrap; }
+#aoa-panel .aoa-screen-toolbar .btn-xxs { flex: 1 1 62px; min-width: 62px; }
+#aoa-panel .aoa-column-heading strong { font-size: 13px; }
+#aoa-panel .aoa-config-column > .aoa-column-heading > div { width: 100%; justify-content: space-between; }
+#aoa-panel .aoa-screen-stage { background: var(--darker-bg); border-color: var(--border-color); }
+#aoa-panel .aoa-calibration-status { border-radius: 6px; background: var(--light-bg); border: 1px solid var(--border-color); }
+#aoa-panel .aoa-command-table th { height: 32px; color: var(--text-secondary); font-weight: 500; }
+#aoa-panel .aoa-command-table td { padding-top: 6px; padding-bottom: 6px; }
+#aoa-panel .aoa-command-list-header,
+#aoa-panel .aoa-command-row { grid-template-columns: 3ch minmax(0, 1.5fr) minmax(70px, 1fr); row-gap: 6px; }
+#aoa-panel .aoa-actions-label { grid-column: 1 / -1; }
+#aoa-panel .aoa-command-row > .aoa-command-state { grid-column: 1 / 3; grid-row: 2; justify-self: start; text-align: left; }
+#aoa-panel .aoa-command-row > .aoa-command-actions { grid-column: 1 / -1; grid-row: 2; justify-self: end; }
+#aoa-panel .aoa-command-list li { padding-top: 6px; padding-bottom: 6px; }
+#aoa-panel .aoa-command-list code { white-space: normal; overflow-wrap: anywhere; }
+.aoa-operation-block { padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); }
+.aoa-operation-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.aoa-operation-heading > strong { font-size: 12px; }
+.aoa-operation-block > .aoa-muted { margin-top: 7px; }
+#aoa-panel .aoa-save-block { padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); }
+#aoa-panel .aoa-target-section { padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); }
+#aoa-panel .aoa-profile-library { padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; }
+#aoa-panel .aoa-semantic-tools { border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 10px; }
+/* ③ 配置列紧凑化：新增录制块后整列内容超出 720p 视口高度，会把
+   列压出内部滚动条（运行时 UI 契约要求 scrollHeight ≤ clientHeight）。
+   统一压薄各块的 padding/间隙/控件高度；两行次要说明文案仅在
+   高视口（≥820px）保留。 */
+#aoa-panel .aoa-config-column { gap: 6px; padding: 8px 10px; }
+#aoa-panel .aoa-config-column .aoa-config-group,
+#aoa-panel .aoa-config-column .aoa-target-section { gap: 4px; padding-bottom: 6px; }
+#aoa-panel .aoa-config-column label,
+#aoa-panel .aoa-config-column .aoa-field { gap: 2px; line-height: 15px; }
+#aoa-panel .aoa-config-column input,
+#aoa-panel .aoa-config-column select { height: 27px; }
+#aoa-panel .aoa-column-heading { min-height: 32px; padding-bottom: 8px; }
+#aoa-panel .aoa-operation-block { padding: 8px 10px; }
+#aoa-panel .aoa-operation-block > .aoa-muted { margin-top: 4px; }
+#aoa-panel .aoa-save-block .aoa-subheading { line-height: 16px; }
+#aoa-panel .aoa-save-block .aoa-form-grid { gap: 4px 6px; }
+#aoa-panel .aoa-profile-summary { padding: 4px 6px; }
+#aoa-panel .aoa-target-section { padding: 8px 10px; }
+#aoa-panel .aoa-semantic-tools { padding: 6px 10px; }
+@media (max-height: 820px) {
+    #aoa-panel .aoa-operation-block > .aoa-muted,
+    #aoa-panel .aoa-save-block > .aoa-muted { display: none; }
+    /* 矮视口再加一档余量：720p 下可用高度仅 ~617px。 */
+    #aoa-panel .aoa-config-column { gap: 5px; }
+    #aoa-panel .aoa-target-section { padding: 6px 8px; }
+    #aoa-panel .aoa-semantic-tools { padding: 5px 8px; }
+}
+@media (min-width: 1181px) {
+    #aoa-panel .aoa-workbench-grid { grid-template-columns: minmax(240px, .78fr) minmax(360px, 1.22fr) minmax(330px, 1.08fr); }
+}
+@media (max-width: 1100px) {
+    .agent-layout { grid-template-columns: minmax(0, 1.2fr) minmax(310px, 1fr); }
+}
+@media (max-width: 900px) {
+    #page-agent { overflow-y: auto; }
+    .agent-layout { grid-template-columns: 1fr; min-height: 0; flex: none; }
+    .agent-conversation-pane { height: min(75dvh, 700px); min-height: 420px; }
+    .agent-execution-pane { min-height: 300px; max-height: 70dvh; }
+    #agent-chat-messages { padding: 12px; }
+    .agent-composer { padding: 8px; gap: 6px; }
+}
+@media (max-width: 760px) {
+    #aoa-panel .aoa-header-status { flex: none; align-self: stretch; max-width: 100%; width: 100%; }
+}

@@ -40,7 +40,7 @@
         function showDevicesManagementLoadError(error) {
             const tbody = document.getElementById('devices-table-body');
             if (tbody && currentPage === 'devices') {
-                tbody.innerHTML = `<tr><td colspan="10">设备列表加载失败：${escapeHtml(error.message || '请刷新重试')}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="7">设备列表加载失败：${escapeHtml(error.message || '请刷新重试')}</td></tr>`;
             }
         }
 
@@ -332,7 +332,7 @@
             if (devices.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="10" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                        <td colspan="7" style="padding: 40px; text-align: center; color: var(--text-secondary);">
                             暂无设备
                         </td>
                     </tr>
@@ -350,70 +350,10 @@
                 const actionDeviceId = String(device.device_id || serialNo);
                 const serialAttr = escapeIconAttr(actionDeviceId);
                 const workerAttr = escapeIconAttr(device.worker_id || workspaceLocalWorkerId());
-                const actionButtonStyle = 'width: 92px; min-width: 92px; font-size: 12px; padding: 4px 8px;';
-                const releaseButton = device.cluster_readonly
-                    ? `<span style="visibility: hidden; width: 92px; min-width: 92px;"></span>`
-                    : device.locked_by
-                    ? `<button class="btn-xxs" data-serial="${serialAttr}" data-click="forceReleaseDeviceLock" data-r0="dataset.serial" title="强制释放该设备的平台占用锁" style="background: var(--danger-color); color: white; ${actionButtonStyle}">释放设备</button>`
-                    : `<span style="visibility: hidden; width: 92px; min-width: 92px;"></span>`;
-                const sourceTypeBadge = device.source_type === 'adb_proxy'
-                    ? '<span style="background:rgba(156,39,176,.16);color:#ce93d8;padding:2px 6px;border-radius:3px;font-size:12px;font-weight:600;">ADB Proxy</span>'
-                    : device.source_type === 'cluster'
-                    ? `<span style="background:rgba(33,150,243,.15);color:#42a5f5;padding:2px 6px;border-radius:3px;font-size:12px;font-weight:600;">${escapeHtml(device.worker_id)}</span>`
-                    : device.source_type === 'local'
-                    ? '<span style="background: rgba(76, 175, 80, 0.2); color: var(--success-color); padding: 2px 6px; border-radius: 3px; font-size: 12px; font-weight: 600;">测试主机</span>'
-                    : '<span style="background: rgba(255, 152, 0, 0.2); color: var(--warning-color); padding: 2px 6px; border-radius: 3px; font-size: 12px; font-weight: 600;">USB/IP</span>';
-
-                const clusterStatus = {
-                    available: ['var(--success-color)', '● 可用'],
-                    allocated: ['var(--warning-color)', '● 已分配'],
-                    reserved: ['#ab47bc', '● 已预留'],
-                    external_busy: ['var(--danger-color)', '● 外部占用'],
-                    fastboot: ['#42a5f5', '● Fastboot'],
-                    usb_only: ['var(--warning-color)', '● USB / AOA'],
-                    unresponsive: ['var(--danger-color)', '● ADB 无响应'],
-                    unauthorized: ['var(--danger-color)', '● 未授权'],
-                    offline: ['var(--text-secondary)', '○ 离线'],
-                    unknown: ['var(--text-secondary)', '○ 未知']
-                }[device.cluster_state];
-                const localStatus = {
-                    fastboot: ['#42a5f5', '● Fastboot'],
-                    usb_only: ['var(--warning-color)', '● USB / AOA'],
-                    unresponsive: ['var(--danger-color)', '● ADB 无响应'],
-                    unauthorized: ['var(--danger-color)', '● 未授权'],
-                    offline: ['var(--text-secondary)', '○ 离线']
-                }[device.status];
-                const statusBadge = clusterStatus
-                    ? `<span style="color: ${clusterStatus[0]}; font-weight: 600; font-size: 12px;">${clusterStatus[1]}</span>`
-                    : localStatus
-                    ? `<span style="color: ${localStatus[0]}; font-weight: 600; font-size: 12px;">${localStatus[1]}</span>`
-                    : device.locked_by
-                    ? '<span style="color: var(--warning-color); font-weight: 600; font-size: 12px;">● 已分配</span>'
-                    : device.status === 'online'
-                    ? '<span style="color: var(--success-color); font-weight: 600; font-size: 12px;">● 可用</span>'
-                    : '<span style="color: var(--text-secondary); font-weight: 600; font-size: 12px;">○ 离线</span>';
-
-                // 电池电量显示
-                let batteryDisplay = '-';
-                if (device.battery_level) {
-                    const level = parseInt(device.battery_level);
-                    if (!isNaN(level)) {
-                        let batteryColor = 'var(--success-color)';
-                        let batteryIcon = '🔋';
-                        if (level < 20) {
-                            batteryColor = 'var(--danger-color)';
-                            batteryIcon = '🪫';
-                        } else if (level < 50) {
-                            batteryColor = 'var(--warning-color)';
-                        }
-                        batteryDisplay = `<span style="color: ${batteryColor}; font-weight: 600; font-size: 12px;">${batteryIcon} ${level}%</span>`;
-                    }
-                }
-
-                // SOC 标签显示
-                const socDisplay = device.soc_model
-                    ? `<span style="background: rgba(33, 150, 243, 0.15); color: #42a5f5; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600; font-family: monospace;">${escapeHtml(String(device.soc_model))}</span>`
-                    : '-';
+                const actionButtonStyle = '';
+                const releaseButton = !device.cluster_readonly && device.locked_by
+                    ? `<button class="btn-xxs btn-danger-quiet device-release-action" data-serial="${serialAttr}" data-click="forceReleaseDeviceLock" data-r0="dataset.serial" title="强制释放该设备的平台占用锁">${GmsUi.icon('unlock')}释放设备</button>`
+                    : '';
 
                 const isFastboot = device.protocol === 'fastboot'
                     || device.status === 'fastboot'
@@ -474,46 +414,20 @@
                     : localClaimedByOther ? '设备已被其他用户或任务占用'
                     : '智能 UI 操控：截图 + 布局元素 + 点按';
                 const shellButton = isClusterRemote
-                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" data-click="openClusterDeviceShell" data-r0="dataset.serial" data-r1="dataset.worker" title="仅可对具备 SSH 元数据的可用 Worker 设备打开 adb shell" style="background: var(--primary-color); ${actionButtonStyle}${shellStyle}"${shellDisabled}>🐧 adb shell</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-click="openDeviceShell" data-r0="dataset.serial" title="${localShellTitle}" style="background: var(--primary-color); ${actionButtonStyle}${shellStyle}"${adbShellDisabled ? ' disabled' : ''}>🐧 adb shell</button>`;
+                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" data-click="openClusterDeviceShell" data-r0="dataset.serial" data-r1="dataset.worker" title="仅可对具备 SSH 元数据的可用 Worker 设备打开 adb shell" style="${actionButtonStyle}${shellStyle}"${shellDisabled}>${GmsUi.icon('terminal')}adb shell</button>`
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-click="openDeviceShell" data-r0="dataset.serial" title="${localShellTitle}" style="${actionButtonStyle}${shellStyle}"${adbShellDisabled ? ' disabled' : ''}>${GmsUi.icon('terminal')}adb shell</button>`;
                 const deviceInfoButton = isClusterRemote
-                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" data-click="openClusterDeviceInfo" data-r0="dataset.serial" data-r1="dataset.worker" title="${inspectionTitle}" style="background: var(--success-color); color: white; ${actionButtonStyle}${remoteInspectionStyle}"${remoteInspectionDisabled}>ℹ️ device info</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-worker="${workerAttr}" data-click="openDeviceConfigExplorer" data-r0="dataset.serial" data-r1="dataset.worker" data-testid="device-config-open" title="${localInspectionTitle}" style="background: var(--success-color); color: white; ${actionButtonStyle}${remoteInspectionStyle}"${adbInspectionDisabled ? ' disabled' : ''}>ℹ️ device info</button>`;
+                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" data-click="openClusterDeviceInfo" data-r0="dataset.serial" data-r1="dataset.worker" title="${inspectionTitle}" style="${actionButtonStyle}${remoteInspectionStyle}"${remoteInspectionDisabled}>${GmsUi.icon('info')}device info</button>`
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-worker="${workerAttr}" data-click="openDeviceConfigExplorer" data-r0="dataset.serial" data-r1="dataset.worker" data-testid="device-config-open" title="${localInspectionTitle}" style="${actionButtonStyle}${remoteInspectionStyle}"${adbInspectionDisabled ? ' disabled' : ''}>${GmsUi.icon('info')}device info</button>`;
                 const uiControlButton = isClusterRemote
-                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" data-click="openClusterDeviceUiControl" data-r0="dataset.serial" data-r1="dataset.worker" title="${controlTitle}" style="background: var(--accent-color, #6c5ce7); color: white; ${actionButtonStyle}${remoteControlStyle}"${remoteControlDisabled}>🎯 UI 操控</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-click="openUiControl" data-r0="dataset.serial" title="${localControlTitle}" style="background: var(--accent-color, #6c5ce7); color: white; ${actionButtonStyle}${remoteControlStyle}"${adbControlDisabled ? ' disabled' : ''}>🎯 UI 操控</button>`;
+                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" data-click="openClusterDeviceUiControl" data-r0="dataset.serial" data-r1="dataset.worker" title="${controlTitle}" style="${actionButtonStyle}${remoteControlStyle}"${remoteControlDisabled}>${GmsUi.icon('target')}UI 操控</button>`
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-click="openUiControl" data-r0="dataset.serial" title="${localControlTitle}" style="${actionButtonStyle}${remoteControlStyle}"${adbControlDisabled ? ' disabled' : ''}>${GmsUi.icon('target')}UI 操控</button>`;
 
                 return `
-                    <tr style="border-bottom: 1px solid var(--border-color);">
-                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
-                            ${escapeHtml(String(device.serial_no || '-'))}
-                        </td>
-                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
-                            ${escapeHtml(String(device.source_host || '-'))}
-                        </td>
-                        <td style="padding: 4px 6px; text-align: center;">
-                            ${sourceTypeBadge}
-                        </td>
-                        <td style="padding: 4px 6px; text-align: center; font-size: 12px;">
-                            ${escapeHtml(String(device.model || '-'))}
-                        </td>
-                        <td style="padding: 4px 6px; text-align: center;">
-                            ${socDisplay}
-                        </td>
-                        <td style="padding: 4px 6px; text-align: center; font-size: 12px;">
-                            ${escapeHtml(String(device.android_version || '-'))}
-                        </td>
-                        <td style="padding: 4px 6px; text-align: center;">
-                            ${batteryDisplay}
-                        </td>
-                        <td style="padding: 4px 6px; text-align: center;">
-                            ${statusBadge}
-                        </td>
-                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
-                            ${escapeHtml(String(device.locked_by || '-'))}
-                        </td>
-                        <td style="padding: 4px 6px; text-align: center; white-space: nowrap;">
-                            <div style="display: grid; grid-template-columns: repeat(4, 92px); gap: 6px; justify-content: center; align-items: center;">
+                    <tr data-device-id="${serialAttr}" data-worker="${workerAttr}">
+                        ${GmsDevicePresentation.cells(device)}
+                        <td>
+                            <div class="device-row-actions">
                                 ${shellButton}
                                 ${deviceInfoButton}
                                 ${uiControlButton}

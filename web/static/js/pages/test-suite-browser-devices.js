@@ -203,6 +203,19 @@ function buildDeviceItemEl({
     statusEl.textContent = isLocked && displayStatus !== '已分配'
         ? `${displayStatus} · 已占用`
         : displayStatus;
+    const statusIcon = isLocked ? 'lock'
+        : statusLower === 'fastboot' ? 'bolt'
+        : statusLower === 'loader' ? 'chip'
+        : ['online', 'available'].includes(statusLower) ? 'check'
+        : ['offline', 'absent'].includes(statusLower) ? 'close'
+        : 'warning';
+    const statusTone = isLocked ? 'warning'
+        : ['online', 'available'].includes(statusLower) ? 'success'
+        : ['fastboot', 'loader'].includes(statusLower) ? 'info'
+        : ['offline', 'absent'].includes(statusLower) ? 'neutral'
+        : 'warning';
+    statusEl.innerHTML = GmsUi.icon(statusIcon) + GmsUi.escape(statusEl.textContent);
+    statusEl.dataset.tone = statusTone;
 
     div.appendChild(checkbox);
     div.appendChild(info);

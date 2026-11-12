@@ -1018,13 +1018,16 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                         self.assertAlmostEqual(select_box["height"], 24, delta=0.5)
                         self.assertAlmostEqual(maximize_box["height"], 24, delta=0.5)
                     refresh_style = refresh_button.evaluate(
-                        "button=>({border:button.style.border||getComputedStyle(button).border,"
-                        "background:getComputedStyle(button).backgroundColor,"
-                        "boxShadow:getComputedStyle(button).boxShadow})"
+                        "button=>{const s=getComputedStyle(button);return {"
+                        "borderWidth:s.borderTopWidth,borderStyle:s.borderTopStyle,"
+                        "background:s.backgroundColor,boxShadow:s.boxShadow}}"
                     )
-                    self.assertIn(refresh_style["border"], ("0px", "0px none rgb(255, 255, 255)"))
-                    self.assertEqual(refresh_style["background"], "rgba(0, 0, 0, 0)")
-                    self.assertEqual(refresh_style["boxShadow"], "none")
+                    # 契约是「无边框、透明背景、无阴影」；0 宽边框的 border-color
+                    # 回落 currentColor，随主题按钮文字色变化，不参与断言。
+                    self.assertEqual(refresh_style["borderWidth"], "0px", refresh_style)
+                    self.assertEqual(refresh_style["borderStyle"], "none", refresh_style)
+                    self.assertEqual(refresh_style["background"], "rgba(0, 0, 0, 0)", refresh_style)
+                    self.assertEqual(refresh_style["boxShadow"], "none", refresh_style)
                     pane = page.locator(f"{page_selector} .host-workspace-pane").first
                     pane_box = pane.bounding_box()
                     pane_style = pane.evaluate(

@@ -5,11 +5,12 @@
         let clusterHostDirectory = {hosts: [], loadedAt: 0, promise: null};
 
         function createTerminalTheme() {
+            const theme = getComputedStyle(document.documentElement);
             return {
-                background: '#000000',
-                foreground: '#ffffff',
-                cursor: '#ffffff',
-                cursorAccent: '#000000',
+                background: theme.getPropertyValue('--darker-bg').trim(),
+                foreground: theme.getPropertyValue('--text-primary').trim(),
+                cursor: theme.getPropertyValue('--text-primary').trim(),
+                cursorAccent: theme.getPropertyValue('--darker-bg').trim(),
                 // xterm 默认灰色选区会压低 ANSI 彩色文本的对比度；固定前景色后，
                 // 鼠标拖选路径和命令时仍能清楚辨认内容及选区边界。
                 selectionBackground: 'rgba(124, 92, 255, 0.55)',

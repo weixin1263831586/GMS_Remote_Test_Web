@@ -60,7 +60,7 @@
 }
 .apk-upload-zone.drag-over {
     border-color: var(--primary-color);
-    background: rgba(59, 130, 246, 0.1);
+    background: color-mix(in srgb, var(--primary-color) 10%, transparent);
     transform: scale(1.02);
 }
 .apk-upload-content {
@@ -248,10 +248,10 @@
     border-color: var(--primary-color);
 }
 .filter-btn[data-apk-tab].active {
-    background: var(--primary-color);
+    background: var(--primary-gradient);
     color: #fff;
     border-color: var(--primary-color);
-    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--primary-color) 30%, transparent);
 }
 
 .apk-tab-panel {
@@ -621,8 +621,8 @@ body.apk-resizing {
 }
 
 .redmine-drop-zone.drag-over {
-    border-color: var(--primary-color, #3b82f6);
-    background: rgba(59, 130, 246, 0.08);
+    border-color: var(--primary-color);
+    background: color-mix(in srgb, var(--primary-color) 8%, transparent);
 }
 
 /* APK 搜索输入框 */
@@ -639,7 +639,7 @@ body.apk-resizing {
 .apk-search-input:focus {
     outline: none;
     border-color: var(--primary-color);
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 20%, transparent);
 }
 
 /* APK 搜索结果下拉框 */
@@ -725,8 +725,8 @@ body.apk-resizing {
 }
 
 .agent-message.user {
-    background: rgba(59, 130, 246, 0.16);
-    border-color: rgba(96, 165, 250, 0.42);
+    background: color-mix(in srgb, var(--primary-color) 16%, transparent);
+    border-color: color-mix(in srgb, var(--primary-light) 42%, transparent);
 }
 
 .agent-message.assistant {
@@ -734,15 +734,15 @@ body.apk-resizing {
 }
 
 .agent-message.plan {
-    border-color: rgba(245, 158, 11, 0.42);
+    border-color: color-mix(in srgb, var(--warning-color) 42%, transparent);
 }
 
 .agent-message.error {
-    border-color: rgba(239, 68, 68, 0.42);
+    border-color: color-mix(in srgb, var(--danger-color) 42%, transparent);
 }
 
 .agent-message.success {
-    border-color: rgba(16, 185, 129, 0.38);
+    border-color: color-mix(in srgb, var(--success-color) 38%, transparent);
 }
 
 .agent-message-header {
@@ -884,7 +884,7 @@ body.apk-resizing {
 }
 
 .agent-run-stage-bar .stage-cell.current {
-    background: var(--primary-color);
+    background: var(--primary-gradient);
     animation: agentStagePulse 1.4s ease-in-out infinite;
 }
 
@@ -920,21 +920,15 @@ body.apk-resizing {
     background: var(--darker-bg);
 }
 
+/* 与左栏 .agent-conversation-heading 同构：单行头部，同 padding 同
+   min-height，保证两个工作区标题行高一致。 */
 .agent-run-header {
-    min-height: 58px;
-    padding: 8px 10px 8px 12px;
+    min-height: 46px;
+    padding: 12px 16px;
     border-bottom: 1px solid var(--border-color);
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
-}
-
-.agent-run-title-row {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    gap: 8px;
-    min-width: 0;
+    gap: 8px 14px;
 }
 
 .agent-run-title {
@@ -951,7 +945,7 @@ body.apk-resizing {
 }
 
 #agent-engine-status {
-    display: block;
+    flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -961,6 +955,7 @@ body.apk-resizing {
 }
 
 .agent-model-line {
+    flex: 1 1 auto;
     min-height: 24px;
     min-width: 0;
     display: flex;
@@ -1296,7 +1291,7 @@ body.apk-resizing {
     margin-bottom: 10px;
 }
 .api-filter-spacer { flex: 1; }
-.filter-btn.tone-primary { background: var(--primary-color); color: #fff; }
+.filter-btn.tone-primary { background: var(--primary-gradient); color: #fff; }
 .filter-btn.tone-success { background: var(--success-color); color: #fff; }
 .suite-download-section {
     margin-bottom: 10px;

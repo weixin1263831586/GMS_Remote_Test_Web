@@ -40,7 +40,7 @@ function renderSuiteBreadcrumb(path) {
         // 与报告管理页 retry 按钮逻辑一致。与互跳按钮同处面包屑右侧。
         const retryBtn = document.createElement('button');
         retryBtn.className = 'btn-xs';
-        retryBtn.style.background = 'var(--primary-color)';
+        retryBtn.style.background = 'var(--primary-gradient)';
         retryBtn.style.cssFloat = 'right';
         retryBtn.textContent = 'retry报告';
         retryBtn.title = '跳到测试页并预填该运行信息';

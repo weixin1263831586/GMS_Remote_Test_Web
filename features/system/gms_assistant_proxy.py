@@ -74,25 +74,26 @@ _ASSISTANT_BOOT_SHELL = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GMS助手</title>
+<link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
 <style>
-  html, body { margin: 0; height: 100%; background: #f7f8fa;
+  html, body { margin: 0; height: 100%; background: var(--page-background);
       font-family: system-ui, sans-serif; }
   #assistant-upstream-frame { position: fixed; inset: 0; width: 100%;
       height: 100%; border: 0; }
   #assistant-boot { position: fixed; inset: 0; display: flex;
-      align-items: center; justify-content: center; background: #f7f8fa;
+      align-items: center; justify-content: center; background: var(--page-background);
       transition: opacity .25s ease; }
   #assistant-boot.done { opacity: 0; pointer-events: none; }
-  .boot-card { text-align: center; color: #243042; }
+  .boot-card { text-align: center; color: var(--text-primary); }
   .boot-spinner { width: 34px; height: 34px; margin: 0 auto 14px;
-      border: 3px solid #d7dce3; border-top-color: #3b82f6;
+      border: 3px solid var(--border-color); border-top-color: var(--primary-color);
       border-radius: 50%; animation: boot-spin 0.9s linear infinite; }
   #assistant-boot.error .boot-spinner { display: none; }
   @keyframes boot-spin { to { transform: rotate(360deg); } }
   #assistant-boot-retry { margin-top: 14px; padding: 8px 22px;
-      border: 1px solid #c9d0d9; border-radius: 8px; background: #fff;
+      border: 1px solid var(--border-color); border-radius: 8px; background: var(--primary-gradient); color: var(--text-on-accent);
       cursor: pointer; font-size: 14px; }
-  #assistant-boot-retry:hover { background: #f0f2f5; }
+  #assistant-boot-retry:hover { background: var(--primary-gradient-hover); }
 </style>
 </head>
 <body>
@@ -259,10 +260,10 @@ async def _proxy_gms_assistant_path(path: str, request: Request, proxy_base: str
         if path.startswith("public/agents/") and path.endswith("/chat"):
             return HTMLResponse(
                 """<!doctype html><html lang='zh-CN'><meta charset='utf-8'>
-<title>GMS助手未配置</title><style>
-body{font-family:system-ui,sans-serif;margin:0;padding:32px;color:#243042;background:#f7f8fa}
-main{max-width:640px;margin:8vh auto;padding:28px;background:#fff;border:1px solid #e3e7ed;border-radius:12px}
-code{background:#f0f2f5;padding:3px 6px;border-radius:4px}
+<title>GMS助手未配置</title><link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces"><style>
+body{font-family:system-ui,sans-serif;margin:0;padding:32px;color:var(--text-primary);background:var(--page-background)}
+main{max-width:640px;margin:8vh auto;padding:28px;background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px}
+code{background:var(--lighter-bg);padding:3px 6px;border-radius:4px}
 </style><main><h2>GMS助手暂未配置</h2>
 <p>请在服务器配置中设置 <code>external_services.gms_assistant_url</code>，然后刷新此页面。</p>
 </main>""",

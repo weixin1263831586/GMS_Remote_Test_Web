@@ -837,8 +837,8 @@ class RuntimeAgentTests(RuntimeUiHarness):
             self.assertEqual(result["guideInstall"], expected)
             self.assertIn("-OJ", result["archiveApi"]["full"])
             self.assertNotIn("| bash", result["archiveApi"]["full"])
-            self.assertEqual(result["primaryLabel"], "📋 安装/更新命令")
-            self.assertEqual(result["offlineLabel"], "📦 离线包")
+            self.assertEqual(result["primaryLabel"], "安装/更新命令")
+            self.assertEqual(result["offlineLabel"], "离线包")
 
             with tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)

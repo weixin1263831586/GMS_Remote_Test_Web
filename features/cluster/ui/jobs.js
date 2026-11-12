@@ -93,7 +93,7 @@ async function checkWorkerVpn(){
 function setClusterRefreshBusy(busy){
  ['#refresh','#dash-refresh-charts'].forEach(selector=>{
   const button=document.querySelector(selector);if(!button)return;
-  if(!button.dataset.idleLabel)button.dataset.idleLabel=button.textContent||'↻ 刷新';
+  if(!button.dataset.idleLabel)button.dataset.idleLabel=(button.textContent||'↻ 刷新').trim()||'↻ 刷新';
   button.disabled=busy;
   button.textContent=busy?'刷新中…':button.dataset.idleLabel;
   if(busy)button.setAttribute('aria-busy','true');else button.removeAttribute('aria-busy');

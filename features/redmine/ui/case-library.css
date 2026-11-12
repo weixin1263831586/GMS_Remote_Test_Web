@@ -1,0 +1,35 @@
+/* 知识库案例与工单工作台。 */
+    .case-card { border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:8px; cursor:pointer; background:var(--card-bg); transition:border-color .15s; }
+    .case-card:hover { border-color:var(--primary-color); }
+    .case-head { display:flex; gap:8px; align-items:center; margin-bottom:4px; }
+    .case-status { font-size:11px; padding:2px 6px; border-radius:4px; }
+    .case-status.approved { background:#064e3b; color:#6ee7b7; }
+    .case-status.draft { background:#3b2f12; color:#fcd34d; }
+    .case-sig { font-size:11px; padding:2px 6px; border-radius:4px; background:var(--lighter-bg); color:var(--primary-light); }
+    .case-title { font-size:13px; font-weight:600; color:var(--text-primary); }
+    .case-scope { font-size:11px; margin-top:2px; }
+    .case-sources { font-size:11px; }
+    .case-actions { display:flex; gap:8px; margin-top:10px; }
+    .redmine-issue-link { color:var(--primary-light); font-weight:700; text-decoration:none; }
+    .redmine-issue-link:hover { color:var(--primary-light); text-decoration:underline; }
+    #knowledgeBody .field { margin-bottom:8px; }
+    #knowledgeBody textarea { font-size:12px; }
+    .case-view-toggle { display:inline-flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+    .case-view-toggle button { font-size:12px; padding:4px 10px; border:0; background:var(--lighter-bg); color:var(--text-secondary); cursor:pointer; border-radius:0; }
+    .case-view-toggle button.active { background:var(--primary-color); color:#fff; }
+    .issue-workbench { margin-top:10px; padding:10px; border:1px solid var(--border-color); border-radius:8px; background:var(--card-bg); }
+    .workbench-grid { display:grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap:10px; margin-bottom:10px; }
+    .workbench-block { border:1px solid var(--border); border-radius:7px; background:var(--light-bg); padding:10px; min-width:0; }
+    .workbench-title { font-size:12px; font-weight:700; color:var(--primary-light); margin-bottom:8px; }
+    .kv-line { display:grid; grid-template-columns:82px minmax(0,1fr); gap:8px; margin:6px 0; font-size:12px; line-height:1.55; }
+    .kv-line b { color:var(--text-secondary); font-weight:700; }
+    .compact-list { margin:0; padding-left:16px; }
+    .mature-hit { padding:7px 8px; border-radius:6px; background:#062f28; color:#99f6e4; margin-bottom:8px; font-size:12px; }
+    .source-links { margin-top:8px; font-size:12px; color:var(--muted); }
+    .mini-evidence-title { font-size:11px; color:var(--primary-light); margin:6px 0 4px; font-weight:700; }
+    .evidence-line, .reply-line, .attachment-evidence { border-top:1px dashed var(--border-color); padding-top:7px; margin-top:7px; font-size:12px; line-height:1.5; }
+    .evidence-line span { color:var(--text-secondary); }
+    .detected-errors { display:inline-block; margin-top:4px; padding:2px 6px; border-radius:4px; background:#3b1f1f; color:#fecaca; font-size:11px; }
+    .workbench-actions { display:flex; flex-wrap:wrap; gap:8px; border-top:1px solid var(--border); padding-top:10px; }
+    .workbench-actions button { font-size:12px; }
+    @media (max-width:900px) { .workbench-grid { grid-template-columns:1fr; } .kv-line { grid-template-columns:1fr; } }

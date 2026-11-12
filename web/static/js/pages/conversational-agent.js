@@ -267,6 +267,7 @@ function renderAgentMessages(session) {
 
         return `
             <div class="agent-message-row ${isUser ? 'user' : 'assistant'}">
+                <span class="agent-avatar" aria-hidden="true">${GmsUi.icon(isUser ? 'user' : 'bot')}</span>
                 <div class="agent-message ${isUser ? 'user' : 'assistant'}${toneClass}">
                     <div class="agent-message-header">
                         <span class="agent-role">${roleLabel}</span>
@@ -388,22 +389,15 @@ function renderAgentSteps(session) {
         return;
     }
 
-    const colorByStatus = {
-        done: 'var(--success-color)',
-        running: 'var(--primary-color)',
-        warning: 'var(--warning-color)',
-        error: 'var(--danger-color)'
-    };
-    const iconByStatus = {
-        done: '✓',
-        running: '…',
-        warning: '!',
-        error: '×'
+    const presentationByStatus = {
+        done: ['success', 'check', '已完成'],
+        running: ['accent', 'clock', '进行中'],
+        warning: ['warning', 'warning', '需关注'],
+        error: ['danger', 'error', '失败'],
     };
 
     stepsEl.innerHTML = steps.map(step => {
-        const color = colorByStatus[step.status] || 'var(--text-secondary)';
-        const icon = iconByStatus[step.status] || '•';
+        const presentation = presentationByStatus[step.status] || ['neutral', 'clock', '待执行'];
         const waitStarted = Date.parse(step.data?.started_at || '');
         const waiting = step.status === 'running' && step.data?.kind === 'agent_model_wait' && Number.isFinite(waitStarted);
         const waitDetail = waiting ? ` · 已等待 ${Math.max(0, Math.floor((Date.now() - waitStarted) / 1000))} 秒` : '';
@@ -420,14 +414,18 @@ function renderAgentSteps(session) {
                     <button class="btn-xs" type="button" data-click="openAgentRunInAts" data-a0="${escapeHtml(runId)}">在 GMS ATS 中查看 Run ${escapeHtml(runId)}</button>
                 </div>` : '';
         return `
-            <div style="border: 1px solid var(--border-color); border-radius: 6px; padding: 9px; background: var(--darker-bg);">
-                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
-                    <span style="width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: ${color}; color: #fff; font-size: 11px; flex-shrink: 0;">${icon}</span>
-                    <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">${escapeHtml(step.title || '')}</span>
+            <article class="agent-step" data-status="${escapeHtml(step.status || 'pending')}">
+                <span class="agent-step-marker" aria-hidden="true">${GmsUi.icon(presentation[1])}</span>
+                <div class="agent-step-card">
+                    <div class="agent-step-heading">
+                        <span class="agent-step-title">${escapeHtml(step.title || '')}</span>
+                        ${GmsUi.badge(...presentation)}
+                    </div>
+                    <div class="agent-step-detail">${escapeHtml((step.detail || '') + waitDetail)}</div>
+                    <time class="agent-step-time">${escapeHtml(formatAgentTime(step.created_at))}</time>
+                    ${runLink}
                 </div>
-                <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.45; overflow-wrap: anywhere;">${escapeHtml((step.detail || '') + waitDetail)}</div>
-                ${runLink}
-            </div>
+            </article>
         `;
     }).join('');
 }

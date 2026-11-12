@@ -667,7 +667,7 @@ class RuntimeReportsAndArtifactsTests(RuntimeUiHarness):
             page.evaluate("switchPage('report-analysis', null)")
             answers = iter(["qa@example.test", ""])
             page.on("dialog", lambda dialog: dialog.accept(next(answers)))
-            page.get_by_role("button", name="📧 发送邮件").evaluate(
+            page.get_by_role("button", name="发送邮件").evaluate(
                 "button => button.click()"
             )
             page.wait_for_function("() => window.currentReportAnalysisData !== null")

@@ -256,7 +256,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("const clusterModeReady = initializeClusterMode()", navigation)
         self.assertIn("await Promise.all([clusterModeReady, configReady])", navigation)
         self.assertIn("test-reports.js?v=20260812-stable-surfaces", shell)
-        self.assertIn("navigation.js?v=20260902-adbproxy-state", shell)
+        self.assertIn("navigation.js?v=20261112-primary-gradient", shell)
         self.assertIn("testTypeLower === 'apts'", navigation)
         self.assertIn("APTS使用GTS测试套件", navigation)
 
@@ -606,9 +606,9 @@ class FrontendIntegrityTests(unittest.TestCase):
         api_constants = read_text("web/static/js/api-constants.js")
 
         self.assertIn('data-click="copySkillInstallCommand"', shell)
-        self.assertIn("📋 安装/更新命令", shell)
+        self.assertIn("安装/更新命令", shell)
         self.assertIn('data-click="downloadSkillsZip"', shell)
-        self.assertIn("📦 离线包", shell)
+        self.assertIn("离线包", shell)
         self.assertIn("function buildSkillInstallCommand()", navigation)
         self.assertIn("function copySkillInstallCommand()", navigation)
         # 未指定 CA 时使用系统信任链；显式 CA 保留原值，下载失败向外返回。
@@ -925,7 +925,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         controls = read_text("web/static/js/pages/test-control.js")
 
         self.assertIn("device.protocol === 'fastboot'", main_text)
-        self.assertIn("● Fastboot", main_text)
+        self.assertIn("states.includes('fastboot')", main_text)
         self.assertIn("config.usbip_vid_pids", controls)
         # 部署拓扑为只读展示：VID:PID 列表以逗号连接渲染，Web 端不提交
         # 去重（saveConfig 只保留 local_server）。

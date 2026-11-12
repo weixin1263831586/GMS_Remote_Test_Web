@@ -691,7 +691,7 @@ class RuntimeDevicesTests(RuntimeUiHarness):
             expect(table).to_contain_text("ats-worker-246")
             expect(table).to_contain_text("ADB Proxy")
             expect(table).to_contain_text("ats-worker-controller → ats-worker-246")
-            expect(table).to_contain_text("已分配")
+            expect(table).to_contain_text("已占用")
             expect(table.locator("tr.device-group-row")).to_have_count(1)
         finally:
             page.close()
@@ -1049,7 +1049,7 @@ class RuntimeDevicesTests(RuntimeUiHarness):
                     const row = document.querySelector('#devices-table-body tr');
                     const buttons = [...row.querySelectorAll('button[data-serial]')];
                     return {
-                        display: row.cells[0].textContent.trim(),
+                        display: row.querySelector('.device-serial').textContent.trim(),
                         actionSerials: buttons.map(button => button.dataset.serial),
                     };
                 }
@@ -1086,7 +1086,7 @@ class RuntimeDevicesTests(RuntimeUiHarness):
                     displayDevicesManagement(allDevices);
                     return Object.fromEntries(
                         [...document.querySelectorAll('#devices-table-body tr')].map(row => {
-                            const serial = row.cells[0]?.textContent.trim();
+                            const serial = row.querySelector('.device-serial')?.textContent.trim();
                             const controls = [...row.querySelectorAll('button[data-serial]')]
                                 .filter(button => !button.textContent.includes('释放'));
                             return [serial, controls.map(button => button.disabled)];
@@ -1322,7 +1322,7 @@ class RuntimeDevicesTests(RuntimeUiHarness):
             expect(page.locator("#fastboot-devices-count")).to_have_text("1")
             expect(page.locator("#local-devices-count")).to_have_text("3")
             fastboot_row = page.locator("#devices-table-body tr", has_text="LOCAL-FB")
-            expect(fastboot_row.get_by_role("button", name="🐧 adb shell")).to_be_disabled()
+            expect(fastboot_row.get_by_role("button", name="adb shell")).to_be_disabled()
             self.assertEqual(cluster_device_requests, [])
 
             page.evaluate(

@@ -43,13 +43,13 @@
                                     <select id="test-suite" class="combo-box" data-test-config-control>
                                         <option value="" disabled selected></option>
                                     </select>
-                                    <button id="refresh-suites-btn" class="btn-xxs ui-refresh-action" data-click="refreshTestSuites">↻ 刷新套件</button>
+                                    <button id="refresh-suites-btn" class="btn-xxs ui-refresh-action" data-click="refreshTestSuites"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新套件</button>
                                 </div>
                                 <div class="form-row">
                                     <label>测试报告:</label>
                                     <div class="input-with-btn">
                                         <input type="text" id="retry-result" class="entry-field" data-test-config-control />
-                                        <button class="btn-small" data-click="browseRemoteFile" data-a0="retry" data-test-config-control>📁 选择报告</button>
+                                        <button class="btn-small" data-click="browseRemoteFile" data-a0="retry" data-test-config-control><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#folder"></use></svg> 选择报告</button>
                                     </div>
                                 </div>
                             </div>
@@ -84,7 +84,7 @@
                 <div class="adb-frame">
                     <div class="page-title-row">
                         <div class="section-title" style="margin: 0;">设备</div>
-                        <button class="btn-xxs" id="btn-follow-filter" data-click="toggleFollowFilter" title="只显示我在设备管理页&quot;关注&quot;的分组设备">⭐ 只看关注</button>
+                        <button class="btn-xxs" id="btn-follow-filter" data-click="toggleFollowFilter" title="只显示我在设备管理页&quot;关注&quot;的分组设备"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#star"></use></svg> 只看关注</button>
                     </div>
                     <div class="device-list-container">
                         <div class="device-canvas device-canvas-empty" id="device-canvas">
@@ -97,27 +97,27 @@
                     </div>
                     <!-- ADB 控制按钮 -->
                     <div class="adb-button-frame" data-operation-log-tab="system">
-                        <button id="refresh-devices-btn" class="btn-xxs ui-refresh-action" data-click="refreshDevices">↻ 刷新设备</button>
-                        <button class="btn-xxs" data-click="selectAllDevices">✅ 全选设备</button>
-                        <button class="btn-xxs" data-click="rebootDevices">⏻ 重启设备</button>
-                        <button id="btn-remount-devices" class="btn-xxs" data-click="remountDevices">⏻ Remount</button>
-                        <button class="btn-xxs" data-click="factoryResetDevices">🧹 恢复出厂</button>
-                        <button class="btn-xxs" data-click="connectWifi">🛜 连接Wifi</button>
-                        <button id="btn-lock-device" class="btn-xxs" data-click="lockSelectedDevices" data-a0="lock">🔒 锁定设备</button>
-                        <button id="btn-unlock-device" class="btn-xxs" data-click="lockSelectedDevices" data-a0="unlock">🔓 解锁设备</button>
-                        <button id="btn-check-lock-status" class="btn-xxs" data-click="checkDeviceLockStatus">🔐 锁定状态</button>
-                        <button id="btn-device-info" class="btn-xxs" data-click="collectDeviceInfo">📋 设备信息</button>
+                        <button id="refresh-devices-btn" class="btn-xxs ui-refresh-action" data-click="refreshDevices"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新设备</button>
+                        <button class="btn-xxs" data-click="selectAllDevices"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#check"></use></svg> 全选设备</button>
+                        <button class="btn-xxs" data-click="rebootDevices"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#power"></use></svg> 重启设备</button>
+                        <button id="btn-remount-devices" class="btn-xxs" data-click="remountDevices"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#power"></use></svg> Remount</button>
+                        <button class="btn-xxs btn-danger-quiet" data-click="factoryResetDevices"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#trash"></use></svg> 恢复出厂</button>
+                        <button class="btn-xxs" data-click="connectWifi"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#wifi"></use></svg> 连接Wifi</button>
+                        <button id="btn-lock-device" class="btn-xxs" data-click="lockSelectedDevices" data-a0="lock"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg> 锁定设备</button>
+                        <button id="btn-unlock-device" class="btn-xxs" data-click="lockSelectedDevices" data-a0="unlock"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#unlock"></use></svg> 解锁设备</button>
+                        <button id="btn-check-lock-status" class="btn-xxs" data-click="checkDeviceLockStatus"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg> 锁定状态</button>
+                        <button id="btn-device-info" class="btn-xxs" data-click="collectDeviceInfo"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> 设备信息</button>
                     </div>
                     <!-- VNC 控制按钮 -->
                     <div class="vnc-button-frame" data-operation-log-tab="system">
-                        <button id="btn-burn-firmware" class="btn-xxs" data-click="burnFirmware">🔥 烧写固件</button>
-                        <button id="btn-burn-gsi" class="btn-xxs" data-click="burnGsiImage">🔥 烧写GSI</button>
-                        <button class="btn-xxs" disabled title="该功能尚未开放">🔥 烧写SN</button>
-                        <button class="btn-xxs" id="start-vnc-btn" data-click="initAndStartVnc">🚀 启动VNC</button>
-                        <button class="btn-xxs" data-click="initAndStartVnc" data-a0="true" title="重启主机 VNC；会短暂断开当前 noVNC 连接">🔄 重启VNC</button>
-                        <button class="btn-xxs" data-click="showDeviceScreen">📺 设备投屏</button>
-                        <button class="btn-xxs" id="adb-forward-btn" data-click="setupAdbPortForward">🔌 ADB接入</button>
-                        <button class="btn-xxs" id="usbip-btn" data-click="setupUsbipForward">📱 本地设备</button>
+                        <button id="btn-burn-firmware" class="btn-xxs" data-click="burnFirmware"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#bolt"></use></svg> 烧写固件</button>
+                        <button id="btn-burn-gsi" class="btn-xxs" data-click="burnGsiImage"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#bolt"></use></svg> 烧写GSI</button>
+                        <button class="btn-xxs" disabled title="该功能尚未开放"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#bolt"></use></svg> 烧写SN</button>
+                        <button class="btn-xxs" id="start-vnc-btn" data-click="initAndStartVnc"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#play"></use></svg> 启动VNC</button>
+                        <button class="btn-xxs" data-click="initAndStartVnc" data-a0="true" title="重启主机 VNC；会短暂断开当前 noVNC 连接"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 重启VNC</button>
+                        <button class="btn-xxs" data-click="showDeviceScreen"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#monitor"></use></svg> 设备投屏</button>
+                        <button class="btn-xxs" id="adb-forward-btn" data-click="setupAdbPortForward"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#plug"></use></svg> ADB接入</button>
+                        <button class="btn-xxs" id="usbip-btn" data-click="setupUsbipForward"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#device"></use></svg> 本地设备</button>
                     </div>
                 </div>
 
@@ -126,11 +126,11 @@
                     <div class="section-title">操作控制</div>
                     <!-- VPN 控制按钮 -->
                     <div class="vpn-btn-frame" data-operation-log-tab="system">
-                        <button class="btn-xxs" data-click="copyDeployCommand">📦 签名发布包部署</button>
-                        <button class="btn-xxs" data-click="showTailscaleInfoModal">🌐 Tailscale组网</button>
-                        <button class="btn-xxs" id="check-sshd-btn" data-click="checkSshd">📡 检查SSHD</button>
-                        <button class="btn-xxs" id="check-routing-btn" data-click="checkRouting">📡 检查路由</button>
-                        <button class="btn-xxs" id="vpn-connect-btn" data-click="connectVpn">🔌 连接VPN</button>
+                        <button class="btn-xxs" data-click="copyDeployCommand"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg> 签名发布包部署</button>
+                        <button class="btn-xxs" data-click="showTailscaleInfoModal"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#globe"></use></svg> Tailscale组网</button>
+                        <button class="btn-xxs" id="check-sshd-btn" data-click="checkSshd"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#network"></use></svg> 检查SSHD</button>
+                        <button class="btn-xxs" id="check-routing-btn" data-click="checkRouting"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#network"></use></svg> 检查路由</button>
+                        <button class="btn-xxs" id="vpn-connect-btn" data-click="connectVpn"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#plug"></use></svg> 连接VPN</button>
                         <span id="vpn-status-label" class="vpn-status-label">状态: 未知</span>
 
                     </div>
@@ -148,7 +148,7 @@
                                 </div>
                                 <div class="drop-zone-filename" id="drop-zone-filename"></div>
                             </div>
-                            <button class="btn-xs" id="upload-test-host-btn" data-click="handleUploadFile">📤 上传到测试主机</button>
+                            <button class="btn-xs" id="upload-test-host-btn" data-click="handleUploadFile"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg> 上传到测试主机</button>
                         </div>
                         <!-- 上传进度 -->
                         <div class="progress-container">
@@ -160,10 +160,10 @@
                     </div>
                     <!-- 测试按钮 -->
                     <div class="test-btn-frame">
-                        <button class="btn-primary btn-lg" id="test-toggle-btn" data-click="toggleTest">▶ 开始测试</button>
-                        <button class="btn-xxs" data-click="downloadTestLog">📥 保存日志</button>
-                        <button class="btn-xxs" data-click="cleanTest">🧹 清除日志</button>
-                        <button class="btn-xxs" data-click="showConfig">⚙️ 配置</button>
+                        <button class="btn-primary btn-lg" id="test-toggle-btn" data-click="toggleTest"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#play"></use></svg> 开始测试</button>
+                        <button class="btn-xxs" data-click="downloadTestLog"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 保存日志</button>
+                        <button class="btn-xxs" data-click="cleanTest"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#trash"></use></svg> 清除日志</button>
+                        <button class="btn-xxs" data-click="showConfig"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg> 配置</button>
                     </div>
                 </div>
             </div>

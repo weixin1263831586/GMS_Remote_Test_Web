@@ -1,5 +1,5 @@
 <div class="container page-content" id="page-users">
-            {% include 'components/page-header.html' %}👥 用户管理{% include 'components/page-header-actions.html' %}
+            {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">👥</span> 用户管理{% include 'components/page-header-actions.html' %}
                 <div class="users-view-tabs" id="users-view-tabs" role="tablist" aria-label="用户管理视图" style="display: none;">
                     <button id="users-list-tab" class="btn-xs active" type="button" role="tab" aria-selected="true" data-click="agentAccessToggle" data-a0="false">用户列表</button>
                     <div id="agent-access-entry">
@@ -84,7 +84,7 @@
                                 <option value="inactive">已失效</option><option value="expired">已过期</option>
                                 <option value="revoked">已吊销</option>
                             </select>
-                            <button id="agent-access-refresh" class="btn-xs" type="button" data-click="agentAccessReload" data-r0="el">↻ 刷新</button>
+                            <button id="agent-access-refresh" class="btn-xs" type="button" data-click="agentAccessReload" data-r0="el"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
                         </div>
                     </div>
                     <div class="agent-access-table-wrap">

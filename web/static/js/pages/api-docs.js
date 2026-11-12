@@ -183,7 +183,7 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
                     <button data-click="_actCloseModal" data-a0="${modalId}"
                             style="padding: 8px 16px; background: var(--secondary-bg); color: var(--text-primary); border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">取消</button>
                     <button data-click="confirmAndSendRedmineReply" data-a0="${modalId}"
-                            style="padding: 8px 16px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; box-shadow: 0 2px 4px rgba(245, 87, 108, 0.3);">确认并发送</button>
+                            style="padding: 8px 16px; background: var(--primary-gradient); color: var(--text-on-accent); border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;">确认并发送</button>
                 </div>
             </div>
         </div>
@@ -785,7 +785,7 @@ function displayApiDocs(apis) {
                             <button
                                 id="expand-btn-${index}"
                                 data-click="toggleApiDetails" data-a0="${index}"
-                                style="background: var(--primary-color); color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 12px; font-weight: 600; min-width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0;"
+                                style="background: var(--primary-gradient); color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 12px; font-weight: 600; min-width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0;"
                                 title="点击展开/收起详情">
                                 <span id="expand-icon-${index}">▶</span>
                             </button>
@@ -839,7 +839,7 @@ window.toggleApiDetails = function(index) {
     } else {
         detailsDiv.style.display = 'none';
         iconSpan.textContent = '▶';
-        button.style.background = 'var(--primary-color)';
+        button.style.background = 'var(--primary-gradient)';
     }
 };
 

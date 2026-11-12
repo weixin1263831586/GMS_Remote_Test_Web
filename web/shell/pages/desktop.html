@@ -1,5 +1,5 @@
 <div class="container page-content" id="page-desktop">
-            {% include 'components/page-header.html' %}🖥️ 主机桌面{% include 'components/page-header-actions.html' %}
+            {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">🖥️</span> 主机桌面{% include 'components/page-header-actions.html' %}
                 <div class="host-workspace-layouts" role="group" aria-label="桌面布局">
                     <button class="btn-xs" data-workspace-layout="single" data-click="setHostWorkspaceLayout" data-a0="single">单屏</button>
                     <button class="btn-xs" data-workspace-layout="horizontal" data-click="setHostWorkspaceLayout" data-a0="horizontal">左右</button>
@@ -8,7 +8,7 @@
                 </div>
                 <div class="host-workspace-single-bar host-workspace-title-state">
                     <span class="host-workspace-pane-status" id="host-workspace-status-single">准备中</span>
-                    <button class="btn-xs host-workspace-refresh-btn" data-click="refreshHostWorkspacePane" data-a0="0" title="重新连接" aria-label="刷新主机桌面">🔄</button>
+                    <button class="btn-xs host-workspace-refresh-btn" data-click="refreshHostWorkspacePane" data-a0="0" title="重新连接" aria-label="刷新主机桌面"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg></button>
                 </div>
                 <div class="host-workspace-mode-pending host-workspace-title-state">
                     <span class="host-workspace-pane-status">正在准备工作区…</span>

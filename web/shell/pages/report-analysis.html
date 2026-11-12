@@ -1,5 +1,5 @@
 <div class="container page-content" id="page-report-analysis">
-            {% include 'components/page-header.html' %}📈 报告分析{% include 'components/page-header-end.html' %}
+            {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">📈</span> 报告分析{% include 'components/page-header-end.html' %}
 
             <!-- 拖拽上传区域 -->
             <div class="analysis-upload-frame">
@@ -18,7 +18,7 @@
                             </div>
                         </div>
                         <button class="btn-xs" data-click="_actClickById" data-a0="report-file-input">
-                            📤 上传报告
+                            <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg> 上传报告
                         </button>
                     </div>
                     <div class="report-upload-progress" id="report-upload-progress">
@@ -30,7 +30,7 @@
             <!-- 分析结果区域 -->
             <div id="report-analysis-result" style="display: none;">
                 <div class="report-result-card">
-                    <button class="btn-xs report-float-action" data-click="sendReportAnalysisEmail" title="将本报告分析结果作为 HTML 邮件发送">📧 发送邮件</button>
+                    <button class="btn-xs report-float-action" data-click="sendReportAnalysisEmail" title="将本报告分析结果作为 HTML 邮件发送"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#mail"></use></svg> 发送邮件</button>
                     <button class="btn-xs report-float-action" data-click="resetReportAnalysis">清除</button>
 
                     <div id="report-summary" class="report-summary-grid"></div>

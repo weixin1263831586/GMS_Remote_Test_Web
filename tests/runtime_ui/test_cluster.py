@@ -639,7 +639,8 @@ class RuntimeClusterTests(RuntimeUiHarness):
             for selector in ["#dash-refresh-charts", "#refresh"]:
                 button = page.locator(selector)
                 expect(button).to_be_enabled()
-                expect(button).to_have_text("↻ 刷新")
+                # 图标已改为 SVG use，textContent 只剩「 刷新」（可含空格）。
+                expect(button).to_have_text(re.compile(r"^刷新$"))
                 expect(button).not_to_have_attribute("aria-busy", "true")
         finally:
             page.close()

@@ -136,7 +136,7 @@ function renderAllCategories(grid) {
                         <span style="margin-left: 10px; padding: 2px 8px; background: var(--light-bg); border-radius: 10px; font-size: 11px; color: var(--text-muted);">${tools.length}</span>
                     </div>
                     <div style="display: flex; gap: 6px;">
-                        <button type="button" data-tools-action="add-tool" data-category="${escapeIconAttr(category)}" style="padding: 6px 16px; background: var(--primary-color); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
+                        <button type="button" data-tools-action="add-tool" data-category="${escapeIconAttr(category)}" style="padding: 6px 16px; background: var(--primary-gradient); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;"
                             class="hover-dim">
                             添加工具
                         </button>

@@ -1,8 +1,8 @@
 <div class="container page-content" id="page-devices">
-            {% include 'components/page-header.html' %}📱 设备管理{% include 'components/page-header-actions.html' %}
+            {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">📱</span> 设备管理{% include 'components/page-header-actions.html' %}
                 <div id="devices-view-tabs" role="tablist" aria-label="设备管理视图">
                     <div class="device-group-toolbar" id="device-group-toolbar">
-                        <button class="btn-xxs" data-click="openCreateGroupModal" title="新建分组">➕ 新建分组</button>
+                        <button class="btn-xxs" data-click="openCreateGroupModal" title="新建分组"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#plus"></use></svg> 新建分组</button>
                         <select class="btn-xxs" data-change="autoGroupAndReset" data-r0="value" title="按属性自动分组">
                             <option value="">⊞ 自动分组…</option>
                             <option value="worker" data-cluster-mode-only>按主机分组</option>
@@ -15,7 +15,7 @@
                         </select>
                     </div>
                     <button id="devices-list-tab" class="btn-xs active" type="button" role="tab" aria-selected="true" data-click="aoaViewToggle" data-a0="false">设备列表</button>
-                    <button id="aoa-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="aoaViewToggle" data-a0="true">🔁 AOA工作台</button>
+                    <button id="aoa-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="aoaViewToggle" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> AOA工作台</button>
                 </div>
             {% include 'components/page-header-end.html' %}
             <div id="devices-main-view">
@@ -48,42 +48,36 @@
 
             <!-- 设备列表 -->
             <div class="devices-table-wrap list-table-wrap">
-                <table class="list-table">
+                <table class="list-table device-management-table">
                     <thead>
                         <tr>
-                            <th style="width: 140px;" data-click="sortDevices" data-a0="serial_no">
-                                设备序列号 <span id="sort-serial_no">↕</span>
+                            <th scope="col" style="width: 190px;">
+                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="serial_no">设备 / 序列号 <span id="sort-serial_no">↕</span></button>
+                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="model">型号 <span id="sort-model">↕</span></button>
                             </th>
-                            <th style="width: 150px;" data-click="sortDevices" data-a0="source_host">
-                                设备来源 <span id="sort-source_host">↕</span>
+                            <th scope="col" style="width: 190px;">
+                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="source_host">来源 / 连接 <span id="sort-source_host">↕</span></button>
+                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="source_type">连接类型 <span id="sort-source_type">↕</span></button>
                             </th>
-                            <th style="width: 110px;" data-click="sortDevices" data-a0="source_type">
-                                来源类型 <span id="sort-source_type">↕</span>
+                            <th scope="col" style="width: 130px;">
+                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="android_version">系统 / 芯片 <span id="sort-android_version">↕</span></button>
+                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="soc_model">SOC <span id="sort-soc_model">↕</span></button>
                             </th>
-                            <th style="width: 120px;" data-click="sortDevices" data-a0="model">
-                                设备型号 <span id="sort-model">↕</span>
+                            <th scope="col" style="width: 145px;">
+                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="status">运行状态 <span id="sort-status">↕</span></button>
                             </th>
-                            <th style="width: 100px;" data-click="sortDevices" data-a0="soc_model">
-                                SOC <span id="sort-soc_model">↕</span>
+                            <th scope="col" style="width: 135px;">
+                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="locked_by">占用情况 <span id="sort-locked_by">↕</span></button>
                             </th>
-                            <th style="width: 130px;" data-click="sortDevices" data-a0="android_version">
-                                Android版本 <span id="sort-android_version">↕</span>
+                            <th scope="col" style="width: 90px;">
+                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="battery_level">电量 <span id="sort-battery_level">↕</span></button>
                             </th>
-                            <th style="width: 90px;" data-click="sortDevices" data-a0="battery_level">
-                                电池电量 <span id="sort-battery_level">↕</span>
-                            </th>
-                            <th style="width: 90px;" data-click="sortDevices" data-a0="status">
-                                状态 <span id="sort-status">↕</span>
-                            </th>
-                            <th style="width: 130px;" data-click="sortDevices" data-a0="locked_by">
-                                占用用户 <span id="sort-locked_by">↕</span>
-                            </th>
-                            <th style="width: 300px;">操作</th>
+                            <th scope="col" style="width: 300px;">操作</th>
                         </tr>
                     </thead>
                     <tbody id="devices-table-body">
                         <tr>
-                            <td colspan="10" class="table-placeholder">加载中...</td>
+                            <td colspan="7" class="table-placeholder">加载中...</td>
                         </tr>
                     </tbody>
                 </table>
@@ -107,7 +101,7 @@
                         <div class="aoa-column-heading">
                             <div><strong id="aoa-screen-heading">① 设备投屏</strong><span>录制机 UI 操作</span></div>
                             <div class="aoa-screen-actions">
-                                <button class="btn-xxs" id="aoa-toggle-live" type="button" data-click="aoaToggleLiveScreen" data-aoa-screen-action>▶ 实时投屏</button>
+                                <button class="btn-xxs" id="aoa-toggle-live" type="button" data-click="aoaToggleLiveScreen" data-aoa-screen-action><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#play"></use></svg> 实时投屏</button>
                                 <button class="btn-xxs" type="button" data-click="aoaRefreshScreen" data-aoa-screen-action>刷新</button>
                             </div>
                         </div>
@@ -130,7 +124,7 @@
                         <div class="aoa-screen-toolbar">
                             <button class="btn-xxs" type="button" data-click="aoaSendKey" data-r0="dataset.key" data-key="back" data-aoa-screen-action>← Back</button>
                             <button class="btn-xxs" type="button" data-click="aoaSendKey" data-r0="dataset.key" data-key="home" data-aoa-screen-action>⌂ Home</button>
-                            <button class="btn-xxs" type="button" data-click="aoaSendKey" data-r0="dataset.key" data-key="wake" data-aoa-screen-action>⏻ Wake</button>
+                            <button class="btn-xxs" type="button" data-click="aoaSendKey" data-r0="dataset.key" data-key="wake" data-aoa-screen-action><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#power"></use></svg> Wake</button>
                             <button class="btn-xxs" type="button" data-click="aoaCalibrateTouch" data-aoa-screen-action>触摸标定</button>
                             <button class="btn-xxs" id="aoa-grid-toggle" type="button" data-click="aoaToggleScreenGrid" title="叠加 AOA 命令坐标网格（0,0..360,640）与悬停坐标读数">⊞ 网格</button>
                         </div>
@@ -180,7 +174,11 @@
                     <section class="aoa-column aoa-config-column" aria-labelledby="aoa-config-heading">
                         <div class="aoa-column-heading">
                             <div><strong id="aoa-config-heading">③ AOA 录制 / 配置</strong><span id="aoa-record-state">尚未录制</span></div>
-                            <div class="aoa-inline-actions">
+                        </div>
+                        <div class="aoa-operation-block">
+                            <div class="aoa-operation-heading">
+                                <strong>录制</strong>
+                                <div class="aoa-inline-actions">
                                 <button id="aoa-record-start" class="btn-xxs btn-primary" type="button" data-click="aoaRecordingStart">开始录制</button>
                                 <!-- 暂停/继续复用同个按钮（aoaPlaybackButtonState
                                      切换文案与 data-mode，入口 aoaPlaybackPauseResume
@@ -190,9 +188,12 @@
                                      aoaPlaybackStop 按 playbackActive 分发），
                                      否则是录制停止（aoa-record-stop 语义）。 -->
                                 <button class="btn-xxs btn-danger" type="button" id="aoa-record-stop" data-click="aoaPlaybackStop" data-aoa-run>停止</button>
+                                </div>
                             </div>
+                            <p class="aoa-muted">在左侧设备上操作，将触摸与按键记录为命令序列。</p>
                         </div>
-                        <div class="aoa-config-group">
+                        <div class="aoa-config-group aoa-save-block">
+                            <strong class="aoa-subheading">保存配置</strong>
                             <div class="aoa-form-grid">
                                 <div class="aoa-field-wide aoa-field">
                                     <label for="aoa-profile-name">配置名称</label>
@@ -219,7 +220,7 @@
                                 <div class="aoa-profile-picker">
                                     <select id="aoa-replay-profile" class="btn-xxs" data-change="aoaProfileSelectionChanged"></select>
                                     <button class="btn-xxs" type="button" data-click="aoaLoadSelectedProfile" data-aoa-edit aria-label="载入选中配置" title="载入选中配置">载入</button>
-                                    <button class="btn-xxs" type="button" data-click="aoaProfileDeleteSelected" data-aoa-edit aria-label="删除配置" title="删除配置">删除</button>
+                                    <button class="btn-xxs btn-danger-quiet" type="button" data-click="aoaProfileDeleteSelected" data-aoa-edit aria-label="删除配置" title="删除配置">删除</button>
                                 </div>
                             </div>
                             <div id="aoa-profile-summary" class="aoa-profile-summary">暂无配置</div>
@@ -259,7 +260,7 @@
                         </details>
                         <div id="aoa-result" class="aoa-result" tabindex="0" aria-label="AOA 执行结果" hidden></div>
                         <div class="aoa-target-section">
-                            <div class="aoa-subheading">目标设备回放</div>
+                            <div class="aoa-subheading">回放</div>
                             <div class="aoa-device-selectors">
                                 <label>Worker<select id="aoa-replay-worker" class="btn-xxs" data-change="aoaReplayWorkerChanged"></select></label>
                                 <label>目标设备<select id="aoa-replay-device" class="btn-xxs"></select></label>

@@ -4,9 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mainline Known Issues</title>
+  <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
   <style>
-    :root { color-scheme: dark; --border:#2a2a35; --muted:#9090a0; --bg:#0a0a0f; --text:#e0e0e8; --head:#141419; --card:#111116; --primary:#3b82f6; }
-    body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:var(--text); background:var(--bg); display:flex; flex-direction:column; height:100vh; overflow:hidden; }
+    :root { color-scheme: dark; --border:var(--border-color); --muted:var(--text-secondary); --bg:var(--dark-bg); --text:var(--text-primary); --head:var(--light-bg); --card:var(--card-bg); --primary:var(--primary-color); }
+    body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:var(--text); background:var(--page-background); display:flex; flex-direction:column; height:100vh; overflow:hidden; }
     header { padding:18px 24px 10px; background:var(--card); border-bottom:1px solid var(--border); flex-shrink:0; }
     h1 { margin:0 0 8px; font-size:22px; color:var(--text); }
     .summary { display:flex; flex-wrap:wrap; gap:8px 16px; color:var(--muted); font-size:13px; }
@@ -15,7 +16,7 @@
     input, select { height:34px; border:1px solid var(--border); border-radius:6px; padding:0 10px; background:var(--card); color:var(--text); font:inherit; }
     input::placeholder { color:var(--muted); }
     select { appearance:auto; }
-    button { height:34px; cursor:pointer; background:var(--primary); color:white; border:none; border-radius:6px; padding:0 10px; font:inherit; font-weight:600; }
+    button { height:34px; cursor:pointer; background:var(--primary-gradient); color:white; border:none; border-radius:6px; padding:0 10px; font:inherit; font-weight:600; }
     table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--border); font-size:13px; table-layout:fixed; }
     th, td { border-bottom:1px solid var(--border); padding:8px 10px; text-align:left; vertical-align:top; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     th { background:var(--head); color:var(--text); position:sticky; top:0; z-index:1; }

@@ -109,6 +109,9 @@
 
     function drawGridLines(ctx, box, width, height) {
         const MARGIN = 14;
+        // Y 轴刻度画在画面外左黑边的最小宽度：最长标签「640」约 19px +
+        // 6px 间距 ≈ 25px，取 30 留余量。黑边不足时才回退到画面内角标。
+        const Y_LABEL_MIN_BAR = 30;
         const stepX = maxStep(GRID_MAX_X);
         const stepY = maxStep(GRID_MAX_Y);
         // 黑边余量：某侧有足够黑边时刻度画在外面，贴边时回退到画面内
@@ -135,7 +138,7 @@
             ctx.beginPath();
             ctx.moveTo(box.left, py + 0.5); ctx.lineTo(box.left + box.w, py + 0.5);
             ctx.stroke();
-            if (leftBar >= 46) {
+            if (leftBar >= Y_LABEL_MIN_BAR) {
                 ctx.textAlign = 'right';
                 label(ctx, String(y), box.left - 6, py - 4);
                 ctx.textAlign = 'center';
@@ -143,7 +146,7 @@
                 label(ctx, String(y), box.left + 2, py - 4);
             }
         }
-        if (leftBar >= 46) {
+        if (leftBar >= Y_LABEL_MIN_BAR) {
             ctx.textAlign = 'right';
             label(ctx, '0,0', box.left - 6, topBar >= MARGIN - 2 ? box.top - 12 : box.top + 2);
             ctx.textAlign = 'center';

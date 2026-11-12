@@ -206,19 +206,19 @@ function updateTestToggleButton(isTesting) {
 
     if (state.testStopping) {
         btn.disabled = true;
-        btn.textContent = '⏳ 停止中';
+        btn.innerHTML = GmsUi.icon('clock') + ' 停止中';
         btn.className = 'btn-danger btn-lg';
     } else if (state.testStarting) {
         btn.disabled = true;
-        btn.textContent = '⏳ 启动中';
+        btn.innerHTML = GmsUi.icon('clock') + ' 启动中';
         btn.className = 'btn-primary btn-lg';
     } else if (state.testing) {
         btn.disabled = false;
-        btn.textContent = '⏹ 停止测试';
+        btn.innerHTML = GmsUi.icon('stop') + ' 停止测试';
         btn.className = 'btn-danger btn-lg';
     } else {
         btn.disabled = false;
-        btn.textContent = '▶ 开始测试';
+        btn.innerHTML = GmsUi.icon('play') + ' 开始测试';
         btn.className = 'btn-primary btn-lg';
     }
 

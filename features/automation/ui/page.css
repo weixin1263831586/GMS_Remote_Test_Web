@@ -1,25 +1,25 @@
 :root {
     color-scheme: dark;
-    --bg: #0f1117;
-    --panel: #171a22;
-    --panel-2: #1d212b;
-    --panel-3: #222731;
-    --line: #303642;
-    --line-strong: #414957;
-    --text: #e7eaf0;
-    --muted: #9299a8;
-    --subtle: #737b8c;
-    --primary: #4f8cff;
-    --primary-hover: #75a4ff;
-    --warn: #e5b94f;
-    --danger: #ef6572;
-    --ok: #48c78e;
+    --bg:var(--dark-bg);
+    --panel:var(--card-bg);
+    --panel-2:var(--light-bg);
+    --panel-3:var(--lighter-bg);
+    --line:var(--border-color);
+    --line-strong:var(--border-light);
+    --text:var(--text-primary);
+    --muted:var(--text-secondary);
+    --subtle:var(--text-muted);
+    --primary:var(--primary-color);
+    --primary-hover:var(--primary-light);
+    --warn:var(--warning-color);
+    --danger:var(--danger-color);
+    --ok:var(--success-color);
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
     margin: 0;
-    background: var(--bg);
+    background: var(--page-background);
     color: var(--text);
     font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     font-size: 13px;
@@ -122,7 +122,7 @@ button {
     font-size: 12px;
 }
 button:hover { border-color: var(--primary); color: #fff; }
-button.primary { background: var(--primary); border-color: var(--primary); }
+button.primary { background:var(--primary-gradient); border-color: var(--primary); }
 button.danger { background: rgb(239 68 68 / 18%); border-color: var(--danger); }
 .workflow-tab {
     flex: 0 0 112px;
@@ -140,9 +140,9 @@ button.danger { background: rgb(239 68 68 / 18%); border-color: var(--danger); }
     position: relative;
 }
 .workflow-tab:hover { color: var(--text); }
-.workflow-tab:focus-visible { outline: 0; background: rgb(79 140 255 / 12%); }
+.workflow-tab:focus-visible { outline: 0; background: color-mix(in srgb, var(--primary-color) 12%, transparent); }
 .workflow-tab.active {
-    background: rgb(79 140 255 / 12%);
+    background: color-mix(in srgb, var(--primary-color) 12%, transparent);
     color: var(--primary-hover);
 }
 .workflow-tab.active::after {
@@ -242,8 +242,8 @@ button.danger { background: rgb(239 68 68 / 18%); border-color: var(--danger); }
     width: 24px;
     height: 24px;
     border-radius: 5px;
-    background: rgb(79 140 255 / 14%);
-    border: 1px solid rgb(79 140 255 / 42%);
+    background: color-mix(in srgb, var(--primary-color) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary-color) 42%, transparent);
     color: var(--primary-hover);
     font-size: 12px;
 }
@@ -310,7 +310,7 @@ input:disabled, select:disabled, button:disabled {
     padding: 10px;
     border: 1px solid var(--line);
     border-radius: 6px;
-    background: rgb(15 17 23 / 35%);
+    background: color-mix(in srgb, var(--dark-bg) 35%, transparent);
     transition: opacity .16s ease;
 }
 .build-source-row { align-items: start; }
@@ -350,7 +350,7 @@ input:disabled, select:disabled, button:disabled {
     padding: 8px;
     border: 1px solid var(--line);
     border-radius: 5px;
-    background: rgb(15 17 23 / 55%);
+    background: color-mix(in srgb, var(--dark-bg) 55%, transparent);
 }
 .device-field {
     min-width: 0;
@@ -441,7 +441,7 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
     border: 1px solid var(--line);
     border-left-width: 3px;
     border-radius: 6px;
-    background: rgb(15 17 23 / 45%);
+    background: color-mix(in srgb, var(--dark-bg) 45%, transparent);
 }
 .preflight-result strong { white-space: nowrap; }
 .preflight-result span { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
@@ -468,7 +468,7 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
     gap: 6px;
     padding: 10px 14px;
     border-bottom: 1px solid var(--line);
-    background: rgb(15 17 23 / 35%);
+    background: color-mix(in srgb, var(--dark-bg) 35%, transparent);
 }
 .subtabs-label { color: var(--muted); font-size: 11px; font-weight: 700; margin-right: 6px; }
 .empty-state {
@@ -548,7 +548,7 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
 .auto-follow { display: flex; align-items: center; gap: 5px; white-space: nowrap; color: var(--muted); }
 .auto-follow input { width: auto; margin: 0; }
 .build-job:hover { border-color: var(--primary); background: var(--panel-3); }
-.build-job.active { border-color: var(--primary); background: rgb(79 140 255 / 14%); }
+.build-job.active { border-color: var(--primary); background: color-mix(in srgb, var(--primary-color) 14%, transparent); }
 .password-backdrop {
     position: fixed;
     inset: 0;
@@ -577,7 +577,7 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
 .password-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .tabs { display: flex; gap: 6px; }
-.tab.active { background: rgb(79 140 255 / 16%); border-color: var(--primary); color: var(--primary-hover); }
+.tab.active { background: color-mix(in srgb, var(--primary-color) 16%, transparent); border-color: var(--primary); color: var(--primary-hover); }
 .monitor-events-body {
     display: grid;
     grid-template-rows: auto 1fr;
@@ -645,7 +645,7 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
     cursor: pointer;
 }
 .run-card:hover { border-color: var(--primary); background: var(--panel-3); }
-.run-card.active { border-color: var(--primary); background: rgb(79 140 255 / 14%); }
+.run-card.active { border-color: var(--primary); background: color-mix(in srgb, var(--primary-color) 14%, transparent); }
 .run-main { display: grid; gap: 8px; min-width: 0; }
 .run-title {
     display: flex;
@@ -691,7 +691,7 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
     min-height: 0;
     overflow: auto;
     padding: 10px 12px;
-    background: #101319;
+    background: var(--darker-bg);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 12px;
     scrollbar-gutter: stable;
@@ -706,7 +706,7 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
     border-bottom: 1px solid rgb(48 54 66 / 52%);
     line-height: 1.5;
 }
-.event-line:hover { background: rgb(79 140 255 / 6%); }
+.event-line:hover { background: color-mix(in srgb, var(--primary-color) 6%, transparent); }
 .event-line-time, .event-line-domain, .event-line-stage { color: var(--muted); }
 .event-line-level { font-weight: 700; }
 .event-line-level.error { color: var(--danger); }
@@ -1039,3 +1039,5 @@ body.overlay-open { overflow: hidden; }
     .field-hint,
     .field-status { line-height: 1.2; }
 }
+
+button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}

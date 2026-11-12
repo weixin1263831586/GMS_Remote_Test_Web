@@ -1,6 +1,6 @@
 <div class="container page-content" id="page-notes">
-            {% include 'components/page-header.html' %}📚 个人知识库{% include 'components/page-header-actions.html' %}
-                <button type="button" class="btn-xs page-title-action" data-click="ekOpen" title="外部知识库（Android Internals Wiki）revision 状态与管理">🔗 外部知识库</button>
+            {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">📚</span> 个人知识库{% include 'components/page-header-actions.html' %}
+                <button type="button" class="btn-xs page-title-action" data-click="ekOpen" title="外部知识库（Android Internals Wiki）revision 状态与管理"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#link"></use></svg> 外部知识库</button>
             {% include 'components/page-header-end.html' %}
             <div class="kb-layout split-layout">
                 <div class="pane">
@@ -33,7 +33,7 @@
                             <button class="btn-xs" data-click="kbToggleFavorite">收藏</button>
                             <button class="btn-xs" data-click="kbShowHistory">历史</button>
                             <button class="btn-xs btn-primary" data-click="kbSaveDoc">保存</button>
-                            <button class="btn-xs" data-click="kbDeleteCurrent">删除</button>
+                            <button class="btn-xs btn-danger-quiet" data-click="kbDeleteCurrent">删除</button>
                         </div>
                         <div class="kb-editor-tags pane-bar">
                             <input id="kb-doc-tags" class="combo-box pane-grow" placeholder="标签，逗号分隔" />

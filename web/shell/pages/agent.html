@@ -1,28 +1,30 @@
 <div class="container page-content" id="page-agent">
-            {% include 'components/page-header.html' %}💬 对话Agent{% include 'components/page-header-actions.html' %}
-                <button class="btn-xs" data-click="newAgentSession">新会话</button>
-                <button class="btn-xs" data-click="cancelAgentSession">取消Agent</button>
+            {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">💬</span> 对话Agent{% include 'components/page-header-actions.html' %}
+                <button class="btn-xs" data-click="newAgentSession"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#plus"></use></svg>新会话</button>
+                <button class="btn-xs btn-danger-quiet" data-click="cancelAgentSession"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#stop"></use></svg>取消Agent</button>
             {% include 'components/page-header-end.html' %}
 
             <div class="split-layout agent-layout">
-                <div class="pane">
+                <div class="pane agent-conversation-pane">
+                    <div class="agent-conversation-heading">
+                        <strong>任务对话</strong>
+                        <span class="ui-meta">描述目标，确认计划，跟踪执行</span>
+                    </div>
                     <div id="agent-chat-messages">
                         <div class="agent-chat-empty">输入测试需求，例如：跑 CtsWifiTestCases，找一台空闲设备，失败 retry 2 次，还失败就报告分析</div>
                     </div>
                     <div class="agent-composer">
                         <textarea id="agent-input" class="entry-field" rows="4" placeholder="描述你的目标：设备与固件、测试、报告、构建、工单或知识查询&#10;Shift+Enter 换行，Enter 发送"></textarea>
                         <div class="agent-send-actions">
-                            <button class="btn-primary" data-click="sendAgentMessage" data-a0="false">发送</button>
-                            <button class="btn-primary is-execute" data-click="sendAgentMessage" data-a0="true">执行</button>
+                            <button class="btn-primary" data-click="sendAgentMessage" data-a0="false"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#message"></use></svg>发送</button>
+                            <button class="btn-xs agent-execute-action" data-click="sendAgentMessage" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#play"></use></svg>执行</button>
                         </div>
                     </div>
                 </div>
-                <div class="pane">
+                <div class="pane agent-execution-pane">
                     <div class="agent-run-header">
-                        <div class="agent-run-title-row">
-                            <div class="agent-run-title">执行步骤</div>
-                            <span id="agent-status">idle</span>
-                        </div>
+                        <div class="agent-run-title">执行步骤</div>
+                        <span id="agent-status">idle</span>
                         <span id="agent-engine-status">对话引擎：待连接</span>
                         <div class="agent-model-line">
                             <span id="agent-model-status" data-state="loading" title="报告与知识分析模型；对话引擎状态单独显示。">分析模型：读取配置…</span>

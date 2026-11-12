@@ -1,4 +1,5 @@
 /* ==================== Reset & Base ==================== */
+@import url("/static/css/theme.css?v=20261112-purple-surfaces");
 @import url("/static/css/apk-analysis.css?v=20260828-manifest-scroll");
 @import url("/static/css/form-controls.css?v=20260828-password-icons");
 
@@ -34,49 +35,21 @@
 }
 
 :root {
-    /* 主色调 - 现代蓝色渐变 */
-    --primary-color: #3b82f6;
-    --primary-light: #60a5fa;
-    --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
+    --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.28);
+    --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.38);
+    --shadow-glow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 28%, transparent);
 
-    /* 功能色 */
-    --success-color: #10b981;
-    --danger-color: #ef4444;
-    --warning-color: #f59e0b;
-    --info-color: #06b6d4;
-    --cluster-accent: #42a5f5;
-    --skill-accent: #8b5cf6;
+    --radius-control: 6px;
+    --radius-surface: 8px;
 
-    /* 背景色 - 提高对比度 */
-    --dark-bg: #0a0a0f;
-    --darker-bg: #050508;
-    --light-bg: #141419;
-    --lighter-bg: #1c1c24;
-    --card-bg: #111116;
-
-    /* 边框和分割线 */
-    --border-color: #2a2a35;
-    --border-light: #3a3a45;
-
-    /* 文字色 - 提高对比度和可读性 */
-    --text-primary: #fff;
-    --text-secondary: #c0c0d0;
-    --text-muted: #9090a0;
-
-    /* 阴影 */
-    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
-    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
-    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
-    --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.3);
-
-    /* 过渡动画 */
     --transition-fast: all 0.15s ease;
     --transition-normal: all 0.25s ease;
 }
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    background: var(--dark-bg);
+    background: var(--page-background);
     color: var(--text-primary);
     line-height: 1.6;
     height: 100vh;
@@ -188,18 +161,17 @@ body {
     display: flex;
     height: 100vh;
     overflow: hidden;
-    background: linear-gradient(135deg, var(--dark-bg) 0%, var(--darker-bg) 100%);
+    background: var(--page-background);
 }
 
 /* ==================== Sidebar ==================== */
 .sidebar {
     width: 130px;
-    background: linear-gradient(180deg, var(--light-bg) 0%, var(--darker-bg) 100%);
+    background: var(--card-bg);
     border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
-    box-shadow: var(--shadow-md);
 }
 
 .sidebar-header {
@@ -210,23 +182,11 @@ body {
     overflow: hidden;
 }
 
-.sidebar-header::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, transparent 100%);
-    pointer-events: none;
-}
-
 .sidebar-brand {
     font-size: 16px;
     font-weight: 700;
-    color: #fff;
-    letter-spacing: 0.8px;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    color: var(--text-on-accent);
+    letter-spacing: 0.2px;
     position: relative;
     z-index: 1;
 }
@@ -271,7 +231,7 @@ body {
     padding: 10px 9px;
     margin-top: auto;
     border-top: 1px solid var(--border-color);
-    background: var(--light-bg);
+    background: transparent;
     text-align: center;
 }
 
@@ -473,10 +433,9 @@ body {
 }
 
 .sidebar-item.active {
-    background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
+    background: color-mix(in srgb, var(--primary-color) 16%, transparent);
     color: var(--primary-light);
     font-weight: 600;
-    box-shadow: var(--shadow-sm);
 }
 
 .sidebar-item.active::before {
@@ -862,7 +821,7 @@ body {
 .host-workspace-layouts > .btn-xs:first-child { border-radius:4px 0 0 4px; }
 .host-workspace-layouts > .btn-xs:last-child { border-radius:0 4px 4px 0; }
 .host-workspace-layouts > .btn-xs + .btn-xs { margin-left:-1px; }
-.host-workspace-layouts .btn-xs.active { background:var(--primary-color); color:#fff; border-color:var(--primary-color); }
+.host-workspace-layouts .btn-xs.active { background:var(--primary-gradient); color:#fff; border-color:var(--primary-color); }
 .host-workspace-grid { flex:1; min-height:0; display:grid; gap:8px; height:auto; }
 .host-workspace-grid.layout-single { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); }
 .host-workspace-grid.layout-horizontal { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:minmax(0,1fr); }
@@ -873,7 +832,7 @@ body {
 .host-workspace-pane-header { flex:0 0 auto; min-height:34px; padding:4px 6px; display:flex; align-items:center; gap:6px; background:var(--darker-bg); border-bottom:1px solid var(--border-color); }
 .host-workspace-pane-header select { min-width:0; max-width:180px; padding:3px 5px; background:var(--light-bg); border:1px solid var(--border-color); border-radius:3px; color:var(--text-primary); font-size:11px; }
 .host-workspace-pane-status { margin-left:auto; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; color:var(--text-secondary); }
-.host-workspace-pane-body { position:relative; flex:1; min-height:0; overflow:hidden; background:#000; }
+.host-workspace-pane-body { position:relative; flex:1; min-height:0; overflow:hidden; background:var(--darker-bg); }
 .host-workspace-pane-body iframe, .host-workspace-terminal { width:100%; height:100%; border:0; }
 .host-workspace-empty { height:100%; display:flex; align-items:center; justify-content:center; color:var(--text-secondary); }
 .host-workspace-grid.pane-maximized .host-workspace-pane:not(.maximized) { display:none; }
@@ -913,12 +872,12 @@ body {
 }
 
 .status-label.connected {
-    background: rgba(76, 175, 80, 0.2);
+    background: color-mix(in srgb, var(--success-color) 20%, transparent);
     color: var(--success-color);
 }
 
 .status-label.disconnected {
-    background: rgba(244, 67, 54, 0.2);
+    background: color-mix(in srgb, var(--danger-color) 20%, transparent);
     color: var(--danger-color);
 }
 
@@ -1018,7 +977,7 @@ body {
     display: inline-block;
     margin-top: 5px;
     padding: 2px 8px;
-    background: var(--primary-color);
+    background: var(--primary-gradient);
     color: var(--text-primary);
     border-radius: 3px;
     font-family: monospace;
@@ -1027,7 +986,7 @@ body {
 }
 
 .placeholder-instructions code:hover {
-    background: #1976D2;
+    background: var(--primary-strong);
 }
 
 
@@ -1081,6 +1040,7 @@ body {
 .page-header-row > .section-title {
     align-items: flex-start;
     align-self: stretch;
+    color: var(--text-primary);
     line-height: 17.2px;
     margin: 0;
 }
@@ -1195,6 +1155,12 @@ body {
     text-align: center;
 }
 .list-table th[data-click] { cursor: pointer; }
+.list-table tbody tr {
+    transition: background 0.12s ease;
+}
+.list-table tbody tr:hover {
+    background: color-mix(in srgb, var(--primary-color) 5%, transparent);
+}
 td.table-placeholder {
     padding: 40px;
     color: var(--text-secondary);
@@ -1433,7 +1399,7 @@ td.table-placeholder {
 }
 
 .device-column::-webkit-scrollbar-thumb:hover {
-    background: var(--primary-color);
+    background: var(--primary-gradient);
 }
 
 /* ==================== 设备分组 ==================== */
@@ -1463,7 +1429,7 @@ td.table-placeholder {
 
 /* 分组开关按钮激活态 */
 #btn-toggle-groupview.active {
-    background: var(--primary-color);
+    background: var(--primary-gradient);
     color: #fff;
 }
 
@@ -1661,7 +1627,7 @@ td.table-placeholder {
     border-radius: 10px;
     font-size: 10px;
     font-weight: 600;
-    background: rgba(76, 175, 80, 0.2);
+    background: color-mix(in srgb, var(--success-color) 20%, transparent);
     color: var(--success-color);
     display: inline-flex;
     align-items: center;
@@ -1672,7 +1638,7 @@ td.table-placeholder {
 }
 
 .device-status.locked {
-    background: rgba(244, 67, 54, 0.2);
+    background: color-mix(in srgb, var(--danger-color) 20%, transparent);
     color: var(--danger-color);
 }
 
@@ -1749,12 +1715,12 @@ td.table-placeholder {
 }
 
 .vpn-status-label.connected {
-    background: rgba(76, 175, 80, 0.2);
+    background: color-mix(in srgb, var(--success-color) 20%, transparent);
     color: var(--success-color);
 }
 
 .vpn-status-label.disconnected {
-    background: rgba(244, 67, 54, 0.2);
+    background: color-mix(in srgb, var(--danger-color) 20%, transparent);
     color: var(--danger-color);
 }
 
@@ -1855,7 +1821,7 @@ td.table-placeholder {
 }
 
 .log-tab-btn.active {
-    background: var(--primary-color);
+    background: var(--primary-gradient);
     color: #fff;
     border-color: var(--primary-color);
 }

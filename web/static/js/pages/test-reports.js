@@ -319,7 +319,7 @@ function displayTestReports(reports) {
             <td style="padding: 4px 6px; text-align: center; font-weight: 600; font-size: 13px; ${passRateStyle}">${escapeHtml(passRate)}</td>
             <td style="padding: 4px 6px; text-align: center;">
                 <button class="btn-xxs" data-action="analyze" style="margin: 2px; font-size: 12px;">📈 分析</button>
-                <button class="btn-xxs" data-action="retry" style="background: var(--primary-color); margin: 2px; font-size: 12px;">🔄 retry</button>
+                <button class="btn-xxs" data-action="retry" style="background: var(--primary-gradient); margin: 2px; font-size: 12px;">🔄 retry</button>
                 <button class="btn-xxs" data-action="results" style="background: var(--info-color); margin: 2px; font-size: 12px;">results</button>
                 <button class="btn-xxs" data-action="logs" style="background: var(--warning-color); margin: 2px; font-size: 12px;">logs</button>
                 <button class="btn-xxs" data-action="download" style="background: var(--success-color); margin: 2px; font-size: 12px;">⬇️ 下载</button>

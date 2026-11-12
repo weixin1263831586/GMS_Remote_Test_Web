@@ -1,12 +1,12 @@
 <div class="container page-content" id="page-security-audit">
-            {% include 'components/page-header.html' %}🛡️ 安全审计{% include 'components/page-header-actions.html' %}
+            {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">🛡️</span> 安全审计{% include 'components/page-header-actions.html' %}
                 <!-- 视图页签：同 users 页「用户列表 / Agent 接入」胶囊模板
                      （.users-view-tabs 通用分段按钮样式）。「历史邮件」为
                      owner 视图（本人邮件台账），管理员可切全量。 -->
                 <div class="users-view-tabs" id="audit-view-tabs" role="tablist" aria-label="安全审计视图" style="display: none;">
                     <button id="audit-logs-tab" class="btn-xs active" type="button" role="tab" aria-selected="true" data-click="auditOutboxToggle" data-a0="false">审计日志</button>
                     <div id="audit-outbox-entry">
-                        <button id="audit-outbox-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="auditOutboxToggle" data-a0="true">📧 历史邮件</button>
+                        <button id="audit-outbox-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="auditOutboxToggle" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#mail"></use></svg> 历史邮件</button>
                     </div>
                 </div>
             {% include 'components/page-header-end.html' %}
@@ -45,8 +45,8 @@
                     <option value="page_visit">入口访问</option>
                 </select>
                 <input id="audit-search-input" class="entry-field" type="text" placeholder="搜索用户、IP、接口、页面" data-keydown="loadSecurityAudit" data-key="Enter" data-a0="true" />
-                <button class="btn-xs" data-click="loadSecurityAudit" data-a0="true">🔄 刷新</button>
-                <button class="btn-xs" data-click="exportSecurityAudit">📥 导出</button>
+                <button class="btn-xs" data-click="loadSecurityAudit" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                <button class="btn-xs" data-click="exportSecurityAudit"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 导出</button>
             </div>
 
             <div class="audit-table-wrap list-table-wrap">
@@ -88,7 +88,7 @@
                         <option value="false">失败</option>
                     </select>
                     <input id="email-outbox-search-input" class="entry-field" type="text" placeholder="搜索收件人、主题" data-keydown="loadAuditOutbox" data-key="Enter" data-a0="true" />
-                    <button class="btn-xs" data-click="loadAuditOutbox" data-a0="true">🔄 刷新</button>
+                    <button class="btn-xs" data-click="loadAuditOutbox" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
                     <label id="email-outbox-all-users-label" style="display: none;">
                         <input type="checkbox" id="email-outbox-all-users" data-change="loadAuditOutbox" data-a0="true" />
                         全部用户

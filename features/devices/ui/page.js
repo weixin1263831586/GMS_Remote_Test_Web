@@ -80,6 +80,9 @@
 
     function button(text, action, className = '') {
         const node = element('button', className, text);
+        const name = {'打开控制台': 'terminal', '切换控制台': 'terminal', '编辑绑定': 'edit',
+            '绑定': 'link', '启动采集': 'play', '停止采集': 'stop'}[text];
+        if (name) node.innerHTML = GmsUi.icon(name) + GmsUi.escape(text);
         node.type = 'button';
         node.addEventListener('click', action);
         return node;
@@ -398,6 +401,26 @@
         session.pane.querySelector('.console-title').textContent = session.title;
         session.pane.querySelector('.console-subtitle').textContent =
             `${port.devname || '当前离线'} · ${port.binding?.baudrate || ''} baud · ${port.port_key}`;
+        const details = session.pane.querySelector('.console-info-grid');
+        details.replaceChildren();
+        for (const [label, value] of [
+            ['绑定设备', port.binding?.label || port.binding?.device_id || '未关联'],
+            ['串口节点', port.devname || '离线'],
+            ['波特率', port.binding?.baudrate ?? '未配置'],
+            ['回车格式', port.binding?.newline || '未配置'],
+            ['芯片 / 驱动', [port.usb_vendor_name, port.usb_model_name, port.driver].filter(Boolean).join(' / ') || '未上报'],
+            ['备注', port.binding?.note || '无'],
+        ]) {
+            details.append(element('dt', '', label), element('dd', '', String(value)));
+        }
+        const others = session.pane.querySelector('.console-other-list');
+        others.replaceChildren();
+        state.ports.filter(item => item.port_key !== session.portKey && item.binding).forEach(item => {
+            const row = element('div', 'console-other-port');
+            row.append(element('span', '', portTitle(item)), button('打开控制台', () => openConsole(item)));
+            others.append(row);
+        });
+        if (!others.childElementCount) others.append(element('span', 'muted', '暂无其他已绑定串口'));
         const tabTitle = session.tab?.querySelector('.tab-title');
         if (tabTitle) tabTitle.textContent = `控制台${session.id}`;
         if (!port.online) setSocketStatus(session, '串口离线', 'offline');
@@ -421,8 +444,17 @@
 
     function setSocketStatus(session, text, className) {
         const node = session.pane.querySelector('.socket-status');
-        node.textContent = text;
+        node.innerHTML = GmsUi.icon(className === 'online' ? 'check' : className === 'offline' ? 'close' : 'clock') + GmsUi.escape(text);
         node.className = `socket-status status-pill ${className}`;
+    }
+
+    function rememberConsoleAction(session, label) {
+        const list = session.pane.querySelector('.console-activity');
+        list.querySelector('.empty')?.remove();
+        const row = element('li');
+        row.append(element('time', 'mono', new Date().toLocaleTimeString()), element('span', '', label));
+        list.prepend(row);
+        while (list.children.length > 4) list.lastElementChild.remove();
     }
 
     function ensureTerminal(session) {
@@ -431,6 +463,7 @@
             notice('终端渲染组件加载失败，请刷新页面重试', 'error');
             return false;
         }
+        const theme = getComputedStyle(document.documentElement);
         const terminal = new Terminal({
             convertEol: true,
             cursorBlink: false,
@@ -441,7 +474,11 @@
             fontFamily: '"DejaVu Sans Mono", "Liberation Mono", Consolas, "Courier New", monospace',
             fontSize: 13,
             scrollback: 10000,
-            theme: {background: '#070a0e', foreground: '#d5dfcf', cursor: '#d5dfcf'},
+            theme: {
+                background: theme.getPropertyValue('--darker-bg').trim(),
+                foreground: theme.getPropertyValue('--text-primary').trim(),
+                cursor: theme.getPropertyValue('--text-primary').trim(),
+            },
         });
         const fitAddon = new FitAddon.FitAddon();
         terminal.loadAddon(fitAddon);
@@ -501,6 +538,7 @@
         socket.onopen = () => {
             if (generation !== session.socketGeneration || session.closed) return;
             setSocketStatus(session, '通道已连接', 'waiting');
+            rememberConsoleAction(session, 'WebSocket 通道已连接');
         };
         socket.onmessage = event => {
             if (generation !== session.socketGeneration || session.closed) return;
@@ -539,6 +577,7 @@
         }
         try {
             session.socket.send(JSON.stringify({type: 'input', data, append_newline: appendNewline}));
+            rememberConsoleAction(session, '已发送输入');
             return true;
         } catch (error) {
             setWritable(session, false);
@@ -643,11 +682,11 @@
                 </div>
                 <div class="console-actions">
                     <span class="socket-status status-pill offline">未连接</span>
-                    <button class="reconnect-socket" type="button">重连</button>
-                    <button class="pause-output" type="button">暂停</button>
-                    <button class="clear-screen" type="button">清屏</button>
-                    <button class="copy-output" type="button">复制</button>
-                    <button class="close-console" type="button">关闭</button>
+                    <button class="reconnect-socket" type="button">${GmsUi.icon('refresh')}重连</button>
+                    <button class="pause-output" type="button">${GmsUi.icon('pause')}暂停</button>
+                    <button class="clear-screen" type="button">${GmsUi.icon('trash')}清屏</button>
+                    <button class="copy-output" type="button">${GmsUi.icon('copy')}复制</button>
+                    <button class="close-console" type="button">${GmsUi.icon('close')}关闭</button>
                 </div>
             </div>
             <div class="console-layout">
@@ -656,23 +695,37 @@
                     <div class="input-dock">
                         <div class="input-row">
                             <input class="terminal-input" type="text" autocomplete="off" placeholder="输入命令，按 Enter 发送">
-                            <button class="send-input primary" type="button">发送</button>
+                            <button class="send-input primary" type="button">${GmsUi.icon('play')}发送</button>
                             <button class="send-ctrl-c" type="button" title="发送 0x03">Ctrl+C</button>
                         </div>
                     </div>
                 </div>
-                <aside class="history-column">
+                <aside class="console-sidebar">
+                    <section class="console-device-info">
+                        <h3>${GmsUi.icon('device')}设备信息</h3>
+                        <dl class="console-info-grid"></dl>
+                    </section>
+                    <section class="console-operation-history">
+                        <h3>${GmsUi.icon('clock')}本次操作</h3>
+                        <ul class="console-activity"><li class="empty">尚无操作</li></ul>
+                    </section>
+                    <section class="history-column">
                     <div class="history-head">
                         <h3>历史日志</h3>
-                        <button class="reload-log" type="button">刷新</button>
+                        <button class="reload-log" type="button">${GmsUi.icon('refresh')}刷新</button>
                     </div>
                     <label>日期<select class="log-date"><option value="">最新</option></select></label>
                     <label>尾部行数<select class="log-tail"><option>200</option><option selected>500</option><option>2000</option><option>10000</option></select></label>
                     <pre class="history-output">暂无日志</pre>
                     <div class="history-actions">
-                        <button class="download-log" type="button">下载</button>
-                        <button class="clear-logs danger" type="button">清空日志</button>
+                        <button class="download-log" type="button">${GmsUi.icon('download')}下载</button>
+                        <button class="clear-logs danger" type="button">${GmsUi.icon('trash')}清空日志</button>
                     </div>
+                    </section>
+                    <section class="console-other-ports">
+                        <h3>${GmsUi.icon('plug')}其他已绑定串口</h3>
+                        <div class="console-other-list"></div>
+                    </section>
                 </aside>
             </div>`;
         $('console-section').append(pane);

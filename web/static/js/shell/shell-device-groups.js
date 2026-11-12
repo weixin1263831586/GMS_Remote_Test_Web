@@ -142,7 +142,7 @@
                     const group = {
                         id: `__host__${workerId}`,
                         name: label,
-                        color: '#42a5f5'
+                        color: 'var(--cluster-accent)'
                     };
                     const collapsed = state.collapsedGroups.has(group.id);
                     return mgmtGroupTitleRow(group, members.length, true)
@@ -168,7 +168,7 @@
                     <button class="btn-xxs" data-mgmt-del="${group.id}" style="padding:2px 6px;font-size:11px;">🗑️ 删除</button>
                 </span>`;
             return `<tr class="device-group-row" style="background: var(--lighter-bg);">
-                <td colspan="10" style="padding:6px 8px;">
+                <td colspan="7" style="padding:6px 8px;">
                     <div class="device-group-header" style="background:transparent;border:none;">${toggle}${color}${name}${cnt}${ops}</div>
                 </td>
             </tr>`;

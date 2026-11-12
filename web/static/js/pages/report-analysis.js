@@ -1916,8 +1916,8 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2 style="margin: 0; font-size: 18px; font-weight: 600;">🤖 报错分析</h2>
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    ${data.source_code_fetched ? '<span style="font-size: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 3px 10px; border-radius: 4px;">✓ 源码已获取</span>' : ''}
-                    ${data.ai_enabled === false ? '<span style="font-size: 10px; background: var(--warning-color); color: white; padding: 2px 8px; border-radius: 4px;">规则分析</span>' : '<span style="font-size: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2px 8px; border-radius: 4px;">AI增强</span>'}
+                    ${data.source_code_fetched ? '<span style="font-size: 10px; background: var(--primary-gradient); color: var(--text-on-accent); padding: 3px 10px; border-radius: 4px;">✓ 源码已获取</span>' : ''}
+                    ${data.ai_enabled === false ? '<span style="font-size: 10px; background: var(--warning-color); color: var(--text-on-accent); padding: 2px 8px; border-radius: 4px;">规则分析</span>' : '<span style="font-size: 10px; background: var(--skill-accent); color: var(--text-on-accent); padding: 2px 8px; border-radius: 4px;">AI增强</span>'}
                     ${data.ai_model ? `<span style="font-size: 10px; background: var(--success-color); color: white; padding: 2px 8px; border-radius: 4px;">${escapeHtml(data.ai_model)}</span>` : ''}
                     <button data-click="closeAIAnalysisModal" data-a0="${modalId}" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);">×</button>
                 </div>
@@ -1926,10 +1926,10 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
 
     if (data.source_code_fetched && data.source_url) {
         html += `
-            <div style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); border-left: 4px solid #667eea; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
-                <div style="font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #667eea;">💻 源码信息</div>
+            <div style="background: color-mix(in srgb, var(--primary-color) 12%, transparent); border-left: 4px solid var(--primary-color); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                <div style="font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--primary-light);">💻 源码信息</div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">文件路径: ${escapeHtml(data.source_file_path || 'N/A')}</div>
-                <a href="${escapeHtml(safeReportExternalUrl(data.source_url))}" target="_blank" rel="noopener" style="font-size: 11px; color: #667eea; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+                <a href="${escapeHtml(safeReportExternalUrl(data.source_url))}" target="_blank" rel="noopener" style="font-size: 11px; color: var(--primary-light); text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
                     🔗 查看源码
                     <svg style="width: 12px; height: 12px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
@@ -1942,8 +1942,8 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
 
     if (data.root_cause) {
         html += `
-            <div style="background: linear-gradient(135deg, rgba(245, 87, 108, 0.1) 0%, rgba(250, 177, 160, 0.1) 100%); border-left: 4px solid #f5576c; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #f5576c;">🎯 根本原因</div>
+            <div style="background: color-mix(in srgb, var(--danger-color) 12%, transparent); border-left: 4px solid var(--danger-color); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px; color: var(--danger-color);">🎯 根本原因</div>
                 <div style="font-size: 13px; color: var(--text-color); line-height: 1.6;">${escapeHtml(data.root_cause)}</div>
             </div>
         `;
@@ -1965,7 +1965,7 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
                 <div style="display: flex; flex-direction: column; gap: 10px;">
                     ${data.suggestions.map((suggestion, idx) => `
                         <div style="display: flex; gap: 10px; align-items: flex-start;">
-                            <span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex-shrink: 0;">${idx + 1}</span>
+                            <span style="background: var(--primary-gradient); color: var(--text-on-accent); width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex-shrink: 0;">${idx + 1}</span>
                             <span style="font-size: 12px; line-height: 1.6; color: var(--text-color);">${escapeHtml(suggestion)}</span>
                         </div>
                     `).join('')}

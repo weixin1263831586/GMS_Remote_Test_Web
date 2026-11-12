@@ -1,5 +1,5 @@
 <div class="container page-content" id="page-test-suites">
-            {% include 'components/page-header.html' %}📚 测试套件{% include 'components/page-header-actions.html' %}
+            {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">📚</span> 测试套件{% include 'components/page-header-actions.html' %}
                 <label data-multi-host-control>主机
                     <select id="suite-worker-select" class="header-host-select" data-change="switchSuiteWorker" disabled><option value="">正在加载主机...</option></select>
                 </label>
@@ -12,10 +12,10 @@
                         <input type="text" id="suite-download-url" class="combo-box" placeholder="测试套件下载地址，如：https://dl.google.com/android/cts/android-cts-14_r1-linux_x86-arm.zip" />
                     </div>
                     <button id="btn-download-suite" class="btn-primary" data-click="downloadTestSuite">
-                        ⬇️ 下载套件
+                        <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 下载套件
                     </button>
                     <button id="btn-extract-suite" class="btn-primary" data-click="extractTestSuite">
-                        📦 解压套件
+                        <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg> 解压套件
                     </button>
                 </div>
                 <!-- 下载进度 -->
@@ -33,7 +33,7 @@
             <div class="suite-browser-layout">
                 <div class="suite-browser-sidebar">
                     <div class="suite-browser-toolbar">
-                        <button class="btn-xs" data-click="refreshTestSuiteBrowser">🔄 刷新</button>
+                        <button class="btn-xs" data-click="refreshTestSuiteBrowser"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
                         <span id="suite-browser-count" class="suite-browser-count">0 个套件</span>
                     </div>
                     <input type="text" id="suite-browser-filter" class="suite-browser-filter" placeholder="筛选套件..."
@@ -51,13 +51,13 @@
                         </div>
                         <div class="suite-browser-actions">
                             <button id="btn-copy-test-report" class="btn-xs" data-click="openReportCopyModal" title="在同一主机或不同主机的测试套件之间复制 Tradefed results 报告">
-                                🔁 拷贝报告
+                                <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 拷贝报告
                             </button>
                             <button id="btn-test-results" class="btn-xs" data-click="openTestResultsModal" title="执行 tradefed list results 查看该套件的测试结果">
-                                📋 测试结果列表
+                                <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> 测试结果列表
                             </button>
                             <button id="btn-add-local-suite" class="btn-xs" data-click="showAddLocalSuiteDialog">
-                                ➕ 添加本地路径
+                                <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#plus"></use></svg> 添加本地路径
                             </button>
                         </div>
                     </div>
