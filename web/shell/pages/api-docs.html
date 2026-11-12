@@ -1,28 +1,23 @@
-<div class="container page-content" id="page-api-docs">
+<div class="container page-content page-ui-rework" id="page-api-docs">
             {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">📡</span> 系统接口{% include 'components/page-header-end.html' %}
 
             <!-- API统计卡片 -->
             <div class="page-stat-row">
-                <div class="page-stat-card">
+                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#network"></use></svg></span><span class="workbench-stat-copy">
                     <div class="page-stat-value tone-primary" id="total-apis-count">-</div>
-                    <div class="page-stat-label">API总数</div>
-                </div>
-                <div class="page-stat-card">
+                    <div class="page-stat-label">API总数</div></span></div>
+                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#check"></use></svg></span><span class="workbench-stat-copy">
                     <div class="page-stat-value tone-success" id="get-apis-count">-</div>
-                    <div class="page-stat-label">GET接口</div>
-                </div>
-                <div class="page-stat-card">
+                    <div class="page-stat-label">GET接口</div></span></div>
+                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#play"></use></svg></span><span class="workbench-stat-copy">
                     <div class="page-stat-value tone-warning" id="post-apis-count">-</div>
-                    <div class="page-stat-label">POST接口</div>
-                </div>
-                <div class="page-stat-card">
+                    <div class="page-stat-label">POST接口</div></span></div>
+                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg></span><span class="workbench-stat-copy">
                     <div class="page-stat-value tone-info" id="filtered-apis-count">-</div>
-                    <div class="page-stat-label">筛选结果</div>
-                </div>
-                <div class="page-stat-card">
+                    <div class="page-stat-label">筛选结果</div></span></div>
+                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#book"></use></svg></span><span class="workbench-stat-copy">
                     <div class="page-stat-value tone-skill" id="skills-count">-</div>
-                    <div class="page-stat-label">Skill总数</div>
-                </div>
+                    <div class="page-stat-label">Skill总数</div></span></div>
             </div>
 
             <!-- 搜索栏 -->
