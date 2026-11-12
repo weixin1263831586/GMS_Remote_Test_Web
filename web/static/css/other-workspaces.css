@@ -45,6 +45,7 @@
     padding: 13px 14px; min-width: 0; text-align: left;
     background: var(--card-bg); border: 1px solid var(--border-color);
     border-radius: 8px; box-shadow: none; line-height: 1.45;
+    height: 78px; box-sizing: border-box;
 }
 .page-ui-rework button.page-stat-card.workbench-stat:hover { border-color: var(--primary-color); }
 .page-ui-rework .workbench-stat-icon {
