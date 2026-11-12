@@ -21,6 +21,7 @@ import json
 import logging
 import re
 import shutil
+import signal
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -173,6 +174,20 @@ def _extract_events(raw_lines: list[str]) -> tuple[str, str, list[str]]:
     return last_text.strip(), session_id, tools
 
 
+def _signal_exit_detail(returncode: int) -> str:
+    """把负退出码翻译成信号名与可行动提示（日志与用户消息共用）。"""
+    if returncode >= 0:
+        return f"kkagent 退出码 {returncode}"
+    try:
+        signal_name = signal.Signals(-returncode).name
+    except ValueError:
+        signal_name = f"SIG{-returncode}"
+    if signal_name == "SIGINT":
+        return ("kkagent 进程被 SIGINT 中断（通常是 Controller 正在重启或停止）。"
+                "等服务恢复后点击重试继续本轮规划；若提示重试已过期，请重新描述目标。")
+    return f"kkagent 进程被 {signal_name} 终止，已保留本轮进度，可重试。"
+
+
 async def _terminate_bridge_process(process: asyncio.subprocess.Process) -> None:
     """TERM→grace→KILL 回收超时/残留的桥接子进程（独立进程组）。"""
     import os
@@ -255,10 +270,16 @@ async def run_turn(
     try:
         stdout = await asyncio.wait_for(invoke(), timeout=timeout_seconds)
         if process.returncode != 0:
-            _record_turn_state(False, f"kkagent 退出码 {process.returncode}", "process_error")
+            # 负退出码 = 被信号终止。Controller 以 systemd 管理且
+            # KillSignal=SIGINT，stop/restart 会向服务 cgroup 内全部进程
+            # 广播（含 start_new_session 的桥接子进程），在途回合因此以
+            # -2 结束。这不是模型失败：区分错误码并给出可行动文案。
+            detail = _signal_exit_detail(process.returncode)
+            error_code = "signalled" if process.returncode < 0 else "process_error"
+            _record_turn_state(False, detail, error_code)
             return BridgeTurnResult(
                 ok=False, session_id=resolved_session,
-                error=f"kkagent 退出码 {process.returncode}", error_code="process_error",
+                error=detail, error_code=error_code,
             )
         raw_lines = stdout.decode("utf-8", errors="replace").splitlines()
     except FileNotFoundError:

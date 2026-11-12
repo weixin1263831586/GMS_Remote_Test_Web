@@ -7,6 +7,10 @@ let agentModelStatusLoaded = false;
 let agentModelStatusFlight = null;
 let agentElevationFlight = null;
 let agentRetryId = '';
+let agentCurrentSession = null;
+let agentSessionDirectory = [];
+let agentDirectoryFlight = null;
+let agentDirectoryStateKey = '';
 const agentHandledAutoOpenMessageIds = new Set();
 
 function agentModelStatusText(status) {
@@ -442,6 +446,7 @@ function openAgentRunInAts(runId) {
 function renderAgentSession(session) {
     if (!session) return;
     agentSessionId = session.session_id || agentSessionId;
+    agentCurrentSession = session;
     agentRetryId = session.agent_retry?.id || '';
     if (agentSessionId) {
         localStorage.setItem('gms_agent_session_id', agentSessionId);
@@ -463,6 +468,141 @@ function renderAgentSession(session) {
     } else if (agentPollTimer) {
         stopAgentPolling();
     }
+    syncAgentSessionDirectory(session);
+}
+
+// ===== 会话目录（多会话管理） =====
+
+function syncAgentSessionDirectory(session) {
+    // 轮询回写只在会话/状态变化时刷新目录，避免 3s 轮询放大请求量。
+    const key = `${session?.session_id || ''}:${session?.status || ''}`;
+    if (key === agentDirectoryStateKey) return;
+    agentDirectoryStateKey = key;
+    refreshAgentSessionDirectory();
+}
+
+async function refreshAgentSessionDirectory() {
+    if (agentDirectoryFlight) return agentDirectoryFlight;
+    agentDirectoryFlight = (async () => {
+        try {
+            const response = await fetch('/api/agent/sessions', {cache: 'no-store'});
+            const result = await response.json().catch(() => ({}));
+            if (response.ok && result.success) {
+                agentSessionDirectory = result.data?.sessions || [];
+                renderAgentSessionDirectory();
+            }
+        } catch (error) {
+            debugLog('[Agent] session directory fetch failed:', error);
+        } finally {
+            agentDirectoryFlight = null;
+        }
+    })();
+    return agentDirectoryFlight;
+}
+
+function renderAgentSessionDirectory() {
+    const listEl = $('agent-session-list');
+    if (!listEl) return;
+    const keyword = ($('agent-session-search')?.value || '').trim().toLowerCase();
+    const items = agentSessionDirectory.filter(item =>
+        !keyword || String(item.title || '').toLowerCase().includes(keyword));
+    if (!items.length) {
+        listEl.innerHTML = `<div class="agent-session-empty">${keyword ? '没有匹配的会话' : '暂无历史会话'}</div>`;
+        return;
+    }
+    listEl.innerHTML = items.map(item => {
+        const active = item.session_id === agentSessionId;
+        const time = formatAgentTime(item.updated_at) || formatAgentTime(item.created_at);
+        return `
+            <div class="agent-session-item${active ? ' active' : ''}${item.active ? ' live' : ''}">
+                <button type="button" class="agent-session-main" data-click="switchAgentSession"
+                    data-a0="${escapeJsAttr(item.session_id)}" title="${escapeHtml(item.title)}">
+                    <span class="agent-session-title">${escapeHtml(item.title || '未命名会话')}</span>
+                    <span class="agent-session-meta">
+                        <span class="agent-session-status">${escapeHtml(item.active ? '运行中' : getAgentStatusLabel(item.status))}</span>
+                        <span class="agent-session-time">${escapeHtml(time)}</span>
+                    </span>
+                </button>
+                <button type="button" class="agent-session-delete" data-click="deleteAgentSessionItem"
+                    data-a0="${escapeJsAttr(item.session_id)}" title="删除会话" aria-label="删除会话">${GmsUi.icon('trash')}</button>
+            </div>
+        `;
+    }).join('');
+}
+
+async function switchAgentSession(sessionId) {
+    const target = String(sessionId || '');
+    if (!target || target === agentSessionId) return;
+    stopAgentPolling();
+    agentSessionId = target;
+    localStorage.setItem('gms_agent_session_id', agentSessionId);
+    clearAgentQuestions();
+    agentDirectoryStateKey = '';
+    renderAgentSessionDirectory();
+    await fetchAgentSession();
+    refreshAgentSessionDirectory();
+}
+
+async function deleteAgentSessionItem(sessionId) {
+    const target = String(sessionId || '');
+    if (!target) return;
+    const entry = agentSessionDirectory.find(item => item.session_id === target);
+    if (entry?.active) {
+        showToast('会话有运行中的任务，请先取消 Agent 再删除', 'warning');
+        return;
+    }
+    try {
+        const response = await fetch(`/api/agent/sessions/${encodeURIComponent(target)}`, {method: 'DELETE'});
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result.success === false) {
+            showToast(result.error || result.message || `删除失败 (HTTP ${response.status})`, 'error');
+            return;
+        }
+        if (target === agentSessionId) newAgentSession();
+        showToast('会话已删除', 'success');
+        refreshAgentSessionDirectory();
+    } catch (error) {
+        showToast(`删除失败: ${error.message}`, 'error');
+    }
+}
+
+function exportAgentSessionTranscript() {
+    const session = agentCurrentSession;
+    const messages = session?.messages || [];
+    const steps = session?.steps || [];
+    if (!session || (!messages.length && !steps.length)) {
+        showToast('当前会话没有可导出的记录', 'warning');
+        return;
+    }
+    const lines = [
+        '# GMS 对话Agent 会话记录',
+        `会话：${session.session_id}`,
+        `导出时间：${new Date().toLocaleString('zh-CN')}`,
+        '',
+    ];
+    if (steps.length) {
+        lines.push('## 执行步骤', '');
+        steps.forEach(step => {
+            lines.push(`[${formatAgentTime(step.created_at)}] ${step.title}${step.detail ? ` — ${step.detail}` : ''}`);
+        });
+        lines.push('');
+    }
+    if (messages.length) {
+        lines.push('## 对话内容', '');
+        messages.forEach(message => {
+            lines.push(`[${formatAgentTime(message.created_at)}] ${message.role === 'user' ? '你' : 'Agent'}：`, message.content || '', '');
+        });
+    }
+    const blob = new Blob([lines.join('\n')], {type: 'text/plain;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `agent-session-${String(session.session_id || 'export').slice(0, 8)}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    showToast('会话记录已导出', 'success');
 }
 
 async function fetchAgentSession() {
@@ -514,8 +654,6 @@ async function sendAgentMessage(execute = false, overrideMessage = '') {
         }
         input.value = '';
         agentHistoryIndex = -1;
-        input.style.height = 'auto';
-        input.style.height = '100px';
     }
 
     try {
@@ -664,9 +802,12 @@ function confirmAgentPlan() {
 function newAgentSession() {
     clearAgentQuestions();
     agentSessionId = '';
+    agentCurrentSession = null;
+    agentDirectoryStateKey = '';
     localStorage.removeItem('gms_agent_session_id');
     stopAgentPolling();
     renderAgentSession({ status: 'idle', messages: [], steps: [] });
+    refreshAgentSessionDirectory();
 }
 
 async function cancelAgentSession() {
@@ -682,6 +823,7 @@ async function cancelAgentSession() {
         const result = await response.json();
         if (result.success && result.data?.session) {
             renderAgentSession(result.data.session);
+            refreshAgentSessionDirectory();
         } else {
             showToast(result.error || '取消失败', 'error');
         }
@@ -758,13 +900,12 @@ function initAgentPage() {
             input.addEventListener('input', () => {
                 // Reset history browsing on manual input
                 agentHistoryIndex = -1;
-                input.style.height = 'auto';
-                input.style.height = Math.max(100, Math.min(input.scrollHeight, 300)) + 'px';
             });
         }
     }
 
     if (!agentModelStatusLoaded) loadAgentModelStatus(true, true);
+    refreshAgentSessionDirectory();
 
     if (agentSessionId) {
         fetchAgentSession();

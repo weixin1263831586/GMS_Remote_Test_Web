@@ -15,80 +15,87 @@
                         </select>
                     </div>
                     <button id="devices-list-tab" class="btn-xs active" type="button" role="tab" aria-selected="true" data-click="aoaViewToggle" data-a0="false">设备列表</button>
-                    <button id="aoa-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="aoaViewToggle" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> AOA工作台</button>
+                    <button id="aoa-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="aoaViewToggle" data-a0="true">AOA工作台</button>
                 </div>
             {% include 'components/page-header-end.html' %}
             <div id="devices-main-view">
-            <div id="devices-scope-hint"></div>
-
-            <!-- 设备统计卡片（page-stat 模板，与用户/审计/API 页一致） -->
-            <div class="page-stat-row">
-                <div class="page-stat-card">
-                    <div class="page-stat-value tone-primary" id="total-devices-count">-</div>
-                    <div class="page-stat-label">总设备数</div>
+                <div id="devices-scope-hint"></div>
+                <div class="page-stat-row">
+                    <div class="page-stat-card inventory-stat">
+                        <span class="inventory-stat-icon"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#grid"></use></svg></span>
+                        <div><div class="page-stat-label">总设备数</div><div class="page-stat-value" id="total-devices-count">-</div><small>当前作用域库存</small></div>
+                    </div>
+                    <div class="page-stat-card inventory-stat">
+                        <span class="inventory-stat-icon"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#monitor"></use></svg></span>
+                        <div><div class="page-stat-label">Controller 本机设备</div><div class="page-stat-value" id="local-devices-count">-</div><small>Controller 已上报设备</small></div>
+                    </div>
+                    <div class="page-stat-card inventory-stat" data-cluster-mode-only>
+                        <span class="inventory-stat-icon"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#network"></use></svg></span>
+                        <div><div class="page-stat-label">集群 Worker 设备</div><div class="page-stat-value" id="cluster-devices-count">-</div><small>Worker 已上报设备</small></div>
+                    </div>
+                    <div class="page-stat-card inventory-stat">
+                        <span class="inventory-stat-icon"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#plug"></use></svg></span>
+                        <div><div class="page-stat-label">USB/IP设备</div><div class="page-stat-value" id="usbip-devices-count">-</div><small>通过 USB/IP 接入</small></div>
+                    </div>
+                    <div class="page-stat-card inventory-stat">
+                        <span class="inventory-stat-icon"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#bolt"></use></svg></span>
+                        <div><div class="page-stat-label">Fastboot设备</div><div class="page-stat-value" id="fastboot-devices-count">-</div><small>Fastboot 启动模式</small></div>
+                    </div>
                 </div>
-                <div class="page-stat-card">
-                    <div class="page-stat-value tone-success" id="local-devices-count">-</div>
-                    <div class="page-stat-label">Controller 本机设备</div>
+                <div class="inventory-toolbar">
+                    <div class="inventory-filters" role="search" aria-label="筛选设备库存">
+                        <label>系统<select id="inventory-system" data-change="filterDeviceInventory"><option value="">全部系统</option></select></label>
+                        <label>连接<select id="inventory-connection" data-change="filterDeviceInventory">
+                            <option value="">全部连接</option><option value="usb">USB 直连</option><option value="network">网络 ADB</option><option value="usbip">USB/IP</option><option value="adb_proxy">ADB Proxy</option><option value="unknown">未知连接</option>
+                        </select></label>
+                        <label>状态<select id="inventory-runtime" data-change="filterDeviceInventory">
+                            <option value="">全部状态</option><option value="online">ADB 在线</option><option value="fastboot">Fastboot</option><option value="loader">Loader</option><option value="usb_only">USB / AOA</option><option value="unresponsive">ADB 无响应</option><option value="unauthorized">未授权</option><option value="offline">离线</option><option value="unknown">连接未知</option>
+                        </select></label>
+                        <label>占用<select id="inventory-occupancy" data-change="filterDeviceInventory">
+                            <option value="">全部占用</option><option value="free">未占用</option><option value="occupied">已占用</option><option value="reserved">已预留</option><option value="external">外部占用</option>
+                        </select></label>
+                        <label class="inventory-search"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg><input id="inventory-search" type="search" aria-label="搜索设备库存" placeholder="搜索名称 / SN / IP / 主机 / 分组" data-input="filterDeviceInventory"></label>
+                    </div>
+                    <div class="inventory-selection-bar">
+                        <span class="inventory-selection-count">已选择 <strong id="inventory-selected-count">0</strong> 台</span>
+                        <button id="inventory-create-group" type="button" class="btn-xxs" data-click="createInventoryGroup" disabled><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#folder"></use></svg>所选设备新建分组</button>
+                        <button id="inventory-clear-selection" type="button" class="btn-xxs" data-click="clearInventorySelection" disabled>清除选择</button>
+                        <button type="button" class="btn-xxs" data-click="resetDeviceInventoryFilters">重置筛选</button>
+                        <button type="button" class="btn-xxs inventory-refresh" data-click="loadDevicesManagement"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg>刷新列表</button>
+                    </div>
                 </div>
-                <div class="page-stat-card" data-cluster-mode-only>
-                    <div class="page-stat-value tone-cluster" id="cluster-devices-count">-</div>
-                    <div class="page-stat-label">集群 Worker 设备</div>
+                <div class="devices-table-wrap list-table-wrap">
+                    <table class="list-table device-management-table">
+                        <colgroup><col style="width:30px"><col style="width:120px"><col style="width:120px"><col style="width:84px"><col style="width:100px"><col style="width:100px"><col style="width:92px"><col style="width:92px"><col style="width:114px"><col style="width:106px"><col style="width:70px"><col style="width:236px"></colgroup>
+                        <thead><tr>
+                            <th scope="col" class="inventory-select-cell"><input id="inventory-select-page" type="checkbox" aria-label="选择本页设备" data-change="selectInventoryPage" data-r0="checked"></th>
+                            <th scope="col"><button class="device-sort" type="button" data-click="sortDevices" data-a0="serial_no">设备 / SN <span id="sort-serial_no">↕</span></button></th>
+                            <th scope="col"><button class="device-sort" type="button" data-click="sortDevices" data-a0="model">型号 <span id="sort-model">↕</span></button></th>
+                            <th scope="col">分组</th>
+                            <th scope="col"><button class="device-sort" type="button" data-click="sortDevices" data-a0="android_version">系统 <span id="sort-android_version">↕</span></button></th>
+                            <th scope="col"><button class="device-sort" type="button" data-click="sortDevices" data-a0="soc_model">SOC <span id="sort-soc_model">↕</span></button></th>
+                            <th scope="col"><button class="device-sort" type="button" data-click="sortDevices" data-a0="source_type">连接方式 <span id="sort-source_type">↕</span></button></th>
+                            <th scope="col"><button class="device-sort" type="button" data-click="sortDevices" data-a0="status">运行状态 <span id="sort-status">↕</span></button></th>
+                            <th scope="col"><button class="device-sort" type="button" data-click="sortDevices" data-a0="source_host">主机 / Worker <span id="sort-source_host">↕</span></button></th>
+                            <th scope="col"><button class="device-sort" type="button" data-click="sortDevices" data-a0="locked_by">用户 / 占用 <span id="sort-locked_by">↕</span></button></th>
+                            <th scope="col"><button class="device-sort" type="button" data-click="sortDevices" data-a0="battery_level">电量 <span id="sort-battery_level">↕</span></button></th>
+                            <th scope="col">操作</th>
+                        </tr></thead>
+                        <tbody id="devices-table-body"><tr><td colspan="12" class="table-placeholder">加载中...</td></tr></tbody>
+                    </table>
                 </div>
-                <div class="page-stat-card">
-                    <div class="page-stat-value tone-warning" id="usbip-devices-count">-</div>
-                    <div class="page-stat-label">USB/IP设备</div>
+                <div class="inventory-footer">
+                    <span id="inventory-total" role="status" aria-live="polite">正在加载设备…</span>
+                    <label>每页<select aria-label="每页设备数" data-change="changeInventoryPageSize" data-r0="value"><option value="20">20 台</option><option value="50">50 台</option><option value="100">100 台</option></select></label>
+                    <nav id="inventory-pages" aria-label="设备列表分页"></nav>
                 </div>
-                <div class="page-stat-card">
-                    <div class="page-stat-value tone-cluster" id="fastboot-devices-count">-</div>
-                    <div class="page-stat-label">Fastboot设备</div>
-                </div>
-            </div>
-
-
-            <!-- 设备列表 -->
-            <div class="devices-table-wrap list-table-wrap">
-                <table class="list-table device-management-table">
-                    <thead>
-                        <tr>
-                            <th scope="col" style="width: 190px;">
-                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="serial_no">设备 / 序列号 <span id="sort-serial_no">↕</span></button>
-                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="model">型号 <span id="sort-model">↕</span></button>
-                            </th>
-                            <th scope="col" style="width: 190px;">
-                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="source_host">来源 / 连接 <span id="sort-source_host">↕</span></button>
-                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="source_type">连接类型 <span id="sort-source_type">↕</span></button>
-                            </th>
-                            <th scope="col" style="width: 130px;">
-                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="android_version">系统 / 芯片 <span id="sort-android_version">↕</span></button>
-                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="soc_model">SOC <span id="sort-soc_model">↕</span></button>
-                            </th>
-                            <th scope="col" style="width: 145px;">
-                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="status">运行状态 <span id="sort-status">↕</span></button>
-                            </th>
-                            <th scope="col" style="width: 135px;">
-                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="locked_by">占用情况 <span id="sort-locked_by">↕</span></button>
-                            </th>
-                            <th scope="col" style="width: 90px;">
-                                <button class="device-sort" type="button" data-click="sortDevices" data-a0="battery_level">电量 <span id="sort-battery_level">↕</span></button>
-                            </th>
-                            <th scope="col" style="width: 300px;">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="devices-table-body">
-                        <tr>
-                            <td colspan="7" class="table-placeholder">加载中...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
             </div>
 
             <!-- 三列 AOA 工作台：设备投屏 → UI 操作对应命令 → AOA 录制/配置。 -->
             <div id="aoa-panel" hidden>
                 <div class="aoa-workbench-header">
                     <div>
-                        <div class="aoa-workbench-title">🔁 AOA工作台</div>
+                        <div class="aoa-workbench-title">AOA工作台</div>
                         <div class="aoa-muted" title="在 userdebug 设备上操作并录制，保存后可在同机型 user 固件上通过 USB AOAv2 回放，无 ADB 依赖。">在 userdebug 设备上操作并录制，保存后可在同机型 user 固件上通过 USB AOAv2 回放，无 ADB 依赖。</div>
                     </div>
                     <div class="aoa-header-status">

@@ -40,7 +40,7 @@
         function showDevicesManagementLoadError(error) {
             const tbody = document.getElementById('devices-table-body');
             if (tbody && currentPage === 'devices') {
-                tbody.innerHTML = `<tr><td colspan="7">设备列表加载失败：${escapeHtml(error.message || '请刷新重试')}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="12">设备列表加载失败：${escapeHtml(error.message || '请刷新重试')}</td></tr>`;
             }
         }
 
@@ -329,14 +329,16 @@
             document.getElementById('fastboot-devices-count').textContent = fastbootCount;
             document.getElementById('cluster-devices-count').textContent = clusterCount;
 
+            devices = GmsDeviceInventory.prepare(devices);
             if (devices.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="7" style="padding: 40px; text-align: center; color: var(--text-secondary);">
-                            暂无设备
+                        <td colspan="12" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                            暂无符合条件的设备
                         </td>
                     </tr>
                 `;
+                GmsDeviceInventory.syncSelection();
                 return;
             }
 
@@ -352,7 +354,7 @@
                 const workerAttr = escapeIconAttr(device.worker_id || workspaceLocalWorkerId());
                 const actionButtonStyle = '';
                 const releaseButton = !device.cluster_readonly && device.locked_by
-                    ? `<button class="btn-xxs btn-danger-quiet device-release-action" data-serial="${serialAttr}" data-click="forceReleaseDeviceLock" data-r0="dataset.serial" title="强制释放该设备的平台占用锁">${GmsUi.icon('unlock')}释放设备</button>`
+                    ? `<button class="btn-xxs btn-danger-quiet device-release-action" aria-label="释放设备" data-serial="${serialAttr}" data-click="forceReleaseDeviceLock" data-r0="dataset.serial" title="强制释放该设备的平台占用锁">${GmsUi.icon('unlock')}释放</button>`
                     : '';
 
                 const isFastboot = device.protocol === 'fastboot'
@@ -414,23 +416,24 @@
                     : localClaimedByOther ? '设备已被其他用户或任务占用'
                     : '智能 UI 操控：截图 + 布局元素 + 点按';
                 const shellButton = isClusterRemote
-                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" data-click="openClusterDeviceShell" data-r0="dataset.serial" data-r1="dataset.worker" title="仅可对具备 SSH 元数据的可用 Worker 设备打开 adb shell" style="${actionButtonStyle}${shellStyle}"${shellDisabled}>${GmsUi.icon('terminal')}adb shell</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-click="openDeviceShell" data-r0="dataset.serial" title="${localShellTitle}" style="${actionButtonStyle}${shellStyle}"${adbShellDisabled ? ' disabled' : ''}>${GmsUi.icon('terminal')}adb shell</button>`;
+                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" aria-label="adb shell" data-click="openClusterDeviceShell" data-r0="dataset.serial" data-r1="dataset.worker" title="仅可对具备 SSH 元数据的可用 Worker 设备打开 adb shell" style="${actionButtonStyle}${shellStyle}"${shellDisabled}>${GmsUi.icon('terminal')}Shell</button>`
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" aria-label="adb shell" data-click="openDeviceShell" data-r0="dataset.serial" title="${localShellTitle}" style="${actionButtonStyle}${shellStyle}"${adbShellDisabled ? ' disabled' : ''}>${GmsUi.icon('terminal')}Shell</button>`;
                 const deviceInfoButton = isClusterRemote
-                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" data-click="openClusterDeviceInfo" data-r0="dataset.serial" data-r1="dataset.worker" title="${inspectionTitle}" style="${actionButtonStyle}${remoteInspectionStyle}"${remoteInspectionDisabled}>${GmsUi.icon('info')}device info</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-worker="${workerAttr}" data-click="openDeviceConfigExplorer" data-r0="dataset.serial" data-r1="dataset.worker" data-testid="device-config-open" title="${localInspectionTitle}" style="${actionButtonStyle}${remoteInspectionStyle}"${adbInspectionDisabled ? ' disabled' : ''}>${GmsUi.icon('info')}device info</button>`;
+                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" aria-label="device info" data-click="openClusterDeviceInfo" data-r0="dataset.serial" data-r1="dataset.worker" title="${inspectionTitle}" style="${actionButtonStyle}${remoteInspectionStyle}"${remoteInspectionDisabled}>${GmsUi.icon('info')}查看</button>`
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-worker="${workerAttr}" aria-label="device info" data-click="openDeviceConfigExplorer" data-r0="dataset.serial" data-r1="dataset.worker" data-testid="device-config-open" title="${localInspectionTitle}" style="${actionButtonStyle}${remoteInspectionStyle}"${adbInspectionDisabled ? ' disabled' : ''}>${GmsUi.icon('info')}查看</button>`;
                 const uiControlButton = isClusterRemote
-                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" data-click="openClusterDeviceUiControl" data-r0="dataset.serial" data-r1="dataset.worker" title="${controlTitle}" style="${actionButtonStyle}${remoteControlStyle}"${remoteControlDisabled}>${GmsUi.icon('target')}UI 操控</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-click="openUiControl" data-r0="dataset.serial" title="${localControlTitle}" style="${actionButtonStyle}${remoteControlStyle}"${adbControlDisabled ? ' disabled' : ''}>${GmsUi.icon('target')}UI 操控</button>`;
+                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" aria-label="UI 操控" data-click="openClusterDeviceUiControl" data-r0="dataset.serial" data-r1="dataset.worker" title="${controlTitle}" style="${actionButtonStyle}${remoteControlStyle}"${remoteControlDisabled}>${GmsUi.icon('target')}操控</button>`
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" aria-label="UI 操控" data-click="openUiControl" data-r0="dataset.serial" title="${localControlTitle}" style="${actionButtonStyle}${remoteControlStyle}"${adbControlDisabled ? ' disabled' : ''}>${GmsUi.icon('target')}操控</button>`;
 
                 return `
                     <tr data-device-id="${serialAttr}" data-worker="${workerAttr}">
-                        ${GmsDevicePresentation.cells(device)}
+                        ${GmsDeviceInventory.selectionCell(device)}
+                        ${GmsDevicePresentation.cells(device, GmsDeviceInventory.groupsFor(device))}
                         <td>
                             <div class="device-row-actions">
-                                ${shellButton}
                                 ${deviceInfoButton}
                                 ${uiControlButton}
+                                ${shellButton}
                                 ${releaseButton}
                             </div>
                         </td>
@@ -450,5 +453,6 @@
             } else {
                 tbody.innerHTML = devices.map(renderDeviceRow).join('');
             }
+            GmsDeviceInventory.syncSelection();
         }
 

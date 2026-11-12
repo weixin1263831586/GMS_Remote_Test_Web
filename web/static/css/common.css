@@ -1489,10 +1489,11 @@ td.table-placeholder {
 
 .device-group-count {
     font-size: 11px;
-    color: var(--text-muted);
-    background: var(--darker-bg);
+    font-weight: 600;
+    color: var(--text-on-accent);
+    background: var(--primary-gradient);
     border-radius: 10px;
-    padding: 1px 7px;
+    padding: 1px 8px;
     flex-shrink: 0;
 }
 
@@ -1682,6 +1683,19 @@ td.table-placeholder {
     width: 75px;
     min-width: 75px;
     box-sizing: border-box;
+    font-weight: 600;
+    box-shadow: var(--shadow-sm);
+}
+
+.adb-button-frame .btn-xxs:hover:not(:disabled),
+.vnc-button-frame .btn-xxs:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+.adb-button-frame .btn-xxs:active:not(:disabled),
+.vnc-button-frame .btn-xxs:active:not(:disabled) {
+    transform: translateY(0);
 }
 
 /* ==================== Control Frame ==================== */

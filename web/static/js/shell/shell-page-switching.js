@@ -738,7 +738,6 @@
                 await loadDevicesManagement();
                 if (sessionStorage.getItem('gms_devices_view') === 'aoa'
                         && typeof aoaViewToggle === 'function') {
-                    // F5 恢复「AOA工作台」页签（toggle 内部完成面板加载）。
                     await aoaViewToggle(true);
                 }
             } else {

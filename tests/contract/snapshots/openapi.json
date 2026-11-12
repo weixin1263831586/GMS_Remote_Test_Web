@@ -4390,7 +4390,58 @@
         "summary": "Agent Package Download Endpoint"
       }
     },
+    "/api/agent/sessions": {
+      "get": {
+        "description": "List this client's Agent sessions (live + recoverable anchors).",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Agent Sessions"
+      }
+    },
     "/api/agent/sessions/{session_id}": {
+      "delete": {
+        "description": "Discard one Agent session: drop live state and its recovery anchor.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Agent Session"
+      },
       "get": {
         "description": "Get Agent session status.",
         "parameters": [

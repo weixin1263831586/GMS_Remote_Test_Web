@@ -97,27 +97,27 @@
                     </div>
                     <!-- ADB 控制按钮 -->
                     <div class="adb-button-frame" data-operation-log-tab="system">
-                        <button id="refresh-devices-btn" class="btn-xxs ui-refresh-action" data-click="refreshDevices"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新设备</button>
-                        <button class="btn-xxs" data-click="selectAllDevices"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#check"></use></svg> 全选设备</button>
-                        <button class="btn-xxs" data-click="rebootDevices"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#power"></use></svg> 重启设备</button>
-                        <button id="btn-remount-devices" class="btn-xxs" data-click="remountDevices"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#power"></use></svg> Remount</button>
-                        <button class="btn-xxs btn-danger-quiet" data-click="factoryResetDevices"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#trash"></use></svg> 恢复出厂</button>
-                        <button class="btn-xxs" data-click="connectWifi"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#wifi"></use></svg> 连接Wifi</button>
-                        <button id="btn-lock-device" class="btn-xxs" data-click="lockSelectedDevices" data-a0="lock"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg> 锁定设备</button>
-                        <button id="btn-unlock-device" class="btn-xxs" data-click="lockSelectedDevices" data-a0="unlock"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#unlock"></use></svg> 解锁设备</button>
-                        <button id="btn-check-lock-status" class="btn-xxs" data-click="checkDeviceLockStatus"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg> 锁定状态</button>
-                        <button id="btn-device-info" class="btn-xxs" data-click="collectDeviceInfo"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> 设备信息</button>
+                        <button id="refresh-devices-btn" class="btn-xxs ui-refresh-action" data-click="refreshDevices">↻ 刷新设备</button>
+                        <button class="btn-xxs" data-click="selectAllDevices">✅ 全选设备</button>
+                        <button class="btn-xxs" data-click="rebootDevices">⏻ 重启设备</button>
+                        <button id="btn-remount-devices" class="btn-xxs" data-click="remountDevices">⏻ Remount</button>
+                        <button class="btn-xxs" data-click="factoryResetDevices">🧹 恢复出厂</button>
+                        <button class="btn-xxs" data-click="connectWifi">🛜 连接Wifi</button>
+                        <button id="btn-lock-device" class="btn-xxs" data-click="lockSelectedDevices" data-a0="lock">🔒 锁定设备</button>
+                        <button id="btn-unlock-device" class="btn-xxs" data-click="lockSelectedDevices" data-a0="unlock">🔓 解锁设备</button>
+                        <button id="btn-check-lock-status" class="btn-xxs" data-click="checkDeviceLockStatus">🔐 锁定状态</button>
+                        <button id="btn-device-info" class="btn-xxs" data-click="collectDeviceInfo">📋 设备信息</button>
                     </div>
                     <!-- VNC 控制按钮 -->
                     <div class="vnc-button-frame" data-operation-log-tab="system">
-                        <button id="btn-burn-firmware" class="btn-xxs" data-click="burnFirmware"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#bolt"></use></svg> 烧写固件</button>
-                        <button id="btn-burn-gsi" class="btn-xxs" data-click="burnGsiImage"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#bolt"></use></svg> 烧写GSI</button>
-                        <button class="btn-xxs" disabled title="该功能尚未开放"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#bolt"></use></svg> 烧写SN</button>
-                        <button class="btn-xxs" id="start-vnc-btn" data-click="initAndStartVnc"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#play"></use></svg> 启动VNC</button>
-                        <button class="btn-xxs" data-click="initAndStartVnc" data-a0="true" title="重启主机 VNC；会短暂断开当前 noVNC 连接"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 重启VNC</button>
-                        <button class="btn-xxs" data-click="showDeviceScreen"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#monitor"></use></svg> 设备投屏</button>
-                        <button class="btn-xxs" id="adb-forward-btn" data-click="setupAdbPortForward"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#plug"></use></svg> ADB接入</button>
-                        <button class="btn-xxs" id="usbip-btn" data-click="setupUsbipForward"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#device"></use></svg> 本地设备</button>
+                        <button id="btn-burn-firmware" class="btn-xxs" data-click="burnFirmware">🔥 烧写固件</button>
+                        <button id="btn-burn-gsi" class="btn-xxs" data-click="burnGsiImage">🔥 烧写GSI</button>
+                        <button class="btn-xxs" disabled title="该功能尚未开放">🔥 烧写SN</button>
+                        <button class="btn-xxs" id="start-vnc-btn" data-click="initAndStartVnc">🚀 启动VNC</button>
+                        <button class="btn-xxs" data-click="initAndStartVnc" data-a0="true" title="重启主机 VNC；会短暂断开当前 noVNC 连接">🔄 重启VNC</button>
+                        <button class="btn-xxs" data-click="showDeviceScreen">📺 设备投屏</button>
+                        <button class="btn-xxs" id="adb-forward-btn" data-click="setupAdbPortForward">🔌 ADB接入</button>
+                        <button class="btn-xxs" id="usbip-btn" data-click="setupUsbipForward">📱 本地设备</button>
                     </div>
                 </div>
 

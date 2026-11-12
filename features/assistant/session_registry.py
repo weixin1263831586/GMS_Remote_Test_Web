@@ -92,6 +92,7 @@ async def get_or_create_session(session_id: str | None, client_id: str) -> dict[
             session = {
                 "session_id": sid,
                 "client_id": client_id,
+                "title": "",
                 "status": "idle",
                 "messages": [],
                 "steps": [],
@@ -144,9 +145,13 @@ async def cleanup_sessions() -> None:
         task = _agent_monitor_tasks.pop(sid, None)
         if task and not task.done():
             task.cancel()
-        # 被清扫的会话同步清掉持久锚点，避免残留可恢复入口。
+        # 被清扫的会话同步清掉持久锚点与对话记录，避免残留可恢复入口。
         try:
             session_store.drop_anchor(sid)
+        except Exception:
+            pass
+        try:
+            session_store.drop_transcript(sid)
         except Exception:
             pass
 
@@ -233,6 +238,7 @@ def session_from_anchor(anchor: dict[str, Any]) -> dict[str, Any] | None:
         "session_id": sid,
         "client_id": anchor.get("client_id") or "",
         "owner_id": anchor.get("owner_id") or "",
+        "title": anchor.get("title") or "",
         "status": "monitoring",
         "messages": [],
         "steps": [],

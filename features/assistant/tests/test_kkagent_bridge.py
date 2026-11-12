@@ -211,6 +211,15 @@ print("model upstream disconnected", file=sys.stderr)
 sys.exit(7)
 '''
 
+FAKE_KKAGENT_SIGINT = r'''#!/usr/bin/env python3
+"""模拟 systemd stop 的 SIGINT 广播：KKAgent 进程被信号杀死（负退出码）。"""
+import os
+import sys
+if "config" in sys.argv[1:]:
+    sys.exit(0)
+os.kill(os.getpid(), 2)  # SIGINT
+'''
+
 
 def _install_fake_cli(monkeypatch, tmp_path, body):
     cli = tmp_path / "kkagent"
@@ -251,3 +260,28 @@ async def test_real_subprocess_nonzero_exit_maps_to_process_error(monkeypatch, t
     assert not result.ok
     assert result.error_code == "process_error"
     assert "退出码 7" in result.error
+
+
+@pytest.mark.asyncio
+async def test_signal_killed_turn_is_reported_as_signalled_not_process_error(monkeypatch, tmp_path):
+    """systemctl stop（KillSignal=SIGINT）广播到服务 cgroup 的在途回合。
+
+    子进程以负退出码（-2 = SIGINT）结束：错误码必须是 signalled 而非
+    process_error，且文案指明是 Controller 重启/停止所致并给出重试指引，
+    不再显示裸数字"退出码 -2"。
+    """
+    _install_fake_cli(monkeypatch, tmp_path, FAKE_KKAGENT_SIGINT)
+    result = await bridge.run_turn("查询设备", timeout_seconds=30)
+    assert not result.ok
+    assert result.error_code == "signalled"
+    assert "-2" not in result.error
+    assert "SIGINT" in result.error
+    assert "重启" in result.error and "重试" in result.error
+    assert bridge._last_turn_state["state"] == "failed"
+    assert "SIGINT" in bridge._last_turn_state["detail"]
+
+
+def test_signal_exit_detail_maps_known_and_unknown_signals():
+    assert bridge._signal_exit_detail(-15).startswith("kkagent 进程被 SIGTERM 终止")
+    assert bridge._signal_exit_detail(-65).startswith("kkagent 进程被 SIG65 终止")
+    assert bridge._signal_exit_detail(3) == "kkagent 退出码 3"

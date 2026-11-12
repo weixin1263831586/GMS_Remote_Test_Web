@@ -1,12 +1,14 @@
-"""Crash-recovery关联表：持久化对话 Agent 会话的最小恢复锚点。
+"""对话 Agent 会话持久化：恢复锚点 + 脱敏对话记录。
 
-会话状态不能只存在于进程内存：Controller 重启后
-``session_id`` 与 ``cluster_job_id`` / ``attempt_id`` / 执行阶段的关联
-丢失，监控无法恢复。这里只持久化恢复锚点（会话元数据 + 活跃运行关联），
-不持久化消息正文、asyncio.Task 或凭据；完整 UI 状态仍是可丢弃的。
-
-存储为单个 JSON 文件（原子替换），量级 = 会话数（每会话 < 2KB），
-与 ``data/security_audit.json`` 等既有运行时文件同级。
+两层持久化职责不同：
+- 锚点（``agent_sessions.json``）：会话元数据 + 活跃运行关联，供
+  Controller 重启后续接监控，不含消息正文；
+- 对话记录（``agent_transcripts/<session_id>.json``）：每会话一文件的
+  脱敏 messages/steps 历史，供重启后恢复对话正文。消息进入会话时
+  已经 ``display_record`` 脱敏，落盘不新增敏感面；不落盘
+  asyncio.Task、pending_plan 或凭据。两者都原子替换、0600、按 TTL
+  清扫，量级 = 会话数，与 ``data/security_audit.json`` 等既有运行时
+  文件同级。
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -22,6 +25,11 @@ from typing import Any
 
 _LOCK = threading.Lock()
 _MAX_RECORDS = 256
+# 对话记录裁剪上限：记录是恢复用途的 UI 历史，不是审计日志，超限裁最旧。
+_MAX_TRANSCRIPT_MESSAGES = 200
+_MAX_TRANSCRIPT_STEPS = 300
+# 会话 ID 一律是 uuid4；落盘文件名只接受该形态，阻断路径注入。
+_SESSION_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 
 # 会话字段里参与持久化恢复锚点的白名单；其余字段（消息、步骤、
 # pending_plan 等）重启后不还原，由 UI 按「过期」处理。
@@ -29,6 +37,7 @@ _SESSION_ANCHOR_FIELDS = (
     "session_id",
     "client_id",
     "owner_id",
+    "title",
     "status",
     "created_at",
     "updated_at",
@@ -43,6 +52,14 @@ def default_sessions_path() -> Path:
     data_dir = Path(PROJECT_ROOT) / "data" / "assistant"
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir / "agent_sessions.json"
+
+
+def default_transcripts_dir() -> Path:
+    from foundation.config import PROJECT_ROOT
+
+    data_dir = Path(PROJECT_ROOT) / "data" / "assistant" / "agent_transcripts"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
 
 
 def _normalize_active_run(active_run: Any) -> dict[str, Any] | None:
@@ -162,15 +179,19 @@ def _write_store_unlocked(target: Path, anchors: dict[str, dict[str, Any]]) -> N
             reverse=True,
         )
         anchors = dict(ranked[:_MAX_RECORDS])
-    target.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(
         {"version": 1, "sessions": anchors},
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    tmp_path = target.with_suffix(".json.tmp")
-    # 锚点虽不含明文凭据（字段白名单剥离 plan），但含 owner/client/Job
-    # 关联，按受限权限创建。
+    _atomic_write_json(target, payload)
+
+
+def _atomic_write_json(target: Path, payload: str, *, unique_tmp: bool = False) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    suffix = f".{os.getpid()}.tmp" if unique_tmp else ".tmp"
+    tmp_path = target.with_suffix(suffix)
+    # 锚点/记录虽不含明文凭据，但含 owner/client/Job 关联，按受限权限创建。
     file_descriptor = os.open(
         tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600
     )
@@ -195,3 +216,76 @@ def _write_store_unlocked(target: Path, anchors: dict[str, dict[str, Any]]) -> N
         with contextlib.suppress(OSError):
             tmp_path.unlink()
         raise
+
+
+def save_transcript(session: dict[str, Any], directory: Path | str | None = None) -> None:
+    """Persist one session's redacted chat history (messages + steps)."""
+    session_id = str(session.get("session_id") or "")
+    # 未注册到客户端的临时会话（纯计算/测试裸字典）没有属主，不落盘。
+    if not session.get("client_id") or not _SESSION_ID_RE.match(session_id):
+        return
+    messages = session.get("messages") or []
+    steps = session.get("steps") or []
+    if not messages and not steps:
+        return
+    workspace = session.get("workspace_context")
+    record = {
+        "version": 1,
+        "session_id": session_id,
+        "client_id": session.get("client_id") or "",
+        "owner_id": session.get("owner_id") or "",
+        "title": session.get("title") or "",
+        "status": session.get("status") or "idle",
+        # pending_plan 含 pre_actions 密码，明确不落盘；重启后待确认计划失效。
+        "workspace_context": {
+            k: v for k, v in (workspace or {}).items()
+            if isinstance(v, (str, int, float, bool))
+        },
+        "created_at": session.get("created_at") or "",
+        "updated_at": session.get("updated_at") or "",
+        "messages": messages[-_MAX_TRANSCRIPT_MESSAGES:],
+        "steps": steps[-_MAX_TRANSCRIPT_STEPS:],
+    }
+    target = (Path(directory) if directory else default_transcripts_dir()) / f"{session_id}.json"
+    payload = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+    # 每会话一文件：写入互不共享，原子替换即可，无需文件锁。
+    _atomic_write_json(target, payload, unique_tmp=True)
+
+
+def load_transcripts(directory: Path | str | None = None) -> dict[str, dict[str, Any]]:
+    """Load all persisted transcripts (best effort; corrupt files skipped)."""
+    root = Path(directory) if directory else default_transcripts_dir()
+    transcripts: dict[str, dict[str, Any]] = {}
+    try:
+        files = list(root.glob("*.json"))
+    except OSError:
+        return transcripts
+    for path in files:
+        if not _SESSION_ID_RE.match(path.stem):
+            continue
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(record, dict) and record.get("session_id"):
+            transcripts[str(record["session_id"])] = record
+    return transcripts
+
+
+def load_transcript(session_id: str, directory: Path | str | None = None) -> dict[str, Any] | None:
+    if not _SESSION_ID_RE.match(session_id or ""):
+        return None
+    root = Path(directory) if directory else default_transcripts_dir()
+    try:
+        record = json.loads((root / f"{session_id}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return record if isinstance(record, dict) and record.get("session_id") else None
+
+
+def drop_transcript(session_id: str, directory: Path | str | None = None) -> None:
+    if not _SESSION_ID_RE.match(session_id or ""):
+        return
+    root = Path(directory) if directory else default_transcripts_dir()
+    with contextlib.suppress(OSError):
+        (root / f"{session_id}.json").unlink()

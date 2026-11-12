@@ -906,17 +906,17 @@ class RuntimeDevicesTests(RuntimeUiHarness):
             page.evaluate("loadDevicesManagement()")
             row = page.locator('#devices-table-body tr').filter(has_text="REMOTE-1")
             expect(row).to_have_count(1)
-            expect(row.locator("button", has_text="adb shell")).to_be_disabled()
-            expect(row.locator("button", has_text="device info")).to_be_disabled()
-            expect(row.locator("button", has_text="UI 操控")).to_be_disabled()
+            expect(row.get_by_role("button", name="adb shell")).to_be_disabled()
+            expect(row.get_by_role("button", name="device info")).to_be_disabled()
+            expect(row.get_by_role("button", name="UI 操控")).to_be_disabled()
 
             worker_ready["value"] = True
             page.evaluate("loadDevicesManagement()")
             row = page.locator('#devices-table-body tr').filter(has_text="REMOTE-1")
-            expect(row.locator("button", has_text="adb shell")).to_be_enabled()
-            expect(row.locator("button", has_text="device info")).to_be_enabled()
-            expect(row.locator("button", has_text="UI 操控")).to_be_enabled()
-            row.locator("button", has_text="UI 操控").click()
+            expect(row.get_by_role("button", name="adb shell")).to_be_enabled()
+            expect(row.get_by_role("button", name="device info")).to_be_enabled()
+            expect(row.get_by_role("button", name="UI 操控")).to_be_enabled()
+            row.get_by_role("button", name="UI 操控").click()
             expect(page.locator("#page-devices")).to_be_visible()
             expect(page.locator("#ui-control-modal")).to_have_class(re.compile(r"\bshow\b"))
         finally:
@@ -1087,8 +1087,8 @@ class RuntimeDevicesTests(RuntimeUiHarness):
                     return Object.fromEntries(
                         [...document.querySelectorAll('#devices-table-body tr')].map(row => {
                             const serial = row.querySelector('.device-serial')?.textContent.trim();
-                            const controls = [...row.querySelectorAll('button[data-serial]')]
-                                .filter(button => !button.textContent.includes('释放'));
+                            const controls = ['openDeviceShell', 'openDeviceConfigExplorer', 'openUiControl']
+                                .map(handler => row.querySelector(`[data-click="${handler}"]`));
                             return [serial, controls.map(button => button.disabled)];
                         }).filter(([serial]) => serial)
                     );
@@ -1338,7 +1338,7 @@ class RuntimeDevicesTests(RuntimeUiHarness):
             expect(page.locator("#devices-table-body")).not_to_contain_text(
                 "REMOTE-UNKNOWN"
             )
-            expect(page.locator("#devices-table-body")).not_to_contain_text("Remote Group")
+            expect(page.locator("#devices-table-body tr.device-group-row", has_text="Remote Group")).to_have_count(0)
             expect(
                 page.locator(
                     "#devices-table-body tr.device-group-row",

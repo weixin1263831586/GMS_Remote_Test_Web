@@ -135,13 +135,11 @@
                     return left.localeCompare(right, undefined, {numeric: true});
                 })
                 .map(([workerId, members]) => {
-                    const hostName = members[0]?.host_display_name || workerId;
-                    const label = hostName === workerId
-                        ? workerId
-                        : `${hostName} · ${workerId}`;
+                    const label = GmsDevicePresentation.hostLabel(members[0]);
                     const group = {
                         id: `__host__${workerId}`,
                         name: label,
+                        description: GmsDevicePresentation.hostDescription(members[0]),
                         color: 'var(--cluster-accent)'
                     };
                     const collapsed = state.collapsedGroups.has(group.id);
@@ -157,7 +155,7 @@
             const followed = !!group.followed;
             const toggle = `<span class="device-group-toggle" data-mgmt-toggle="${group.id}" style="cursor:pointer;">${collapsed ? '▶' : '▼'}</span>`;
             const color = `<span class="device-group-color" style="background:${group.color}"></span>`;
-            const name = `<span class="device-group-name">${escapeHtml(group.name)}</span>`;
+            const name = `<span class="device-group-name" title="${GmsUi.escape(group.description || group.name)}">${escapeHtml(group.name)}</span>`;
             const cnt = `<span class="device-group-count">${count}</span>`;
             const followBtn = isUngrouped ? '' :
                 `<button class="btn-xxs" data-mgmt-follow="${group.id}" title="关注后主页ADB设备区只显示关注的分组" style="padding:2px 6px;font-size:11px;${followed ? 'background:var(--warning-color);' : ''}">${followed ? '★ 已关注' : '☆ 关注'}</button>`;
@@ -168,7 +166,7 @@
                     <button class="btn-xxs" data-mgmt-del="${group.id}" style="padding:2px 6px;font-size:11px;">🗑️ 删除</button>
                 </span>`;
             return `<tr class="device-group-row" style="background: var(--lighter-bg);">
-                <td colspan="7" style="padding:6px 8px;">
+                <td colspan="12" style="padding:6px 8px;">
                     <div class="device-group-header" style="background:transparent;border:none;">${toggle}${color}${name}${cnt}${ops}</div>
                 </td>
             </tr>`;

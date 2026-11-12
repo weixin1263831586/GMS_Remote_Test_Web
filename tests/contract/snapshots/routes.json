@@ -75,6 +75,18 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/agent/sessions"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/agent/sessions/{session_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/agent/sessions/{session_id}"
   },
   {
