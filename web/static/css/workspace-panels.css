@@ -1,6 +1,6 @@
-.agent-layout { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
+.agent-layout { grid-template-columns: minmax(0, 4fr) minmax(0, 1fr); gap: 12px; }
 /* 参考稿（GMS Agent.png）：会话列表 + 任务对话 + 执行步骤 三栏。 */
-.agent-layout.agent-layout-with-sessions { grid-template-columns: minmax(212px, 250px) minmax(0, 2fr) minmax(0, 1fr); }
+.agent-layout.agent-layout-with-sessions { grid-template-columns: 200px minmax(0, 4fr) minmax(0, 1fr); }
 .agent-sessions-heading,
 .agent-conversation-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--border-color); }
 .agent-conversation-heading strong { font-size: 13px; }
@@ -126,12 +126,7 @@
     #aoa-panel .aoa-workbench-grid { grid-template-columns: minmax(240px, .78fr) minmax(360px, 1.22fr) minmax(330px, 1.08fr); }
 }
 @media (max-width: 1280px) {
-    .agent-layout.agent-layout-with-sessions { grid-template-columns: minmax(186px, 210px) minmax(0, 2fr) minmax(0, 1fr); }
     .agent-conversation-heading .ui-meta { display: none; }
-}
-@media (max-width: 1100px) {
-    .agent-layout { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
-    .agent-layout.agent-layout-with-sessions { grid-template-columns: minmax(170px, 190px) minmax(0, 2fr) minmax(0, 1fr); }
 }
 @media (max-width: 900px) {
     #page-agent { overflow-y: auto; }

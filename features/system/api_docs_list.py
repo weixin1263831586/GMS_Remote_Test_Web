@@ -758,7 +758,7 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
     {
         "method": "POST",
         "path": "/api/reports/analyze-url",
-        "description": "从URL分析测试报告",
+        "description": "从URL解析测试报告（XML/ZIP，不适用于普通日志或工单正文）",
         "params": [{"name": "url", "type": "string", "required": True, "desc": "报告URL"}],
         "category": "report",
         "skill": ""
@@ -766,8 +766,8 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
     {
         "method": "POST",
         "path": "/api/reports/extract-redmine-attachment",
-        "description": "从Redmine附件提取报告信息",
-        "params": [],
+        "description": "提取Redmine测试报告附件URL（工单和普通日志分析请用Redmine单号分析）",
+        "params": [{"name": "issue_url", "type": "string", "required": True, "desc": "Redmine工单完整URL"}],
         "category": "report",
         "skill": ""
     },

@@ -37,6 +37,18 @@ async def get_workload_statistics(*args, **kwargs):
     return await implementation(*args, **kwargs)
 
 
+async def analyze_issue_for_assistant(*args, **kwargs):
+    from .assistant_analysis import analyze_issue_for_assistant as implementation
+
+    return await implementation(*args, **kwargs)
+
+
+async def get_analysis_for_assistant(*args, **kwargs):
+    from .assistant_analysis import get_analysis_for_assistant as implementation
+
+    return await implementation(*args, **kwargs)
+
+
 __all__ = [
     "COMPILED_REDMINE_ATTACHMENT_PATTERN",
     "COMPILED_REDMINE_ISSUE_PATTERN",
@@ -46,6 +58,7 @@ __all__ = [
     "RedmineCaseExtractor",
     "RedmineClient",
     "RedmineService",
+    "analyze_issue_for_assistant",
     "config_manager",
     "configure_agent_factories",
     "create_basic_auth_header",
@@ -54,6 +67,7 @@ __all__ = [
     "extract_redmine_issue_id_from_text",
     "failure_identity",
     "find_user_mapping",
+    "get_analysis_for_assistant",
     "get_redmine_config_for_request",
     "get_redmine_service_for_owner",
     "get_redmine_service_for_request",

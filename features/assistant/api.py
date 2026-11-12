@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Request
 from pydantic import BaseModel, Field
 
-from features.assistant import session_store
+from features.assistant.capabilities import capabilities_payload
 from features.assistant.context import record_user_message, update_context
 from features.assistant.executor import executor
 from features.assistant.payloads import jsonable as _jsonable
@@ -24,6 +24,16 @@ from features.assistant.response import (
 )
 from features.assistant.response import (
     generate as gen_response,
+)
+from features.assistant.session_directory import (
+    _restore_session_from_transcript as _restore_session_from_transcript,
+)
+from features.assistant.session_directory import (
+    _session_directory,
+    delete_session,
+)
+from features.assistant.session_directory import (
+    _session_directory_entry as _session_directory_entry,
 )
 from features.assistant.session_log import (
     _append_message,
@@ -52,7 +62,6 @@ from features.assistant.session_registry import (
     restore_session as _restore_session,
 )
 from features.assistant.test_runs import (
-    MAX_AGENT_RETRIES,
     _execute_plan,
     _monitor_agent_run,
 )
@@ -90,12 +99,10 @@ from features.assistant.workspace import (
     _request_missing_params,
 )
 from features.users import get_client_id_from_request, owner_id_from_request
-from foundation.config import config_manager
 from foundation.responses import error_response, success_response
 
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter()
 
 
@@ -108,9 +115,6 @@ class AgentChatRequest(BaseModel):
     action: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
     workspace_context: dict[str, Any] = Field(default_factory=dict)
-
-
-# 计划资源选择/构建已拆至 plan_context.py（file-size baseline）。
 
 
 @router.post("/api/agent/chat")
@@ -204,7 +208,7 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
             resp = gen_response(tool_result)
             _append_message(session, "assistant", resp.content, kind=resp.kind, data=resp.to_message_data(), private_params=params)
             session["pending_plan"] = None
-            session["status"] = "idle"
+            session["status"] = "monitoring" if (session.get("active_run") or {}).get("redmine_run_id") else "idle"
         elif pending_plan.get("type") == "test_execution":
             # 确认提交状态机在 plan_submission：同一计划只提交一次。
             result, repeat_hint = await submit_pending_plan_once(
@@ -352,7 +356,7 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
         )
         resp = gen_response(tool_result)
         _append_message(session, "assistant", resp.content, kind=resp.kind, data=resp.to_message_data(), private_params=params)
-        session["status"] = "idle"
+        session["status"] = "monitoring" if (session.get("active_run") or {}).get("redmine_run_id") else "idle"
         session["pending_plan"] = None
         return success_response({"session": _session_payload(session)}, "Agent updated")
 
@@ -494,7 +498,7 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     resp = gen_response(tool_result)
     _append_message(session, "assistant", resp.content, kind=resp.kind, data=resp.to_message_data(), private_params=tool_params)
 
-    session["status"] = "idle"
+    session["status"] = "monitoring" if (session.get("active_run") or {}).get("redmine_run_id") else "idle"
     session["pending_plan"] = None
     return success_response({"session": _session_payload(session)}, "Agent updated")
 
@@ -509,104 +513,6 @@ def kkagent_bridge_availability() -> dict[str, Any]:
         return {"available": False, "binary": "", "mode": "headless_stream_json"}
 
 
-def _restore_session_from_transcript(
-    session_id: str, client_id: str, owner_id: str
-) -> dict[str, Any] | None:
-    """从落盘对话记录重建只读会话（无活跃运行的重启恢复）。
-
-    消息/步骤原样回放（落盘前已脱敏）；pending_plan 不落盘，重启后
-    待确认计划失效，用户需要重新描述或重新规划。
-    """
-    if not client_id and not owner_id:
-        return None
-    try:
-        record = session_store.load_transcript(session_id)
-    except Exception:
-        return None
-    if not record:
-        return None
-    if record.get("client_id") != client_id and not (
-        owner_id and record.get("owner_id") == owner_id
-    ):
-        return None
-    session = {
-        "session_id": session_id,
-        "client_id": client_id or str(record.get("client_id") or ""),
-        "owner_id": owner_id or str(record.get("owner_id") or ""),
-        "title": record.get("title") or "",
-        "status": record.get("status") or "idle",
-        "messages": list(record.get("messages") or []),
-        "steps": list(record.get("steps") or []),
-        "pending_plan": None,
-        "active_run": None,
-        "workspace_context": dict(record.get("workspace_context") or {}),
-        "created_at": record.get("created_at") or "",
-        "updated_at": record.get("updated_at") or "",
-        "recovered": True,
-    }
-    if session["status"] in {"running", "monitoring", "thinking"}:
-        # 记录里的运行状态已无人续接，不能伪装成进行中。
-        session["status"] = "idle"
-    _agent_sessions[session_id] = session
-    return session
-
-
-def _session_directory_entry(session_id: str, anchor: dict[str, Any]) -> dict[str, Any]:
-    live = _agent_sessions.get(session_id)
-    source = live or anchor
-    return {
-        "session_id": session_id,
-        "title": str(source.get("title") or "未命名会话"),
-        "status": str(source.get("status") or "idle"),
-        "created_at": source.get("created_at") or "",
-        "updated_at": source.get("updated_at") or "",
-        "active": bool(live and (live.get("active_run") or live.get("pending_plan"))),
-    }
-
-
-def _session_directory(client_id: str, owner_id: str) -> list[dict[str, Any]]:
-    """合并内存会话、持久锚点与落盘记录，返回该客户端的会话目录（新→旧）。
-
-    内存会话与同 id 锚点/记录合并去重；仅保留 client_id 或 owner_id
-    命中的会话（与恢复属主判定同语义），记录文件携带重启前的对话
-    元数据，保证强刷/重启后目录不丢会话。
-    """
-    entries: dict[str, dict[str, Any]] = {}
-    for session_id, session in _agent_sessions.items():
-        if session.get("client_id") == client_id or (
-            owner_id and session.get("owner_id") == owner_id
-        ):
-            entries[session_id] = _session_directory_entry(session_id, {})
-    try:
-        anchors = session_store.load_anchors()
-    except Exception:
-        anchors = {}
-    for session_id, anchor in anchors.items():
-        matched = anchor.get("client_id") == client_id or (
-            owner_id and anchor.get("owner_id") == owner_id
-        )
-        if matched and session_id not in entries:
-            entries[session_id] = _session_directory_entry(session_id, anchor)
-    try:
-        transcripts = session_store.load_transcripts()
-    except Exception:
-        transcripts = {}
-    for session_id, record in transcripts.items():
-        matched = record.get("client_id") == client_id or (
-            owner_id and record.get("owner_id") == owner_id
-        )
-        if matched and session_id not in entries:
-            entries[session_id] = {
-                "session_id": session_id,
-                "title": str(record.get("title") or "未命名会话"),
-                "status": str(record.get("status") or "idle"),
-                "created_at": record.get("created_at") or "",
-                "updated_at": record.get("updated_at") or "",
-                "active": False,
-            }
-    return sorted(entries.values(), key=lambda item: item.get("updated_at") or "", reverse=True)
-
-
 @router.get("/api/agent/sessions")
 async def list_agent_sessions(request: Request):
     """List this client's Agent sessions (live + recoverable anchors)."""
@@ -617,30 +523,7 @@ async def list_agent_sessions(request: Request):
 
 @router.delete("/api/agent/sessions/{session_id}")
 async def delete_agent_session(session_id: str, request: Request):
-    """Discard one Agent session: drop live state and its recovery anchor."""
-    client_id = get_client_id_from_request(request)
-    owner_id = owner_id_from_request(request)
-    session = _agent_sessions.get(session_id)
-    if not session or session.get("client_id") != client_id:
-        session = _restore_session(session_id, client_id, owner_id)
-    if not session or session.get("client_id") != client_id:
-        return error_response("Agent session not found", 404)
-    task = _agent_monitor_tasks.pop(session_id, None)
-    if task and not task.done():
-        task.cancel()
-    from features.assistant.project_agent import cancel_project_turn
-
-    cancel_project_turn(session_id)
-    _agent_sessions.pop(session_id, None)
-    try:
-        session_store.drop_anchor(session_id)
-    except Exception:
-        pass
-    try:
-        session_store.drop_transcript(session_id)
-    except Exception:
-        pass
-    return success_response({"session_id": session_id}, "Agent session deleted")
+    return delete_session(session_id, get_client_id_from_request(request), owner_id_from_request(request))
 
 
 @router.get("/api/agent/sessions/{session_id}")
@@ -655,8 +538,13 @@ async def get_agent_session(session_id: str, request: Request):
         session = _restore_session(session_id, client_id, owner_id)
         if session and session_id not in _agent_monitor_tasks:
             request_shim = AgentRequestShim(request)
-            _append_step(session, "会话已恢复", "running", "Controller 重启后根据持久任务重建监控状态")
-            if (session.get("active_run") or {}).get("automation_run_id"):
+            redmine_active = bool((session.get("active_run") or {}).get("redmine_run_id"))
+            _append_step(session, "会话已恢复", "done" if redmine_active else "running", "Controller 重启后根据持久任务重建监控状态")
+            if redmine_active:
+                from features.assistant.redmine_analysis import monitor_redmine_run
+
+                task = asyncio.create_task(monitor_redmine_run(session_id, request_shim))
+            elif (session.get("active_run") or {}).get("automation_run_id"):
                 # 工作流 run 只在锚点保留 automation_run_id，监控续接走
                 # workflow 监视器（token=None 与恢复锚点 active_run 匹配）。
                 from features.assistant.workflow_execution import monitor_workflow_run
@@ -670,6 +558,14 @@ async def get_agent_session(session_id: str, request: Request):
             session = _restore_session_from_transcript(session_id, client_id, owner_id)
     if not session or session.get("client_id") != client_id:
         return success_response(_expired_session_payload(session_id), "Agent session expired")
+    active = session.get("active_run") or {}
+    task = _agent_monitor_tasks.get(session_id)
+    if active.get("redmine_run_id") and (task is None or task.done()):
+        from features.assistant.redmine_analysis import monitor_redmine_run
+
+        _agent_monitor_tasks[session_id] = asyncio.create_task(monitor_redmine_run(
+            session_id, AgentRequestShim(request), active.get("monitor_token"),
+        ))
     return success_response({"session": _session_payload(session)})
 
 
@@ -686,54 +582,19 @@ async def cancel_agent_session(session_id: str, request: Request):
     task = _agent_monitor_tasks.pop(session_id, None)
     if task and not task.done():
         task.cancel()
+    redmine_active = bool((session.get("active_run") or {}).get("redmine_run_id"))
     _finish_run_state(session, "cancelled")
     from features.assistant.project_agent import cancel_project_turn
 
     cancel_project_turn(session_id)
-    _append_step(session, "Agent 已取消", "warning", "如果测试仍在运行，请到测试界面停止测试")
-    _append_message(session, "assistant", "Agent 会话已取消。如果测试仍在运行，请到测试界面停止测试。")
+    detail = ("已停止跟踪 Redmine 分析；后台任务仍可在 Redmine 单号分析页面查看或停止。"
+              if redmine_active else "如果测试仍在运行，请到测试界面停止测试")
+    _append_step(session, "Agent 已取消", "warning", detail)
+    _append_message(session, "assistant", detail if redmine_active else "Agent 会话已取消。如果测试仍在运行，请到测试界面停止测试。")
     return success_response({"session": _session_payload(session)})
 
 
 @router.get("/api/agent/capabilities")
 async def get_agent_capabilities():
     """List supported Agent capabilities with full tool catalog."""
-    config = config_manager.load_config()
-    categories = registry.get_all_categories()
-    tools_by_category = {}
-    for cat, tools in categories.items():
-        tools_by_category[cat] = [
-            {
-                "name": t.name,
-                "description": t.description,
-                "api_path": t.api_path,
-                "method": t.method,
-                "readonly": t.is_readonly,
-                "dangerous": t.is_dangerous,
-            }
-            for t in tools
-        ]
-
-    return success_response({
-        "tools": [
-            "list_devices", "list_test_suites", "start_test", "monitor_test",
-            "retry_test", "find_latest_report", "analyze_report", "diagnose_failure",
-            "analyze_suite_apk", "read_decompiled_source",
-            "automation_dashboard", "automation_runs", "automation_run_cancel",
-            "automation_run_retry", "cluster_status", "cluster_workers",
-            "cluster_devices", "cluster_jobs", "cluster_job_cancel",
-            "build_jobs", "knowledge_search",
-            "knowledge_ask", "knowledge_create",
-        ],
-        "tool_catalog": tools_by_category,
-        "total_tools": len(registry),
-        "limits": {"max_retries": MAX_AGENT_RETRIES},
-        "suite_source": "local" if config_manager.is_config_host_local(config) else "ssh",
-        # kkagent 会话桥接（P1）：规划/澄清/诊断走 kkagent，执行仍走状态机。
-        "kkagent_bridge": kkagent_bridge_availability(),
-        "workflow_draft": {
-            "plan_type": _WORKFLOW_PLAN_TYPE,
-            "actions": ["plan.create", "plan.update", "plan.preflight",
-                        "plan.confirm", "plan.cancel", "plan.status"],
-        },
-    })
+    return success_response(capabilities_payload(kkagent_bridge_availability()))

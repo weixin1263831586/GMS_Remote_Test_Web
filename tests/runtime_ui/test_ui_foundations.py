@@ -136,7 +136,7 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
             }""", devices)
             rows = page.locator('#devices-table-body tr[data-device-id]')
             expect(rows).to_have_count(3)
-            expect(rows.first.locator('td')).to_have_count(11)
+            expect(rows.first.locator('td')).to_have_count(12)
             expect(rows.first.locator('[data-device-field="connection"]')).to_contain_text('网络 ADB')
             expect(rows.first.locator('[data-device-field="runtime"]')).to_have_text('ADB 在线')
             expect(rows.first.locator('[data-device-field="occupancy"]')).to_have_text('未占用')

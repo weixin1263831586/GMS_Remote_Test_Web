@@ -73,6 +73,9 @@ def _normalize_active_run(active_run: Any) -> dict[str, Any] | None:
             "cluster_job_id",
             # 对话 Agent 工作流 run 的恢复锚点（generic run 用 cluster_job_id）。
             "automation_run_id",
+            "redmine_run_id",
+            "redmine_issue_id",
+            "redmine_step_id",
             "attempt_id",
             "worker_id",
             "baseline_report_timestamp",

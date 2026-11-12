@@ -232,6 +232,7 @@ def session_from_anchor(anchor: dict[str, Any]) -> dict[str, Any] | None:
     active_run = anchor.get("active_run") or {}
     if not sid or not (
         active_run.get("cluster_job_id") or active_run.get("automation_run_id")
+        or (active_run.get("redmine_run_id") and active_run.get("redmine_issue_id"))
     ):
         return None
     return {
@@ -283,5 +284,13 @@ def restore_session(session_id: str, client_id: str, owner_id: str = "") -> dict
             session["client_id"] = client_id
             if owner_id:
                 session["owner_id"] = owner_id
+            # Restore history before the first recovery step can replace its transcript.
+            transcript = session_store.load_transcript(session_id)
+            if transcript and (
+                (owner_id and transcript.get("owner_id") == owner_id)
+                or (not owner_id and transcript.get("client_id") == client_id)
+            ):
+                session["messages"] = list(transcript.get("messages") or [])
+                session["steps"] = list(transcript.get("steps") or [])
             _agent_sessions[session_id] = session
         return session

@@ -134,3 +134,54 @@ html,body{height:100%;min-height:0;overflow:hidden}
 @media(max-width:850px){.console-layout{grid-template-columns:1fr}.console-heading{align-items:flex-start;flex-direction:column}.console-sidebar{overflow:visible}.console-sidebar .history-column{flex:none}.terminal{height:55vh}.console-subtitle{max-width:85vw}.input-dock{position:static}}
 
 button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
+
+
+/* Agent/Device Inventory design alignment for isolated iframe documents.
+   Scope: only color, surfaces, controls and tables; do not change tab geometry,
+   JS data hooks, canvas/terminal, modal visibility or scroll ownership. */
+:root {
+    --bg: #15151b;
+    --panel: #1b1b23;
+    --panel2: #202027;
+    --panel-2: #202027;
+    --panel-3: #2a2a34;
+    --border: #353540;
+    --line: #353540;
+    --line-strong: #4a4a58;
+    --text: #ededf2;
+    --muted: #b2b2c1;
+    --primary: #8b74e8;
+    --blue: #8b74e8;
+    --primary-hover: #c4b5fd;
+    --green: #39c994;
+    --ok: #39c994;
+    --yellow: #e7b854;
+    --warn: #e7b854;
+    --red: #f06b78;
+    --bad: #f06b78;
+    --danger: #f06b78;
+}
+:where(button, select, input, textarea) { font-family: inherit; border-radius: 6px; }
+:where(button):not(:disabled) { transition: color .15s, background-color .15s, border-color .15s; }
+:where(button, select, input, textarea):focus-visible {
+    outline: 2px solid var(--primary); outline-offset: 2px;
+}
+:where(section, .panel, .card, .stat-card, .table-wrap) {
+    border-color: var(--border); box-shadow: none;
+}
+:where(th) { color: var(--muted); font-weight: 600; }
+:where(td) { border-color: var(--border); }
+::selection { background: rgba(139,116,232,.25); color: var(--text); }
+
+
+/* 设备串口（独立 iframe）：只对齐主题，保留 xterm 字宽兜底等专用规则。 */
+.page-shell, .view-panel { color: var(--text); }
+.toolbar { background: var(--panel); border-bottom-color: var(--border); }
+.view-tab.active { color: var(--primary); }
+.view-tab.active::after { background: var(--primary); }
+:where(.panel, .port-card, .history-column, .modal) {
+    border-color: var(--border); border-radius: 8px;
+    background: var(--panel);
+}
+.terminal { border-color: var(--border); }
+:where(input, textarea, select) { border-color: var(--border); background: var(--panel2); }

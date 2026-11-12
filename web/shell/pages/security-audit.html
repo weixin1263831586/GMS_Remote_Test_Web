@@ -1,4 +1,4 @@
-<div class="container page-content" id="page-security-audit">
+<div class="container page-content page-ui-rework" id="page-security-audit">
             {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">🛡️</span> 安全审计{% include 'components/page-header-actions.html' %}
                 <!-- 视图页签：同 users 页「用户列表 / Agent 接入」胶囊模板
                      （.users-view-tabs 通用分段按钮样式）。「历史邮件」为
@@ -14,22 +14,18 @@
             <!-- 审计日志主视图（原内容） -->
             <div id="audit-main-view">
             <div class="audit-stats page-stat-row">
-                <div class="page-stat-card">
+                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#shield"></use></svg></span><span class="workbench-stat-copy">
                     <div class="page-stat-value tone-primary" id="audit-total-count">-</div>
-                    <div class="page-stat-label">审计记录</div>
-                </div>
-                <div class="page-stat-card">
+                    <div class="page-stat-label">审计记录</div></span></div>
+                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#monitor"></use></svg></span><span class="workbench-stat-copy">
                     <div class="page-stat-value tone-success" id="audit-web-count">-</div>
-                    <div class="page-stat-label">Web访问</div>
-                </div>
-                <div class="page-stat-card">
+                    <div class="page-stat-label">Web访问</div></span></div>
+                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#terminal"></use></svg></span><span class="workbench-stat-copy">
                     <div class="page-stat-value tone-warning" id="audit-cli-count">-</div>
-                    <div class="page-stat-label">CLI操作</div>
-                </div>
-                <div class="page-stat-card">
+                    <div class="page-stat-label">CLI操作</div></span></div>
+                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#warning"></use></svg></span><span class="workbench-stat-copy">
                     <div class="page-stat-value tone-danger" id="audit-error-count">-</div>
-                    <div class="page-stat-label">异常请求</div>
-                </div>
+                    <div class="page-stat-label">异常请求</div></span></div>
             </div>
 
             <div class="audit-filter-bar">

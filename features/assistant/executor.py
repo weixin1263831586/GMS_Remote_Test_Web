@@ -94,6 +94,8 @@ class ActionExecutor:
             "redmine_workload_stats": self._query_redmine_workload_stats,
             "redmine_department_stats": self._query_redmine_department_stats,
             "redmine_stats_config": self._query_redmine_stats_config,
+            "redmine_issue_analyze": self._start_redmine_analysis,
+            "redmine_issue_analysis_status": self._query_redmine_analysis,
             "gerrit_dashboard_config": self._query_gerrit_dashboard_config,
             "gerrit_dashboard_changes": self._query_gerrit_dashboard_changes,
             "knowledgebase_search": self._query_knowledgebase_search,
@@ -146,6 +148,16 @@ class ActionExecutor:
             error=f"工具 {tool_name} 暂未实现执行逻辑",
             formatted_text=f"抱歉，工具「{tool.display_name}」暂未实现。请在对应页面操作。",
         )
+
+    async def _start_redmine_analysis(self, session, request, params):
+        from .redmine_analysis import start_analysis
+
+        return await start_analysis(session, request, params)
+
+    async def _query_redmine_analysis(self, session, request, params):
+        from .redmine_analysis import query_analysis
+
+        return await query_analysis(session, request, params)
 
     # ==================== Query Helpers ====================
 

@@ -55,3 +55,56 @@ main{padding:0}
 
 
 button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
+
+
+/* Agent/Device Inventory design alignment for isolated iframe documents.
+   Scope: only color, surfaces, controls and tables; do not change tab geometry,
+   JS data hooks, canvas/terminal, modal visibility or scroll ownership. */
+:root {
+    --bg: #15151b;
+    --panel: #1b1b23;
+    --panel2: #202027;
+    --panel-2: #202027;
+    --panel-3: #2a2a34;
+    --border: #353540;
+    --line: #353540;
+    --line-strong: #4a4a58;
+    --text: #ededf2;
+    --muted: #b2b2c1;
+    --primary: #8b74e8;
+    --blue: #8b74e8;
+    --primary-hover: #c4b5fd;
+    --green: #39c994;
+    --ok: #39c994;
+    --yellow: #e7b854;
+    --warn: #e7b854;
+    --red: #f06b78;
+    --bad: #f06b78;
+    --danger: #f06b78;
+}
+:where(button, select, input, textarea) { font-family: inherit; border-radius: 6px; }
+:where(button):not(:disabled) { transition: color .15s, background-color .15s, border-color .15s; }
+:where(button, select, input, textarea):focus-visible {
+    outline: 2px solid var(--primary); outline-offset: 2px;
+}
+:where(section, .panel, .card, .stat-card, .table-wrap) {
+    border-color: var(--border); box-shadow: none;
+}
+:where(th) { color: var(--muted); font-weight: 600; }
+:where(td) { border-color: var(--border); }
+::selection { background: rgba(139,116,232,.25); color: var(--text); }
+
+
+/* 主机集群：KPI/数据面板与设备库存卡同构，保持 Dashboard/Management 原位。 */
+.dash-stat-card, .dash-panel, .card {
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--panel); box-shadow: none;
+}
+.dash-stat-card .num { font-weight: 650; font-variant-numeric: tabular-nums; }
+.dash-stat-card .label, .dash-stat-card .sub { color: var(--muted); }
+.dash-tabs { background: var(--panel); }
+.dash-tab.active { color: var(--primary); }
+.dash-tab.active::after { background: var(--primary); }
+.table-wrap th { position: sticky; top: 0; z-index: 1; }
+.table-wrap tbody tr:hover { background: color-mix(in srgb, var(--primary) 6%, var(--panel)); }
+.onboarding-modal { border-color: var(--border); background: var(--panel); }
