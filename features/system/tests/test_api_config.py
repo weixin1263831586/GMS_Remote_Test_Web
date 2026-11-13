@@ -60,7 +60,8 @@ class SystemApiConfigTests(unittest.TestCase):
     def test_architecture_replaces_configured_build_server_safely(self):
         page = ("<text>{{BUILD_SERVER_LABEL}} • 编译服务器</text>"
                 "{{PLATFORM_TOPOLOGY}}{{USBIP_TOPOLOGY}}"
-                "{{AOA_TOPOLOGY}}{{FIRMWARE_TOPOLOGY}}")
+                "{{AOA_TOPOLOGY}}{{FIRMWARE_TOPOLOGY}}"
+                "{{TEST_FLOW_TOPOLOGY}}{{AGENT_ANALYSIS_TOPOLOGY}}")
         topology_dir = Path(api.PROJECT_ROOT, "docs", "architecture")
         files = {
             "architecture.html": page,
@@ -75,6 +76,12 @@ class SystemApiConfigTests(unittest.TestCase):
             ).read_text(encoding="utf-8"),
             "firmware-topology.mmd": (
                 topology_dir / "firmware-topology.mmd"
+            ).read_text(encoding="utf-8"),
+            "test-flow-topology.mmd": (
+                topology_dir / "test-flow-topology.mmd"
+            ).read_text(encoding="utf-8"),
+            "agent-analysis-topology.mmd": (
+                topology_dir / "agent-analysis-topology.mmd"
             ).read_text(encoding="utf-8"),
         }
 

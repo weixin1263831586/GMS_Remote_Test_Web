@@ -57,6 +57,8 @@ ARCHITECTURE_VIEWS = {
     '{{USBIP_TOPOLOGY}}': 'usbip-topology.mmd',
     '{{AOA_TOPOLOGY}}': 'aoa-topology.mmd',
     '{{FIRMWARE_TOPOLOGY}}': 'firmware-topology.mmd',
+    '{{TEST_FLOW_TOPOLOGY}}': 'test-flow-topology.mmd',
+    '{{AGENT_ANALYSIS_TOPOLOGY}}': 'agent-analysis-topology.mmd',
 }
 
 
@@ -66,6 +68,26 @@ def test_architecture_views_cover_module_topologies():
         assert placeholder in content, f'missing placeholder {placeholder}'
         source = (ROOT / 'docs/architecture' / source_name).read_text(encoding='utf-8')
         assert parse_topology(source), f'{source_name} must define nodes and edges'
+
+
+
+def test_business_flows_show_real_ownership_and_monitoring_boundaries():
+    sources = ROOT / 'docs' / 'architecture'
+    usb_nodes, usb_edges = parse_topology((sources / 'usbip-topology.mmd').read_text(encoding='utf-8'))
+    assert '虚拟 USB' in usb_nodes['DevWorker']
+    assert any(start == 'DevWorker' and end == 'Tools' for start, end, *_ in usb_edges)
+    assert not any(start == 'Tools' and end == 'DevWorker' for start, end, *_ in usb_edges)
+
+    firm_nodes, firm_edges = parse_topology((sources / 'firmware-topology.mmd').read_text(encoding='utf-8'))
+    assert 'Windows' in firm_nodes['SourceHost']
+    assert any(start == 'SourceHost' and end == 'SourceDev' for start, end, *_ in firm_edges)
+    assert not any(start == 'Worker' and end == 'SourceDev' for start, end, *_ in firm_edges)
+
+    page = (ROOT / 'web/templates/architecture.html').read_text(encoding='utf-8')
+    for name in ('platform', 'usbip', 'aoa', 'firmware', 'test-flow', 'agent-analysis'):
+        assert f'id="arch-tab-{name}"' in page
+        assert f'data-arch-pane="{name}"' in page
+    assert 'run_id' in page and 'Linux USB Source' in page
 
 
 def test_architecture_views_render_as_local_svg():
