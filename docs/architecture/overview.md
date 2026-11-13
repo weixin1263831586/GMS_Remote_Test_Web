@@ -36,6 +36,15 @@ flowchart TB
 
 本图的规范源为 [`platform-topology.mmd`](platform-topology.mmd)，README 与 Web 架构页由契约测试约束为同一组角色和消息方向。
 
+## 业务流程与双平面说明
+
+Web「系统架构」另提供两个独立的流程图：
+
+- [测试执行闭环](test-flow-topology.mmd)：Web / Agent 意图 → Controller 鉴权、设备 Claim 与套件预检 → ATS / Cluster Job → Worker Poll、Tradefed / ADB → 原生日志 / 登记报告 → 可选 AI 诊断。**原生套件目录与已登记报告不是同一个存储**。
+- [Agent 工单诊断](agent-analysis-topology.mmd)：Agent 工具规划 → Controller 受控校验 → Redmine 单号分析队列 → 工单证据与分析 → run_id 状态跟踪 → 原会话结果回送。模型不会绕过 Controller，后台任务与 Agent 跟踪生命周期分开。
+
+USB/IP 数据面中设备**物理连接在 Source 主机**，Worker 使用 `vhci_hcd` 虚拟 USB 总线访问设备；[USB/IP 拓扑](usbip-topology.mmd) 不应画成设备重新物理连接 Worker。本地 USB 烧写与 Windows Source-side Flash 是两条不同的路径，见 [固件烧写拓扑](firmware-topology.mmd) 和 ADR 0005；Linux Source 的整包固件烧写尚未实现，拒绝而不是跨 USB/IP 勉强继续。
+
 ## 四个主要角色
 
 Web「系统架构 → 平台总览」顶部的分层功能图按接入与规划、Controller
