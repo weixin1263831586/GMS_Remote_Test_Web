@@ -1,17 +1,18 @@
+%% 设备物理连接在 Source；Worker 看到的是 vhci_hcd 虚拟 USB，不是二次物理设备。
 flowchart TB
-    DevSrc["Android Device（Source 侧）"]
+    DevSrc["Android 设备（Source 物理 USB）"]
     WinSrc["Windows USB Source（usbipd-win）"]
     LinuxSrc["Linux USB Source（usbipd）"]
     Worker["Linux Worker（usbip attach）"]
     Ctrl["FastAPI Controller"]
-    Tools["ADB / Fastboot / upgrade_tool"]
-    DevWorker["Android Device（Worker 侧）"]
+    DevWorker["Worker 虚拟 USB 总线（vhci_hcd）"]
+    Tools["ADB / Fastboot / Tradefed"]
 
-    DevSrc -->|"USB 物理接入"| WinSrc
-    DevSrc -->|"USB 物理接入"| LinuxSrc
+    DevSrc -->|"物理 USB"| WinSrc
+    DevSrc -->|"物理 USB"| LinuxSrc
     WinSrc -->|"USB/IP TCP 3240"| Worker
     LinuxSrc -->|"USB/IP TCP 3240"| Worker
-    Worker --> Tools
-    Tools --> DevWorker
-    Ctrl -.->|"SSH：usbip attach / bind（ADR 0004）"| Worker
-    Worker -->|"清单与心跳回报"| Ctrl
+    Worker -->|"attach"| DevWorker
+    DevWorker -->|"本地 USB 语义"| Tools
+    Ctrl -.->|"受控 SSH / attach / bind"| Worker
+    Worker -->|"设备清单 / Heartbeat"| Ctrl

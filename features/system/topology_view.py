@@ -368,8 +368,8 @@ LAYOUTS = {
             'LinuxSrc': (600, 270),
             'Worker': (360, 490),
             'Ctrl': (1040, 490),
-            'Tools': (360, 700),
-            'DevWorker': (360, 900),
+            'Tools': (360, 900),
+            'DevWorker': (360, 700),
         },
         kinds={
             'DevSrc': '#34d399',
@@ -403,12 +403,14 @@ LAYOUTS = {
     ),
     'firmware-topology.mmd': TopologyLayout(
         positions={
-            'Browser': (210, 80),
-            'Ctrl': (730, 80),
-            'Worker': (730, 360),
-            'Loader': (300, 600),
-            'Dev': (300, 850),
-            'AoaRec': (1060, 600),
+            'Browser': (200, 85),
+            'Ctrl': (730, 85),
+            'Worker': (730, 385),
+            'Loader': (280, 625),
+            'Dev': (280, 920),
+            'AoaRec': (960, 820),
+            'SourceHost': (1490, 385),
+            'SourceDev': (1490, 750),
         },
         kinds={
             'Browser': '#38bdf8',
@@ -417,6 +419,32 @@ LAYOUTS = {
             'Loader': '#fbbf24',
             'Dev': '#34d399',
             'AoaRec': '#a78bfa',
+            'SourceHost': '#34d399',
+            'SourceDev': '#34d399',
+        },
+    ),
+    'test-flow-topology.mmd': TopologyLayout(
+        positions={
+            'Request': (180, 85), 'Gate': (600, 85), 'Job': (1060, 85),
+            'Worker': (1060, 400), 'Device': (590, 400),
+            'Evidence': (1060, 735), 'Report': (615, 735), 'Diagnosis': (180, 735),
+        },
+        kinds={
+            'Request': '#a78bfa', 'Gate': '#38bdf8', 'Job': '#38bdf8',
+            'Worker': '#fbbf24', 'Device': '#34d399', 'Evidence': '#fbbf24',
+            'Report': '#34d399', 'Diagnosis': '#a78bfa',
+        },
+    ),
+    'agent-analysis-topology.mmd': TopologyLayout(
+        positions={
+            'Chat': (180, 85), 'Planner': (590, 85), 'Guard': (1070, 85),
+            'Run': (1070, 410), 'Evidence': (1070, 735),
+            'Monitor': (610, 735), 'Reply': (180, 735),
+        },
+        kinds={
+            'Chat': '#a78bfa', 'Planner': '#a78bfa', 'Guard': '#38bdf8',
+            'Run': '#38bdf8', 'Evidence': '#fbbf24',
+            'Monitor': '#34d399', 'Reply': '#34d399',
         },
     ),
 }

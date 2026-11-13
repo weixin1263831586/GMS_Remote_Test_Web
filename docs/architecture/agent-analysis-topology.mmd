@@ -1,0 +1,16 @@
+%% 对话 Agent 只规划；Controller 保持授权边界，Redmine 队列是任务权威。
+flowchart TB
+    Chat["对话 Agent：工单号 / URL"]
+    Planner["kkagent：规划与工具发现"]
+    Guard["Controller：权限 / 参数校验"]
+    Run["Redmine 单号分析队列"]
+    Evidence["工单正文 / 评论 / 附件 / 日志"]
+    Monitor["run_id 状态跟踪"]
+    Reply["原会话：分析结论 / 执行步骤"]
+
+    Chat -->|"分析请求"| Planner
+    Planner -->|"受控工具调用"| Guard
+    Guard -.->|"属主校验后入队"| Run
+    Run -->|"异步取证与分析"| Evidence
+    Evidence -->|"结果供状态查询"| Monitor
+    Monitor -->|"完成 / 失败反馈"| Reply
