@@ -285,7 +285,7 @@ ARCHITECTURE_TOPOLOGIES = {
 
 @router.get("/templates/architecture.html")
 async def get_architecture():
-    """获取系统架构图（拓扑、测试闭环、Agent 分析流程）。"""
+    """获取系统架构图（平台总览 / USB/IP / AOA / 固件烧写视图）"""
     architecture_file = os.path.join(PROJECT_ROOT, 'web', 'templates', 'architecture.html')
     if os.path.exists(architecture_file):
         with open(architecture_file, encoding='utf-8') as f:
