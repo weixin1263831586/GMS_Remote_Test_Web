@@ -33,6 +33,7 @@ ALLOWED_SCRIPT_CATEGORIES = {
     "agent",
     "deployment",
     "docs",
+    "kkagent",
     "maintenance",
     "migrations",
     "setup",

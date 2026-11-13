@@ -26,15 +26,28 @@ def is_local_provider(provider_name: str, config: dict) -> bool:
     )
 
 
+def _credential(value: object) -> str:
+    text = str(value or "").strip()
+    return "" if "${" in text else text
+
+
+def provider_api_key(provider_name: str, config: dict) -> str:
+    """Resolve inline/env credentials consistently for HTTP and headless calls."""
+    api_key = _credential(config.get("api_key"))
+    if not api_key and config.get("api_key_env"):
+        api_key = _credential(os.getenv(str(config["api_key_env"]), ""))
+    if not api_key and is_local_provider(provider_name, config):
+        api_key = _credential(os.getenv("GMS_LOCAL_AI_API_KEY", ""))
+    return api_key
+
+
 def auth_headers(
     provider_name: str,
     config: dict,
     header_name: str = "Authorization",
 ) -> dict:
-    api_key = str(config.get("api_key") or "").strip()
+    api_key = provider_api_key(provider_name, config)
     local = is_local_provider(provider_name, config)
-    if not api_key and local:
-        api_key = os.getenv("GMS_LOCAL_AI_API_KEY", "").strip()
     if not api_key and local and config.get("auth_required") is False:
         return {}
     if not api_key:
@@ -54,9 +67,7 @@ def provider_statuses(config: dict) -> list[dict]:
         if not isinstance(provider, dict):
             continue
         local = is_local_provider(provider_name, provider)
-        api_key = str(provider.get("api_key") or "").strip()
-        if not api_key and local:
-            api_key = os.getenv("GMS_LOCAL_AI_API_KEY", "").strip()
+        api_key = provider_api_key(provider_name, provider)
         auth_required = not (local and provider.get("auth_required") is False)
         configured = bool(provider.get("base_url") and provider.get("model"))
         credential_configured = bool(api_key) or not auth_required

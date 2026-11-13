@@ -1,6 +1,6 @@
 import unittest
 
-from features.assistant.universal_ai import UniversalAIAnalyzer
+from features.kkagent import UniversalAIAnalyzer
 
 
 class BuildPromptTests(unittest.TestCase):

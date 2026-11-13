@@ -379,13 +379,14 @@ class DailyBriefService:
     def start_issue_analysis(
         self, issue_id: int, *, analysis_mode: str = "incremental", device_serial: str = "",
         analysis_hint: str = "", subject: str = "",
+        output_style: str = "diagnostic",
     ) -> dict[str, Any]:
         """Queue an incremental retry or a fresh full analysis for one issue."""
         if not self._owner_is_eligible():
             return {"error": ADMIN_OWNER_MESSAGE, "code": "ADMIN_OWNER_FORBIDDEN"}
         analysis_hint = analysis_hint.strip()
         if analysis_mode == "incremental":
-            previous = self.repository.latest_issue_run(self.owner_id, issue_id)
+            previous = self.repository.latest_issue_run(self.owner_id, issue_id, output_style=output_style)
             # 选择另一台实机意味着取证上下文已经改变，必须保留旧 run 并
             # 新建记录，不能把新设备证据混进原分析历史。
             if previous is not None and (
@@ -405,9 +406,10 @@ class DailyBriefService:
                     }
         # A full analysis gets a new run rather than replacing the previous
         # conclusion.  This keeps the saved Redmine-number history auditable.
+        mode_prefix = f"issue:{issue_id}" + (":summary" if output_style == "summary" else "")
         mode = (
-            f"issue:{issue_id}:{analysis_mode}:{new_run_id()[-12:]}"
-            if analysis_mode == "full" or device_serial or analysis_hint else f"issue:{issue_id}"
+            f"{mode_prefix}:{analysis_mode}:{new_run_id()[-12:]}"
+            if analysis_mode == "full" or device_serial or analysis_hint else mode_prefix
         )
         run = DailyBriefRun(
             owner_id=self.owner_id, brief_date=brief_date_today(),
@@ -838,6 +840,7 @@ class DailyBriefService:
                 "snapshot_hash": run.snapshot_hash,
                 "device_serial": config.get("device_serial", ""),
                 "analysis_hint": config.get("analysis_hint", ""),
+                **({"output_style": "summary"} if run.output_style == "summary" else {}),
             },
         )
         if receipt.get("duplicate"):
@@ -873,6 +876,7 @@ class DailyBriefService:
         try:
             analyze_entry = dict(entry) if entry else {"issue_id": issue_id}
             analyze_entry.setdefault("analysis_mode", "diagnostic")
+            analyze_entry["output_style"] = run.output_style
             if config.get("device_serial"):
                 analyze_entry.setdefault("device_serial", config["device_serial"])
             if config.get("analysis_hint"):

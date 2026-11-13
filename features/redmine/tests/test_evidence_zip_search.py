@@ -12,7 +12,6 @@ import asyncio
 import io
 import unittest
 import zipfile
-from unittest.mock import patch
 
 from features.redmine.tests.test_evidence_pipeline import (
     EvidencePipelineFixture,
@@ -91,16 +90,15 @@ class ZipDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         self.assertEqual(entry["line"], 1)
         self.assertEqual(entry["zip_member"], "logs/logcat.txt")
 
-    def test_zip_member_limit_records_derived_partial(self):
-        """成员超限：派生索引不完整记 derived_status=partial + derive
-        阶段错误，zip 原件保持 ready（检索兜底仍扫原文/已索引成员）。"""
+    def test_all_zip_members_are_indexed_beyond_old_count_and_size_limits(self):
         from features.redmine.evidence import EvidenceFetcher, snapshot_completeness
         from features.redmine.evidence_store import owner_evidence_store
 
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
-            zf.writestr("one.txt", "first")
-            zf.writestr("two.txt", "second")
+            for index in range(55):
+                zf.writestr(f"{index:03d}.TXT", f"entry {index}")
+            zf.writestr("DULOMV~V.TXT", "x" * (2 * 1024 * 1024) + "\nlmkd killed target\n")
         zip_payload = buf.getvalue()
 
         with FakeRedmineServer() as fake:
@@ -114,26 +112,28 @@ class ZipDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
                 }
             )
             fake.attachment_payloads["776658"] = zip_payload
-            with self._patched_config(fake.base_url), patch(
-                "features.redmine.evidence_zip.ZIP_MEMBER_TEXT_MAX_MEMBERS", 1
-            ):
+            with self._patched_config(fake.base_url):
                 fetcher = EvidenceFetcher("owner-a")
                 result = asyncio.run(
                     fetcher.run(fetcher.create_snapshot(648526, download="all"))
                 )
 
-        # 下载完整 → 快照 ready；索引缺口由 derive 错误与 completeness
-        # 的 derived_text 维度显性表达。
         self.assertEqual(result["status"], "ready")
-        self.assertTrue(any(item["stage"] == "derive" for item in result["errors"]))
-        self.assertFalse(snapshot_completeness(result)["derived_text"])
-        artifacts = owner_evidence_store("owner-a").list_artifacts(
-            result["snapshot_id"]
-        )
-        limited = next(item for item in artifacts if item["attachment_id"] == "776658")
-        self.assertEqual(limited["status"], "ready")
-        self.assertEqual(limited["derived_status"], "partial")
-        self.assertIn("检索索引不完整", limited["error"])
+        self.assertFalse(result["errors"])
+        self.assertTrue(snapshot_completeness(result)["derived_text"])
+        store = owner_evidence_store("owner-a")
+        artifacts = store.list_artifacts(result["snapshot_id"])
+        archive = next(item for item in artifacts if item["attachment_id"] == "776658")
+        self.assertEqual(archive["derived_status"], "ready")
+        with store._connect() as connection:
+            relative = connection.execute(
+                "SELECT derived_text_path FROM redmine_evidence_artifacts WHERE artifact_id = ?",
+                (archive["artifact_id"],),
+            ).fetchone()[0]
+        from features.redmine.evidence import split_zip_derived_text
+        members = dict(split_zip_derived_text(store.resolve_internal(relative).read_text()))
+        self.assertEqual(len(members), 56)
+        self.assertIn("lmkd killed target", members["DULOMV~V.TXT"])
 
 
 if __name__ == "__main__":

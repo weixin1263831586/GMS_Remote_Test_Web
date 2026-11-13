@@ -3,7 +3,6 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from features.redmine.attachments import RedmineAttachmentMixin
 
@@ -142,12 +141,11 @@ class DownloadAttachmentGuardTests(unittest.IsolatedAsyncioTestCase):
             await self._download([redirect])
         self.assertIn("escapes configured origin", str(ctx.exception))
 
-    async def test_stream_size_cap_aborts_download(self):
+    async def test_stream_retains_complete_download(self):
         ok = _DownloadResponse(status=200, chunks=[b"a" * 16, b"b" * 16])
-        with patch("features.redmine.attachments.ATTACHMENT_MAX_BYTES", 16), \
-                self.assertRaises(RuntimeError) as ctx:
-            await self._download([ok])
-        self.assertIn("exceeds size limit", str(ctx.exception))
+        _client, total, content = await self._download([ok])
+        self.assertEqual(total, 32)
+        self.assertEqual(content, b"a" * 16 + b"b" * 16)
 
     async def test_happy_path_follows_one_redirect_and_writes_file(self):
         redirect = _DownloadResponse(

@@ -24,24 +24,19 @@ import aiohttp
 
 from . import evidence as _evidence
 from .evidence import (
-    _DERIVED_TEXT_MAX_BYTES,
     ANALYZABLE_KINDS,
     ATTACHMENT_CONNECT_TIMEOUT_SECONDS,
-    ATTACHMENT_MAX_BYTES,
     ATTACHMENT_READ_TIMEOUT_SECONDS,
     DERIVE_CONCURRENCY,
     DOWNLOAD_POLICIES,
     MAX_REDIRECTS,
     SNAPSHOT_ISSUE_TIMEOUT_SECONDS,
-    SNAPSHOT_MAX_ATTACHMENTS,
-    SNAPSHOT_MAX_TOTAL_DOWNLOAD_BYTES,
     EvidenceAuthError,
     EvidenceError,
     EvidenceNotFoundError,
     EvidencePermissionError,
     _attachment_path_ok,
     _classify_attachment,
-    _detect_text_encoding,
     _OwnerCredentials,
     _same_origin,
     owner_evidence_store,
@@ -49,6 +44,7 @@ from .evidence import (
 from .evidence_archives import extract_system_archive_text
 from .evidence_images import extract_image_ocr_text
 from .evidence_store import EvidenceStore
+from .evidence_text import derive_text_file
 from .evidence_zip import extract_zip_derived_text
 
 
@@ -205,74 +201,56 @@ class EvidenceFetcher:
         downloaded = 0
         policy = str(snapshot.get("download_policy") or "none")
         if policy != "none" and attachments:
-            if len(attachments) > SNAPSHOT_MAX_ATTACHMENTS:
-                errors.append({
-                    "stage": "download",
-                    "message": f"附件数量 {len(attachments)} 超过上限 {SNAPSHOT_MAX_ATTACHMENTS}，跳过下载",
-                })
-            else:
-                credentials_headers = credentials.headers()
-                total_budget = SNAPSHOT_MAX_TOTAL_DOWNLOAD_BYTES
-                async with aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(
-                        total=None,
-                        connect=ATTACHMENT_CONNECT_TIMEOUT_SECONDS,
-                        sock_read=ATTACHMENT_READ_TIMEOUT_SECONDS,
-                    ),
-                ) as session:
-                    for attachment in attachments:
-                        artifact = self._artifact_for(snapshot_id, str(attachment.get("id") or ""))
-                        if artifact is None:
-                            continue
-                        if policy == "analyzable" and attachment.get("kind") not in ANALYZABLE_KINDS:
-                            self.store.update_artifact(
-                                artifact["artifact_id"], status="rejected",
-                                error="download=analyzable 不覆盖该类型",
-                            )
-                            continue
-                        if total_budget <= 0:
-                            self.store.update_artifact(
-                                artifact["artifact_id"], status="rejected",
-                                error="快照总下载量已达上限",
-                            )
-                            errors.append({
-                                "stage": "download",
-                                "message": f"attachment {attachment.get('id')} 因总量上限被拒绝",
-                            })
-                            continue
-                        try:
-                            spent, inline_derive_error = await self._download_attachment(
-                                session, base_url, attachment,
-                                credentials_headers, artifact, snapshot_dir,
-                            )
-                        except EvidenceError as exc:
-                            self.store.update_artifact(
-                                artifact["artifact_id"], status="failed", error=str(exc)
-                            )
-                            errors.append({
-                                "stage": "download",
-                                "message": f"attachment {attachment.get('id')}: {exc}",
-                            })
-                            continue
-                        except Exception as exc:  # 网络/文件系统异常统一降级
-                            self.store.update_artifact(
-                                artifact["artifact_id"], status="failed",
-                                error=f"下载异常: {type(exc).__name__}",
-                            )
-                            errors.append({
-                                "stage": "download",
-                                "message": f"attachment {attachment.get('id')}: {type(exc).__name__}",
-                            })
-                            continue
-                        total_budget -= spent
-                        downloaded += 1
-                        if inline_derive_error:
-                            errors.append({
-                                "stage": "derive",
-                                "message": (
-                                    f"attachment {attachment.get('id')}: {inline_derive_error}"
-                                ),
-                            })
+            credentials_headers = credentials.headers()
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(
+                    total=None,
+                    connect=ATTACHMENT_CONNECT_TIMEOUT_SECONDS,
+                    sock_read=ATTACHMENT_READ_TIMEOUT_SECONDS,
+                ),
+            ) as session:
+                for attachment in attachments:
+                    artifact = self._artifact_for(snapshot_id, str(attachment.get("id") or ""))
+                    if artifact is None:
+                        continue
+                    if policy == "analyzable" and attachment.get("kind") not in ANALYZABLE_KINDS:
+                        self.store.update_artifact(
+                            artifact["artifact_id"], status="rejected",
+                            error="download=analyzable 不覆盖该类型",
+                        )
+                        continue
+                    try:
+                        _spent, inline_derive_error = await self._download_attachment(
+                            session, base_url, attachment,
+                            credentials_headers, artifact, snapshot_dir,
+                        )
+                    except EvidenceError as exc:
+                        self.store.update_artifact(
+                            artifact["artifact_id"], status="failed", error=str(exc)
+                        )
+                        errors.append({
+                            "stage": "download",
+                            "message": f"attachment {attachment.get('id')}: {exc}",
+                        })
+                        continue
+                    except Exception as exc:  # 网络/文件系统异常统一降级
+                        self.store.update_artifact(
+                            artifact["artifact_id"], status="failed",
+                            error=f"下载异常: {type(exc).__name__}",
+                        )
+                        errors.append({
+                            "stage": "download",
+                            "message": f"attachment {attachment.get('id')}: {type(exc).__name__}",
+                        })
+                        continue
+                    downloaded += 1
+                    if inline_derive_error:
+                        errors.append({
+                            "stage": "derive",
+                            "message": (
+                                f"attachment {attachment.get('id')}: {inline_derive_error}"
+                            ),
+                        })
 
         # 派生阶段与下载解耦：OCR/压缩包索引并发执行，失败/索引不全只
         # 记 derive 阶段错误与 artifact.derived_status，不把原件 ready
@@ -404,10 +382,6 @@ class EvidenceFetcher:
                 if response.status >= 400:
                     raise EvidenceError(f"附件下载 HTTP {response.status}")
                 declared = int(attachment.get("filesize") or 0)
-                if declared and declared > ATTACHMENT_MAX_BYTES:
-                    raise EvidenceError(
-                        f"声明大小 {declared} 超过单附件上限 {ATTACHMENT_MAX_BYTES}",
-                    )
                 # 流式落盘：256MiB 级附件不再整包驻留内存，边收边写临时
                 # 文件并滚动 SHA-256，完成后原子重命名；任何失败（含取消）
                 # 都删除半成品，绝不留下截断的原件。
@@ -449,31 +423,10 @@ class EvidenceFetcher:
         derived_status = ""
         kind = str(artifact.get("kind") or "unknown")
         if kind in {"text", "log"}:
-            # 转码是唯一需要整包字节的路径：仅小文本附件按需回读磁盘，
-            # 大文件不再为编码探测把原件整体载入内存。
-            data = absolute.read_bytes() if size <= _DERIVED_TEXT_MAX_BYTES else b""
-            encoding = _detect_text_encoding(data) if data else ""
-            if not data:
-                # 超出派生上限：不为编码探测载入大文件，无派生文本。
-                derived_status = "missing"
-                derived_error = "文本附件超出派生上限，未生成派生文本"
-            elif encoding and encoding != "utf-8":
-                try:
-                    derived = data.decode(encoding).encode("utf-8")
-                    derived_rel = f"{snapshot_rel}/derived/{artifact_id}.txt"
-                    self._atomic_write(self.store.resolve_internal(derived_rel), derived)
-                    derived_status = "ready"
-                except (UnicodeDecodeError, OSError) as exc:
-                    derived_error = f"派生 UTF-8 文本失败: {type(exc).__name__}"
-                    derived_status = "missing"
-            elif encoding == "utf-8":
-                # 原件已是 UTF-8：检索直接扫原文（stored_path 兜底），
-                # 无需派生副本，derived_status 留空表示"不适用"。
-                pass
-            else:
-                # 无法识别编码：无法生成派生文本。
-                derived_status = "missing"
-                derived_error = "文本编码未识别，未生成派生文本"
+            derived_rel, derived_error = await asyncio.to_thread(
+                derive_text_file, self.store, artifact_id, snapshot_rel, absolute,
+            )
+            derived_status = "missing" if derived_error else ("ready" if derived_rel else "")
         elif kind == "image":
             # 截图/图片附件 OCR 成可检索文本（best-effort），延迟到
             # 派生阶段并发执行；失败只影响 derived_status，不降级原件。
@@ -486,7 +439,7 @@ class EvidenceFetcher:
             })
         elif kind == "archive":
             # 队列只保留元数据（磁盘路径/格式），不引用原始字节：压缩包
-            # 可能接近快照总下载预算，字节数组常驻待处理队列会随批量下载
+            # 可能很大，字节数组常驻待处理队列会随批量下载
             # 推高 Controller 内存峰值；派生 Worker 统一从磁盘原件读取。
             self._pending_derive.append({
                 "artifact_id": str(artifact["artifact_id"]),
@@ -705,8 +658,6 @@ class EvidenceFetcher:
             nonlocal size, header
             async for chunk in response.content.iter_chunked(256 * 1024):
                 size += len(chunk)
-                if size > ATTACHMENT_MAX_BYTES:
-                    raise EvidenceError("附件超过单附件大小上限")
                 if len(header) < 8:
                     header = (header + chunk)[:8]
                 digest.update(chunk)

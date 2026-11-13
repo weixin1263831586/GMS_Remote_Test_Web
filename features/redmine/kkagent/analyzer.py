@@ -14,25 +14,25 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..daily_brief_prompt import issue_result_schema_json, prompt_template_for
-from .context_budget import (
+from features.kkagent import (
+    STREAM_LINE_LIMIT_BYTES,
     ContextBudgetError,
     analysis_command,
-    context_limited_config,
-    trace_from_summary,
+    child_env,
+    classify_failure,
+    context_length_limit,
+    has_textual_gms_tool_call,
+    model_config,
+    settle_reader_future,
+    terminate_process_tree,
 )
-from .errors import classify_failure, context_length_limit, has_textual_gms_tool_call
+
+from ..daily_brief_prompt import issue_result_schema_json, prompt_template_for
 from .evidence_gate import gate_and_errors
 from .mcp_health import probe_kkagent_mcp_health
 from .native_summary import native_evidence_repair_prompt, native_summary_result
 from .output import parse_issue_result
-from .process import (
-    STREAM_LINE_LIMIT_BYTES,
-    child_env,
-    settle_reader_future,
-    terminate_process_tree,
-)
-from .trace import KkAgentTrace, ToolTrace, consume_line
+from .trace import KkAgentTrace, ToolTrace, consume_line, trace_from_summary
 
 
 # 与 __init__ 共享的常量（避免包级循环 import，直接定义于 process/本模块）。
@@ -251,7 +251,7 @@ class KkAgentRedmineAnalyzer:
                 f"for #{entry.get('issue_id')} again unless you have concrete evidence the "
                 f"issue changed after the preflight."
             )
-        if entry.get("analysis_mode") != "triage":
+        if entry.get("analysis_mode") != "triage" and entry.get("output_style") != "summary":
             prompt += (
                 "\n\nAUDITABLE CLAIM CONTRACT (mandatory): include a `## 关键结论` "
                 "section. Label each bullet 事实/推断/待验证. Cite actual observed "
@@ -268,6 +268,7 @@ class KkAgentRedmineAnalyzer:
                 "reporter/assignee/status/update-time metadata yourself; the Controller "
                 "renders authoritative Redmine metadata outside your Markdown."
             )
+        if entry.get("analysis_mode") != "triage":
             metadata = {
                 "reporter(author)": entry.get("author_name"),
                 "assignee": entry.get("assigned_to_name"),
@@ -359,8 +360,8 @@ class KkAgentRedmineAnalyzer:
                 limit = self._observed_context_limit
                 if limit is not None and budgeted_limit != limit:
                     try:
-                        path = resources.enter_context(context_limited_config(
-                            self.model, limit, self.env_extra
+                        path, config_env = resources.enter_context(model_config(
+                            self.model, self.env_extra, context_limit=limit
                         ))
                     except ContextBudgetError as error:
                         if outcome is not None:
@@ -370,6 +371,7 @@ class KkAgentRedmineAnalyzer:
                             ok=False, error_type="context_limit_exceeded", error=str(error)
                         )
                     active_entry["_kkagent_config_path"] = str(path)
+                    active_entry["_kkagent_config_env"] = config_env
                     budgeted_limit = limit
                 outcome = await self._analyze_once(active_entry)
                 if outcome.error_type == "context_limit_exceeded":
@@ -406,10 +408,28 @@ class KkAgentRedmineAnalyzer:
     # ------------------------------------------------------------ process
 
     async def _run_stream(
-        self, command: list[str], progress: Any = None, on_started: Any = None
+        self, command: list[str], progress: Any = None, on_started: Any = None,
+        *, config_env: dict[str, str] | None = None,
+    ) -> tuple[KkAgentTrace, _StreamFallback, bool]:
+        if "--config" in command:
+            return await self._run_configured_stream(command, progress, on_started, config_env)
+        try:
+            with model_config(self.model, self.env_extra) as (path, env):
+                return await self._run_configured_stream(
+                    [command[0], "--config", str(path), *command[1:]], progress, on_started, env
+                )
+        except ContextBudgetError as error:
+            trace = KkAgentTrace(status="model_config_unavailable",
+                                 error_type="model_config_unavailable", error=str(error))
+            return trace, _StreamFallback(), False
+
+    async def _run_configured_stream(
+        self, command: list[str], progress: Any, on_started: Any,
+        config_env: dict[str, str] | None,
     ) -> tuple[KkAgentTrace, _StreamFallback, bool]:
         """启动 kkagent 并实时消费 stream-json；返回 (轨迹, 原始兜底, 超时)。"""
         env = child_env(self.env_extra)
+        env.update(config_env or {})
         if self.model:
             env["KKAGENT_DEFAULT_MODEL"] = self.model
         trace = KkAgentTrace()
@@ -553,7 +573,8 @@ class KkAgentRedmineAnalyzer:
         command = analysis_command(command, entry)
         on_started = entry.get("_provider_started") if isinstance(entry, dict) else None
         trace, raw, timed_out = await self._run_stream(
-            command, progress, on_started=on_started
+            command, progress, on_started=on_started,
+            **({"config_env": entry["_kkagent_config_env"]} if "_kkagent_config_env" in entry else {}),
         )
         if previous is not None:
             if trace.session_id and trace.session_id != previous.session_id:
@@ -584,7 +605,7 @@ class KkAgentRedmineAnalyzer:
             result = native_summary_result(trace, entry)
             if result is None:
                 _gate, findings = gate_and_errors(trace, entry, {})
-                findings.insert(0, _missing_report_finding(trace))
+                findings.insert(0, _missing_report_finding(trace, output_style=entry.get("output_style")))
             else:
                 _gate, findings = gate_and_errors(trace, entry, result)
                 findings.extend(result.get("claim_binding_errors") or [])
@@ -597,7 +618,9 @@ class KkAgentRedmineAnalyzer:
             result = native_summary_result(trace, entry)
             if result is None:
                 trace.status = trace.error_type = "incomplete_ai_output"
-                trace.error = "模型未生成最终分析报告，不能将进度文字作为分析结果。 " + _missing_report_finding(trace)
+                trace.error = "模型未生成最终分析报告，不能将进度文字作为分析结果。 " + _missing_report_finding(
+                    trace, output_style=entry.get("output_style")
+                )
                 return self._failure(trace, raw)
             _gate, findings = gate_and_errors(trace, entry, result)
             findings.extend(result.get("claim_binding_errors") or [])
@@ -655,10 +678,12 @@ class KkAgentRedmineAnalyzer:
         native_summary = entry.get("analysis_mode") == "diagnostic"
         for _attempt in range(REPAIR_RESUME_RETRIES):
             repair_prompt = (
-                native_evidence_repair_prompt(findings, merged.evidence_ledger())
+                native_evidence_repair_prompt(
+                    findings, merged.evidence_ledger(), output_style=entry.get("output_style", "diagnostic")
+                )
                 if native_summary else self.build_repair_prompt(findings)
             )
-            if _attempt > 0:
+            if _attempt > 0 and entry.get("output_style") != "summary":
                 # 首轮 repair 后仍无有效产出时,把"只回引用对照、不重发报告"
                 # 的模式点名禁止:第二轮必须直接返回完整报告正文。
                 repair_prompt += (
@@ -675,7 +700,8 @@ class KkAgentRedmineAnalyzer:
                     "正在自动补齐取证" if native_summary else "正在自动修复输出格式"
                 )
             repair_trace, raw, timed_out = await self._run_stream(
-                analysis_command(self.build_repair_command(repair_prompt, session_id), entry), progress
+                analysis_command(self.build_repair_command(repair_prompt, session_id), entry), progress,
+                **({"config_env": entry["_kkagent_config_env"]} if "_kkagent_config_env" in entry else {}),
             )
             repair_trace.repair_attempts = 1
             if repair_trace.session_id and repair_trace.session_id != session_id:
@@ -708,7 +734,8 @@ class KkAgentRedmineAnalyzer:
                 }
                 result = native_summary_result(merged, indexed_entry)
                 errors = [] if result is not None else [
-                    _missing_report_finding(merged), *gate_and_errors(merged, entry, {})[1],
+                    _missing_report_finding(merged, output_style=entry.get("output_style")),
+                    *gate_and_errors(merged, entry, {})[1],
                 ]
             else:
                 result, errors = parse_issue_result(trace=repair_trace, raw=raw.text())
@@ -776,7 +803,13 @@ class KkAgentRedmineAnalyzer:
         )
 
 
-def _missing_report_finding(trace: KkAgentTrace) -> str:
+def _missing_report_finding(trace: KkAgentTrace, *, output_style: str | None = None) -> str:
+    if output_style == "summary":
+        return (
+            "The last model round did not return a final summary "
+            f"(last round output: {trace.last_round_output_tokens} tokens). "
+            "Return your actual final answer directly, not progress or a promise to continue."
+        )
     return (
         "The last model round did not return a final diagnostic Markdown report "
         f"(last round output: {trace.last_round_output_tokens} tokens). "
@@ -855,7 +888,7 @@ class _StreamFallback:
     """
 
     def __init__(self) -> None:
-        from .process import CappedCapture
+        from features.kkagent import CappedCapture
 
         self.stdout = CappedCapture()
         self.stderr = CappedCapture()

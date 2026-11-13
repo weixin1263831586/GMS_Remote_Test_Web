@@ -222,6 +222,11 @@ class DailyBriefRun:
     report_markdown: str = ""
     error: str = ""
 
+    @property
+    def output_style(self) -> str:
+        """Standalone conversation mode survives queueing without a schema change."""
+        return "summary" if self.mode.split(":")[2:3] == ["summary"] else "diagnostic"
+
     def to_row(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,

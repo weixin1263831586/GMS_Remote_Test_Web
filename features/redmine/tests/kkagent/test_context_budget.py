@@ -6,15 +6,36 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+
+try:
+    import tomllib
+except ImportError:  # Python 3.10
+    import tomli as tomllib
+
+from features.kkagent import classify_failure, context_length_limit, context_limited_config
+from features.kkagent import config as kkagent_config
 from features.redmine.kkagent.analyzer import KkAgentRedmineAnalyzer, _StreamFallback
-from features.redmine.kkagent.context_budget import context_limited_config, tomllib
-from features.redmine.kkagent.errors import classify_failure, context_length_limit
 from features.redmine.kkagent.mcp_health import McpHealthProbe
 from features.redmine.tests.kkagent.test_native_summary import (
     ENTRY,
     complete_trace,
     final_trace,
 )
+
+
+AI_CONFIG = {
+    "enabled": True,
+    "primary_provider": "gateway",
+    "providers": {
+        "gateway": {
+            "enabled": True,
+            "base_url": "http://gateway.invalid",
+            "model": "test",
+            "api_format": "openai",
+            "max_context_size": 500000,
+        },
+    },
+}
 
 
 OVERFLOW = 'The input (64005 tokens) is longer than the model\'s context length (16384 tokens).'
@@ -54,34 +75,35 @@ def test_context_overflow_is_classified_before_generic_failure_or_step_limit():
     assert context_length_limit('模型输入超过服务端上下文上限（16384 tokens）。') == 16384
 
 
-def test_overlay_is_private_preserves_security_and_cleans_up_on_error(tmp_path):
+def test_overlay_is_private_preserves_security_and_cleans_up_on_error(tmp_path, monkeypatch):
     original = config_home(tmp_path)
+    monkeypatch.setattr(kkagent_config._config_manager, "get_ai_config", lambda: AI_CONFIG)
     with pytest.raises(RuntimeError), context_limited_config("test", 16384, {"HOME": str(tmp_path)}) as path:
         assert path.stat().st_mode & 0o777 == 0o600
         assert path.parent.stat().st_mode & 0o777 == 0o700
         config = tomllib.loads(path.read_text())
         assert config['models']['test']['max_context_size'] == 16384
-        assert config['models']['test']['max_output_size'] == 16000
-        assert config['providers']['gateway']['api_key'] == 'synthetic-test-key'
+        assert config['providers']['gateway']['base_url'] == 'http://gateway.invalid'
         assert config['sandbox']['enabled']
         assert config['mcp_servers']['gms']['command'] == 'gms-mcp'
-        assert config['loop_control']['auto_compact']
         assert config['loop_control']['max_steps_per_turn'] == 0
+        assert config['loop_control']['auto_compact']
         raise RuntimeError("cancelled analysis")
     assert not path.exists()
     assert original.read_text() == CONFIG
 
 
-def test_input_ceiling_does_not_invent_an_output_budget(tmp_path):
-    original = config_home(tmp_path)
-    original.write_text(CONFIG.replace('max_output_size = 16000\n', ''))
+def test_input_ceiling_does_not_invent_an_output_budget(tmp_path, monkeypatch):
+    config_home(tmp_path)
+    monkeypatch.setattr(kkagent_config._config_manager, "get_ai_config", lambda: AI_CONFIG)
     with context_limited_config("test", 16384, {"HOME": str(tmp_path)}) as path:
         assert 'max_output_size' not in tomllib.loads(path.read_text())['models']['test']
 
 
 @pytest.mark.parametrize("second_failure", [False, True])
-def test_context_recovery_resumes_once_and_preserves_prior_evidence(tmp_path, second_failure):
+def test_context_recovery_resumes_once_and_preserves_prior_evidence(tmp_path, second_failure, monkeypatch):
     original = config_home(tmp_path)
+    monkeypatch.setattr(kkagent_config._config_manager, "get_ai_config", lambda: AI_CONFIG)
     analyzer = KkAgentRedmineAnalyzer(model="test", env_extra={"HOME": str(tmp_path)})
     paths = []
     commands = []
@@ -191,7 +213,7 @@ def test_learned_ceiling_is_reused_for_later_issues(tmp_path):
 
 def test_overlay_uses_inherited_model_selection(tmp_path, monkeypatch):
     config_home(tmp_path)
-    monkeypatch.setenv("KKAGENT_DEFAULT_MODEL", "test")
+    monkeypatch.setattr(kkagent_config._config_manager, "get_ai_config", lambda: AI_CONFIG)
     with context_limited_config("", 16384, {"HOME": str(tmp_path)}) as path:
         assert tomllib.loads(path.read_text())['models']['test']['max_context_size'] == 16384
 

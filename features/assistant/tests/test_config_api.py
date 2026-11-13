@@ -78,7 +78,7 @@ class AiConfigApiTests(unittest.TestCase):
                 SimpleNamespace(get_ai_config=lambda: self._config()),
             ),
             patch(
-                "features.assistant.universal_ai.UniversalAIAnalyzer.probe_provider",
+                "features.kkagent.analyzer.UniversalAIAnalyzer.probe_provider",
                 return_value=probed,
             ) as probe,
         ):

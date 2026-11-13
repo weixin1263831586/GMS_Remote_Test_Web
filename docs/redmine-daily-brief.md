@@ -44,6 +44,7 @@ Web 手动触发 → SQLite 持久 job 队列 → 独立 daily_brief_worker
 | `features/redmine/kkagent/` | stream-json 进程、轨迹、schema 与 runtime evidence gate、同会话修复 |
 | `features/redmine/daily_brief_api.py` | REST API（triage/run/config/latest/refresh/analyze-issue/事件时间线等） |
 | `features/redmine/daily_brief_worker.py` | Web 入队任务的独立 Worker、租约与优雅停止 |
+| `bootstrap/run_daily_brief_worker.py` | systemd Worker 启动入口，先加载部署环境与密钥，再导入分析模块 |
 | `features/redmine/daily_brief_analysis_events.py` | 分析进度事件存储（脱敏白名单摘要、增量轮询） |
 | `features/redmine/daily_brief_cli.py` | systemd 入口（run-nightly/run-delta/doctor） |
 | `agent/gms-remote-test/skill/references/redmine-daily-triage.md` | Agent 分析规范（skill，批量晨报与单条深度分析同工作流） |
@@ -272,3 +273,26 @@ kkagent --output-format stream-json
 
 - 可配置 delta、历史每日晨报趋势、persistent issue 连续天数统计已具备数据
   基础，UI 聚合视图后续迭代。
+
+
+### 附件证据完整性与检索分页
+
+证据快照按下载策略完整保存附件，不以附件数量、单件大小或总下载量省略
+附件。ZIP 以及受支持的压缩格式完整索引文本成员，不再设置 2 MiB 单成员、
+50 成员、32 MiB 总索引量限制；大文本编码校验和转码按块处理。大图 OCR
+通过重叠分块覆盖全图，识别结果完整保留。文件读取、依赖或安全校验失败
+必须显式反映为证据缺口，不能当作日志不存在。
+
+单词和批量检索都会扫描到 EOF。`limit` / `per_query_limit` 仅控制返回页大小，
+分别以 `offset` / `per_query_offset` 继续读取 `next_offset` 所指向的页。
+单词搜索的 `total_occurrences` 和批量搜索的每词 `total` 是完整命中数量。
+ZIP 命中的 `char_index` 是成员内偏移，`artifact_char_index` 是整份派生文本
+偏移，后者可直接传给 `artifact_read`。旧版无长度帧索引仍全文扫描，但不从
+正文伪造成员引用；已保存原件的旧预算缺口在检索时重建。只有
+`index_complete=true` 且 `coverage_complete=true` 时，零命中才支持缺失判断。
+
+对话 Agent 的 kkagent 模型回合不需要 GMS Agent Token；模型 Provider 的
+认证独立配置。当前 Redmine 分析复用晨报队列，其 GMS CLI/MCP 取证仍需要
+显式 profile 和有效 Agent Token。Web 登录态不自动成为后台 CLI 身份。
+若改为免手工配置 Token，应通过 Controller 进行按当前用户、任务和权限
+绑定的后端身份委托，不能直接删除认证预检或共享管理员身份。

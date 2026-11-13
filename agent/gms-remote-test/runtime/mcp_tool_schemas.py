@@ -1250,14 +1250,17 @@ ALL_TOOLS: list[dict[str, Any]] = [
             "description": (
                 "Search a fixed-string query across the description, all "
                 "journals, and downloaded artifact text. Returns evidence "
-                "refs (journal_id/artifact_id + snippet)."
+                "refs and total_occurrences. Scans all text; limit only bounds the page. "
+                "Follow next_offset with offset to read further matches. ZIP matches "
+                "provide artifact_char_index for artifact_read and member-relative char_index."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "snapshot_id": {"type": "string", "minLength": 0, "maxLength": 2048},
                     "query": {"type": "string", "minLength": 0, "maxLength": 256},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 400},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+                    "offset": {"type": "integer", "minimum": 0},
                 },
                 "required": ["snapshot_id", "query"],
                 "additionalProperties": False,
@@ -1273,7 +1276,9 @@ ALL_TOOLS: list[dict[str, Any]] = [
                 "truncated/matches; coverage_complete=false means parts of "
                 "the evidence were NOT scanned, so a zero hit is not "
                 "negative evidence. Matches carry char_index offsets usable "
-                "with gms_rt_redmine_artifact_read."
+                "with gms_rt_redmine_artifact_read (use artifact_char_index for ZIP). "
+                "Scans to EOF regardless of page size. Follow each row next_offset "
+                "with per_query_offset to read further matches."
             ),
             "inputSchema": {
                 "type": "object",
@@ -1286,6 +1291,7 @@ ALL_TOOLS: list[dict[str, Any]] = [
                         "maxItems": 16,
                     },
                     "per_query_limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "per_query_offset": {"type": "integer", "minimum": 0},
                 },
                 "required": ["snapshot_id", "queries"],
                 "additionalProperties": False,
@@ -1297,15 +1303,15 @@ ALL_TOOLS: list[dict[str, Any]] = [
                 "Read a text/log artifact by character window "
                 "(offset+limit, max 262144 chars). Response carries "
                 "total_chars and truncated. Offset is validated, not "
-                "clamped: out-of-range values are rejected — locate the "
+                "clamped: negative values are rejected — locate the "
                 "region with gms_rt_redmine_artifact_search first (its "
-                "char_index offsets are usable here)."
+                "artifact_char_index offsets are usable here)."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "artifact_id": {"type": "string", "minLength": 0, "maxLength": 2048},
-                    "offset": {"type": "integer", "minimum": 0, "maximum": 1000000000},
+                    "offset": {"type": "integer", "minimum": 0},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 262144},
                 },
                 "required": ["artifact_id"],

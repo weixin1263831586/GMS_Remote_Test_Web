@@ -475,7 +475,9 @@ class DailyBriefRepository:
                 break
         return list(latest.values())
 
-    def latest_issue_run(self, owner_id: str, issue_id: int) -> DailyBriefRun | None:
+    def latest_issue_run(
+        self, owner_id: str, issue_id: int, *, output_style: str | None = None,
+    ) -> DailyBriefRun | None:
         """Newest standalone analysis for one issue, including legacy runs."""
         # Do not route this through the bounded history view: an older issue
         # must still be found when a user enters its exact Redmine number.
@@ -489,7 +491,9 @@ class DailyBriefRepository:
         for row in rows:
             run = self._row_to_run(row)
             match = re.match(r"^issue:(\d+)(?::|$)", run.mode)
-            if match and int(match.group(1)) == int(issue_id):
+            if match and int(match.group(1)) == int(issue_id) and (
+                output_style is None or run.output_style == output_style
+            ):
                 return run
         return None
 

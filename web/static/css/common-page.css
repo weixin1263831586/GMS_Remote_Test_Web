@@ -951,18 +951,27 @@ body.apk-resizing {
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: 11px;
 }
 
+/* 对话引擎状态着色：与模型状态同一套语义色。 */
+#agent-engine-status[data-state="ready"] { color: var(--success-color); }
+#agent-engine-status[data-state="thinking"],
+#agent-engine-status[data-state="rules"] { color: var(--text-secondary); }
+#agent-engine-status[data-state="retrying"],
+#agent-engine-status[data-state="timeout"],
+#agent-engine-status[data-state="awaiting_authorization"] { color: var(--warning-color); }
+#agent-engine-status[data-state="failed"] { color: var(--danger-color); }
+
 .agent-model-line {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-height: 24px;
     min-width: 0;
     display: flex;
     align-items: center;
     gap: 6px;
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: 11px;
 }
 
 #agent-model-status {

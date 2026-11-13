@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from features.assistant.universal_ai import UniversalAIAnalyzer
 from features.automation import register_worker_status_port
 from features.cluster import register_cluster_port
 from features.devices.host_inventory import register_devices_port
@@ -11,6 +10,7 @@ from features.email import (
     configure_attachment_resolver,
     configure_manager_provider,
 )
+from features.kkagent import UniversalAIAnalyzer
 from features.redmine import (
     configure_agent_factories,
     get_redmine_config_for_request,
@@ -21,6 +21,22 @@ from features.redmine.service import RedmineService
 from features.reports import ReportAnalyzer
 from foundation.config import ConfigManager, RuntimeSettings, settings
 from foundation.device_locks import configure_display_name_resolver
+
+
+def _universal_analyzer_factory(config=None):
+    """统一网关分析器工厂：注入 reports 源码检索 provider（避免依赖环）。"""
+    if config is None:
+        from foundation.config import config_manager
+
+        config = config_manager.get_ai_config()
+
+    def _codesearch_source_search(class_name: str) -> list[dict]:
+        try:
+            return ReportAnalyzer().rk_codesearch(class_name, max_results=3) or []
+        except Exception:
+            return []
+
+    return UniversalAIAnalyzer(config, source_search=_codesearch_source_search)
 
 
 @dataclass
@@ -69,7 +85,7 @@ def _wire_cross_feature_services() -> None:
     configure_attachment_resolver(resolve_report_attachments)
     configure_agent_factories(
         report_analyzer_factory=ReportAnalyzer,
-        ai_analyzer_factory=UniversalAIAnalyzer,
+        ai_analyzer_factory=_universal_analyzer_factory,
     )
     configure_display_name_resolver(devices_display_name_resolver)
 
@@ -92,7 +108,7 @@ def build_services(
             agent=RedmineAgent(
                 redmine_repository,
                 report_analyzer_factory=ReportAnalyzer,
-                ai_analyzer_factory=UniversalAIAnalyzer,
+                ai_analyzer_factory=_universal_analyzer_factory,
             ),
         ),
     )

@@ -237,10 +237,29 @@ def issue_result_schema_json() -> str:
     return json.dumps(ISSUE_RESULT_SCHEMA, ensure_ascii=False)
 
 
+SUMMARY_PROMPT_TEMPLATE = """Analyze Redmine issue #{issue_id}: {subject}
+Status: {status}. Attachments: {attachment_count}.
+Return your own final summary directly in Simplified Chinese. Choose the
+structure and wording that best answer the user's question. Markdown is
+optional; there are no required headings, report sections, JSON fields or
+evidence-ID bullet formats. The conversation displays this final answer as-is.
+State the conclusion, its supporting evidence and any remaining uncertainty
+in natural language. Cite actual issue, journal, attachment or source references
+inline where relevant. Do not return progress narration or a promise to finish.
+
+Read the current issue and latest journals using the native read-only GMS MCP
+tools. Check relevant attachments and perform at least two distinct history
+searches with exclude_issue_id={issue_id}. For test failures, inspect the
+relevant source or test binary before assigning a cause. Never invent completed
+checks. Evidence and safety requirements below still apply.
+
+"""
+
+
 def prompt_template_for(entry: dict) -> str:
     """Keep the persisted result shape while limiting routine triage work."""
     if entry.get("analysis_mode") == "diagnostic":
-        return """Analyze Redmine issue #{issue_id}: {subject}
+        prompt = """Analyze Redmine issue #{issue_id}: {subject}
 Status: {status}. Attachments: {attachment_count}.
 Return your final analysis directly in Simplified Chinese Markdown (no JSON,
 enum labels or duplicate summaries). After reading the issue and its latest
@@ -350,6 +369,14 @@ DIAGNOSTIC REASONING REQUIREMENTS:
   different local suite is available, state both versions and treat its code
   as a comparison. A suite filename, minSdkVersion or compileSdkVersion alone
   cannot establish certification applicability or eliminate a suite mismatch.
+- Evidence accuracy takes priority over elapsed time or token savings. Search
+  all readable attachment text, including short/uppercase filenames and log
+  tails. A search page limit only bounds the returned page: follow next_offset
+  (or each batch row's next_offset via per_query_offset) until relevant matches
+  are read. Use artifact_char_index for artifact_read on ZIP member matches;
+  char_index is relative to that member. Do not declare a signature absent
+  unless index_complete AND coverage_complete are true. Explicitly disclose
+  extraction/download failures; never turn an unread member into negative evidence.
 - A failed archive read is a tool limitation, not proof its members lack logs.
   Name the unread attachment and distinguish not extracted from not present.
   A reporter's DPI statement does not independently eliminate that hypothesis.
@@ -435,6 +462,11 @@ GKI constraint: never propose a vendor GKI kernel patch without confirming the
 component is vendor-fixable. Distinguish product defects from suite expectations.
 If no local device was inspected, say so without inventing observations.
 """
+        if entry.get("output_style") == "summary":
+            # Share substantive forensics and safety rules, without the report layout.
+            reasoning = prompt.split("DIAGNOSTIC REASONING REQUIREMENTS:\n", 1)[1]
+            return SUMMARY_PROMPT_TEMPLATE + reasoning
+        return prompt
     if entry.get("analysis_mode") != "triage":
         return PROMPT_TEMPLATE
     header = PROMPT_TEMPLATE.split("Confidence rules:")[0]

@@ -14,7 +14,6 @@ from unittest.mock import patch
 import aiohttp
 import pytest
 
-from features.redmine.evidence import EvidenceError
 from features.redmine.evidence_fetch import EvidenceFetcher
 from features.redmine.evidence_store import EvidenceStore
 
@@ -88,20 +87,13 @@ async def test_network_failure_terminates_with_no_part_file(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_oversize_limit_terminates(tmp_path):
+async def test_stream_retains_all_chunks_without_size_budget(tmp_path):
     fetcher = EvidenceFetcher.__new__(EvidenceFetcher)
     temporary = tmp_path / "big.bin.part"
-
-    class _OversizeResponse:
-        content = _oversize_stream([b"A" * 1024, b"B" * 1024, b"C" * 1024])
-
-    with patch(
-        "features.redmine.evidence_fetch.ATTACHMENT_MAX_BYTES", 2048,
-    ), pytest.raises(EvidenceError):
-        await asyncio.wait_for(
-            _run_stream(fetcher, _OversizeResponse(), temporary),
-            timeout=5,
-        )
+    response = _PlainResponse([b"A" * 1024, b"B" * 1024, b"C" * 1024])
+    size, header = await asyncio.wait_for(_run_stream(fetcher, response, temporary), timeout=5)
+    assert size == 3072 and header == b"A" * 8
+    assert temporary.read_bytes() == b"A" * 1024 + b"B" * 1024 + b"C" * 1024
 
 
 @pytest.mark.asyncio
@@ -235,7 +227,7 @@ async def test_cancellation_joins_disk_thread_before_close(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["network", "oversize", "cancel"])
+@pytest.mark.parametrize("failure", ["network", "disk", "cancel"])
 async def test_attachment_failure_removes_part_after_pipeline_exits(tmp_path, monkeypatch, failure):
     store = EvidenceStore(tmp_path)
     fetcher = EvidenceFetcher("alice", store)
@@ -254,6 +246,8 @@ async def test_attachment_failure_removes_part_after_pipeline_exits(tmp_path, mo
             reading.set()
             if failure == "network":
                 raise aiohttp.ClientPayloadError("connection reset")
+            if failure == "disk":
+                return
             await asyncio.Event().wait()
 
     class Response:
@@ -270,8 +264,10 @@ async def test_attachment_failure_removes_part_after_pipeline_exits(tmp_path, mo
         def get(self, *_args, **_kwargs):
             return Response()
 
-    if failure == "oversize":
-        monkeypatch.setattr("features.redmine.evidence_fetch.ATTACHMENT_MAX_BYTES", 1)
+    if failure == "disk":
+        def fail_sync(*_args):
+            raise OSError("disk write failed")
+        monkeypatch.setattr("features.redmine.evidence_fetch.os.fsync", fail_sync)
     task = asyncio.create_task(fetcher._download_attachment(
         Session(), "https://redmine.example", {"id": "123", "filename": "a.bin"},
         {}, artifact, snapshot_dir,
@@ -280,7 +276,7 @@ async def test_attachment_failure_removes_part_after_pipeline_exits(tmp_path, mo
         await asyncio.wait_for(reading.wait(), timeout=5)
         task.cancel()
     expected = {
-        "network": aiohttp.ClientPayloadError, "oversize": EvidenceError,
+        "network": aiohttp.ClientPayloadError, "disk": OSError,
         "cancel": asyncio.CancelledError,
     }[failure]
     with pytest.raises(expected):

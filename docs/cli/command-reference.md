@@ -27,8 +27,8 @@
 | `gms-rt-apk-status` | Get one APK analysis task status, or list all tasks when no task id is given | gms-rt-apk-status [task_id] |
 | `gms-rt-approval-create` | Create a one-shot approval token (human terminal: auto-login/session reuse; scripts: GMS_RT_HUMAN_SESSION=1) | gms-rt-approval-create --tool <gms_rt_burn_firmware\|gms_rt_shell_exec> --device <serial>[,<serial>...] [--command <command>\|--firmware-sha256 <sha256> [--wipe-data true\|false] [--burn-mode auto\|uf]] |
 | `gms-rt-artifact-read` | Read a text/log artifact derived text by char window (--offset/--limit) | gms-rt-artifact-read <artifact_id> [--offset N] [--limit N] |
-| `gms-rt-artifact-search` | Search description, journals, and artifact text for a fixed query with evidence refs | gms-rt-artifact-search <snapshot_id> <query> [--limit N] |
-| `gms-rt-artifact-search-batch` | Multi-keyword one-pass search across description/journals/artifact text; per-query totals and truncation with coverage report | gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N] |
+| `gms-rt-artifact-search` | Search description, journals, and artifact text for a fixed query with evidence refs | gms-rt-artifact-search <snapshot_id> <query> [--limit N] [--offset N] |
+| `gms-rt-artifact-search-batch` | Multi-keyword one-pass search across description/journals/artifact text; per-query totals and truncation with coverage report | gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N] [--per-query-offset N] |
 | `gms-rt-auth-credential-mode` | Show whether this CLI invocation uses an Agent Token file or a session cookie |  |
 | `gms-rt-auth-elevate` | Activate administrator elevation for the current human session | gms-rt-auth-elevate [admin_username] [--password-stdin] |
 | `gms-rt-auth-elevation-reset` | Clear administrator elevation from the current human session |  |

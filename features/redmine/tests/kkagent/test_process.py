@@ -11,7 +11,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from features.redmine.kkagent.process import (
+from features.kkagent import (
     CAPTURE_HEAD_BYTES,
     CAPTURE_TAIL_BYTES,
     CappedCapture,

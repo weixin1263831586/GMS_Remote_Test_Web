@@ -82,6 +82,7 @@ Developer/maintenance Python/Shell scripts live under `tools/scripts/`
 |---|---|
 | `scripts/agent/` | Agent package toolchain: `audit_contract.py` → `sync_package.py` → `build_package.py` → `release.py` → `dev.py` |
 | `scripts/docs/` | Documentation generators (`generate_cli_docs.py`, `generate_guide_screenshots.py`) |
+| `scripts/kkagent/` | Model catalog migration (`import_kkagent_models.py`) |
 | `scripts/deployment/` | Host deployment helpers (systemd installers) |
 | `scripts/maintenance/` | Repo maintenance (`update_size_baseline.py`, `refactor_visual_parity.py`, `vulture_allowlist.py`) |
 | `scripts/migrations/` | One-shot data migrations |

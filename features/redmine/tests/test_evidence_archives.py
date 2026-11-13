@@ -25,7 +25,7 @@ def _archive_source_file(tmp_path: Path, magic: bytes) -> Path:
 def test_rar_members_become_searchable_text_with_stable_member_references(tmp_path):
     store = EvidenceStore(tmp_path / 'owner')
 
-    def extract(_source, target):
+    def extract(_source, target, **_kwargs):
         root = Path(target)
         (root / 'test_result.xml').write_text('<Result suite_version="14_r2"/>')
         (root / 'logcat.txt').write_text(
@@ -70,10 +70,10 @@ def test_archive_extractor_failure_is_reported_as_unread_not_as_missing_logs(tmp
     assert '尚未提取' in note
 
 
-def test_archive_text_budget_marks_skipped_members_and_preserves_result_priority(tmp_path):
+def test_archive_indexes_all_members_and_preserves_result_priority(tmp_path):
     store = EvidenceStore(tmp_path / 'owner')
 
-    def extract(_source, target):
+    def extract(_source, target, **_kwargs):
         (Path(target) / 'test_result.xml').write_text('<Result/>')
         (Path(target) / 'aaa.log').write_text('other log')
 
@@ -81,15 +81,13 @@ def test_archive_text_budget_marks_skipped_members_and_preserves_result_priority
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
 
-    with patch('features.redmine.evidence_archives.extract_system_archive', side_effect=extract), patch(
-        'features.redmine.evidence_archives.ZIP_MEMBER_TEXT_MAX_MEMBERS', 1,
-    ):
+    with patch('features.redmine.evidence_archives.extract_system_archive', side_effect=extract):
         derived, note = extract_system_archive_text(
             store, write, 'art_test', '123/ev_test',
             _archive_source_file(tmp_path, b'Rar!\x1a\x07\x01'),
         )
-    assert '检索索引不完整' in note
-    assert list(dict(split_zip_derived_text(store.resolve_internal(derived).read_text()))) == ['test_result.xml']
+    assert not note
+    assert list(dict(split_zip_derived_text(store.resolve_internal(derived).read_text()))) == ['test_result.xml', 'aaa.log']
 
 
 class ArchiveDownloadTests(unittest.TestCase):
@@ -100,7 +98,7 @@ class ArchiveDownloadTests(unittest.TestCase):
     def test_downloaded_rar_logs_are_published_as_readable_evidence(self):
         payload = b'Rar!\x1a\x07\x01\x00'
 
-        def extract(_source, target):
+        def extract(_source, target, **_kwargs):
             (Path(target) / 'logcat.txt').write_text('Resources$NotFoundException\n')
 
         with pipeline.FakeRedmineServer() as server:

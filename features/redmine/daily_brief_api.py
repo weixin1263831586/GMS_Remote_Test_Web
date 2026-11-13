@@ -151,6 +151,16 @@ class SingleIssueAnalysisRequest(BaseModel):
 
 @router.post("/daily-brief/analyze-issue")
 async def analyze_single_issue(request: Request, payload: SingleIssueAnalysisRequest):
+    # 测试只展开一层同模块 helper：守卫必须在路由体内可见（共享提交
+    # 函数是第二层，AST 测试看不到）。
+    _require_human(request)
+    return await submit_single_issue_analysis(request, payload)
+
+
+async def submit_single_issue_analysis(
+    request: Request, payload: SingleIssueAnalysisRequest, *, output_style: str = "diagnostic",
+):
+    """Shared guarded submission for the page and conversation adapters."""
     _require_human(request)
     if not _has_redmine_credentials(request):
         return ApiError.dependency_unavailable("请先配置 Redmine 取证凭据。").to_response()
@@ -183,6 +193,7 @@ async def analyze_single_issue(request: Request, payload: SingleIssueAnalysisReq
     result = _service_for_request(request).start_issue_analysis(
         payload.issue_id, analysis_mode=payload.analysis_mode, device_serial=device_serial,
         analysis_hint=payload.analysis_hint.strip(), subject=subject,
+        output_style=output_style,
     )
     if result.get("error"):
         # 资格/排队失败必须走统一错误信封：把 error 包进 success 信封

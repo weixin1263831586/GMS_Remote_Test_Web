@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from contextlib import contextmanager
+
+import pytest
 
 from features.assistant import api, session_store
 from features.assistant.tests.test_agent_session_safety import _bare_request
@@ -103,6 +106,47 @@ def test_delete_rejects_foreign_session():
             result = _json(asyncio.run(api.delete_agent_session("s-foreign", request)))
         assert result["success"] is False
         assert "s-foreign" in api._agent_sessions
+    finally:
+        api._agent_sessions.clear()
+        api._agent_sessions.update(saved)
+
+
+@pytest.mark.parametrize("client_id,owner_id,expected_status", [
+    ("client-old", "owner-a", 200),
+    ("client-new", "owner-a", 200),
+    ("client-new", "owner-b", 404),
+])
+def test_delete_transcript_only_session_after_restart(
+    tmp_path, monkeypatch, client_id, owner_id, expected_status,
+):
+    transcripts = tmp_path / "transcripts"
+    monkeypatch.setattr(session_store, "default_transcripts_dir", lambda: transcripts)
+    monkeypatch.setattr(api, "owner_id_from_request", lambda _request: owner_id)
+    saved = dict(api._agent_sessions)
+    api._agent_sessions.clear()
+    session_id = str(uuid.uuid4())
+    session_store.save_transcript({
+        "session_id": session_id, "client_id": "client-old", "owner_id": "owner-a",
+        "status": "idle", "title": "重启前的历史会话",
+        "messages": [{"role": "user", "content": "保留的对话"}], "steps": [],
+    })
+    try:
+        # The directory includes transcripts even with no live state or anchor.
+        own_entries = api._session_directory("client-old", "owner-a")
+        assert [item["session_id"] for item in own_entries] == [session_id]
+        assert not session_store.load_anchors().get(session_id)
+        assert session_id not in api._agent_sessions
+        request = _bare_request()
+        with _client(request, client_id):
+            response = asyncio.run(api.delete_agent_session(session_id, request))
+        assert response.status_code == expected_status
+        assert _json(response)["success"] is (expected_status == 200)
+        if expected_status == 200:
+            assert session_store.load_transcript(session_id) is None
+            assert api._session_directory(client_id, owner_id) == []
+        else:
+            assert session_store.load_transcript(session_id) is not None
+        assert session_id not in api._agent_sessions
     finally:
         api._agent_sessions.clear()
         api._agent_sessions.update(saved)

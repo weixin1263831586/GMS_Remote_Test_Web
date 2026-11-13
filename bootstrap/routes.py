@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from bootstrap.dependencies import _universal_analyzer_factory as get_universal_analyzer
 from features import knowledge
 from features.assistant import api as assistant
 from features.assistant import config_api as assistant_config
-from features.assistant.universal_ai import get_universal_analyzer
 from features.auth import router as auth_router
 from features.auth.api import configure_client_ssh_authenticator
 from features.automation import api as automation

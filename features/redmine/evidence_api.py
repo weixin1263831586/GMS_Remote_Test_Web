@@ -152,6 +152,7 @@ async def create_evidence_snapshot(
             existing
             and str(existing.get("status")) == "ready"
             and _snapshot_fresh(existing, EVIDENCE_CACHE_TTL_SECONDS)
+            and snapshot_completeness(existing)["derived_text"]
         ):
             return {
                 "success": True,
@@ -404,6 +405,8 @@ async def get_evidence_artifacts(snapshot_id: str, request: Request):
             "detected_content_type": artifact.get("detected_content_type") or "",
             "kind": artifact.get("kind"),
             "status": artifact.get("status"),
+            "derived_status": artifact.get("derived_status") or "",
+            "text_available": bool(artifact.get("text_available")),
             "size_bytes": int(artifact.get("size_bytes") or 0),
             "declared_size": int(artifact.get("declared_size") or 0),
             "sha256": artifact.get("sha256") or "",

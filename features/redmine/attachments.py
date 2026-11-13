@@ -8,7 +8,7 @@ from urllib.parse import urljoin, urlparse
 
 import aiohttp
 
-from .evidence import ATTACHMENT_MAX_BYTES, MAX_REDIRECTS, _attachment_path_ok, _same_origin
+from .evidence import MAX_REDIRECTS, _attachment_path_ok, _same_origin
 from .models import RedmineAttachment
 from .utils import (
     COMPILED_ISSUE_LINK_PATTERN,
@@ -100,7 +100,7 @@ class RedmineAttachmentMixin:
                 raise RuntimeError("Redmine attachment URL escapes configured origin")
             if not _attachment_path_ok(url):
                 raise RuntimeError("Redmine attachment URL path is not an attachment download")
-            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=180), allow_redirects=False) as response:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=None, connect=10, sock_read=120), allow_redirects=False) as response:
                 if response.status in (301, 302, 303, 307, 308):
                     location = response.headers.get("Location") or ""
                     if not location:
@@ -118,8 +118,6 @@ class RedmineAttachmentMixin:
                         if not chunk:
                             continue
                         total += len(chunk)
-                        if total > ATTACHMENT_MAX_BYTES:
-                            raise RuntimeError("Redmine attachment exceeds size limit")
                         target.write(chunk)
                 break
         return total

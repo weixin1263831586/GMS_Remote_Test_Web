@@ -2002,18 +2002,26 @@ class RedmineEvidenceToolTests(unittest.TestCase):
             captured["args"], ["ART", "--offset", "4096", "--limit", "8192"],
         )
 
-    def test_artifact_read_rejects_out_of_range_offset_explicitly(self):
-        # 回归：超大 offset 不得静默钳制——模型拿到错误窗口却不自知。
-        # 1e9 以内的偏移放行（大日志合法），越界值必须显式报错并引导
-        # 先用 search 定位。
+    def test_artifact_read_accepts_offsets_beyond_one_billion(self):
         captured = self._capture_run()
-        text, is_error = mcp_server.redmine_artifact_read_tool({
+        _text, is_error = mcp_server.redmine_artifact_read_tool({
             "artifact_id": "ART", "offset": 2_000_000_000,
         })
-        self.assertTrue(is_error)
-        self.assertIn("offset", text)
-        self.assertIn("gms_rt_redmine_artifact_search", text)
-        self.assertNotIn("command", captured)
+        self.assertFalse(is_error)
+        self.assertEqual(captured["args"], ["ART", "--offset", "2000000000"])
+
+    def test_artifact_search_pagination_args(self):
+        captured = self._capture_run()
+        _text, is_error = mcp_server.redmine_artifact_search_tool({
+            "snapshot_id": "ev_1", "query": "lmkd", "offset": 200,
+        })
+        self.assertFalse(is_error)
+        self.assertEqual(captured["args"], ["ev_1", "lmkd", "--offset", "200"])
+        _text, is_error = mcp_server.redmine_artifact_search_batch_tool({
+            "snapshot_id": "ev_1", "queries": ["lmkd"], "per_query_offset": 100,
+        })
+        self.assertFalse(is_error)
+        self.assertEqual(captured["args"], ["ev_1", "lmkd", "--per-query-offset", "100"])
 
     def test_artifact_read_accepts_large_but_valid_offset(self):
         # Controller 端 offset 无上限：适配层只做合理性防呆（1e9）。

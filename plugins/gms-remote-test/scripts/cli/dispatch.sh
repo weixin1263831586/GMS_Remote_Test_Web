@@ -95,8 +95,8 @@ _gms_rt_command_usage() {
         gms-rt-redmine-history-search) printf '%s' 'gms-rt-redmine-history-search <query> [--limit N] [--exclude-issue-id N] [--resolved-only]' ;;
         gms-rt-artifact-read) printf '%s' 'gms-rt-artifact-read <artifact_id> [--offset N] [--limit N]' ;;
         gms-rt-redmine-artifact-image) printf '%s' 'gms-rt-redmine-artifact-image <artifact_id>' ;;
-        gms-rt-artifact-search) printf '%s' 'gms-rt-artifact-search <snapshot_id> <query> [--limit N]' ;;
-        gms-rt-artifact-search-batch) printf '%s' 'gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N]' ;;
+        gms-rt-artifact-search) printf '%s' 'gms-rt-artifact-search <snapshot_id> <query> [--limit N] [--offset N]' ;;
+        gms-rt-artifact-search-batch) printf '%s' 'gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N] [--per-query-offset N]' ;;
         gms-rt-apk-analyze-attachment) printf '%s' 'gms-rt-apk-analyze-attachment <snapshot_id> <artifact_id>' ;;
         gms-rt-apk-source-read) printf '%s' 'gms-rt-apk-source-read <task_id> <path> [--offset N] [--limit N]' ;;
         gms-rt-knowledge-search) printf '%s' 'gms-rt-knowledge-search QUERY [--limit N] [--android-api-level N]' ;;

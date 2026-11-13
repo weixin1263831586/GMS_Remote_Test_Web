@@ -6,7 +6,7 @@
 - 直接请求 Redmine REST ``/issues/{id}.json?include=...``，原样保存返回的
   UTF-8 JSON 字节并计算 SHA-256；
 - 从原始响应构建规范化 manifest（不截断任何 journal notes）；
-- 按 download 策略受控下载附件原件（流式、限重定向、限大小、逐附件审计）；
+- 按 download 策略受控下载附件原件（流式、限重定向、逐附件审计）；
 - 文本/图片生成派生物，但派生失败绝不影响原件保存。
 
 对 Redmine 的所有请求都是 GET；认证使用 owner runtime config 中的
@@ -41,15 +41,9 @@ DOWNLOAD_POLICIES = ("none", "analyzable", "all")
 SNAPSHOT_ISSUE_TIMEOUT_SECONDS = 30
 ATTACHMENT_CONNECT_TIMEOUT_SECONDS = 10
 ATTACHMENT_READ_TIMEOUT_SECONDS = 120
-ATTACHMENT_MAX_BYTES = 256 * 1024 * 1024
-SNAPSHOT_MAX_TOTAL_DOWNLOAD_BYTES = 1024 * 1024 * 1024
-SNAPSHOT_MAX_ATTACHMENTS = 200
 MAX_REDIRECTS = 3
 SNAPSHOT_TTL_SECONDS = 300
-# 派生阶段（OCR/系统压缩包解包）在附件下载完成后的并发上限。与单图
-# OCR 超时（evidence_images.OCR_TIMEOUT_SECONDS）共同把最坏派生时间从
-# 串行 200×20s 压到 ~17 分钟量级；派生失败只记
-# 派生状态，不做超时跳过（保证分析结论准确优先）。
+# 派生并发限制只控制内存/CPU，不限制成员大小、数量或完整处理时间。
 DERIVE_CONCURRENCY = 4
 
 TEXT_KIND_EXTENSIONS = {
@@ -64,13 +58,6 @@ IMAGE_MIME_TYPES = {
 ANALYZABLE_KINDS = {"text", "log", "image", "pdf", "archive", "apk"}
 
 _TEXT_ENCODINGS = ("utf-8", "gb18030", "utf-16", "latin-1")
-_DERIVED_TEXT_MAX_BYTES = 64 * 1024 * 1024
-# zip 内文本成员的派生文本限制。单成员解压后
-# 超过阈值、成员数超上限或总量超上限都会跳过剩余成员（可审计地记录在
-# artifact error 里），防止 zip 炸弹拖垮 fetch 或搜索。
-ZIP_MEMBER_TEXT_MAX_BYTES = 2 * 1024 * 1024
-ZIP_MEMBER_TEXT_MAX_MEMBERS = 50
-ZIP_MEMBER_DERIVED_TOTAL_MAX_BYTES = 32 * 1024 * 1024
 # 派生文本里的成员分隔标记（行级），search 用它还原
 # ``attachment:<file>.zip!/<member>`` 引用与行号。
 _ZIP_MEMBER_MARKER_RE = re.compile(r"^<<<zip-member:(.*?)>>>$")

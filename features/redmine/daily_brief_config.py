@@ -58,44 +58,16 @@ _TRIGGER_TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 def list_daily_brief_model_options(
     ai_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """List enabled system models without exposing provider credentials or URLs."""
-    config = ai_config if ai_config is not None else config_manager.get_ai_config()
-    if not isinstance(config, dict) or not config.get("enabled", False):
-        return {"models": [], "default_model": ""}
-    providers = config.get("providers")
-    if not isinstance(providers, dict):
-        return {"models": [], "default_model": ""}
+    """List enabled system models without exposing provider credentials or URLs.
 
-    primary_provider = str(config.get("primary_provider") or "").strip()
-    provider_names = list(providers)
-    if primary_provider in providers:
-        provider_names.remove(primary_provider)
-        provider_names.insert(0, primary_provider)
+    模型目录唯一来源是 ``ai_models``（features.kkagent.registry，ADR 0034）；
+    返回形状与历史一致：``{"models": [...], "default_model": str}``。
+    """
+    from features.kkagent import list_model_options
 
-    models: list[dict[str, str]] = []
-    seen_models: set[str] = set()
-    default_model = ""
-    for provider_name in provider_names:
-        provider = providers.get(provider_name)
-        if not isinstance(provider, dict) or not provider.get("enabled", False):
-            continue
-        model = str(provider.get("model") or "").strip()
-        if not model:
-            continue
-        if provider_name == primary_provider:
-            default_model = model
-        if model in seen_models:
-            continue
-        seen_models.add(model)
-        display_name = str(provider.get("display_name") or model).strip() or model
-        models.append({
-            "model": model,
-            "display_name": display_name,
-            "provider": str(provider_name),
-        })
-    if not default_model and models:
-        default_model = models[0]["model"]
-    return {"models": models, "default_model": default_model}
+    return list_model_options(
+        ai_config if ai_config is not None else config_manager.get_ai_config()
+    )
 
 
 def list_daily_brief_agent_profiles(

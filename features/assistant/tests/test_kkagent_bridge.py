@@ -9,19 +9,37 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from features.assistant import kkagent_bridge as bridge
-from features.assistant.kkagent_runtime import read_bounded, restricted_runtime
+from features.kkagent import config as gateway_config
+from features.kkagent import extract_turn_events, read_bounded, restricted_runtime, run_headless_turn
 from foundation.command_result import CommandResult
+
+
+@pytest.fixture(autouse=True)
+def isolated_model_catalog(monkeypatch, tmp_path, request):
+    if request.node.name == "test_real_kkagent_cli_turn_returns_a_single_decision":
+        return
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("GMS_ASSISTANT_KKAGENT_CONFIG", raising=False)
+    monkeypatch.delenv("KKAGENT_DEFAULT_MODEL", raising=False)
+    config = {
+        "enabled": True, "primary_provider": "gateway",
+        "providers": {"gateway": {
+            "enabled": True, "base_url": "https://gateway.invalid", "model": "test",
+            "api_key": "synthetic-bridge-key",
+        }},
+    }
+    monkeypatch.setattr(gateway_config._config_manager, "get_ai_config", lambda: config)
 
 
 def test_native_and_legacy_streams_extract_assistant_text_and_session():
     events = [{"type": "session", "session_id": "sid"},
               {"type": "message", "role": "assistant", "content": '{"type":"answer","text":"好"}'},
               {"type": "result", "session_id": "sid", "message": "completed"}]
-    text, session_id, tools = bridge._extract_events([json.dumps(event) for event in events])
+    text, session_id, tools = extract_turn_events([json.dumps(event) for event in events])
     assert json.loads(text)["text"] == "好"
     assert session_id == "sid" and tools == []
     legacy = [{"type": "assistant", "message": {"content": [{"type": "text", "text": "old"}]}}]
-    assert bridge._extract_events([json.dumps(event) for event in legacy])[0] == "old"
+    assert extract_turn_events([json.dumps(event) for event in legacy])[0] == "old"
 
 
 @pytest.mark.asyncio
@@ -39,7 +57,7 @@ async def test_bridge_uses_isolated_config_plan_mode_and_an_empty_workspace(monk
                                   "wait": AsyncMock(return_value=0)})()
     spawn = AsyncMock(return_value=process)
     monkeypatch.setattr(bridge, "availability", lambda: {"available": True})
-    monkeypatch.setattr(bridge, "restricted_runtime", runtime)
+    monkeypatch.setattr("features.kkagent.session.restricted_runtime", runtime)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
     result = await bridge.run_turn("测试", context="只查询")
     assert result.ok and result.text == "ok"
@@ -73,9 +91,10 @@ async def test_timeout_retains_the_streamed_session_and_reaps_the_process(monkey
     process.wait = wait
     reap = AsyncMock()
     monkeypatch.setattr(bridge, "availability", lambda: {"available": True})
-    monkeypatch.setattr(bridge, "restricted_runtime", runtime)
+    monkeypatch.setattr("features.kkagent.session.restricted_runtime", runtime)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", AsyncMock(return_value=process))
-    monkeypatch.setattr(bridge, "_terminate_bridge_process", reap)
+    reap_target = "features.kkagent.session.terminate_process_tree"
+    monkeypatch.setattr(reap_target, reap)
     result = await bridge.run_turn("烧写固件", timeout_seconds=0.02)
     assert not result.ok and result.error_code == "timeout"
     assert result.session_id == "first-session"
@@ -91,7 +110,7 @@ async def test_bridge_deadline_also_bounds_policy_preparation(monkeypatch):
 
     spawn = AsyncMock()
     monkeypatch.setattr(bridge, "availability", lambda: {"available": True})
-    monkeypatch.setattr(bridge, "restricted_runtime", runtime)
+    monkeypatch.setattr("features.kkagent.session.restricted_runtime", runtime)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
     result = await bridge.run_turn("介绍下自己", timeout_seconds=0.01)
     assert not result.ok and result.error_code == "timeout"
@@ -104,10 +123,14 @@ async def test_runtime_denies_native_tools_mcp_and_hooks_without_editing_host_co
     source.write_text('default_permission_mode = "yolo"\n')
     monkeypatch.setenv("GMS_ASSISTANT_KKAGENT_CONFIG", str(source))
     command = Mock(return_value=CommandResult(code=0))
-    monkeypatch.setattr("features.assistant.kkagent_runtime.run_local_command", command)
+    monkeypatch.setattr("features.kkagent.sandbox.run_local_command", command)
     async with restricted_runtime("kkagent", {}) as (config, directory):
         assert config.stat().st_mode & 0o777 == 0o600
         assert str(config.parent) != directory
+        parsed = gateway_config.tomllib.loads(config.read_text())
+        assert parsed["default_model"] == "test"
+        assert parsed["providers"]["gateway"]["api_key_env"] == "GMS_MODEL_API_KEY"
+        assert "synthetic-bridge-key" not in config.read_text()
     assert not config.exists()
     assert source.read_text() == 'default_permission_mode = "yolo"\n'
     changes = {call.args[0][-2]: call.args[0][-1] for call in command.call_args_list}
@@ -115,12 +138,41 @@ async def test_runtime_denies_native_tools_mcp_and_hooks_without_editing_host_co
                        "mcp_servers": "{}", "hooks": "[]"}
 
 
+async def test_headless_callback_preserves_session_and_reaps_before_runtime_cleanup(monkeypatch, tmp_path):
+    stdout, stderr = asyncio.StreamReader(), asyncio.StreamReader()
+    stdout.feed_data(b'{"type":"session","session_id":"observed-session"}\n')
+    process = Mock(stdout=stdout, stderr=stderr, returncode=None)
+
+    async def wait():
+        await asyncio.Event().wait()
+
+    process.wait = wait
+
+    async def reap(_process):
+        process.returncode = -15
+
+    @asynccontextmanager
+    async def runtime(*_args):
+        try:
+            yield tmp_path / "config.toml", str(tmp_path)
+        finally:
+            assert process.returncode == -15
+
+    monkeypatch.setattr("features.kkagent.session.restricted_runtime", runtime)
+    monkeypatch.setattr("features.kkagent.session.terminate_process_tree", reap)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", AsyncMock(return_value=process))
+    lines = []
+    result = await run_headless_turn("test", env={}, timeout_seconds=0.02, on_line=lines.append)
+    assert result.error_code == "timeout" and result.session_id == "observed-session"
+    assert len(lines) == 1
+
+
 @pytest.mark.asyncio
 async def test_runtime_fails_closed_when_a_policy_setting_is_rejected(tmp_path, monkeypatch):
     source = tmp_path / "operator.toml"
     source.write_text('default_permission_mode = "yolo"\n')
     monkeypatch.setenv("GMS_ASSISTANT_KKAGENT_CONFIG", str(source))
-    monkeypatch.setattr("features.assistant.kkagent_runtime.run_local_command", Mock(return_value=CommandResult(code=1)))
+    monkeypatch.setattr("features.kkagent.sandbox.run_local_command", Mock(return_value=CommandResult(code=1)))
     with pytest.raises(RuntimeError, match="隔离工具策略"):
         async with restricted_runtime("kkagent", {}):
             pytest.fail("must not run the model with an incomplete policy")
@@ -140,7 +192,7 @@ def test_multi_segment_assistant_stream_keeps_only_the_final_text():
             {"type": "tool_use", "name": "list_devices"},
             {"type": "text", "text": '{"type":"answer","text":"好"}'}]}},
     ]
-    text, _sid, tools = bridge._extract_events([json.dumps(e) for e in events])
+    text, _sid, tools = extract_turn_events([json.dumps(e) for e in events])
     assert json.loads(text)["text"] == "好"
     assert tools == ["list_devices"]
 
@@ -225,7 +277,7 @@ def _install_fake_cli(monkeypatch, tmp_path, body):
     cli = tmp_path / "kkagent"
     cli.write_text(body)
     cli.chmod(0o755)
-    monkeypatch.setattr(bridge, "KKAGENT_BINARY", str(cli))
+    monkeypatch.setattr("features.kkagent.session.KKAGENT_BINARY", str(cli))
     monkeypatch.setattr(bridge, "availability", lambda: {"available": True})
     # 隔离运行时需要一份操作者模型配置
     monkeypatch.setenv("GMS_ASSISTANT_KKAGENT_CONFIG", str(tmp_path / "operator.toml"))
@@ -285,3 +337,20 @@ def test_signal_exit_detail_maps_known_and_unknown_signals():
     assert bridge._signal_exit_detail(-15).startswith("kkagent 进程被 SIGTERM 终止")
     assert bridge._signal_exit_detail(-65).startswith("kkagent 进程被 SIG65 终止")
     assert bridge._signal_exit_detail(3) == "kkagent 退出码 3"
+
+
+@pytest.mark.asyncio
+async def test_bridge_preserves_long_message_and_context_without_agent_token(monkeypatch):
+    from features.kkagent import HeadlessTurnResult
+
+    monkeypatch.setattr(bridge, "availability", lambda: {"available": True})
+    monkeypatch.delenv("GMS_AUTH_TOKEN_FILE", raising=False)
+    turn = AsyncMock(return_value=HeadlessTurnResult(ok=True, text="ok"))
+    monkeypatch.setattr(bridge, "run_headless_turn", turn)
+    message = "m" * 4500 + "message tail"
+    context = "上" * 31000 + "context tail"
+    result = await bridge.run_turn(message, context=context)
+    assert result.ok
+    prompt = turn.call_args.args[0]
+    assert context in prompt and prompt.endswith(message)
+    assert "GMS_AUTH_TOKEN_FILE" not in turn.call_args.kwargs["env"]

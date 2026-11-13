@@ -24,7 +24,7 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                 if (!title) return [];
                 const nav = item.querySelector('.sidebar-icon');
                 const navImage = nav.querySelector('img');
-                const titleImage = title.querySelector('img.section-title-icon');
+                const titleImage = title.querySelector('img.section-title-icon, img.page-title-icon');
                 if (navImage) return navImage.getAttribute('src') === titleImage?.getAttribute('src') ? [] : [item.dataset.page];
                 return nav.textContent.trim() === title.querySelector('.page-title-icon')?.textContent.trim()
                     && !nav.querySelector('svg') ? [] : [item.dataset.page];

@@ -109,10 +109,12 @@ def _session_directory(client_id: str, owner_id: str) -> list[dict[str, Any]]:
 
 
 def delete_session(session_id: str, client_id: str, owner_id: str):
-    """Discard one Agent session: drop live state and its recovery anchor."""
+    """Discard an owned session from live state, anchors or saved transcripts."""
     session = _agent_sessions.get(session_id)
     if not session or session.get("client_id") != client_id:
         session = restore_session(session_id, client_id, owner_id)
+    if not session:
+        session = _restore_session_from_transcript(session_id, client_id, owner_id)
     if not session or session.get("client_id") != client_id:
         return error_response("Agent session not found", 404)
     task = _agent_monitor_tasks.pop(session_id, None)

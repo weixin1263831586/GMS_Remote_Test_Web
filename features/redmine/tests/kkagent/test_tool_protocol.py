@@ -6,12 +6,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from features.kkagent import has_textual_gms_tool_call
 from features.redmine.kkagent.analyzer import (
     KkAgentRedmineAnalyzer,
     _StreamFallback,
     classify_gate_failure,
 )
-from features.redmine.kkagent.errors import has_textual_gms_tool_call
 from features.redmine.kkagent.mcp_health import McpHealthProbe
 from features.redmine.kkagent.trace import KkAgentTrace, ToolTrace, consume_line
 

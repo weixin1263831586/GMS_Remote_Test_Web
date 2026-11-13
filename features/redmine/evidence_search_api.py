@@ -6,8 +6,7 @@ artifact 派生文本/原文全文匹配。
 检索语义：
 - **全量覆盖**：文本按增量块流式扫描整个文件，内存只保留滚动窗口；
   日志末尾的进程死亡/LMKD/Perfetto 异常同样能命中。
-- **多次命中**：每个文件报告每一次出现（最多 limit+1 处，超出即提前
-  停止扫描），同一进程多次死亡、先后因果链不再被吞掉。
+- **多次命中**：扫描所有命中并统计总数；limit 仅控制响应分页，offset 可继续读取。
 - **大小写不敏感**：默认按小写折叠匹配（折叠不保长时自动退回精确匹配），
   snippet 仍按原文大小写截取。
 - **覆盖诚实**：响应带 ``coverage_complete``/``scanned_bytes``/
@@ -17,20 +16,19 @@ artifact 派生文本/原文全文匹配。
   ``artifacts.read_own``（与 artifact 读取端点同界），限定 Scope 的
   Agent 不能借搜索提取无权读取的附件内容。
 
-zip 附件的 v2 成员帧（``<<<zip-member-v2:<b64>:<len>>>``，写入侧限
-2MiB/成员、32MiB 总量）逐成员全文匹配并给
-``attachment:<file>.zip!/<member>:L<line>`` 行级引用；旧版行级标记快照
-退回 1MiB 截断兜底，coverage 如实报告不完整。命中偏移与
-``artifact_read`` 的字符偏移同一坐标空间（普通附件为全文件偏移，zip
-成员为成员内偏移），可直接喂给后续上下文读取。
+ZIP v2 成员帧按声明字符长度分块全文匹配，旧索引同样扫描到 EOF。
+成员引用给出行号与成员内 char_index；artifact_char_index 对应整份派生
+文本，可直接传给 artifact_read 读取后续上下文。
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import codecs
 import json
 import re
+import sys
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
@@ -39,7 +37,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from features.auth import require_agent_scope
 from features.redmine.evidence import (
     _ZIP_MEMBER_V2_RE,
-    split_zip_derived_text,
 )
 from features.redmine.evidence_api import (
     SEARCH_DEFAULT_LIMIT,
@@ -59,14 +56,6 @@ router = APIRouter(prefix="/api/redmine-agent")
 # 单次读入内存的文本块（字节）：全量扫描靠增量块 + 滚动窗口完成，
 # 不再限制只扫文件前缀。
 _SEARCH_CHUNK_BYTES = 256 * 1024
-# 伪造成员帧的读取硬上限：v2 帧写入侧限 2MiB/成员，读侧给宽松上限，
-# 防止恶意快照声明超大长度拖垮内存。
-_MEMBER_TEXT_HARD_CAP = 16 * 1024 * 1024
-# 旧版（v1 行级标记）派生文本的截断兜底窗口：旧格式没有可流式解析的
-# 帧长度，保持旧的 1MiB 前缀行为，coverage 字段如实报告不完整。
-_LEGACY_DERIVED_PREFIX_BYTES = 1024 * 1024
-# v2 流式解析的缓冲上限：超过仍无帧头即认为不是 v2 派生文本。
-_ZIP_STREAM_BUFFER_CAP = 4 * 1024 * 1024
 # 原文兜底（stored_path）只对文本类 kind 生效；binary/image/apk/pdf 的
 # 原文不可检索，读取只放大内存占用。
 _SEARCHABLE_RAW_KINDS = {"text", "log"}
@@ -123,6 +112,7 @@ def _scan_text_multi(
     with_lines: bool = False,
     limits: dict[str, int] | None = None,
     scan_state: _TextScanState | None = None,
+    on_match=None,
 ) -> list[tuple[str, _Occurrence]]:
     """Read/decode once, matching overlapping queries with separate budgets.
 
@@ -153,11 +143,15 @@ def _scan_text_multi(
                     break
                 start = match.start()
                 line = newlines + buffer.count("\n", 0, start) + 1 if with_lines else None
-                results.append((needle, _Occurrence(
+                occurrence = _Occurrence(
                     base + start,
                     buffer[max(0, start - context):match.end() + context],
                     line,
-                )))
+                )
+                if on_match is None:
+                    results.append((needle, occurrence))
+                else:
+                    on_match(needle, occurrence)
                 counts[needle] += 1
                 if len(results) >= stop_after:
                     return True
@@ -194,7 +188,7 @@ def _scan_text(chunks, needle: str, *, stop_after: int,
 
 
 def _scan_file_multi(path, needles: list[str], *, stop_after: int,
-                     limits: dict[str, int] | None = None):
+                     limits: dict[str, int] | None = None, on_match=None):
     """多关键词全文扫描单个文本文件
     →（[(needle, 命中)]，是否扫到 EOF，已扫字节，总字节）。"""
     total = path.stat().st_size
@@ -213,7 +207,7 @@ def _scan_file_multi(path, needles: list[str], *, stop_after: int,
     state = _TextScanState()
     hits = _scan_text_multi(
         _decode_chunks(raw_chunks()), needles, stop_after=stop_after,
-        limits=limits, scan_state=state,
+        limits=limits, scan_state=state, on_match=on_match,
     )
     return hits, state.complete, bytes_read, total
 
@@ -237,65 +231,50 @@ class _ZipStreamState:
 
 
 def _iter_zip_members(path, state: _ZipStreamState):
-    """文本域流式解析 v2 成员帧 → (成员名, 成员文本)。
+    """Yield (name, bounded text iterator, global character offset) per v2 frame.
 
-    与 split_zip_derived_text 同一帧格式；帧间填充与旧版行级标记被跳过
-    （调用方用空结果触发旧格式兜底）。成员体按帧声明长度读取，读取侧
-    另设宽松硬上限防伪造长度；缓冲超限仍无帧头则放弃（非 v2 文本）。
+    Declared lengths only control streaming, never an allocation. A forged
+    frame inside a member body cannot create a different member reference.
     """
-    with path.open("r", encoding="utf-8", errors="replace") as fh:
-        pending = ""
+    with path.open("r", encoding="utf-8", errors="strict", newline="") as handle:
         while True:
-            chunk = fh.read(_SEARCH_CHUNK_BYTES)
-            if chunk:
-                state.chars_scanned += len(chunk)
-                pending += chunk
-            while True:
-                match = _ZIP_MEMBER_V2_RE.search(pending)
-                if match is None:
-                    break
-                state.saw_frame = True
-                try:
-                    encoded = match.group(1)
-                    padding = "=" * (-len(encoded) % 4)
-                    name = base64.urlsafe_b64decode(encoded + padding).decode("utf-8")
-                    length = int(match.group(2))
-                except (ValueError, UnicodeDecodeError):
-                    pending = pending[match.end():]
-                    continue
-                if length > _MEMBER_TEXT_HARD_CAP:
-                    state.truncated_frame = True
-                    pending = pending[match.end():]
-                    continue
-                body = pending[match.end():match.end() + length]
-                while len(body) < length:
-                    more = fh.read(length - len(body))
-                    if not more:
-                        state.truncated_frame = True
-                        body = ""
-                        break
-                    state.chars_scanned += len(more)
-                    body += more
-                if not body and length:
-                    pending = ""
-                    break
-                pending = pending[match.end() + length:]
-                yield name, body
-            if not chunk:
+            header = handle.readline(_SEARCH_CHUNK_BYTES)
+            state.chars_scanned += len(header)
+            if not header:
                 state.complete = True
                 return
-            if len(pending) > _ZIP_STREAM_BUFFER_CAP:
-                return  # 非 v2 文本：交由旧格式兜底
+            if header.isspace():
+                continue
+            match = _ZIP_MEMBER_V2_RE.fullmatch(header)
+            if match is None:
+                state.truncated_frame = state.saw_frame or header.startswith("<<<zip-member-v2:")
+                state.saw_frame = state.saw_frame or state.truncated_frame
+                return
+            state.saw_frame = True
+            try:
+                encoded = match.group(1)
+                name = base64.b64decode(encoded + "=" * (-len(encoded) % 4),
+                                       altchars=b"-_", validate=True).decode("utf-8")
+                length = int(match.group(2))
+            except (ValueError, UnicodeError):
+                state.truncated_frame = True
+                return
+            remaining = length
 
+            def chunks():
+                nonlocal remaining
+                while remaining:
+                    text = handle.read(min(remaining, _SEARCH_CHUNK_BYTES))
+                    if not text:
+                        state.truncated_frame = True
+                        return
+                    state.chars_scanned += len(text)
+                    remaining -= len(text)
+                    yield text
 
-def _read_legacy_derived_prefix(path) -> str:
-    """旧版行级标记派生文本的截断兜底（保持旧行为）。"""
-    try:
-        with path.open("rb") as fh:
-            raw = fh.read(_LEGACY_DERIVED_PREFIX_BYTES)
-    except OSError:
-        return ""
-    return raw.decode("utf-8", errors="replace")
+            yield name, chunks(), state.chars_scanned
+            if remaining:
+                return
 
 
 def _collect_text_match(
@@ -390,398 +369,156 @@ BATCH_PER_QUERY_MAX_LIMIT = 100
 
 
 class BatchSearchRequest(BaseModel):
-    """批量关键词搜索请求体：一次 IO 完成多个关键词的全文匹配。"""
+    """Page size controls the response only; every query scans all evidence."""
 
     model_config = ConfigDict(extra="forbid")
+    queries: list[str] = Field(..., min_length=1, max_length=BATCH_MAX_QUERIES)
+    per_query_limit: int = Field(BATCH_PER_QUERY_DEFAULT_LIMIT, ge=1, le=BATCH_PER_QUERY_MAX_LIMIT)
+    per_query_offset: int = Field(0, ge=0)
 
-    queries: list[str] = Field(..., min_length=1)
-    per_query_limit: int = Field(BATCH_PER_QUERY_DEFAULT_LIMIT, ge=1)
+
+def _search_all_evidence(store, snapshot, needles, limit, offset):
+    from .evidence_reindex import repair_budget_indexes
+
+    repair_budget_indexes(store, snapshot)
+    rows = {needle: {"query": needle, "total": 0, "matches": []} for needle in needles}
+    warnings = []
+    scanned_bytes = total_bytes = 0
+    complete = True
+
+    def add_hit(needle, entry):
+        row = rows[needle]
+        index = row["total"]
+        row["total"] += 1
+        if offset <= index < offset + limit:
+            row["matches"].append(entry)
+
+    def scan(chunks, sink, *, with_lines=False):
+        state = _TextScanState()
+        _scan_text_multi(chunks, needles, stop_after=sys.maxsize,
+                         with_lines=with_lines, scan_state=state, on_match=sink)
+        return state.complete
+
+    manifest = snapshot.get("manifest") or {}
+    scan(iter([str(manifest.get("description") or "")]),
+         lambda needle, occ: add_hit(needle, _occurrence_entry(occ, "description", "", None)))
+    for artifact in store.list_artifacts(snapshot["snapshot_id"]):
+        kind = str(artifact.get("kind") or "")
+        if artifact.get("status") != "ready" or artifact.get("derived_status") in {"partial", "missing"}:
+            warnings.append({"artifact_id": artifact["artifact_id"], "filename": artifact.get("filename"),
+                             "warning": artifact.get("error") or "附件未完整下载或文本未完整提取"})
+        with store._connect() as conn:
+            row = conn.execute(
+                "SELECT derived_text_path, stored_path FROM redmine_evidence_artifacts WHERE artifact_id = ?",
+                (artifact["artifact_id"],),
+            ).fetchone()
+        rel = str(row["derived_text_path"] or "") if row else ""
+        if not rel and row and kind in _SEARCHABLE_RAW_KINDS:
+            rel = str(row["stored_path"] or "")
+        if not rel:
+            if kind in {*_SEARCHABLE_RAW_KINDS, "archive", "image", "pdf"} and artifact.get("derived_status") != "empty":
+                if kind in {*_SEARCHABLE_RAW_KINDS, "archive"}:
+                    complete = False
+                warnings.append({"artifact_id": artifact["artifact_id"], "filename": artifact.get("filename"),
+                                 "warning": artifact.get("error") or "附件尚无完整的可检索文本"})
+            continue
+        try:
+            path = store.resolve_internal(rel)
+            size = path.stat().st_size
+            total_bytes += size
+            def artifact_sink(needle, occ, artifact=artifact):
+                entry = _occurrence_entry(occ, "artifact", "", artifact)
+                entry["artifact_char_index"] = occ.offset
+                add_hit(needle, entry)
+            if kind == "archive":
+                state = _ZipStreamState()
+                for member, chunks, body_offset in _iter_zip_members(path, state):
+                    def member_sink(needle, occ, member=member, body_offset=body_offset, artifact=artifact):
+                        entry = _occurrence_entry(occ, "artifact",
+                                                  f"attachment:{artifact['filename']}!{member}",
+                                                  artifact, zip_member=member)
+                        entry["artifact_char_index"] = body_offset + occ.offset
+                        add_hit(needle, entry)
+                    complete = scan(chunks, member_sink, with_lines=True) and complete
+                if state.saw_frame:
+                    member_complete = state.complete and not state.truncated_frame
+                    complete = complete and member_complete
+                    scanned_bytes += size if member_complete else min(size, state.chars_scanned)
+                    continue
+                # Legacy/no-frame indexes are scanned to EOF in their global
+                # coordinate space. Do not invent member references from text.
+            _, done, scanned, _ = _scan_file_multi(
+                path, needles, stop_after=sys.maxsize, on_match=artifact_sink,
+            )
+            complete = complete and done
+            scanned_bytes += scanned
+        except (OSError, ValueError, UnicodeError) as exc:
+            complete = False
+            warnings.append({"artifact_id": artifact["artifact_id"], "filename": artifact.get("filename"),
+                             "warning": f"文本读取失败: {type(exc).__name__}"})
+    for journal in manifest.get("journals") or []:
+        notes = str(journal.get("notes") or "")
+        texts = [("journal", notes)] if notes else [
+            ("journal_detail", json.dumps(detail, ensure_ascii=False))
+            for detail in journal.get("details") or []
+        ]
+        for kind, text in texts:
+            def journal_sink(needle, occ, kind=kind, journal=journal):
+                entry = _occurrence_entry(occ, kind, "", None)
+                entry["journal_id"] = journal.get("id")
+                add_hit(needle, entry)
+            scan(iter([text]), journal_sink)
+
+    for row in rows.values():
+        row["offset"] = offset
+        row["returned"] = len(row["matches"])
+        row["truncated"] = row["total"] > offset + row["returned"]
+        row["next_offset"] = offset + row["returned"] if row["truncated"] else None
+    return {"snapshot_id": snapshot["snapshot_id"], "queries": list(rows.values()),
+            "total_matches": sum(len(row["matches"]) for row in rows.values()),
+            "coverage_complete": complete, "index_complete": complete and not warnings,
+            "index_warnings": warnings, "scanned_bytes": scanned_bytes, "total_bytes": total_bytes}
 
 
 @router.post("/evidence/{snapshot_id}/search/batch")
 @handle_api_errors
-async def search_evidence_batch(
-    snapshot_id: str,
-    payload: BatchSearchRequest,
-    request: Request,
-):
-    """多关键词单遍全文搜索：MCP→CLI→HTTP 逐关键词调用会重复扫描
-    同一批大日志，批量端点一次服务端遍历完成全部匹配。
+async def search_evidence_batch(snapshot_id: str, payload: BatchSearchRequest, request: Request):
+    from .evidence import EvidenceError
 
-    每个关键词独立计数与截断（``truncated``=该词命中超过 per_query_limit），
-    覆盖语义与单查询端点一致：``coverage_complete=false`` 时零命中不可
-    当作否定证据。
-    """
-    from features.redmine.evidence import EvidenceError
-
-    # 与单查询端点同界：搜索返回原文片段，需要 artifacts.read_own。
     require_agent_scope("redmine.read")(request)
     require_agent_scope("artifacts.read_own")(request)
     owner_id = _owner(request)
-    try:
-        snapshot = _get_snapshot(owner_id, snapshot_id)
-    except EvidenceError as exc:
-        return _error_response(exc)
-
-    needles: list[str] = []
-    for query in payload.queries[:BATCH_MAX_QUERIES]:
-        stripped = str(query or "").strip()
-        if stripped and stripped not in needles:
-            needles.append(stripped)
-    per_query_limit = min(payload.per_query_limit, BATCH_PER_QUERY_MAX_LIMIT)
-    per_query_stop = per_query_limit + 1
-    if not needles:
-        return _error_response(
-            EvidenceError("queries 不能为空", status_code=422)
-        )
-
-    rows: dict[str, dict[str, Any]] = {
-        needle: {"query": needle, "total": 0, "truncated": False, "matches": []}
-        for needle in needles
-    }
-
-    def remaining_limits() -> dict[str, int]:
-        return {needle: max(0, per_query_stop - row["total"]) for needle, row in rows.items()}
-
-    def add_hit(needle: str, entry: dict[str, Any]) -> None:
-        row = rows.get(needle)
-        if row is None:
-            return
-        row["total"] += 1
-        if row["total"] >= per_query_stop:
-            row["truncated"] = True
-            return
-        row["matches"].append(entry)
-
-    manifest = snapshot.get("manifest") or {}
-    manifest_texts: list[tuple[str, str, dict[str, Any] | None]] = []
-    description = str(manifest.get("description") or "")
-    if description:
-        manifest_texts.append(("description", description, None))
-    for journal in manifest.get("journals") or []:
-        notes = str(journal.get("notes") or "")
-        if notes:
-            manifest_texts.append(("journal", notes, journal))
-        else:
-            for detail in journal.get("details") or []:
-                blob = json.dumps(detail, ensure_ascii=False)
-                manifest_texts.append(("journal_detail", blob, journal))
-    for kind, text, meta in manifest_texts:
-        for needle, occ in _scan_text_multi(
-            iter([text]), needles, stop_after=per_query_stop * len(needles),
-            limits=remaining_limits(),
-        ):
-            entry: dict[str, Any] = {
-                "kind": kind, "path": "", "char_index": occ.offset, "snippet": occ.snippet,
-            }
-            if kind in {"journal", "journal_detail"} and meta is not None:
-                entry["journal_id"] = meta.get("id")
-            add_hit(needle, entry)
-
-    store = owner_evidence_store(owner_id)
-    artifacts = store.list_artifacts(snapshot["snapshot_id"])
-    index_warnings = [
-        {
-            "artifact_id": artifact.get("artifact_id"),
-            "filename": artifact.get("filename"),
-            "warning": artifact.get("error"),
-        }
-        for artifact in artifacts
-        if str(artifact.get("kind") or "") == "archive"
-        and str(artifact.get("derived_status") or "") in {"partial", "missing"}
-        and artifact.get("error")
-    ]
-
-    scanned_bytes = 0
-    total_bytes = 0
-    coverage_complete = True
-
-    def record_coverage(scanned: int, size: int, complete: bool) -> None:
-        nonlocal scanned_bytes, total_bytes, coverage_complete
-        scanned_bytes += scanned
-        total_bytes += size
-        if not complete:
-            coverage_complete = False
-
-    def saturated() -> bool:
-        return all(row["total"] >= per_query_stop for row in rows.values())
-
-    def artifact_sink(
-        hit_needle: str,
-        occ: _Occurrence,
-        path: str,
-        meta: dict[str, Any] | None,
-        zip_member: str | None = None,
-    ) -> None:
-        if rows.get(hit_needle, {}).get("total", 0) >= per_query_stop:
-            return
-        add_hit(hit_needle, _occurrence_entry(
-            occ, "artifact", path, meta, zip_member=zip_member,
-        ))
-
-    for artifact in artifacts:
-        if saturated():
-            coverage_complete = False
-            break
-        with store._connect() as conn:
-            row = conn.execute(
-                "SELECT derived_text_path, stored_path FROM redmine_evidence_artifacts WHERE artifact_id = ?",
-                (str(artifact.get("artifact_id")),),
-            ).fetchone()
-        candidates: list[str] = []
-        if row:
-            derived_rel = str(row["derived_text_path"] or "")
-            if derived_rel:
-                candidates.append(derived_rel)
-            if str(artifact.get("kind") or "") in _SEARCHABLE_RAW_KINDS:
-                stored_rel = str(row["stored_path"] or "")
-                if stored_rel:
-                    candidates.append(stored_rel)
-        for rel in candidates:
-            # 空候选只跳过本项（真机 #648526 缺陷）；与单查询一致，
-            # 同一附件只扫第一个非空候选。
-            if not rel or saturated():
-                continue
-            try:
-                path = store.resolve_internal(rel)
-            except ValueError:
-                continue
-            if not path.is_file():
-                continue
-            is_derived = bool(row) and rel == str(row["derived_text_path"] or "")
-            if is_derived and str(artifact.get("kind") or "") == "archive":
-                state = _ZipStreamState()
-                filename = str(artifact.get("filename") or "")
-                member_path = f"attachment:{filename}!"
-                members_complete = True
-                for member, member_text in _iter_zip_members(path, state):
-                    if saturated():
-                        members_complete = False
-                        break
-                    member_scan = _TextScanState()
-                    for hit_needle, occ in _scan_text_multi(
-                        iter([member_text]), needles,
-                        stop_after=per_query_stop * len(needles),
-                        with_lines=True, limits=remaining_limits(), scan_state=member_scan,
-                    ):
-                        artifact_sink(hit_needle, occ, member_path + member,
-                                      artifact, zip_member=member)
-                    members_complete = members_complete and member_scan.complete
-                if state.saw_frame:
-                    size = path.stat().st_size
-                    complete = state.complete and not state.truncated_frame and members_complete
-                    record_coverage(size if complete else state.chars_scanned,
-                                    size, complete)
-                    break
-                # 旧版行级标记/无成员标记：截断兜底（旧格式兼容）。
-                text = _read_legacy_derived_prefix(path)
-                legacy_members = split_zip_derived_text(text)
-                if legacy_members:
-                    size = path.stat().st_size
-                    raw_len = len(text.encode("utf-8"))
-                    legacy_scan = _TextScanState()
-                    for legacy_needle, legacy_occ in _scan_text_multi(
-                        iter([text]), needles,
-                        stop_after=per_query_stop * len(needles),
-                        with_lines=False, limits=remaining_limits(), scan_state=legacy_scan,
-                    ):
-                        # 旧格式无流式帧，无法可靠还原成员行号；只报
-                        # 全文级命中，避免伪造 member 引用。
-                        artifact_sink(legacy_needle, legacy_occ, "", artifact)
-                    record_coverage(
-                        min(raw_len, size), size,
-                        raw_len < _LEGACY_DERIVED_PREFIX_BYTES and legacy_scan.complete,
-                    )
-                    break
-                # 非 v2 且无旧标记：按普通文本全文扫描。
-            hits, complete, scanned, size = _scan_file_multi(
-                path, needles, stop_after=per_query_stop * len(needles), limits=remaining_limits(),
-            )
-            record_coverage(scanned, size, complete)
-            for hit_needle, occ in hits:
-                artifact_sink(hit_needle, occ, "", artifact)
-            break
-
-    queries_out = []
-    total_matches = 0
-    for needle in needles:
-        row = rows[needle]
-        row["matches"] = row["matches"][:per_query_limit]
-        row["truncated"] = row["total"] > per_query_limit
-        total_matches += len(row["matches"])
-        queries_out.append(row)
-
-    return {
-        "success": True,
-        "data": {
-            "snapshot_id": snapshot.get("snapshot_id"),
-            "queries": queries_out,
-            "total_matches": total_matches,
-            "coverage_complete": coverage_complete,
-            "scanned_bytes": scanned_bytes,
-            "total_bytes": total_bytes,
-            "index_complete": coverage_complete and not index_warnings,
-            "index_warnings": index_warnings,
-        },
-    }
+    snapshot = _get_snapshot(owner_id, snapshot_id)
+    needles = list(dict.fromkeys(query.strip() for query in payload.queries if query.strip()))
+    if not needles or any(len(query) > SEARCH_MAX_QUERY_CHARS for query in needles):
+        return _error_response(EvidenceError("queries 不能为空且关键词长度不得超过上限", status_code=422))
+    data = await asyncio.to_thread(_search_all_evidence, owner_evidence_store(owner_id), snapshot,
+                                   needles, payload.per_query_limit, payload.per_query_offset)
+    return {"success": True, "data": data}
 
 
 @router.get("/evidence/{snapshot_id}/search")
 @handle_api_errors
 async def search_evidence(
-    snapshot_id: str,
-    request: Request,
+    snapshot_id: str, request: Request,
     q: str = Query(..., min_length=1, max_length=SEARCH_MAX_QUERY_CHARS),
     limit: int = Query(SEARCH_DEFAULT_LIMIT, ge=1, le=SEARCH_MAX_LIMIT),
+    offset: int = Query(0, ge=0),
 ):
-    from features.redmine.evidence import EvidenceError
+    from .evidence import EvidenceError
 
-    # 搜索返回带上下文的原文片段，与 artifact 读取端点同界：
-    # 限定 redmine.read 的 Agent 不能借搜索提取无权读取的内容。
     require_agent_scope("redmine.read")(request)
     require_agent_scope("artifacts.read_own")(request)
     owner_id = _owner(request)
-    try:
-        snapshot = _get_snapshot(owner_id, snapshot_id)
-    except EvidenceError as exc:
-        return _error_response(exc)
-    needle = q
-    matches: list[dict[str, Any]] = []
-    stop = limit + 1
-
-    manifest = snapshot.get("manifest") or {}
-    description = str(manifest.get("description") or "")
-    _collect_text_match(matches, "description", "", description, needle, None)
-    for journal in manifest.get("journals") or []:
-        notes = str(journal.get("notes") or "")
-        hit = _collect_text_match(matches, "journal", "", notes, needle, journal)
-        if not hit:
-            for detail in journal.get("details") or []:
-                blob = json.dumps(detail, ensure_ascii=False)
-                _collect_text_match(matches, "journal_detail", "", blob, needle, journal)
-
-    store = owner_evidence_store(owner_id)
-    artifacts = store.list_artifacts(snapshot["snapshot_id"])
-    index_warnings = [
-        {
-            "artifact_id": artifact.get("artifact_id"),
-            "filename": artifact.get("filename"),
-            "warning": artifact.get("error"),
-        }
-        for artifact in artifacts
-        if str(artifact.get("kind") or "") == "archive"
-        and str(artifact.get("derived_status") or "") in {"partial", "missing"}
-        and artifact.get("error")
-    ]
-
-    scanned_bytes = 0
-    total_bytes = 0
-    coverage_complete = True
-
-    def record_coverage(scanned: int, total: int, complete: bool) -> None:
-        nonlocal scanned_bytes, total_bytes, coverage_complete
-        scanned_bytes += scanned
-        total_bytes += total
-        if not complete:
-            coverage_complete = False
-
-    for artifact in artifacts:
-        if len(matches) >= stop:
-            coverage_complete = False
-            break
-        with store._connect() as conn:
-            row = conn.execute(
-                "SELECT derived_text_path, stored_path FROM redmine_evidence_artifacts WHERE artifact_id = ?",
-                (str(artifact.get("artifact_id")),),
-            ).fetchone()
-        candidates: list[str] = []
-        if row:
-            derived_rel = str(row["derived_text_path"] or "")
-            if derived_rel:
-                candidates.append(derived_rel)
-            # 原文兜底仅限文本类 kind；全量扫描与派生文本同一内存窗口。
-            if str(artifact.get("kind") or "") in _SEARCHABLE_RAW_KINDS:
-                stored_rel = str(row["stored_path"] or "")
-                if stored_rel:
-                    candidates.append(stored_rel)
-        for rel in candidates:
-            # 空候选（如无派生文本）只跳过本项；用 break 会让后面的
-            # stored_path 永远不被扫描（真机 #648526 验收发现的缺陷）。
-            if not rel:
-                continue
-            if len(matches) >= stop:
-                break
-            try:
-                path = store.resolve_internal(rel)
-            except ValueError:
-                continue
-            if not path.is_file():
-                continue
-            # 与旧行为一致：同一附件只扫第一个非空候选（派生文本是原文
-            # 的镜像，重复扫描只浪费 IO 不产生新命中）。
-            is_derived = bool(row) and rel == str(row["derived_text_path"] or "")
-            if is_derived and str(artifact.get("kind") or "") == "archive":
-                state = _ZipStreamState()
-                filename = str(artifact.get("filename") or "")
-                members_complete = True
-                for member, member_text in _iter_zip_members(path, state):
-                    if len(matches) >= stop:
-                        members_complete = False
-                        break
-                    member_scan = _TextScanState()
-                    hits = _scan_text(
-                        iter([member_text]), needle,
-                        stop_after=stop - len(matches), with_lines=True, scan_state=member_scan,
-                    )
-                    members_complete = members_complete and member_scan.complete
-                    for occ in hits:
-                        matches.append(_occurrence_entry(
-                            occ, "artifact",
-                            f"attachment:{filename}!{member}",
-                            artifact, zip_member=member,
-                        ))
-                if state.saw_frame:
-                    size = path.stat().st_size
-                    complete = state.complete and not state.truncated_frame and members_complete
-                    record_coverage(size if complete else state.chars_scanned,
-                                    size, complete)
-                    break
-                # 旧版行级标记/无成员标记：截断兜底（旧格式兼容）。
-                text = _read_legacy_derived_prefix(path)
-                members = split_zip_derived_text(text)
-                if members:
-                    size = path.stat().st_size
-                    _collect_zip_member_matches(matches, members, needle, artifact, stop)
-                    raw_len = len(text.encode("utf-8"))
-                    record_coverage(
-                        min(raw_len, size), size,
-                        raw_len < _LEGACY_DERIVED_PREFIX_BYTES,
-                    )
-                    break
-                # 派生文本既非 v2 也无旧标记：按普通文本全文扫描。
-            hits, complete, scanned, size = _scan_file(
-                path, needle, stop_after=stop - len(matches)
-            )
-            record_coverage(scanned, size, complete)
-            matches.extend(
-                _occurrence_entry(occ, "artifact", "", artifact) for occ in hits
-            )
-            break
-
-    found_total = len(matches)
-    matches = matches[:limit]
-    return {
-        "success": True,
-        "data": {
-            "snapshot_id": snapshot.get("snapshot_id"),
-            "query": q,
-            "total": len(matches),
-            "limited": found_total > limit,
-            "index_complete": coverage_complete and not index_warnings,
-            "index_warnings": index_warnings,
-            "coverage_complete": coverage_complete,
-            "scanned_bytes": scanned_bytes,
-            "total_bytes": total_bytes,
-            "matches": matches,
-        },
-    }
+    snapshot = _get_snapshot(owner_id, snapshot_id)
+    needle = q.strip()
+    if not needle:
+        return _error_response(EvidenceError("q 不能为空", status_code=422))
+    offset = offset if isinstance(offset, int) else 0
+    data = await asyncio.to_thread(_search_all_evidence, owner_evidence_store(owner_id), snapshot,
+                                   [needle], limit, offset)
+    row = data.pop("queries")[0]
+    data.update(query=needle, total=len(row["matches"]), total_occurrences=row["total"],
+                matches=row["matches"], limited=row["truncated"],
+                offset=offset, next_offset=row["next_offset"])
+    return {"success": True, "data": data}

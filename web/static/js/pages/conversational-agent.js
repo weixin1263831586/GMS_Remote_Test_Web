@@ -457,8 +457,11 @@ function renderAgentSession(session) {
     if (engine) {
         const backend = session.agent_backend;
         const kkagentState = {ready: '已连接', thinking: '规划中', retrying: '重试中', timeout: '响应超时', failed: '连接异常', awaiting_authorization: '等待授权'};
+        const kkagentSeverity = {ready: 'ready', thinking: 'thinking', retrying: 'retrying', timeout: 'timeout', failed: 'failed', awaiting_authorization: 'awaiting_authorization'};
         engine.textContent = backend?.mode === 'kkagent' ? `对话引擎：kkagent ${kkagentState[backend.state] || '连接中'}`
             : backend?.mode === 'rules' ? '对话引擎：规则兜底' : '对话引擎：待连接';
+        engine.dataset.state = backend?.mode === 'kkagent' ? (kkagentSeverity[backend.state] || 'thinking')
+            : backend?.mode === 'rules' ? 'rules' : 'idle';
         engine.title = backend?.detail || '由 kkagent 规划并选择项目工具，平台负责授权和执行。';
     }
     applyAgentSessionWorkspace(session);

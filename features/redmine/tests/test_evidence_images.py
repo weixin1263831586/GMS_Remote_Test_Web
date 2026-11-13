@@ -3,7 +3,7 @@
 从 test_evidence_zip_search.py 的模式拆出：复用假 Redmine fixture，
 验证 image 附件在快照下载时被 OCR 成可检索派生文本
 （``derived_text_path`` + ``text_available`` + ``derived_status``）。
-OCR 依赖缺失 / 超时 / 像素超限只把派生状态记为 missing 并写入快照
+OCR 依赖缺失 / 识别失败只把派生状态记为 missing 并写入快照
 derive 阶段错误，原件保持 ready、附件原始可用状态不被派生失败覆盖；
 OCR 正常但零文本记 empty（示意图/照片是
 常态，不是证据缺口——#656295/#655644 复盘只要求"未识别"显性可见）。
@@ -181,24 +181,22 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
             "ready",
         )
 
-    def test_image_pixel_budget_rejects_before_ocr(self):
+    def test_large_image_is_tiled_instead_of_rejected(self):
         with patch("features.redmine.evidence_images.OCR_MAX_IMAGE_PIXELS", 100), patch(
-            "pytesseract.image_to_string", return_value="",
+            "pytesseract.image_to_string", return_value="tile text",
         ) as ocr:
             result, store = self._fetch_with_png()
+        self.assertGreater(ocr.call_count, 1)
         for call in ocr.call_args_list:
             image = call.args[0]
             self.assertLessEqual(image.width * image.height, 100)
-        self.assertEqual(result["status"], "ready")
-        artifact = store.get_artifact_by_attachment_id(
-            "776701", snapshot_id=result["snapshot_id"],
-        )
-        self.assertEqual(artifact["status"], "ready")
-        self.assertEqual(artifact["derived_status"], "missing")
-        self.assertIn("像素超过上限", artifact["error"])
+            self.assertEqual(call.kwargs["timeout"], 0)
+        artifact = store.get_artifact_by_attachment_id("776701", snapshot_id=result["snapshot_id"])
+        self.assertEqual(artifact["derived_status"], "ready")
+        self.assertFalse(artifact["error"])
 
-    def test_derived_text_truncation_stays_on_utf8_boundary(self):
-        """中文 OCR 长文本按字节截断后必须仍是合法 UTF-8。"""
+    def test_derived_text_preserves_full_utf8_output(self):
+        """OCR output is retained in full, including multibyte text at the tail."""
         from pathlib import Path
 
         from features.redmine.evidence_images import extract_image_ocr_text
@@ -207,8 +205,6 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         long_text = "崩溃日志一二三四五六七八九十" * 500
         with patch(
             "pytesseract.image_to_string", lambda *args, **kwargs: long_text,
-        ), patch(
-            "features.redmine.evidence_images._DERIVED_TEXT_MAX_BYTES", 997,
         ), TemporaryDirectory() as directory:
             store = EvidenceStore(Path(directory))
             png_path = Path(directory) / "shot.png"
@@ -223,10 +219,7 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
             )
             self.assertEqual(error, "")
             payload = store.resolve_internal(derived_rel).read_bytes()
-        self.assertLessEqual(len(payload), 997)
-        # 严格解码：截断点落在汉字中间会在这里抛 UnicodeDecodeError。
-        decoded = payload.decode("utf-8")
-        self.assertEqual(decoded, long_text[: len(decoded)])
+        self.assertEqual(payload.decode("utf-8"), long_text)
 
 
 if __name__ == "__main__":

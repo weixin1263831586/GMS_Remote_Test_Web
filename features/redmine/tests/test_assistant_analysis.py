@@ -31,7 +31,7 @@ def base_url(monkeypatch):
 @pytest.mark.parametrize("reference", ["661332", "https://redmine.example.test/issues/661332"])
 async def test_analysis_reuses_typed_single_issue_route(base_url, monkeypatch, reference):
     dispatch = AsyncMock(return_value={"success": True, "data": {"run_id": "run-1"}})
-    monkeypatch.setattr(adapter, "analyze_single_issue", dispatch)
+    monkeypatch.setattr(adapter, "submit_single_issue_analysis", dispatch)
     req = request()
     result = await adapter.analyze_issue_for_assistant(req, reference, "full", "检查 kernel_vendor.log")
     assert result["success"]
@@ -41,6 +41,7 @@ async def test_analysis_reuses_typed_single_issue_route(base_url, monkeypatch, r
     assert payload.issue_id == 661332 and payload.analysis_mode == "full"
     assert payload.analysis_hint == "检查 kernel_vendor.log"
     assert payload.device_serials == [] and payload.device_serial == ""
+    assert dispatch.await_args.kwargs == {"output_style": "summary"}
 
 
 @pytest.mark.asyncio
@@ -48,7 +49,7 @@ async def test_analysis_reuses_typed_single_issue_route(base_url, monkeypatch, r
                                        "https://[broken/issues/661332", "kernel_vendor.log", None])
 async def test_invalid_or_foreign_issue_ref_never_enqueues(base_url, monkeypatch, reference):
     dispatch = AsyncMock()
-    monkeypatch.setattr(adapter, "analyze_single_issue", dispatch)
+    monkeypatch.setattr(adapter, "submit_single_issue_analysis", dispatch)
     response = await adapter.analyze_issue_for_assistant(request(), reference)
     assert response.status_code == 400
     dispatch.assert_not_awaited()
@@ -57,7 +58,7 @@ async def test_invalid_or_foreign_issue_ref_never_enqueues(base_url, monkeypatch
 @pytest.mark.asyncio
 async def test_agent_token_cannot_start_analysis(base_url, monkeypatch):
     dispatch = AsyncMock()
-    monkeypatch.setattr(adapter, "analyze_single_issue", dispatch)
+    monkeypatch.setattr(adapter, "submit_single_issue_analysis", dispatch)
     with pytest.raises(HTTPException) as error:
         await adapter.analyze_issue_for_assistant(request("agent_service", auth_method="agent_token"), "661332")
     assert error.value.status_code == 403

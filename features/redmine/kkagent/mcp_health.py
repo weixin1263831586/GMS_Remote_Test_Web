@@ -22,7 +22,8 @@ import os
 import shutil
 from dataclasses import dataclass, field
 
-from .process import child_env, settle_reader_future, terminate_process_tree
+from features.kkagent import child_env, settle_reader_future, terminate_process_tree
+
 from .trace import ToolTrace
 
 

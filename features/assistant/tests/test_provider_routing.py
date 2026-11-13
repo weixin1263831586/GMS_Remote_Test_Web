@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from features.assistant.universal_ai import UniversalAIAnalyzer
+from features.kkagent import UniversalAIAnalyzer
 
 
 class ProviderRoutingTests(unittest.TestCase):
@@ -224,7 +224,7 @@ class ProviderRoutingTests(unittest.TestCase):
         })
 
         with patch(
-            'features.assistant.universal_ai.requests.post',
+            'features.kkagent.analyzer.requests.post',
             side_effect=[rejected, accepted],
         ) as post:
             result = analyzer.generate('生成周报', preferred_provider='glm_local')
@@ -258,7 +258,7 @@ class ProviderRoutingTests(unittest.TestCase):
                 return {'error': {'message': 'invalid model'}}
 
         with patch(
-            'features.assistant.universal_ai.requests.post',
+            'features.kkagent.analyzer.requests.post',
             return_value=_Response(),
         ) as post:
             result = analyzer.generate('hello', preferred_provider='glm_local')

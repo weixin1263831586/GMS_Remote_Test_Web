@@ -20,8 +20,9 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
+from features.kkagent import child_env, settle_reader_future, terminate_process_tree
+
 from .auth_preflight import GMS_SELFCHECK_SCRIPT
-from .process import child_env, settle_reader_future, terminate_process_tree
 
 # _attachment_manifest 只提取清单元数据（artifact id/kind/status），不含
 # 客户正文——与 trace._record_tool_result 对 live trace 的记账口径一致。

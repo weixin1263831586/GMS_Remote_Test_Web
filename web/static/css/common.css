@@ -568,97 +568,6 @@ body {
     justify-content: center;
 }
 
-.embedded-frame-skeleton {
-    display: grid;
-    height: 100%;
-    grid-template-rows: 46px minmax(76px, 0.34fr) minmax(150px, 1fr);
-    gap: 14px;
-    opacity: 0.78;
-}
-
-.embedded-frame-skeleton-bar,
-.embedded-frame-skeleton-card,
-.embedded-frame-skeleton-panel {
-    position: relative;
-    overflow: hidden;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    background: var(--light-bg);
-}
-
-.embedded-frame-skeleton-bar {
-    max-width: 520px;
-}
-
-.embedded-frame-skeleton-cards,
-.embedded-frame-skeleton-panels {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-}
-
-.embedded-frame-skeleton-panels {
-    grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.6fr);
-}
-
-.embedded-frame-skeleton-bar::after,
-.embedded-frame-skeleton-card::after,
-.embedded-frame-skeleton-panel::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    transform: translateX(-100%);
-    background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.12), transparent);
-    animation: embedded-frame-skeleton-shimmer 1.6s ease-in-out infinite;
-}
-
-@keyframes embedded-frame-skeleton-shimmer {
-    to { transform: translateX(100%); }
-}
-
-.embedded-frame-loading-chip {
-    position: absolute;
-    z-index: 1;
-    top: 50%;
-    left: 50%;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    max-width: calc(100% - 32px);
-    padding: 8px 12px;
-    border: 1px solid var(--border-color);
-    border-radius: 999px;
-    color: var(--text-secondary);
-    background: color-mix(in srgb, var(--card-bg) 94%, transparent);
-    box-shadow: var(--shadow-sm);
-    opacity: 0;
-    transform: translate(-50%, -50%);
-    visibility: hidden;
-    transition: opacity 0.16s ease;
-}
-
-/* 快速页面只经过结构骨架，不闪现重复的“正在加载某页面”文案。
-   只有超过短阈值仍未就绪，或明确失败时，才提升文字状态。 */
-.embedded-frame-shell[data-frame-progress="visible"] .embedded-frame-loading-chip,
-.embedded-frame-shell[data-frame-state="error"] .embedded-frame-loading-chip {
-    opacity: 1;
-    visibility: visible;
-}
-
-.embedded-frame-loading-spinner {
-    width: 12px;
-    height: 12px;
-    flex: 0 0 auto;
-    border: 2px solid color-mix(in srgb, var(--primary-color) 24%, transparent);
-    border-top-color: var(--primary-color);
-    border-radius: 50%;
-    animation: embedded-frame-loading-spin 0.8s linear infinite;
-}
-
-@keyframes embedded-frame-loading-spin {
-    to { transform: rotate(360deg); }
-}
-
 /* 重载时保留上一帧可用内容，只显示不拦截操作的轻量状态角标。 */
 .embedded-frame-shell[data-frame-has-content="true"] > .embedded-frame-loading {
     inset: 0;
@@ -687,21 +596,41 @@ body {
 }
 
 @media (max-width: 760px) {
-    .embedded-frame-skeleton-cards {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+    .embedded-frame-skeleton { --stage: min(72vmin, 300px); }
+}
 
-    .embedded-frame-skeleton-panels {
-        grid-template-columns: 1fr;
+/* 矮视口：嵌入区高度有限，星轨降档并收紧角标间距，保证整体不溢出。 */
+@media (max-height: 820px) {
+    .embedded-frame-skeleton { --stage: min(52vmin, 420px); }
+
+    .embedded-frame-shell:not([data-frame-has-content="true"]) .embedded-frame-loading-chip {
+        top: calc(50% + min(26vmin, 210px) + 18px);
     }
 }
 
 @media (prefers-reduced-motion: reduce) {
+    /* 退化：静态星图——所有层停在中性位（弧光全环隐、冲击波隐、
+       核心常亮、卫星保持基位分布），无旋转/公转/爆发。 */
+    .embedded-frame-skeleton-bar,
+    .embedded-frame-skeleton-bar::before,
     .embedded-frame-skeleton-bar::after,
-    .embedded-frame-skeleton-card::after,
-    .embedded-frame-skeleton-panel::after,
+    .embedded-frame-skeleton-card,
+    .embedded-frame-skeleton-panel,
     .embedded-frame-loading-spinner {
         animation: none;
+    }
+
+    .embedded-frame-skeleton-bar::after {
+        opacity: 0.6;
+    }
+
+    .embedded-frame-skeleton-panel:nth-child(1) {
+        opacity: 0;
+    }
+
+    .embedded-frame-skeleton-panel:nth-child(2) {
+        transform: none;
+        opacity: 0.9;
     }
 }
 

@@ -184,6 +184,22 @@ class EvidenceGateTests(unittest.TestCase):
         self.assertEqual(trace.search_covered_artifact_ids(), set())
         self.assertTrue(trace.read_artifact_ids() == set())
 
+    def test_scanned_partial_index_does_not_claim_full_evidence_coverage(self):
+        trace = KkAgentTrace()
+        consume_line(trace, json.dumps({
+            "type": "tool_call", "tool_call_id": "partial-index",
+            "tool_name": "gms_rt_redmine_artifact_search",
+            "input": {"snapshot_id": "snap-1", "query": "lmkd"},
+        }))
+        consume_line(trace, json.dumps({
+            "type": "tool_result", "tool_call_id": "partial-index", "is_error": False,
+            "output": json.dumps({"data": {
+                "coverage_complete": True, "index_complete": False,
+                "matches": [{"kind": "artifact", "artifact_id": "partial-log", "snippet": "lmkd"}],
+            }}),
+        }))
+        self.assertEqual(trace.search_covered_artifact_ids(), set())
+
     def test_manifest_attachments_cannot_be_bypassed_by_stale_zero_count(self):
         trace = _full_trace()
         attachment_call = next(

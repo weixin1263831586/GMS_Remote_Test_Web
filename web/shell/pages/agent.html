@@ -23,10 +23,12 @@
                 <div class="pane agent-conversation-pane">
                     <div class="agent-conversation-heading">
                         <strong>任务对话</strong>
-                        <span id="agent-engine-status">对话引擎：待连接</span>
-                        <div class="agent-model-line">
-                            <span id="agent-model-status" data-state="loading" title="报告与知识分析模型；对话引擎状态单独显示。">分析模型：读取配置…</span>
-                            <button id="agent-model-check" class="btn-xxs" type="button" data-click="loadAgentModelStatus" data-a0="true">检测</button>
+                        <div class="agent-heading-status">
+                            <span id="agent-engine-status" data-state="idle">对话引擎：待连接</span>
+                            <div class="agent-model-line">
+                                <span id="agent-model-status" data-state="loading" title="报告与知识分析模型；对话引擎状态单独显示。">分析模型：读取配置…</span>
+                                <button id="agent-model-check" class="btn-xxs" type="button" data-click="loadAgentModelStatus" data-a0="true">检测</button>
+                            </div>
                         </div>
                         <span class="ui-meta">描述目标，确认计划，跟踪执行</span>
                     </div>

@@ -117,7 +117,7 @@ mcp_debug_tools = _load_typed_tools("mcp_debug_tools")
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.79"
+SERVER_VERSION = "0.22.80"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -2437,7 +2437,6 @@ def _int_arg(arguments: dict[str, Any], name: str, default: int, minimum: int, m
 
 # artifact_read 的 offset 合法域上限：与 Controller 端 ge=0 一致地放行
 # 大偏移（仅做合理性防呆），超出时报错并引导先用 search 定位。
-ARTIFACT_READ_OFFSET_MAX = 1_000_000_000
 
 
 def _image_file_result(
@@ -2569,6 +2568,19 @@ def redmine_attachments_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     return run_cli("gms-rt-redmine-attachments", [snapshot_id])
 
 
+def _evidence_offset(arguments: dict[str, Any], name: str) -> int:
+    raw = arguments[name]
+    if isinstance(raw, (bool, float)):
+        raise ValueError(f"{name} must be a nonnegative integer")
+    try:
+        offset = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a nonnegative integer") from None
+    if offset < 0:
+        raise ValueError(f"{name} must be a nonnegative integer")
+    return offset
+
+
 def redmine_artifact_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     snapshot_id = str(arguments.get("snapshot_id") or "").strip()
     query = str(arguments.get("query") or "").strip()
@@ -2577,6 +2589,11 @@ def redmine_artifact_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     args: list[str] = [snapshot_id, query]
     if arguments.get("limit"):
         args.extend(["--limit", str(_int_arg(arguments, "limit", 50, 1, 200))])
+    if arguments.get("offset") is not None:
+        try:
+            args.extend(["--offset", str(_evidence_offset(arguments, "offset"))])
+        except (TypeError, ValueError) as exc:
+            return str(exc), True
     return run_cli("gms-rt-artifact-search", args)
 
 
@@ -2606,6 +2623,11 @@ def redmine_artifact_search_batch_tool(arguments: dict[str, Any]) -> tuple[str, 
             "--per-query-limit",
             str(_int_arg(arguments, "per_query_limit", 20, 1, 100)),
         ])
+    if arguments.get("per_query_offset") is not None:
+        try:
+            args.extend(["--per-query-offset", str(_evidence_offset(arguments, "per_query_offset"))])
+        except (TypeError, ValueError) as exc:
+            return str(exc), True
     return run_cli("gms-rt-artifact-search-batch", args)
 
 
@@ -2615,21 +2637,10 @@ def redmine_artifact_read_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         return "artifact_id is required", True
     args: list[str] = [artifact_id]
     if arguments.get("offset") is not None:
-        # 显式校验而不是静默钳制：超界 offset 直接报错并引导先用 search
-        # 定位，而不是悄悄钳回上限让模型拿到错误窗口却不自知。
-        raw_offset = arguments.get("offset")
         try:
-            offset = int(raw_offset)
-        except (TypeError, ValueError):
-            return f"offset must be an integer, got {raw_offset!r}", True
-        if offset < 0 or offset > ARTIFACT_READ_OFFSET_MAX:
-            return (
-                f"offset must be within [0, {ARTIFACT_READ_OFFSET_MAX}] "
-                f"(got {offset}); use gms_rt_redmine_artifact_search to "
-                "locate the region first — search hits carry char_index "
-                "offsets usable here",
-                True,
-            )
+            offset = _evidence_offset(arguments, "offset")
+        except (TypeError, ValueError) as exc:
+            return str(exc), True
         args.extend(["--offset", str(offset)])
     if arguments.get("limit"):
         args.extend(["--limit", str(_int_arg(arguments, "limit", 65536, 1, 262144))])

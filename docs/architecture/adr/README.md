@@ -39,3 +39,5 @@
 | 0031 | [模型主导的对话 Agent 与项目工具注册表](0031-conversation-project-agent.md) | Accepted | — | — |
 | 0032 | [ATS 运行记录团队可读与操作权限](0032-ats-team-read-access.md) | Accepted | — | — |
 | 0033 | [ATS 完成后的资源释放与遗留清理](0033-completed-run-resource-cleanup.md) | Accepted | — | — |
+| 0034 | [统一模型网关（features/kkagent：目录 + 直连通道 + headless 引擎）](0034-unified-model-gateway.md) | Accepted | — | — |
+| 0035 | [对话工单分析直接展示 kkagent 最终总结](0035-conversation-kkagent-summary.md) | Accepted | — | — |

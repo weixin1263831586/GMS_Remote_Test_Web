@@ -288,7 +288,7 @@ class EvidenceApiTests(unittest.TestCase):
 
     def test_search_cites_zip_member_with_line(self):
         """zip 内容可检索（端点级）：archive 派生文本命中给出 zip!/member 行级引用。"""
-        from features.redmine.evidence import zip_member_marker
+        from features.redmine.evidence import zip_member_block
         from features.redmine.evidence_store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
@@ -307,9 +307,7 @@ class EvidenceApiTests(unittest.TestCase):
         derived_path = store.resolve_internal(derived_rel)
         derived_path.parent.mkdir(parents=True, exist_ok=True)
         derived_path.write_text(
-            f"{zip_member_marker('logs/logcat.txt')}\n"
-            "noise line\n"
-            "get_ad_selection_data bind ok\n",
+            zip_member_block("logs/logcat.txt", "noise line\nget_ad_selection_data bind ok\n"),
             encoding="utf-8",
         )
         store.update_artifact(

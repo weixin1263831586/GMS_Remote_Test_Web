@@ -10,11 +10,10 @@ import asyncio
 
 from fastapi import APIRouter, Query, Request
 
+from features.kkagent import UniversalAIAnalyzer
 from features.users import hide_sensitive_info
 from features.users import runtime as users_runtime
 from foundation.responses import error_response, success_response
-
-from .universal_ai import UniversalAIAnalyzer
 
 
 router = APIRouter()

@@ -12,8 +12,7 @@ from pydantic import BaseModel, Field
 from features.assistant.capabilities import capabilities_payload
 from features.assistant.context import record_user_message, update_context
 from features.assistant.executor import executor
-from features.assistant.payloads import jsonable as _jsonable
-from features.assistant.payloads import session_payload as _session_payload
+from features.assistant.payloads import jsonable as _jsonable, session_payload as _session_payload
 from features.assistant.plan_submission import submit_pending_plan_once
 from features.assistant.response import (
     WEBAPP_PAGES,
@@ -27,6 +26,8 @@ from features.assistant.response import (
 )
 from features.assistant.session_directory import (
     _restore_session_from_transcript as _restore_session_from_transcript,
+)
+from features.assistant.session_directory import (
     _session_directory,
     delete_session,
 )

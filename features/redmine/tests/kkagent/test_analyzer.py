@@ -10,6 +10,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, Mock, patch
 
+from features.kkagent import classify_failure
 from features.redmine.kkagent import (
     PROMPT_VERSION,
     KkAgentAnalysisResult,
@@ -19,7 +20,6 @@ from features.redmine.kkagent.analyzer import (
     _StreamFallback,
     classify_gate_failure,
 )
-from features.redmine.kkagent.errors import classify_failure
 from features.redmine.kkagent.mcp_health import McpHealthProbe
 from features.redmine.kkagent.trace import KkAgentTrace, ToolTrace
 from features.redmine.tests.kkagent.test_process import (

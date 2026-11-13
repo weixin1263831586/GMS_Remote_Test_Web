@@ -1,15 +1,17 @@
-"""Per-call kkagent policy: model reasoning only, project tools run in Controller."""
+"""Per-call kkagent policy: model reasoning only, project tools run in Controller.
+
+引擎侧沙箱（ADR 0034）：受限运行时（空临时工作区 + 私有 config.toml 副本 +
+deny-all 工具策略）与有界流读取。assistant 桥接与 redmine 分析复用同一实现，
+不再各自维护。"""
 
 from __future__ import annotations
 
 import asyncio
-import os
-import shutil
 import tempfile
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from pathlib import Path
 
+from features.kkagent.config import model_config
 from foundation.processes import run_local_command
 
 
@@ -28,14 +30,9 @@ def _empty_workspace() -> str:
 
 @asynccontextmanager
 async def restricted_runtime(binary: str, env: dict[str, str]):
-    source = Path(os.getenv("GMS_ASSISTANT_KKAGENT_CONFIG", "").strip()
-                  or Path.home() / ".kkagent" / "config.toml").expanduser()
-    if not source.is_file():
-        raise RuntimeError("kkagent 模型配置不存在，请配置 GMS_ASSISTANT_KKAGENT_CONFIG")
-    with tempfile.TemporaryDirectory(prefix="gms-agent-model-") as directory:
-        config = Path(directory) / "config.toml"
-        shutil.copyfile(source, config)
-        config.chmod(0o600)
+    with model_config("", env) as (config, config_env):
+        env.update(config_env)
+        directory = str(config.parent)
         # Use the installed CLI's own schema writer; never modify host config.
         settings = {
             "default_permission_mode": '"manual"',

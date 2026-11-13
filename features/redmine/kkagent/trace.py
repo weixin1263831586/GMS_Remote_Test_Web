@@ -1,38 +1,38 @@
-"""kkagent stream-json 执行轨迹：session / tool_call / usage 采集。
+"""Redmine 领域轨迹：证据归属 / artifact 覆盖 / 源码取证语义。
 
-kkagent ``--output-format stream-json`` 的 NDJSON 事件流是晨报证据链的
-事实来源：session_id、真实 MCP 调用（tool_call/tool_result）、token
-usage、LLM 重试都在这里。运行时据此计算 Evidence Gate，不再信任模型
-自报的 history_checked。
+通用 stream-json 消费核在 :mod:`features.kkagent.trace`（引擎侧）；
+本模块只做 Redmine 取证域扩展：
 
-隐私约束：tool_result 的完整输出（Redmine journal/附件可能含客户数据）
-只保留 sha256 + 字节数 + 短 preview，完整内容留在 kkagent session 里。
+- ``KkAgentTrace(KkAgentStreamTrace)``：追加证据域字段（issue 归属、
+  attachment manifest、snapshot、源码取证可复现性）与 Evidence Gate
+  消费的派生属性（ledger、coverage、窗口读取判定）；
+- ``record_tool_result`` 钩子：把 tool_result 的领域语义并入记录；
+- ``source_evidence_result`` / ``trace_from_summary``：UI 消费与
+  context-overflow 续跑的恢复入口。
+
+隐私约束与事件语义见引擎模块文档。
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
-
-TOOL_OUTPUT_PREVIEW_CHARS = 200
-TOOL_INPUT_JSON_CHARS = 500
-
-# 截断 tool input 时必须保留的身份字段。
-_IDENTITY_INPUT_KEYS = (
-    "issue_id", "issue", "snapshot_id", "artifact_id",
-    "source", "revision", "path", "query", "q", "mode",
+from features.kkagent import (
+    TOOL_INPUT_JSON_CHARS,
+    TOOL_OUTPUT_PREVIEW_CHARS,
+    KkAgentStreamTrace,
+    consume_line,
 )
-
-_KNOWN_EVENT_TYPES = frozenset({
-    "system", "session", "turn_start", "message", "tool_call", "tool_result",
-    "usage", "llm_retry", "approval_requested", "question_asked", "turn_end",
-    "error", "result",
-})
+from features.kkagent import (
+    ToolTrace as _EngineToolTrace,
+)
+from features.kkagent import (
+    consume_event as _engine_consume_event,
+)
 
 
 def _as_int(value: Any) -> int:
@@ -43,19 +43,9 @@ def _as_int(value: Any) -> int:
 
 
 @dataclass
-class ToolTrace:
-    """一次工具调用的最小证据记录（不含完整输出）。"""
+class ToolTrace(_EngineToolTrace):
+    """一次工具调用的证据记录（引擎字段 + Redmine 取证域字段）。"""
 
-    tool_call_id: str = ""
-    tool_name: str = ""
-    tool_input: dict[str, Any] = field(default_factory=dict)
-    status: Literal["pending", "succeeded", "failed"] = "pending"
-    output_sha256: str = ""
-    output_bytes: int = 0
-    output_preview: str = ""
-    # Controller-owned preflight may classify a failure without exposing raw
-    # diagnostics. Empty preserves the historical "unknown" tool result.
-    failure_kind: str = ""
     evidence_issue_ids: list[int] = field(default_factory=list)
     attachment_manifest_parsed: bool = False
     attachment_count: int = 0
@@ -77,26 +67,9 @@ class ToolTrace:
     # 搜索调用命中的 artifact id（从 matches/artifact_id 提取，供覆盖归属）。
     search_artifact_ids: list[str] = field(default_factory=list)
 
-    @property
-    def is_error(self) -> bool:
-        """兼容旧的 trace 消费方；pending 既不是成功也不是失败。"""
-        return self.status == "failed"
-
-    @property
-    def succeeded(self) -> bool:
-        return self.status == "succeeded"
-
     def to_summary(self) -> dict[str, Any]:
         return {
-            "tool_call_id": self.tool_call_id,
-            "tool_name": self.tool_name,
-            "tool_input": self.tool_input,
-            "status": self.status,
-            "is_error": self.is_error,
-            "output_sha256": self.output_sha256,
-            "output_bytes": self.output_bytes,
-            "output_preview": self.output_preview,
-            "failure_kind": self.failure_kind,
+            **super().to_summary(),
             "evidence_issue_ids": self.evidence_issue_ids,
             "attachment_manifest_parsed": self.attachment_manifest_parsed,
             "attachment_count": self.attachment_count,
@@ -216,38 +189,8 @@ def source_evidence_result(tool_name: str, value: Any) -> dict[str, Any] | None:
 
 
 @dataclass
-class KkAgentTrace:
-    """一次 kkagent 调用（attempt）的完整运行时轨迹。"""
-
-    session_id: str = ""
-    kkagent_version: str = ""
-    subtype: str = ""
-    exit_code: int | None = None
-    resumed: bool = False
-    duration_ms: int = 0
-    rounds: int = 0
-    turns: int = 0
-
-    input_tokens: int = 0
-    output_tokens: int = 0
-    last_round_output_tokens: int = 0
-    last_round_visible_output: bool | None = None
-    cache_read_tokens: int = 0
-    cache_creation_tokens: int = 0
-
-    llm_retries: int = 0
-    repair_attempts: int = 0
-    tool_calls: list[ToolTrace] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
-
-    # 事件流里的最终 result 信封（dict），供输出解析器消费。
-    final_event: dict[str, Any] | None = None
-
-    # 状态标注（analyzer 在收尾时填写）：成功为 "completed"，否则为
-    # 对应的 error_type（timeout/llm_timeout/...）。
-    status: str = ""
-    error_type: str = ""
-    error: str = ""
+class KkAgentTrace(KkAgentStreamTrace):
+    """一次 kkagent 调用（attempt）的完整运行时轨迹（含 Redmine 取证域）。"""
 
     # ------------------------------------------------------------- 观测值
 
@@ -421,60 +364,55 @@ class KkAgentTrace:
 
     def to_summary(self) -> dict[str, Any]:
         return {
-            "session_id": self.session_id,
-            "kkagent_version": self.kkagent_version,
-            "subtype": self.subtype,
-            "exit_code": self.exit_code,
-            "resumed": self.resumed,
-            "duration_ms": self.duration_ms,
-            "rounds": self.rounds,
-            "turns": self.turns,
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
-            "last_round_output_tokens": self.last_round_output_tokens,
-            "last_round_visible_output": self.last_round_visible_output,
-            "cache_read_tokens": self.cache_read_tokens,
-            "cache_creation_tokens": self.cache_creation_tokens,
-            "llm_retries": self.llm_retries,
-            "repair_attempts": self.repair_attempts,
-            "tool_call_count": len(self.tool_calls),
+            **super().to_summary(),
             "history_search_count": self.history_search_count,
             "distinct_history_search_count": self.distinct_history_search_count,
-            "tools": [call.to_summary() for call in self.tool_calls],
-            "errors": self.errors[:10],
-            "status": self.status,
-            "error_type": self.error_type,
-            "error": self.error[:1000],
         }
+
+    # ------------------------------------------------- 引擎多态钩子实现
+
+    def new_tool_call(self, tool_call_id: str, tool_name: str, tool_input: dict[str, Any]) -> ToolTrace:
+        return ToolTrace(
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            tool_input=tool_input,
+        )
+
+    def record_tool_result(self, call: ToolTrace, event: dict[str, Any]) -> None:
+        """引擎通用记录后的取证域富化（issue/artifact/snapshot/源码语义）。"""
+        output = event.get("output")
+        if "history_search" in call.tool_name or "redmine_issue_fetch" in call.tool_name:
+            ids = set(_structured_issue_ids(output))
+            if "redmine_issue_fetch" in call.tool_name:
+                try:
+                    input_issue_id = int(call.tool_input.get("issue_id") or 0)
+                except (TypeError, ValueError):
+                    input_issue_id = 0
+                if input_issue_id > 0:
+                    ids.add(input_issue_id)
+            call.evidence_issue_ids = sorted(ids)[:100]
+        if "redmine_attachments" in call.tool_name:
+            parsed, count, text_ids, all_ids = _attachment_manifest(output)
+            call.attachment_manifest_parsed = parsed
+            call.attachment_count = count
+            call.text_artifact_ids = text_ids
+            call.all_artifact_ids = all_ids
+        call.snapshot_ids = _collect_snapshot_ids(output)
+        if "artifact_search" in call.tool_name:
+            call.search_coverage_complete, call.search_artifact_ids = (
+                _search_coverage(output)
+            )
+        if _is_source_evidence_tool(call.tool_name):
+            call.source_reproducible = _source_reproducible_flag(output)
+            (
+                call.source_evidence_valid,
+                call.source_result_count,
+            ) = _source_evidence_result(call.tool_name, output)
 
 
 def _normalize_history_query(value: Any) -> str:
     text = unicodedata.normalize("NFKC", str(value or "")).casefold()
     return re.sub(r"\s+", " ", text).strip()
-
-
-def _bounded_tool_input(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
-    if len(encoded) <= TOOL_INPUT_JSON_CHARS:
-        return value
-    # 身份字段永远保留（供 Evidence Gate 按目标 issue 归属核对），其余
-    # 内容截断为原始 JSON 前缀。身份键的**值**也要截断：
-    # path/query 等值可被超大参数击穿总量上限，审计表随之膨胀；归属核对
-    # 只需要可辨识前缀。
-    kept = {
-        key: (
-            value[key]
-            if isinstance(value[key], (int, float)) and not isinstance(value[key], bool)
-            else str(value[key])[:TOOL_INPUT_JSON_CHARS]
-        )
-        for key in _IDENTITY_INPUT_KEYS
-        if key in value
-    }
-    kept["_truncated_json"] = encoded[:TOOL_INPUT_JSON_CHARS]
-    kept["_truncated"] = True
-    return kept
 
 
 def _structured_issue_ids(value: Any) -> list[int]:
@@ -555,7 +493,8 @@ def _search_coverage(value: Any) -> tuple[bool, list[str]]:
     while isinstance(value, dict) and isinstance(value.get("data"), dict):
         value = value["data"]
     data = value if isinstance(value, dict) else {}
-    coverage = data.get("coverage_complete", data.get("index_complete"))
+    coverage = (data.get("coverage_complete", data.get("index_complete", False)) is True
+                and data.get("index_complete", True) is True)
     artifact_ids: set[str] = set()
 
     def walk(item: Any) -> None:
@@ -603,149 +542,18 @@ def _collect_snapshot_ids(value: Any) -> list[str]:
     return found[:10]
 
 
-def _record_tool_result(trace: KkAgentTrace, event: dict[str, Any]) -> None:
-    tool_call_id = str(event.get("tool_call_id") or "")
-    output = event.get("output")
-    output_text = output if isinstance(output, str) else json.dumps(
-        output, ensure_ascii=False
-    ) if output is not None else ""
-    encoded = output_text.encode("utf-8", errors="replace")
-    target: ToolTrace | None = None
-    for call in reversed(trace.tool_calls):
-        if call.tool_call_id and call.tool_call_id == tool_call_id:
-            target = call
-            break
-    if target is None:
-        # 乱序/缺失 tool_call 的容错：仍要记录这次调用发生过。
-        target = ToolTrace(
-            tool_call_id=tool_call_id,
-            tool_name=str(event.get("tool_name") or ""),
-        )
-        trace.tool_calls.append(target)
-    target.status = "failed" if bool(event.get("is_error")) else "succeeded"
-    target.output_sha256 = hashlib.sha256(encoded).hexdigest()
-    target.output_bytes = len(encoded)
-    target.output_preview = output_text[:TOOL_OUTPUT_PREVIEW_CHARS]
-    if "history_search" in target.tool_name or "redmine_issue_fetch" in target.tool_name:
-        ids = set(_structured_issue_ids(output))
-        if "redmine_issue_fetch" in target.tool_name:
-            try:
-                input_issue_id = int(target.tool_input.get("issue_id") or 0)
-            except (TypeError, ValueError):
-                input_issue_id = 0
-            if input_issue_id > 0:
-                ids.add(input_issue_id)
-        target.evidence_issue_ids = sorted(ids)[:100]
-    if "redmine_attachments" in target.tool_name:
-        parsed, count, text_ids, all_ids = _attachment_manifest(output)
-        target.attachment_manifest_parsed = parsed
-        target.attachment_count = count
-        target.text_artifact_ids = text_ids
-        target.all_artifact_ids = all_ids
-    target.snapshot_ids = _collect_snapshot_ids(output)
-    if "artifact_search" in target.tool_name:
-        target.search_coverage_complete, target.search_artifact_ids = (
-            _search_coverage(output)
-        )
-    if _is_source_evidence_tool(target.tool_name):
-        target.source_reproducible = _source_reproducible_flag(output)
-        (
-            target.source_evidence_valid,
-            target.source_result_count,
-        ) = _source_evidence_result(target.tool_name, output)
-
-
-def _apply_usage(trace: KkAgentTrace, usage: Any, *, override: bool) -> None:
-    if not isinstance(usage, dict):
-        return
-    if override:
-        trace.input_tokens = _as_int(usage.get("input_tokens"))
-        trace.output_tokens = _as_int(usage.get("output_tokens"))
-        trace.cache_read_tokens = _as_int(usage.get("cache_read_input_tokens"))
-        trace.cache_creation_tokens = _as_int(usage.get("cache_creation_input_tokens"))
-        return
-    trace.input_tokens += _as_int(usage.get("input_tokens"))
-    trace.output_tokens += _as_int(usage.get("output_tokens"))
-    trace.cache_read_tokens += _as_int(usage.get("cache_read_input_tokens"))
-    trace.cache_creation_tokens += _as_int(usage.get("cache_creation_input_tokens"))
-
-
-def consume_event(trace: KkAgentTrace, event: dict[str, Any]) -> None:
-    """把一条已解析的 stream-json 事件并入轨迹。"""
-    event_type = str(event.get("type") or "")
-    if event_type == "system":
-        trace.kkagent_version = str(event.get("version") or trace.kkagent_version)
-    elif event_type == "session":
-        trace.session_id = str(event.get("session_id") or trace.session_id)
-    elif event_type == "turn_start":
-        trace.last_round_output_tokens = 0
-        trace.last_round_visible_output = False
-    elif event_type == "message":
-        content = event.get("content")
-        if event.get("role") == "assistant" and isinstance(content, str) and content.strip():
-            trace.last_round_visible_output = True
-    elif event_type == "tool_call":
-        trace.tool_calls.append(ToolTrace(
-            tool_call_id=str(event.get("tool_call_id") or ""),
-            tool_name=str(event.get("tool_name") or ""),
-            tool_input=_bounded_tool_input(event.get("input")),
-        ))
-    elif event_type == "tool_result":
-        _record_tool_result(trace, event)
-    elif event_type == "usage":
-        usage = event.get("usage") or event
-        if isinstance(usage, dict):
-            trace.last_round_output_tokens = _as_int(usage.get("output_tokens"))
-        _apply_usage(trace, usage, override=False)
-    elif event_type == "llm_retry":
-        trace.llm_retries += 1
-    elif event_type == "error":
-        message = str(event.get("message") or event)
-        if len(trace.errors) < 20:
-            trace.errors.append(message[:500])
-    elif event_type == "result":
-        trace.final_event = event
-        if event.get("session_id"):
-            trace.session_id = str(event["session_id"])
-        trace.subtype = str(event.get("subtype") or "")
-        if "exit_code" in event:
-            trace.exit_code = _as_int(event.get("exit_code"))
-        trace.duration_ms = _as_int(event.get("duration_ms")) or trace.duration_ms
-        trace.rounds = _as_int(event.get("rounds")) or trace.rounds
-        trace.turns = _as_int(event.get("turns")) or trace.turns
-        trace.resumed = bool(event.get("resumed", trace.resumed))
-        if event.get("usage") is not None:
-            # 最终 result 的 usage 是权威累计值，覆盖事件流求和。
-            _apply_usage(trace, event.get("usage"), override=True)
-
-
-def consume_line(trace: KkAgentTrace, raw_line: str | bytes, *, on_event: Any = None) -> bool:
-    """消费一行 NDJSON；返回是否为可解析 JSON。
-
-    非法行（二进制杂讯、截断行）返回 False 并留给调用方进入 raw 兜底
-    解析路径——不做猜测修复。
-
-    ``on_event``：可选的实时事件分流回调（分析进度时间线的接入点）。
-    每条可解析事件在并入轨迹后原样回调；回调自身异常只吞掉并继续——
-    进度观测永远不得影响取证轨迹的完整性。
-    """
-    text = raw_line.decode("utf-8", errors="replace") if isinstance(raw_line, bytes) else raw_line
-    text = text.strip()
-    if not text:
-        return True
-    try:
-        event = json.loads(text)
-    except json.JSONDecodeError:
-        return False
-    if not isinstance(event, dict):
-        return False
-    consume_event(trace, event)
-    if on_event is not None:
-        try:
-            on_event(event)
-        except Exception:
-            pass
-    return True
+def trace_from_summary(summary: dict[str, Any]) -> KkAgentTrace:
+    """Restore prior observed tools when resuming after a context overflow."""
+    trace = KkAgentTrace(**{
+        key: value for key, value in summary.items()
+        if key in KkAgentTrace.__dataclass_fields__ and key != "tool_calls"
+    })
+    trace.tool_calls = [
+        ToolTrace(**{key: value for key, value in item.items()
+                     if key in ToolTrace.__dataclass_fields__})
+        for item in summary.get("tools", [])
+    ]
+    return trace
 
 
 __all__ = [
@@ -755,4 +563,11 @@ __all__ = [
     "ToolTrace",
     "consume_event",
     "consume_line",
+    "source_evidence_result",
+    "trace_from_summary",
 ]
+
+
+def consume_event(trace: KkAgentTrace, event: dict[str, Any]) -> None:
+    """把一条已解析的 stream-json 事件并入 Redmine 轨迹（透传引擎核）。"""
+    _engine_consume_event(trace, event)

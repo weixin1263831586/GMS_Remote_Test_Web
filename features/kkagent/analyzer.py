@@ -1,5 +1,10 @@
-"""
-通用AI模型管理器
+"""通用 AI 模型分析器（统一模型网关门面，ADR 0034）。
+
+类名与调用面保持不变：bootstrap 以 ``UniversalAIAnalyzer`` 工厂注入
+RedmineAgent（夜间 triage / 相似度分析），reports 的 ai_diagnosis 与
+assistant 配置页也直接使用本类。HTTP 传输与响应文本解析已下沉到
+http_client（openai/anthropic 双格式、GLM 思考参数兼容）；本模块保留
+provider 选择、failover、业务 prompt 与结果解析。
 """
 from __future__ import annotations
 
@@ -12,20 +17,24 @@ from typing import Any
 
 import requests
 
-from foundation.redaction import redact_sensitive_text
-
-from .provider_health import (
-    auth_headers as _auth_headers,
-)
-from .provider_health import (
+from features.kkagent.health import (
     is_local_provider as _is_local_provider,
 )
-from .provider_health import (
+from features.kkagent.health import (
     probe_provider as probe_provider_health,
 )
-from .provider_health import (
+from features.kkagent.health import (
     provider_statuses,
 )
+from features.kkagent.http_client import (
+    API_FORMAT_ANTHROPIC,
+    API_FORMAT_OPENAI,
+    api_format_for,
+    build_chat_request,
+    parse_response_text,
+    post_chat,
+)
+from foundation.redaction import redact_sensitive_text
 
 
 logger = logging.getLogger(__name__)
@@ -33,35 +42,28 @@ logger = logging.getLogger(__name__)
 EMOJI_TARGET = "🎯"
 EMOJI_CHART = "📊"
 EMOJI_CHECK = "✅"
-# GLM-5.x 等常开思考模型拒绝关闭思考参数，要求改用推理档位（low/high/max）。
-_THINKING_CONTROL_KEYS = ('disable_thinking', 'skip_reasoning', 'enable_thinking')
-_ALWAYS_THINKING_MARKERS = ('不支持关闭思考', '始终思考')
-
-
-def _rejects_disabling_thinking(error_text: str) -> bool: return any(m in (error_text or '') for m in _ALWAYS_THINKING_MARKERS)
 
 
 class UniversalAIAnalyzer:
     """通用AI模型分析器"""
 
-    def __init__(self, config: dict = None):
-        """初始化通用AI分析器。config: AI模型配置字典。"""
+    def __init__(self, config: dict = None, source_search: Callable[[str], list[dict]] | None = None):
+        """初始化通用AI分析器。config: AI模型配置字典。
+
+        ``source_search``：可选的类名→源码检索结果 provider（默认由
+        bootstrap 注入 reports 的 OpenGrok codesearch；网关自身不反向
+        依赖 reports）。
+        """
         self.config = config or {}
+        self.source_search = source_search
         self.timeout = 60
-        self.API_FORMAT_ANTHROPIC = 'anthropic'  # /v1/messages 端点
-        self.API_FORMAT_OPENAI = 'openai'  # /v1/chat/completions 端点
+        # 兼容既有调用方（features/redmine/analysis_ai.py）的格式常量。
+        self.API_FORMAT_ANTHROPIC = API_FORMAT_ANTHROPIC
+        self.API_FORMAT_OPENAI = API_FORMAT_OPENAI
 
     def _get_api_format(self, provider_name: str, config: dict) -> str:
         """返回提供商使用的 Anthropic 或 OpenAI API 格式。"""
-        api_format = config.get('api_format')
-        if api_format:
-            return api_format
-
-        base_url = config.get('base_url', '')
-        if 'anthropic' in base_url.lower() or base_url.endswith('/messages'):
-            return self.API_FORMAT_ANTHROPIC
-
-        return self.API_FORMAT_OPENAI
+        return api_format_for(provider_name, config)
 
     def get_primary_provider(self, preferred: str | None = None) -> str | None:
         """获取主要提供商。
@@ -90,22 +92,9 @@ class UniversalAIAnalyzer:
         return None
 
     def get_local_provider(self) -> str | None: return first_local_provider(self.config, _is_local_provider)
-    # 常开思考模型（GLM-5.x）拒绝 disable_thinking 时改用 reasoning_effort=low 重试一次。
+
     def _post_chat(self, url: str, headers: dict, data: dict, api_format: str):
-        response = requests.post(url, headers={'Connection': 'keep-alive', **headers},
-                                 json=data, timeout=self.timeout)
-        if response.status_code != 200:
-            try:
-                message = response.json().get('error', {}).get('message', '')
-            except Exception:
-                message = response.text[:300]
-            if _rejects_disabling_thinking(message):
-                retry_data = {k: v for k, v in data.items() if k not in _THINKING_CONTROL_KEYS}
-                if api_format != self.API_FORMAT_ANTHROPIC:
-                    retry_data['reasoning_effort'] = 'low'
-                response = requests.post(url, headers={'Connection': 'keep-alive', **headers},
-                                         json=retry_data, timeout=self.timeout)
-        return response
+        return post_chat(url, headers, data, api_format, timeout=self.timeout)
 
     def get_provider_statuses(self) -> list[dict]:
         return provider_statuses(self.config)
@@ -158,25 +147,19 @@ class UniversalAIAnalyzer:
             if not base_url or not model:
                 return {'success': False, 'error': f'{provider_name} base_url/model 未配置'}
 
-            api_format = self._get_api_format(provider_name, provider_config)
             messages = []
             if system_prompt:
                 messages.append({'role': 'system', 'content': system_prompt})
             messages.append({'role': 'user', 'content': user_prompt})
             tokens = max_tokens or provider_config.get('max_tokens', 2000)
 
-            if api_format == self.API_FORMAT_ANTHROPIC:
-                url = f"{base_url}/v1/messages" if not base_url.endswith('/messages') else base_url
-                headers = {**_auth_headers(provider_name, provider_config, 'x-api-key'), "Content-Type": "application/json", "anthropic-version": "2023-06-01"}
-                data = {"model": model, "max_tokens": tokens, "messages": messages,
-                        "system": system_prompt or None, "disable_thinking": True, "skip_reasoning": True}
-                data = {k: v for k, v in data.items() if v is not None}
-            else:
-                headers = {**_auth_headers(provider_name, provider_config), "Content-Type": "application/json"}
-                data = {"model": model, "messages": messages, "temperature": provider_config.get('temperature', 0.3),
-                        "max_tokens": tokens, "disable_thinking": True, "skip_reasoning": True,
-                        "enable_thinking": False}
-                url = f"{base_url}/v1/chat/completions" if not (base_url.endswith('/chat/completions') or base_url.endswith('/completions')) else base_url
+            url, headers, data, api_format = build_chat_request(
+                provider_name,
+                provider_config,
+                messages=messages,
+                max_tokens=tokens,
+                system_prompt=system_prompt,
+            )
 
             response = self._post_chat(url, headers, data, api_format)
             if response.status_code != 200:
@@ -258,37 +241,12 @@ class UniversalAIAnalyzer:
 
             prompt = self._build_prompt(class_name, method_name, error_message, stack_trace, source_code)
 
-            api_format = self._get_api_format(provider_name, config)
-
-            if api_format == self.API_FORMAT_ANTHROPIC:
-                url = f"{base_url}/v1/messages" if not base_url.endswith('/messages') else base_url
-                headers = {
-                    **_auth_headers(provider_name, config, 'x-api-key'),
-                    "Content-Type": "application/json",
-                    "anthropic-version": "2023-06-01"
-                }
-                data = {
-                    "model": model,
-                    "max_tokens": config.get('max_tokens', 2000),
-                    "messages": [{"role": "user", "content": prompt}],
-                    "disable_thinking": True,
-                    "skip_reasoning": True
-                }
-            else:
-                headers = {
-                    **_auth_headers(provider_name, config),
-                    "Content-Type": "application/json"
-                }
-                data = {
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": config.get('temperature', 0.3),
-                    "max_tokens": config.get('max_tokens', 2000),
-                    "disable_thinking": True,
-                    "skip_reasoning": True,
-                    "enable_thinking": False
-                }
-                url = f"{base_url}/v1/chat/completions" if not (base_url.endswith('/chat/completions') or base_url.endswith('/completions')) else base_url
+            url, headers, data, api_format = build_chat_request(
+                provider_name,
+                config,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=config.get('max_tokens', 2000),
+            )
 
             logger.info(f"[{provider_name}] Request URL: {url}, Model: {model}, Format: {api_format}")
 
@@ -299,14 +257,14 @@ class UniversalAIAnalyzer:
                 try:
                     response = self._post_chat(url, headers, data, api_format)
                     break
-                except requests.exceptions.ConnectionError as e:
+                except requests.ConnectionError as e:
                     if attempt < max_retries - 1:
                         logger.warning(f"[{provider_name}] 连接失败，{retry_delay}秒后重试 ({attempt+1}/{max_retries}): {str(e)[:100]}")
                         time.sleep(retry_delay)
                         retry_delay *= 2
                     else:
                         return {'success': False, 'error': f'连接失败: {redact_sensitive_text(e)}'}
-                except requests.exceptions.Timeout as e:
+                except requests.Timeout as e:
                     if attempt < max_retries - 1:
                         logger.warning(f"[{provider_name}] 请求超时，{retry_delay}秒后重试 ({attempt+1}/{max_retries})")
                         time.sleep(retry_delay)
@@ -317,7 +275,7 @@ class UniversalAIAnalyzer:
             if response.status_code == 200:
                 result = response.json()
 
-                if api_format == self.API_FORMAT_ANTHROPIC and 'content' in result:
+                if api_format == API_FORMAT_ANTHROPIC and 'content' in result:
                     content = result['content'][0].get('text', '')
                 elif 'choices' in result:
                     choice = result.get('choices', [{}])[0]
@@ -401,27 +359,7 @@ class UniversalAIAnalyzer:
         Shared by UniversalAIAnalyzer internals and RedmineAgent to avoid
         duplicating Anthropic/OpenAI response parsing logic.
         """
-        if api_format == self.API_FORMAT_ANTHROPIC and 'content' in payload:
-            content_items = payload.get('content') or []
-            first = content_items[0] if content_items else {}
-            return (first or {}).get('text', '') if isinstance(first, dict) else str(first or '')
-
-        # OpenAI / compatible format
-        choices = payload.get('choices') or []
-        if choices:
-            choice = choices[0] or {}
-            message = choice.get('message', {})
-            content = message.get('content') or ''
-            if not content and message.get('reasoning'):
-                content = message.get('reasoning', '')
-            # 兜底：GLM-5.x 等推理模型在关闭 thinking 失败时，正文可能只在 reasoning_content
-            if not content and message.get('reasoning_content'):
-                content = message.get('reasoning_content', '')
-            if not content:
-                content = choice.get('text', '')
-            return content
-
-        return str(payload)
+        return parse_response_text(payload, api_format)
 
     def _build_prompt(self, class_name: str, method_name: str | None,
                       error_message: str, stack_trace: str | None, source_code: str | None) -> str:
@@ -896,17 +834,21 @@ class UniversalAIAnalyzer:
         }
 
     def _fetch_source_code_android(self, class_name: str) -> dict | None:
-        """Fetch Android source for *class_name* (e.g. com.android...vts.SomeTest) via OpenGrok; return None on failure."""
+        """Fetch Android source for *class_name* (e.g. com.android...vts.SomeTest) via OpenGrok; return None on failure.
+
+        源码检索能力经 ``source_search`` provider 注入（默认走 reports 的
+        OpenGrok codesearch），避免 kkagent 网关反向依赖 reports 形成
+        feature 依赖环（ADR 0034）。
+        """
+        search = self.source_search
+        if search is None:
+            return None
         try:
             if not class_name or not isinstance(class_name, str):
                 logger.warning(f"无效的类名参数: {class_name}")
                 return None
 
-            from features.reports import ReportAnalyzer
-
-            temp_analyzer = ReportAnalyzer()
-
-            search_results = temp_analyzer.rk_codesearch(class_name, max_results=3)
+            search_results = search(class_name)
 
             if search_results and len(search_results) > 0:
                 first_result = search_results[0]
@@ -937,21 +879,6 @@ class UniversalAIAnalyzer:
         except Exception as e:
             logger.error(f"获取Android源码失败: {e}")
             return None
-
-
-# 全局实例
-_universal_analyzer = None
-
-def get_universal_analyzer() -> UniversalAIAnalyzer:
-    """获取通用AI分析器实例"""
-    global _universal_analyzer
-    from foundation.config import config_manager
-
-    ai_config = config_manager.get_ai_config()
-
-    # 每次都重新创建实例以确保使用最新配置
-    _universal_analyzer = UniversalAIAnalyzer(ai_config)
-    return _universal_analyzer
 
 
 def first_local_provider(
@@ -993,3 +920,18 @@ def call_provider_chain(
         'provider_errors': errors,
         'attempted_providers': attempted,
     }
+
+
+# 全局实例
+_universal_analyzer = None
+
+def get_universal_analyzer() -> UniversalAIAnalyzer:
+    """获取通用AI分析器实例"""
+    global _universal_analyzer
+    from foundation.config import config_manager
+
+    ai_config = config_manager.get_ai_config()
+
+    # 每次都重新创建实例以确保使用最新配置
+    _universal_analyzer = UniversalAIAnalyzer(ai_config)
+    return _universal_analyzer

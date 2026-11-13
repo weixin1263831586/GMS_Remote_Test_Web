@@ -2,9 +2,11 @@
 /* 参考稿（GMS Agent.png）：会话列表 + 任务对话 + 执行步骤 三栏。 */
 .agent-layout.agent-layout-with-sessions { grid-template-columns: 200px minmax(0, 4fr) minmax(0, 1fr); }
 .agent-sessions-heading,
-.agent-conversation-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--border-color); }
+.agent-conversation-heading { display: flex; align-items: center; gap: 8px 12px; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--border-color); }
+/* 固定 48px 单行：不再换行，溢出由各状态 span 自身省略号消化。 */
+.agent-heading-status { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px 12px; }
 .agent-conversation-heading strong { font-size: 13px; }
-.agent-conversation-heading .ui-meta { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: right; }
+.agent-conversation-heading .ui-meta { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: right; }
 .agent-sessions-heading { padding: 0 14px; gap: 8px; }
 .agent-sessions-heading strong { font-size: 13px; }
 .agent-sessions-heading .ui-meta { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

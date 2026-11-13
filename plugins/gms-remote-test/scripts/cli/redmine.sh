@@ -478,6 +478,7 @@ gms-rt-artifact-search() {
     local snapshot_id=""
     local query=""
     local limit=50
+    local offset=0
     local positional=()
     # 契约：<snapshot_id> --query QUERY；同时兼容两个位置参数。
     while [ "$#" -gt 0 ]; do
@@ -486,6 +487,11 @@ gms-rt-artifact-search() {
                 shift
                 [ $# -gt 0 ] || { error "--query requires a value"; return "$GMS_RT_EXIT_USAGE"; }
                 query="$1"
+                ;;
+            --offset)
+                shift
+                [ $# -gt 0 ] || { error "--offset requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                offset="$1"
                 ;;
             --limit)
                 shift
@@ -502,9 +508,9 @@ gms-rt-artifact-search() {
     if [ -z "$query" ] && [ "${#positional[@]}" -ge 2 ]; then
         query="${positional[1]}"
     fi
-    [ -z "$snapshot_id" ] || [ -z "$query" ] && { error "Usage: gms-rt-artifact-search <snapshot_id> <query|--query QUERY> [--limit N]"; return "$GMS_RT_EXIT_USAGE"; }
+    [ -z "$snapshot_id" ] || [ -z "$query" ] && { error "Usage: gms-rt-artifact-search <snapshot_id> <query|--query QUERY> [--limit N] [--offset N]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
-    local url="/redmine-agent/evidence/$(_urlencode "$snapshot_id")/search?q=$(_urlencode "$query")&limit=$limit"
+    local url="/redmine-agent/evidence/$(_urlencode "$snapshot_id")/search?q=$(_urlencode "$query")&limit=$limit&offset=$(_urlencode "$offset")"
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
         api_call "$url" "GET" | jq '.'
         return $?
@@ -515,12 +521,18 @@ gms-rt-artifact-search() {
 gms-rt-artifact-search-batch() {
     # 多关键词单遍搜索：一次请求完成全部关键词匹配，
     # 避免逐词搜索对同一批大日志的重复扫描。用法：
-    #   gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N]
+    #   gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N] [--per-query-offset N]
     local snapshot_id=""
     local per_query_limit=20
+    local per_query_offset=0
     local queries=()
     while [ "$#" -gt 0 ]; do
         case "$1" in
+            --per-query-offset)
+                shift
+                [ $# -gt 0 ] || { error "--per-query-offset requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                per_query_offset="$1"
+                ;;
             --per-query-limit)
                 shift
                 [ $# -gt 0 ] || { error "--per-query-limit requires a value"; return "$GMS_RT_EXIT_USAGE"; }
@@ -532,15 +544,15 @@ gms-rt-artifact-search-batch() {
     done
     snapshot_id="${queries[0]:-}"
     if [ -z "$snapshot_id" ] || [ "${#queries[@]}" -lt 2 ]; then
-        error "Usage: gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N]"
+        error "Usage: gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N] [--per-query-offset N]"
         return "$GMS_RT_EXIT_USAGE"
     fi
     local -a word_queries=("${queries[@]:1}")
     check_jq
     local body
     body=$(printf '%s\n' "${word_queries[@]}" \
-        | jq -Rn --argjson lim "$per_query_limit" \
-        '{queries: ([inputs | ltrimstr(" ") | rtrimstr(" ")]), per_query_limit: $lim}')
+        | jq -Rn --argjson lim "$per_query_limit" --argjson off "$per_query_offset" \
+        '{queries: ([inputs | ltrimstr(" ") | rtrimstr(" ")]), per_query_limit: $lim, per_query_offset: $off}')
     local url="/redmine-agent/evidence/$(_urlencode "$snapshot_id")/search/batch"
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
         api_call "$url" "POST" "$body" | jq '.'

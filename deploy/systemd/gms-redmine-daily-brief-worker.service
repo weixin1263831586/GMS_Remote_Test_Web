@@ -7,7 +7,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/gms-remote-test
-ExecStart=/opt/gms-remote-test/.venv/bin/python -m features.redmine.daily_brief_worker
+ExecStart=/opt/gms-remote-test/.venv/bin/python -m bootstrap.run_daily_brief_worker
 User=gms
 Group=gms
 Restart=on-failure

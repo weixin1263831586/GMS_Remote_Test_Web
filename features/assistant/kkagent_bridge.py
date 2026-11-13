@@ -16,16 +16,14 @@ Redmine 模块已验证的 headless stream-json 子进程方式（不引入 ACP 
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-import re
 import shutil
 import signal
 from dataclasses import dataclass, field
 from typing import Any
 
-from features.assistant.kkagent_runtime import read_bounded, restricted_runtime
+from features.kkagent import child_env as _engine_child_env
+from features.kkagent import run_headless_turn
 
 
 logger = logging.getLogger(__name__)
@@ -101,7 +99,12 @@ def availability() -> dict[str, Any]:
 
 
 def child_env() -> dict[str, str]:
-    """宿主环境减去身份类变量，供子进程显式注入。"""
+    """宿主环境减去身份类变量，供子进程显式注入。
+
+    键位与引擎 :data:`features.kkagent.process.MCP_IDENTITY_ENV_KEYS`
+    一致；本桥接的 env 已剥离身份，可直接作为引擎 ``child_env({})`` 的
+    ``env_extra`` 空注入使用。
+    """
     import os
 
     return {
@@ -125,55 +128,6 @@ def link_payload(
     }
 
 
-def _extract_events(raw_lines: list[str]) -> tuple[str, str, list[str]]:
-    """从 stream-json 行里提取**最终**助手文本、会话 ID 与工具名列表。
-
-    一个回合可能产生多段助手文本（工具调用间的中间叙述）；调用方把整段
-    文本当单个 JSON 决策解析，因此这里只保留最后一段文本——中间段落
-    拼接会产生非法 JSON，让解析永远失败。
-    """
-    last_text = ""
-    session_id = ""
-    tools: list[str] = []
-    for line in raw_lines:
-        try:
-            event = json.loads(line)
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(event, dict):
-            continue
-        if event.get("session_id"):
-            session_id = str(event["session_id"])
-        if event.get("type") == "system" and event.get("subtype") in {
-            "init", "session_started",
-        }:
-            session_id = str(event.get("session_id") or session_id)
-        if event.get("type") == "message" and event.get("role") == "assistant":
-            content = event.get("content")
-            if isinstance(content, str) and content:
-                last_text = content
-            elif isinstance(content, list):
-                blocks = [str(block["text"]) for block in content
-                          if isinstance(block, dict) and block.get("type") == "text" and block.get("text")]
-                if blocks:
-                    last_text = blocks[-1]
-        if event.get("type") == "assistant":
-            message = event.get("message") or {}
-            for block in message.get("content") or []:
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") == "text" and block.get("text"):
-                    last_text = str(block["text"])
-                elif block.get("type") == "tool_use":
-                    tools.append(str(block.get("name") or ""))
-        if event.get("type") == "result":
-            session_id = str(event.get("session_id") or session_id)
-            result_text = str(event.get("result") or event.get("message") or "")
-            if result_text and not last_text:
-                last_text = result_text
-    return last_text.strip(), session_id, tools
-
-
 def _signal_exit_detail(returncode: int) -> str:
     """把负退出码翻译成信号名与可行动提示（日志与用户消息共用）。"""
     if returncode >= 0:
@@ -188,38 +142,6 @@ def _signal_exit_detail(returncode: int) -> str:
     return f"kkagent 进程被 {signal_name} 终止，已保留本轮进度，可重试。"
 
 
-async def _terminate_bridge_process(process: asyncio.subprocess.Process) -> None:
-    """TERM→grace→KILL 回收超时/残留的桥接子进程（独立进程组）。"""
-    import os
-    import signal
-
-    if process.returncode is not None:
-        return
-    if os.name == "posix":
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-    else:  # pragma: no cover - Windows fallback
-        process.terminate()
-    try:
-        await asyncio.wait_for(process.wait(), timeout=5.0)
-        return
-    except asyncio.TimeoutError:
-        pass
-    if os.name == "posix":
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    else:  # pragma: no cover
-        process.kill()
-    try:
-        await process.wait()
-    except Exception:  # pragma: no cover - reap best-effort
-        pass
-
-
 async def run_turn(
     message: str,
     *,
@@ -227,84 +149,53 @@ async def run_turn(
     context: str = "",
     timeout_seconds: int = TURN_TIMEOUT_SECONDS,
 ) -> BridgeTurnResult:
-    """执行一次 kkagent 桥接回合（headless、只读、有界超时）。"""
+    """执行一次 kkagent 桥接回合（headless、只读、有界超时）。
+
+    进程协议（spawn/stream-json/超时/信号退出分类/进程组回收）统一走
+    ``features.kkagent.run_headless_turn``；本函数保留 prompt 组装、
+    可用性预检与用户可行动文案。
+    """
     if not availability()["available"]:
         return BridgeTurnResult(ok=False, error="kkagent 未安装，桥接不可用", error_code="unavailable")
     prompt = _BRIDGE_PROMPT_PREFIX
     if context:
-        bounded_context = context.encode("utf-8")[:90000].decode("utf-8", errors="ignore")
-        prompt += f"上下文：{bounded_context}\n\n"
-    prompt += message[:4000]
+        prompt += f"上下文：{context}\n\n"
+    prompt += message
 
-    raw_lines: list[str] = []
-    process: asyncio.subprocess.Process | None = None
-    resolved_session = session_id
+    result = await run_headless_turn(
+        prompt,
+        env=_engine_child_env(child_env()),
+        session_id=session_id,
+        timeout_seconds=timeout_seconds,
+    )
 
-    def remember_session(line: str) -> None:
-        nonlocal resolved_session
-        try:
-            event = json.loads(line)
-        except ValueError:
-            return
-        candidate = event.get("session_id") if isinstance(event, dict) else None
-        if isinstance(candidate, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", candidate):
-            resolved_session = candidate
-
-    async def invoke() -> bytes:
-        nonlocal process
-        env = child_env()
-        async with restricted_runtime(KKAGENT_BINARY, env) as (config, directory):
-            command = [KKAGENT_BINARY, "--config", str(config), "--plan", "-p", prompt,
-                       "--output-format", "stream-json", "--max-turns", "2"]
-            if session_id:
-                command += ["--resume", session_id]
-            process = await asyncio.create_subprocess_exec(
-                *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                env=env, cwd=directory, start_new_session=True,
-            )
-            stdout, _stderr, _ = await asyncio.gather(
-                read_bounded(process.stdout, on_line=remember_session), read_bounded(process.stderr), process.wait(),
-            )
-            return stdout
-
-    try:
-        stdout = await asyncio.wait_for(invoke(), timeout=timeout_seconds)
-        if process.returncode != 0:
-            # 负退出码 = 被信号终止。Controller 以 systemd 管理且
-            # KillSignal=SIGINT，stop/restart 会向服务 cgroup 内全部进程
-            # 广播（含 start_new_session 的桥接子进程），在途回合因此以
-            # -2 结束。这不是模型失败：区分错误码并给出可行动文案。
-            detail = _signal_exit_detail(process.returncode)
-            error_code = "signalled" if process.returncode < 0 else "process_error"
-            _record_turn_state(False, detail, error_code)
-            return BridgeTurnResult(
-                ok=False, session_id=resolved_session,
-                error=detail, error_code=error_code,
-            )
-        raw_lines = stdout.decode("utf-8", errors="replace").splitlines()
-    except FileNotFoundError:
-        _record_turn_state(False, "kkagent 未安装", "unavailable")
-        return BridgeTurnResult(ok=False, session_id=resolved_session, error="kkagent 未安装，桥接不可用", error_code="unavailable")
-    except asyncio.TimeoutError:
-        _record_turn_state(False, "回合超时", "timeout")
-        return BridgeTurnResult(ok=False, session_id=resolved_session, error="kkagent 回合超时", error_code="timeout")
-    except Exception:
-        logger.debug("kkagent bridge turn failed", exc_info=True)
-        _record_turn_state(False, "调用失败", "bridge_error")
-        return BridgeTurnResult(ok=False, session_id=resolved_session,
-                                error="kkagent 调用失败，请检查模型连接或隔离策略", error_code="bridge_error")
-    finally:
-        if process is not None and process.returncode is None:
-            await _terminate_bridge_process(process)
-
-    text, resolved_session, tools = _extract_events(raw_lines)
-    if not text:
-        _record_turn_state(False, "未返回文本结果", "empty_response")
+    if result.ok:
+        _record_turn_state(True)
         return BridgeTurnResult(
-            ok=False, session_id=resolved_session or session_id,
-            error="kkagent 未返回文本结果", tools_used=tools, error_code="empty_response",
+            ok=True, text=result.text, session_id=result.session_id,
+            tools_used=result.tools_used,
         )
-    _record_turn_state(True)
+
+    error_messages = {
+        "unavailable": ("kkagent 未安装", "kkagent 未安装，桥接不可用"),
+        "timeout": ("回合超时", "kkagent 回合超时"),
+        "internal": ("调用失败", "kkagent 调用失败，请检查模型连接或隔离策略"),
+        "empty_response": ("未返回文本结果", "kkagent 未返回文本结果"),
+    }
+    detail, message = error_messages.get(
+        result.error_code, ("调用失败", "kkagent 调用失败，请检查模型连接或隔离策略")
+    )
+    if result.error_code in ("signalled", "process_error"):
+        # 负退出码 = 被信号终止。Controller 以 systemd 管理且
+        # KillSignal=SIGINT，stop/restart 会向服务 cgroup 内全部进程
+        # 广播（含 start_new_session 的桥接子进程），在途回合因此以
+        # -2 结束。这不是模型失败：区分错误码并给出可行动文案。
+        detail = _signal_exit_detail(result.returncode or 0)
+        message = detail
+    error_code = "bridge_error" if result.error_code == "internal" else result.error_code
+    _record_turn_state(False, detail, error_code)
     return BridgeTurnResult(
-        ok=True, text=text, session_id=resolved_session or session_id, tools_used=tools,
+        ok=False, session_id=result.session_id or session_id,
+        error=message, tools_used=result.tools_used,
+        error_code=error_code,
     )

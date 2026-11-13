@@ -97,6 +97,23 @@ async def test_submit_follows_original_run_until_current_report_is_ready(environ
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("summary", [
+    "签名配置需要核对，尚未完成复测。", "\n保留总结正文与换行。\n", "原始总结\n\n" + "详细证据。" * 6000,
+])
+async def test_monitor_displays_kkagent_summary_without_a_wrapper_or_truncation(environment, summary):
+    _, read = environment
+    payload = status("completed", report=summary)
+    payload["data"]["issues"][0]["result"]["output_style"] = "summary"
+    read.return_value = payload
+    current = session()
+    await analysis.start_analysis(current, request(), {"issue_ref": "661332"})
+    await asyncio.wait_for(session_registry._agent_monitor_tasks[current["session_id"]], 2)
+    assert current["messages"][-1]["content"] == summary
+    assert current["steps"][-1]["status"] == "done"
+    assert current["active_run"] is None
+
+
+@pytest.mark.asyncio
 async def test_running_task_rejects_duplicate_submission(environment):
     submit, read = environment
     gate = asyncio.Event()
@@ -350,3 +367,60 @@ async def test_monitor_read_failure_preserves_run_without_resubmission(environme
     assert current["status"] == "idle" and current["active_run"] is None
     assert "无法继续跟踪" in current["messages"][-1]["content"]
     assert "run-1" in project_agent._context(current, [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("params", [
+    {"issue_ref": "661332", "output_style": "summary"},
+    {"issue_ref": "661332", "worker_id": "foreign-worker"},
+    None,
+])
+async def test_invalid_submission_reports_not_submitted_and_parameters_to_correct(environment, params):
+    submit, _ = environment
+    current = session()
+    outcome = await analysis.start_analysis(current, request(), params)
+    assert not outcome.success and outcome.data["status_code"] == 400
+    assert "任务尚未提交" in outcome.formatted_text
+    action = outcome.data["next_actions"][0]
+    assert action["allowed_parameters"] == ["analysis_hint", "analysis_mode", "issue_ref"]
+    submit.assert_not_awaited()
+    assert current["active_run"] is None
+    assert current["session_id"] not in session_registry._agent_monitor_tasks
+
+
+@pytest.mark.asyncio
+async def test_model_corrects_extra_redmine_parameters_before_dispatch(environment, monkeypatch):
+    submit, _ = environment
+    monkeypatch.setenv("GMS_ASSISTANT_KKAGENT_ENABLED", "1")
+    monkeypatch.setattr(project_agent.kkagent_bridge, "availability", lambda: {"available": True})
+    reference = "https://redmine.example.test/issues/661332"
+    bad = {"type": "call", "tool": analysis.START_TOOL,
+           "params": {"issue_ref": reference, "analysis_hint": "检查日志末尾", "output_style": "summary"}}
+    good = {"type": "call", "tool": analysis.START_TOOL,
+            "params": {"issue_ref": reference, "analysis_hint": "检查日志末尾"}}
+
+    async def turn(*args, **kwargs):
+        if turn.calls == 0:
+            assert submit.await_count == 0
+            assert "tool_contracts" in kwargs["context"]
+            value = bad
+        else:
+            assert submit.await_count == 0
+            context = json.loads(kwargs["context"])
+            correction = context["observations"][-1]
+            assert correction["unexpected_parameters"] == ["output_style"]
+            assert correction["tool_schema"]["name"] == analysis.START_TOOL
+            value = good
+        turn.calls += 1
+        return BridgeTurnResult(ok=True, text=json.dumps(value))
+
+    turn.calls = 0
+    monkeypatch.setattr(project_agent.kkagent_bridge, "run_turn", turn)
+    current, req = session(), request()
+    await project_agent.handle_project_turn(current, req, SimpleNamespace(
+        message=f"分析 {reference}，检查日志末尾", action=None, params={},
+    ))
+    assert turn.calls == 2 and submit.await_count == 1
+    assert submit.await_args.args == (req, reference, "incremental", "检查日志末尾")
+    assert not any(step["status"] == "warning" for step in current["steps"])
+    await asyncio.wait_for(session_registry._agent_monitor_tasks[current["session_id"]], 2)

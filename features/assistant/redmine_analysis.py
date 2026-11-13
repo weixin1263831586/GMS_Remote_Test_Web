@@ -52,6 +52,19 @@ def _invalid(tool_name, message):
     return _result(ApiError.malformed_request(message).to_response(), tool_name)
 
 
+def _parameter_error(tool_name, allowed, params):
+    message = ("分析请求参数不匹配，任务尚未提交；Agent 需要核对工具参数后重试。"
+               if tool_name == START_TOOL else "分析进度查询参数不匹配；Agent 需要核对工具参数后重试。")
+    return _result(ApiError.malformed_request(
+        message,
+        next_actions=({
+            "action": "correct_tool_parameters", "tool": tool_name,
+            "allowed_parameters": sorted(allowed),
+            "unexpected_parameters": sorted(set(params) - allowed) if isinstance(params, dict) else [],
+        },),
+    ).to_response(), tool_name)
+
+
 def _current_issue(payload, issue_id=None):
     issues = payload.get("issues") or []
     if issue_id is not None:
@@ -64,7 +77,10 @@ def _report(payload, issue_id=None):
     if issue.get("status") != "completed":
         return ""
     result = issue.get("result") or {}
-    text = str(result.get("detailed_report") or result.get("problem_summary") or "").strip()
+    text = str(result.get("detailed_report") or result.get("problem_summary") or "")
+    if result.get("output_style") == "summary":
+        return text if text.strip() else ""
+    text = text.strip()
     if len(text) > 24000:
         return text[:24000] + "\n\n（报告较长，完整内容请到 Redmine 单号分析查看。）"
     return text
@@ -80,7 +96,10 @@ def _summary(payload, issue_id=None):
              "partial": "部分完成，请关注缺失证据", "failed": "分析失败", "cancelled": "已停止"}.get(status, "等待任务状态")
     text = f"{title}：{label}。"
     if status in {"completed", "partial"}:
-        text += "\n\n" + (_report(payload, issue_id) or "本次任务没有返回该工单的完整分析报告，请在 Redmine 单号分析查看详情。")
+        report = _report(payload, issue_id)
+        if report and (issue.get("result") or {}).get("output_style") == "summary":
+            return report
+        text += "\n\n" + (report or "本次任务没有返回该工单的完整分析报告，请在 Redmine 单号分析查看详情。")
     elif status == "failed":
         detail = str(issue.get("error") or run.get("error") or "")[:1000]
         if detail:
@@ -89,8 +108,10 @@ def _summary(payload, issue_id=None):
 
 
 async def query_analysis(session, request, params):
+    if not isinstance(params, dict) or set(params) - {"run_id"}:
+        return _parameter_error(STATUS_TOOL, {"run_id"}, params)
     run_id = params.get("run_id")
-    if set(params) - {"run_id"} or not isinstance(run_id, str) or not run_id.strip() or len(run_id) > 256:
+    if not isinstance(run_id, str) or not run_id.strip() or len(run_id) > 256:
         return _invalid(STATUS_TOOL, "请提供提交分析时返回的 run_id。")
     outcome = _result(await get_analysis_for_assistant(request, run_id), STATUS_TOOL)
     if not outcome.success:
@@ -115,8 +136,9 @@ async def query_analysis(session, request, params):
 
 
 async def start_analysis(session, request, params):
-    if set(params) - {"issue_ref", "analysis_mode", "analysis_hint"}:
-        return _invalid(START_TOOL, "工单分析只接受 issue_ref、analysis_mode 和 analysis_hint。")
+    allowed = {"issue_ref", "analysis_mode", "analysis_hint"}
+    if not isinstance(params, dict) or set(params) - allowed:
+        return _parameter_error(START_TOOL, allowed, params)
     if session.get("active_run") or session.get("_redmine_submitting"):
         return _result(ApiError.conflict("当前会话已有运行中的任务，请查询该任务进度，或新建会话分析其他工单。").to_response(), START_TOOL)
     session["_redmine_submitting"] = True

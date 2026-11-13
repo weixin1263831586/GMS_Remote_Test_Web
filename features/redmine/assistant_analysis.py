@@ -8,8 +8,8 @@ from foundation.error_model import ApiError
 from .daily_brief_api import (
     SingleIssueAnalysisRequest,
     _require_human,
-    analyze_single_issue,
     get_brief_run,
+    submit_single_issue_analysis,
 )
 from .evidence import EvidenceError, owner_base_url, parse_issue_ref
 
@@ -27,7 +27,7 @@ async def analyze_issue_for_assistant(
         )
     except (EvidenceError, ValueError):
         return ApiError.malformed_request("工单引用或分析参数无效；URL 必须属于当前账号配置的 Redmine。").to_response()
-    return await analyze_single_issue(request, payload)
+    return await submit_single_issue_analysis(request, payload, output_style="summary")
 
 
 async def get_analysis_for_assistant(request: Request, run_id: str):

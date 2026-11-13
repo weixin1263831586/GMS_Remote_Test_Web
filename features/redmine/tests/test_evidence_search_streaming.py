@@ -36,13 +36,13 @@ class BatchEvidenceSearchTests(unittest.TestCase):
             derived_text_path=rel if archive else "",
         )
 
-    def _batch(self, queries, limit=1):
+    def _batch(self, queries, limit=1, offset=0):
         with patch.object(api, "require_agent_scope", lambda scope: lambda request: None), \
                 patch.object(api, "_owner", return_value="test-owner"), \
                 patch.object(api, "_get_snapshot", return_value={**self.snapshot, "manifest": self.manifest}), \
                 patch.object(api, "owner_evidence_store", return_value=self.store):
             result = asyncio.run(api.search_evidence_batch(
-                self.snapshot["snapshot_id"], api.BatchSearchRequest(queries=queries, per_query_limit=limit), object(),
+                self.snapshot["snapshot_id"], api.BatchSearchRequest(queries=queries, per_query_limit=limit, per_query_offset=offset), object(),
             ))
         return result["data"]
 
@@ -90,12 +90,17 @@ class BatchEvidenceSearchTests(unittest.TestCase):
         self.assertEqual(rare["matches"][0]["line"], 1)
         self.assertTrue(data["coverage_complete"])
 
-    def test_reading_last_chunk_does_not_prove_matching_completed(self):
+    def test_page_limit_does_not_stop_matching_before_eof(self):
         self._artifact("hit\n" * 100)
         data = self._batch(["hit"])
         self.assertEqual(data["scanned_bytes"], data["total_bytes"])
-        self.assertFalse(data["coverage_complete"])
-        self.assertFalse(data["index_complete"])
+        self.assertTrue(data["coverage_complete"])
+        self.assertTrue(data["index_complete"])
+        self.assertEqual(data["queries"][0]["total"], 100)
+        self.assertEqual(data["queries"][0]["next_offset"], 1)
+        page = self._batch(["hit"], offset=99)["queries"][0]
+        self.assertEqual(page["matches"][0]["char_index"], 396)
+        self.assertIsNone(page["next_offset"])
 
 
 class TextStreamSearchTests(unittest.TestCase):
