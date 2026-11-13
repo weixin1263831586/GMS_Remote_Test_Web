@@ -107,5 +107,14 @@ def test_binding_device_is_optional_for_unbootable_boards():
 def test_console_distinguishes_channel_from_port_and_reconnects():
     assert "通道已连接" in SCRIPT
     assert "串口已打开" in SCRIPT
-    assert "reconnect-socket" in SCRIPT
+    # 重连契约随 WebSocket 重构更新：手动重连是
+    # page.html 重连按钮的 data-console-action="reconnect" 事件绑定，
+    # 自动重连由 connectSocket 内的 reconnectTimer 承接，
+    # socketGeneration 会话代次保护丢弃旧会话的迟到回调。
+    assert "connectSocket(session)" in SCRIPT
+    assert "clearTimeout(session.reconnectTimer)" in SCRIPT
     assert "session.reconnectTimer = setTimeout" in SCRIPT
+    assert "session.socketGeneration" in SCRIPT
+    assert 'data-console-action="reconnect"' in Path(
+        "features/devices/ui/page.html"
+    ).read_text(encoding="utf-8", errors="ignore")

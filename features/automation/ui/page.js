@@ -197,6 +197,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // E2E 以 automationReady 为就绪信号：必须在首轮 loadAll 完成（成功或
     // 失败）后置位，否则测试会在首轮 API 重绘表单前操作，丢失草稿状态
     // 。
+    // 首屏区域占位：整页级容器渲染超新星动画，数据到达后被各自 load 覆盖。
+    for (const [id, label] of [
+        ['dashboard-stats', '正在加载自动化概览...'],
+        ['automation-runs', '正在加载运行记录...'],
+        ['ops-events', '正在加载运维事件...'],
+    ]) {
+        const box = document.getElementById(id);
+        setLoadingOrbit(box, label);
+    }
     loadAll(true)
         .catch(() => {})
         .finally(() => {

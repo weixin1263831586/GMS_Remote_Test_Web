@@ -470,7 +470,7 @@ async function loadDepartmentOverdue(force) {
   const requestGeneration = ++redmineDashboardRequestGeneration.department;
   const hadRenderedDashboard = box.dataset.loaded === 'true';
   box.setAttribute('aria-busy', 'true');
-  if (!hadRenderedDashboard) box.innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在统计部门Redmine数据...</div>';
+  if (!hadRenderedDashboard) setLoadingOrbit(box, '正在统计部门Redmine数据...', true);
   try {
     await loadStatsConfig();
     var sd = statsConfig.stale_days || 20;
@@ -503,7 +503,7 @@ async function loadStatistics(force) {
   const requestGeneration = ++redmineDashboardRequestGeneration.stats;
   const hadRenderedDashboard = box.dataset.loaded === 'true';
   box.setAttribute('aria-busy', 'true');
-  if (!hadRenderedDashboard) box.innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在加载个人看板数据...</div>';
+  if (!hadRenderedDashboard) setLoadingOrbit(box, '正在加载个人看板数据...', true);
   var savedName = '';
   try {
     var oldSel = document.getElementById('statsUserSelect');
@@ -668,7 +668,7 @@ async function loadProjectDashboard(force) {
   const requestGeneration = ++redmineDashboardRequestGeneration.project;
   const hadRenderedDashboard = box.dataset.loaded === 'true';
   box.setAttribute('aria-busy', 'true');
-  if (!hadRenderedDashboard) box.innerHTML = '<div class="muted" style="padding:20px;text-align:center">⏳ 正在统计项目 Redmine 当前情况...</div>';
+  if (!hadRenderedDashboard) setLoadingOrbit(box, '正在统计项目 Redmine 当前情况...', true);
   try {
     await loadStatsConfig();
     if (!projectProfiles().length) {

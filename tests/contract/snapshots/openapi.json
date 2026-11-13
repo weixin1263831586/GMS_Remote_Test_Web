@@ -200,6 +200,30 @@
         "additionalProperties": false,
         "description": "Page size controls the response only; every query scans all evidence.",
         "properties": {
+          "artifact": {
+            "default": "",
+            "maxLength": 2048,
+            "title": "Artifact",
+            "type": "string"
+          },
+          "collapse": {
+            "default": false,
+            "title": "Collapse",
+            "type": "boolean"
+          },
+          "context": {
+            "default": 200,
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Context",
+            "type": "integer"
+          },
+          "member": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Member",
+            "type": "string"
+          },
           "per_query_limit": {
             "default": 20,
             "maximum": 100.0,
@@ -9891,6 +9915,38 @@
               "title": "Suite Path",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "metadata_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Metadata Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "test_type",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Test Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -18719,6 +18775,43 @@
         "summary": "Download Evidence Artifact"
       }
     },
+    "/api/redmine-agent/artifacts/{artifact_id}/failures": {
+      "get": {
+        "description": "解析测试报告附件为结构化失败用例表（服务端一次，所有 agent 受益）。\n\n支持 test_result.xml（含 zip 内成员）、STS/GTS 汇总 HTML、zip 内\n兜底 HTML。每行给出 module/test/result/failure_message/首行栈/来源，\nagent 不再需要多次窗口往返手工抠失败信息。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Extract Artifact Failures"
+      }
+    },
     "/api/redmine-agent/artifacts/{artifact_id}/image": {
       "get": {
         "description": "返回 MCP image content（base64 原图），超限时明确报错而不是悄悄截断。",
@@ -18758,6 +18851,7 @@
     },
     "/api/redmine-agent/artifacts/{artifact_id}/text": {
       "get": {
+        "description": "按字符窗口读取派生文本。\n\n``offset >= 0`` 为正向窗口；``offset < 0`` 从尾部计数（-1 = 最后一个\n字符起），此时整个文件会被流式扫描一次以得到精确 total_chars——\n这是显式选择的高成本操作。归档附件若带有派生时的 zip 索引 sidecar，\n响应会附带 ``zip_index``（成员全局 char 区间）与当前窗口所在的\n``zip_member``/``member_char_index`` 注记，供 search 命中 → 续读\n换算，不再需要手工推算偏移。",
         "parameters": [
           {
             "in": "path",
@@ -18774,7 +18868,6 @@
             "required": false,
             "schema": {
               "default": 0,
-              "minimum": 0,
               "title": "Offset",
               "type": "integer"
             }
@@ -20153,6 +20246,50 @@
               "default": 0,
               "minimum": 0,
               "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "artifact",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 2048,
+              "title": "Artifact",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "member",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 512,
+              "title": "Member",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "collapse",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Collapse",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "context",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 0,
+              "title": "Context",
               "type": "integer"
             }
           }
@@ -22583,6 +22720,26 @@
               "title": "Cursor",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "test_type",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Test Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Status",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -22816,6 +22973,199 @@
           }
         },
         "summary": "Get Weekly Report Department"
+      }
+    },
+    "/api/sdk/manage/discover": {
+      "post": {
+        "description": "枚举远端 home 下的 SDK 根目录候选（下拉数据源）。",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discover Sdk Roots"
+      }
+    },
+    "/api/sdk/manage/discover-local": {
+      "post": {
+        "description": "本机（local_git）候选：home 一级目录 + 项目根同级，含 git 证据。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Discover Local Sdk Roots"
+      }
+    },
+    "/api/sdk/manage/probe": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Probe Sdk Path"
+      }
+    },
+    "/api/sdk/manage/servers": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Manage Servers"
+      }
+    },
+    "/api/sdk/manage/sources": {
+      "get": {
+        "description": "用户注册源 + 实时存在性校验（每次刷新检查 SDK 路径是否还在）。\n\nlocal_git（本机）走本地探测；ssh_git 走远端 verify。每次刷新都会\n把结果写回 ``last_verified_at/ok``。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List User Sdk Sources"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register Sdk Source"
+      }
+    },
+    "/api/sdk/manage/sources/{source_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Sdk Source"
       }
     },
     "/api/sdk/read": {

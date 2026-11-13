@@ -76,6 +76,7 @@ def _normalize_active_run(active_run: Any) -> dict[str, Any] | None:
             "redmine_run_id",
             "redmine_issue_id",
             "redmine_step_id",
+            "recovery_step_id",
             "monitor_token",
             "attempt_id",
             "worker_id",

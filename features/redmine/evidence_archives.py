@@ -12,7 +12,7 @@ from pathlib import Path
 
 from foundation.archives import extract_system_archive
 
-from .evidence import TEXT_KIND_EXTENSIONS
+from .evidence import EXTRACT_TIMEOUT_SECONDS, TEXT_KIND_EXTENSIONS
 from .evidence_store import EvidenceStore
 from .evidence_text import derive_member_index
 from .evidence_zip import _member_priority
@@ -49,9 +49,13 @@ def extract_system_archive_text(
             return "", "压缩附件格式暂不支持，内容尚未提取；不能据此判断日志缺失。"
         with tempfile.TemporaryDirectory(prefix="gms-evidence-archive-") as directory:
             destination = Path(directory)
-            # Keep the shared path/symlink/security preflight. No indexing
-            # budget or elapsed-time budget discards otherwise readable logs.
-            extract_system_archive(str(source), str(destination), timeout=None)
+            # Keep the shared path/symlink/security preflight. 解包进程受
+            # EXTRACT_TIMEOUT_SECONDS 时长预算（外部进程
+            # 不得无限运行；foundation 超时会杀整个进程组），文件数与展开
+            # 大小仍由 foundation 的解压安全检查兜底。
+            extract_system_archive(
+                str(source), str(destination), timeout=EXTRACT_TIMEOUT_SECONDS
+            )
             members = sorted(
                 (path for path in destination.rglob("*")
                  if path.is_file() and path.suffix.lower() in TEXT_KIND_EXTENSIONS),

@@ -48,7 +48,19 @@ class SSHManager:
         key_path = os.path.expanduser(key_path)
         key_error = None
 
-        for key_class in [paramiko.RSAKey, paramiko.Ed25519Key, paramiko.ECDSAKey, paramiko.DSSKey]:
+        # paramiko 5.0 移除了 DSSKey；按可用性过滤，避免列表构造时
+        # AttributeError 让所有密钥认证连接整体失败。
+        key_classes = [
+            key_class
+            for key_class in (
+                paramiko.RSAKey,
+                paramiko.Ed25519Key,
+                paramiko.ECDSAKey,
+                getattr(paramiko, "DSSKey", None),
+            )
+            if key_class is not None
+        ]
+        for key_class in key_classes:
             try:
                 key = key_class.from_private_key_file(key_path)
                 logger.info(f"[SSH] Loaded {key_class.__name__} from {key_path}")

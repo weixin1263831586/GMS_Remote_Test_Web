@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .source_provenance import expected_module, module_matches
 from .trace import KkAgentTrace
 
 
@@ -206,6 +207,11 @@ def evaluate_evidence_gate(
     test_failure_subject = is_test_failure_subject(entry)
     source_evidence_tool_count = trace.source_evidence_tool_count
     reproducible_source_evidence_count = trace.reproducible_source_evidence_count
+    module = expected_module(entry)
+    mismatched_source_calls = [call for call in trace.tool_calls if call.succeeded
+                               and call.source_evidence_valid and not module_matches(call, trace, module)]
+    relevant_source_count = source_evidence_tool_count - len(mismatched_source_calls)
+    reproducible_source_evidence_count -= sum(call.source_reproducible is True for call in mismatched_source_calls)
     # 部署未配置任何 SDK 源时降级放行：模型会尝试 sdk/apk 取证并收到
     # "source 未配置"的失败，此时强制 gate 只会系统性烧光轮次。降级依据
     # 是部署事实（entry 注入的 runtime hint），不是模型自报。hint 缺失
@@ -251,9 +257,15 @@ def evaluate_evidence_gate(
         "test_failure_subject": test_failure_subject,
         "source_evidence_required": source_evidence_required,
         "source_evidence_tool_count": source_evidence_tool_count,
+        "source_attempt_count": sum(any(marker in call.tool_name for marker in (
+            "sdk_search", "sdk_read", "apk_resolve", "apk_analyze", "apk_source", "apk_search",
+        )) for call in trace.tool_calls),
+        "source_module": module,
+        "relevant_source_evidence_count": relevant_source_count,
+        "mismatched_source_tool_ids": [call.tool_call_id for call in mismatched_source_calls],
         "reproducible_source_evidence_count": reproducible_source_evidence_count,
         "source_evidence_checked": (
-            not source_evidence_required or source_evidence_tool_count >= 1
+            not source_evidence_required or relevant_source_count >= 1
         ),
         "attachments_listed": bool(attachment_calls),
         "attachment_manifest_parsed": attachment_manifest_parsed,
@@ -356,13 +368,16 @@ def gate_errors(
             f"history search only used {count} distinct successful query/queries; "
             f"at least {MIN_HISTORY_SEARCHES} distinct history searches are required"
         )
-    if gate.get("source_evidence_required") and not gate.get("source_evidence_checked"):
+    qualified_unknown = gate.get("source_limitation_acknowledged") is True
+    if gate.get("source_evidence_required") and not gate.get("source_evidence_checked") and not qualified_unknown:
         errors.append(
             "test-suite failure: no successful source-level evidence call was made "
             "(gms_rt_sdk_* or gms_rt_apk_*); the kernel-missing-patch vs "
             "upstream-behavior-change directions must be distinguished with source "
             "evidence before claiming a root cause"
         )
+        if gate.get("mismatched_source_tool_ids"):
+            errors.append("source calls resolved a different module; inspect the exact failing module, not a nearby APK/JAR")
     if isinstance(result, dict):
         if (
             result.get("root_cause_type") == "confirmed"
@@ -429,10 +444,19 @@ def apply_gate(result: dict[str, Any], gate: dict[str, Any]) -> None:
 
 
 def gate_and_errors(
-    trace: KkAgentTrace, entry: dict[str, Any], result: dict[str, Any]
+    trace: KkAgentTrace, entry: dict[str, Any], result: dict[str, Any],
+    *, reviewed_claims: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """一次性：评估 gate → 绑定 claim → 写回 result → 返回 (gate, errors)。"""
     gate = evaluate_evidence_gate(trace, entry)
+    # This argument is supplied only after Controller validation. Model-owned
+    # JSON fields named analysis_review/claims cannot authorize a weaker gate.
+    gate["source_limitation_acknowledged"] = bool(
+        gate.get("source_evidence_required") and not gate.get("source_evidence_checked")
+        and gate.get("source_attempt_count", 0) > 0 and reviewed_claims
+        and not any(item.get("category") in {"root_cause", "responsibility"}
+                    and item.get("claim_type") == "supported" for item in reviewed_claims)
+    )
     # Claim ↔ Evidence Ledger 绑定：把模型声称的 evidence
     # 绑定回稳定证据 ID，随 gate 一起存档；confirmed 级结论的引用必须
     # 命中可复现源码证据，而不是仅"轨迹里存在过一次"（gate_errors）。

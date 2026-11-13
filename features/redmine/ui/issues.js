@@ -349,7 +349,7 @@ async function loadIssueDocOnToggle(details, issueId) {
   if (!details || !details.open || details.dataset.loaded === '1') return;
   const box = details.querySelector('.formatted-doc');
   if (!box) return;
-  box.innerHTML = '<div class="muted">正在加载完整文档…</div>';
+  setLoadingOrbit(box, '正在加载完整文档...');
   try {
     const data = await api(`/api/redmine-agent/issues/${issueId}/document`);
     const text = data && data.doc_content ? data.doc_content : (data || '');

@@ -59,7 +59,7 @@ human user in their own shell.
 | Durable jobs | `gms-rt-jobs-list`, `gms-rt-jobs-status`, `gms-rt-jobs-events`, `gms-rt-jobs-follow`, `gms-rt-jobs-wait`, `gms-rt-jobs-cancel` |
 | Config and files | `gms-rt-config-read`, `gms-rt-config-update` |
 | System | `gms-rt-system-capabilities`, `gms-rt-system-command-describe`, `gms-rt-system-commands`, `gms-rt-system-docs`, `gms-rt-system-doctor`, `gms-rt-system-health`, `gms-rt-system-help`, `gms-rt-system-selfcheck`, `gms-rt-system-skills`, `gms-rt-system-update`, `gms-rt-system-version` |
-| Redmine evidence | `gms-rt-redmine-credentials-status`, `gms-rt-redmine-triage`, `gms-rt-redmine-issue-fetch`, `gms-rt-redmine-issue-show`, `gms-rt-redmine-journals`, `gms-rt-redmine-attachments`, `gms-rt-redmine-attachment-download`, `gms-rt-redmine-artifact-image`, `gms-rt-redmine-history-search`, `gms-rt-artifact-read`, `gms-rt-artifact-search`, `gms-rt-artifact-search-batch` |
+| Redmine evidence | `gms-rt-redmine-credentials-status`, `gms-rt-redmine-triage`, `gms-rt-redmine-issue-fetch`, `gms-rt-redmine-issue-show`, `gms-rt-redmine-journals`, `gms-rt-redmine-attachments`, `gms-rt-redmine-attachment-download`, `gms-rt-redmine-artifact-failures`, `gms-rt-redmine-artifact-image`, `gms-rt-redmine-history-search`, `gms-rt-artifact-read`, `gms-rt-artifact-search`, `gms-rt-artifact-search-batch` |
 | SDK sources | `gms-rt-sdk-sources`, `gms-rt-sdk-search`, `gms-rt-sdk-read` |
 | External knowledge (background only, ADR 0014) | `gms-rt-knowledge-search` |
 
@@ -123,10 +123,39 @@ gms-rt-redmine-attachments SNAP --json --non-interactive
 #    attachment:<file>.zip!/<member> with a line number.
 gms-rt-artifact-search SNAP --query 'AssertionError' --json --non-interactive
 
+# 5a. Structured failure table for test reports (server-side one pass —
+#     prefer this over scraping test_result.xml / summary HTML manually):
+gms-rt-redmine-artifact-failures ART --json --non-interactive
+#    → module / test / result / failure_message / first_stack_line / source
+
 # 5b. Multi-keyword one-pass search: one server-side scan matches every
 #     keyword (per-query totals/truncation + coverage report); prefer it
-#     over repeated single-query scans on large logs.
+#     over repeated single-query scans on large logs. Filter to one
+#     attachment, widen snippets, or fold repeated stack traces:
 gms-rt-artifact-search-batch SNAP 'AssertionError' 'Process died' --json --non-interactive
+gms-rt-artifact-search SNAP 'LoadSdkException' --artifact logcat.zip --member main --collapse --json --non-interactive
+#    Every response carries artifact_hits (per-artifact hit counts), so a
+#    truncated result still shows WHICH attachment holds the hits.
+
+# 5c. WORKED EXAMPLE — two-index continuation (search hit → read on):
+#    search matches carry member-relative `char_index` AND global
+#    `artifact_char_index` (zip: body_offset + member offset). Feed the
+#    GLOBAL index into artifact_read to continue reading from the hit; the
+#    read response header then names the member and its global range:
+#      matches[].artifact_char_index = 4143310  (member logcat-main.log)
+#      gms-rt-artifact-read ART --offset 4143310 --limit 40000
+#      → offset=4143310 zip_member=logcat-main.log
+#        member_char_index=523xx member_char_range=[4091xxx, 42xxxxx]
+#    No manual arithmetic. Negative offset reads the log TAIL without
+#    knowing its length (-1 = last char; whole file streamed once,
+#    total_chars exact — also how you probe total length cheaply for
+#    very large logs: read --offset -1 --limit 1 → total_chars).
+gms-rt-artifact-read ART --offset -65536 --json --non-interactive
+
+# 5d. Big attachment? Download the ORIGINAL once and grep locally instead
+#     of paging windows (35MB xml, 800k-char logs):
+gms-rt-redmine-attachment-download ART --json --non-interactive
+#    → saved_path (default ~/.local/state/gms-remote-test/artifacts/, 0600)
 
 # 6. Read long text by window (offset/limit chars)
 gms-rt-artifact-read ART --offset 0 --limit 65536 --json --non-interactive
@@ -139,9 +168,19 @@ gms-rt-apk-source-read TASK com/example/Test.java --offset 0 --limit 400 --json 
 
 # 8. Bind SDK conclusions to an exact commit (admin-configured sources)
 #    provider=local_git: revision 解析为 commit，result_id 绑定 commit+path
+#    provider=ssh_git: 编译服务器上的只读远端 git 检索（SSH 执行层）。
+#    单仓模式：repo_root 本身是 git 仓；repo_manifest 多仓模式：配置
+#    repos 子仓清单，检索按仓 HEAD 聚合、路径带子仓前缀、read 绑定子仓
+#    commit（multi_repo: true），语义与 local_git 的可复现性一致
 #    provider=codesearch: OpenGrok /api/v1 动态索引（AOSP 等大项目树），
 #    revision 仅作请求标签，read 直接按项目路径取文件内容
+#    WORKED EXAMPLE — 超大 Android 树（AOSP/repo manifest）里对本地/远端
+#    文件树跑 Glob **/*.java 会超时（实测两次）；一律先用本节 SDK
+#    codesearch 检索（commit 绑定、可引用），必须看文件树时把 path 收窄
+#    到具体子系统目录（如 frameworks/base/services）再 Glob。
 gms-rt-sdk-sources --json --non-interactive
+#    Omitting --revision resolves the source's default_revision automatically:
+gms-rt-sdk-search --source SRC --query SYMBOL --json --non-interactive
 gms-rt-sdk-search --source SRC --revision REV --query SYMBOL --json --non-interactive
 gms-rt-sdk-read --result-id RID --source SRC --path P --commit SHA --json --non-interactive
 

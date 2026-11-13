@@ -526,6 +526,10 @@ body {
     overflow: hidden;
     border-radius: 8px;
     background: var(--light-bg);
+    /* 尺寸容器：骨架屏用 cqh 以本盒高度为基准，与 iframe 内
+       .loading-orbit--stage 的 vh 基准（iframe 视口 == 本盒）完全一致，
+       加载交接瞬间动画不缩放。盒高来自 flex 布局，size containment 安全。 */
+    container-type: size;
 }
 
 .embedded-frame-shell > iframe {
@@ -596,39 +600,53 @@ body {
 }
 
 @media (max-width: 760px) {
-    .embedded-frame-skeleton { --stage: min(72vmin, 300px); }
+    .embedded-frame-skeleton { --stage: min(72vmin, 300px); --stage: min(72cqh, 300px); }
+    .loading-orbit { --stage: min(72vmin, 300px); }
+    .loading-orbit--stage { --stage: min(72vh, 300px); }
 }
 
-/* 矮视口：嵌入区高度有限，星轨降档并收紧角标间距，保证整体不溢出。 */
+/* 矮视口：嵌入区高度有限，星轨降档并收紧角标间距，保证整体不溢出。
+   cqh 兜底 vh 同上：shell 骨架与 iframe 舞台共用内容盒高度基准。 */
 @media (max-height: 820px) {
-    .embedded-frame-skeleton { --stage: min(52vmin, 420px); }
+    .embedded-frame-skeleton { --stage: min(52vmin, 420px); --stage: min(52cqh, 420px); }
+    .loading-orbit--stage { --stage: min(52vh, 420px); }
 
     .embedded-frame-shell:not([data-frame-has-content="true"]) .embedded-frame-loading-chip {
         top: calc(50% + min(26vmin, 210px) + 18px);
+        top: calc(50% + min(26cqh, 210px) + 18px);
     }
 }
 
 @media (prefers-reduced-motion: reduce) {
     /* 退化：静态星图——所有层停在中性位（弧光全环隐、冲击波隐、
-       核心常亮、卫星保持基位分布），无旋转/公转/爆发。 */
+       核心常亮、卫星保持基位分布），无旋转/公转/爆发。
+       .loading-orbit 数据区舞台同样适配。 */
     .embedded-frame-skeleton-bar,
     .embedded-frame-skeleton-bar::before,
     .embedded-frame-skeleton-bar::after,
     .embedded-frame-skeleton-card,
     .embedded-frame-skeleton-panel,
+    .loading-orbit-bar,
+    .loading-orbit-bar::before,
+    .loading-orbit-bar::after,
+    .loading-orbit-card,
+    .loading-orbit-panel,
     .embedded-frame-loading-spinner {
         animation: none;
     }
 
-    .embedded-frame-skeleton-bar::after {
+    .embedded-frame-skeleton-bar::after,
+    .loading-orbit-bar::after {
         opacity: 0.6;
     }
 
-    .embedded-frame-skeleton-panel:nth-child(1) {
+    .embedded-frame-skeleton-panel:nth-child(1),
+    .loading-orbit-panel:nth-child(1) {
         opacity: 0;
     }
 
-    .embedded-frame-skeleton-panel:nth-child(2) {
+    .embedded-frame-skeleton-panel:nth-child(2),
+    .loading-orbit-panel:nth-child(2) {
         transform: none;
         opacity: 0.9;
     }

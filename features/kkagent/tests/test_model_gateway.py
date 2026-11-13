@@ -20,6 +20,8 @@ from features.kkagent import (
     restricted_runtime,
 )
 from features.kkagent import config as gateway_config
+from features.kkagent import http_client as gateway_http
+from features.kkagent.http_client import build_chat_request, endpoint_url
 
 
 @pytest.fixture
@@ -279,3 +281,97 @@ async def test_redmine_spawn_receives_catalog_config_and_private_key(catalog, mo
     trace, _raw, timed_out = await analyzer._run_stream(analyzer.build_command("test"))
     assert trace.session_id == "test-session" and not timed_out
     assert paths and all(not path.exists() for path in paths)
+
+
+# --------------------------------------------------------------- HTTP 传输层
+# 跨提供商请求结构的契约校验——端点拼接（根地址、
+# /v1 地址、完整端点、GLM /v4）、system 消息落位、思考参数与重试。
+
+
+@pytest.mark.parametrize("base,fmt,expected", [
+    ("https://api.anthropic.com", gateway_http.API_FORMAT_ANTHROPIC,
+     "https://api.anthropic.com/v1/messages"),
+    ("https://api.anthropic.com/v1", gateway_http.API_FORMAT_ANTHROPIC,
+     "https://api.anthropic.com/v1/messages"),
+    ("https://api.anthropic.com/v1/messages", gateway_http.API_FORMAT_ANTHROPIC,
+     "https://api.anthropic.com/v1/messages"),
+    ("https://api.openai.com", gateway_http.API_FORMAT_OPENAI,
+     "https://api.openai.com/v1/chat/completions"),
+    ("https://api.openai.com/v1", gateway_http.API_FORMAT_OPENAI,
+     "https://api.openai.com/v1/chat/completions"),
+    ("https://api.openai.com/v1/chat/completions", gateway_http.API_FORMAT_OPENAI,
+     "https://api.openai.com/v1/chat/completions"),
+    ("https://open.bigmodel.cn/api/paas/v4", gateway_http.API_FORMAT_OPENAI,
+     "https://open.bigmodel.cn/api/paas/v4/chat/completions"),
+])
+def test_endpoint_urls_never_duplicate_the_version_segment(base, fmt, expected):
+    assert endpoint_url(base, fmt) == expected
+
+
+def test_anthropic_request_moves_system_out_of_messages(catalog):
+    messages = [
+        {"role": "system", "content": "You are concise."},
+        {"role": "user", "content": "hi"},
+    ]
+    _url, headers, data, api_format = build_chat_request(
+        "primary",
+        {**catalog["providers"]["primary"], "base_url": "https://api.anthropic.com"},
+        messages=messages, max_tokens=128, system_prompt="You are concise.",
+    )
+    assert api_format == gateway_http.API_FORMAT_ANTHROPIC
+    assert headers["anthropic-version"] == "2023-06-01"
+    assert data["system"] == "You are concise."
+    assert data["messages"] == [{"role": "user", "content": "hi"}]
+
+
+def test_openai_request_keeps_system_role_and_thinks_off(catalog):
+    messages = [
+        {"role": "system", "content": "You are concise."},
+        {"role": "user", "content": "hi"},
+    ]
+    url, _headers, data, api_format = build_chat_request(
+        "primary", catalog["providers"]["primary"],
+        messages=messages, max_tokens=128, system_prompt="You are concise.",
+    )
+    assert api_format == gateway_http.API_FORMAT_OPENAI
+    assert url == "https://gateway.invalid/v1/chat/completions"
+    assert data["messages"] == messages
+    assert "system" not in data
+    assert data["disable_thinking"] is True and data["enable_thinking"] is False
+
+
+@pytest.mark.parametrize("status", [400, 404, 422])
+def test_thinking_rejection_retries_without_thinking_controls(catalog, status, monkeypatch):
+    provider = catalog["providers"]["primary"]
+    _url, headers, data, api_format = build_chat_request(
+        "primary", provider, messages=[{"role": "user", "content": "hi"}],
+        max_tokens=128,
+    )
+    rejected = Mock(status_code=status,
+                    **{"json.return_value": {"error": {"message": "disable_thinking 不支持"}}})
+    accepted = Mock(status_code=200,
+                    **{"json.return_value": {"choices": [{"message": {"content": "ok"}}]}})
+    posts = Mock(side_effect=[rejected, accepted])
+    monkeypatch.setattr(gateway_http.requests, "post", posts)
+    response = gateway_http.post_chat(_url, headers, data, api_format)
+    assert response is accepted
+    first, retry = posts.call_args_list
+    assert first.kwargs["json"]["disable_thinking"] is True
+    assert "disable_thinking" not in retry.kwargs["json"]
+    assert retry.kwargs["json"]["reasoning_effort"] == "low"
+
+
+@pytest.mark.parametrize("status", [401, 500])
+def test_non_validation_errors_are_never_swallowed_by_thinking_retry(
+        catalog, status, monkeypatch):
+    provider = catalog["providers"]["primary"]
+    _url, headers, data, api_format = build_chat_request(
+        "primary", provider, messages=[{"role": "user", "content": "hi"}],
+        max_tokens=128,
+    )
+    unauthorized = Mock(status_code=status,
+                        **{"json.return_value": {"error": {"message": "thinking mode?"}}})
+    posts = Mock(return_value=unauthorized)
+    monkeypatch.setattr(gateway_http.requests, "post", posts)
+    assert gateway_http.post_chat(_url, headers, data, api_format) is unauthorized
+    assert posts.call_count == 1

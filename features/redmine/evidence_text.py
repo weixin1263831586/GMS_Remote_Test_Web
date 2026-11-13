@@ -4,15 +4,23 @@ from __future__ import annotations
 
 import base64
 import codecs
+import json
 import os
 import shutil
 import tempfile
 import zipfile
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
+
+from .evidence import DERIVED_TEXT_MAX_CHARS
 
 
 TEXT_CHUNK_BYTES = 256 * 1024
+
+
+class _MemberBudgetError(Exception):
+    """单个成员解码长度突破派生文本预算的内部信号。"""
 
 
 def detect_stream_encoding(source) -> str:
@@ -80,15 +88,32 @@ def derive_text_file(store, artifact_id: str, snapshot_rel: str, source: Path):
 def derive_member_index(store, artifact_id: str, snapshot_rel: str, members):
     """Spool each member to obtain the character length of its v2 frame.
 
-    Members are (name, opener) pairs. No indexing budget excludes members.
-    Failed reads remain explicit and never publish a partial member body.
+    Members are (name, opener) pairs. A char budget bounds the published
+    derived text (压缩炸弹/索引膨胀防护)：超出预算的成员
+    不再进入索引，错误显式记录并让调用方把 derived_status 记为 partial
+    ——未索引的成员绝不能当作不存在。Failed reads remain explicit and
+    never publish a partial member body.
+
+    A sidecar ``<artifact>.txt.idx.json`` records each member's global char
+    range in the derived text plus the total char count, so artifact_read can
+    map a window (or a search artifact_char_index hit) to its member without
+    rescanning frames. Older derived files without a sidecar degrade to
+    frame-less reads (no annotation), never to an error.
     """
     relative = f"{snapshot_rel}/derived/{artifact_id}.txt"
     destination = store.resolve_internal(relative)
     included = 0
     errors = []
+    index_members: list[dict[str, Any]] = []
+    cursor = 0
     with atomic_output(destination) as output:
         for name, opener in members:
+            if cursor >= DERIVED_TEXT_MAX_CHARS:
+                errors.append(
+                    f"成员 {name} 起超出 {DERIVED_TEXT_MAX_CHARS} 字符派生预算，"
+                    "其余成员未计入索引"
+                )
+                break
             with tempfile.TemporaryFile() as spool:
                 try:
                     length = 0
@@ -96,17 +121,45 @@ def derive_member_index(store, artifact_id: str, snapshot_rel: str, members):
                         encoding = detect_stream_encoding(source)
                         for text in decoded_chunks(source, encoding):
                             length += len(text)
+                            if length > DERIVED_TEXT_MAX_CHARS:
+                                raise _MemberBudgetError(name)
                             spool.write(text.encode("utf-8"))
+                except _MemberBudgetError:
+                    errors.append(
+                        f"成员 {name} 超出 {DERIVED_TEXT_MAX_CHARS} 字符派生预算，未计入索引"
+                    )
+                    continue
                 except (OSError, ValueError, RuntimeError, EOFError, UnicodeError, zipfile.BadZipFile) as exc:
                     errors.append(f"成员 {name} 读取失败: {type(exc).__name__}，检索索引不完整")
                     continue
                 encoded = base64.urlsafe_b64encode(name.encode("utf-8")).decode("ascii").rstrip("=")
                 output.write(f"<<<zip-member-v2:{encoded}:{length}>>>\n".encode())
+                cursor += len(f"<<<zip-member-v2:{encoded}:{length}>>>\n")
                 spool.seek(0)
                 shutil.copyfileobj(spool, output, length=TEXT_CHUNK_BYTES)
                 output.write(b"\n")
+                cursor += length + 1
+                index_members.append({
+                    "name": name,
+                    # Global char range of the member BODY inside the derived
+                    # text: artifact_char_index values from search fall in
+                    # [start, start + length).
+                    "start": cursor - length - 1,
+                    "length": length,
+                })
                 included += 1
     if not included:
         destination.unlink(missing_ok=True)
         return "", "; ".join(errors)
+    sidecar = destination.parent / f"{destination.name}.idx.json"
+    try:
+        with atomic_output(sidecar) as output:
+            output.write(json.dumps({
+                "version": 1,
+                "total_chars": cursor,
+                "members": index_members,
+            }, ensure_ascii=False).encode("utf-8"))
+    except OSError as exc:
+        # 索引文件只是加速注记；写失败不回收已成功的派生文本。
+        errors.append(f"zip 索引 sidecar 写入失败: {type(exc).__name__}")
     return relative, "; ".join(errors)

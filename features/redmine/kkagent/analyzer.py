@@ -28,7 +28,8 @@ from features.kkagent import (
 )
 
 from ..daily_brief_prompt import issue_result_schema_json, prompt_template_for
-from .evidence_gate import gate_and_errors
+from .claim_review import apply_review, review_prompt, validate_review
+from .evidence_gate import gate_and_errors, gate_errors
 from .mcp_health import probe_kkagent_mcp_health
 from .native_summary import native_evidence_repair_prompt, native_summary_result
 from .output import parse_issue_result
@@ -57,7 +58,7 @@ logger = logging.getLogger(__name__)
 # v27: 钉死截图取证行为——每个 image 附件至少一次 artifact_read 尝试，
 #      成功即引用 OCR 文本；未实际尝试不得写"截图读取失败"
 #      （#655644 夜批实测：管道已通但模型跳读，错误申报缺口）。
-PROMPT_VERSION = "redmine_daily_triage_v28"
+PROMPT_VERSION = "redmine_daily_triage_v29"
 
 # analyzer 实现版本（Ledger logical_key 组成项）：kkagent analyzer 实现
 # 升级但 prompt/model 不变时，逻辑键也必须变化（否则错误 dedupe）。以 agent 包版本为准，包描述读不到（非仓库部署）时回退
@@ -609,9 +610,13 @@ class KkAgentRedmineAnalyzer:
             else:
                 _gate, findings = gate_and_errors(trace, entry, result)
                 findings.extend(result.get("claim_binding_errors") or [])
-            if not findings:
-                trace.status = "completed"
-                return self._success(result, trace, raw)
+            source_gap_only = (result is not None and not result.get("claim_binding_errors")
+                               and _gate.get("source_attempt_count", 0) > 0
+                               and not gate_errors({**_gate, "source_evidence_required": False}))
+            if not findings or source_gap_only:
+                reviewed, trace, findings = await self._review_native(entry, result, trace, raw)
+                if reviewed is not None:
+                    return reviewed
             repaired, trace = await self._repair(entry, trace, findings)
             if repaired is not None:
                 return repaired
@@ -624,6 +629,7 @@ class KkAgentRedmineAnalyzer:
                 return self._failure(trace, raw)
             _gate, findings = gate_and_errors(trace, entry, result)
             findings.extend(result.get("claim_binding_errors") or [])
+            findings.extend(trace.analysis_review_findings)
             trace.status, trace.error_type, trace.error = classify_gate_failure(
                 trace, findings
             )
@@ -746,14 +752,72 @@ class KkAgentRedmineAnalyzer:
             _gate, findings = gate_and_errors(merged, entry, result)
             if native_summary:
                 findings.extend(result.get("claim_binding_errors") or [])
-            if findings:
+            source_gap_only = (native_summary and not result.get("claim_binding_errors")
+                               and _gate.get("source_attempt_count", 0) > 0
+                               and not gate_errors({**_gate, "source_evidence_required": False}))
+            if findings and not source_gap_only:
                 merged.errors.extend(findings[:10])
+                continue
+            if native_summary:
+                reviewed, merged, findings = await self._review_native(entry, result, merged, raw)
+                if reviewed is not None:
+                    return reviewed, merged
                 continue
             merged.status = "completed"
             merged.error_type = ""
             merged.error = ""
             return self._success(result, merged, raw), merged
         return None, merged
+
+    async def _review_native(self, entry, result, trace, raw):
+        """A successful evidence workflow still needs a review of its final prose."""
+        trace.analysis_review_findings = []
+        if not trace.session_id:
+            findings = ["claim review requires the original analysis session"]
+            trace.analysis_review_findings = findings
+            return None, trace, findings
+        progress = entry.get("_progress_recorder")
+        if progress is not None:
+            progress.stage_changed("正在复核结论与证据")
+        reviewed, review_raw, timed_out = await self._run_stream(
+            analysis_command(self.build_repair_command(review_prompt(result, trace, entry), trace.session_id), entry),
+            progress,
+            **({"config_env": entry["_kkagent_config_env"]} if "_kkagent_config_env" in entry else {}),
+        )
+        candidate = trace.final_event
+        merged = _merge_traces(trace, reviewed)
+        merged.final_event = candidate  # The review JSON is never the displayed answer.
+        merged.last_round_visible_output = trace.last_round_visible_output
+        merged.last_round_output_tokens = trace.last_round_output_tokens
+        if reviewed.session_id and reviewed.session_id != trace.session_id:
+            merged.status = merged.error_type = "claim_review_failed"
+            merged.error = "结论复核返回了不同的会话，未发布分析结果。"
+            return self._failure(merged, review_raw), merged, []
+        if timed_out or reviewed.error_type or reviewed.exit_code not in (0, None):
+            if reviewed.exit_code not in (0, None) and not reviewed.error_type:
+                self._classify_nonzero_exit(reviewed, review_raw.text(), review_raw.stderr_tail())
+            merged.status = merged.error_type = reviewed.error_type or "claim_review_failed"
+            merged.error = reviewed.error or "结论复核未完成，未发布分析结果。"
+            return self._failure(merged, review_raw), merged, []
+        event = reviewed.final_event or {}
+        if (event.get("subtype") != "success" or event.get("exit_code", 0) != 0
+                or reviewed.last_round_visible_output is False):
+            review, findings = None, ["claim review did not return a successful visible final answer"]
+        else:
+            review, findings = validate_review(event.get("message"), result, merged, entry)
+        merged.analysis_review_findings = findings
+        if findings:
+            return None, merged, findings
+        review["review_output_tokens"] = reviewed.last_round_output_tokens
+        apply_review(result, review)
+        _gate, findings = gate_and_errors(merged, entry, result, reviewed_claims=review["claims"])
+        if findings:
+            return None, merged, findings
+        if _gate.get("source_limitation_acknowledged"):
+            result["needs_human_review"] = True
+            result["confidence"] = min(result["confidence"], 0.58)
+        merged.status, merged.error_type, merged.error = "completed", "", ""
+        return self._success(result, merged, raw), merged, []
 
     # ------------------------------------------------------------ helpers
 
@@ -844,6 +908,7 @@ def _merge_traces(first: KkAgentTrace, second: KkAgentTrace) -> KkAgentTrace:
         status=second.status or first.status,
         error_type=second.error_type,
         error=second.error,
+        analysis_review_findings=(second.analysis_review_findings or first.analysis_review_findings),
     )
     merged.tool_calls = list(first.tool_calls)
     for index, call in enumerate(first.tool_calls):

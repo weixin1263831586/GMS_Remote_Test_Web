@@ -497,30 +497,9 @@ class ActionExecutor:
         )
 
     async def _query_reports(self, session, request, params) -> ToolResult:
-        from features.auth import require_authenticated_user
-        from features.reports import test_report_db
+        from .report_query import query_reports
 
-        owner_id = require_authenticated_user(request).resource_owner_id  # ADR 0010: 报告按账号分区
-        reports = test_report_db.get_reports(limit=10, owner_id=owner_id)
-        stats = test_report_db.get_statistics(owner_id=owner_id)
-        lines = [
-            f"- {r.get('timestamp', '-')} | {r.get('test_type', '?')} | pass {r.get('pass', 0)} fail {r.get('fail', 0)} total {r.get('total', 0)}"
-            for r in reports
-        ]
-        text = (
-            f"报告共 {stats.get('total_reports', len(reports))} 份，最近7天 {stats.get('recent_week', 0)} 份。\n"
-            + "\n".join(lines) if lines else "暂无报告"
-        )
-        return ToolResult(
-            success=True, tool_name="reports_list",
-            data={"reports": reports, "stats": stats},
-            formatted_text=text, kind="table", page="reports",
-            entities={"reports": [r.get("timestamp", "") for r in reports[:8]]},
-            quick_actions=[
-                {"label": "打开报告管理", "page": "reports"},
-                {"label": "打开报告分析", "page": "report-analysis"},
-            ],
-        )
+        return await query_reports(session, request, params)
 
     async def _query_users(self, session, request, params) -> ToolResult:
         # Agent calls route functions directly, outside FastAPI's dependency

@@ -168,13 +168,15 @@
 #page-apk-analysis.page-ui-rework .analysis-upload-frame:has(.upload-empty) {
     border: 0;
 }
-#page-report-analysis.page-ui-rework .report-upload-zone,
-#page-apk-analysis.page-ui-rework .apk-upload-zone {
+/* Upload zone carries the dashed drop frame only in the empty state;
+   the result-state row is borderless (common.css :not(.upload-empty)). */
+#page-report-analysis.page-ui-rework .report-upload-zone.upload-empty,
+#page-apk-analysis.page-ui-rework .apk-upload-zone.upload-empty {
     border: 1px dashed var(--border-light);
     border-radius: 8px; background: var(--darker-bg);
 }
-#page-report-analysis.page-ui-rework .report-upload-zone:hover,
-#page-apk-analysis.page-ui-rework .apk-upload-zone:hover {
+#page-report-analysis.page-ui-rework .report-upload-zone.upload-empty:hover,
+#page-apk-analysis.page-ui-rework .apk-upload-zone.upload-empty:hover {
     border-color: var(--primary-color);
     background: color-mix(in srgb, var(--primary-color) 5%, var(--darker-bg));
 }

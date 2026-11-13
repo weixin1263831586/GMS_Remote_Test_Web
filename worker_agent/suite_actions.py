@@ -242,6 +242,13 @@ def execute_suite_action(config: WorkerConfig, payload: dict[str, Any],
     if not any(root.exists() and suite_root.is_relative_to(root.resolve())
                for root in config.suite_roots):
         raise ValueError("suite path is outside configured roots")
+    if action == "report_summaries":
+        from .report_summaries import native_report_summaries
+
+        return native_report_summaries(
+            suite_root, test_type=str(payload.get("test_type") or ""),
+            limit=payload.get("limit", 100),
+        )
     if action == "list_results":
         tools_dir = suite_path if suite_path.name == "tools" else suite_root / "tools"
         launchers = sorted(

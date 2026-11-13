@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -45,6 +46,28 @@ MAX_REDIRECTS = 3
 SNAPSHOT_TTL_SECONDS = 300
 # 派生并发限制只控制内存/CPU，不限制成员大小、数量或完整处理时间。
 DERIVE_CONCURRENCY = 4
+
+
+def _env_limit(name: str, default: int, minimum: int = 1) -> int:
+    """资源预算取环境变量覆盖值；非法或非正值回退默认。"""
+    try:
+        value = int(os.environ.get(name, "").strip() or default)
+    except ValueError:
+        return default
+    return max(minimum, value) if value > 0 else default
+
+
+# 资源边界（可配置硬上限）：全文取证能力保留，但磁盘/CPU/解压展开量
+# 必须有可配置硬上限。附件按声明大小预检 + 下载流内双保险；派生文本按
+# 字符预算截停；RAR/7z 外部解包进程受时长限制。触顶一律走 error note +
+# partial/missing 显性化（未扫描的部分绝不当作不存在），而非静默截断。
+MAX_ATTACHMENT_BYTES = _env_limit("GMS_EVIDENCE_MAX_ATTACHMENT_BYTES", 2 * 1024**3)
+DERIVED_TEXT_MAX_CHARS = _env_limit("GMS_EVIDENCE_DERIVED_TEXT_MAX_CHARS", 256_000_000)
+EXTRACT_TIMEOUT_SECONDS = _env_limit("GMS_EVIDENCE_EXTRACT_TIMEOUT_SECONDS", 1800)
+# OCR 单次调用时长预算（0 = 不限时是明确的 CPU 风险，必须兜底）；
+# tesseract 超时抛 RuntimeError，由派生层降级 derived_status=missing。
+OCR_TIMEOUT_SECONDS = _env_limit("GMS_EVIDENCE_OCR_TIMEOUT_SECONDS", 120)
+OCR_MAX_IMAGE_PIXELS = _env_limit("GMS_EVIDENCE_OCR_MAX_IMAGE_PIXELS", 16_000_000)
 
 TEXT_KIND_EXTENSIONS = {
     ".txt", ".log", ".xml", ".json", ".html", ".htm", ".csv", ".md",

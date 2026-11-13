@@ -270,7 +270,7 @@ failing test. The FIRST paragraph is a standalone conclusion line:
 `**结论：**` + 2-3 sentences naming the issue nature in plain words (a
 configuration consultation, a real test failure, a certification/process
 question — never the words 分支/branch), the decisive
-fact or the current answer, and the owner direction. Do NOT force failure
+fact or the current answer. Name the owner only with causal evidence; otherwise state 待定. Do NOT force failure
 wording onto branch B: state and answer the question directly instead of
 padding with "不是失败，而是…". Then structure the report with the matching
 branch below, in order (both branches end with the 关键结论 section; do NOT
@@ -356,6 +356,22 @@ Keep the whole report under ~2500 字: bullets and short paragraphs over wide
 tables (justified tables: the branch-B 当前结论 values and the evidence
 segment overview).
 DIAGNOSTIC REASONING REQUIREMENTS:
+- A completed tool workflow is not proof that the final diagnosis is true.
+  The Controller performs a separate paragraph-level evidence review before
+  publication. It may request corrections without changing your answer format.
+- Bind source claims to the exact module, artifact type (native ELF/APK/JAR),
+  reported suite version, source commit and build variant. Generic protobuf
+  declarations and other modules cannot prove a failing native executable's
+  behavior. Re-read the actual conditional and both branches before describing
+  an assertion. Source search/name hits are navigation, not causal proof.
+- Distinguish unsymbolized frames from missing frames. Keep available PCs and
+  identify the matching ELF/build needed for symbolization. A single RSS
+  snapshot and chronological proximity cannot locate the allocation function
+  or prove when memory growth started. CPU profiling alone is not heap profiling.
+- Similar failures sharing a SoC/platform cannot alone establish an upstream
+  test defect. A successful flush or no fatal service message cannot exclude
+  platform, kernel, producer-data or allocator causes. Keep unproven ownership
+  and exclusions tentative; returning a clearly scoped unknown is valid.
 - Separate the observed failure from its cause and owner. `Process crashed`
   proves an instrumentation run failed, not whether the test APK, runner,
   target app, platform API linkage, or process termination caused it. Without

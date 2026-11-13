@@ -357,6 +357,12 @@
                 panels.appendChild(panel);
             }
             skeleton.append(bar, cards, panels);
+            // 与数据区舞台同构的文字行：文案行会把星轨中心上推约一行高，
+            // 骨架屏保留同样内容行才能让揭示交接时圆心零位移。
+            const orbitText = document.createElement('span');
+            orbitText.className = 'loading-orbit-text';
+            orbitText.textContent = status.dataset.loadingText;
+            skeleton.append(orbitText);
 
             const chip = document.createElement('span');
             chip.className = 'embedded-frame-loading-chip';

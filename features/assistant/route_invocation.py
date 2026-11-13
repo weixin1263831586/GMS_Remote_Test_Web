@@ -18,6 +18,7 @@ from fastapi import HTTPException
 from features.assistant.execution_result import ToolResult, http_error_result, internal_error_result
 from features.assistant.route_binding import build_call_kwargs
 from features.assistant.tools import AgentTool
+from foundation.error_model import ApiError
 
 from .executor_formatting import format_payload as _format_payload
 from .executor_formatting import json_body as _json_body
@@ -115,6 +116,14 @@ async def call_router_function(
 
         # 解析 JSONResponse
         payload = _json_body(response) if hasattr(response, "body") else {"success": True, "data": response}
+        if payload.get("success") is False:
+            rejected = http_error_result(tool.name, HTTPException(
+                status_code=getattr(response, "status_code", 400),
+                detail=payload.get("error") or payload.get("message") or payload.get("detail"),
+            ))
+            rejected.data = {**payload, **(rejected.data or {})}
+            rejected.page = _TOOL_PAGES.get(tool.category, "")
+            return rejected
         formatted = _format_payload(tool, payload)
         return ToolResult(
             success=payload.get("success", True),
@@ -123,6 +132,13 @@ async def call_router_function(
             formatted_text=formatted,
             page=_TOOL_PAGES.get(tool.category, ""),
             error=payload.get("error", ""),
+        )
+    except ApiError as exc:
+        return ToolResult(
+            success=False, tool_name=tool.name,
+            data={"status_code": exc.status_code, "code": exc.code,
+                  "next_actions": list(exc.next_actions)},
+            formatted_text=exc.message, error=exc.message,
         )
     except HTTPException as exc:
         # 受控异常：detail 是路由守卫/端点自己的业务语义（401/403 等），

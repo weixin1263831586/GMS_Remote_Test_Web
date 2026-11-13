@@ -6,6 +6,54 @@ from tests.runtime_ui.harness import RuntimeUiHarness, expect
 
 
 class RuntimeAgentQuestionTests(RuntimeUiHarness):
+    def test_native_report_action_opens_the_exact_worker_suite_and_directory_on_repeated_navigation(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            page.evaluate("""() => {
+                window.nativeBrowseVisits = [];
+                window.loadSuiteWorkerSelector = async () => {
+                    const select = document.getElementById('suite-worker-select');
+                    select.innerHTML = '<option value="worker-a">A</option><option value="worker-b">B</option>';
+                    select.value = 'worker-b';
+                    select.disabled = false;
+                };
+                window.loadSuitesForBrowserWorker = async () => {
+                    const worker = document.getElementById('suite-worker-select').value;
+                    _browserSuitesWorkerId = worker;
+                    _browserSuitesCache = [{worker_id: worker, test_type: 'gts', version: '14_r4',
+                        tools_path: worker === 'worker-a' ? '/suites/GTS & #1/tools' : '/remote/GTS/tools'}];
+                    return _browserSuitesCache;
+                };
+                window.loadSuiteBrowserDirectory = async path => {
+                    nativeBrowseVisits.push({worker: document.getElementById('suite-worker-select').value,
+                        suite: state.suiteBrowser.selectedSuitePath, path});
+                };
+            }""")
+            targets = [
+                {"worker_id": "worker-a", "suite_path": "/suites/GTS & #1/tools", "path": "results/GTSRUN~1"},
+                {"worker_id": "worker-b", "suite_path": "/remote/GTS/tools", "path": "results/2026.11.13_14.22.45.723_8397"},
+            ]
+            for count, target in enumerate(targets, 1):
+                page.evaluate("switchPage('agent', null)")
+                page.evaluate("""params => renderAgentMessages({status: 'idle', messages: [{
+                    role: 'assistant', content: '已找到原生结果', data: {quick_actions: [{
+                        label: '查看原生报告目录', page: 'test-suites', params
+                    }]}
+                }]})""", target)
+                button = page.get_by_role("button", name="查看原生报告目录", exact=True)
+                expect(button).to_be_visible()
+                expect(page.locator('#agent-chat-messages button[data-a0="reports"]')).to_have_count(0)
+                button.click()
+                page.wait_for_function(f"nativeBrowseVisits.length === {count}")
+                expect(page.locator('#page-test-suites')).to_be_visible()
+                visit = page.evaluate("nativeBrowseVisits[nativeBrowseVisits.length - 1]")
+                self.assertEqual(visit, {"worker": target["worker_id"], "suite": target["suite_path"], "path": target["path"]})
+                self.assertEqual(page.evaluate("getSuiteBrowserRouteParams().workerId"), target["worker_id"])
+        finally:
+            page.close()
+
     def test_background_planning_polls_until_resource_choices_are_ready(self):
         page = self.new_page()
         planning = {'session_id': 'model-background', 'status': 'thinking', 'messages': [], 'steps': [],

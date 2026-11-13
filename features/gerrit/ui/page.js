@@ -374,7 +374,7 @@ async function loadPersonal(refresh) {
       refreshConnBanner({});
       return;
     }
-    if (!hadRenderedDashboard) content.innerHTML = personalPlaceholderHtml('⏳ 正在统计个人 Gerrit 提交...');
+    if (!hadRenderedDashboard) setLoadingOrbit(content, '正在统计个人 Gerrit 提交...', true);
     const data = await api('/api/gerrit-dashboard/statistics/personal?profile_id=' + encodeURIComponent(profileId) + '&owner=' + encodeURIComponent(owner) + '&refresh=' + (refresh ? 'true' : 'false'));
     if (requestGeneration !== gerritDashboardRequestGeneration.personal) return;
     // owner 跳转后按返回的 profile 回填下拉选项。
@@ -417,7 +417,7 @@ async function loadDepartment(refresh) {
   currentDepartmentProfileId = profileId;
   saveGerritProfileState();
   document.getElementById('departmentStatus').textContent = '';
-  if (!hadRenderedDashboard) content.innerHTML = placeholderHtml('⏳ 正在统计部门 Gerrit 提交...');
+  if (!hadRenderedDashboard) setLoadingOrbit(content, '正在统计部门 Gerrit 提交...', true);
   try {
     const data = await api('/api/gerrit-dashboard/statistics/department?profile_id=' + encodeURIComponent(profileId) + '&refresh=' + (refresh ? 'true' : 'false'));
     if (requestGeneration !== gerritDashboardRequestGeneration.department) return;

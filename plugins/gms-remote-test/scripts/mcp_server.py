@@ -117,7 +117,7 @@ mcp_debug_tools = _load_typed_tools("mcp_debug_tools")
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.80"
+SERVER_VERSION = "0.22.83"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -2193,6 +2193,8 @@ _TOOLSETS = {
             "gms_rt_redmine_history_search",
             "gms_rt_redmine_journals",
             "gms_rt_redmine_attachments",
+            "gms_rt_redmine_attachment_download",
+            "gms_rt_redmine_artifact_failures",
             "gms_rt_redmine_artifact_search",
             "gms_rt_redmine_artifact_search_batch",
             "gms_rt_redmine_artifact_read",
@@ -2568,15 +2570,54 @@ def redmine_attachments_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     return run_cli("gms-rt-redmine-attachments", [snapshot_id])
 
 
-def _evidence_offset(arguments: dict[str, Any], name: str) -> int:
+def redmine_artifact_failures_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """Parse a test-report artifact into a structured failure-case table.
+
+    Server-side one-pass extraction (test_result.xml, summary HTML, zip
+    archives): module / test / result / failure_message / first stack line /
+    source per row — replaces the multi-round-trip manual scraping of STS
+    summary HTML.
+    """
+    artifact_id = str(arguments.get("artifact_id") or "").strip()
+    if not artifact_id:
+        return "artifact_id is required", True
+    return run_cli("gms-rt-redmine-artifact-failures", [artifact_id])
+
+
+def redmine_attachment_download_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """Download one artifact original to a local file (agent host).
+
+    Streams the original bytes (35MB test_result.xml, 800k-char logs) so the
+    agent can grep/rg/jq the full text instead of paging char windows. The
+    default output lands in the controlled state dir
+    (~/.local/state/gms-remote-test/artifacts/, same level as profile
+    tokens, 0600); pass output_path to choose another location.
+    """
+    artifact_id = str(arguments.get("artifact_id") or "").strip()
+    if not artifact_id:
+        return "artifact_id is required", True
+    args: list[str] = [artifact_id]
+    output_path = str(arguments.get("output_path") or "").strip()
+    if output_path:
+        args.append(output_path)
+    return run_cli("gms-rt-redmine-attachment-download", args)
+
+
+def _evidence_offset(arguments: dict[str, Any], name: str, *, allow_negative: bool = False) -> int:
+    """Parse an integer offset argument.
+
+    ``allow_negative=True`` accepts tail-relative offsets (-1 = last char)
+    for artifact_read; the Controller resolves them to an absolute window
+    and reports both ``offset`` and ``requested_offset`` back.
+    """
     raw = arguments[name]
     if isinstance(raw, (bool, float)):
-        raise ValueError(f"{name} must be a nonnegative integer")
+        raise ValueError(f"{name} must be an integer")
     try:
         offset = int(raw)
     except (TypeError, ValueError):
-        raise ValueError(f"{name} must be a nonnegative integer") from None
-    if offset < 0:
+        raise ValueError(f"{name} must be an integer") from None
+    if offset < 0 and not allow_negative:
         raise ValueError(f"{name} must be a nonnegative integer")
     return offset
 
@@ -2594,6 +2635,14 @@ def redmine_artifact_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             args.extend(["--offset", str(_evidence_offset(arguments, "offset"))])
         except (TypeError, ValueError) as exc:
             return str(exc), True
+    for flag, key in (("--artifact", "artifact"), ("--member", "member")):
+        value = str(arguments.get(key) or "").strip()
+        if value:
+            args.extend([flag, value])
+    if arguments.get("context") is not None:
+        args.extend(["--context", str(_int_arg(arguments, "context", 200, 0, 1000))])
+    if arguments.get("collapse"):
+        args.append("--collapse")
     return run_cli("gms-rt-artifact-search", args)
 
 
@@ -2628,6 +2677,14 @@ def redmine_artifact_search_batch_tool(arguments: dict[str, Any]) -> tuple[str, 
             args.extend(["--per-query-offset", str(_evidence_offset(arguments, "per_query_offset"))])
         except (TypeError, ValueError) as exc:
             return str(exc), True
+    for flag, key in (("--artifact", "artifact"), ("--member", "member")):
+        value = str(arguments.get(key) or "").strip()
+        if value:
+            args.extend([flag, value])
+    if arguments.get("context") is not None:
+        args.extend(["--context", str(_int_arg(arguments, "context", 200, 0, 1000))])
+    if arguments.get("collapse"):
+        args.append("--collapse")
     return run_cli("gms-rt-artifact-search-batch", args)
 
 
@@ -2638,7 +2695,9 @@ def redmine_artifact_read_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     args: list[str] = [artifact_id]
     if arguments.get("offset") is not None:
         try:
-            offset = _evidence_offset(arguments, "offset")
+            # 负 offset 合法：从尾部计数（-1 = 最后一个字符起），由
+            # Controller 解析为绝对窗口并回传 requested_offset/offset。
+            offset = _evidence_offset(arguments, "offset", allow_negative=True)
         except (TypeError, ValueError) as exc:
             return str(exc), True
         args.extend(["--offset", str(offset)])
@@ -2828,9 +2887,13 @@ def sdk_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     if has_query and has_keywords:
         return "provide exactly one of query/keywords, not both", True
     query = str(arguments.get("query") or arguments.get("keywords") or "").strip()
-    if not source or not revision or not query:
-        return "source, revision, and query (or its alias keywords) are required", True
-    args = ["--source", source, "--revision", revision, "--query", query]
+    if not source or not query:
+        return "source and query (or its alias keywords) are required", True
+    args = ["--source", source, "--query", query]
+    if revision:
+        args.extend(["--revision", revision])
+    # revision 缺省：CLI 会用该 source 的 default_revision 解析，
+    # 未知 source 时报错并列出可用 source。
     # limit 与 Controller 契约对齐（/api/sdk/search 的 limit le=200，
     # SEARCH_MAX_LIMIT）：越界显式报错而不是静默截断调用方的请求。
     raw_limit = arguments.get("limit")
@@ -2921,6 +2984,8 @@ _TOOL_HANDLERS = {
     "gms_rt_redmine_history_search": redmine_history_search_tool,
     "gms_rt_redmine_journals": redmine_journals_tool,
     "gms_rt_redmine_attachments": redmine_attachments_tool,
+    "gms_rt_redmine_attachment_download": redmine_attachment_download_tool,
+    "gms_rt_redmine_artifact_failures": redmine_artifact_failures_tool,
     "gms_rt_redmine_artifact_search": redmine_artifact_search_tool,
     "gms_rt_redmine_artifact_search_batch": redmine_artifact_search_batch_tool,
     "gms_rt_redmine_artifact_read": redmine_artifact_read_tool,

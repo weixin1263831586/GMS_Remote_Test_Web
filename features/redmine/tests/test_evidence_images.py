@@ -182,6 +182,8 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         )
 
     def test_large_image_is_tiled_instead_of_rejected(self):
+        from features.redmine.evidence_images import OCR_TIMEOUT_SECONDS
+
         with patch("features.redmine.evidence_images.OCR_MAX_IMAGE_PIXELS", 100), patch(
             "pytesseract.image_to_string", return_value="tile text",
         ) as ocr:
@@ -190,7 +192,9 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         for call in ocr.call_args_list:
             image = call.args[0]
             self.assertLessEqual(image.width * image.height, 100)
-            self.assertEqual(call.kwargs["timeout"], 0)
+            # 超时预算随 evidence.py 统一资源边界约束：
+            # 默认 120s 环境可覆盖，断言跟随常量而非硬编码 0。
+            self.assertEqual(call.kwargs["timeout"], OCR_TIMEOUT_SECONDS)
         artifact = store.get_artifact_by_attachment_id("776701", snapshot_id=result["snapshot_id"])
         self.assertEqual(artifact["derived_status"], "ready")
         self.assertFalse(artifact["error"])

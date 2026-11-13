@@ -15,7 +15,12 @@ from foundation.redaction import redact_sensitive_data
 
 from .execution_result import ToolResult
 from .route_invocation import guarded_tool_call
-from .session_log import _append_message, _append_step, _persist_transcript
+from .session_log import (
+    _append_message,
+    _append_step,
+    _persist_transcript,
+    complete_recovery_step,
+)
 from .session_registry import (
     AgentRequestShim,
     _agent_monitor_tasks,
@@ -203,6 +208,9 @@ async def monitor_redmine_run(session_id, request, monitor_token=None):
     try:
         while monitor_run_is_current(session, monitor_token):
             if time.monotonic() >= deadline:
+                complete_recovery_step(
+                    session, active, status="warning", detail="会话重启恢复后等待超时。",
+                )
                 _update_step(session, active, "warning", "本会话等待超时，后台分析未被取消。")
                 finish_run_state(session, "idle")
                 _append_message(session, "assistant", f"Redmine #{issue_id} 仍可在单号分析页面查看。任务：{run_id}。")
@@ -213,12 +221,19 @@ async def monitor_redmine_run(session_id, request, monitor_token=None):
             if not outcome.success:
                 errors += 1
                 if errors >= 3 or 400 <= (outcome.data or {}).get("status_code", 500) < 500:
+                    complete_recovery_step(
+                        session, active, status="warning",
+                        detail=f"恢复后跟踪失败：{outcome.error}"[:200],
+                    )
                     _update_step(session, active, "warning", outcome.error)
                     finish_run_state(session, "idle")
                     _append_message(session, "assistant", f"无法继续跟踪 Redmine #{issue_id}：{outcome.error}\n任务：{run_id}。后台任务未被重复提交或取消。")
                     return
             else:
                 errors = 0
+                # 首次成功轮询：后台任务真实状态已确认，收敛重启恢复步骤
+                # （done=仍在跟踪中，后续终态由分析步骤自身呈现）。
+                complete_recovery_step(session, active)
                 payload = outcome.data
                 status = payload["run"].get("status")
                 if status in TERMINAL:
@@ -237,6 +252,9 @@ async def monitor_redmine_run(session_id, request, monitor_token=None):
     except Exception:
         logger.exception("Redmine analysis monitor failed")
         if monitor_run_is_current(session, monitor_token):
+            complete_recovery_step(
+                session, active, status="warning", detail="会话恢复后监控异常。",
+            )
             _update_step(session, active, "warning", "分析状态跟踪异常，请到 Redmine 单号分析查看。")
             finish_run_state(session, "idle")
             _append_message(session, "assistant", f"分析状态跟踪异常，任务 {run_id} 未被取消，请到 Redmine 单号分析查看。")

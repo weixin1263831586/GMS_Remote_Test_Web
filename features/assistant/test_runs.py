@@ -18,7 +18,11 @@ from features.assistant.failure_analysis import (
 )
 from features.assistant.payloads import jsonable as _jsonable
 from features.assistant.plan_submission import execute_plan_start, superseded_plan_result
-from features.assistant.session_log import _append_message, _append_step
+from features.assistant.session_log import (
+    _append_message,
+    _append_step,
+    complete_recovery_step,
+)
 from features.assistant.session_registry import (
     AgentRequestShim,
     _agent_monitor_tasks,
@@ -192,6 +196,9 @@ async def _monitor_agent_run(
 
                 repository = get_cluster_service().repository
                 job = repository.get_job(cluster_job_id)
+                if job:
+                    # 后台任务真实存在：收敛重启恢复步骤（幂等）。
+                    complete_recovery_step(session, session.get("active_run") or {})
                 while job and job.get("status") in _ACTIVE_CLUSTER_JOB_STATUSES:
                     await asyncio.sleep(3)
                     job = repository.get_job(cluster_job_id)
@@ -200,6 +207,10 @@ async def _monitor_agent_run(
                     return
                 if not job:
                     if _monitor_run_is_current(session, monitor_token):
+                        complete_recovery_step(
+                            session, session.get("active_run") or {},
+                            status="warning", detail="恢复后读取集群任务失败。",
+                        )
                         _finish_run_state(session, "error")
                         _append_step(session, "读取集群任务", "error", f"任务不存在: {cluster_job_id}")
                     return

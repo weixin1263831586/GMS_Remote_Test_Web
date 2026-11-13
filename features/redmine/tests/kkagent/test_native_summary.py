@@ -7,6 +7,7 @@ from features.redmine.kkagent.analyzer import KkAgentRedmineAnalyzer, _StreamFal
 from features.redmine.kkagent.mcp_health import McpHealthProbe
 from features.redmine.kkagent.native_summary import native_evidence_repair_prompt, native_summary_result
 from features.redmine.kkagent.trace import KkAgentTrace, ToolTrace
+from features.redmine.tests.kkagent.review_support import review_trace
 
 
 ENTRY = {"issue_id": 123, "subject": "CTS fail", "analysis_mode": "diagnostic"}
@@ -86,7 +87,8 @@ def test_native_claims_are_bound_to_controller_evidence_ids():
     }]
     assert result["claim_binding_errors"] == []
     assert result["execution_status"] == "completed"
-    assert result["evidence_quality"] == "verified"
+    assert result["evidence_quality"] == "partial"
+    assert result["analysis_review"]["status"] == "pending"
 
 
 def test_observed_snapshot_and_artifact_references_resolve_to_existing_evidence():
@@ -149,6 +151,7 @@ def test_repair_accepts_controller_ids_only_after_providing_their_real_mapping()
     stream = AsyncMock(side_effect=[
         (trace, _StreamFallback(), False),
         (final_trace(report=trace.final_event['message']), _StreamFallback(), False),
+        (review_trace(trace.final_event['message']), _StreamFallback(), False),
     ])
     with patch.object(analyzer, '_run_stream', stream), patch(
         'features.redmine.kkagent.analyzer.probe_kkagent_mcp_health',
@@ -156,7 +159,7 @@ def test_repair_accepts_controller_ids_only_after_providing_their_real_mapping()
     ):
         outcome = asyncio.run(analyzer.analyze(ENTRY))
     assert outcome.ok
-    assert stream.await_count == 2
+    assert stream.await_count == 3
     assert '"evidence_id": "EV-005"' in stream.await_args_list[1].args[0][-1]
     assert 'file:PackageSignatureTest.java' in stream.await_args_list[1].args[0][-1]
 
@@ -208,7 +211,8 @@ def test_diagnostic_prompt_requires_causal_evidence_and_the_reported_suite_versi
 
 def test_native_summary_passes_without_repair_when_evidence_gate_is_complete():
     analyzer = KkAgentRedmineAnalyzer()
-    stream = AsyncMock(return_value=(complete_trace(), _StreamFallback(), False))
+    stream = AsyncMock(side_effect=[(complete_trace(), _StreamFallback(), False),
+                                   (review_trace(REPORT), _StreamFallback(), False)])
     with patch.object(analyzer, "_run_stream", stream), patch(
         "features.redmine.kkagent.analyzer.probe_kkagent_mcp_health",
         AsyncMock(return_value=McpHealthProbe(ok=True, skipped=True)),
@@ -216,9 +220,9 @@ def test_native_summary_passes_without_repair_when_evidence_gate_is_complete():
         outcome = asyncio.run(analyzer.analyze(ENTRY))
     assert outcome.ok
     assert outcome.result["detailed_report"] == REPORT
-    assert not outcome.result["needs_human_review"]
-    assert outcome.result["confidence"] == 0.85
-    assert stream.await_count == 1
+    assert outcome.result["needs_human_review"]
+    assert outcome.result["confidence"] == 0.58
+    assert stream.await_count == 2
 
 
 def test_native_summary_repairs_missing_evidence_in_same_session():
@@ -227,6 +231,7 @@ def test_native_summary_repairs_missing_evidence_in_same_session():
     stream = AsyncMock(side_effect=[
         (final_trace(), _StreamFallback(), False),
         (complete_trace(report=repaired_report), _StreamFallback(), False),
+        (review_trace(repaired_report), _StreamFallback(), False),
     ])
     with patch.object(analyzer, "_run_stream", stream), patch(
         "features.redmine.kkagent.analyzer.probe_kkagent_mcp_health",
@@ -235,9 +240,9 @@ def test_native_summary_repairs_missing_evidence_in_same_session():
         outcome = asyncio.run(analyzer.analyze(ENTRY))
     assert outcome.ok
     assert outcome.result["detailed_report"] == repaired_report
-    assert not outcome.result["needs_human_review"]
-    assert outcome.result["confidence"] == 0.85
-    assert stream.await_count == 2
+    assert outcome.result["needs_human_review"]
+    assert outcome.result["confidence"] == 0.58
+    assert stream.await_count == 3
     repair_command = stream.await_args_list[1].args[0]
     assert "--resume" in repair_command
     assert "native gms_rt_* MCP tools directly" in repair_command[-1]

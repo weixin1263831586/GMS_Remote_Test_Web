@@ -14,13 +14,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .evidence import OCR_MAX_IMAGE_PIXELS, OCR_TIMEOUT_SECONDS
 from .evidence_store import EvidenceStore
 
 
 logger = logging.getLogger(__name__)
-
-OCR_TIMEOUT_SECONDS = 0
-OCR_MAX_IMAGE_PIXELS = 16_000_000
 
 
 def ocr_image_text(image, pytesseract) -> str:

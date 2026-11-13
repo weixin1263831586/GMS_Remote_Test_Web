@@ -57,6 +57,50 @@ def _append_step(session: dict[str, Any], title: str, status: str = "done", deta
     _persist_transcript(session)
 
 
+RECOVERY_STEP_TITLE = "会话已恢复"
+
+
+def _find_step(session: dict[str, Any], step_id: Any) -> dict[str, Any] | None:
+    if not step_id:
+        return None
+    return next(
+        (item for item in session.get("steps", []) if item.get("id") == step_id),
+        None,
+    )
+
+
+def append_recovery_step(
+    session: dict[str, Any], active: dict[str, Any],
+    detail: str = "正在重新关联后台任务…",
+) -> None:
+    """登记 Controller 重启恢复步骤，状态保持 running。
+
+    恢复步骤不能立刻标 done：此时监控协程尚未向后台确认任务的真实
+    状态，绿勾会看起来像"分析完成"（假完成）。由接手的监控器在首次
+    成功轮询后调用 complete_recovery_step 收敛。
+    幂等：active_run.recovery_step_id 指向的步骤仍在 running 时不重复
+    追加（监控任务退出后再次恢复会重入这里，避免出现重复恢复步骤）。
+    """
+    existing = _find_step(session, active.get("recovery_step_id"))
+    if existing is not None and existing.get("status") == "running":
+        return
+    _append_step(session, RECOVERY_STEP_TITLE, "running", detail)
+    active["recovery_step_id"] = session["steps"][-1]["id"]
+
+
+def complete_recovery_step(
+    session: dict[str, Any], active: dict[str, Any], *,
+    status: str = "done", detail: str = "已重新关联后台任务监控。",
+) -> None:
+    """监控器确认后台任务状态后收敛恢复步骤；无待收敛步骤时是 no-op。"""
+    step = _find_step(session, active.get("recovery_step_id"))
+    if step is not None and step.get("status") == "running":
+        step.update(status=status, detail=redact_sensitive_data(detail))
+        session["updated_at"] = _now_iso()
+        _persist_transcript(session)
+    active.pop("recovery_step_id", None)
+
+
 def _derive_session_title(session: dict[str, Any], content: str) -> None:
     """首次用户输入派生会话标题（会话目录展示用），只取首个非空行。"""
     if session.get("title"):

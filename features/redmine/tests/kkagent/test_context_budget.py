@@ -16,8 +16,10 @@ from features.kkagent import classify_failure, context_length_limit, context_lim
 from features.kkagent import config as kkagent_config
 from features.redmine.kkagent.analyzer import KkAgentRedmineAnalyzer, _StreamFallback
 from features.redmine.kkagent.mcp_health import McpHealthProbe
+from features.redmine.tests.kkagent.review_support import review_trace
 from features.redmine.tests.kkagent.test_native_summary import (
     ENTRY,
+    REPORT,
     complete_trace,
     final_trace,
 )
@@ -110,6 +112,8 @@ def test_context_recovery_resumes_once_and_preserves_prior_evidence(tmp_path, se
 
     async def stream(command, *_args, **_kwargs):
         commands.append(command)
+        if command[-1].startswith("Review the preceding analysis"):
+            return review_trace(REPORT, session="exact-session"), _StreamFallback(), False
         if len(commands) == 1 or second_failure:
             trace = complete_trace(session="exact-session")
             trace.exit_code = 1
@@ -131,7 +135,7 @@ def test_context_recovery_resumes_once_and_preserves_prior_evidence(tmp_path, se
         AsyncMock(return_value=McpHealthProbe(ok=True, skipped=True)),
     ):
         outcome = asyncio.run(analyzer.analyze(ENTRY))
-    assert len(commands) == 2
+    assert len(commands) == (2 if second_failure else 3)
     assert '--resume' not in commands[0]
     assert commands[1][commands[1].index('--resume') + 1] == 'exact-session'
     assert len(commands[1][-1]) < 1000
@@ -170,7 +174,7 @@ def test_context_recovery_retains_new_evidence_across_transient_retries(tmp_path
     stream = AsyncMock(side_effect=[
         (first, overflow, False), (interrupted, interrupted_raw, False),
         (final, _StreamFallback(), False),
-        *[(final_trace(), _StreamFallback(), False) for _ in range(2)],
+        (review_trace(REPORT), _StreamFallback(), False),
     ])
     with patch.object(analyzer, "_run_stream", stream), patch(
         "features.redmine.kkagent.analyzer.probe_kkagent_mcp_health",
@@ -178,7 +182,7 @@ def test_context_recovery_retains_new_evidence_across_transient_retries(tmp_path
     ):
         outcome = asyncio.run(analyzer.analyze(ENTRY))
     assert outcome.ok, outcome.error
-    assert stream.await_count == 3
+    assert stream.await_count == 4
     assert outcome.trace["input_tokens"] == 125
     assert len(outcome.trace["tools"]) == 5
     assert outcome.result["evidence_gate"]["source_evidence_checked"]
@@ -201,6 +205,8 @@ def test_learned_ceiling_is_reused_for_later_issues(tmp_path):
         path = Path(command[command.index('--config') + 1])
         assert path.exists()
         seen.append(path)
+        if command[-1].startswith("Review the preceding analysis"):
+            return review_trace(REPORT), _StreamFallback(), False
         return complete_trace(), _StreamFallback(), False
 
     with patch.object(analyzer, '_run_stream', side_effect=stream), patch(

@@ -29,6 +29,7 @@ from .evidence import (
     ATTACHMENT_READ_TIMEOUT_SECONDS,
     DERIVE_CONCURRENCY,
     DOWNLOAD_POLICIES,
+    MAX_ATTACHMENT_BYTES,
     MAX_REDIRECTS,
     SNAPSHOT_ISSUE_TIMEOUT_SECONDS,
     EvidenceAuthError,
@@ -354,6 +355,13 @@ class EvidenceFetcher:
         # stored_path 是 evidence 根下的相对路径：issue/<snapshot>/attachments/<artifact>/<name>
         target_rel = f"{snapshot_rel}/attachments/{artifact_id}/{safe_name}"
         absolute = self.store.resolve_internal(target_rel)
+        declared = int(attachment.get("filesize") or 0)
+        # 磁盘预算：声明大小即超限时直接拒绝，避免
+        # 先落盘后发现的磁盘浪费；声明缺失/虚报由下载流内第二道防线兜底。
+        if declared > MAX_ATTACHMENT_BYTES:
+            raise EvidenceError(
+                f"附件声明 {declared} 字节，超出 {MAX_ATTACHMENT_BYTES} 字节预算，未下载"
+            )
         while True:
             parsed = urlparse(url)
             if parsed.scheme not in {"http", "https"}:
@@ -658,6 +666,12 @@ class EvidenceFetcher:
             nonlocal size, header
             async for chunk in response.content.iter_chunked(256 * 1024):
                 size += len(chunk)
+                if size > MAX_ATTACHMENT_BYTES:
+                    # 下载流内第二道磁盘预算：虚报/缺失声明大小的响应在
+                    # 落盘途中触顶即中止，.part 由调用方统一清理。
+                    raise EvidenceError(
+                        f"附件下载达到 {MAX_ATTACHMENT_BYTES} 字节预算，已中止"
+                    )
                 if len(header) < 8:
                     header = (header + chunk)[:8]
                 digest.update(chunk)

@@ -90,13 +90,14 @@ _gms_rt_command_usage() {
         gms-rt-redmine-journals) printf '%s' 'gms-rt-redmine-journals <snapshot_id> [--limit N] [--cursor C]' ;;
         gms-rt-redmine-attachments) printf '%s' 'gms-rt-redmine-attachments <snapshot_id>' ;;
         gms-rt-redmine-attachment-download) printf '%s' 'gms-rt-redmine-attachment-download <artifact_id> [output_path]' ;;
+        gms-rt-redmine-artifact-failures) printf '%s' 'gms-rt-redmine-artifact-failures <artifact_id>' ;;
         gms-rt-redmine-credentials-status) printf '%s' 'gms-rt-redmine-credentials-status' ;;
         gms-rt-redmine-triage) printf '%s' 'gms-rt-redmine-triage [--stale-days N] [--list-limit N] [--refresh]' ;;
         gms-rt-redmine-history-search) printf '%s' 'gms-rt-redmine-history-search <query> [--limit N] [--exclude-issue-id N] [--resolved-only]' ;;
-        gms-rt-artifact-read) printf '%s' 'gms-rt-artifact-read <artifact_id> [--offset N] [--limit N]' ;;
+        gms-rt-artifact-read) printf '%s' 'gms-rt-artifact-read <artifact_id> [--offset N|-N] [--limit N]' ;;
         gms-rt-redmine-artifact-image) printf '%s' 'gms-rt-redmine-artifact-image <artifact_id>' ;;
-        gms-rt-artifact-search) printf '%s' 'gms-rt-artifact-search <snapshot_id> <query> [--limit N] [--offset N]' ;;
-        gms-rt-artifact-search-batch) printf '%s' 'gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N] [--per-query-offset N]' ;;
+        gms-rt-artifact-search) printf '%s' 'gms-rt-artifact-search <snapshot_id> <query> [--limit N] [--offset N] [--artifact ID|NAME] [--member NAME] [--context N] [--collapse]' ;;
+        gms-rt-artifact-search-batch) printf '%s' 'gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N] [--per-query-offset N] [--artifact ID|NAME] [--member NAME] [--context N] [--collapse]' ;;
         gms-rt-apk-analyze-attachment) printf '%s' 'gms-rt-apk-analyze-attachment <snapshot_id> <artifact_id>' ;;
         gms-rt-apk-source-read) printf '%s' 'gms-rt-apk-source-read <task_id> <path> [--offset N] [--limit N]' ;;
         gms-rt-knowledge-search) printf '%s' 'gms-rt-knowledge-search QUERY [--limit N] [--android-api-level N]' ;;
@@ -218,13 +219,14 @@ _gms_rt_command_summary() {
         gms-rt-redmine-journals) printf '%s' 'Read full (untruncated) issue journals with cursor pagination' ;;
         gms-rt-redmine-attachments) printf '%s' 'List evidence artifacts with kind, size, sha256, and per-attachment status' ;;
         gms-rt-redmine-attachment-download) printf '%s' 'Stream one evidence artifact original to a client path (reports saved path/bytes/sha256)' ;;
+        gms-rt-redmine-artifact-failures) printf '%s' 'Parse test_result.xml / summary HTML / zip archive into a structured failure-case table (module/test/result/message/first stack line/source)' ;;
         gms-rt-redmine-credentials-status) printf '%s' 'Pre-flight check that the owner account has Redmine credentials configured (no secret material returned)' ;;
         gms-rt-redmine-triage) printf '%s' "List today's pending Redmine issues (waiting_my_reply + no_reply_3_days, deduped; read-only)" ;;
         gms-rt-redmine-history-search) printf '%s' "Search all historical Redmine issues (local archive + site search) for similar problems and reusable fixes (read-only)" ;;
-        gms-rt-artifact-read) printf '%s' 'Read a text/log artifact derived text by char window (--offset/--limit)' ;;
+        gms-rt-artifact-read) printf '%s' 'Read a text/log artifact derived text by char window (--offset N, negative = count from tail; --limit)' ;;
         gms-rt-redmine-artifact-image) printf '%s' 'Return an image artifact as JSON with base64 payload and metadata (for MCP image tooling)' ;;
-        gms-rt-artifact-search) printf '%s' 'Search description, journals, and artifact text for a fixed query with evidence refs' ;;
-        gms-rt-artifact-search-batch) printf '%s' 'Multi-keyword one-pass search across description/journals/artifact text; per-query totals and truncation with coverage report' ;;
+        gms-rt-artifact-search) printf '%s' 'Search description, journals, and artifact text for a fixed query with evidence refs; filter by --artifact/--member, widen snippets with --context, fold repeats with --collapse' ;;
+        gms-rt-artifact-search-batch) printf '%s' 'Multi-keyword one-pass search across description/journals/artifact text; per-query totals and truncation with coverage report; same --artifact/--member/--context/--collapse filters' ;;
         gms-rt-apk-analyze-attachment) printf '%s' 'Import a Redmine .apk artifact into the JADX analysis pipeline (owner-scoped)' ;;
         gms-rt-apk-source-read) printf '%s' 'Read a window of one decompiled source file by task-relative path' ;;
         gms-rt-knowledge-search) printf '%s' 'Search background Android system-mechanism knowledge from the external wiki (read-only, ADR 0014)' ;;
@@ -319,7 +321,7 @@ gms-rt-system-commands() {
             then {external_side_effects: false, resource_intensive: false, required_scope: "devices.read"}
             elif test("apk-analyze-attachment")
             then {external_side_effects: false, resource_intensive: true, required_scope: "apk.analyze_own"}
-            elif test("artifact-(read|search)|redmine-attachment-download|redmine-attachments")
+            elif test("artifact-(read|search|failures)|redmine-attachment-download|redmine-attachments")
             then {external_side_effects: false, resource_intensive: false, required_scope: "artifacts.read_own"}
             elif test("redmine-|artifact-")
             then {external_side_effects: false, resource_intensive: false, required_scope: "redmine.read"}
@@ -593,6 +595,7 @@ ${YELLOW}Redmine Evidence (read-only analysis chain):${NC}
   gms-rt-redmine-journals        - Read full journals with cursor pagination
   gms-rt-redmine-attachments     - List artifacts (kind, size, sha256, status)
   gms-rt-redmine-attachment-download - Save one artifact original locally
+  gms-rt-redmine-artifact-failures - Parse test_result/summary into a failure-case table
   gms-rt-redmine-credentials-status - Pre-flight check for owner Redmine credentials
   gms-rt-redmine-artifact-image  - Return an image artifact as base64 plus metadata
   gms-rt-artifact-read           - Read artifact derived text by char window

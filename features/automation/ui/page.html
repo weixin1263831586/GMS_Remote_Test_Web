@@ -8,6 +8,7 @@
     <style>
 {{AUTOMATION_CSS}}
     </style>
+<link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261113-orbit-stage2">
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-ui-foundations">
 </head>
 <body data-automation-ready="false">
@@ -54,21 +55,19 @@
                 <i>→</i>
                 <div><span>06</span><strong>报告分析</strong><small>收集 / 诊断 / 上报</small></div>
             </div>
-            <div id="dashboard-stats" class="dashboard-stats">
-                <div class="empty-state">加载中...</div>
-            </div>
-            <div id="dashboard-active-runs" class="run-list muted">加载中...</div>
+            <div id="dashboard-stats" class="dashboard-stats"></div>
+            <div id="dashboard-active-runs" class="run-list muted"></div>
             <div class="overview-breakdowns">
                 <section class="panel">
                     <div class="panel-header">运行状态分布</div>
                     <div class="panel-body">
-                        <div id="dashboard-status-breakdown" class="breakdown-list muted">加载中...</div>
+                        <div id="dashboard-status-breakdown" class="breakdown-list muted"></div>
                     </div>
                 </section>
                 <section class="panel">
                     <div class="panel-header">按 Profile 分布</div>
                     <div class="panel-body">
-                        <div id="dashboard-profile-breakdown" class="breakdown-list muted">加载中...</div>
+                        <div id="dashboard-profile-breakdown" class="breakdown-list muted"></div>
                     </div>
                 </section>
             </div>
@@ -345,9 +344,7 @@
                     <div class="history-filter-actions"><button type="submit" class="primary">筛选</button><button type="button" data-click="clearRunHistoryFilters" data-a0="runs">清空</button></div>
                 </form>
                 <p class="history-help">执行完成不代表用例全部通过；无可靠统计的历史记录显示“结果待确认”。</p>
-                <div id="automation-runs" class="run-list">
-                    <div class="empty-state">加载中...</div>
-                </div>
+                <div id="automation-runs" class="run-list"></div>
                 <nav class="history-pager" aria-label="运行记录分页">
                     <span id="history-page-runs" aria-live="polite">第 1 页</span>
                     <label>每页<select id="history-limit-runs" data-change="applyRunHistoryFilters" data-a0="runs"><option value="25">25 条</option><option value="50">50 条</option><option value="100">100 条</option></select></label>
@@ -364,7 +361,7 @@
             <div class="panel-header stage-header"><span>资源与存储</span><div class="log-actions"><button type="button" data-click="switchWorkflowPane" data-a0="ops">运维 →</button><button type="button" data-click="loadResourceCatalog">刷新资源与预览</button></div></div>
             <div class="stage-pane resource-workspace">
                 <section><h3>套件版本与缓存预热</h3><p class="history-help">先计算 SHA-256，再下发到指定 Worker。校验一致时复用已有缓存；新下载校验失败会保留原缓存。下发需要管理员权限。</p>
-                    <label>目标 Worker<select id="resource-worker"></select></label><div id="resource-catalog" class="run-list">加载中…</div><div id="resource-transfers" aria-live="polite"></div>
+                    <label>目标 Worker<select id="resource-worker"></select></label><div id="resource-catalog" class="run-list"></div><div id="resource-transfers" aria-live="polite"></div>
                 </section>
                 <section><h3>日志保留策略</h3><p class="history-help">只处理本人已终止任务的 stdout/stderr。测试报告、XML、原始结果包和已固定保留的产物会保留。每轮最多处理 25 项；自动策略每小时最多处理 5 项。</p>
                     <form data-submit="saveRetentionPolicy" data-prevent><div class="history-filters"><label>归档年龄（天）<input id="retention-archive-days" type="number" min="1" max="3650" value="7"></label><label>删除归档日志年龄（天，0 禁止删除）<input id="retention-delete-days" type="number" min="0" max="3650" value="30"></label></div><label class="plan-options"><input type="checkbox" id="retention-enabled">启用每小时自动归档与过期日志清理</label><button type="submit">保存策略</button></form>
@@ -390,7 +387,7 @@
             <div class="stage-pane build-monitor-body">
                 <aside class="build-job-list">
                     <div class="section-label">构建任务</div>
-                    <div id="build-jobs" class="stack muted">加载中...</div>
+                    <div id="build-jobs" class="stack muted"></div>
                 </aside>
                 <div class="build-log-pane">
                     <div class="build-log-toolbar">
@@ -500,12 +497,10 @@
                 </div>
             </div>
             <div class="stage-pane">
-                <div id="ops-status-strip" class="run-value muted">加载中...</div>
+                <div id="ops-status-strip" class="run-value muted"></div>
                 <p class="history-help">暂停推进（kill-switch）只停止新的自动化运行认领与计划调度；正在执行的步骤完成后停止，超时清理、日志保留与告警照常运行。恢复后队列自动继续。</p>
                 <div id="ops-disk" class="run-value muted"></div>
-                <div id="ops-events" class="run-list">
-                    <div class="empty-state">加载中...</div>
-                </div>
+                <div id="ops-events" class="run-list"></div>
             </div>
         </section>
     </section>

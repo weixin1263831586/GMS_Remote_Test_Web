@@ -24,8 +24,12 @@ MODULE_EXTENSIONS = (".apk", ".jar", ".config", ".xml")
 def normalize_module_query(query: str) -> str:
     """Normalize a natural-language module search query into a filesystem keyword."""
     text = str(query or "").strip()
+    # An identifier such as CtsPerfettoTestCases is already a precise query.
+    # Removing its TestCases suffix turns it into a different, broad search.
+    if re.fullmatch(r"[A-Za-z0-9_.-]+", text):
+        return text
     text = re.sub(
-        r"(相关|测试项|测试模块|模块|用例|有哪些|有那些|列表|列出|查询|查看|显示|包含|include|modules?|testcases?|tests?)",
+        r"(相关|测试项|测试模块|模块|用例|有哪些|有那些|列表|列出|查询|查看|显示|包含|\b(?:include|modules?|testcases?|tests?)\b)",
         " ",
         text,
         flags=re.IGNORECASE,

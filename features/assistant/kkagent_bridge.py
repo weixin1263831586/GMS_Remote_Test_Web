@@ -98,6 +98,14 @@ def availability() -> dict[str, Any]:
     }
 
 
+def availability_snapshot() -> dict[str, Any]:
+    """可用性快照：探测异常时返回显式不可用，路由层无须再兜底。"""
+    try:
+        return availability()
+    except Exception:
+        return {"available": False, "binary": "", "mode": "headless_stream_json"}
+
+
 def child_env() -> dict[str, str]:
     """宿主环境减去身份类变量，供子进程显式注入。
 

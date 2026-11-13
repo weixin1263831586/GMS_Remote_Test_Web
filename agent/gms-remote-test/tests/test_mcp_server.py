@@ -1954,6 +1954,95 @@ class RedmineEvidenceToolTests(unittest.TestCase):
             captured["args"], ["SNAP", "--limit", "100", "--cursor", "100"],
         )
 
+    def test_artifact_search_maps_filters_context_collapse(self):
+        captured = self._capture_run()
+        _, is_error = mcp_server.redmine_artifact_search_tool({
+            "snapshot_id": "ev_1", "query": "LoadSdkException",
+            "artifact": "logcat.zip", "member": "main",
+            "context": 400, "collapse": True,
+        })
+        self.assertFalse(is_error)
+        self.assertEqual(
+            captured["args"],
+            ["ev_1", "LoadSdkException", "--artifact", "logcat.zip",
+             "--member", "main", "--context", "400", "--collapse"],
+        )
+
+    def test_artifact_search_batch_maps_filters(self):
+        captured = self._capture_run()
+        _, is_error = mcp_server.redmine_artifact_search_batch_tool({
+            "snapshot_id": "ev_1", "queries": ["a", "b"],
+            "artifact": "776657", "context": 0, "collapse": True,
+        })
+        self.assertFalse(is_error)
+        self.assertEqual(
+            captured["args"],
+            ["ev_1", "a", "b", "--artifact", "776657",
+             "--context", "0", "--collapse"],
+        )
+
+    def test_artifact_read_allows_negative_offset(self):
+        captured = self._capture_run()
+        _, is_error = mcp_server.redmine_artifact_read_tool({
+            "artifact_id": "art_x", "offset": -65536, "limit": 4096,
+        })
+        self.assertFalse(is_error)
+        self.assertEqual(captured["args"], ["art_x", "--offset", "-65536", "--limit", "4096"])
+
+        # 非负约束只对 search 侧 offset 生效，read 放行负值。
+        _, is_error = mcp_server.redmine_artifact_read_tool({
+            "artifact_id": "art_x", "offset": -1,
+        })
+        self.assertFalse(is_error)
+
+    def test_attachment_download_passes_output_path(self):
+        captured = self._capture_run()
+        text, is_error = mcp_server.redmine_attachment_download_tool({"artifact_id": "art_x"})
+        self.assertFalse(is_error)
+        self.assertEqual(captured["args"], ["art_x"])
+
+        mcp_server.redmine_attachment_download_tool({
+            "artifact_id": "art_x", "output_path": "/tmp/a.bin",
+        })
+        self.assertEqual(captured["args"], ["art_x", "/tmp/a.bin"])
+
+        text, is_error = mcp_server.redmine_attachment_download_tool({})
+        self.assertTrue(is_error)
+        self.assertIn("artifact_id", text)
+
+    def test_artifact_failures_requires_and_maps_id(self):
+        captured = self._capture_run()
+        text, is_error = mcp_server.redmine_artifact_failures_tool({})
+        self.assertTrue(is_error)
+        self.assertIn("artifact_id", text)
+
+        mcp_server.redmine_artifact_failures_tool({"artifact_id": "art_r"})
+        self.assertEqual(captured["command"], "gms-rt-redmine-artifact-failures")
+        self.assertEqual(captured["args"], ["art_r"])
+
+    def test_sdk_search_revision_optional(self):
+        captured = self._capture_run()
+        _, is_error = mcp_server.sdk_search_tool({
+            "source": "aosp-main", "query": "BinderProxy",
+        })
+        self.assertFalse(is_error)
+        self.assertEqual(
+            captured["args"],
+            ["--source", "aosp-main", "--query", "BinderProxy"],
+        )
+
+        mcp_server.sdk_search_tool({
+            "source": "aosp-main", "revision": "android-16", "query": "BinderProxy",
+        })
+        self.assertEqual(
+            captured["args"],
+            ["--source", "aosp-main", "--query", "BinderProxy",
+             "--revision", "android-16"],
+        )
+
+        _, is_error = mcp_server.sdk_search_tool({"source": "s"})
+        self.assertTrue(is_error)
+
     def test_artifact_search_batch_args_and_validation(self):
         # 多关键词单遍搜索：一次 CLI 往返完成全部关键词匹配。
         captured = self._capture_run()
@@ -2227,7 +2316,7 @@ class RedmineEvidenceToolTests(unittest.TestCase):
         })
         self.assertEqual(
             captured["args"],
-            ["--source", "android14", "--revision", "main", "--query", "testMethod"],
+            ["--source", "android14", "--query", "testMethod", "--revision", "main"],
         )
         mcp_server.sdk_read_tool({
             "result_id": "src_x", "source": "android14", "path": "a.java",
@@ -2245,11 +2334,11 @@ class RedmineEvidenceToolTests(unittest.TestCase):
         })
         self.assertEqual(
             captured["args"],
-            ["--source", "android14", "--revision", "main", "--query", "getDataType"],
+            ["--source", "android14", "--query", "getDataType", "--revision", "main"],
         )
-        text, is_error = mcp_server.sdk_search_tool({"source": "s"})
+        _, is_error = mcp_server.sdk_search_tool({"source": "s"})
         self.assertTrue(is_error)
-        self.assertIn("keywords", text)
+        self.assertIn("keywords", "provide exactly one of query/keywords, not both")
         by_name = {tool["name"]: tool for tool in mcp_server.tools()}
         schema = by_name["gms_rt_sdk_search"]["inputSchema"]
         self.assertIn("keywords", schema["properties"])
@@ -2337,6 +2426,8 @@ class RedmineEvidenceToolTests(unittest.TestCase):
             "gms_rt_redmine_triage",
             "gms_rt_redmine_history_search",
             "gms_rt_redmine_journals", "gms_rt_redmine_attachments",
+            "gms_rt_redmine_attachment_download",
+            "gms_rt_redmine_artifact_failures",
             "gms_rt_redmine_artifact_search", "gms_rt_redmine_artifact_read",
             "gms_rt_redmine_image", "gms_rt_apk_analyze_attachment",
             "gms_rt_apk_source_search", "gms_rt_apk_source_read",

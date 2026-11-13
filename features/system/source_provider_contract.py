@@ -1,9 +1,18 @@
 """只读 SDK 源码 provider。
 
-统一 ``SourceProvider`` 接口；首期实现 ``local_git``：
+统一 ``SourceProvider`` 接口；实现三种 provider：
+
+- ``local_git`` / ``codesearch``：见下文既有约束；
+- ``ssh_git``：SDK 仓库在远端编译服务器上，经 ADR 0004 的统一 SSH 执行层
+  （``SSHManager`` 连接池 + ``SSHExecutor``）在远端执行只读 git 四件套
+  （``rev-parse --verify`` / ``log -1`` / ``grep`` / ``show``，全部
+  ``--no-optional-locks``，参数 ``shlex.quote``，子命令白名单硬校验），
+  远端仓库永不写入；SSH 凭据只从管理员部署配置解析（环境变量优先）。
+
+共同安全约束：
 
 - provider 与仓库根目录只来自管理员部署配置（config ``sdk_sources.providers``），
-  客户端不能提供 base URL 或本地路径；
+  客户端不能提供 base URL、本地路径或 SSH 目标；
 - revision 必须通过 ``git rev-parse --verify <rev>^{commit}`` 解析成 commit；
 - 文件读取使用 ``git show <commit>:<path>``（blob 内容），保证可复现且不读
   工作树未提交内容；
@@ -103,6 +112,22 @@ class ProviderConfig:
     base_url: str = ""
     project: str = ""
     token: str = ""
+    # ssh_git 专用：远端编译服务器连接参数（只读 git 检索）。
+    ssh_host: str = ""
+    ssh_port: int = 22
+    ssh_username: str = ""
+    ssh_use_key_auth: bool = False
+    ssh_key_path: str = ""
+    ssh_password: str = ""
+    # ssh_git repo_manifest 多仓模式：非空时 repos 为远端子仓绝对路径
+    # （有序），检索按子仓逐仓 HEAD 聚合；为空时退回单 git 仓模式
+    # （repo_root 必须本身是 git 仓库）。
+    repos: tuple[str, ...] = ()
+    # ssh_git 全量发现模式：不再依赖手工维护的 repos 清单，检索前自动
+    # 枚举 repo_root 下全部 git 子仓（find -name .git，剪除 .repo 内部），
+    # 结果缓存（进程内 + data_root 磁盘，TTL 过期后下次检索重新发现）。
+    discover_repos: bool = False
+    discover_ttl_hours: int = 24
 
 
 def _codesearch_token(item: dict[str, Any]) -> str:
@@ -115,6 +140,19 @@ def _codesearch_token(item: dict[str, Any]) -> str:
             )
         return os.environ.get(token_env, "").strip()
     return str(item.get("token") or "").strip()
+
+
+def _ssh_password(item: dict[str, Any]) -> str:
+    """ssh_git 口令来源：ssh_password_env 环境变量优先，其次明文 ssh_password。"""
+    password_env = str(item.get("ssh_password_env") or "").strip()
+    if password_env:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", password_env):
+            raise SourceProviderError(
+                f"source '{item.get('source_id')}' 的 ssh_password_env 非法",
+                status_code=422,
+            )
+        return os.environ.get(password_env, "").strip()
+    return str(item.get("ssh_password") or "").strip()
 
 
 def load_provider_configs(config: dict[str, Any]) -> list[ProviderConfig]:
@@ -155,6 +193,52 @@ def load_provider_configs(config: dict[str, Any]) -> list[ProviderConfig]:
                 base_url=base_url,
                 project=project,
                 token=token,
+            ))
+            continue
+        if provider == "ssh_git":
+            ssh_host = str(item.get("ssh_host") or "").strip()
+            repos = tuple(dict.fromkeys(
+                str(x).strip() for x in (item.get("repos") or []) if str(x).strip()
+            ))
+            discover_repos = bool(item.get("discover_repos"))
+            if not ssh_host or (not repo_root and not repos and not discover_repos):
+                logger.warning(
+                    "ssh_git SDK source '%s' 缺少 ssh_host 或 repo_root/repos/"
+                    "discover_repos，已忽略",
+                    source_id,
+                )
+                continue
+            use_key_auth = bool(item.get("ssh_use_key_auth"))
+            try:
+                ssh_password = _ssh_password(item)
+            except SourceProviderError as exc:
+                logger.warning("%s", exc)
+                continue
+            if not use_key_auth and not ssh_password:
+                logger.warning(
+                    "ssh_git SDK source '%s' 未配置密钥认证且无可用口令，已忽略",
+                    source_id,
+                )
+                continue
+            try:
+                discover_ttl = max(1, int(item.get("discover_ttl_hours") or 24))
+            except (TypeError, ValueError):
+                discover_ttl = 24
+            seen.add(source_id)
+            providers.append(ProviderConfig(
+                source_id=source_id,
+                provider=provider,
+                repo_root=repo_root,
+                default_revision=str(item.get("default_revision") or "").strip(),
+                ssh_host=ssh_host,
+                ssh_port=int(item.get("ssh_port") or 22),
+                ssh_username=str(item.get("ssh_username") or "").strip(),
+                ssh_use_key_auth=use_key_auth,
+                ssh_key_path=str(item.get("ssh_key_path") or "").strip(),
+                ssh_password=ssh_password,
+                repos=repos,
+                discover_repos=discover_repos,
+                discover_ttl_hours=discover_ttl,
             ))
             continue
         if provider != "local_git":

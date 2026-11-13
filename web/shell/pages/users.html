@@ -106,5 +106,35 @@
                     </table>
                     </div>
                 </section>
+                <section class="agent-access-list-section" aria-label="已配置的 SDK 源码源">
+                    <div class="agent-access-toolbar">
+                        <div class="agent-access-list-label">
+                            <h3>已配置的 SDK 源码源</h3>
+                            <span id="agent-sdk-sources-count">分析 Redmine 问题时的只读源码取证来源（本机 / 编译服务器 / OpenGrok）。</span>
+                        </div>
+                        <div class="agent-access-list-actions">
+                            <button id="agent-sdk-sources-add" class="btn-xs btn-primary" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-sdk-add-modal" data-click="agentAccessToggleAddSdk">＋ 添加SDK</button>
+                            <button id="agent-sdk-sources-refresh" class="btn-xs" type="button" data-click="agentAccessLoadSdkSources" data-r0="el"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                        </div>
+                    </div>
+                    <div class="agent-access-table-wrap">
+                    <table class="agent-access-table">
+                        <thead>
+                            <tr>
+                                <th>源 ID</th>
+                                <th>类型</th>
+                                <th>位置 / 连接目标</th>
+                                <th>检索模式</th>
+                                <th>默认 revision</th>
+                                <th>路径校验</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="agent-sdk-sources-tbody">
+                            <tr><td colspan="7" class="agent-access-empty">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                    </div>
+                </section>
             </div>
         </div>

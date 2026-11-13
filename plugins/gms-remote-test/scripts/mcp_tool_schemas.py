@@ -1246,13 +1246,74 @@ ALL_TOOLS: list[dict[str, Any]] = [
             },
         },
         {
+            "name": "gms_rt_redmine_attachment_download",
+            "description": (
+                "Download one evidence artifact's ORIGINAL bytes to a local "
+                "file on the agent host (default: controlled dir "
+                "~/.local/state/gms-remote-test/artifacts/, 0600). After "
+                "download, grep/rg/jq the full text locally instead of "
+                "paging artifact_read windows — the biggest speedup for "
+                "35MB test_result.xml or 800k-char logcat analysis. CLI "
+                "equivalent: gms-rt-redmine-attachment-download."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "artifact_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                    "output_path": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 4096,
+                        "description": (
+                            "Optional destination path; must not already "
+                            "exist. Omit for the default controlled dir."
+                        ),
+                    },
+                },
+                "required": ["artifact_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "gms_rt_redmine_artifact_failures",
+            "description": (
+                "Parse one test-report artifact into a structured "
+                "failure-case table — module / test / result / "
+                "failure_message / first stack line / source per row. "
+                "Handles test_result.xml (including inside zip archives), "
+                "STS/GTS summary HTML, and zip fallbacks. Server-side "
+                "one-pass extraction: prefer this over scraping failure "
+                "info from gms_rt_redmine_artifact_read windows. Empty "
+                "failures with a note means the format matched no "
+                "built-in parser — fall back to artifact_search or "
+                "attachment_download. CLI equivalent: "
+                "gms-rt-redmine-artifact-failures."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "artifact_id": {"type": "string", "minLength": 0, "maxLength": 2048},
+                },
+                "required": ["artifact_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "gms_rt_redmine_artifact_search",
             "description": (
                 "Search a fixed-string query across the description, all "
                 "journals, and downloaded artifact text. Returns evidence "
                 "refs and total_occurrences. Scans all text; limit only bounds the page. "
-                "Follow next_offset with offset to read further matches. ZIP matches "
-                "provide artifact_char_index for artifact_read and member-relative char_index."
+                "Follow next_offset with offset to read further matches. "
+                "Offset semantics: char_index is member-relative; "
+                "artifact_char_index is the global derived-text offset "
+                "usable directly with gms_rt_redmine_artifact_read. "
+                "Filters: artifact (art_* id / numeric attachment id / "
+                "filename substring), member (zip member substring), "
+                "context (snippet chars each side, default 200, max 1000), "
+                "collapse (fold repeated hits within 200 chars of each "
+                "other per artifact/member; totals stay raw). Every "
+                "response carries artifact_hits: per-artifact hit counts."
             ),
             "inputSchema": {
                 "type": "object",
@@ -1261,6 +1322,45 @@ ALL_TOOLS: list[dict[str, Any]] = [
                     "query": {"type": "string", "minLength": 0, "maxLength": 256},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 200},
                     "offset": {"type": "integer", "minimum": 0},
+                    "artifact": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 2048,
+                        "description": (
+                            "Only scan this artifact: art_* id, numeric "
+                            "attachment id, or filename substring."
+                        ),
+                    },
+                    "member": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 512,
+                        "description": (
+                            "ZIP only: only report matches whose member "
+                            "name contains this substring (all members are "
+                            "still streamed, so coverage stays honest)."
+                        ),
+                    },
+                    "context": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000,
+                        "description": (
+                            "Snippet context chars on each side of the "
+                            "match (default 200). Larger values avoid a "
+                            "follow-up artifact_read for short context."
+                        ),
+                    },
+                    "collapse": {
+                        "type": "boolean",
+                        "description": (
+                            "Fold matches that repeat within 200 chars of "
+                            "an earlier match in the same artifact/member "
+                            "(same stack trace repeated 10x collapses to "
+                            "one entry); total_occurrences and "
+                            "artifact_hits keep counting every raw hit."
+                        ),
+                    },
                 },
                 "required": ["snapshot_id", "query"],
                 "additionalProperties": False,
@@ -1275,8 +1375,13 @@ ALL_TOOLS: list[dict[str, Any]] = [
                 "on large logs. Each query reports independent total/"
                 "truncated/matches; coverage_complete=false means parts of "
                 "the evidence were NOT scanned, so a zero hit is not "
-                "negative evidence. Matches carry char_index offsets usable "
-                "with gms_rt_redmine_artifact_read (use artifact_char_index for ZIP). "
+                "negative evidence. Offset semantics: char_index is "
+                "member-relative; artifact_char_index is the global "
+                "derived-text offset usable with gms_rt_redmine_artifact_read. "
+                "Same filters as the single-query tool: artifact, member, "
+                "context, collapse. Every response carries artifact_hits "
+                "(per-artifact hit counts) so a truncated result still "
+                "shows which attachment holds the hits. "
                 "Scans to EOF regardless of page size. Follow each row next_offset "
                 "with per_query_offset to read further matches."
             ),
@@ -1292,6 +1397,37 @@ ALL_TOOLS: list[dict[str, Any]] = [
                     },
                     "per_query_limit": {"type": "integer", "minimum": 1, "maximum": 100},
                     "per_query_offset": {"type": "integer", "minimum": 0},
+                    "artifact": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 2048,
+                        "description": (
+                            "Only scan this artifact: art_* id, numeric "
+                            "attachment id, or filename substring."
+                        ),
+                    },
+                    "member": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 512,
+                        "description": (
+                            "ZIP only: only report matches whose member "
+                            "name contains this substring."
+                        ),
+                    },
+                    "context": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000,
+                        "description": "Snippet context chars per side (default 200).",
+                    },
+                    "collapse": {
+                        "type": "boolean",
+                        "description": (
+                            "Fold matches repeating within 200 chars per "
+                            "artifact/member; totals stay raw."
+                        ),
+                    },
                 },
                 "required": ["snapshot_id", "queries"],
                 "additionalProperties": False,
@@ -1301,17 +1437,32 @@ ALL_TOOLS: list[dict[str, Any]] = [
             "name": "gms_rt_redmine_artifact_read",
             "description": (
                 "Read a text/log artifact by character window "
-                "(offset+limit, max 262144 chars). Response carries "
-                "total_chars and truncated. Offset is validated, not "
-                "clamped: negative values are rejected — locate the "
-                "region with gms_rt_redmine_artifact_search first (its "
-                "artifact_char_index offsets are usable here)."
+                "(offset+limit, max 262144 chars). Offset >= 0 is absolute; "
+                "NEGATIVE offset counts from the tail (-1 = last char, "
+                "whole file is streamed once, total_chars is exact) — use "
+                "it to inspect the end of a log without knowing its "
+                "length. Response carries total_chars/truncated; for "
+                "archives with a derived zip index it also carries "
+                "zip_index (each member's global char range), zip_member, "
+                "member_char_index and member_char_range for the current "
+                "window, so a search hit at artifact_char_index X can be "
+                "continued directly (offset=X; the header shows which "
+                "member you are in). Beyond-EOF offsets return an empty "
+                "window, not an error."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "artifact_id": {"type": "string", "minLength": 0, "maxLength": 2048},
-                    "offset": {"type": "integer", "minimum": 0},
+                    "offset": {
+                        "type": "integer",
+                        "minimum": -1000000000,
+                        "maximum": 1000000000,
+                        "description": (
+                            "Absolute offset (>=0) or tail-relative "
+                            "(<0, -1 = last char)."
+                        ),
+                    },
                     "limit": {"type": "integer", "minimum": 1, "maximum": 262144},
                 },
                 "required": ["artifact_id"],
@@ -1446,13 +1597,23 @@ ALL_TOOLS: list[dict[str, Any]] = [
             "description": (
                 "Search an SDK source pinned to a revision (branch, tag, "
                 "or commit). Every match carries the resolved commit and a "
-                "signed result_id for gms_rt_sdk_read."
+                "signed result_id for gms_rt_sdk_read. Omit revision to "
+                "use the source's default_revision automatically (an "
+                "unknown source errors with the available source list)."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "source": {"type": "string", "minLength": 0, "maxLength": 2048},
-                    "revision": {"type": "string", "minLength": 0, "maxLength": 2048},
+                    "revision": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 2048,
+                        "description": (
+                            "Branch/tag/commit; omit to use the source's "
+                            "default_revision."
+                        ),
+                    },
                     "query": {
                         "type": "string",
                         "minLength": 0,
@@ -1483,7 +1644,7 @@ ALL_TOOLS: list[dict[str, Any]] = [
                         ),
                     },
                 },
-                "required": ["source", "revision"],
+                "required": ["source"],
                 # oneOf = 恰好其一：query/keywords 严格互斥，与运行时
                 # 校验（两者同时出现报错）一致；anyOf 会放行同传。
                 "oneOf": [

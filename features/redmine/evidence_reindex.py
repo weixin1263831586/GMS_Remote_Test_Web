@@ -13,7 +13,7 @@ def repair_budget_indexes(store, snapshot):
         error = str(artifact.get("error") or "")
         if (artifact.get("status") != "ready"
                 or artifact.get("derived_status") not in {"partial", "missing"}
-                or not any(marker in error for marker in ("超阈值", "上限", "超过阈值"))):
+                or not any(marker in error for marker in ("超阈值", "上限", "超过阈值", "派生预算"))):
             continue
         with store._connect() as connection:
             row = connection.execute(

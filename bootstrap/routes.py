@@ -63,6 +63,7 @@ from features.system import api as system
 from features.system import assets, audit, desktop, health_api, integrations
 from features.system import notifications_api as notifications
 from features.system import source_api as system_sources
+from features.system import source_manage_api as system_source_manage
 from features.system import terminal_api as terminal
 from features.system.api import init_templates
 from features.system.api_help import generate_help_or_continue
@@ -164,6 +165,7 @@ ALL_ROUTERS = [
     reports.router,
     system.router,
     system_sources.router,
+    system_source_manage.router,
     terminal.router,
     tests.router,
     users.router,

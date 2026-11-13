@@ -144,7 +144,11 @@ class RuntimeAgentTests(RuntimeUiHarness):
                 "expected => document.querySelectorAll('#agent-access-scopes input').length === expected",
                 arg=expected_scope_count,
             )
-            self.assertEqual(page.locator(".agent-access-table thead th").count(), 7)
+            # 页面有两个 agent-access-table（接入凭据 + SDK 源码源）；
+            # 本用例只验收凭据表，选择器按 tbody id 收窄。
+            self.assertEqual(
+                page.locator("table:has(#agent-access-tokens) thead th").count(), 7
+            )
             self.assertEqual(page.locator("#agent-access-tokens img").count(), 0)
             self.assertFalse(page.evaluate("Boolean(window.injected)"))
             self.assertIn("agt_fixture", page.locator("#agent-access-tokens").inner_text())
@@ -161,7 +165,8 @@ class RuntimeAgentTests(RuntimeUiHarness):
                 page.locator("#agent-access-create-toggle").click()
                 expect(page.locator("#agent-access-enroll-form")).to_be_visible()
                 expect(page.locator("#agent-access-create-modal")).to_be_visible()
-                expect(page.locator(".agent-access-list-section")).to_be_visible()
+                # SDK 源码源 section 加入后同类区块有两个；本用例只验收凭据列表。
+                expect(page.locator('section.agent-access-list-section[aria-label="已接入的 Agent"]')).to_be_visible()
                 page.wait_for_function("document.activeElement.id === 'agent-access-name'")
                 expect(page.locator("#agent-access-scopes")).to_be_visible()
                 self.assertTrue(page.locator(".agent-access-target-details").evaluate("el => el.open"))
@@ -663,7 +668,7 @@ class RuntimeAgentTests(RuntimeUiHarness):
                                 delta=0.5,
                             )
                             self.assertGreater(upload_geometry["bottom"], 15)
-                            self.assertEqual(upload_geometry["borderStyle"], "solid")
+                            self.assertEqual(upload_geometry["borderStyle"], "dashed")
                             self.assertEqual(upload_geometry["borderWidth"], "1px")
                             self.assertEqual(upload_geometry["borderRadius"], "8px")
                             self.assertEqual(

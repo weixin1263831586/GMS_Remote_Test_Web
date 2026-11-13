@@ -30,6 +30,7 @@ TOOL_INPUT_JSON_CHARS = 500
 _IDENTITY_INPUT_KEYS = (
     "issue_id", "issue", "snapshot_id", "artifact_id",
     "source", "revision", "path", "query", "q", "mode",
+    "task_id", "suite_path", "offset", "limit",
 )
 
 

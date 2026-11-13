@@ -153,7 +153,12 @@ class RepositoryStorageMixin:
 
     @staticmethod
     def history_query_tokens(query: str) -> list[str]:
-        """与 _fts_query 一致的查询分词（供命中标注与远端结果标注复用）。"""
+        """与 _fts_query 一致的查询分词（供命中标注与远端结果标注复用）。
+
+        空格切词；含 ``_`` 的整段 token（测试名/符号名，如
+        ``testSdkSandbox_whenBackground_blocked``）原样保留——它们在
+        _fts_query 里转为短语匹配，是测试类 issue 最强检索键。
+        """
         return [token for token in query.replace('"', " ").split() if len(token) >= 2][:12]
 
     def corpus_token_stats(self, tokens: list[str], conn: sqlite3.Connection | None = None) -> dict[str, dict[str, float]]:
@@ -420,8 +425,23 @@ class RepositoryStorageMixin:
 
     @staticmethod
     def _fts_query(query: str) -> str:
+        """OR 连接各查询词；含 ``_`` 的词（测试名/符号名）转为短语匹配。
+
+        FTS5 unicode61 分词器把 ``testSdkSandbox_whenBackground_blocked``
+        在文档与查询两侧都切成相邻碎片；整段 OR 匹配会让 "blocked" 这类
+        通用碎片命中大量无关单。短语匹配（"testsdk... whenbackground
+        blocked"）只在碎片相邻连续出现时命中，保留测试名的强区分度。
+        """
         tokens = [token for token in query.replace('"', " ").split() if len(token) >= 2][:12]
-        return " OR ".join(f'"{token}"' for token in tokens) or '"empty"'
+        clauses = []
+        for token in tokens:
+            if "_" in token:
+                parts = [part for part in re.split(r"[^A-Za-z0-9]+", token) if len(part) >= 2]
+                if len(parts) >= 2:
+                    clauses.append(" ".join(f'"{part}"' for part in parts))
+                    continue
+            clauses.append(f'"{token}"')
+        return " OR ".join(clauses) or '"empty"'
 
     @staticmethod
     def _json_value(value: Any) -> str:

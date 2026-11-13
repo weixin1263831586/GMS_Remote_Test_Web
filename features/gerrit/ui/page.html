@@ -186,6 +186,7 @@ header { background: var(--panel); border-bottom: 1px solid var(--border); box-s
 :where(table) tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--panel)); }
 
 </style>
+<link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261113-orbit-stage2">
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-ui-foundations">
 </head>
 <body>
@@ -221,11 +222,11 @@ header { background: var(--panel); border-bottom: 1px solid var(--border); box-s
 <main>
   <section id="tab-personal" class="tab-content active">
     <div id="personalStatus" class="muted status-line"></div>
-    <div id="personalContent"><div class="muted" style="padding:40px;text-align:center">⏳ 正在统计个人 Gerrit 提交...</div></div>
+    <div id="personalContent"></div>
   </section>
   <section id="tab-department" class="tab-content">
     <div id="departmentStatus" class="muted status-line"></div>
-    <div id="departmentContent"><div class="muted" style="padding:40px;text-align:center">⏳ 正在统计部门 Gerrit 提交...</div></div>
+    <div id="departmentContent"></div>
   </section>
   <section id="tab-query" class="tab-content">
     <div id="status" class="muted status-line">加载中...</div>

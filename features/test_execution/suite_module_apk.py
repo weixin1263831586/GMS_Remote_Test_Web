@@ -44,8 +44,14 @@ def _pick_suite_module_artifact(payload: dict[str, Any], prefer: str) -> dict[st
     """
     prefer_ext = "jar" if str(prefer or "").strip().lower() == "jar" else "apk"
     normalized_query = str(payload.get("normalized_query") or "").strip().lower()
+    modules = payload.get("modules") or []
+    exact = [item for item in modules if str(item.get("module") or "").lower() == normalized_query]
+    # An exact native/config-only module must never fall through to another
+    # module's APK/JAR. The caller needs the actual native artifact or source.
+    if exact:
+        modules = exact
     candidates: list[tuple[int, int, dict[str, Any], dict[str, Any]]] = []
-    for item in payload.get("modules") or []:
+    for item in modules:
         files = _module_artifact_files(item)
         if not files:
             continue

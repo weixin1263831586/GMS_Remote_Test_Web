@@ -1,24 +1,18 @@
-"""SDK source providers and registry public surface."""
+"""SDK source providers and registry public surface.
+
+provider 实现按模块拆分：``local_git`` 见 :mod:`source_local_git`、
+``codesearch`` 见 :mod:`source_codesearch`、``ssh_git``（远端编译服务器
+只读检索）见 :mod:`source_ssh_git`；本模块只保留注册表与进程级初始化，
+并 re-export 各 provider 以维持既有公共导出面。
+"""
 
 from __future__ import annotations
 
-import hashlib
-import subprocess
+import logging
 from typing import Any
 
 from .source_codesearch import CodesearchProvider
-from .source_git_search import grep_matches
-from .source_provider_contract import (
-    _COMMIT_RE,
-    GIT_TIMEOUT_SECONDS,
-    MAX_BLOB_BYTES,
-    SEARCH_DEFAULT_LIMIT,
-    SEARCH_MAX_LIMIT,
-    _git,
-    _make_signed_id,
-    _safe_repo_path,
-    decode_signed_id,
-)
+from .source_local_git import LocalGitProvider
 from .source_provider_contract import (
     CODESEARCH_TIMEOUT_SECONDS as CODESEARCH_TIMEOUT_SECONDS,
 )
@@ -29,172 +23,17 @@ from .source_provider_contract import (
     SourceProviderError as SourceProviderError,
 )
 from .source_provider_contract import (
+    decode_signed_id as decode_signed_id,
+)
+from .source_provider_contract import (
     load_provider_configs as load_provider_configs,
 )
-
-
-class LocalGitProvider:
-    """读取指定 commit blob 的本地 Git provider。"""
-
-    kind = "local_git"
-
-    def __init__(self, config: ProviderConfig, secret: bytes):
-        self.config = config
-        self._secret = secret
-
-    # -------------------------------------------------------------- helpers
-
-    def resolve_commit(self, revision: str) -> str:
-        revision = str(revision or "").strip()
-        if not revision:
-            if self.config.default_revision:
-                revision = self.config.default_revision
-            else:
-                raise SourceProviderError("revision 不能为空", status_code=422)
-        if revision.startswith("-") or ".." in revision:
-            raise SourceProviderError("revision 非法", status_code=422)
-        commit = _git(self.config.repo_root, "rev-parse", "--verify", f"{revision}^{{commit}}").strip()
-        if not commit:
-            raise SourceProviderError("revision 无法解析为 commit", status_code=422)
-        return commit
-
-    def _verify_repo(self) -> None:
-        try:
-            _git(self.config.repo_root, "rev-parse", "--show-toplevel")
-        except SourceProviderError as exc:
-            raise SourceProviderError(
-                "配置的 repo_root 不是有效 Git 仓库；请联系管理员检查 sdk_sources 配置",
-                status_code=502,
-            ) from exc
-
-    def revision_metadata(self, revision: str = "") -> dict[str, Any]:
-        self._verify_repo()
-        commit = self.resolve_commit(revision)
-        subject = _git(self.config.repo_root, "log", "-1", "--format=%s", commit).strip()
-        date = _git(self.config.repo_root, "log", "-1", "--format=%cI", commit).strip()
-        return {
-            "source_id": self.config.source_id,
-            "revision": revision or self.config.default_revision,
-            "commit": commit,
-            "commit_subject": subject[:200],
-            "commit_date": date,
-            "reproducible": True,
-        }
-
-    # -------------------------------------------------------------- search
-
-    def search(
-        self,
-        revision: str,
-        query: str,
-        *,
-        path_filter: str = "",
-        limit: int = SEARCH_DEFAULT_LIMIT,
-    ) -> dict[str, Any]:
-        if not str(query or "").strip():
-            raise SourceProviderError("query 不能为空", status_code=422)
-        limit = max(1, min(int(limit or SEARCH_DEFAULT_LIMIT), SEARCH_MAX_LIMIT))
-        self._verify_repo()
-        commit = self.resolve_commit(revision)
-        filter_value = str(path_filter or "").strip().lower()
-        # 单进程 git grep 全树匹配只需数秒；逐文件 `git show` 扫描在
-        # 真实 SDK 树（约 2 万文件）要分钟级，HTTP 30s 客户端必超时。
-        # --fixed-strings/--ignore-case 与旧 Python 匹配的字面量、大小写
-        # 不敏感语义一致；-I 跳过二进制。
-        matches, scanned, limited = grep_matches(
-            self.config.repo_root, commit, str(query),
-            path_filter=filter_value, limit=limit, timeout=GIT_TIMEOUT_SECONDS,
-        )
-        for match in matches:
-            match.update(source_id=self.config.source_id, commit=commit)
-        return self._search_payload(commit, matches, scanned, limited)
-
-    def _search_payload(
-        self, commit: str, matches: list[dict[str, Any]], scanned: int, limited: bool
-    ) -> dict[str, Any]:
-        for match in matches:
-            match["result_id"] = self._make_result_id(match["path"], commit)
-        return {
-            "source_id": self.config.source_id,
-            "commit": commit,
-            "reproducible": True,
-            "total": len(matches),
-            "scanned_files": scanned,
-            "limited": bool(limited),
-            "matches": matches,
-        }
-
-    def _make_result_id(self, path: str, commit: str) -> str:
-        return _make_signed_id(
-            {
-                "source_id": self.config.source_id,
-                "commit": commit,
-                "path": path,
-            },
-            self._secret,
-        )
-
-    def decode_result_id(self, result_id: str) -> dict[str, str]:
-        """校验并解码自包含 result_id；任何失败都是 422，绝不返回载荷。"""
-        payload = decode_signed_id(result_id, self._secret)
-        if str(payload.get("source_id") or "") != self.config.source_id:
-            raise SourceProviderError(
-                f"result_id 不属于 source '{self.config.source_id}'", status_code=422
-            )
-        commit = str(payload.get("commit") or "")
-        if not _COMMIT_RE.match(commit):
-            raise SourceProviderError("result_id 载荷 commit 非法", status_code=422)
-        return {"source_id": self.config.source_id, "commit": commit.lower(),
-                "path": str(payload.get("path") or "")}
-
-    def _blob(self, commit: str, path: str) -> bytes | None:
-        try:
-            completed = subprocess.run(
-                ["git", "-C", self.config.repo_root, "show", f"{commit}:{path}"],
-                capture_output=True,
-                timeout=GIT_TIMEOUT_SECONDS,
-            )
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            return None
-        if completed.returncode != 0:
-            return None
-        blob = completed.stdout
-        if len(blob) > MAX_BLOB_BYTES:
-            return None
-        return blob
-
-    # ---------------------------------------------------------------- read
-
-    def read_signed(
-        self, result_id: str, *, offset: int = 0, limit: int = 400
-    ) -> dict[str, Any]:
-        """解码自包含 result_id 后按 commit blob 分段读取（唯一 read 入口）。"""
-        decoded = self.decode_result_id(result_id)
-        safe_path = _safe_repo_path(decoded["path"])
-        commit = decoded["commit"]
-        blob = self._blob(commit, safe_path)
-        if blob is None:
-            raise SourceProviderError("文件不存在或超过读取上限", status_code=404)
-        blob_hash = hashlib.sha256(blob).hexdigest()
-        text = blob.decode("utf-8", errors="replace")
-        lines = text.splitlines()
-        window = lines[offset:offset + limit]
-        return {
-            "source_id": self.config.source_id,
-            "commit": commit,
-            "reproducible": True,
-            "path": safe_path,
-            "blob_sha256": blob_hash,
-            "total_lines": len(lines),
-            "offset": offset,
-            "returned_lines": len(window),
-            "next_offset": offset + limit if offset + limit < len(lines) else None,
-            "truncated": offset + limit < len(lines),
-            "lines": [
-                {"line": offset + index + 1, "text": line}
-                for index, line in enumerate(window)
-            ],
-        }
+from .source_ssh_git import SSHGitProvider
+from .source_user_store import UserSourceStore as UserSourceStore
+from .source_user_store import UserSourceStoreError as UserSourceStoreError
+from .source_user_store import (
+    user_source_to_provider_config as user_source_to_provider_config,
+)
 
 
 class SourceRegistry:
@@ -203,10 +42,11 @@ class SourceRegistry:
     _PROVIDER_CLASSES = {
         "local_git": LocalGitProvider,
         "codesearch": CodesearchProvider,
+        "ssh_git": SSHGitProvider,
     }
 
     def __init__(self, configs: list[ProviderConfig], secret: bytes):
-        self._providers: dict[str, LocalGitProvider | CodesearchProvider] = {}
+        self._providers: dict[str, LocalGitProvider | CodesearchProvider | SSHGitProvider] = {}
         for item in configs:
             provider_class = self._PROVIDER_CLASSES.get(item.provider)
             if provider_class is None:  # load_provider_configs 已过滤；双保险
@@ -214,17 +54,26 @@ class SourceRegistry:
             self._providers[item.source_id] = provider_class(item, secret)
 
     def list_sources(self) -> list[dict[str, Any]]:
-        return [
-            {
+        # repo_root 永不暴露；ssh_git 额外给出连接目标（host:port）与
+        # 检索模式，供管理页只读展示——不含任何凭据。
+        listing = []
+        for provider in self._providers.values():
+            entry = {
                 "source_id": provider.config.source_id,
                 "provider": provider.kind,
                 "default_revision": provider.config.default_revision,
                 "repo_root_exposed": False,
             }
-            for provider in self._providers.values()
-        ]
+            if isinstance(provider, SSHGitProvider):
+                entry["ssh_host"] = provider.config.ssh_host
+                entry["ssh_port"] = provider.config.ssh_port
+                entry["ssh_username"] = provider.config.ssh_username
+                entry["multi_repo"] = provider._multi
+                entry["discover_repos"] = provider.config.discover_repos
+            listing.append(entry)
+        return listing
 
-    def get(self, source_id: str) -> LocalGitProvider | CodesearchProvider:
+    def get(self, source_id: str) -> LocalGitProvider | CodesearchProvider | SSHGitProvider:
         provider = self._providers.get(str(source_id or "").strip())
         if provider is None:
             raise SourceProviderError(
@@ -248,6 +97,10 @@ class SourceRegistry:
 
 
 _REGISTRY: SourceRegistry | None = None
+# reload 复用的密钥与静态配置快照（initialize 时缓存；未初始化时为 None）。
+_REGISTRY_SECRET: bytes | None = None
+_LAST_STATIC_CONFIG: dict[str, Any] | None = None
+_USER_STORE: UserSourceStore | None = None
 
 
 def registry_state() -> str:
@@ -274,7 +127,13 @@ def initialize_source_runtime(config: dict[str, Any] | None = None) -> str:
     registry 保持 UNINITIALIZED（``sdk_sources_available()`` → None），
     evidence gate 按 fail-safe 强制取证，而不是把初始化失败误标成
     UNAVAILABLE（部署明明配置了 source 却被降级）。
+
+    配置来源 = 静态 ``configs/local/config.json`` 的
+    ``sdk_sources.providers`` **加上**用户经「添加SDK」面板注册的动态源
+    （:mod:`features.system.source_user_store`）；同 source_id 冲突时
+    静态配置优先，动态条目跳过并告警。
     """
+    global _REGISTRY_SECRET, _LAST_STATIC_CONFIG
     if config is None:
         # 与 Web bootstrap 相同的配置来源；features → foundation 是合法
         # 依赖方向（注意实际模块是 foundation.config）。
@@ -284,7 +143,70 @@ def initialize_source_runtime(config: dict[str, Any] | None = None) -> str:
     from foundation.secrets import derive_application_key
 
     secret = derive_application_key("gms-sdk-source-v1:")
-    configure_source_registry(load_provider_configs(config or {}), secret)
+    _REGISTRY_SECRET = secret
+    _LAST_STATIC_CONFIG = dict(config or {})
+    configure_source_registry(_build_registry_configs(_LAST_STATIC_CONFIG), secret)
+    return registry_state()
+
+
+def user_source_store() -> UserSourceStore:
+    """用户注册 SDK 源的单例存储（进程内共享）。"""
+    global _USER_STORE
+    if _USER_STORE is None:
+        from foundation.config import settings
+        from foundation.config_paths import sdk_user_sources_path
+
+        _USER_STORE = UserSourceStore(
+            sdk_user_sources_path(settings.project_root)
+        )
+    return _USER_STORE
+
+
+def _build_registry_configs(config: dict[str, Any]) -> list[ProviderConfig]:
+    """静态 providers + 用户注册源合并；用户存储损坏/解密失败不拖垮静态源。"""
+    providers = load_provider_configs(config)
+    static_ids = {item.source_id for item in providers}
+    try:
+        records = user_source_store().list_sources()
+    except Exception as exc:
+        logger.warning("用户 SDK 源存储不可读，仅使用静态配置：%s", exc)
+        return providers
+    for record in records:
+        sid = str(record.get("source_id") or "")
+        if not sid or sid in static_ids:
+            if sid in static_ids:
+                logger.warning(
+                    "用户 SDK 源 '%s' 与静态配置冲突，静态优先，已跳过", sid
+                )
+            continue
+        try:
+            password = user_source_store().get_password(sid)
+            item = user_source_to_provider_config(record, password=password)
+            provider_config = load_provider_configs(
+                {"sdk_sources": {"providers": [item]}}
+            )
+            if provider_config:
+                providers.append(provider_config[0])
+        except UserSourceStoreError as exc:
+            logger.warning("用户 SDK 源 '%s' 加载失败，已跳过：%s", sid, exc)
+        except Exception as exc:
+            logger.warning("用户 SDK 源 '%s' 构建异常，已跳过：%s", sid, exc)
+    return providers
+
+
+def reload_source_runtime() -> str:
+    """「添加SDK / 删除」后的进程内热重载（不重新派生密钥）。
+
+    复用 initialize 时的静态配置快照（:data:`_LAST_STATIC_CONFIG`），否则
+    空 config 会把静态 providers 全部清掉。进程尚未初始化时回退到完整
+    :func:`initialize_source_runtime`（独立 Worker 场景没有管理端点，
+    不会走到这里；Web 进程正常时一定已初始化）。
+    """
+    if _REGISTRY_SECRET is None:
+        return initialize_source_runtime()
+    configure_source_registry(
+        _build_registry_configs(_LAST_STATIC_CONFIG or {}), _REGISTRY_SECRET
+    )
     return registry_state()
 
 
@@ -311,18 +233,26 @@ def source_registry() -> SourceRegistry:
     return _REGISTRY
 
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "CODESEARCH_TIMEOUT_SECONDS",
     "CodesearchProvider",
     "LocalGitProvider",
     "ProviderConfig",
+    "SSHGitProvider",
     "SourceProviderError",
     "SourceRegistry",
+    "UserSourceStore",
+    "UserSourceStoreError",
     "configure_source_registry",
     "initialize_source_runtime",
     "load_provider_configs",
     "registry_state",
+    "reload_source_runtime",
     "source_registry",
+    "user_source_store",
+    "user_source_to_provider_config",
 ]
 
 

@@ -353,7 +353,7 @@ function copyPatchDirection(btn) {
 }
 
 async function showCaseFact(issueId) {
-  openKnowledgeModal(`📚 案例结构化 #${issueId}`, '<div class="muted">加载中…</div>');
+  openKnowledgeModal(`📚 案例结构化 #${issueId}`, loadingOrbitHtml('正在加载案例...'));
   try {
     const f = await api(`/api/redmine-agent/cases/${issueId}`);
     setKnowledgeBody(`

@@ -10,6 +10,7 @@ from features.redmine.kkagent import KkAgentAnalysisResult
 from features.redmine.kkagent.analyzer import KkAgentRedmineAnalyzer, _StreamFallback
 from features.redmine.kkagent.mcp_health import McpHealthProbe
 from features.redmine.kkagent.native_summary import native_summary_result
+from features.redmine.tests.kkagent.review_support import review_trace
 from features.redmine.tests.kkagent.test_native_summary import ENTRY, complete_trace, final_trace
 from features.redmine.tests.test_daily_brief_service import make_service
 
@@ -54,7 +55,8 @@ def test_summary_rejects_an_unobserved_or_unsuccessful_final_round():
 
 async def test_summary_completes_without_a_format_repair(monkeypatch):
     analyzer = KkAgentRedmineAnalyzer()
-    stream = AsyncMock(return_value=(complete_trace(report=SUMMARY), _StreamFallback(), False))
+    stream = AsyncMock(side_effect=[(complete_trace(report=SUMMARY), _StreamFallback(), False),
+                                   (review_trace(SUMMARY), _StreamFallback(), False)])
     monkeypatch.setattr(analyzer, "_run_stream", stream)
     monkeypatch.setattr("features.redmine.kkagent.analyzer.probe_kkagent_mcp_health",
                         AsyncMock(return_value=McpHealthProbe(ok=True, skipped=True)))
@@ -62,7 +64,7 @@ async def test_summary_completes_without_a_format_repair(monkeypatch):
     assert result.ok, result.error
     assert result.result["detailed_report"] == SUMMARY
     assert result.result["evidence_gate"]["issue_fetched"]
-    stream.assert_awaited_once()
+    assert stream.await_count == 2
 
 
 async def test_summary_repairs_do_not_restore_report_headings(monkeypatch):
@@ -73,6 +75,7 @@ async def test_summary_repairs_do_not_restore_report_headings(monkeypatch):
         (first, _StreamFallback(), False),
         (final_trace(report=""), _StreamFallback(), False),
         (final_trace(report=SUMMARY), _StreamFallback(), False),
+        (review_trace(SUMMARY), _StreamFallback(), False),
     ])
     monkeypatch.setattr(analyzer, "_run_stream", stream)
     monkeypatch.setattr("features.redmine.kkagent.analyzer.probe_kkagent_mcp_health",
@@ -80,7 +83,7 @@ async def test_summary_repairs_do_not_restore_report_headings(monkeypatch):
     result = await analyzer.analyze(SUMMARY_ENTRY)
     assert result.ok, result.error
     assert result.result["detailed_report"] == SUMMARY
-    assert stream.await_count == 3
+    assert stream.await_count == 4
     for call in stream.await_args_list[1:]:
         command = call.args[0]
         assert command[command.index("--resume") + 1] == "same"

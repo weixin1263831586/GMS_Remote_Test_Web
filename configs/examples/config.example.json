@@ -62,6 +62,31 @@
         "base_url": "https://codeindex.example.com/source",
         "project": "Android17",
         "token_env": "RK_CODESEARCH_TOKEN"
+      },
+      {
+        "source_id": "android-remote",
+        "provider": "ssh_git",
+        "repo_root": "/home/operator/aosp",
+        "default_revision": "android17-release",
+        "ssh_host": "build.example.com",
+        "ssh_port": 22,
+        "ssh_username": "operator",
+        "ssh_use_key_auth": true,
+        "ssh_key_path": "~/.ssh/id_ed25519"
+      },
+      {
+        "source_id": "android-remote-manifest",
+        "provider": "ssh_git",
+        "repo_root": "/home/operator/aosp",
+        "default_revision": "HEAD",
+        "ssh_host": "build.example.com",
+        "ssh_username": "operator",
+        "ssh_password_env": "BUILD_HOST_PASSWORD",
+        "repos": [
+          "/home/operator/aosp/frameworks/base",
+          "/home/operator/aosp/kernel-6.1",
+          "/home/operator/aosp/vendor/rockchip/common"
+        ]
       }
     ]
   },

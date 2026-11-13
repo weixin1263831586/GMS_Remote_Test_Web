@@ -2222,6 +2222,12 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/redmine-agent/artifacts/{artifact_id}/failures"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/redmine-agent/artifacts/{artifact_id}/image"
   },
   {
@@ -2841,6 +2847,48 @@
       "GET"
     ],
     "path": "/api/reports/weekly-report/department"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/sdk/manage/discover"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/sdk/manage/discover-local"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/sdk/manage/probe"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/sdk/manage/servers"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/sdk/manage/sources"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/sdk/manage/sources"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/sdk/manage/sources/{source_id}"
   },
   {
     "methods": [

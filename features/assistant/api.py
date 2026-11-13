@@ -12,7 +12,8 @@ from pydantic import BaseModel, Field
 from features.assistant.capabilities import capabilities_payload
 from features.assistant.context import record_user_message, update_context
 from features.assistant.executor import executor
-from features.assistant.payloads import jsonable as _jsonable, session_payload as _session_payload
+from features.assistant.payloads import jsonable as _jsonable
+from features.assistant.payloads import session_payload as _session_payload
 from features.assistant.plan_submission import submit_pending_plan_once
 from features.assistant.response import (
     WEBAPP_PAGES,
@@ -38,6 +39,7 @@ from features.assistant.session_log import (
     _append_message,
     _append_step,
     _format_params,
+    append_recovery_step,
 )
 from features.assistant.session_registry import (
     AgentRequestShim,
@@ -503,16 +505,6 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     return success_response({"session": _session_payload(session)}, "Agent updated")
 
 
-def kkagent_bridge_availability() -> dict[str, Any]:
-    """kkagent 桥接可用性（惰性导入，避免影响基础路由加载）。"""
-    from features.assistant.kkagent_bridge import availability
-
-    try:
-        return availability()
-    except Exception:
-        return {"available": False, "binary": "", "mode": "headless_stream_json"}
-
-
 @router.get("/api/agent/sessions")
 async def list_agent_sessions(request: Request):
     """List this client's Agent sessions (live + recoverable anchors)."""
@@ -541,7 +533,10 @@ async def get_agent_session(session_id: str, request: Request):
         if session and session_id not in _agent_monitor_tasks:
             request_shim = AgentRequestShim(request)
             redmine_active = bool((session.get("active_run") or {}).get("redmine_run_id"))
-            _append_step(session, "会话已恢复", "done" if redmine_active else "running", "Controller 重启后根据持久任务重建监控状态")
+            # 恢复步骤保持 running（不能立即标 done——监控尚未确认后台
+            # 任务真实状态，绿勾会被当成"分析完成"）；由监控器首次成功
+            # 轮询后收敛。重复恢复（监控退出后再 GET）幂等不重复追加。
+            append_recovery_step(session, session.get("active_run") or {})
             if redmine_active:
                 from features.assistant.redmine_analysis import monitor_redmine_run
 
@@ -599,4 +594,6 @@ async def cancel_agent_session(session_id: str, request: Request):
 @router.get("/api/agent/capabilities")
 async def get_agent_capabilities():
     """List supported Agent capabilities with full tool catalog."""
-    return success_response(capabilities_payload(kkagent_bridge_availability()))
+    from features.assistant.kkagent_bridge import availability_snapshot
+
+    return success_response(capabilities_payload(availability_snapshot()))

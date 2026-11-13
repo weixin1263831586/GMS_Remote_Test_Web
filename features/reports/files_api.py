@@ -152,6 +152,8 @@ async def list_reports(
     report_timestamp: str = "",
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
     cursor: str = "",
+    test_type: str = "",
+    status: str = "",
 ):
     """Get test report list from database."""
     import time
@@ -212,6 +214,8 @@ async def list_reports(
                 automation_run_id=automation_run_id or None,
                 before_created_at=before_created_at or None,
                 before_report_id=before_report_id or None,
+                test_type=test_type.strip().upper() or None,
+                status=status.strip() or None,
             )
         accessible = (
             candidate_reports
@@ -230,6 +234,9 @@ async def list_reports(
         all_reports = [report for report in all_reports if (
             not worker_id or str(report.get("worker_id") or "") == worker_id
         )]
+        all_reports = [report for report in all_reports
+                       if (not test_type or str(report.get("test_type") or "").upper() == test_type.strip().upper())
+                       and (not status or report.get("status") == status.strip())]
         has_more = not report_timestamp and len(all_reports) > limit
         page = all_reports[:limit]
         next_cursor = _encode_report_cursor(page[-1]) if has_more and page else ""

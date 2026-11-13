@@ -699,6 +699,9 @@ async def cluster_suite_results(
     worker_id: str = Query(...),
     suite_path: str = Query(...),
     _user: CurrentUser | None = Depends(require_authenticated_user_when_auth_required),
+    metadata_only: bool = False,
+    test_type: str = "",
+    limit: int = Query(default=100, ge=1, le=100),
 ):
     from features.test_execution import (
         extract_project_from_result_fields,
@@ -708,6 +711,12 @@ async def cluster_suite_results(
     _require_agent_scope_when_agent(request, "suites.read")
     ensure_agent_worker_allowed(request, worker_id)
     _require_cluster_enabled(remote=worker_id != service().config.local_worker_id)
+    if metadata_only:
+        result = await _run_worker_command(worker_id, "suite_action", {
+            "action": "report_summaries", "suite_path": suite_path,
+            "test_type": test_type, "limit": limit,
+        }, timeout=100)
+        return {"success": True, **result, "worker_id": worker_id}
     result = await _run_worker_command(worker_id, "suite_action", {
         "action": "list_results", "suite_path": suite_path,
     }, timeout=100)

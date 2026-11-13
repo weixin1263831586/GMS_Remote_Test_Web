@@ -72,7 +72,12 @@ window.GmsDevicePresentation = (() => {
             external: ['danger', 'lock', '外部占用'], reserved: ['accent', 'clock', '已预留'],
             occupied: ['warning', 'lock', '已占用'], free: ['neutral', 'unlock', '未占用'],
         };
-        return stack(device.locked_by ? meta(device.locked_by) : '', badge(...states[occupancyState(device)]));
+        // 徽章在上、锁定人在下（与"主机 / Worker"列同款 ui-name 字号，
+        // 未占用时不渲染空行）。
+        const holder = device.locked_by
+            ? `<span class="ui-name inventory-host" title="${text(device.locked_by)}">${text(device.locked_by)}</span>`
+            : '';
+        return stack(badge(...states[occupancyState(device)]), holder);
     }
 
     function battery(device) {

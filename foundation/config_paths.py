@@ -109,6 +109,17 @@ def build_servers_path(project_root: Path | str) -> Path:
     return _prefer_existing(root / "local/build_servers.json", root / "build_servers.json")
 
 
+def sdk_user_sources_path(project_root: Path | str) -> Path:
+    """用户经「Agent 接入 → 添加SDK」注册的 SDK 源码源（ADR-0007 同类）。
+
+    属于配置/凭据（SSH 口令 Fernet 加密存储），canonical 在
+    ``configs/secrets/sdk_sources/user_sources.json``；与静态
+    ``configs/local/config.json`` 的 ``sdk_sources.providers`` 合并后进入
+    registry。删 ``data/`` 不得影响，因此不落 data_root。
+    """
+    return config_root(project_root) / "secrets" / "sdk_sources" / "user_sources.json"
+
+
 def default_suites_path(config: dict[str, str], ubuntu_user: str) -> str:
     """Resolve the GMS suite root: an explicit ``suites_path`` wins, else
     the suite is assumed under the configured Ubuntu user's home."""

@@ -10,7 +10,7 @@ from .display import (
     report_name_from_result_dir,
     tradefed_result_folder_name,
 )
-from .repository import test_report_db
+from .repository import TestReportDB, test_report_db
 from .service import TestReportManager, test_report_manager
 from .xml_parser import XMLReportParser
 
@@ -20,6 +20,7 @@ __all__ = [
     "ReportAnalysisAgent",
     "ReportAnalyzer",
     "ReportDiagnosisRequest",
+    "TestReportDB",
     "TestReportManager",
     "XMLReportParser",
     "can_access_report",

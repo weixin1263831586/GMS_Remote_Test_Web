@@ -5,20 +5,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GMS Remote Test - 系统架构</title>
   <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
+  <link rel="stylesheet" href="/static/css/architecture-layers.css?v=20261113-layers">
   <style>
     :root { color-scheme: dark; --bg:var(--dark-bg); --panel:var(--card-bg); --line:var(--border-color); --text:var(--text-primary); --muted:var(--text-secondary); --blue:var(--primary-color); --green:var(--success-color); --amber:var(--warning-color); --violet:var(--primary-light); }
     * { box-sizing: border-box; }
-    body { margin: 0; padding: 24px; background: var(--page-background); color: var(--text); font-family: "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace; }
-    main { margin: 0 auto; }
-    h1 { margin: 0; font-size: 28px; }
-    .lead { color: var(--muted); line-height: 1.7; margin: 8px 0 18px; }
-    .arch-tabs { display: flex; align-items: center; gap: 0; margin: 0 0 18px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--darker-bg) 60%, transparent); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+    body { margin: 0; background: var(--page-background); color: var(--text); font-family: "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace; }
+    /* Tab 行适配公共模板（Redmine/Gerrit/设备串口/主机集群）：
+       sticky 44px 头部、≥112px×44px 页签、13px/600 字号、2px 底部指示条。
+       min-width:0 + max-width:100% 让 flex 项可收缩，窄视口时页签行内部
+       横向滚动，文档总宽不超视口。 */
+    .arch-header { position: sticky; top: 0; z-index: 1000; display: flex; align-items: center; min-height: 44px; padding: 0 16px; background: var(--panel); box-shadow: 0 8px 18px rgba(0, 0, 0, .22); }
+    main { margin: 0 auto; padding: 16px; }
+    .lead { color: var(--muted); line-height: 1.7; margin: 0 0 14px; font-size: 13px; }
+    .arch-tabs { display: flex; align-items: stretch; gap: 0; height: 44px; flex: 1 1 auto; min-width: 0; max-width: 100%; background: var(--panel); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
     .arch-tabs::-webkit-scrollbar { display: none; }
-    .arch-tab { flex: 0 0 auto; padding: 11px 20px; border: 0; border-right: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
-    .arch-tab:last-child { border-right: 0; }
+    .arch-tab { position: relative; flex: 0 0 auto; min-width: 112px; height: 44px; padding: 0 12px; border: 0; border-radius: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: color .2s; white-space: nowrap; }
     .arch-tab:hover { color: var(--text); }
-    .arch-tab:focus-visible { outline: 0; background: color-mix(in srgb, var(--primary-color) 12%, transparent); }
-    .arch-tab.active { color: var(--blue); background: color-mix(in srgb, var(--primary-color) 10%, transparent); box-shadow: inset 0 -2px 0 var(--blue); }
+    .arch-tab:focus-visible { outline: 0; background: color-mix(in srgb, var(--blue) 12%, transparent); }
+    .arch-tab.active { color: var(--blue); }
+    .arch-tab.active::after { content: ''; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--blue); }
     .arch-pane { min-width: 0; }
     section { margin: 18px 0; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(145deg, color-mix(in srgb, var(--card-bg) 98%, transparent), color-mix(in srgb, var(--card-bg) 78%, transparent)); }
     h2 { margin: 0 0 16px; font-size: 18px; color: var(--blue); }
@@ -34,31 +39,83 @@
     .card p, .card li { color: var(--muted); font-size: 12px; line-height: 1.6; }
     .card ul { margin: 0; padding-left: 18px; }
     .topology { overflow-x: auto; }
-    .topology svg { display: block; width: 100%; min-width: 850px; }
+    .topology svg {
+      display: block; width: 100%; min-width: 920px;
+      font-family: "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    }
     .note { margin-top: 14px; padding: 12px; border-left: 3px solid var(--amber); color: var(--muted); background: rgba(251, 191, 36, .06); font-size: 12px; line-height: 1.6; }
     code { color: var(--green); }
     @media (max-width: 980px) {
       .roles, .workers, .sources { grid-template-columns: 1fr 1fr; }
     }
     @media (max-width: 620px) {
-      body { padding: 12px; }
+      main { padding: 12px; }
       .roles, .workers, .sources { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
-<main>
-  <h1>GMS Remote Test 系统架构</h1>
-  <p class="lead">Controller 统一认证和调度；Worker 主动轮询命令并回报状态；Agent Runtime 通过独立 Service Token 使用受控能力。切换下方视图查看平台总览、USB/IP 接入、AOA 恢复与固件烧写数据面。</p>
-
+<header class="arch-header">
   <nav class="arch-tabs" role="tablist" aria-label="架构视图切换">
     <button type="button" role="tab" class="arch-tab active" id="arch-tab-platform" data-arch="platform" aria-selected="true" aria-controls="arch-pane-platform">平台总览</button>
     <button type="button" role="tab" class="arch-tab" id="arch-tab-usbip" data-arch="usbip" aria-selected="false" aria-controls="arch-pane-usbip" tabindex="-1">USB/IP 接入</button>
     <button type="button" role="tab" class="arch-tab" id="arch-tab-aoa" data-arch="aoa" aria-selected="false" aria-controls="arch-pane-aoa" tabindex="-1">AOA 恢复与回放</button>
     <button type="button" role="tab" class="arch-tab" id="arch-tab-firmware" data-arch="firmware" aria-selected="false" aria-controls="arch-pane-firmware" tabindex="-1">固件烧写</button>
   </nav>
+</header>
+<main>
+  <p class="lead">Controller 统一认证和调度；Worker 主动轮询命令并回报状态；Agent Runtime 通过独立 Service Token 使用受控能力。切换上方视图查看平台总览、USB/IP 接入、AOA 恢复与固件烧写数据面。</p>
 
   <div class="arch-pane" id="arch-pane-platform" role="tabpanel" data-arch-pane="platform" aria-labelledby="arch-tab-platform">
+    <section class="layers-section" aria-labelledby="layers-heading">
+      <h2 id="layers-heading">系统分层架构</h2>
+      <p class="layers-intro">从用户入口到设备执行，按职责查看平台能力与结果归属。</p>
+      <figure class="architecture-layers" aria-labelledby="layers-heading" aria-describedby="layers-caption">
+        <div class="arch-layer arch-layer--access" role="group" aria-label="接入与规划层">
+          <div class="arch-layer-label"><strong>接入与规划</strong><span>ACCESS</span><small>用户与 Agent</small></div>
+          <div class="arch-layer-content">
+            <article class="arch-layer-item"><h3>Web 工作台</h3><p>设备管理、测试执行、实时日志、报告分析与 ATS 工作流。</p></article>
+            <article class="arch-layer-item"><h3>对话 Agent</h3><p>kkagent 理解目标、规划工具调用并提供诊断建议。</p></article>
+            <article class="arch-layer-item"><h3>外部 Agent Runtime</h3><p>Codex / Kimi / kkagent 通过 CLI / MCP 使用平台能力。</p></article>
+          </div>
+        </div>
+        <div class="arch-layer-bridge"><span>↓ HTTPS / WebSocket</span><span>Session / Service Token · <strong>Controller 校验权限</strong></span></div>
+        <div class="arch-layer arch-layer--controller" role="group" aria-label="Controller 控制与编排层">
+          <div class="arch-layer-label"><strong>控制与编排</strong><span>CONTROLLER</span><small>FastAPI 服务</small></div>
+          <div class="arch-layer-content">
+            <article class="arch-layer-item"><h3>认证与权限</h3><p>账号会话、Token、scope / ACL，以及受控操作审批。</p></article>
+            <article class="arch-layer-item"><h3>任务与设备调度</h3><p>ATS 编排、Cluster Job、类型化命令队列、设备 Claim / Lease。</p></article>
+            <article class="arch-layer-item"><h3>报告与证据分析</h3><p>登记报告索引、工单取证、APK / SDK 分析与知识检索。</p></article>
+            <article class="arch-layer-item"><h3>状态与审计</h3><p>SQLite 状态、执行回执、Artifact 引用与操作审计。</p></article>
+          </div>
+        </div>
+        <div class="arch-layer-bridge"><span>↑ Worker 发起注册 / Heartbeat / Poll / ACK</span><span>↓ <strong>命令随 Poll 响应返回</strong> · Worker Token / session / generation</span></div>
+        <div class="arch-layer arch-layer--worker" role="group" aria-label="Worker 执行与原始结果层">
+          <div class="arch-layer-label"><strong>执行与结果</strong><span>WORKER</span><small>Linux 测试主机</small></div>
+          <div class="arch-layer-content">
+            <article class="arch-layer-item"><h3>测试执行</h3><p>CTS / GTS / VTS / STS 套件，通过 Tradefed 执行任务。</p></article>
+            <article class="arch-layer-item"><h3>设备操作</h3><p>ADB / Fastboot、upgrade_tool 烧写、AOA 恢复与回放。</p></article>
+            <article class="arch-layer-item"><h3>原生结果与日志</h3><p>套件 results / logs 目录、XML / HTML 结果及执行日志。</p></article>
+            <article class="arch-layer-item"><h3>资源探测与回报</h3><p>设备与套件清单、执行状态、日志和 Artifact 回报。</p></article>
+          </div>
+        </div>
+        <div class="arch-layer-bridge"><span>↓ 本地 USB / USB/IP · ADB / Fastboot / AOA</span><span>按设备归属与来源能力执行</span></div>
+        <div class="arch-layer arch-layer--resources" role="group" aria-label="设备与接入资源层">
+          <div class="arch-layer-label"><strong>设备与接入</strong><span>RESOURCES</span><small>物理资源</small></div>
+          <div class="arch-layer-content">
+            <article class="arch-layer-item"><h3>Android 设备</h3><p>手机、平板与 TV；可直接连接 Worker，或通过 USB/IP 导入。</p></article>
+            <article class="arch-layer-item"><h3>USB Source 主机</h3><p>Windows / Linux 提供 USB/IP 接入；来源侧烧写能力见固件烧写视图。</p></article>
+          </div>
+        </div>
+        <div class="arch-integrations" role="group" aria-label="外部集成与构建资源">
+          <article class="arch-integration"><h3>工单与代码平台</h3><p>Redmine · Gerrit · OpenGrok，提供工单、评审与源码检索。</p></article>
+          <article class="arch-integration"><h3>模型与知识服务</h3><p>按配置接入模型服务与知识源，为规划、取证和诊断提供支持。</p></article>
+          <article class="arch-integration"><h3>构建主机 · {{BUILD_SERVER_LABEL}}</h3><p>Controller 经受审计 SSH 执行器调用受控构建模板。</p></article>
+        </div>
+        <figcaption id="layers-caption"><strong>报告入口按来源区分：</strong>Worker 的原生结果从“测试套件”浏览器访问；Controller 已登记的报告从“报告管理”访问。<br>Agent 提供规划与分析，Controller 校验和调度，Worker 按命令执行并回报。</figcaption>
+      </figure>
+    </section>
+
     <section aria-labelledby="topology-heading">
       <h2 id="topology-heading">平台拓扑</h2>
       <div class="topology">{{PLATFORM_TOPOLOGY}}</div>

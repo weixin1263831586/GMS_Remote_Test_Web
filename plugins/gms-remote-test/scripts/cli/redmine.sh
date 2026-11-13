@@ -219,7 +219,12 @@ gms-rt-redmine-attachment-download() {
     check_jq
     if [ -z "$output" ]; then
         [[ "$artifact_id" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || { error "Invalid artifact ID for default filename"; return "$GMS_RT_EXIT_USAGE"; }
-        output="gms-evidence-$artifact_id.bin"
+        # 默认落受控目录（与 profile token 同级的 state 目录）：落盘后
+        # grep/rg/jq 全文检索，不再逐窗口翻读。默认文件名用 art_* ID，
+        # 需要原始文件名时显式传 output_path。
+        local output_dir="${GMS_EVIDENCE_DOWNLOAD_DIR:-${HOME:-/tmp}/.local/state/gms-remote-test/artifacts}"
+        output="$output_dir/$artifact_id.bin"
+        mkdir -p -- "$output_dir" || { error "Cannot create download directory: $output_dir"; return "$GMS_RT_EXIT_OPERATION"; }
     fi
     [ ! -e "$output" ] && [ ! -L "$output" ] || { error "Output already exists: $output"; return "$GMS_RT_EXIT_CONFLICT"; }
     local curl_status status_file tmp_output
@@ -446,6 +451,8 @@ gms-rt-artifact-read() {
             --offset)
                 shift
                 [ $# -gt 0 ] || { error "--offset requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                # 允许负数：负 offset 从尾部计数（-1 = 最后一个字符起），
+                # 服务器端流式扫描一次后返回精确 total_chars。
                 offset="$1"
                 ;;
             --limit)
@@ -457,13 +464,31 @@ gms-rt-artifact-read() {
         esac
         shift
     done
-    [ -z "$artifact_id" ] && { error "Artifact ID required. Usage: gms-rt-artifact-read <artifact_id> [--offset N] [--limit N]"; return "$GMS_RT_EXIT_USAGE"; }
+    [ -z "$artifact_id" ] && { error "Artifact ID required. Usage: gms-rt-artifact-read <artifact_id> [--offset N|-N] [--limit N]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
         api_call "/redmine-agent/artifacts/$(_urlencode "$artifact_id")/text?offset=$offset&limit=$limit" "GET" | jq '.'
         return $?
     fi
-    api_call "/redmine-agent/artifacts/$(_urlencode "$artifact_id")/text?offset=$offset&limit=$limit" "GET" | jq -r '.data | "chars \(.offset)+\(.returned_chars)/\(.total_chars)\(if .truncated then " (truncated; use --offset)" else "" end)\n\n\(.text)"'
+    api_call "/redmine-agent/artifacts/$(_urlencode "$artifact_id")/text?offset=$offset&limit=$limit" "GET" | jq -r '.data |
+        "chars \(.offset)+\(.returned_chars)/\(.total_chars)\(if .truncated then " (truncated; use --offset)" else "" end)" +
+        (if .zip_member then "  member: \(.zip_member) member@\(member_char_index) global[\(.member_char_range[0]),\(.member_char_range[1]))" else "" end) +
+        "\n\n\(.text)"'
+}
+
+gms-rt-redmine-artifact-failures() {
+    local artifact_id="$1"
+    [ -z "$artifact_id" ] && { error "Artifact ID required. Usage: gms-rt-redmine-artifact-failures <artifact_id>"; return "$GMS_RT_EXIT_USAGE"; }
+    check_jq
+    local url="/redmine-agent/artifacts/$(_urlencode "$artifact_id")/failures"
+    if [ "$GMS_RT_OUTPUT" = "json" ]; then
+        api_call "$url" "GET" | jq '.'
+        return $?
+    fi
+    api_call "$url" "GET" | jq -r '.data |
+        "parser: \(.parser // "-")  failures: \(.total // 0)",
+        (if .note then "  note: \(.note)" else empty end),
+        (.failures[] | "[\(.module)] \(.test)  (\(.result))\n  \(.first_stack_line // "-")\n  src: \(.source)")'
 }
 
 gms-rt-redmine-artifact-image() {
@@ -479,6 +504,10 @@ gms-rt-artifact-search() {
     local query=""
     local limit=50
     local offset=0
+    local artifact_filter=""
+    local member_filter=""
+    local context=""
+    local collapse=0
     local positional=()
     # 契约：<snapshot_id> --query QUERY；同时兼容两个位置参数。
     while [ "$#" -gt 0 ]; do
@@ -498,6 +527,22 @@ gms-rt-artifact-search() {
                 [ $# -gt 0 ] || { error "--limit requires a value"; return "$GMS_RT_EXIT_USAGE"; }
                 limit="$1"
                 ;;
+            --artifact)
+                shift
+                [ $# -gt 0 ] || { error "--artifact requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                artifact_filter="$1"
+                ;;
+            --member)
+                shift
+                [ $# -gt 0 ] || { error "--member requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                member_filter="$1"
+                ;;
+            --context)
+                shift
+                [ $# -gt 0 ] || { error "--context requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                context="$1"
+                ;;
+            --collapse) collapse=1 ;;
             *) positional+=("$1") ;;
         esac
         shift
@@ -508,23 +553,35 @@ gms-rt-artifact-search() {
     if [ -z "$query" ] && [ "${#positional[@]}" -ge 2 ]; then
         query="${positional[1]}"
     fi
-    [ -z "$snapshot_id" ] || [ -z "$query" ] && { error "Usage: gms-rt-artifact-search <snapshot_id> <query|--query QUERY> [--limit N] [--offset N]"; return "$GMS_RT_EXIT_USAGE"; }
+    [ -z "$snapshot_id" ] || [ -z "$query" ] && { error "Usage: gms-rt-artifact-search <snapshot_id> <query|--query QUERY> [--limit N] [--offset N] [--artifact ID|NAME] [--member NAME] [--context N] [--collapse]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
     local url="/redmine-agent/evidence/$(_urlencode "$snapshot_id")/search?q=$(_urlencode "$query")&limit=$limit&offset=$(_urlencode "$offset")"
+    [ -n "$artifact_filter" ] && url="$url&artifact=$(_urlencode "$artifact_filter")"
+    [ -n "$member_filter" ] && url="$url&member=$(_urlencode "$member_filter")"
+    [ -n "$context" ] && url="$url&context=$(_urlencode "$context")"
+    [ "$collapse" = "1" ] && url="$url&collapse=true"
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
         api_call "$url" "GET" | jq '.'
         return $?
     fi
-    api_call "$url" "GET" | jq -r '.data | "query: \(.query) matches: \(.total)\(if .limited then " (limited)" else "" end)", (.matches[] | "[\(.kind)\(.journal_id // .artifact_id // "")] \(.snippet)")'
+    api_call "$url" "GET" | jq -r '.data |
+        "query: \(.query) matches: \(.total) occurrences: \(.total_occurrences)\(if .limited then " (limited)" else "" end)",
+        (if (.artifact_hits | length) > 1 then "  hits by artifact:", (.artifact_hits[] | "    [\(.artifact_id)] \(.filename): \(.hits)") else empty end),
+        (.matches[] | "[\(.kind)\(.journal_id // .artifact_id // "")]\(if .zip_member then "!\(.zip_member) member@\(member_char_index // .char_index)" else "" end) \(if .line then "L\(.line) " else "" end)\(.snippet)")'
 }
 
 gms-rt-artifact-search-batch() {
     # 多关键词单遍搜索：一次请求完成全部关键词匹配，
     # 避免逐词搜索对同一批大日志的重复扫描。用法：
     #   gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N] [--per-query-offset N]
+    #                                 [--artifact ID|NAME] [--member NAME] [--context N] [--collapse]
     local snapshot_id=""
     local per_query_limit=20
     local per_query_offset=0
+    local artifact_filter=""
+    local member_filter=""
+    local context=""
+    local collapse=0
     local queries=()
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -538,13 +595,29 @@ gms-rt-artifact-search-batch() {
                 [ $# -gt 0 ] || { error "--per-query-limit requires a value"; return "$GMS_RT_EXIT_USAGE"; }
                 per_query_limit="$1"
                 ;;
+            --artifact)
+                shift
+                [ $# -gt 0 ] || { error "--artifact requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                artifact_filter="$1"
+                ;;
+            --member)
+                shift
+                [ $# -gt 0 ] || { error "--member requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                member_filter="$1"
+                ;;
+            --context)
+                shift
+                [ $# -gt 0 ] || { error "--context requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                context="$1"
+                ;;
+            --collapse) collapse=1 ;;
             *) queries+=("$1") ;;
         esac
         shift
     done
     snapshot_id="${queries[0]:-}"
     if [ -z "$snapshot_id" ] || [ "${#queries[@]}" -lt 2 ]; then
-        error "Usage: gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N] [--per-query-offset N]"
+        error "Usage: gms-rt-artifact-search-batch <snapshot_id> <query...> [--per-query-limit N] [--per-query-offset N] [--artifact ID|NAME] [--member NAME] [--context N] [--collapse]"
         return "$GMS_RT_EXIT_USAGE"
     fi
     local -a word_queries=("${queries[@]:1}")
@@ -552,14 +625,19 @@ gms-rt-artifact-search-batch() {
     local body
     body=$(printf '%s\n' "${word_queries[@]}" \
         | jq -Rn --argjson lim "$per_query_limit" --argjson off "$per_query_offset" \
-        '{queries: ([inputs | ltrimstr(" ") | rtrimstr(" ")]), per_query_limit: $lim, per_query_offset: $off}')
+              --arg artifact "$artifact_filter" --arg member "$member_filter" \
+              --argjson context "${context:-200}" --argjson collapse "$collapse" \
+        '{queries: ([inputs | ltrimstr(" ") | rtrimstr(" ")]), per_query_limit: $lim, per_query_offset: $off}
+         | (. + {artifact: $artifact, member: $member, context: $context, collapse: $collapse})
+         | with_entries(select((((.key == "artifact") or (.key == "member")) | not) or (.value != "")))')
     local url="/redmine-agent/evidence/$(_urlencode "$snapshot_id")/search/batch"
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
         api_call "$url" "POST" "$body" | jq '.'
         return $?
     fi
     api_call "$url" "POST" "$body" | jq -r '
-        .data | "coverage: \(if .coverage_complete then "complete" else "PARTIAL — zero hits are not negative evidence" end) matches: \(.total_matches)",
+        .data | "coverage: \(if .coverage_complete then "complete" else "PARTIAL — zero hits are not negative evidence" end) matches: \(.total_matches) occurrences: \(.total_occurrences // "-")",
+        (if ((.artifact_hits // []) | length) > 1 then "  hits by artifact:", (.artifact_hits[] | "    [\(.artifact_id)] \(.filename): \(.hits)") else empty end),
         (.queries[] | "## \(.query): \(.total)\(if .truncated then " (truncated)" else "" end)",
          (.matches[] | "  [\(.kind)]\(.zip_member // "")\(if .line then ":L\(.line)" else "" end) \(.snippet | gsub("\n"; " ") | .[0:200])"))
     '
@@ -636,7 +714,8 @@ gms-rt-sdk-search() {
     while [ "$#" -gt 0 ]; do
         case "$1" in
             -h|--help)
-                echo "Usage: gms-rt-sdk-search --source ID --revision REV --query TEXT [--path FILTER] [--limit N]"
+                echo "Usage: gms-rt-sdk-search --source ID [--revision REV] --query TEXT [--path FILTER] [--limit N]"
+                echo "  Omitting --revision resolves the source's default_revision automatically."
                 return 0
                 ;;
             --source) shift; [ $# -gt 0 ] || { error "--source requires a value"; return "$GMS_RT_EXIT_USAGE"; }; source="$1" ;;
@@ -648,8 +727,26 @@ gms-rt-sdk-search() {
         esac
         shift
     done
-    [ -z "$source" ] || [ -z "$revision" ] || [ -z "$query" ] && { error "Usage: gms-rt-sdk-search --source ID --revision REV --query TEXT"; return "$GMS_RT_EXIT_USAGE"; }
+    [ -z "$source" ] || [ -z "$query" ] && { error "Usage: gms-rt-sdk-search --source ID [--revision REV] --query TEXT"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
+    # revision 缺省时自动解析该 source 的 default_revision；未知 source
+    # 直接列出可用 source，省一次 gms-rt-sdk-sources 往返。
+    if [ -z "$revision" ]; then
+        local sources_response resolved_revision
+        sources_response=$(api_call "/sdk/sources" "GET")
+        if [ $? -ne 0 ]; then
+            error "sdk-search requires --revision, and default_revision lookup failed: $(extract_api_error "$sources_response")"
+            return "$GMS_RT_EXIT_NETWORK"
+        fi
+        resolved_revision=$(echo "$sources_response" | jq -r --arg src "$source" \
+            '[.data.sources[] | select(.source_id == $src)][0].default_revision // ""')
+        if [ -z "$resolved_revision" ]; then
+            error "Source '$source' not found (or has no default_revision); pass --revision explicitly."
+            error "Available sources: $(echo "$sources_response" | jq -r '[.data.sources[] | .source_id] | join(", ")')"
+            return "$GMS_RT_EXIT_USAGE"
+        fi
+        revision="$resolved_revision"
+    fi
     local url="/sdk/search?source=$(_urlencode "$source")&revision=$(_urlencode "$revision")&query=$(_urlencode "$query")&limit=$limit"
     [ -n "$path_filter" ] && url="$url&path_filter=$(_urlencode "$path_filter")"
     if [ "$GMS_RT_OUTPUT" = "json" ]; then

@@ -38,6 +38,12 @@ flowchart TB
 
 ## 四个主要角色
 
+Web「系统架构 → 平台总览」顶部的分层功能图按接入与规划、Controller
+控制与编排、Worker 执行与结果、设备与接入资源展示职责。外部集成和构建
+主机单独列示，具体部署关系与消息方向以总体拓扑为准。Worker 原生结果位于
+套件 `results` / `logs`，从测试套件浏览器访问；已登记报告由 Controller
+索引，从报告管理访问。
+
 1. **Controller**：FastAPI 应用（入口 `app.py`）。负责 Web UI、认证、权限、任务调度、配置、报告、集群状态和外部系统集成。
 2. **Worker Agent**（`worker_agent/`）：运行在实际执行 GMS 测试的 Linux 主机上，负责 ADB、Fastboot、Tradefed、USB/IP Client、本地资源探测与任务执行。
 3. **Device Source**：Android 设备物理 USB 所在主机。直接 USB/IP 来源工作流当前主要支持 Windows + `usbipd-win`（Ubuntu 来源支持设备共享、分配与重连）。

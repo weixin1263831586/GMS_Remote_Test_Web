@@ -424,3 +424,27 @@ async def test_model_corrects_extra_redmine_parameters_before_dispatch(environme
     assert submit.await_args.args == (req, reference, "incremental", "检查日志末尾")
     assert not any(step["status"] == "warning" for step in current["steps"])
     await asyncio.wait_for(session_registry._agent_monitor_tasks[current["session_id"]], 2)
+
+
+@pytest.mark.asyncio
+async def test_recovery_step_stays_running_until_first_successful_poll(environment):
+    """Controller 重启恢复（20261113154337 截图）：恢复步骤不能立即显示
+    绿勾假完成——保持 running，监控器首次成功轮询到后台真实状态后才
+    收敛；后续重复恢复（监控退出后再 GET）幂等不追加重复步骤。"""
+    from features.assistant.session_log import append_recovery_step
+
+    _submit, _read = environment
+    current, req = session(), request()
+    outcome = await analysis.start_analysis(current, req, {"issue_ref": "661332"})
+    assert outcome.success
+    active = current["active_run"]
+    # 模拟 api.get_agent_session 恢复路径：running 状态 + 幂等。
+    append_recovery_step(current, active)
+    recovery = [s for s in current["steps"] if s["title"] == "会话已恢复"]
+    assert len(recovery) == 1 and recovery[0]["status"] == "running"
+    append_recovery_step(current, active)
+    assert len([s for s in current["steps"] if s["title"] == "会话已恢复"]) == 1
+    # 监控器首次成功轮询后收敛恢复步骤。
+    await asyncio.wait_for(session_registry._agent_monitor_tasks[current["session_id"]], 2)
+    recovery = [s for s in current["steps"] if s["title"] == "会话已恢复"]
+    assert len(recovery) == 1 and recovery[0]["status"] == "done"

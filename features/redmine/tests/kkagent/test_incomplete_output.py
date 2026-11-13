@@ -7,6 +7,7 @@ from features.redmine.kkagent.analyzer import KkAgentRedmineAnalyzer, _StreamFal
 from features.redmine.kkagent.mcp_health import McpHealthProbe
 from features.redmine.kkagent.native_summary import native_summary_result
 from features.redmine.kkagent.trace import consume_event
+from features.redmine.tests.kkagent.review_support import review_trace
 from features.redmine.tests.kkagent.test_context_budget import OVERFLOW, config_home
 from features.redmine.tests.kkagent.test_native_summary import ENTRY, REPORT, complete_trace
 
@@ -50,13 +51,14 @@ def test_silent_last_round_is_repaired_in_the_same_session_without_repeating_evi
     stream = AsyncMock(side_effect=[
         (silent_last_round(), _StreamFallback(), False),
         (repaired, _StreamFallback(), False),
+        (review_trace(REPORT), _StreamFallback(), False),
     ])
     with patch.object(analyzer, "_run_stream", stream), health_probe():
         outcome = asyncio.run(analyzer.analyze(ENTRY))
     assert outcome.ok
     assert outcome.result["detailed_report"] == REPORT
     assert outcome.trace["last_round_output_tokens"] == 1500
-    assert stream.await_count == 2
+    assert stream.await_count == 3
     command = stream.await_args_list[1].args[0]
     assert command[command.index("--resume") + 1] == "same"
     assert "last round output: 4096 tokens" in command[-1]
@@ -87,11 +89,12 @@ def test_context_overflow_during_report_repair_reaches_context_recovery(tmp_path
         (silent_last_round(), _StreamFallback(), False),
         (overflow, raw, False),
         (complete_trace(), _StreamFallback(), False),
+        (review_trace(REPORT), _StreamFallback(), False),
     ])
     with patch.object(analyzer, "_run_stream", stream), health_probe():
         outcome = asyncio.run(analyzer.analyze(ENTRY))
     assert outcome.ok
-    assert stream.await_count == 3
+    assert stream.await_count == 4
     assert "--config" in stream.await_args_list[2].args[0]
     assert stream.await_args_list[2].args[0][-1].count("DIAGNOSTIC REASONING REQUIREMENTS") == 0
 

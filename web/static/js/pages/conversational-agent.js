@@ -777,6 +777,13 @@ function openAgentPageAction(page, paramsJson = '{}') {
     } catch (_) {
         params = {};
     }
+    if (page === 'test-suites' && params.worker_id && params.suite_path) {
+        const query = new URLSearchParams({worker_id: params.worker_id,
+            suite_path: params.suite_path, path: params.path || ''});
+        window.history.replaceState(null, '', '#test-suites?' + query.toString());
+        switchPage(page, null);
+        return;
+    }
     if (page === 'redmine-agent') {
         const frame = document.getElementById('redmine-agent-frame');
         const query = new URLSearchParams();

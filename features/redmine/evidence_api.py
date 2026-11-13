@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import base64
 import codecs
+import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -490,6 +492,10 @@ async def download_evidence_artifact(artifact_id: str, request: Request):
 # 整个（可能数百 MB 的）日志一次性读进内存再切片。
 _TEXT_WINDOW_CHUNK_BYTES = 256 * 1024
 
+# zip 索引 sidecar 里最多返回的成员条目：防止成员数巨大的归档把
+# 每次窗口读取的响应撑爆。超出时用 member_count/truncated_members 标注。
+_ZIP_INDEX_MAX_MEMBERS = 200
+
 
 def _stream_text_window(path, offset: int, limit: int, encoding: str, errors: str):
     """流式解码计数到 offset 再收集 limit 个字符，随后停止读取。
@@ -536,14 +542,247 @@ def _stream_text_window(path, offset: int, limit: int, encoding: str, errors: st
     return window, total_chars if scanned_complete else -1
 
 
+def _stream_tail_window(path, negative_offset: int, limit: int, encoding: str, errors: str):
+    """负 offset（从尾部计数）窗口：流式解码整个文件，只保留末尾。
+
+    ``offset=-N`` 表示从最后一个字符向前数 N。读取方由此可以"看日志
+    末尾"而无需先知道总长度。deque 只保留 ``-offset + limit`` 个字符，
+    内存占用与窗口大小成正比，与文件大小无关；total_chars 始终精确。
+    """
+    from collections import deque
+
+    keep = deque(maxlen=max(1, -negative_offset + limit))
+    decoder = codecs.getincrementaldecoder(encoding)(errors)
+    total_chars = 0
+    with path.open("rb") as fh:
+        while True:
+            raw = fh.read(_TEXT_WINDOW_CHUNK_BYTES)
+            if not raw:
+                tail = decoder.decode(b"", True)
+                if tail:
+                    total_chars += len(tail)
+                    keep.append(tail)
+                break
+            text = decoder.decode(raw)
+            total_chars += len(text)
+            if text:
+                keep.append(text)
+    joined = "".join(keep)
+    kept_base = total_chars - len(joined)
+    start = max(0, total_chars + negative_offset)
+    rel = max(0, start - kept_base)
+    return joined[rel:rel + limit], total_chars
+
+
+def _zip_index_for(path: Path) -> dict[str, Any] | None:
+    """读取派生文本旁的 zip 索引 sidecar（旧文件没有则返回 None）。"""
+    sidecar = path.parent / f"{path.name}.idx.json"
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        return None
+    members = payload.get("members") or []
+    if not isinstance(members, list):
+        return None
+    trimmed = []
+    for member in members[:_ZIP_INDEX_MAX_MEMBERS]:
+        if not isinstance(member, dict):
+            continue
+        trimmed.append({
+            "name": str(member.get("name") or ""),
+            "start": int(member.get("start") or 0),
+            "length": int(member.get("length") or 0),
+        })
+    return {
+        "total_chars": int(payload.get("total_chars") or 0),
+        "member_count": len(members),
+        "truncated_members": len(members) > _ZIP_INDEX_MAX_MEMBERS,
+        "members": trimmed,
+    }
+
+
+# ------------------------------------------------------------------
+# 失败用例表（test_result.xml / 汇总 HTML → 结构化行）
+# ------------------------------------------------------------------
+
+_FAILURES_MAX_ROWS = 50
+_FAILURES_MAX_MESSAGE_CHARS = 800
+
+
+def _failure_first_stack(reason: str) -> str:
+    """取失败信息里的第一行"栈"：优先异常/断言行，否则首行非空文本。"""
+    for line in str(reason or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if any(marker in stripped for marker in ("Exception", "Error", "at ", "Assertion")):
+            return stripped[:200]
+    return next((line.strip()[:200] for line in str(reason or "").splitlines() if line.strip()), "")
+
+
+def _failures_from_report_dict(result: dict[str, Any], source: str) -> list[dict[str, Any]]:
+    """ReportAnalyzer._report_to_dict 结构 → 失败用例行。"""
+    rows: list[dict[str, Any]] = []
+    for item in (result.get("failures") or [])[:_FAILURES_MAX_ROWS]:
+        if not isinstance(item, dict):
+            continue
+        reason = str(item.get("reason") or item.get("error_message") or "")
+        rows.append({
+            "module": str(item.get("module") or ""),
+            "test": str(item.get("name") or item.get("test_name") or ""),
+            "result": "fail",
+            "failure_message": reason[:_FAILURES_MAX_MESSAGE_CHARS],
+            "first_stack_line": _failure_first_stack(reason),
+            "source": source,
+        })
+    return rows
+
+
+def _failures_from_test_result_xml(text: str, source: str) -> list[dict[str, Any]]:
+    """直接解析 test_result.xml（部分附件未走 ReportAnalyzer 管线）。"""
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return []
+    rows: list[dict[str, Any]] = []
+
+    def _visit(node, module_hint=""):
+        module = node.get("name") if node.tag in {"Module", "TestModule"} else module_hint
+        if node.tag in {"Test", "TestCase"}:
+            result = str(node.get("result") or "").lower()
+            if result in {"fail", "failed", "error", "assumption_failure"}:
+                message = ""
+                for child in node:
+                    if child.tag in {"Failure", "Error", "StackTrace"}:
+                        message = "".join(child.itertext())
+                        break
+                rows.append({
+                    "module": str(node.get("module") or module or module_hint),
+                    "test": str(node.get("name") or ""),
+                    "result": result,
+                    "failure_message": message.strip()[:_FAILURES_MAX_MESSAGE_CHARS],
+                    "first_stack_line": _failure_first_stack(message),
+                    "source": source,
+                })
+        for child in node:
+            _visit(child, module or module_hint)
+
+    _visit(root)
+    return rows[:_FAILURES_MAX_ROWS]
+
+
+def _failures_from_summary_html(text: str, source: str) -> list[dict[str, Any]]:
+    """从 STS/GTS 汇总 HTML 提取失败行：兼容 <table> 行与纯文本 grep。
+
+    ``</tr>`` 转换行、其余标签转空格：汇总 HTML 的失败表一行一个用例，
+    展平后保持 "module test FAIL" 同行，才能被行正则命中。
+    """
+    rows: list[dict[str, Any]] = []
+    text = re.sub(r"(?i)</tr\s*>", "\n", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    seen: set[tuple[str, str]] = set()
+    for line in text.splitlines():
+        stripped = re.sub(r"\s+", " ", line).strip()
+        if not stripped or len(stripped) < 8:
+            continue
+        match = re.match(
+            r"^(?P<module>[A-Za-z][\w.]*(?:Cts|Gts|Vts|Sts|CTS|GTS|VTS|STS)[\w.]*)\s+"
+            r"(?P<test>[\w#.\[\]]+)\s+(?P<result>FAIL(?:ED)?|ASSUMPTION_FAILURE)\b",
+            stripped,
+            re.IGNORECASE,
+        )
+        if not match:
+            continue
+        key = (match.group("module"), match.group("test"))
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({
+            "module": match.group("module"),
+            "test": match.group("test"),
+            "result": match.group("result").lower(),
+            "failure_message": stripped[:_FAILURES_MAX_MESSAGE_CHARS],
+            "first_stack_line": stripped[:200],
+            "source": source,
+        })
+        if len(rows) >= _FAILURES_MAX_ROWS:
+            break
+    return rows
+
+
+def _extract_failure_rows(artifact: dict[str, Any], path: Path) -> tuple[list[dict[str, Any]], str]:
+    """按 artifact 类型分派到对应解析器 →（失败行, 解析器名）。
+
+    解析器不可用或格式不匹配时返回空列表（上层给出可操作提示），
+    不抛错——失败表提取是提效路径，绝不能变成新的阻塞点。
+    """
+    name = str(artifact.get("filename") or "").lower()
+    if name.endswith(".xml"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        rows = _failures_from_test_result_xml(text, "test_result.xml")
+        if rows:
+            return rows, "xml-parser"
+    if name.endswith((".html", ".htm")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        rows = _failures_from_summary_html(text, artifact.get("filename"))
+        if rows:
+            return rows, "summary-html"
+        # HTML 里也可能内嵌 test_result XML 结构。
+        rows = _failures_from_test_result_xml(text, artifact.get("filename"))
+        if rows:
+            return rows, "embedded-xml"
+        return [], "summary-html"
+    if name.endswith(".zip") and "archive" in str(artifact.get("kind") or ""):
+        import zipfile
+
+        try:
+            with zipfile.ZipFile(path) as archive:
+                for info in archive.infolist():
+                    base = Path(info.filename).name.lower()
+                    if base == "test_result.xml":
+                        rows = _failures_from_test_result_xml(
+                            archive.read(info).decode("utf-8", errors="replace"),
+                            f"{artifact.get('filename')}!{info.filename}",
+                        )
+                        if rows:
+                            return rows, "zip-test_result.xml"
+                # 兜底：zip 内的汇总 HTML。
+                for info in archive.infolist():
+                    base = Path(info.filename).name.lower()
+                    if base.endswith((".html", ".htm")):
+                        rows = _failures_from_summary_html(
+                            archive.read(info).decode("utf-8", errors="replace"),
+                            f"{artifact.get('filename')}!{info.filename}",
+                        )
+                        if rows:
+                            return rows, "zip-summary-html"
+        except (zipfile.BadZipFile, OSError):
+            return [], "zip"
+        return [], "zip"
+    return [], "skip"
+
+
 @router.get("/artifacts/{artifact_id}/text")
 @handle_api_errors
 async def read_evidence_artifact_text(
     artifact_id: str,
     request: Request,
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0),
     limit: int = Query(65536, ge=1, le=262144),
 ):
+    """按字符窗口读取派生文本。
+
+    ``offset >= 0`` 为正向窗口；``offset < 0`` 从尾部计数（-1 = 最后一个
+    字符起），此时整个文件会被流式扫描一次以得到精确 total_chars——
+    这是显式选择的高成本操作。归档附件若带有派生时的 zip 索引 sidecar，
+    响应会附带 ``zip_index``（成员全局 char 区间）与当前窗口所在的
+    ``zip_member``/``member_char_index`` 注记，供 search 命中 → 续读
+    换算，不再需要手工推算偏移。
+    """
     require = require_agent_scope("artifacts.read_own")
     require(request)
     try:
@@ -561,21 +800,107 @@ async def read_evidence_artifact_text(
     # 日志读进内存，也不为统计 total_chars 读完整个文件——窗口填满即停止。
     # total_chars=-1 表示还有后续内容未计数；truncated 同步为窗口语义。
     try:
-        window, total_chars = _stream_text_window(path, offset, limit, "utf-8", "strict")
+        if offset >= 0:
+            window, total_chars = _stream_text_window(path, offset, limit, "utf-8", "strict")
+        else:
+            window, total_chars = _stream_tail_window(path, offset, limit, "utf-8", "strict")
     except UnicodeDecodeError:
-        window, total_chars = _stream_text_window(path, offset, limit, "gb18030", "replace")
-    return {
-        "success": True,
-        "data": {
-            "artifact_id": artifact.get("artifact_id"),
-            "total_chars": total_chars,
-            "total_bytes": size,
-            "offset": offset,
-            "returned_chars": len(window),
-            "text": window,
-            "truncated": len(window) == limit and total_chars != offset + limit,
-        },
+        if offset >= 0:
+            window, total_chars = _stream_text_window(path, offset, limit, "gb18030", "replace")
+        else:
+            window, total_chars = _stream_tail_window(path, offset, limit, "gb18030", "replace")
+    # zip 索引 sidecar：既补全 total_chars（正向窗口扫描提前停止时为 -1），
+    # 也把当前窗口映射回其所在的 zip 成员。
+    zip_index = _zip_index_for(path)
+    if zip_index and total_chars == -1:
+        total_chars = zip_index["total_chars"]
+    resolved_offset = offset if offset >= 0 else max(0, total_chars + offset)
+    data: dict[str, Any] = {
+        "artifact_id": artifact.get("artifact_id"),
+        "total_chars": total_chars,
+        "total_bytes": size,
+        "offset": resolved_offset,
+        "requested_offset": offset,
+        "returned_chars": len(window),
+        "text": window,
     }
+    if total_chars == -1:
+        data["truncated"] = len(window) == limit
+    else:
+        data["truncated"] = resolved_offset + len(window) < total_chars
+    if zip_index:
+        data["zip_index"] = zip_index
+        member = next(
+            (
+                m for m in zip_index["members"]
+                if m["start"] <= resolved_offset < m["start"] + m["length"]
+            ),
+            None,
+        )
+        if member is not None:
+            data["zip_member"] = member["name"]
+            data["member_char_index"] = resolved_offset - member["start"]
+            data["member_char_range"] = [member["start"], member["start"] + member["length"]]
+    return {"success": True, "data": data}
+
+
+@router.get("/artifacts/{artifact_id}/failures")
+@handle_api_errors
+async def extract_artifact_failures(artifact_id: str, request: Request):
+    """解析测试报告附件为结构化失败用例表（服务端一次，所有 agent 受益）。
+
+    支持 test_result.xml（含 zip 内成员）、STS/GTS 汇总 HTML、zip 内
+    兜底 HTML。每行给出 module/test/result/failure_message/首行栈/来源，
+    agent 不再需要多次窗口往返手工抠失败信息。
+    """
+    require = require_agent_scope("artifacts.read_own")
+    require(request)
+    try:
+        artifact, path = _artifact_file(_owner(request), artifact_id)
+    except EvidenceError as exc:
+        return _error_response(exc)
+    rows, parser = _extract_failure_rows(artifact, path)
+    if rows:
+        return {
+            "success": True,
+            "data": {
+                "artifact_id": artifact.get("artifact_id"),
+                "filename": artifact.get("filename"),
+                "parser": parser,
+                "total": len(rows),
+                "truncated": len(rows) >= _FAILURES_MAX_ROWS,
+                "failures": rows,
+            },
+        }
+    kind = str(artifact.get("kind") or "")
+    name = str(artifact.get("filename") or "").lower()
+    if parser == "skip":
+        return _error_response(EvidenceError(
+            "该附件不是测试报告（仅支持 .xml test_result、.html 汇总与 .zip 归档）；"
+            "文本类附件请直接 gms-rt-artifact-read 或下载后本地检索",
+            status_code=422,
+        ))
+    if parser in {"summary-html", "zip", "zip-test_result.xml", "zip-summary-html"} or "archive" in kind or name.endswith((".html", ".htm", ".xml")):
+        return {
+            "success": True,
+            "data": {
+                "artifact_id": artifact.get("artifact_id"),
+                "filename": artifact.get("filename"),
+                "parser": parser,
+                "total": 0,
+                "truncated": False,
+                "failures": [],
+                "note": (
+                    "未提取到结构化失败行：报告格式可能不匹配内置解析器。"
+                    "改用 gms-rt-artifact-search 检索 FAIL/stack 关键字，"
+                    "或 gms_rt_redmine_attachment_download 落盘后人工解析。"
+                ),
+            },
+        }
+    return _error_response(EvidenceError(
+        "该附件不是测试报告（仅支持 .xml test_result、.html 汇总与 .zip 归档）",
+        status_code=422,
+    ))
 
 
 @router.get("/artifacts/{artifact_id}/image")

@@ -22,6 +22,7 @@ from features.redmine.kkagent.analyzer import (
 )
 from features.redmine.kkagent.mcp_health import McpHealthProbe
 from features.redmine.kkagent.trace import KkAgentTrace, ToolTrace
+from features.redmine.tests.kkagent.review_support import review_trace
 from features.redmine.tests.kkagent.test_process import (
     _valid_result,
     _write_fake_kkagent,
@@ -337,8 +338,8 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        # v28: EVIDENCE SEARCH STRATEGY 注入批量搜索/覆盖语义。
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v28")
+        # v29 adds mandatory paragraph-level claim review before publication.
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v29")
 
     def test_diagnostic_prompt_has_no_journal_timeline_section(self):
         """处理时间线只是 Redmine journal 流水的复述，读者点开工单就有；
@@ -555,6 +556,8 @@ class RepairSecondRoundContractTests(unittest.TestCase):
 
         async def fake_stream(command, progress=None, on_started=None):
             calls.append(command)
+            if command[-1].startswith("Review the preceding analysis"):
+                return review_trace(ok_round.final_event["message"], session="s", refs=["EV-001"]), _StreamFallback(), False
             # 调用序:main(1)→repair#1(2)→repair#2(3)。main 与 repair#1
             # 返回无 `## ` 的叙事文本(不产出可用报告),迫使第二轮 repair
             # 触发并携带 STRICT OUTPUT REQUIREMENT;repair#2 返回完整报告。
@@ -636,7 +639,9 @@ class McpHealthPreflightTests(unittest.TestCase):
         ]
         with patch.object(
             analyzer, "_run_stream",
-            AsyncMock(return_value=(trace, _StreamFallback(), False)),
+            AsyncMock(side_effect=[(trace, _StreamFallback(), False),
+                                   (trace, _StreamFallback(), False),
+                                   (review_trace(trace.final_event["message"], session="s", refs=["EV-001"]), _StreamFallback(), False)]),
         ), patch(
             "features.redmine.kkagent.analyzer.probe_kkagent_mcp_health",
             AsyncMock(return_value=skipped),

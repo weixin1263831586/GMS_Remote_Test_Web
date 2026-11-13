@@ -39,6 +39,35 @@ def request(message="帮我处理项目任务", **kwargs):
 
 
 @pytest.mark.asyncio
+async def test_latest_gts_goal_sets_real_query_constraints_when_model_omits_them(model):
+    turn, execute = model
+    turn.side_effect = [decision("call", tool="reports_list", params={}),
+                        decision("answer", text="已查询当前 Worker 的 GTS 结果。")]
+    current = session()
+    assert await agent.handle_project_turn(current, object(), request("最新GTS测试报告"))
+    assert execute.await_args.args[2:] == ("reports_list", {
+        "worker_id": "worker-1", "test_type": "GTS", "latest": True, "limit": 1,
+    })
+
+
+@pytest.mark.asyncio
+async def test_final_answer_preserves_controller_bound_native_report_navigation(model):
+    turn, execute = model
+    actions = [{"label": "查看原生报告目录", "page": "test-suites", "params": {
+        "worker_id": "worker-1", "suite_path": "/suites/android-gts/tools", "path": "results/run-1",
+    }}]
+    execute.return_value = ToolResult(success=True, tool_name="reports_list", quick_actions=actions,
+                                     data={"reports": [{"registered": False, "access": {"report_management": False}}]})
+    turn.side_effect = [decision("call", tool="reports_list", params={}),
+                        decision("answer", text="已找到 GTS 原生结果，可通过下方按钮查看目录。")]
+    current = session()
+    assert await agent.handle_project_turn(current, object(), request("最新GTS测试报告"))
+    assert current["messages"][-1]["data"]["quick_actions"] == actions
+    assert "report_timestamp" not in current["messages"][-1]["data"]
+    assert "access.open_action" in turn.await_args_list[0].kwargs["context"]
+
+
+@pytest.mark.asyncio
 async def test_arbitrary_command_discovers_queries_and_answers_with_evidence(model):
     turn, execute = model
     turn.side_effect = [decision("discover", query="设备"), decision("describe", tools=["devices_list"]),

@@ -34,6 +34,8 @@ from features.kkagent import (
     consume_event as _engine_consume_event,
 )
 
+from .source_provenance import call_source_context, source_context
+
 
 def _as_int(value: Any) -> int:
     try:
@@ -61,6 +63,7 @@ class ToolTrace(_EngineToolTrace):
     # 启动反编译任务都不能通过 Evidence Gate。
     source_evidence_valid: bool = False
     source_result_count: int = 0
+    source_context: dict[str, Any] = field(default_factory=dict)
     # 搜索工具（artifact_search/batch）输出是否声明 coverage_complete=true
     # （False 时零命中不可当否定证据，Gate 也不计入覆盖）。
     search_coverage_complete: bool = False
@@ -79,6 +82,7 @@ class ToolTrace(_EngineToolTrace):
             "source_reproducible": self.source_reproducible,
             "source_evidence_valid": self.source_evidence_valid,
             "source_result_count": self.source_result_count,
+            "source_context": self.source_context,
             "search_coverage_complete": self.search_coverage_complete,
             "search_artifact_ids": self.search_artifact_ids,
         }
@@ -124,7 +128,7 @@ def _source_evidence_result(tool_name: str, value: Any) -> tuple[bool, int]:
                 elif lowered in {"results", "matches", "items", "files"}:
                     if isinstance(child, list):
                         counts.append(len(child))
-                elif lowered in {"text", "content", "source", "snippet"}:
+                elif lowered in {"text", "content", "snippet"}:
                     if isinstance(child, str) and child.strip():
                         nonempty_payload = True
                 walk(child)
@@ -150,8 +154,8 @@ def _source_reproducible_flag(value: Any) -> bool | None:
     """从源码取证工具结果提取 reproducible 标志。
 
     CLI/MCP 输出是 ``{"success": true, "data": {..., "reproducible": ...}}``
-    形态的信封；遍历嵌套取值。同一输出出现多个标志时，任一 True 即视为
-    存在可复现证据；完全没有标志时返回 None（无法判定，按不可复现处理
+    形态的信封；遍历嵌套取值。同一输出出现多个标志时，必须全部为 True
+    才能整体标记为可复现；完全没有标志时返回 None（无法判定，按不可复现处理
     由 evidence gate 决定，trace 只忠实记录）。
     """
     if isinstance(value, str):
@@ -172,7 +176,7 @@ def _source_reproducible_flag(value: Any) -> bool | None:
                 walk(child)
 
     walk(value)
-    return any(found) if found else None
+    return all(found) if found else None
 
 
 def source_evidence_result(tool_name: str, value: Any) -> dict[str, Any] | None:
@@ -192,6 +196,7 @@ def source_evidence_result(tool_name: str, value: Any) -> dict[str, Any] | None:
 class KkAgentTrace(KkAgentStreamTrace):
     """一次 kkagent 调用（attempt）的完整运行时轨迹（含 Redmine 取证域）。"""
 
+    analysis_review_findings: list[str] = field(default_factory=list)
     # ------------------------------------------------------------- 观测值
 
     @property
@@ -359,6 +364,8 @@ class KkAgentTrace(KkAgentStreamTrace):
                 "tool_name": call.tool_name,
                 "reproducible": call.source_reproducible if is_source else None,
                 "refs": sorted(refs),
+                "source_operation": ("read" if "read" in call.tool_name else "search") if is_source else "",
+                "source_context": call_source_context(call, self) if is_source else {},
             })
         return ledger
 
@@ -367,6 +374,7 @@ class KkAgentTrace(KkAgentStreamTrace):
             **super().to_summary(),
             "history_search_count": self.history_search_count,
             "distinct_history_search_count": self.distinct_history_search_count,
+            "analysis_review_findings": self.analysis_review_findings,
         }
 
     # ------------------------------------------------- 引擎多态钩子实现
@@ -381,6 +389,8 @@ class KkAgentTrace(KkAgentStreamTrace):
     def record_tool_result(self, call: ToolTrace, event: dict[str, Any]) -> None:
         """引擎通用记录后的取证域富化（issue/artifact/snapshot/源码语义）。"""
         output = event.get("output")
+        if any(marker in call.tool_name for marker in ("apk_", "sdk_", "codesearch")):
+            call.source_context = source_context(output)
         if "history_search" in call.tool_name or "redmine_issue_fetch" in call.tool_name:
             ids = set(_structured_issue_ids(output))
             if "redmine_issue_fetch" in call.tool_name:
@@ -408,6 +418,8 @@ class KkAgentTrace(KkAgentStreamTrace):
                 call.source_evidence_valid,
                 call.source_result_count,
             ) = _source_evidence_result(call.tool_name, output)
+            if "apk_search" in call.tool_name and call.tool_input.get("mode", "name") == "name":
+                call.source_evidence_valid = False
 
 
 def _normalize_history_query(value: Any) -> str:

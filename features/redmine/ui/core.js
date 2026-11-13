@@ -95,6 +95,33 @@ async function api(url, options) {
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+// 数据区加载占位：超新星动画（.loading-orbit 舞台，样式见 loading-orbit.css）。
+// redmine 页面不引 utils.js，此处独立提供（与 utils.js 同名同实现）。
+// stage=true 启用视口锚定舞台（.loading-orbit--stage，fixed 居中）。
+function loadingOrbitHtml(text, stage) {
+  return '<div class="loading-orbit' + (stage ? ' loading-orbit--stage' : '') + '" role="status" aria-label="' + esc(text) + '">'
+    + '<div class="loading-orbit-bar" aria-hidden="true"></div>'
+    + '<div class="loading-orbit-cards" aria-hidden="true">'
+    + '<div class="loading-orbit-card"></div><div class="loading-orbit-card"></div>'
+    + '<div class="loading-orbit-card"></div><div class="loading-orbit-card"></div></div>'
+    + '<div class="loading-orbit-panels" aria-hidden="true">'
+    + '<div class="loading-orbit-panel"></div><div class="loading-orbit-panel"></div></div>'
+    + '<span class="loading-orbit-text">' + esc(text) + '</span></div>';
+}
+// 幂等写入：容器已渲染动画时只改文案、不重建 DOM（重复加载不重播动画）。
+function setLoadingOrbit(box, text, stage) {
+  if (!box) return false;
+  var existing = box.querySelector(':scope > .loading-orbit');
+  if (existing) {
+    existing.classList.toggle('loading-orbit--stage', Boolean(stage));
+    existing.setAttribute('aria-label', text);
+    var label = existing.querySelector('.loading-orbit-text');
+    if (label) label.textContent = text;
+    return false;
+  }
+  box.innerHTML = loadingOrbitHtml(text, stage);
+  return true;
+}
 function trunc(s, n) {
   s = String(s || '');
   return s.length > n ? s.slice(0, n) + '...' : s;

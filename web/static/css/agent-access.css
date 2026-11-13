@@ -19,7 +19,11 @@
     gap: 14px;
 }
 
-.agent-access-intro { padding: 4px 0; }
+.agent-access-intro { padding: 4px 0 4px 8px; }
+/* 裸文字块与公共页面外框的呼吸量（20261113170706 截图）：标题/说明
+   这类无边框文字直接从 15px 容器边贴到外框线上。只缩进文字块本身，
+   统计卡片、表格等自带边框的组件保持贴边原样。 */
+.agent-access-list-label { padding-left: 8px; }
 .agent-access-intro > div { min-width: 0; }
 .agent-access-intro h2 { margin: 0; font-size: 17px; font-weight: 650; }
 .agent-access-intro p { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
@@ -163,3 +167,44 @@
     #agent-access-search { flex: 1 1 100%; width: 100%; }
     #agent-access-code-result { font-size: 18px; letter-spacing: 1px; }
 }
+
+/* ==================== SDK 源码源面板（添加SDK / 路径校验） ==================== */
+
+.agent-access-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: help;
+}
+
+.agent-access-status-badge.ok {
+    background: rgba(46, 125, 50, 0.12);
+    color: #2e7d32;
+}
+
+.agent-access-status-badge.bad {
+    background: rgba(198, 40, 40, 0.12);
+    color: #c62828;
+}
+
+#agent-sdk-add-probe-result {
+    margin-top: 12px;
+}
+
+#agent-sdk-add-probe-text {
+    overflow-wrap: anywhere;
+}
+
+/* 「添加SDK」弹框可读性：字号整体上调（12px 基准 → 14px）。 */
+#agent-sdk-add-modal .modal-title { font-size: 17px; }
+#agent-sdk-add-modal .agent-access-field { font-size: 14px; }
+#agent-sdk-add-modal .agent-access-field > span:first-child { font-size: 14px; }
+#agent-sdk-add-modal .agent-access-field small { font-size: 12.5px; }
+#agent-sdk-add-modal .combo-box,
+#agent-sdk-add-modal .btn-xs { font-size: 14px; }
+#agent-sdk-add-modal .agent-access-form-hint { font-size: 12.5px; }

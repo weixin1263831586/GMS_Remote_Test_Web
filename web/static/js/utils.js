@@ -43,6 +43,37 @@ function escapeHtml(text) {
     return String(text).replace(/[&<>"']/g, char => HTML_ENTITIES[char]);
 }
 
+// 数据区加载占位：超新星动画（.loading-orbit 舞台，样式见 loading-orbit.css）
+// + 说明文字。redmine/gerrit 看板等慢接口的首屏占位复用同一实现。
+// stage=true 启用视口锚定舞台（.loading-orbit--stage，fixed 居中），
+// 用于整页 Tab 主内容区：页头/工具栏行显隐增高不再牵动动画位置。
+function loadingOrbitHtml(text, stage) {
+    return '<div class="loading-orbit' + (stage ? ' loading-orbit--stage' : '') + '" role="status" aria-label="' + escapeHtml(text) + '">'
+        + '<div class="loading-orbit-bar" aria-hidden="true"></div>'
+        + '<div class="loading-orbit-cards" aria-hidden="true">'
+        + '<div class="loading-orbit-card"></div><div class="loading-orbit-card"></div>'
+        + '<div class="loading-orbit-card"></div><div class="loading-orbit-card"></div></div>'
+        + '<div class="loading-orbit-panels" aria-hidden="true">'
+        + '<div class="loading-orbit-panel"></div><div class="loading-orbit-panel"></div></div>'
+        + '<span class="loading-orbit-text">' + escapeHtml(text) + '</span></div>';
+}
+
+// 幂等写入：容器已渲染动画时只改文案、不重建 DOM——重复加载（如 tab
+// 初始化 + force 刷新）不会让动画从头重播或移位；返回是否新注入。
+function setLoadingOrbit(box, text, stage) {
+    if (!box) return false;
+    const existing = box.querySelector(':scope > .loading-orbit');
+    if (existing) {
+        existing.classList.toggle('loading-orbit--stage', Boolean(stage));
+        existing.setAttribute('aria-label', text);
+        const label = existing.querySelector('.loading-orbit-text');
+        if (label) label.textContent = text;
+        return false;
+    }
+    box.innerHTML = loadingOrbitHtml(text, stage);
+    return true;
+}
+
 function safeHeaderPercentEncode(value) {
     const text = String(value ?? '');
     try {

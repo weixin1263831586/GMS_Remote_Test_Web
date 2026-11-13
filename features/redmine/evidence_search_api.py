@@ -188,7 +188,8 @@ def _scan_text(chunks, needle: str, *, stop_after: int,
 
 
 def _scan_file_multi(path, needles: list[str], *, stop_after: int,
-                     limits: dict[str, int] | None = None, on_match=None):
+                     limits: dict[str, int] | None = None, on_match=None,
+                     context: int = SNIPPET_CONTEXT_CHARS):
     """多关键词全文扫描单个文本文件
     →（[(needle, 命中)]，是否扫到 EOF，已扫字节，总字节）。"""
     total = path.stat().st_size
@@ -207,7 +208,7 @@ def _scan_file_multi(path, needles: list[str], *, stop_after: int,
     state = _TextScanState()
     hits = _scan_text_multi(
         _decode_chunks(raw_chunks()), needles, stop_after=stop_after,
-        limits=limits, scan_state=state, on_match=on_match,
+        limits=limits, scan_state=state, on_match=on_match, context=context,
     )
     return hits, state.complete, bytes_read, total
 
@@ -366,6 +367,8 @@ def _collect_zip_member_matches(
 BATCH_MAX_QUERIES = 16
 BATCH_PER_QUERY_DEFAULT_LIMIT = 20
 BATCH_PER_QUERY_MAX_LIMIT = 100
+# snippet 上下文的合理上限：过大只会把每条命中撑成半屏文本。
+SEARCH_MAX_CONTEXT_CHARS = 1000
 
 
 class BatchSearchRequest(BaseModel):
@@ -375,9 +378,39 @@ class BatchSearchRequest(BaseModel):
     queries: list[str] = Field(..., min_length=1, max_length=BATCH_MAX_QUERIES)
     per_query_limit: int = Field(BATCH_PER_QUERY_DEFAULT_LIMIT, ge=1, le=BATCH_PER_QUERY_MAX_LIMIT)
     per_query_offset: int = Field(0, ge=0)
+    artifact: str = Field("", max_length=2048)
+    member: str = Field("", max_length=512)
+    collapse: bool = Field(False)
+    context: int = Field(SNIPPET_CONTEXT_CHARS, ge=0, le=SEARCH_MAX_CONTEXT_CHARS)
 
 
-def _search_all_evidence(store, snapshot, needles, limit, offset):
+def _artifact_matches_filter(artifact: dict[str, Any], artifact_filter: str) -> bool:
+    """artifact 过滤：art_* ID、数字附件 ID 或文件名子串（大小写不敏感）。"""
+    needle = artifact_filter.strip().lower()
+    if not needle:
+        return True
+    haystacks = (
+        str(artifact.get("artifact_id") or ""),
+        str(artifact.get("attachment_id") or ""),
+        str(artifact.get("filename") or "").lower(),
+        str(artifact.get("original_filename") or "").lower(),
+    )
+    return any(needle in value.lower() for value in haystacks if value)
+
+
+def _member_matches_filter(member_name: str, member_filter: str) -> bool:
+    return member_filter.strip().lower() in member_name.lower()
+
+
+# 折叠窗口：同一 artifact 内相邻（字符距离 ≤ 此值）的重复命中只保留
+# 第一条进入分页页，raw total 与 per-artifact 计数不受影响——
+# "同一异常栈在 logcat 里重复 10 组"这类日志只占一页，但计数诚实。
+COLLAPSE_GAP_CHARS = 200
+
+
+def _search_all_evidence(store, snapshot, needles, limit, offset,
+                         artifact_filter="", member_filter="",
+                         collapse=False, context=SNIPPET_CONTEXT_CHARS):
     from .evidence_reindex import repair_budget_indexes
 
     repair_budget_indexes(store, snapshot)
@@ -385,18 +418,35 @@ def _search_all_evidence(store, snapshot, needles, limit, offset):
     warnings = []
     scanned_bytes = total_bytes = 0
     complete = True
+    # per-artifact 命中计数摘要：不管分页截断，agent 都能先看到
+    # "哪个附件命中多少"，再决定翻页还是按附件过滤。
+    artifact_hits: dict[str, dict[str, Any]] = {}
 
-    def add_hit(needle, entry):
+    def note_artifact_hit(artifact) -> None:
+        key = str(artifact.get("artifact_id") or "")
+        row = artifact_hits.setdefault(key, {
+            "artifact_id": artifact.get("artifact_id"),
+            "filename": artifact.get("filename"),
+            "hits": 0,
+        })
+        row["hits"] += 1
+
+    def add_hit(needle, entry, *, collapsed=False):
+        # total 始终按 raw 命中计数；分页页窗口用 raw 序号，折叠只影响
+        # 页内是否携带该条 entry（False=携带）。
         row = rows[needle]
         index = row["total"]
         row["total"] += 1
+        if collapsed:
+            return
         if offset <= index < offset + limit:
             row["matches"].append(entry)
 
     def scan(chunks, sink, *, with_lines=False):
         state = _TextScanState()
         _scan_text_multi(chunks, needles, stop_after=sys.maxsize,
-                         with_lines=with_lines, scan_state=state, on_match=sink)
+                         with_lines=with_lines, scan_state=state, on_match=sink,
+                         context=context)
         return state.complete
 
     manifest = snapshot.get("manifest") or {}
@@ -407,6 +457,8 @@ def _search_all_evidence(store, snapshot, needles, limit, offset):
         if artifact.get("status") != "ready" or artifact.get("derived_status") in {"partial", "missing"}:
             warnings.append({"artifact_id": artifact["artifact_id"], "filename": artifact.get("filename"),
                              "warning": artifact.get("error") or "附件未完整下载或文本未完整提取"})
+        if not _artifact_matches_filter(artifact, artifact_filter):
+            continue
         with store._connect() as conn:
             row = conn.execute(
                 "SELECT derived_text_path, stored_path FROM redmine_evidence_artifacts WHERE artifact_id = ?",
@@ -426,19 +478,49 @@ def _search_all_evidence(store, snapshot, needles, limit, offset):
             path = store.resolve_internal(rel)
             size = path.stat().st_size
             total_bytes += size
+            # 折叠状态按 artifact 迭代重置；闭包经默认参数绑定当前迭代
+            # 的 dict 对象（B023），sink 惰性调用时不会看到下一次迭代。
+            collapse_last: dict[str, int] = {}
+
+            def _collapsed(member_key, global_offset, _last=collapse_last) -> bool:
+                if not collapse:
+                    return False
+                previous = _last.get(member_key)
+                if previous is not None and abs(global_offset - previous) <= COLLAPSE_GAP_CHARS:
+                    return True
+                _last[member_key] = global_offset
+                return False
+
             def artifact_sink(needle, occ, artifact=artifact):
+                # per-artifact 计数在折叠判定之前：artifact_hits 必须
+                # 诚实反映 raw 命中数，折叠只影响分页页内容。
+                note_artifact_hit(artifact)
+                if _collapsed("", occ.offset):
+                    add_hit(needle, None, collapsed=True)
+                    return
                 entry = _occurrence_entry(occ, "artifact", "", artifact)
                 entry["artifact_char_index"] = occ.offset
+                entry["member_char_index"] = occ.offset
                 add_hit(needle, entry)
             if kind == "archive":
                 state = _ZipStreamState()
                 for member, chunks, body_offset in _iter_zip_members(path, state):
                     def member_sink(needle, occ, member=member, body_offset=body_offset, artifact=artifact):
+                        if member_filter and not _member_matches_filter(member, member_filter):
+                            return
+                        global_offset = body_offset + occ.offset
+                        # 计数先于折叠（见 artifact_sink）。
+                        note_artifact_hit(artifact)
+                        if _collapsed(member, global_offset):
+                            add_hit(needle, None, collapsed=True)
+                            return
                         entry = _occurrence_entry(occ, "artifact",
                                                   f"attachment:{artifact['filename']}!{member}",
                                                   artifact, zip_member=member)
-                        entry["artifact_char_index"] = body_offset + occ.offset
+                        entry["artifact_char_index"] = global_offset
+                        entry["member_char_index"] = occ.offset
                         add_hit(needle, entry)
+                    # 成员内容必须被消费（流式推进文件位置），过滤在 sink 内完成。
                     complete = scan(chunks, member_sink, with_lines=True) and complete
                 if state.saw_frame:
                     member_complete = state.complete and not state.truncated_frame
@@ -449,6 +531,7 @@ def _search_all_evidence(store, snapshot, needles, limit, offset):
                 # coordinate space. Do not invent member references from text.
             _, done, scanned, _ = _scan_file_multi(
                 path, needles, stop_after=sys.maxsize, on_match=artifact_sink,
+                context=context,
             )
             complete = complete and done
             scanned_bytes += scanned
@@ -474,10 +557,15 @@ def _search_all_evidence(store, snapshot, needles, limit, offset):
         row["returned"] = len(row["matches"])
         row["truncated"] = row["total"] > offset + row["returned"]
         row["next_offset"] = offset + row["returned"] if row["truncated"] else None
-    return {"snapshot_id": snapshot["snapshot_id"], "queries": list(rows.values()),
+    data = {"snapshot_id": snapshot["snapshot_id"], "queries": list(rows.values()),
             "total_matches": sum(len(row["matches"]) for row in rows.values()),
+            "total_occurrences": sum(row["total"] for row in rows.values()),
             "coverage_complete": complete, "index_complete": complete and not warnings,
-            "index_warnings": warnings, "scanned_bytes": scanned_bytes, "total_bytes": total_bytes}
+            "index_warnings": warnings, "scanned_bytes": scanned_bytes, "total_bytes": total_bytes,
+            "artifact_hits": sorted(artifact_hits.values(), key=lambda row: -row["hits"]),
+            "filters": {"artifact": artifact_filter, "member": member_filter,
+                        "collapse": collapse, "context": context}}
+    return data
 
 
 @router.post("/evidence/{snapshot_id}/search/batch")
@@ -492,8 +580,12 @@ async def search_evidence_batch(snapshot_id: str, payload: BatchSearchRequest, r
     needles = list(dict.fromkeys(query.strip() for query in payload.queries if query.strip()))
     if not needles or any(len(query) > SEARCH_MAX_QUERY_CHARS for query in needles):
         return _error_response(EvidenceError("queries 不能为空且关键词长度不得超过上限", status_code=422))
-    data = await asyncio.to_thread(_search_all_evidence, owner_evidence_store(owner_id), snapshot,
-                                   needles, payload.per_query_limit, payload.per_query_offset)
+    data = await asyncio.to_thread(
+        _search_all_evidence, owner_evidence_store(owner_id), snapshot,
+        needles, payload.per_query_limit, payload.per_query_offset,
+        artifact_filter=payload.artifact, member_filter=payload.member,
+        collapse=bool(payload.collapse), context=payload.context,
+    )
     return {"success": True, "data": data}
 
 
@@ -504,6 +596,10 @@ async def search_evidence(
     q: str = Query(..., min_length=1, max_length=SEARCH_MAX_QUERY_CHARS),
     limit: int = Query(SEARCH_DEFAULT_LIMIT, ge=1, le=SEARCH_MAX_LIMIT),
     offset: int = Query(0, ge=0),
+    artifact: str = Query("", max_length=2048),
+    member: str = Query("", max_length=512),
+    collapse: bool = Query(False),
+    context: int = Query(SNIPPET_CONTEXT_CHARS, ge=0, le=SEARCH_MAX_CONTEXT_CHARS),
 ):
     from .evidence import EvidenceError
 
@@ -515,8 +611,23 @@ async def search_evidence(
     if not needle:
         return _error_response(EvidenceError("q 不能为空", status_code=422))
     offset = offset if isinstance(offset, int) else 0
-    data = await asyncio.to_thread(_search_all_evidence, owner_evidence_store(owner_id), snapshot,
-                                   [needle], limit, offset)
+    # 直调兼容：绕过 FastAPI 依赖注入的单测直调里，Query 默认值仍是
+    # Query 对象而非解析后的值——与上方 offset 的 isinstance 防御同型。
+    if not isinstance(context, int) or isinstance(context, bool):
+        context = SNIPPET_CONTEXT_CHARS
+    context = max(0, min(int(context), SEARCH_MAX_CONTEXT_CHARS))
+    if not isinstance(artifact, str):
+        artifact = ""
+    if not isinstance(member, str):
+        member = ""
+    if not isinstance(collapse, bool):
+        collapse = False
+    data = await asyncio.to_thread(
+        _search_all_evidence, owner_evidence_store(owner_id), snapshot,
+        [needle], limit, offset,
+        artifact_filter=artifact, member_filter=member,
+        collapse=collapse, context=context,
+    )
     row = data.pop("queries")[0]
     data.update(query=needle, total=len(row["matches"]), total_occurrences=row["total"],
                 matches=row["matches"], limited=row["truncated"],
