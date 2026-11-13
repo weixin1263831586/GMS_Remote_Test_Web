@@ -1,14 +1,20 @@
+%% 本地 Worker 路径与 USB/IP Source-side Flash 必须分开；Linux Source 整包烧写 fail closed。
 flowchart TB
-    Browser["Web 烧写入口（分片上传）"]
-    Ctrl["Controller：固件服务与烧写编排"]
-    Worker["Worker：upgrade_tool / fastboot"]
-    Loader[("Loader / Rockusb 模式")]
-    Dev["Android 设备"]
-    AoaRec["AOA 恢复接续（向导 → USB 调试）"]
+    Browser["Web 固件入口（分片上传）"]
+    Ctrl["Controller：权限 / 烧写编排"]
+    Worker["Worker：本地 USB 烧写"]
+    Loader["Loader / Rockusb 模式"]
+    Dev["Android 设备（本地 USB）"]
+    AoaRec["可选：AOA 向导恢复"]
+    SourceHost["Windows Source Agent（SSH 文件队列）"]
+    SourceDev["Android 设备（Source 物理 USB）"]
 
-    Browser -->|"HTTPS：固件上传"| Ctrl
-    Ctrl -->|"SSH 执行（受审计，ADR 0004）"| Worker
-    Worker -->|"Download Firmware"| Loader
-    Loader -->|"烧写完成自动重启"| Dev
-    Worker -->|"烧写后接续 AOA 恢复（可选）"| AoaRec
-    AoaRec -->|"ADB device 态验证"| Dev
+    Browser -->|"固件上传 / SHA-256"| Ctrl
+    Ctrl -.->|"类型化烧写命令"| Worker
+    Worker -->|"upgrade_tool / fastboot"| Loader
+    Loader -->|"完成后重启"| Dev
+    Worker -->|"可选的恢复阶段"| AoaRec
+    AoaRec -->|"ADB liveness 校验"| Dev
+    Ctrl -.->|"USB/IP 交还所有权"| SourceHost
+    SourceHost -->|"RKDevTool 整包烧写"| SourceDev
+    SourceHost -->|"状态和回执"| Ctrl

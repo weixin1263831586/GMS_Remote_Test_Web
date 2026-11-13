@@ -1,5 +1,5 @@
 /**
- * architecture-view —— 系统架构页多视图切换（平台总览 / USB/IP / AOA / 固件烧写）。
+ * architecture-view —— 系统架构页多视图切换（平台总览 / USB/IP / AOA / 固件烧写 / 测试闭环 / Agent 诊断）。
  *
  * 全站页面 CSP 为 script-src 'self'（bootstrap/application.py 的
  * _STRICT_CSP），架构页脚本必须外置为静态文件加载，不允许 inline <script>。

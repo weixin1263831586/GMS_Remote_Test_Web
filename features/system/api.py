@@ -278,6 +278,8 @@ ARCHITECTURE_TOPOLOGIES = {
     "USBIP_TOPOLOGY": "usbip-topology.mmd",
     "AOA_TOPOLOGY": "aoa-topology.mmd",
     "FIRMWARE_TOPOLOGY": "firmware-topology.mmd",
+    "TEST_FLOW_TOPOLOGY": "test-flow-topology.mmd",
+    "AGENT_ANALYSIS_TOPOLOGY": "agent-analysis-topology.mmd",
 }
 
 

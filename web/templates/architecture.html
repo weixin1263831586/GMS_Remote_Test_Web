@@ -5,16 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GMS Remote Test - 系统架构</title>
   <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
-  <link rel="stylesheet" href="/static/css/architecture-layers.css?v=20261113-layers">
+  <link rel="stylesheet" href="/static/css/architecture-layers.css?v=20261113-workflows">
   <style>
     :root { color-scheme: dark; --bg:var(--dark-bg); --panel:var(--card-bg); --line:var(--border-color); --text:var(--text-primary); --muted:var(--text-secondary); --blue:var(--primary-color); --green:var(--success-color); --amber:var(--warning-color); --violet:var(--primary-light); }
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--page-background); color: var(--text); font-family: "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace; }
+    body { margin: 0; background: var(--page-background); color: var(--text); font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif; }
     /* Tab 行适配公共模板（Redmine/Gerrit/设备串口/主机集群）：
        sticky 44px 头部、≥112px×44px 页签、13px/600 字号、2px 底部指示条。
        min-width:0 + max-width:100% 让 flex 项可收缩，窄视口时页签行内部
        横向滚动，文档总宽不超视口。 */
-    .arch-header { position: sticky; top: 0; z-index: 1000; display: flex; align-items: center; min-height: 44px; padding: 0 16px; background: var(--panel); box-shadow: 0 8px 18px rgba(0, 0, 0, .22); }
+    .arch-header { position: sticky; top: 0; z-index: 1000; display: flex; align-items: center; min-height: 44px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
     main { margin: 0 auto; padding: 16px; }
     .lead { color: var(--muted); line-height: 1.7; margin: 0 0 14px; font-size: 13px; }
     .arch-tabs { display: flex; align-items: stretch; gap: 0; height: 44px; flex: 1 1 auto; min-width: 0; max-width: 100%; background: var(--panel); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
@@ -25,25 +25,25 @@
     .arch-tab.active { color: var(--blue); }
     .arch-tab.active::after { content: ''; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--blue); }
     .arch-pane { min-width: 0; }
-    section { margin: 18px 0; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(145deg, color-mix(in srgb, var(--card-bg) 98%, transparent), color-mix(in srgb, var(--card-bg) 78%, transparent)); }
-    h2 { margin: 0 0 16px; font-size: 18px; color: var(--blue); }
+    section { margin: 12px 0; padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+    h2 { margin: 0 0 12px; font-size: 16px; font-weight: 650; color: var(--text); }
     .grid { display: grid; gap: 14px; }
     .roles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .workers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .sources { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .card { min-height: 120px; padding: 16px; border: 1px solid var(--line); border-top: 3px solid var(--blue); border-radius: 10px; background: color-mix(in srgb, var(--darker-bg) 72%, transparent); }
-    .card.agent { border-top-color: var(--violet); }
-    .card.worker { border-top-color: var(--amber); }
-    .card.source { border-top-color: var(--green); }
+    .card { min-height: 115px; padding: 14px; border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 8px; background: var(--card-bg); }
+    .card.agent { border-left-color: var(--violet); }
+    .card.worker { border-left-color: var(--amber); }
+    .card.source { border-left-color: var(--green); }
     .card h3 { margin: 0 0 8px; font-size: 15px; }
     .card p, .card li { color: var(--muted); font-size: 12px; line-height: 1.6; }
     .card ul { margin: 0; padding-left: 18px; }
-    .topology { overflow-x: auto; }
+    .topology { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--darker-bg) 50%, var(--panel)); scrollbar-color: var(--border-light) transparent; }
     .topology svg {
-      display: block; width: 100%; min-width: 920px;
+      display: block; width: 100%; min-width: 1020px;
       font-family: "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
     }
-    .note { margin-top: 14px; padding: 12px; border-left: 3px solid var(--amber); color: var(--muted); background: rgba(251, 191, 36, .06); font-size: 12px; line-height: 1.6; }
+    .note { margin-top: 12px; padding: 12px; border-left: 3px solid var(--amber); color: var(--muted); background: color-mix(in srgb, var(--amber) 6%, var(--panel)); font-size: 12px; line-height: 1.7; }
     code { color: var(--green); }
     @media (max-width: 980px) {
       .roles, .workers, .sources { grid-template-columns: 1fr 1fr; }
@@ -61,10 +61,12 @@
     <button type="button" role="tab" class="arch-tab" id="arch-tab-usbip" data-arch="usbip" aria-selected="false" aria-controls="arch-pane-usbip" tabindex="-1">USB/IP 接入</button>
     <button type="button" role="tab" class="arch-tab" id="arch-tab-aoa" data-arch="aoa" aria-selected="false" aria-controls="arch-pane-aoa" tabindex="-1">AOA 恢复与回放</button>
     <button type="button" role="tab" class="arch-tab" id="arch-tab-firmware" data-arch="firmware" aria-selected="false" aria-controls="arch-pane-firmware" tabindex="-1">固件烧写</button>
+    <button type="button" role="tab" class="arch-tab" id="arch-tab-test-flow" data-arch="test-flow" aria-selected="false" aria-controls="arch-pane-test-flow" tabindex="-1">测试执行闭环</button>
+    <button type="button" role="tab" class="arch-tab" id="arch-tab-agent-analysis" data-arch="agent-analysis" aria-selected="false" aria-controls="arch-pane-agent-analysis" tabindex="-1">Agent 诊断流程</button>
   </nav>
 </header>
 <main>
-  <p class="lead">Controller 统一认证和调度；Worker 主动轮询命令并回报状态；Agent Runtime 通过独立 Service Token 使用受控能力。切换上方视图查看平台总览、USB/IP 接入、AOA 恢复与固件烧写数据面。</p>
+  <p class="lead">Controller 统一认证和调度；Worker 主动轮询命令并回报状态；Agent Runtime 通过独立 Service Token 使用受控能力。切换上方六个视图，查看平台拓扑、USB/IP 接入、AOA 恢复、固件烧写、测试闭环及 Agent 工单分析。图中实线为数据或回报通路，紫色虚线为受控命令路径。</p>
 
   <div class="arch-pane" id="arch-pane-platform" role="tabpanel" data-arch-pane="platform" aria-labelledby="arch-tab-platform">
     <section class="layers-section" aria-labelledby="layers-heading">
@@ -117,7 +119,12 @@
     </section>
 
     <section aria-labelledby="topology-heading">
-      <h2 id="topology-heading">平台拓扑</h2>
+      <h2 id="topology-heading">平台拓扑与通信方向</h2>
+      <div class="arch-legend" aria-label="拓扑图线型说明">
+        <span><i class="arch-legend-line" aria-hidden="true"></i>数据 / 回执</span>
+        <span><i class="arch-legend-line arch-legend-line--command" aria-hidden="true"></i>控制命令 / 权限调用</span>
+        <span class="arch-legend-hint">节点代表进程或资源角色，不代表所有模块部署在同一主机</span>
+      </div>
       <div class="topology">{{PLATFORM_TOPOLOGY}}</div>
     </section>
 
@@ -157,14 +164,19 @@
 
   <div class="arch-pane" id="arch-pane-usbip" role="tabpanel" data-arch-pane="usbip" aria-labelledby="arch-tab-usbip" hidden>
     <section aria-labelledby="usbip-topology-heading">
-      <h2 id="usbip-topology-heading">USB/IP 接入拓扑</h2>
+      <h2 id="usbip-topology-heading">USB/IP：物理 Source 与 Worker 虚拟总线</h2>
+      <div class="arch-legend" aria-label="拓扑图线型说明">
+        <span><i class="arch-legend-line" aria-hidden="true"></i>数据 / 回执</span>
+        <span><i class="arch-legend-line arch-legend-line--command" aria-hidden="true"></i>控制命令 / 权限调用</span>
+        <span class="arch-legend-hint">节点代表进程或资源角色，不代表所有模块部署在同一主机</span>
+      </div>
       <div class="topology">{{USBIP_TOPOLOGY}}</div>
     </section>
     <section aria-labelledby="usbip-sources-title">
       <h2 id="usbip-sources-title">接入链路分层</h2>
       <div class="grid sources">
         <article class="card source"><h3>Source 侧（Windows / Linux）</h3><p><code>usbipd-win</code> 或 Linux <code>usbipd</code> 把本机 USB 设备以 USB/IP 协议暴露在 TCP 3240；设备仍物理插在 Source 主机。</p></article>
-        <article class="card worker"><h3>Worker 侧（usbip attach）</h3><p>Worker attach 远端共享后得到虚拟 USB 总线，ADB / Fastboot / upgrade_tool 按本地设备方式使用，并回报清单与心跳。</p></article>
+        <article class="card worker"><h3>Worker 侧（usbip attach）</h3><p>Worker attach 远端共享后通过 vhci_hcd 得到虚拟 USB 总线；设备物理上始终连接 Source。ADB / Fastboot / Tradefed 在 Worker 侧使用对应设备。</p></article>
         <article class="card"><h3>Controller 协调</h3><p>跨主机动作只经受审计 SSH 边界（ADR 0004）；USB/IP 设备的整包烧写不跨链路维持重枚举，按 ADR 0005 把设备所有权交还 Source Host 执行，期间暂停通用重连 watchdog。</p></article>
       </div>
       <p class="note">USB/IP 链路无法跨越 ADB → Loader → ADB 的多次 USB 重枚举：断开即设备离线，Worker 以清单与心跳上报实际状态，Controller 不假设远端设备仍然存在。</p>
@@ -189,20 +201,70 @@
 
   <div class="arch-pane" id="arch-pane-firmware" role="tabpanel" data-arch-pane="firmware" aria-labelledby="arch-tab-firmware" hidden>
     <section aria-labelledby="firmware-topology-heading">
-      <h2 id="firmware-topology-heading">固件烧写拓扑</h2>
+      <h2 id="firmware-topology-heading">固件烧写：本地 Worker / USB/IP Source 两条路径</h2>
+      <div class="arch-legend" aria-label="拓扑图线型说明">
+        <span><i class="arch-legend-line" aria-hidden="true"></i>数据 / 回执</span>
+        <span><i class="arch-legend-line arch-legend-line--command" aria-hidden="true"></i>控制命令 / 权限调用</span>
+        <span class="arch-legend-hint">节点代表进程或资源角色，不代表所有模块部署在同一主机</span>
+      </div>
       <div class="topology">{{FIRMWARE_TOPOLOGY}}</div>
     </section>
     <section aria-labelledby="firmware-layers-title">
       <h2 id="firmware-layers-title">烧写链路分层</h2>
       <div class="grid sources">
         <article class="card"><h3>Web 烧写入口</h3><p>固件分片上传与断点续传；烧写入口按设备所在 Worker 解析，跨 Worker 入口 fail closed。</p></article>
-        <article class="card worker"><h3>Worker 烧写执行</h3><p>设备进入 Loader / Rockusb 后由 <code>upgrade_tool</code> / fastboot 完成 Download Firmware；烧写完成设备自动重启。</p></article>
+        <article class="card worker"><h3>Worker 烧写执行</h3><p>本地 USB 设备由 Worker 接收类型化命令执行 <code>upgrade_tool</code> / fastboot；设备在 Loader / Rockusb 重枚举，成功后重启。</p></article>
         <article class="card agent"><h3>AOA 恢复接续（可选）</h3><p>烧写成功与 ADB 就绪分离上报：可接续 AOA 恢复旅程（向导 → USB 调试），失败时提示单独调试而无需重新烧写。</p></article>
       </div>
-      <p class="note">烧写会重启设备并可能进入 fastboot / loader；USB/IP 来源设备的整包烧写按 ADR 0005 交还 Source Host 执行。恢复判定以 adb 传输 liveness 为准，而非 adb devices 字面状态。</p>
+      <p class="note">完整固件烧写与 ADB 恢复是两个独立阶段。USB/IP 来源设备必须先暂停重连、detach 并复核所有权交还；Windows Source Agent 执行 RKDevTool 文件队列。Linux USB Source 的整包固件烧写尚未实现，直接拒绝（fail closed，ADR 0005）。恢复判定以 adb liveness 为准。</p>
+    </section>
+  </div>
+
+  <div class="arch-pane" id="arch-pane-test-flow" role="tabpanel" data-arch-pane="test-flow" aria-labelledby="arch-tab-test-flow" hidden>
+    <section aria-labelledby="test-flow-heading">
+      <h2 id="test-flow-heading">GMS 测试执行与结果闭环</h2>
+      <p class="arch-flow-intro">从受控资源预检到 Worker 执行、结果归属和可选诊断。原生测试结果与已登记报告是两个入口，不能混为同一个持久化存储。</p>
+      <div class="arch-legend" aria-label="拓扑图线型说明">
+        <span><i class="arch-legend-line" aria-hidden="true"></i>数据 / 回执</span>
+        <span><i class="arch-legend-line arch-legend-line--command" aria-hidden="true"></i>控制命令 / 权限调用</span>
+        <span class="arch-legend-hint">节点代表进程或资源角色，不代表所有模块部署在同一主机</span>
+      </div>
+      <div class="topology">{{TEST_FLOW_TOPOLOGY}}</div>
+    </section>
+    <section aria-labelledby="test-flow-details">
+      <h2 id="test-flow-details">关键执行边界</h2>
+      <div class="grid roles">
+        <article class="card"><h3>01 · 接入与预检</h3><p>权限、设备归属、Claim / Lease、Worker 可用性和测试套件检查；不可用时拒绝执行而不是盲目选择设备。</p></article>
+        <article class="card worker"><h3>02 · 异步执行</h3><p>Controller 持久化任务并入队；Worker 主动 Poll、ACK，在本地运行 Tradefed 并回报状态。</p></article>
+        <article class="card source"><h3>03 · 结果归属</h3><p>原始 <code>results / logs</code> 来自 Worker 套件目录；报告管理只呈现 Controller 已登记的报告。</p></article>
+        <article class="card agent"><h3>04 · 分析与重试</h3><p>诊断、知识检索和 Redmine 反馈可按需接续。Worker 失联触发状态回收，不代表测试可跨主机自动续跑。</p></article>
+      </div>
+    </section>
+  </div>
+
+  <div class="arch-pane" id="arch-pane-agent-analysis" role="tabpanel" data-arch-pane="agent-analysis" aria-labelledby="arch-tab-agent-analysis" hidden>
+    <section aria-labelledby="agent-flow-heading">
+      <h2 id="agent-flow-heading">对话 Agent → Redmine 工单分析</h2>
+      <p class="arch-flow-intro">Agent 负责理解意图和工具发现；真正的工单校验、属主鉴权、任务入队与回执由 Controller / Redmine 服务完成。</p>
+      <div class="arch-legend" aria-label="拓扑图线型说明">
+        <span><i class="arch-legend-line" aria-hidden="true"></i>数据 / 回执</span>
+        <span><i class="arch-legend-line arch-legend-line--command" aria-hidden="true"></i>控制命令 / 权限调用</span>
+        <span class="arch-legend-hint">节点代表进程或资源角色，不代表所有模块部署在同一主机</span>
+      </div>
+      <div class="topology">{{AGENT_ANALYSIS_TOPOLOGY}}</div>
+    </section>
+    <section aria-labelledby="agent-flow-details">
+      <h2 id="agent-flow-details">任务状态与安全约束</h2>
+      <div class="grid roles">
+        <article class="card agent"><h3>模型规划</h3><p>kkagent 输出受控工具调用；不直接使用未知 Shell、设备凭据或绕过审批调用 Worker。</p></article>
+        <article class="card"><h3>属主隔离</h3><p>按用户配置的 Redmine 校验工单引用；同一会话运行中禁止重复入队，返回唯一 <code>run_id</code>。</p></article>
+        <article class="card worker"><h3>状态跟踪</h3><p>pending → snapshotting / analyzing → completed / partial / failed / cancelled，监控结果回传原会话。</p></article>
+        <article class="card source"><h3>报告回送</h3><p>仅消费本次运行结果，不用历史报告冒充当前结论。取消 Agent 跟踪不等于取消 Redmine 后台分析任务。</p></article>
+      </div>
+      <p class="note">模型分析提供诊断建议，不能替代 Controller 的资源授权、证据边界或真实工具执行回执。</p>
     </section>
   </div>
 </main>
-<script src="/static/js/pages/architecture-view.js?v=20261107-arch-keys" defer></script>
+<script src="/static/js/pages/architecture-view.js?v=20261113-six-views" defer></script>
 </body>
 </html>

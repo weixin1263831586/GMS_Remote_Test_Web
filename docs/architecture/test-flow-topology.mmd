@@ -1,0 +1,18 @@
+%% 以设备归属和任务回执为中心；报告按来源展示，不假设全部回传 Controller。
+flowchart TB
+    Request["Web / Agent 测试目标"]
+    Gate["Controller：鉴权 / Claim / 资源预检"]
+    Job["ATS / Cluster Job"]
+    Worker["Worker：Tradefed / 设备操作"]
+    Device["Android 设备（ADB / Fastboot）"]
+    Evidence["Worker：原生 results / logs"]
+    Report["套件浏览器 / 已登记报告"]
+    Diagnosis["报告分析 / 知识库（可选）"]
+
+    Request -->|"选择设备和套件"| Gate
+    Gate -->|"受控任务入队"| Job
+    Job -.->|"命令随 Poll 返回"| Worker
+    Worker -->|"ADB / Fastboot"| Device
+    Worker -->|"执行结果与日志"| Evidence
+    Evidence -->|"按来源浏览 / 登记"| Report
+    Report -->|"按需诊断"| Diagnosis
