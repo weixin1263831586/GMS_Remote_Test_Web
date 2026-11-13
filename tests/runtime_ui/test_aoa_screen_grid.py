@@ -296,6 +296,14 @@ class RuntimeAoaScreenGridTests(RuntimeUiHarness):
         try:
             def route_handler(route):
                 url = route.request.url
+                if url.endswith('/api/devices/management'):
+                    # management 响应会整体替换 AOA 工作台清单：
+                    # 桩必须含流目标 REC，否则清单刷新会停掉活跃会话。
+                    route.fulfill(content_type='application/json', body=json.dumps({
+                        "success": True, "devices": [{
+                            "serial_no": "REC", "worker_id": "worker-a",
+                            "status": "online", "cluster_state": "available"}]}))
+                    return
                 if url.endswith('/stream/REC/start'):
                     route.fulfill(content_type='application/json', body=json.dumps({
                         "success": True, "ws_url": "ws://fake/stream"}))
@@ -313,6 +321,7 @@ class RuntimeAoaScreenGridTests(RuntimeUiHarness):
                     return
                 route.fulfill(content_type='application/json', body=json.dumps({"success": True}))
             page.route('**/api/devices/aoa/**', route_handler)
+            page.route('**/api/devices/management*', route_handler)
             page.route('**/api/cluster/**', route_handler)
             self.goto_shell(page)
             page.evaluate("""async () => {
@@ -337,6 +346,19 @@ class RuntimeAoaScreenGridTests(RuntimeUiHarness):
                 }
                 FakeSocket.OPEN = 1;
                 window.WebSocket = FakeSocket;
+            }""")
+            # Keep the real AOA workbench selector consistent with the mocked stream.
+            # Inventory refreshes may otherwise select the empty target and call
+            # aoaLiveScreen.stop() while these transport-only tests are running.
+            page.evaluate("""() => {
+                aoaSyncDeviceSources([{
+                    serial_no: 'REC', worker_id: 'worker-a',
+                    status: 'online', cluster_state: 'available',
+                }]);
+                document.getElementById('aoa-record-worker').value = 'worker-a';
+                aoaSyncDeviceOptions();
+                document.getElementById('aoa-record-device').value = 'REC';
+                aoaRecorderDeviceChanged();
             }""")
             page.evaluate("aoaLiveScreen.start('REC', 'worker-a')")
             page.wait_for_timeout(400)
@@ -378,12 +400,21 @@ class RuntimeAoaScreenGridTests(RuntimeUiHarness):
         page = self.new_page()
         try:
             def route_handler(route):
+                if route.request.url.endswith('/api/devices/management'):
+                    # management 响应会整体替换 AOA 工作台清单：
+                    # 桩必须含流目标 REC，否则清单刷新会停掉活跃会话。
+                    route.fulfill(content_type='application/json', body=json.dumps({
+                        "success": True, "devices": [{
+                            "serial_no": "REC", "worker_id": "worker-a",
+                            "status": "online", "cluster_state": "available"}]}))
+                    return
                 if route.request.url.endswith('/stream/REC/start'):
                     route.fulfill(content_type='application/json', body=json.dumps({
                         "success": True, "ws_url": "ws://fake/stream"}))
                     return
                 route.fulfill(content_type='application/json', body=json.dumps({"success": True}))
             page.route('**/api/devices/aoa/**', route_handler)
+            page.route('**/api/devices/management*', route_handler)
             page.route('**/api/cluster/**', route_handler)
             self.goto_shell(page)
             page.evaluate("""async () => {
@@ -404,6 +435,19 @@ class RuntimeAoaScreenGridTests(RuntimeUiHarness):
                 FakeSocket.OPEN = 1;
                 window.WebSocket = FakeSocket;
             }""")
+            # Keep the real AOA workbench selector consistent with the mocked stream.
+            # Inventory refreshes may otherwise select the empty target and call
+            # aoaLiveScreen.stop() while these transport-only tests are running.
+            page.evaluate("""() => {
+                aoaSyncDeviceSources([{
+                    serial_no: 'REC', worker_id: 'worker-a',
+                    status: 'online', cluster_state: 'available',
+                }]);
+                document.getElementById('aoa-record-worker').value = 'worker-a';
+                aoaSyncDeviceOptions();
+                document.getElementById('aoa-record-device').value = 'REC';
+                aoaRecorderDeviceChanged();
+            }""")
             page.evaluate("aoaLiveScreen.start('REC', 'worker-a')")
             page.wait_for_timeout(400)
             assert page.evaluate("aoaLiveScreen.isActive()") is True
@@ -423,6 +467,14 @@ class RuntimeAoaScreenGridTests(RuntimeUiHarness):
         try:
             def route_handler(route):
                 url = route.request.url
+                if url.endswith('/api/devices/management'):
+                    # management 响应会整体替换 AOA 工作台清单：
+                    # 桩必须含流目标 REC，否则清单刷新会停掉活跃会话。
+                    route.fulfill(content_type='application/json', body=json.dumps({
+                        "success": True, "devices": [{
+                            "serial_no": "REC", "worker_id": "worker-a",
+                            "status": "online", "cluster_state": "available"}]}))
+                    return
                 if url.endswith('/stream/REC/start'):
                     route.fulfill(content_type='application/json', body=json.dumps({
                         "success": True, "ws_url": "ws://fake/stream"}))
@@ -438,6 +490,7 @@ class RuntimeAoaScreenGridTests(RuntimeUiHarness):
                     return
                 route.fulfill(content_type='application/json', body=json.dumps({"success": True}))
             page.route('**/api/devices/aoa/**', route_handler)
+            page.route('**/api/devices/management*', route_handler)
             page.route('**/api/cluster/**', route_handler)
             self.goto_shell(page)
             page.evaluate("""async () => {
@@ -459,6 +512,19 @@ class RuntimeAoaScreenGridTests(RuntimeUiHarness):
                 }
                 FakeSocket.OPEN = 1;
                 window.WebSocket = FakeSocket;
+            }""")
+            # Keep the real AOA workbench selector consistent with the mocked stream.
+            # Inventory refreshes may otherwise select the empty target and call
+            # aoaLiveScreen.stop() while these transport-only tests are running.
+            page.evaluate("""() => {
+                aoaSyncDeviceSources([{
+                    serial_no: 'REC', worker_id: 'worker-a',
+                    status: 'online', cluster_state: 'available',
+                }]);
+                document.getElementById('aoa-record-worker').value = 'worker-a';
+                aoaSyncDeviceOptions();
+                document.getElementById('aoa-record-device').value = 'REC';
+                aoaRecorderDeviceChanged();
             }""")
             page.evaluate("aoaLiveScreen.start('REC', 'worker-a')")
             page.wait_for_timeout(200)

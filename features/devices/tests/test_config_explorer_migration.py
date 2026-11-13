@@ -31,15 +31,17 @@ class DeviceConfigExplorerMigrationTests(unittest.TestCase):
             'data-click="openDeviceConfigExplorer"', combined
         )
         self.assertIn('data-r0="dataset.serial"', combined)
-        for field in (
-            'serial_no',
-            'source_host',
-            'model',
-            'soc_model',
-            'android_version',
-            'locked_by',
-        ):
-            self.assertIn(f'escapeHtml(String(device.{field}', shell)
+        # Device columns were migrated to the dedicated presentation module.
+        # Assert all user-controlled fields are rendered via its HTML escaper.
+        presentation = Path("web/static/js/shell/device-presentation.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("const {escape: text, icon, badge} = GmsUi", presentation)
+        for field in ("serial_no", "source_host", "model", "soc_model",
+                      "android_version", "locked_by"):
+            self.assertIn(f"device.{field}", presentation)
+        self.assertIn("${text(serial)}", presentation)
+        self.assertIn("${text(hostLabel(device))}", presentation)
         self.assertIn("function openDeviceConfigExplorer", combined)
         self.assertIn("/api/config-explorer/packages-with-path", combined)
         self.assertIn("/api/config-explorer/decompile", combined)

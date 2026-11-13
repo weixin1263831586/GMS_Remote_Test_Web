@@ -115,7 +115,7 @@ def test_restored_session_rebuilds_monitoring_state_for_owner(tmp_path):
         "client_id": "c1",
         "owner_id": "user-42",
         "status": "monitoring",
-        "active_run": {"cluster_job_id": "job-7", "attempt_id": "a2", "worker_id": "w2"},
+        "active_run": {"cluster_job_id": "job-7", "attempt_id": "a2", "worker_id": "w2", "monitor_token": "generation-7"},
         "workspace_context": {"scope_mode": "cluster", "worker_id": "w2"},
         "created_at": "2026-10-16T00:00:00",
         "updated_at": "2026-10-16T00:00:00",
@@ -125,6 +125,7 @@ def test_restored_session_rebuilds_monitoring_state_for_owner(tmp_path):
         rebuilt = api._restore_session("s-res", "c1")
         assert rebuilt is not None
         assert rebuilt["active_run"]["cluster_job_id"] == "job-7"
+        assert rebuilt["active_run"]["monitor_token"] == "generation-7"
         assert rebuilt["status"] == "monitoring"
         assert rebuilt.get("recovered") is True
         # 其他 client 无法恢复他人会话

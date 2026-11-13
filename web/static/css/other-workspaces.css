@@ -162,6 +162,12 @@
     border: 1px solid var(--border-color); border-radius: 8px;
     background: var(--card-bg); box-shadow: none;
 }
+/* In empty state the upload zone is the sole frame; outer 1px border shifted
+   the upload area off the 15px layout grid on both analysis pages. */
+#page-report-analysis.page-ui-rework .analysis-upload-frame:has(.upload-empty),
+#page-apk-analysis.page-ui-rework .analysis-upload-frame:has(.upload-empty) {
+    border: 0;
+}
 #page-report-analysis.page-ui-rework .report-upload-zone,
 #page-apk-analysis.page-ui-rework .apk-upload-zone {
     border: 1px dashed var(--border-light);
@@ -206,7 +212,8 @@
 /* 常用网址/工具以及嵌入 iframe 的统一面板外壳。 */
 #page-websites.page-ui-rework .tools-container,
 #page-tools.page-ui-rework .tools-container {
-    border: 1px solid var(--border-color) !important;
+    /* The full-size page already has a single frame; do not double-frame it. */
+    border: 0 !important;
     border-radius: 8px; background: var(--card-bg); box-shadow: none;
 }
 #page-websites.page-ui-rework :is(.tool-card, .category-section),

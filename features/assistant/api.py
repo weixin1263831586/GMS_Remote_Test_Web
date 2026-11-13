@@ -27,8 +27,6 @@ from features.assistant.response import (
 )
 from features.assistant.session_directory import (
     _restore_session_from_transcript as _restore_session_from_transcript,
-)
-from features.assistant.session_directory import (
     _session_directory,
     delete_session,
 )
@@ -98,6 +96,7 @@ from features.assistant.workspace import (
     _normalize_workspace_context,
     _request_missing_params,
 )
+from features.auth import require_human_principal_when_auth_required
 from features.users import get_client_id_from_request, owner_id_from_request
 from foundation.responses import error_response, success_response
 
@@ -523,6 +522,8 @@ async def list_agent_sessions(request: Request):
 
 @router.delete("/api/agent/sessions/{session_id}")
 async def delete_agent_session(session_id: str, request: Request):
+    """Discard one Agent session: drop live state and its recovery anchor."""
+    require_human_principal_when_auth_required(request)
     return delete_session(session_id, get_client_id_from_request(request), owner_id_from_request(request))
 
 
@@ -543,15 +544,15 @@ async def get_agent_session(session_id: str, request: Request):
             if redmine_active:
                 from features.assistant.redmine_analysis import monitor_redmine_run
 
-                task = asyncio.create_task(monitor_redmine_run(session_id, request_shim))
+                task = asyncio.create_task(monitor_redmine_run(session_id, request_shim, session['active_run'].get('monitor_token')))
             elif (session.get("active_run") or {}).get("automation_run_id"):
                 # 工作流 run 只在锚点保留 automation_run_id，监控续接走
                 # workflow 监视器（token=None 与恢复锚点 active_run 匹配）。
                 from features.assistant.workflow_execution import monitor_workflow_run
 
-                task = asyncio.create_task(monitor_workflow_run(session_id, request_shim, None))
+                task = asyncio.create_task(monitor_workflow_run(session_id, request_shim, session['active_run'].get('monitor_token')))
             else:
-                task = asyncio.create_task(_monitor_agent_run(session_id, request_shim))
+                task = asyncio.create_task(_monitor_agent_run(session_id, request_shim, session['active_run'].get('monitor_token')))
             _agent_monitor_tasks[session_id] = task
         if not session:
             # 无活跃运行的重启恢复：从落盘记录重建只读对话历史。
