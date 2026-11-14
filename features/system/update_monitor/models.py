@@ -91,6 +91,21 @@ class MainlinePackageRecord:
 
 
 @dataclass(frozen=True)
+class BulletinPatchRecord:
+    source_key: str
+    item_key: str
+    year: str
+    patch_id: str
+    patch_kind: str
+    android_versions: str
+    description: str
+    bulletin_month: str
+    deadline: str
+    bulletin_url: str
+    content_hash: str
+
+
+@dataclass(frozen=True)
 class RequirementSectionRecord:
     source_key: str
     section_key: str
@@ -136,6 +151,7 @@ class ParsedSource:
     artifacts: list[ArtifactRecord] = None  # type: ignore[assignment]
     gms_packages: list[GmsPackageRecord] = None  # type: ignore[assignment]
     mainline_packages: list[MainlinePackageRecord] = None  # type: ignore[assignment]
+    bulletin_patches: list[BulletinPatchRecord] = None  # type: ignore[assignment]
     requirement_sections: list[RequirementSectionRecord] = None  # type: ignore[assignment]
     requirement_table_rows: list[RequirementTableRowRecord] = None  # type: ignore[assignment]
     requirement_version_tags: list[RequirementVersionTagRecord] = None  # type: ignore[assignment]
@@ -145,6 +161,7 @@ class ParsedSource:
             'artifacts',
             'gms_packages',
             'mainline_packages',
+            'bulletin_patches',
             'requirement_sections',
             'requirement_table_rows',
             'requirement_version_tags',
@@ -199,6 +216,14 @@ SOURCES: tuple[SourceConfig, ...] = (
         url='https://docs.partner.android.com/mainline/release/release-notes?authuser=2',
         category='mainline_package',
         parser='mainline_release_notes',
+        auth_required=True,
+    ),
+    SourceConfig(
+        key='gms_bulletins',
+        name='Critical Fix Supplementary Bulletins',
+        url='https://docs.partner.android.com/partners/releases/cf',
+        category='gms_bulletin',
+        parser='gms_bulletins',
         auth_required=True,
     ),
 )

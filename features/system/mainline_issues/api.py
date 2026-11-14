@@ -210,6 +210,7 @@ async def mainline_known_issues_summary():
         return missing
     with _connect_db() as conn:
         total = conn.execute('SELECT COUNT(*) FROM mainline_known_issues').fetchone()[0]
+        patch_total = conn.execute('SELECT COUNT(*) FROM mainline_security_patches').fetchone()[0]
         by_type = conn.execute(
             """
             SELECT issue_type, product_section, COUNT(*) AS count
@@ -235,10 +236,145 @@ async def mainline_known_issues_summary():
     return {
         'success': True,
         'total': total,
+        'patch_total': patch_total,
         'by_type': [dict(row) for row in by_type],
         'last_sync': dict(last_sync) if last_sync else None,
         'year_range': dict(year_range) if year_range and year_range['min_year'] else None,
         'db_path': str(DB_PATH),
+    }
+
+
+@router.get('/api/mainline-known-issues/security-patches')
+async def list_mainline_security_patches(
+    q: str = Query('', max_length=256, description='CVE id, module, or note keyword'),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    missing = _db_exists_response()
+    if missing:
+        return missing
+    where = []
+    params: list[str | int] = []
+    if q:
+        like = f'%{escape_like(q)}%'
+        where.append(
+            '(cve_id LIKE ? ESCAPE "\\" OR mainline_module LIKE ? ESCAPE "\\" OR '
+            'version_note LIKE ? ESCAPE "\\" OR release_label LIKE ? ESCAPE "\\" OR '
+            'source_url LIKE ? ESCAPE "\\" OR product_section LIKE ? ESCAPE "\\" OR '
+            'source_title LIKE ? ESCAPE "\\" OR cve_id IN (SELECT cve_id FROM mainline_known_issues WHERE exemption_id LIKE ? ESCAPE "\\"))'
+        )
+        params.extend([like] * 7)
+        params.append(like)
+    where_sql = f"WHERE {' AND '.join(where)}" if where else ''
+    with _connect_db() as conn:
+        total = conn.execute(
+            f'SELECT COUNT(*) FROM mainline_security_patches {where_sql}', params
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"""
+            SELECT id, cve_id, mainline_module, version_note, product_section,
+                   release_year, release_label, source_url, source_title, last_seen_at
+            FROM mainline_security_patches
+            {where_sql}
+            ORDER BY release_year DESC, source_url DESC, cve_id, mainline_module
+            LIMIT ? OFFSET ?
+            """,
+            [*params, limit, offset],
+        ).fetchall()
+    items = []
+    for row in rows:
+        d = dict(row)
+        m = re.search(r'/release-notes/\d{4}/([a-z-]+?)(?:/|$)', d.get('source_url', ''))
+        d['release_month'] = m.group(1) if m else ''
+        items.append(d)
+    return {
+        'success': True,
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+        'items': items,
+    }
+
+
+@router.get('/api/mainline-known-issues/critical-patches')
+async def list_mainline_critical_patches(
+    q: str = Query('', max_length=256, description='Patch id, description, Android version, month, or deadline keyword'),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Critical Fix Supplementary Bulletins 补丁（数据源：GMS Update Monitor 库）。
+
+    patch_id 形如 ``A-568181732``，数字段与 Mainline 豁免表的
+    exemption_id 同属 Google bug ID 空间；命中豁免时附带
+    ``exemptions``（issue_type / test_module / test_case），供分析
+    「补丁修复 ↔ 豁免条目」关联。库不存在时优雅降级为空集。
+    """
+    updates_db = settings.data_root / 'gms_update_monitor.sqlite3'
+    if not updates_db.exists():
+        return {'success': True, 'available': False, 'total': 0, 'limit': limit, 'offset': offset, 'items': []}
+    where = []
+    params: list[str | int] = []
+    if q:
+        like = f'%{escape_like(q)}%'
+        where.append(
+            '(patch_id LIKE ? ESCAPE "\\" OR description LIKE ? ESCAPE "\\" OR '
+            'android_versions LIKE ? ESCAPE "\\" OR bulletin_month LIKE ? ESCAPE "\\" OR '
+            'deadline LIKE ? ESCAPE "\\" OR year LIKE ? ESCAPE "\\" OR patch_kind LIKE ? ESCAPE "\\" OR '
+            # 数字段与豁免表 exemption_id（Google bug ID）同空间，Python 侧交叉检索。
+            'substr(patch_id, 3) IN (SELECT ? UNION SELECT ?))'
+        )
+        params.extend([like] * 7)
+        params.extend([q, q.lstrip('AP-')])
+    where_sql = f"WHERE {' AND '.join(where)}" if where else ''
+    conn = sqlite3.connect(str(updates_db))
+    conn.row_factory = sqlite3.Row
+    try:
+        total = conn.execute(
+            f'SELECT COUNT(*) FROM gms_update_bulletin_patches {where_sql}', params
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"""
+            SELECT source_key, year, patch_id, patch_kind, android_versions,
+                   description, bulletin_month, deadline, bulletin_url
+            FROM gms_update_bulletin_patches
+            {where_sql}
+            ORDER BY CAST(year AS INTEGER) DESC, bulletin_month, patch_id DESC
+            LIMIT ? OFFSET ?
+            """,
+            [*params, limit, offset],
+        ).fetchall()
+    finally:
+        conn.close()
+
+    items = []
+    page_ids = [str(row['patch_id']) for row in rows]
+    with _connect_db() as mainline_conn:
+        for row in rows:
+            item = dict(row)
+            numeric_id = str(row['patch_id'])[2:] if str(row['patch_id']).startswith(('A-', 'P-')) else ''
+            exemptions = []
+            if numeric_id:
+                exemptions = [
+                    dict(m) for m in mainline_conn.execute(
+                        """
+                        SELECT issue_type, test_module, test_case, exemption_id
+                        FROM mainline_known_issues
+                        WHERE exemption_id = ?
+                        LIMIT 5
+                        """,
+                        (numeric_id,),
+                    ).fetchall()
+                ]
+            item['exemptions'] = exemptions
+            item['release_month'] = str(row['bulletin_month'] or '')
+            items.append(item)
+    return {
+        'success': True,
+        'available': True,
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+        'items': items,
     }
 
 

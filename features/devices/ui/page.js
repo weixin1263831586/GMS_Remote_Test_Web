@@ -672,7 +672,7 @@
         tablist.querySelectorAll('.console-tab').forEach(node => node.remove());
         let anchor = $('ports-tab');
         state.sessions.forEach(session => {
-            const tab = element('button', 'view-tab console-tab');
+            const tab = element('button', 'view-tab console-tab workspace-tab');
             tab.type = 'button';
             tab.setAttribute('role', 'tab');
             tab.dataset.portKey = session.portKey;

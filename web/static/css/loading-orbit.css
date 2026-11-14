@@ -12,6 +12,14 @@
    - .embedded-frame-skeleton：嵌入页整页加载（shell 注入）；
    - .loading-orbit：数据区加载占位（utils.js/core.js loadingOrbitHtml 注入，
      redmine/gerrit/cluster/automation 看板）。共用同一套节点结构与 keyframes。 */
+/* Redmine/Gerrit 的视口预留量与 shell 的滚动条探针一致。
+   低优先级保留局部滚动区尺寸和 modal-open 的滚动锁定。 */
+:where(html.loading-orbit-page) { scrollbar-gutter: stable; overflow-y: scroll; }
+:where(.loading-orbit-page, .loading-orbit-page *)::-webkit-scrollbar { width: 8px; height: 8px; }
+:where(.loading-orbit-page, .loading-orbit-page *)::-webkit-scrollbar-track { background: var(--darker-bg); }
+:where(.loading-orbit-page, .loading-orbit-page *)::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+:where(.loading-orbit-page, .loading-orbit-page *)::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
 .embedded-frame-skeleton,
 .loading-orbit {
     display: grid;
@@ -29,10 +37,6 @@
     /* 与 .loading-orbit 同构的行距：文字行（含空占位）把星轨中心上推
        同样的距离，保证骨架屏 → 数据区揭示时圆心零位移。 */
     gap: 26px;
-    /* 舞台契约（仅 redmine/gerrit 注入）：iframe 页根滚动条统一平台 8px
-       样式，这里右侧 pad 实测同宽，骨架屏圆心 == iframe 舞台/内容列
-       圆心（布局视口中心）；overlay 滚动条环境实测为 0，同样成立。 */
-    padding-right: var(--iframe-scrollbar-width, 0px);
 }
 
 .loading-orbit {
@@ -51,17 +55,15 @@
     gap: 26px;
 }
 
-/* 页面级舞台（.loading-orbit--stage，redmine/gerrit 看板 Tab 主内容区专用）：
-   fixed 锚定 iframe「布局视口」居中（inset:0 自动扣除根滚动条带），
-   圆心 == 页头/内容列圆心——加载与揭示交接全程零跳变；页头 Tab 栏/
-   工具栏行的显隐与增高只改变文档流，不再牵动动画位置（流内
-   align-content:center 会随内容盒顶部移动——这是最早切 Tab 动画位移的根因）。
-   对侧的 shell 骨架屏由 shell-page-switching.js 注入等宽右 pad
-   （--iframe-scrollbar-width，实测平台滚动条宽度），三方圆心重合。
-   pointer-events:none 不拦截页头操作；z-index 低于 sticky 表头与模态。 */
+/* 页面级舞台使用完整 iframe 视口宽度，和外层骨架共用一个中心。
+   inset:0 单独使用会扣掉根滚动条预留带，让 Redmine/Gerrit 的中心比
+   没有根滚动条的 ATS/Cluster 偏左。100vw 统一四个页面的视觉坐标；
+   页头、内容列和滚动条仍按页面原有布局显示。 */
 .loading-orbit--stage {
     position: fixed;
     inset: 0;
+    right: auto;
+    width: 100vw;
     height: auto;
     min-height: 0;
     align-self: auto;
@@ -71,7 +73,8 @@
 
 .embedded-frame-skeleton-bar,
 .loading-orbit-bar {
-    grid-area: auto;
+    grid-area: 1 / 1;
+    place-self: center;
     position: relative;
     overflow: visible;
     width: var(--stage);
@@ -91,6 +94,7 @@
 .loading-orbit .loading-orbit-text,
 .embedded-frame-skeleton .loading-orbit-text {
     grid-column: 1 / -1;
+    grid-row: 2;
     text-align: center;
     color: var(--text-secondary);
     font-size: 13px;
@@ -179,14 +183,19 @@
     100% { transform: scale(1.04); opacity: 0; }
 }
 
-/* 卫星层：两张点组铺满动画区，光点在环上公转，并被引力周期牵引。 */
+/* 所有视觉层共用圆环所在的栅格单元。外层容器还包含文字行和滚动条
+   补偿 padding，不能用 inset:0 把核心/卫星锚定到整个容器中心。 */
 .embedded-frame-skeleton-cards,
 .embedded-frame-skeleton-panels,
 .loading-orbit-cards,
 .loading-orbit-panels {
-    position: absolute;
-    inset: 0;
+    grid-area: 1 / 1;
+    place-self: center;
+    position: relative;
+    width: var(--stage);
+    height: var(--stage);
     display: block;
+    pointer-events: none;
 }
 
 .embedded-frame-skeleton-card,

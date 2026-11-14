@@ -1,0 +1,31 @@
+<div id="radar-settings-modal" class="modal radar-settings-modal" role="dialog" aria-modal="true" aria-labelledby="radar-settings-title" aria-hidden="true">
+  <div class="modal-content">
+    <div class="modal-header"><h2 id="radar-settings-title">修改 GMS更新雷达</h2><button id="radar-settings-close" type="button" aria-label="关闭雷达设置">×</button></div>
+    <div class="modal-body">
+      <p class="radar-hint">每天按计划全量扫描所选任务。关闭浏览器后仍由平台服务执行，停机错过的计划恢复后补跑一次。</p>
+      <p id="radar-smtp-status" class="radar-hint">复用系统级 SMTP：在「测试执行 → 系统设置 → 邮件发送方」配置。</p>
+      <form id="radar-settings-form">
+        <fieldset id="radar-settings-fields" disabled>
+          <label class="radar-check"><input id="radar-enabled" type="checkbox">开启每日扫描</label>
+          <div class="radar-form-row"><label>每日执行时间<input id="radar-time" type="time" value="04:00" required autofocus></label><label>时区<input id="radar-timezone" value="Asia/Shanghai" required maxlength="100"><small>北京时间：Asia/Shanghai</small></label></div>
+          <fieldset class="radar-task-fieldset"><legend>监听任务</legend>
+            <label class="radar-check"><input id="radar-all-tasks" type="checkbox" checked>全部监听（6项）</label>
+            <div class="radar-task-grid">
+              <label class="radar-check"><input type="checkbox" name="radar-task" value="requirements" checked>GMS要求</label>
+              <label class="radar-check"><input type="checkbox" name="radar-task" value="packages" checked>GMS包更新</label>
+              <label class="radar-check"><input type="checkbox" name="radar-task" value="mainline" checked>Mainline包更新</label>
+              <label class="radar-check"><input type="checkbox" name="radar-task" value="artifacts" checked>测试套件更新</label>
+              <label class="radar-check"><input type="checkbox" name="radar-task" value="bulletins" checked>Critical_Patch</label>
+              <label class="radar-check"><input type="checkbox" name="radar-task" value="exemptions" checked>Mainline包豁免项</label>
+            </div><small id="radar-task-count">已选择 6 / 6 项</small>
+          </fieldset>
+          <label>收件人<textarea id="radar-recipients" placeholder="person@example.com, team@example.com"></textarea><small>逗号、分号或换行分隔，最多 50 人。开启每日扫描前需填写。</small></label>
+          <label>发送策略<select id="radar-notify"><option value="changes">仅有变更或扫描失败时发</option><option value="always">每次扫描都发汇总，无更新也发</option></select></label>
+          <label>邮件中的雷达页面地址<input id="radar-url" type="url" placeholder="https://controller.example.com/gms-update-radar"><small>填写收件人可访问的平台地址。</small></label>
+          <p id="radar-settings-feedback" role="status" aria-live="polite"></p>
+          <div class="radar-settings-actions"><button id="radar-settings-cancel" type="button">取消</button><button id="radar-settings-save" type="submit">保存修改</button></div>
+        </fieldset>
+      </form>
+    </div>
+  </div>
+</div>

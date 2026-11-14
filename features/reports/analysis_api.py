@@ -47,6 +47,7 @@ from .diagnosis_quality import public_provider_error
 from .diagnosis_recalls import (
     search_knowledge_base,
     search_mainline_exemptions,
+    search_mainline_security_patches,
     search_system_background,
 )
 from .display import report_display_name
@@ -491,13 +492,14 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
         background_api_level = android_api_level_from_request(request)
 
         # 召回通道编排：suite target / AI / 内部案例 KB / Mainline 豁免 /
-        # 系统机制背景五路并行；KB 与 Mainline 的失败降级实现在
-        # diagnosis_recalls.py（各自独立降级，互不影响）。
-        suite_target, ai_result, kb_results, mainline_exemptions, system_background_results = await asyncio.gather(
+        # Mainline 安全补丁 / 系统机制背景六路并行；KB 与 Mainline 的
+        # 失败降级实现在 diagnosis_recalls.py（各自独立降级，互不影响）。
+        suite_target, ai_result, kb_results, mainline_exemptions, mainline_patches, system_background_results = await asyncio.gather(
             _resolve_suite_target(),
             _run_ai_analysis(),
             search_knowledge_base(http_request, request, keywords),
             search_mainline_exemptions(request),
+            search_mainline_security_patches(request),
             search_system_background(
                 background_query, android_api_level=background_api_level
             ),
@@ -549,6 +551,10 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
             "suite_target": suite_target,
             "mainline_exemptions": mainline_exemptions,
             "mainline_exempt": bool(mainline_exemptions),
+            # Mainline release notes 的安全补丁行（CVE → 模块/版本说明），
+            # 供安全补丁合入类工单（如 CVE warning→fail）定位官方模块修复。
+            "mainline_security_patches": mainline_patches,
+            "mainline_security_patch_hit": bool(mainline_patches),
         }
         diagnosis["summary"] = ai_result.get("root_cause") or ai_result.get("analysis") or "Diagnosis orchestration complete"
         diagnosis["patch_draft"] = _build_patch_draft(diagnosis)

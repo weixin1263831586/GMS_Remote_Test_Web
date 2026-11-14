@@ -185,6 +185,12 @@ def ui_source_groups() -> dict[str, list[Path]]:
             ROOT / 'features/system/update_monitor/ui/page.html',
             ROOT / 'features/system/update_monitor/ui/page.js',
         ],
+        'gms-update-radar': [
+            ROOT / 'features/system/update_radar/ui/page.html',
+            ROOT / 'features/system/update_radar/ui/page.js',
+            ROOT / 'web/shell/dialogs/update-radar-settings.html',
+            ROOT / 'web/static/js/update-radar-settings.js',
+        ],
         'mainline-known-issues': [
             ROOT / 'features/system/mainline_issues/ui/page.html',
             ROOT / 'features/system/mainline_issues/ui/page.js',

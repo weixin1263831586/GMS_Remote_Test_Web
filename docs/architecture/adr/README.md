@@ -43,3 +43,4 @@
 | 0035 | [对话工单分析直接展示 kkagent 最终总结](0035-conversation-kkagent-summary.md) | Accepted | — | — |
 | 0036 | [单工单分析发布前逐段复核结论](0036-analysis-claim-review.md) | Accepted（补充 0035） | — | — |
 | 0037 | [最新报告查询覆盖原生套件结果](0037-native-report-lookup.md) | Accepted | — | — |
+| 0038 | [GMS更新雷达的扫描、比较和通知](0038-update-radar-scans-and-notifications.md) | Accepted | — | — |

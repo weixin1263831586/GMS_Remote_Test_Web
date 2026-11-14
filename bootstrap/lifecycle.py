@@ -311,6 +311,14 @@ def create_lifespan(services: AppServices):
             except Exception:
                 logger.exception('Failed to start automation worker')
             app.state.automation_task = automation_task
+            radar_task = None
+            try:
+                from features.system.update_radar import start_radar
+
+                radar_task = start_radar()
+            except Exception:
+                logger.exception('Failed to start update radar')
+            app.state.update_radar_task = radar_task
             from features.firmware.apk import recover_apk_analysis_tasks
 
             app.state.apk_recovery_tasks = recover_apk_analysis_tasks()
@@ -320,6 +328,9 @@ def create_lifespan(services: AppServices):
             try:
                 yield
             finally:
+                from features.system.update_radar import stop_radar
+
+                await stop_radar(radar_task)
                 await stop_loop_watchdog(loop_watchdog_task)
                 unbind_event_bus_loop(event_loop)
                 background_tasks = list(global_state.background_tasks)

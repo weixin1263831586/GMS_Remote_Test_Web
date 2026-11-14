@@ -418,6 +418,7 @@ async function showConfig() {
                         <option value="automation">自动化通知</option>
                         <option value="ops">运维告警</option>
                         <option value="redmine_reminder">Redmine 提醒</option>
+                        <option value="update_radar">GMS更新雷达</option>
                     </select>
                 </label>
                 <label style="margin:0;font-size:12px;">结果:
@@ -523,6 +524,7 @@ const EMAIL_OUTBOX_CHANNEL_LABELS = {
     automation: '自动化',
     ops: '运维告警',
     redmine_reminder: 'Redmine',
+    update_radar: '更新雷达',
 };
 
 async function loadEmailOutbox() {

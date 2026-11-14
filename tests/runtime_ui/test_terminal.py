@@ -98,6 +98,16 @@ class RuntimeTerminalTests(RuntimeUiHarness):
             ).click()
             tabs = page.locator(".console-tab")
             expect(tabs).to_have_count(2)
+            for width in (1440, 390, 360):
+                page.set_viewport_size({'width': width, 'height': 960})
+                for tab in page.locator('.workspace-tabs [role="tab"]').all():
+                    rect = tab.bounding_box()
+                    self.assertAlmostEqual(rect['width'], 112, delta=0.5)
+                    self.assertAlmostEqual(rect['height'], 44, delta=0.5)
+                self.assertTrue(page.evaluate(
+                    'document.documentElement.scrollWidth <= innerWidth'
+                ))
+            page.set_viewport_size({'width': 1440, 'height': 960})
             expect(tabs.nth(0)).to_contain_text("控制台1")
             expect(tabs.nth(1)).to_contain_text("控制台2")
             expect(tabs.nth(1)).to_have_class(re.compile(r"\bactive\b"))

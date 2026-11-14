@@ -9,6 +9,7 @@
 | --- | --- | --- |
 | Controller 部署 | [快速安装](deployment/quick-install.md) | [生产服务](deployment/production.md)、[配置与迁移](deployment/configuration.md)、[Worker](deployment/worker.md)、[排障](deployment/troubleshooting.md) |
 | GMS ATS | [运行管理](automation.md) | 创建、测试计划、团队可读权限、追踪、重跑、设备预约释放 |
+| GMS更新雷达 | [监听与通知](gms-update-radar.md) | 每日全量扫描、六项任务选择、差异记录和邮件汇总 |
 | AOA 工作台 | [用户指南](aoa/user-guide.md) | 命令编辑、回放、调试、类别认证和语义模板 |
 | USB/IP 与固件 | [接入选型](usbip/overview.md) | [ADB Proxy 对比](usbip/adb-proxy-vs-usbip.md)、[烧写](usbip/firmware-flashing.md)、[故障处理](usbip/troubleshooting.md) |
 | Bootloader | [OEM 命令与恢复](devices/bootloader-oem-commands.md) | 版本判据、执行路径及失败边界 |

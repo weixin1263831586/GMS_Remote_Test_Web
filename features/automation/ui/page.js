@@ -204,7 +204,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ['ops-events', '正在加载运维事件...'],
     ]) {
         const box = document.getElementById(id);
-        setLoadingOrbit(box, label);
+        setLoadingOrbit(box, label, true);
     }
     loadAll(true)
         .catch(() => {})

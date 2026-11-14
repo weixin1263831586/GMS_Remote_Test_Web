@@ -9,7 +9,7 @@ button.primary{background:var(--primary-gradient);border-color:var(--primary-col
 button.danger{color:#ff8a94;border-color:rgba(240,106,117,.45)}
 .page-shell{display:flex;flex-direction:column;gap:14px;padding:14px 16px;max-width:1600px;margin:auto}
 .toolbar,.section-heading,.toolbar-actions,.history-head,.history-actions,.modal-head,.modal-actions,.input-row{display:flex;align-items:center;gap:8px}
-.toolbar{justify-content:space-between}
+
 h1,h2,h3,p{margin:0}
 h1{font-size:20px}h2{font-size:15px}h3{font-size:13px}
 .toolbar p,.section-heading p{color:var(--muted);font-size:12px;margin-top:3px}
@@ -66,19 +66,12 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue);box-shadow:0 0 
 .modal label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:12px}.modal label input,.modal label textarea,.modal label select{color:var(--text)}
 .modal .switch-row{flex-direction:row;align-items:center}.switch-row input{width:auto}.modal-actions{margin-top:4px}.spacer{flex:1}
 @media(max-width:850px){.console-layout{grid-template-columns:1fr}.history-output{height:220px}.terminal{height:48vh}}
-@media(max-width:600px){.page-shell{padding:9px}.toolbar,.section-heading{align-items:flex-start}.toolbar{gap:10px}.toolbar-actions{flex-direction:column;align-items:flex-end}.ports-grid{grid-template-columns:1fr}#console-toolbar{flex-wrap:wrap}.input-row{flex-wrap:wrap}.input-row input{flex-basis:100%}}
+@media(max-width:600px){.page-shell{padding:9px}.toolbar,.section-heading{align-items:flex-start}.toolbar-actions{flex-direction:column;align-items:flex-end}.ports-grid{grid-template-columns:1fr}.input-row{flex-wrap:wrap}.input-row input{flex-basis:100%}}
 
 /* iframe 内采用单层工作区：Tab 切换列表/控制台，控制台自身填满可视高度。 */
 html,body{height:100%;min-height:0;overflow:hidden}
 .page-shell{height:100%;min-height:0;max-width:none;margin:0;padding:0;gap:0}
-.toolbar{height:44px;min-height:44px;padding:0 16px;border-bottom:0}
-.view-tabs{display:flex;align-self:stretch;align-items:stretch;gap:0}
-.view-tab{position:relative;width:112px;min-width:112px;height:44px;border:0;border-radius:0;background:transparent;color:var(--muted);padding:0 14px;font-size:13px;font-weight:600;white-space:nowrap}
-.view-tab:hover{border-color:transparent;background:color-mix(in srgb, var(--primary-color) 8%, transparent)}
-.view-tab:focus-visible{outline:0;background:color-mix(in srgb, var(--primary-color) 12%, transparent)}
-.view-tab.active{background:color-mix(in srgb, var(--primary-color) 12%, transparent);color:var(--text)}
-.view-tab.active::after{content:"";position:absolute;right:0;bottom:-1px;left:0;height:2px;background:var(--blue)}
-.view-tab:disabled{opacity:.38}
+
 .view-panel{flex:1;min-height:0;overflow:auto;padding:12px 16px}
 .section-heading{margin-bottom:8px}
 .console-panel{display:flex;min-height:0;flex-direction:column;overflow:hidden}
@@ -90,19 +83,16 @@ html,body{height:100%;min-height:0;overflow:hidden}
 .history-column{min-height:0;gap:7px;padding:8px;border:0;border-left:1px solid var(--border);border-radius:0;background:var(--card-bg)}
 .history-output{height:auto;min-height:120px;flex:1;padding:8px}.history-actions{margin-top:0}
 @media(max-width:850px){html,body{overflow:auto}.page-shell{height:auto;min-height:100%}.console-layout{grid-template-columns:1fr}.history-column{border-left:0;border-top:1px solid var(--border)}.history-output{height:220px;flex:none}.terminal{height:55vh}.input-dock{position:sticky;bottom:0;padding-bottom:4px}}
-@media(max-width:600px){.toolbar{height:auto;min-height:40px;padding:0 10px;gap:6px}.view-tab{min-height:40px;height:40px;padding:0 10px}.view-panel{padding:10px}.toolbar-actions{flex-direction:column;align-items:flex-end}}
+@media(max-width:600px){.view-panel{padding:10px}.toolbar-actions{flex-direction:column;align-items:flex-end}}
 
 /* 标题与说明同行显示；过长时允许折行，不挤压右侧操作按钮。 */
 .heading-main{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 10px;min-width:0}
 .heading-main p{margin-top:0;overflow-wrap:anywhere}
 
-/* 多控制台 tab：宽度自适应；不用 overflow-x:auto——Chromium 会把纵向
-滚轮转成 tab 栏横向滚动、抢走页面滚动（其它页面 tab 栏无此行为）。
-溢出的 tab 仍可通过键盘 ←/→ 聚焦自动滚入可视区（hidden 保留编程滚动）。 */
-.view-tabs{flex:1;min-width:0;overflow:hidden}
-.console-tab{width:auto;min-width:0;display:inline-flex;align-items:center;gap:6px;padding:0 10px}
-.console-tab .tab-title{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.console-tab .tab-close{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:4px;color:var(--muted);font-size:14px;line-height:1}
+/* Console sessions use the shared fixed-width workspace tab template. */
+
+.console-tab .tab-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.console-tab .tab-close{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:4px;color:var(--muted);font-size:14px;line-height:1}
 .console-tab .tab-close:hover{background:rgba(240,106,117,.18);color:var(--red)}
 
 /* 每个控制台会话面板独立占满 console-panel，保证输入行不被 overflow 裁掉。 */
@@ -111,7 +101,8 @@ html,body{height:100%;min-height:0;overflow:hidden}
 /* Terminal workspace: live output stays primary; metadata and retained logs stay adjacent. */
 .console-layout{grid-template-columns:minmax(0,1fr) minmax(280px,340px);gap:12px}
 /* 控制台操作区上移 header（Redmine 同构）：状态 + 按钮组右对齐单行。 */
-#console-toolbar{display:flex;flex:1 1 auto;align-items:center;justify-content:flex-end;gap:8px;min-width:0}
+
+.toolbar-actions,#console-toolbar{overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
 #console-toolbar[hidden]{display:none}
 #console-toolbar .btn-group{display:flex;flex:0 0 auto;align-items:center;gap:5px;padding-left:9px;margin-left:1px;border-left:1px solid var(--border)}
 #console-toolbar button{min-height:30px;padding:5px 10px;white-space:nowrap}
@@ -137,7 +128,6 @@ html,body{height:100%;min-height:0;overflow:hidden}
 @media(max-width:850px){.console-layout{grid-template-columns:1fr}.console-sidebar{overflow:visible}.console-sidebar .history-column{flex:none}.terminal{height:55vh}.input-dock{position:static}}
 
 button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
-
 
 /* Agent/Device Inventory design alignment for isolated iframe documents.
    Scope: only color, surfaces, controls and tables; do not change tab geometry,
@@ -176,12 +166,9 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 :where(td) { border-color: var(--border); }
 ::selection { background: rgba(139,116,232,.25); color: var(--text); }
 
-
 /* 设备串口（独立 iframe）：只对齐主题，保留 xterm 字宽兜底等专用规则。 */
 .page-shell, .view-panel { color: var(--text); }
-.toolbar { background: var(--panel); border-bottom-color: var(--border); }
-.view-tab.active { color: var(--primary); }
-.view-tab.active::after { background: var(--primary); }
+
 :where(.panel, .port-card, .history-column, .modal) {
     border-color: var(--border); border-radius: 8px;
     background: var(--panel);

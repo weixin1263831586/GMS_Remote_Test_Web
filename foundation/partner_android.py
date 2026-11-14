@@ -8,8 +8,10 @@ import http.cookiejar
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -233,6 +235,116 @@ def load_browser_cookies(
                 return loaded
 
     return loaded
+
+
+def is_auth_failure(status_code: int, final_url: str, *, allow_404: bool = True) -> bool:
+    """True when a Partner docs fetch looks like a lost Google session.
+
+    Signals: any redirect to accounts.google.com, HTTP 401/403, or the
+    auth-walled 404 the site serves to anonymous clients. Real missing
+    pages also return 404, so per-child-page callers pass allow_404=False
+    and only auth statuses / login redirects count.
+    """
+    host = (urlparse(final_url or '').hostname or '').lower()
+    if host.endswith('accounts.google.com'):
+        return True
+    if status_code in (401, 403):
+        return True
+    if status_code == 404 and allow_404:
+        return host.endswith('partner.android.com')
+    return False
+
+
+AUTO_LOGIN_ENV = 'GMS_PARTNER_ANDROID_AUTO_LOGIN'
+AUTO_LOGIN_DISPLAY_ENV = 'GMS_PARTNER_AUTO_LOGIN_DISPLAY'
+AUTO_LOGIN_MARKER_ENV = 'GMS_PARTNER_ANDROID_AUTO_LOGIN_MARKER'
+AUTO_LOGIN_DEBOUNCE_SECONDS = 1800
+
+
+def _auto_login_enabled() -> bool:
+    # 默认关闭：认证失败只在扫描结果里提示手动登录，避免服务端
+    # 擅自在桌面弹 Firefox 窗口。需要旧的自愈行为时显式设为 1。
+    return os.getenv(AUTO_LOGIN_ENV, '0').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _auto_login_marker_path() -> Path:
+    return Path(os.getenv(AUTO_LOGIN_MARKER_ENV) or (Path(tempfile.gettempdir()) / 'gms-partner-login-launch'))
+
+
+def _auto_login_display_environment():
+    """X11 environment for the host desktop session, or None when absent.
+
+    Display defaults to :0 (the gdm/Xorg session x11vnc shares); the X
+    socket probe avoids popping windows on headless service hosts.
+    """
+    display = os.getenv(AUTO_LOGIN_DISPLAY_ENV, ':0')
+    socket_path = Path('/tmp/.X11-unix') / ('X' + display.lstrip(':').split('.')[0])
+    if not socket_path.exists():
+        return None
+    env = dict(os.environ)
+    env['DISPLAY'] = display
+    xauth = os.getenv('XAUTHORITY')
+    if not xauth:
+        candidate = Path(f'/run/user/{os.getuid()}/gdm/Xauthority')
+        if candidate.is_file():
+            xauth = str(candidate)
+    if xauth:
+        env['XAUTHORITY'] = xauth
+    return env
+
+
+def launch_login_browser(url: str = DEFAULT_URL, *, reason: str = '', verbose: bool = False) -> bool:
+    """Open `url` in the host desktop Firefox to restore the Google session.
+
+    Sync jobs call this when Partner authentication fails: the browser has
+    the saved account session and password manager, so recovery takes a few
+    clicks without any credential handling in code. Off by default — callers
+    must surface manual sign-in guidance in their error text; opt in with
+    GMS_PARTNER_ANDROID_AUTO_LOGIN=1. Debounced via a marker file so
+    repeated failures in one scan launch at most one window.
+    """
+    if not _auto_login_enabled():
+        if verbose:
+            print(f'auto-login launch disabled ({AUTO_LOGIN_ENV}=1 to enable)', file=sys.stderr)
+        return False
+    marker = _auto_login_marker_path()
+    try:
+        if marker.exists() and time.time() - marker.stat().st_mtime < AUTO_LOGIN_DEBOUNCE_SECONDS:
+            if verbose:
+                print('auto-login launch skipped: launched recently (debounce)', file=sys.stderr)
+            return False
+    except OSError:
+        pass
+    firefox = shutil.which('firefox')
+    env = _auto_login_display_environment()
+    if not firefox or env is None:
+        if verbose:
+            print('auto-login launch unavailable: firefox binary or X display missing', file=sys.stderr)
+        return False
+    try:
+        subprocess.Popen(
+            [firefox, url],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        if verbose:
+            print(f'auto-login launch failed: {exc}', file=sys.stderr)
+        return False
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(f'{int(time.time())}\t{reason}\t{url}\n', encoding='utf-8')
+    except OSError:
+        pass
+    if verbose:
+        print(
+            f'auto-login: opened {url} in host Firefox ({reason or "partner auth failure"}); '
+            'sign in there to restore cookies, then re-run the sync',
+            file=sys.stderr,
+        )
+    return True
 
 
 def build_parser() -> argparse.ArgumentParser:

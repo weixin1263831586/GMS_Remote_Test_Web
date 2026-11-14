@@ -10,20 +10,10 @@
     :root { color-scheme: dark; --bg:var(--dark-bg); --panel:var(--card-bg); --line:var(--border-color); --text:var(--text-primary); --muted:var(--text-secondary); --blue:var(--primary-color); --green:var(--success-color); --amber:var(--warning-color); --violet:var(--primary-light); }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--page-background); color: var(--text); font-family: "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace; }
-    /* Tab 行适配公共模板（Redmine/Gerrit/设备串口/主机集群）：
-       sticky 44px 头部、≥112px×44px 页签、13px/600 字号、2px 底部指示条。
-       min-width:0 + max-width:100% 让 flex 项可收缩，窄视口时页签行内部
-       横向滚动，文档总宽不超视口。 */
-    .arch-header { position: sticky; top: 0; z-index: 1000; display: flex; align-items: center; min-height: 44px; padding: 0 16px; background: var(--panel); box-shadow: 0 8px 18px rgba(0, 0, 0, .22); }
+
     main { margin: 0 auto; padding: 16px; }
     .lead { color: var(--muted); line-height: 1.7; margin: 0 0 14px; font-size: 13px; }
-    .arch-tabs { display: flex; align-items: stretch; gap: 0; height: 44px; flex: 1 1 auto; min-width: 0; max-width: 100%; background: var(--panel); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
-    .arch-tabs::-webkit-scrollbar { display: none; }
-    .arch-tab { position: relative; flex: 0 0 auto; min-width: 112px; height: 44px; padding: 0 12px; border: 0; border-radius: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: color .2s; white-space: nowrap; }
-    .arch-tab:hover { color: var(--text); }
-    .arch-tab:focus-visible { outline: 0; background: color-mix(in srgb, var(--blue) 12%, transparent); }
-    .arch-tab.active { color: var(--blue); }
-    .arch-tab.active::after { content: ''; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--blue); }
+
     .arch-pane { min-width: 0; }
     section { margin: 12px 0; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(145deg, color-mix(in srgb, var(--card-bg) 98%, transparent), color-mix(in srgb, var(--card-bg) 78%, transparent)); }
     h2 { margin: 0 0 12px; font-size: 18px; color: var(--blue); }
@@ -53,14 +43,16 @@
       .roles, .workers, .sources { grid-template-columns: 1fr; }
     }
   </style>
+<link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261114-unified-tabs">
+<script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
 </head>
 <body>
-<header class="arch-header">
-  <nav class="arch-tabs" role="tablist" aria-label="架构视图切换">
-    <button type="button" role="tab" class="arch-tab active" id="arch-tab-platform" data-arch="platform" aria-selected="true" aria-controls="arch-pane-platform">平台总览</button>
-    <button type="button" role="tab" class="arch-tab" id="arch-tab-usbip" data-arch="usbip" aria-selected="false" aria-controls="arch-pane-usbip" tabindex="-1">USB/IP 接入</button>
-    <button type="button" role="tab" class="arch-tab" id="arch-tab-aoa" data-arch="aoa" aria-selected="false" aria-controls="arch-pane-aoa" tabindex="-1">AOA 恢复与回放</button>
-    <button type="button" role="tab" class="arch-tab" id="arch-tab-firmware" data-arch="firmware" aria-selected="false" aria-controls="arch-pane-firmware" tabindex="-1">固件烧写</button>
+<header class="arch-header workspace-header">
+  <nav class="arch-tabs workspace-tabs" role="tablist" aria-label="架构视图切换">
+    <button type="button" role="tab" class="arch-tab active workspace-tab" id="arch-tab-platform" data-arch="platform" aria-selected="true" aria-controls="arch-pane-platform">平台总览</button>
+    <button type="button" role="tab" class="arch-tab workspace-tab" id="arch-tab-usbip" data-arch="usbip" aria-selected="false" aria-controls="arch-pane-usbip" tabindex="-1">USB/IP 接入</button>
+    <button type="button" role="tab" class="arch-tab workspace-tab" id="arch-tab-aoa" data-arch="aoa" aria-selected="false" aria-controls="arch-pane-aoa" tabindex="-1">AOA 恢复与回放</button>
+    <button type="button" role="tab" class="arch-tab workspace-tab" id="arch-tab-firmware" data-arch="firmware" aria-selected="false" aria-controls="arch-pane-firmware" tabindex="-1">固件烧写</button>
   </nav>
 </header>
 <main>

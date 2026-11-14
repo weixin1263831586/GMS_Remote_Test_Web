@@ -23,7 +23,11 @@ from .api_support import *
 @page_router.get('/gms-update-monitor', response_class=HTMLResponse)
 async def gms_update_monitor_page():
     page_path = Path(__file__).with_name('ui') / 'page.html'
-    return HTMLResponse(page_path.read_text(encoding='utf-8'))
+    # 与 cluster/redmine 页面对齐：HTML 缓存会让改版后的旧 DOM 搭配新脚本。
+    return HTMLResponse(
+        page_path.read_text(encoding='utf-8'),
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @page_router.get('/gms-update-monitor/page.js')
@@ -32,7 +36,9 @@ def gms_update_monitor_page_js():
     page_path = Path(__file__).with_name('ui') / 'page.html'
     js = page_path.parent / 'page.js'
     return Response(
-        js.read_text(encoding='utf-8'), media_type='application/javascript'
+        js.read_text(encoding='utf-8'),
+        media_type='application/javascript',
+        headers={"Cache-Control": "no-cache"},
     )
 
 @router.get('/sources')
@@ -129,6 +135,8 @@ async def gms_update_monitor_summary():
             SELECT s.source_key, s.name, s.category, s.last_scanned_at, s.last_changed_at,
                    COALESCE(a.count, 0) AS artifacts,
                    COALESCE(p.count, 0) AS packages,
+                   COALESCE(m.count, 0) AS mainline_packages,
+                   COALESCE(b.count, 0) AS bulletin_patches,
                    COALESCE(r.count, 0) AS requirement_sections
             FROM gms_update_sources s
             LEFT JOIN (
@@ -137,6 +145,12 @@ async def gms_update_monitor_summary():
             LEFT JOIN (
                 SELECT source_key, COUNT(*) AS count FROM gms_update_packages GROUP BY source_key
             ) p ON p.source_key = s.source_key
+            LEFT JOIN (
+                SELECT source_key, COUNT(*) AS count FROM gms_update_mainline_packages GROUP BY source_key
+            ) m ON m.source_key = s.source_key
+            LEFT JOIN (
+                SELECT source_key, COUNT(*) AS count FROM gms_update_bulletin_patches GROUP BY source_key
+            ) b ON b.source_key = s.source_key
             LEFT JOIN (
                 SELECT source_key, COUNT(*) AS count FROM gms_update_requirement_sections GROUP BY source_key
             ) r ON r.source_key = s.source_key
@@ -406,6 +420,47 @@ _MAINLINE_MONTH_ORDER_SQL = (
     "WHEN 'sep' THEN 9 WHEN 'oct' THEN 10 WHEN 'nov' THEN 11 WHEN 'dec' THEN 12 "
     "ELSE 0 END"
 )
+
+
+@router.get('/bulletins')
+async def list_gms_update_monitor_bulletins(
+    year: str = Query(''),
+    kind: str = Query(''),
+    android_version: str = Query(''),
+    q: str = Query(''),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    conn = _get_db()
+    where = []
+    params: list[str] = []
+    if year:
+        where.append('year = ?')
+        params.append(year)
+    if kind:
+        where.append('patch_kind = ?')
+        params.append(kind)
+    if android_version:
+        where.append("android_versions LIKE ? ESCAPE \"\\\"")
+        params.append(f"%{_like_param(android_version)}%")
+    if q:
+        like = _like_param(q)
+        where.append('(patch_id LIKE ? ESCAPE "\\" OR description LIKE ? ESCAPE "\\" OR deadline LIKE ? ESCAPE "\\")')
+        params.extend([like, like, like])
+    where_sql = f"WHERE {' AND '.join(where)}" if where else ''
+    with conn:
+        total = conn.execute(f'SELECT COUNT(*) FROM gms_update_bulletin_patches {where_sql}', params).fetchone()[0]
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM gms_update_bulletin_patches
+            {where_sql}
+            ORDER BY CAST(year AS INTEGER) DESC, patch_id DESC
+            LIMIT ? OFFSET ?
+            """,
+            [*params, limit, offset],
+        ).fetchall()
+    return {'success': True, 'data': {'items': _rows_to_dicts(rows)}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
 
 
 @router.get('/mainline')

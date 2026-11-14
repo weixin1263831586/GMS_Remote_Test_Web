@@ -49,11 +49,18 @@ def build_session(args: argparse.Namespace) -> requests.Session:
 
 def fetch_source(session: requests.Session, source: SourceConfig, timeout: float) -> FetchedDocument:
     response = session.get(source.url, timeout=timeout, allow_redirects=True)
-    if source.auth_required and response.status_code in {401, 403, 404}:
+    if source.auth_required and fetch_partner_android.is_auth_failure(response.status_code, str(response.url)):
+        # 认证失效默认不再自动弹桌面浏览器（GMS_PARTNER_ANDROID_AUTO_LOGIN=1
+        # 可恢复旧行为），报错里直接给出手动登录指引。
+        if fetch_partner_android.launch_login_browser(
+                source.url, reason=f'{source.name} HTTP {response.status_code}'):
+            opened_hint = '已尝试在主机桌面 Firefox 打开该页'
+        else:
+            opened_hint = '请在本机 Firefox 登录 docs.partner.android.com 的 Google 账号（无需保持页面打开）'
         raise RuntimeError(
             f'{source.name} 访问失败 (HTTP {response.status_code})：'
             'Android Partner 登录可能已失效、当前账号无权限或页面地址已调整；'
-            f'请先在本机 Firefox 登录并确认可打开 {source.url}，然后重试'
+            f'扫描读取的是本机浏览器的登录 Cookie，{opened_hint}，完成登录后重试'
         )
     response.raise_for_status()
     doc = html.fromstring(response.content)

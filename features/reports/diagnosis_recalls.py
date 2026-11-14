@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import sqlite3
 from typing import Any
 
@@ -59,6 +60,46 @@ def query_mainline_exemptions(request: ReportDiagnosisRequest) -> list[dict]:
         )
     finally:
         conn.close()
+
+
+# Mainline release notes 的安全补丁表以 CVE 号为主键身份；失败文本
+# （错误消息/堆栈）里出现 CVE-YYYY-NNNNN 时按号召回，补齐豁免匹配
+# 覆盖不到的「Security patches in this Mainline release」信息。
+_CVE_RE = re.compile(r'CVE-\d{4}-\d{4,7}', flags=re.IGNORECASE)
+
+
+def query_mainline_security_patches(request: ReportDiagnosisRequest) -> list[dict]:
+    """Recall security-patch rows by CVE ids found in the failure text."""
+    if not _MAINLINE_DB_PATH.exists():
+        return []
+    cve_ids = _CVE_RE.findall(
+        f"{request.error_message or ''}\n{request.stack_trace or ''}"
+    )
+    if not cve_ids:
+        return []
+    from features.system import (
+        init_mainline_issues_db,
+    )
+    from features.system import (
+        query_mainline_security_patches as query_patches,
+    )
+
+    conn = sqlite3.connect(str(_MAINLINE_DB_PATH))
+    conn.row_factory = sqlite3.Row
+    try:
+        init_mainline_issues_db(conn)
+        return query_patches(conn, cve_ids, limit=20)
+    finally:
+        conn.close()
+
+
+async def search_mainline_security_patches(request: ReportDiagnosisRequest) -> list[dict]:
+    """Async wrapper; a CVE lookup failure degrades to []."""
+    try:
+        return await asyncio.to_thread(query_mainline_security_patches, request)
+    except Exception as exc:
+        logger.debug("Mainline security-patch lookup skipped: %s", redact_sensitive_text(exc))
+        return []
 
 
 async def search_mainline_exemptions(request: ReportDiagnosisRequest) -> list[dict]:

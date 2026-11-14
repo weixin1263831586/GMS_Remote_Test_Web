@@ -8,20 +8,22 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
     <style>{{CONSOLE_CSS}}</style>
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-ui-foundations">
+<link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261114-unified-tabs">
+<script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
 </head>
 <body>
 <main class="page-shell">
-    <header class="toolbar">
-        <div id="console-view-tabs" class="view-tabs" role="tablist" aria-label="设备串口视图">
-            <button id="ports-tab" class="view-tab active" type="button" role="tab" aria-selected="true" aria-controls="ports-section">本机串口</button>
+    <header class="toolbar workspace-header">
+        <nav id="console-view-tabs" class="view-tabs workspace-tabs" role="tablist" aria-label="设备串口视图">
+            <button id="ports-tab" class="view-tab active workspace-tab" type="button" role="tab" aria-selected="true" aria-controls="ports-section">本机串口</button>
             <!-- 控制台 tab 由 page.js 依据打开的会话动态渲染（支持多个控制台并存）。 -->
-        </div>
-        <div class="toolbar-actions">
+        </nav>
+        <div class="toolbar-actions workspace-actions">
             <span id="refresh-status" class="muted">准备中</span>
             <button id="refresh-ports" type="button">刷新端口</button>
         </div>
         <!-- 控制台操作区（Redmine 同构）：会话打开后填充，随激活 Tab 切换内容。 -->
-        <div id="console-toolbar" class="header-toolbar" hidden>
+        <div id="console-toolbar" class="header-toolbar workspace-actions" hidden>
             <span id="console-socket-status" class="socket-status status-pill offline">未连接</span>
             <div class="btn-group">
                 <button id="console-reconnect" type="button" data-console-action="reconnect">重连</button>

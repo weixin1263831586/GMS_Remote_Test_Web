@@ -1,0 +1,117 @@
+/* Shared embedded workspace header: header > tablist + optional actions.
+   Keep domain classes as behavior hooks; tab geometry belongs here. */
+:root {
+    --workspace-tab-height: 44px;
+    --workspace-tab-width: 112px;
+    --workspace-header-inset: 16px;
+}
+.workspace-header {
+    box-sizing: border-box;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    column-gap: 16px;
+    row-gap: 0;
+    min-width: 0;
+    min-height: var(--workspace-tab-height);
+    margin: 0;
+    padding: 0 var(--workspace-header-inset);
+    border: 0;
+    border-radius: 0;
+    background: var(--card-bg);
+    box-shadow: inset 0 -1px var(--border-color);
+}
+.workspace-header > .workspace-tabs {
+    box-sizing: border-box;
+    display: flex;
+    flex: 0 0 auto;
+    align-self: stretch;
+    align-items: stretch;
+    flex-wrap: nowrap;
+    gap: 0;
+    width: auto;
+    min-width: 0;
+    max-width: 100%;
+    height: var(--workspace-tab-height);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+}
+.workspace-tabs::-webkit-scrollbar { display: none; }
+/* Keep complete tabs on desktop; long session lists still leave room for actions. */
+.workspace-header:has(> .workspace-actions:not([hidden])) > .workspace-tabs {
+    max-width: calc(100% - 256px);
+}
+.workspace-tabs > .workspace-tab {
+    box-sizing: border-box;
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 var(--workspace-tab-width);
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    width: var(--workspace-tab-width);
+    min-width: var(--workspace-tab-width);
+    max-width: var(--workspace-tab-width);
+    height: var(--workspace-tab-height);
+    min-height: var(--workspace-tab-height);
+    margin: 0;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    font: 600 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    text-align: center;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color .15s, background-color .15s;
+}
+.workspace-tabs > .workspace-tab:hover { color: var(--text-primary); }
+.workspace-tabs > .workspace-tab:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: -3px;
+    background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+}
+.workspace-tabs > .workspace-tab.active { color: var(--primary-color); }
+.workspace-tabs > .workspace-tab.active::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 2px;
+    background: var(--primary-color);
+}
+.workspace-tabs > .workspace-tab:disabled { opacity: .4; cursor: not-allowed; }
+.workspace-tab > .ui-icon { width: 15px; height: 15px; margin: 0; }
+.workspace-header > .workspace-actions {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: flex-end;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 8px;
+    min-width: 0;
+    min-height: var(--workspace-tab-height);
+    margin: 0;
+    padding: 0;
+}
+.workspace-header > .workspace-actions[hidden] { display: none; }
+/* The tab row stays 44px tall; controls use a separate row on narrow screens. */
+@media (max-width: 1199px) {
+    .workspace-header { flex-wrap: wrap; }
+    .workspace-header > .workspace-tabs { flex: 1 1 100%; width: 100%; }
+    .workspace-header:has(> .workspace-actions:not([hidden])) > .workspace-tabs { max-width: 100%; }
+    .workspace-header > .workspace-actions { flex: 1 1 100%; width: 100%; }
+}

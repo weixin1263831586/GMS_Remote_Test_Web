@@ -72,7 +72,7 @@ def send_email(
     - ``manager``：可选的 owner config manager；省略时使用全局 SMTP 默认
       配置（``resolve_email_config`` 合并规则），各 owner 无需重复配置账号。
     - ``channel``：触发通道标识（``manual`` / ``automation`` / ``ops`` /
-      ``redmine_reminder``），台账按通道过滤展示；
+      ``redmine_reminder`` / ``update_radar``），台账按通道过滤展示；
     - ``owner_id`` / ``username``：资源所有者（ADR 0010
       ``resource_owner_id``）与操作者显示名，owner 视图按 owner_id 过滤；
     - ``ref_type`` / ``ref_id``：业务回链（如 ``automation_run`` + run id、

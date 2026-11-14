@@ -1,6 +1,6 @@
 
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="loading-orbit-page">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -12,21 +12,23 @@
   <link rel="stylesheet" href="/redmine-agent/assets/rework-chrome.css">
   <link rel="stylesheet" href="/redmine-agent/assets/case-library.css">
   <link rel="stylesheet" href="/redmine-agent/assets/daily-brief-session.css">
-  <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-stage5">
+  <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport">
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-ui-foundations">
+<link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261114-unified-tabs">
+<script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
 </head>
 <body>
-<header>
-  <div class="tabs" role="tablist" aria-label="看板视图" data-keydown="redmineTabKeydown" data-key="ArrowLeft,ArrowRight,Home,End" data-r0="event">
-    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="department" data-click="switchTab" data-a0="department">🏢 部门看板</button>
-    <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="stats" data-click="switchTab" data-a0="stats"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#trend"></use></svg> 个人看板</button>
-    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="project" data-click="switchTab" data-a0="project">🧩 项目看板</button>
-    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="daily-brief" data-click="switchTab" data-a0="daily-brief"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#bot"></use></svg> 每日晨报</button>
-    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="issues" data-click="switchTab" data-a0="issues"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> 工单列表</button>
-    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="cases" data-click="switchTab" data-a0="cases"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#book"></use></svg> 成熟案例</button>
-    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="runs" data-click="switchTab" data-a0="runs"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg> 扫描记录</button>
-  </div>
-  <div class="header-toolbar">
+<header class="workspace-header">
+  <nav class="tabs workspace-tabs" role="tablist" aria-label="看板视图" data-keydown="redmineTabKeydown" data-key="ArrowLeft,ArrowRight,Home,End" data-r0="event">
+    <button type="button" class="tab workspace-tab" role="tab" aria-selected="false" data-tab="department" data-click="switchTab" data-a0="department">🏢 部门看板</button>
+    <button type="button" class="tab active workspace-tab" role="tab" aria-selected="true" data-tab="stats" data-click="switchTab" data-a0="stats"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#trend"></use></svg> 个人看板</button>
+    <button type="button" class="tab workspace-tab" role="tab" aria-selected="false" data-tab="project" data-click="switchTab" data-a0="project">🧩 项目看板</button>
+    <button type="button" class="tab workspace-tab" role="tab" aria-selected="false" data-tab="daily-brief" data-click="switchTab" data-a0="daily-brief"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#bot"></use></svg> 每日晨报</button>
+    <button type="button" class="tab workspace-tab" role="tab" aria-selected="false" data-tab="issues" data-click="switchTab" data-a0="issues"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> 工单列表</button>
+    <button type="button" class="tab workspace-tab" role="tab" aria-selected="false" data-tab="cases" data-click="switchTab" data-a0="cases"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#book"></use></svg> 成熟案例</button>
+    <button type="button" class="tab workspace-tab" role="tab" aria-selected="false" data-tab="runs" data-click="switchTab" data-a0="runs"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg> 扫描记录</button>
+  </nav>
+  <div class="header-toolbar workspace-actions">
     <div id="issuesToolbarFilters" class="filter-bar">
       <input type="text" id="searchInput" placeholder="搜索 / #工单号查 Redmine" title="输入关键词搜索本地工单，或输入 #工单号 直接查询 Redmine" data-keydown="smartSearch" data-key="Enter">
       <select id="statusFilter" data-change="loadIssues" aria-label="工单状态">

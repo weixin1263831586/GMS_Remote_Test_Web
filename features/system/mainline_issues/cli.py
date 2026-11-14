@@ -21,6 +21,8 @@ PRODUCT_SECTIONS = ('Android', 'Android Go')
 
 
 
+from foundation import partner_android as fetch_partner_android
+
 from .parser import *
 from .repository import *
 
@@ -62,7 +64,15 @@ def main() -> int:
     try:
         index_doc = fetch_doc(session, args.index_url, args.timeout)
     except requests.RequestException as exc:
-        print(f'error: failed to fetch index page {args.index_url}: {exc}', file=sys.stderr)
+        response = getattr(exc, 'response', None)
+        manual_hint = (
+            'sign in to docs.partner.android.com with your Google account in host Firefox '
+            '(the page does not need to stay open), then re-run the sync'
+        )
+        if response is not None and fetch_partner_android.is_auth_failure(response.status_code, str(response.url)):
+            if fetch_partner_android.launch_login_browser(args.index_url, reason=f'index HTTP {response.status_code}'):
+                manual_hint = 'opened the page in host Firefox; sign in there, then re-run the sync'
+        print(f'error: failed to fetch index page {args.index_url}: {exc}; {manual_hint}', file=sys.stderr)
         return 1
     years = args.year or extract_release_years(index_doc)
     if not years:
@@ -76,9 +86,11 @@ def main() -> int:
         print(f'found {len(pages)} release-note pages under years: {years_text}', file=sys.stderr)
 
     all_issues: list[KnownIssue] = []
+    all_patches: list[SecurityPatch] = []
     pages_scanned = 0
     pages_skipped = 0
-    page_updates: list[tuple[ReleasePage, FetchedPage, list[KnownIssue], bool]] = []
+    auth_failures = 0
+    page_updates: list[tuple[ReleasePage, FetchedPage, list[KnownIssue], list[SecurityPatch], bool]] = []
     known_issue_keys: set = set()
     with sqlite3.connect(args.db) as conn:
         conn.row_factory = sqlite3.Row
@@ -97,8 +109,34 @@ def main() -> int:
         try:
             fetched = fetch_page(session, page.url, args.timeout)
         except requests.RequestException as exc:
+            # 扫描中途 Cookie 失效表现为子页连续 401/403 或跳到登录页
+            # （单页 404 可能是真实下线页，不计入）。连续 3 次判定为认证
+            # 失效并中止本轮，避免整轮全 404；默认不再自动弹桌面浏览器，
+            # 提示手动登录（GMS_PARTNER_ANDROID_AUTO_LOGIN=1 恢复弹窗）。
+            response = getattr(exc, 'response', None)
+            if response is not None and fetch_partner_android.is_auth_failure(
+                    response.status_code, str(response.url), allow_404=False):
+                auth_failures += 1
+                if auth_failures >= 3:
+                    launched = fetch_partner_android.launch_login_browser(
+                        page.url, reason=f'{auth_failures} consecutive auth failures')
+                    hint = (
+                        'opened the login page in host Firefox'
+                        if launched else
+                        'sign in to docs.partner.android.com with your Google account in host Firefox'
+                    )
+                    print(
+                        f'error: consecutive Partner authentication failures; {hint}. '
+                        'Sign in there, then re-run the sync.',
+                        file=sys.stderr,
+                    )
+                    return 1
+            else:
+                auth_failures = 0
             print(f'warning: skipped {page.url}: {exc}', file=sys.stderr)
             continue
+
+        auth_failures = 0
 
         unchanged = bool(page_state and page_state['content_hash'] == fetched.content_hash)
         if unchanged and not args.force:
@@ -120,17 +158,23 @@ def main() -> int:
             continue
 
         raw_issues = extract_known_issues(page, fetched.doc)
+        raw_patches = extract_security_patches(page, fetched.doc)
         if not args.force:
             with sqlite3.connect(args.db) as conn:
                 conn.row_factory = sqlite3.Row
                 known_issue_keys = load_known_issue_keys(conn, exclude_source_url=page.url)
         issues = dedupe_issues(raw_issues, known_issue_keys)
         all_issues.extend(issues)
-        page_updates.append((page, fetched, issues, not unchanged))
+        all_patches.extend(raw_patches)
+        page_updates.append((page, fetched, issues, raw_patches, not unchanged))
         pages_scanned += 1
         if args.verbose:
             suffix = f' ({len(raw_issues) - len(issues)} duplicate skipped)' if len(raw_issues) != len(issues) else ''
-            print(f'{idx}/{len(pages)} {len(issues)} issues{suffix} {page.label} {page.url}', file=sys.stderr)
+            print(
+                f'{idx}/{len(pages)} {len(issues)} issues, {len(raw_patches)} security patches{suffix} '
+                f'{page.label} {page.url}',
+                file=sys.stderr,
+            )
 
     if args.dry_run:
         for issue in all_issues:
@@ -148,7 +192,7 @@ def main() -> int:
                     ]
                 )
             )
-        print(f'total_pages={len(pages)} pages_scanned={pages_scanned} pages_skipped={pages_skipped} issues_found={len(all_issues)}')
+        print(f'total_pages={len(pages)} pages_scanned={pages_scanned} pages_skipped={pages_skipped} issues_found={len(all_issues)} security_patches_found={len(all_patches)}')
         return 0
 
     finished_at = datetime.now(timezone.utc).isoformat()
@@ -157,15 +201,18 @@ def main() -> int:
         init_db(conn)
         if args.force:
             conn.execute('DELETE FROM mainline_known_issues')
-        for page, fetched, issues, changed in page_updates:
+            conn.execute('DELETE FROM mainline_security_patches')
+        for page, fetched, issues, patches, changed in page_updates:
             replace_page_issues(conn, page.url, issues, finished_at)
+            replace_page_patches(conn, page.url, patches, finished_at)
             upsert_page_state(conn, page, fetched, len(issues), finished_at, changed=changed)
         conn.execute(
             """
             INSERT INTO mainline_known_issue_sync_runs (
-                index_url, release_year, pages_scanned, pages_skipped, issues_found, started_at, finished_at
+                index_url, release_year, pages_scanned, pages_skipped, issues_found,
+                patches_found, started_at, finished_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 args.index_url,
@@ -173,6 +220,7 @@ def main() -> int:
                 pages_scanned,
                 pages_skipped,
                 len(all_issues),
+                len(all_patches),
                 started_at,
                 finished_at,
             ),
@@ -181,7 +229,8 @@ def main() -> int:
 
     print(
         f'total_pages={len(pages)} pages_scanned={pages_scanned} '
-        f'pages_skipped={pages_skipped} issues_found={len(all_issues)} db={args.db}'
+        f'pages_skipped={pages_skipped} issues_found={len(all_issues)} '
+        f'security_patches_found={len(all_patches)} db={args.db}'
     )
     return 0
 

@@ -141,7 +141,7 @@ function renderAllCategories(grid) {
                         </button>
                     </div>
                 </div>
-                <div class="tools-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px;">
+                <div class="tools-grid">
         `;
 
         tools.forEach((tool, index) => {
@@ -196,7 +196,7 @@ function renderSingleCategory(grid, category) {
                     </button>
                 </div>
             </div>
-            <div class="tools-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px;">
+            <div class="tools-grid">
     `;
 
     tools.forEach((tool, index) => {

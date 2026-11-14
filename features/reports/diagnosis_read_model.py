@@ -98,6 +98,20 @@ def read_model_from_report_diagnosis(diagnosis: dict[str, Any] | None) -> dict[s
             })
         elif item:
             evidence.append({"kind": "mainline_exemption", "fact": str(item)})
+    for patch in diagnosis.get("mainline_security_patches") or []:
+        if isinstance(patch, dict):
+            cve = str(patch.get("cve_id") or "")
+            module = str(patch.get("mainline_module") or "")
+            note = str(patch.get("version_note") or "")
+            label = str(patch.get("release_label") or "")
+            evidence.append({
+                "kind": "mainline_security_patch",
+                "source": "mainline",
+                "reference": cve,
+                "fact": f"{cve} → {module}（{label}）{(': ' + note) if note else ''}".strip(),
+            })
+        elif patch:
+            evidence.append({"kind": "mainline_security_patch", "fact": str(patch)})
 
     identity = _failure_identity_for(diagnosis)
     ai_enabled = bool(ai_result.get("ai_enabled"))

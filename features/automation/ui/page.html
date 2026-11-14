@@ -8,36 +8,38 @@
     <style>
 {{AUTOMATION_CSS}}
     </style>
-<link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-stage5">
+<link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport">
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-ui-foundations">
+<link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261114-unified-tabs">
+<script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
 </head>
 <body data-automation-ready="false">
     <main class="ats-shell">
-<section class="ats-toolbar">
-    <div class="workflow-tabs" role="tablist" aria-label="GMS ATS workflow">
+<header class="ats-toolbar workspace-header">
+    <nav class="workflow-tabs workspace-tabs" role="tablist" aria-label="GMS ATS workflow">
         <!-- 五段旅程：概览 → 发起 → 追踪与诊断 → 测试报告 → 平台。
              data-workflow 仍是 pane 主键（组内其余 pane 经页首互链进入，
              高亮归属见 switchWorkflowPane 的 AUTOMATION_TAB_GROUPS）。 -->
-        <button type="button" role="tab" aria-selected="true" class="workflow-tab active" data-workflow="overview" data-click="switchWorkflowPane" data-a0="overview">概览</button>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="create" data-click="switchWorkflowPane" data-a0="create">发起</button>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="runs" data-click="switchWorkflowPane" data-a0="runs">追踪与诊断</button>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="reports" data-click="switchWorkflowPane" data-a0="reports">测试报告</button>
-        <button type="button" role="tab" aria-selected="false" class="workflow-tab" data-workflow="resources" data-click="switchWorkflowPane" data-a0="resources">平台</button>
-        <div class="ats-actions">
-            <span id="worker-indicator" class="worker-dot down" title="Worker 状态">Worker</span>
-            <span id="ops-indicator" class="worker-dot down" title="运维状态">运维</span>
-            <button type="button" data-click="loadAll">刷新</button>
-            <details class="ats-more-menu">
-                <summary class="ats-more-btn">更多</summary>
-                <div class="ats-more-dropdown">
-                    <button type="button" data-click="pollGerrit">轮询 Gerrit</button>
-                    <button type="button" data-click="tickWorker" data-a0="http">推进队列</button>
-                </div>
-            </details>
-        </div>
-        <div id="automation-toast" class="toast" role="status" aria-live="polite"></div>
+        <button type="button" role="tab" aria-selected="true" class="workflow-tab active workspace-tab" data-workflow="overview" data-click="switchWorkflowPane" data-a0="overview">概览</button>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab workspace-tab" data-workflow="create" data-click="switchWorkflowPane" data-a0="create">发起</button>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab workspace-tab" data-workflow="runs" data-click="switchWorkflowPane" data-a0="runs">追踪与诊断</button>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab workspace-tab" data-workflow="reports" data-click="switchWorkflowPane" data-a0="reports">测试报告</button>
+        <button type="button" role="tab" aria-selected="false" class="workflow-tab workspace-tab" data-workflow="resources" data-click="switchWorkflowPane" data-a0="resources">平台</button>
+    </nav>
+    <div class="ats-actions workspace-actions">
+        <span id="worker-indicator" class="worker-dot down" title="Worker 状态">Worker</span>
+        <span id="ops-indicator" class="worker-dot down" title="运维状态">运维</span>
+        <button type="button" data-click="loadAll">刷新</button>
+        <details class="ats-more-menu">
+            <summary class="ats-more-btn">更多</summary>
+            <div class="ats-more-dropdown">
+                <button type="button" data-click="pollGerrit">轮询 Gerrit</button>
+                <button type="button" data-click="tickWorker" data-a0="http">推进队列</button>
+            </div>
+        </details>
     </div>
-</section>
+    <div id="automation-toast" class="toast" role="status" aria-live="polite"></div>
+</header>
 
 <section class="workflow-surface">
     <section id="workflow-pane-overview" class="workflow-pane active" aria-hidden="false">

@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 import sqlite3
 
-from .parser import FetchedPage, KnownIssue, ReleasePage
+from .parser import FetchedPage, KnownIssue, ReleasePage, SecurityPatch
 
 
 # Mainline 问题类型白名单，供解析、查询和豁免匹配共用。
@@ -30,6 +30,7 @@ def _migrate_sync_runs_table(conn: sqlite3.Connection) -> None:
                     pages_scanned INTEGER NOT NULL,
                     pages_skipped INTEGER NOT NULL DEFAULT 0,
                     issues_found INTEGER NOT NULL,
+                    patches_found INTEGER NOT NULL DEFAULT 0,
                     started_at TEXT NOT NULL,
                     finished_at TEXT NOT NULL
                 )
@@ -39,10 +40,10 @@ def _migrate_sync_runs_table(conn: sqlite3.Connection) -> None:
                 """
                 INSERT INTO mainline_known_issue_sync_runs (
                     id, index_url, release_year, pages_scanned, pages_skipped,
-                    issues_found, started_at, finished_at
+                    issues_found, patches_found, started_at, finished_at
                 )
                 SELECT id, index_url, release_year, pages_scanned, pages_skipped,
-                       issues_found, started_at, finished_at
+                       issues_found, COALESCE(patches_found, 0), started_at, finished_at
                 FROM mainline_known_issue_sync_runs_old
                 """
             )
@@ -159,6 +160,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     }
     if 'pages_skipped' not in sync_run_columns:
         conn.execute('ALTER TABLE mainline_known_issue_sync_runs ADD COLUMN pages_skipped INTEGER NOT NULL DEFAULT 0')
+    if 'patches_found' not in sync_run_columns:
+        conn.execute('ALTER TABLE mainline_known_issue_sync_runs ADD COLUMN patches_found INTEGER NOT NULL DEFAULT 0')
     # 确保 release_year 允许空值。
     _migrate_sync_runs_table(conn)
     conn.execute(
@@ -175,6 +178,30 @@ def init_db(conn: sqlite3.Connection) -> None:
             last_scanned_at TEXT NOT NULL,
             last_changed_at TEXT NOT NULL
         )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mainline_security_patches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_url TEXT NOT NULL,
+            source_title TEXT NOT NULL,
+            release_year INTEGER NOT NULL,
+            release_label TEXT NOT NULL,
+            product_section TEXT NOT NULL,
+            cve_id TEXT NOT NULL,
+            mainline_module TEXT NOT NULL DEFAULT '',
+            version_note TEXT NOT NULL DEFAULT '',
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            UNIQUE(source_url, cve_id, mainline_module)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_mainline_security_patches_cve
+        ON mainline_security_patches(cve_id)
         """
     )
     conn.execute('PRAGMA user_version = 1')
@@ -262,8 +289,7 @@ def upsert_page_state(
     )
 
 
-def upsert_issues(conn: sqlite3.Connection, issues: list[KnownIssue], timestamp: str) -> None:
-    conn.executemany(
+def upsert_issues(conn: sqlite3.Connection, issues: list[KnownIssue], timestamp: str) -> None:    conn.executemany(
         """
         INSERT INTO mainline_known_issues (
             source_url, source_title, release_year, release_label, product_section, issue_type,
@@ -298,6 +324,83 @@ def upsert_issues(conn: sqlite3.Connection, issues: list[KnownIssue], timestamp:
             for issue in issues
         ],
     )
+
+
+# 安全补丁表返回给诊断和界面的字段。
+_SECURITY_PATCH_COLUMNS = (
+    'cve_id, mainline_module, version_note, product_section, '
+    'release_year, release_label, source_url, source_title, last_seen_at'
+)
+
+
+def replace_page_patches(conn: sqlite3.Connection, source_url: str, patches: list[SecurityPatch], timestamp: str) -> None:
+    conn.execute('DELETE FROM mainline_security_patches WHERE source_url = ?', (source_url,))
+    upsert_security_patches(conn, patches, timestamp)
+
+
+def upsert_security_patches(conn: sqlite3.Connection, patches: list[SecurityPatch], timestamp: str) -> None:
+    conn.executemany(
+        """
+        INSERT INTO mainline_security_patches (
+            source_url, source_title, release_year, release_label, product_section,
+            cve_id, mainline_module, version_note, first_seen_at, last_seen_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(source_url, cve_id, mainline_module)
+        DO UPDATE SET
+            version_note = excluded.version_note,
+            product_section = excluded.product_section,
+            last_seen_at = excluded.last_seen_at
+        """,
+        [
+            (
+                patch.source_url,
+                patch.source_title,
+                patch.release_year,
+                patch.release_label,
+                patch.product_section,
+                patch.cve_id,
+                patch.mainline_module,
+                patch.version_note,
+                timestamp,
+                timestamp,
+            )
+            for patch in patches
+        ],
+    )
+
+
+def query_security_patches_by_cve(
+    conn: sqlite3.Connection,
+    cve_ids: list[str],
+    *,
+    limit: int = 20,
+) -> list[dict]:
+    """按 CVE 号查询安全补丁记录（最新 release 优先）。"""
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for cve in cve_ids or []:
+        match = re.search(r'CVE-\d{4}-\d{4,7}', str(cve), flags=re.IGNORECASE)
+        if not match:
+            continue
+        cve_id = match.group(0).upper()
+        if cve_id not in seen:
+            seen.add(cve_id)
+            normalized.append(cve_id)
+    if not normalized:
+        return []
+    placeholders = ', '.join('?' for _ in normalized)
+    rows = conn.execute(
+        f"""
+        SELECT {_SECURITY_PATCH_COLUMNS}
+        FROM mainline_security_patches
+        WHERE cve_id IN ({placeholders})
+        ORDER BY release_year DESC, source_url DESC, cve_id, mainline_module
+        LIMIT ?
+        """,
+        (*normalized, limit),
+    ).fetchall()
+    return [dict(row) for row in rows]
 
 
 # 豁免匹配返回给诊断和界面的字段。

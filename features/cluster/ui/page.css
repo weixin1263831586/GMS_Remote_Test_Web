@@ -24,10 +24,7 @@
 .dash-test-group{margin-bottom:6px}
 .dash-test-group-title{font-size:10px;font-weight:600;color:var(--blue);padding:3px 0 1px;border-bottom:1px solid rgba(48,54,66,.3)}
 .dash-empty{color:var(--muted);font-size:11px;padding:6px 0}
-.dash-tabs{display:flex;gap:0;border-bottom:2px solid var(--border);padding:10px 14px 0}
-.dash-tab{padding:8px 18px;font-size:13px;font-weight:600;border:none;background:none;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:color .2s,border-color .2s}
-.dash-tab:hover{color:var(--text)}
-.dash-tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+
 .dash-tab-pane{animation:dash-fade .15s ease;flex:1;min-height:0;display:flex;flex-direction:column}
 .dash-tab-pane[hidden]{display:none}
 #tab-management{overflow:auto}
@@ -39,22 +36,16 @@
 @media(max-width:700px){.dash-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:460px){.dash-cards{grid-template-columns:1fr}}
 
-/* 与内嵌工作区的其余页面共用 Tab 栏尺寸和顶部位置。 */
+/* Tab geometry is provided by workspace-tabs.css. */
 main{padding:0}
-.dash-tabs{display:flex;align-items:stretch;gap:0;height:44px;border-bottom:0;padding:0}
-.dash-tabs-row{display:flex;align-items:center;height:44px;padding:0 16px}
-.dash-tabs-actions{display:flex;align-items:center;gap:8px;margin-left:auto;min-width:0}
+
 /* author 的 display 覆盖会压掉 UA 的 [hidden]，显式兜底。 */
 .dash-tabs-actions [hidden]{display:none}
 .dash-tabs-actions .compact-filter{height:30px}
-.dash-tab{position:relative;width:112px;min-width:112px;height:44px;padding:0 14px;font-size:13px;font-weight:600;border:none;border-radius:0;background:none;color:var(--muted);cursor:pointer;margin:0;transition:color .2s;white-space:nowrap}
-.dash-tab:focus-visible{outline:0;background:color-mix(in srgb, var(--primary-color) 12%, transparent)}
-.dash-tab.active::after{content:"";position:absolute;right:0;bottom:-1px;left:0;height:2px;background:var(--blue)}
+
 .dash-tab-pane{margin:0 16px}
 
-
 button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
-
 
 /* Agent/Device Inventory design alignment for isolated iframe documents.
    Scope: only color, surfaces, controls and tables; do not change tab geometry,
@@ -93,7 +84,6 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 :where(td) { border-color: var(--border); }
 ::selection { background: rgba(139,116,232,.25); color: var(--text); }
 
-
 /* 主机集群：KPI/数据面板与设备库存卡同构，保持 Dashboard/Management 原位。 */
 .dash-stat-card, .dash-panel, .card {
     border: 1px solid var(--border); border-radius: 8px;
@@ -101,9 +91,7 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 }
 .dash-stat-card .num { font-weight: 650; font-variant-numeric: tabular-nums; }
 .dash-stat-card .label, .dash-stat-card .sub { color: var(--muted); }
-.dash-tabs { background: var(--panel); }
-.dash-tab.active { color: var(--primary); }
-.dash-tab.active::after { background: var(--primary); }
+
 .table-wrap th { position: sticky; top: 0; z-index: 1; }
 .table-wrap tbody tr:hover { background: color-mix(in srgb, var(--primary) 6%, var(--panel)); }
 .onboarding-modal { border-color: var(--border); background: var(--panel); }

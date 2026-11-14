@@ -1,4 +1,4 @@
-from .repository import init_db, query_exemption_match
+from .repository import init_db, query_exemption_match, query_security_patches_by_cve
 
 
 def __getattr__(name: str):
@@ -11,4 +11,4 @@ def __getattr__(name: str):
     return api
 
 
-__all__ = ["api", "init_db", "query_exemption_match"]
+__all__ = ["api", "init_db", "query_exemption_match", "query_security_patches_by_cve"]

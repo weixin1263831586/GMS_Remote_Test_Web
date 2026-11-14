@@ -345,7 +345,7 @@ def save_smtp_config(body: SmtpConfigRequest, admin: CurrentUser = Depends(requi
 # 历史邮件（outbox ledger）：三条链路统一的可追溯台账
 # ---------------------------------------------------------------------------
 
-_EMAIL_CHANNELS = ("manual", "automation", "ops", "redmine_reminder")
+_EMAIL_CHANNELS = ("manual", "automation", "ops", "redmine_reminder", "update_radar")
 
 
 @router.get("/api/email/outbox")
@@ -360,7 +360,7 @@ def list_email_outbox(
 ):
     """历史邮件：普通用户看自己的记录，管理员可看全量。
 
-    - ``channel``：按触发通道过滤（manual/automation/ops/redmine_reminder）；
+    - ``channel``：按触发通道过滤（manual/automation/ops/redmine_reminder/update_radar）；
     - ``sent``：``true`` / ``false`` 过滤成败；缺省返回全部（含失败尝试）；
     - ``admin_view=true``：仅 admin 角色生效，跨 owner 返回全部记录。
     """

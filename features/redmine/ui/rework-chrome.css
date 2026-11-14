@@ -1,7 +1,5 @@
 /* Redmine：不改变现有七个 tab / 工单/晨报数据视图。 */
-header { background: var(--panel); border-bottom: 1px solid var(--border); box-shadow: none; }
-.tab.active { color: var(--primary); }
-.tab.active::after { background: var(--primary); }
+
 :where(.panel, .issue-card, .stat-card, .trend-panel) {
     background: var(--panel); border: 1px solid var(--border);
     border-radius: 8px; box-shadow: none;

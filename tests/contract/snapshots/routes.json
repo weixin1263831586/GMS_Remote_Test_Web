@@ -1863,6 +1863,12 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/gms-update-monitor/bulletins"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/gms-update-monitor/changes"
   },
   {
@@ -1930,6 +1936,54 @@
       "GET"
     ],
     "path": "/api/gms-update-monitor/sync/status"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-radar/runs"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-radar/runs/{run_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-radar/runs/{run_id}/email"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/gms-update-radar/runs/{run_id}/email"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/gms-update-radar/scan"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-radar/settings"
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "path": "/api/gms-update-radar/settings"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-radar/status"
   },
   {
     "methods": [
@@ -2092,6 +2146,18 @@
       "GET"
     ],
     "path": "/api/mainline-known-issues"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/mainline-known-issues/critical-patches"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/mainline-known-issues/security-patches"
   },
   {
     "methods": [
@@ -3476,6 +3542,18 @@
       "GET"
     ],
     "path": "/gms-update-monitor/page.js"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/gms-update-radar"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/gms-update-radar/page.js"
   },
   {
     "methods": [

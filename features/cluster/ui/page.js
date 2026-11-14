@@ -78,7 +78,7 @@ if(!CLUSTER_DASHBOARD_TABS.has(initialClusterDashboardTab)){
 }
 selectClusterDashboardTab(initialClusterDashboardTab,{persist:false});
 // 首屏占位：Worker 管理区渲染超新星动画，首轮 refresh 完成后被覆盖。
-document.querySelector('#workers')&&(document.querySelector('#workers').innerHTML=loadingOrbitHtml('正在加载主机列表...'));
+document.querySelector('#workers')&&(document.querySelector('#workers').innerHTML=loadingOrbitHtml('正在加载主机列表...',true));
 window.addEventListener('resize',scheduleDashboardChartsResize,{passive:true});
 if(typeof ResizeObserver!=='undefined'){
  dashResizeObserver=new ResizeObserver(scheduleDashboardChartsResize);

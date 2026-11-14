@@ -33,30 +33,7 @@ body {
     gap: 0;
     overflow: hidden;
 }
-.ats-toolbar {
-    flex: 0 0 auto;
-    display: flex;
-    flex-direction: column;
-    padding: 0 16px;
-    background: var(--panel);
-    border: 0;
-    border-bottom: 0;
-    border-radius: 0;
-}
-.workflow-tabs {
-    display: flex;
-    align-items: center;
-    gap: 0;
-    min-height: 44px;
-    /* 窄视口下 tab 行比视口宽：内容包在自身横向滚动容器里（content-based
-       overflow），既不劫持纵向滚轮，也让 mobile overflow 门禁认可溢出
-       已被容器约束（overflow:hidden + 无滚动容器会被判为 leak）。 */
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
-}
-.workflow-tabs::-webkit-scrollbar { display: none; }
-.ats-actions { display: flex; flex: 0 0 auto; gap: 8px; margin-left: auto; align-items: center; }
+
 .ats-more-menu { position: relative; }
 /* UA 对关闭 <details> 内容的 display:none 会被下面的 display:flex 覆盖，
    导致收起的菜单按钮常驻渲染并溢出窄视口（mobile overflow 门禁抓到）。 */
@@ -124,36 +101,7 @@ button {
 button:hover { border-color: var(--primary); color: #fff; }
 button.primary { background:var(--primary-gradient); border-color: var(--primary); }
 button.danger { background: rgb(239 68 68 / 18%); border-color: var(--danger); }
-.workflow-tab {
-    flex: 0 0 112px;
-    height: 44px;
-    width: 112px;
-    min-width: 112px;
-    padding: 0 14px;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    color: var(--muted);
-    text-align: center;
-    font-size: 13px;
-    font-weight: 600;
-    position: relative;
-}
-.workflow-tab:hover { color: var(--text); }
-.workflow-tab:focus-visible { outline: 0; background: color-mix(in srgb, var(--primary-color) 12%, transparent); }
-.workflow-tab.active {
-    background: color-mix(in srgb, var(--primary-color) 12%, transparent);
-    color: var(--primary-hover);
-}
-.workflow-tab.active::after {
-    content: '';
-    position: absolute;
-    right: 0;
-    bottom: -1px;
-    left: 0;
-    height: 2px;
-    background: var(--primary);
-}
+
 .workflow-divider {
     flex: 0 0 1px;
     width: 1px;
@@ -961,8 +909,7 @@ body.overlay-open { overflow: hidden; }
     .monitor-events-body { min-height: 0; overflow: visible; }
     .run-list { flex: none; min-height: 200px; }
     .events { max-height: none; }
-    .ats-toolbar { align-items: flex-start; }
-    .ats-actions { margin-left: 0; }
+
     .form-row { grid-template-columns: 1fr; }
     .build-panel-header { align-items: flex-start; }
     .build-panel-actions { flex-wrap: wrap; justify-content: flex-end; }
@@ -1042,7 +989,6 @@ body.overlay-open { overflow: hidden; }
 
 button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 
-
 /* Agent/Device Inventory design alignment for isolated iframe documents.
    Scope: only color, surfaces, controls and tables; do not change tab geometry,
    JS data hooks, canvas/terminal, modal visibility or scroll ownership. */
@@ -1080,11 +1026,8 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 :where(td) { border-color: var(--border); }
 ::selection { background: rgba(139,116,232,.25); color: var(--text); }
 
-
 /* ATS：工作流区沿用 Agent 任务步骤的紧凑层级，保留 pane/Tab 结构。 */
-.ats-toolbar { background: var(--panel); border-bottom-color: var(--border); }
-.workflow-tab.active { color: var(--primary); }
-.workflow-tab.active::after { background: var(--primary); }
+
 :where(.panel, .dash-stat-card, .stat-card, .overview-card, .run-card) {
     background: var(--panel); border: 1px solid var(--border);
     border-radius: 8px; box-shadow: none;

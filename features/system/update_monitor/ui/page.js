@@ -1,5 +1,6 @@
     const UPDATE_MONITOR_TAB_STORAGE_KEY = 'gms_update_monitor_tab';
     const updateMonitorTabs = ['changes', 'artifacts', 'packages', 'mainline', 'requirements'];
+    const BULLETIN_MONTH_NUM = {January:'1',February:'2',March:'3',April:'4',May:'5',June:'6',July:'7',August:'8',September:'9',October:'10',November:'11',December:'12'};
     let initialTab = new URLSearchParams(window.location.search).get('tab') || '';
     if (!updateMonitorTabs.includes(initialTab)) {
       try { initialTab = window.sessionStorage.getItem(UPDATE_MONITOR_TAB_STORAGE_KEY) || ''; } catch (_) { initialTab = ''; }

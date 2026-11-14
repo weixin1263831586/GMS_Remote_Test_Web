@@ -54,6 +54,18 @@ class KnownIssue:
     issue_text: str
 
 
+@dataclass(frozen=True)
+class SecurityPatch:
+    source_url: str
+    source_title: str
+    release_year: int
+    release_label: str
+    product_section: str
+    cve_id: str
+    mainline_module: str
+    version_note: str
+
+
 def build_session(args: argparse.Namespace) -> requests.Session:
     session = requests.Session()
     session.headers.update(
@@ -274,6 +286,76 @@ def extract_known_issues(page: ReleasePage, doc: html.HtmlElement) -> list[Known
                     )
                 )
     return issues
+
+
+def patch_section_heading(article: html.HtmlElement) -> html.HtmlElement | None:
+    """Find the ``Security patches in this Mainline release`` heading.
+
+    The heading is normally an h2, but matching h2-h6 keeps the extractor
+    resilient to devsite layout changes.
+    """
+    headings = article.xpath(
+        './/*[self::h2 or self::h3 or self::h4 or self::h5 or self::h6]'
+        '[contains(normalize-space(.), "Security patches in this Mainline release")]'
+    )
+    return headings[0] if headings else None
+
+
+def extract_security_patches(page: ReleasePage, doc: html.HtmlElement) -> list[SecurityPatch]:
+    """Parse the per-release security-patch table (CVE / module / version).
+
+    The section holds one table whose rows carry a CVE id, the affected
+    Mainline module and a free-text version note (sometimes empty). Rows
+    without a recognizable CVE id are skipped instead of failing the scan.
+    """
+    title = ' '.join(doc.xpath('//title/text()')).strip()
+    articles = doc.xpath('//article[contains(@class, "devsite-article")]')
+    article = articles[0] if articles else doc
+    heading = patch_section_heading(article)
+    if heading is None:
+        return []
+    heading_lvl = heading_level(heading)
+
+    section = ''
+    patches: list[SecurityPatch] = []
+    seen: set[tuple[str, str]] = set()
+    for sibling in heading.itersiblings():
+        level = heading_level(sibling)
+        if level:
+            if level <= heading_lvl:
+                break
+            section = text_content(sibling)
+            continue
+        for row in sibling.xpath('.//tr'):
+            cells = [text_content(cell) for cell in row.xpath('./th|./td')]
+            if len(cells) < 2:
+                continue
+            cve_match = next(
+                (re.search(r'CVE-\d{4}-\d{4,7}', cell, flags=re.IGNORECASE) for cell in cells),
+                None,
+            )
+            if not cve_match:
+                continue
+            cve_id = cve_match.group(0).upper()
+            module = next((cell for cell in cells[1:] if cell), '')
+            note = cells[-1] if len(cells) > 2 else ''
+            key = (cve_id, module)
+            if key in seen:
+                continue
+            seen.add(key)
+            patches.append(
+                SecurityPatch(
+                    source_url=page.url,
+                    source_title=title,
+                    release_year=page.year,
+                    release_label=page.label,
+                    product_section=section or 'Security patches in this Mainline release',
+                    cve_id=cve_id,
+                    mainline_module=module,
+                    version_note=note,
+                )
+            )
+    return patches
 
 
 def issue_dedupe_key(issue: KnownIssue) -> tuple[str, str, str, str, str]:

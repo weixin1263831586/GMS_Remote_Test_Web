@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="loading-orbit-page">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,37 +10,21 @@
     :root { color-scheme: dark; --bg:var(--dark-bg); --panel:var(--card-bg); --panel2:var(--light-bg); --border:var(--border-color); --text:var(--text-primary); --muted:var(--text-secondary); --primary:var(--primary-color); --ok:var(--success-color); --warn:var(--warning-color); --bad:var(--danger-color); --surface:var(--light-bg); --accent:var(--lighter-bg); }
     * { box-sizing:border-box; }
     body { margin:0; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--page-background); color:var(--text); }
-    html { scrollbar-gutter:stable; overflow-y:scroll; scroll-padding-top:86px; }
-    /* 根滚动条对齐平台全局 8px 样式（common-components.css）：滚动条带
-       宽度（scrollbar-gutter 预留量）与 shell 探针同源同值，shell 骨架屏
-       注入等宽右 pad 后，星轨圆心与页面内容列/加载舞台三方重合，加载与
-       揭示交接零跳变；视觉与外层 shell 一致。
-       注意：不要再给根加 scrollbar-width/color——标准属性会覆盖
-       ::-webkit-scrollbar 的宽度，让预留量与 shell 探针不一致。 */
-    ::-webkit-scrollbar { width: 8px; height: 8px; }
-    ::-webkit-scrollbar-track { background: var(--darker-bg); }
-    ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
-    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-    header { position:sticky; top:0; z-index:1000; min-height:44px; display:flex; align-items:center; gap:16px; padding:0 16px; border-bottom:0; background:var(--panel); box-shadow:0 8px 18px rgba(0,0,0,.22); flex-wrap:wrap; row-gap:6px; }
+    html { scroll-padding-top:86px; }
+
     .header-title { font-size:18px; font-weight:700; white-space:nowrap; margin:0; }
     select,input { height:30px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:0 8px; font-size:13px; }
     input { min-width:260px; }
     button { height:30px; border:0; border-radius:6px; padding:0 10px; color:white; background:var(--primary-gradient); font-weight:650; cursor:pointer; font-size:13px; }
     button.secondary { background:var(--lighter-bg); }
     main { padding:0; }
-    .tabs { display:flex; align-self:stretch; gap:0; max-width:100%; overflow-x:auto; scrollbar-width:none; }
-    /* 页签是原生 <button role="tab">（a11y 契约）：重置按钮外观，保留底部指示条。 */
-    .tab { position:relative; flex:1 1 112px; min-width:96px; max-width:112px; width:auto; height:44px; padding:0 8px; cursor:pointer; font:inherit; font-size:13px; font-weight:600; color:var(--muted); background:none; border:none; border-radius:0; transition:all .15s; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .tab:hover { color:var(--text); }
-    .tab:focus-visible { outline:0; background:color-mix(in srgb, var(--primary-color) 12%, transparent); }
-    .tab.active { color:var(--primary); }
-    .tab.active::after { content:''; position:absolute; right:0; bottom:-1px; left:0; height:2px; background:var(--primary); }
+
     .btn-group { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
     /* Redmine 同构：筛选与操作按钮整体右对齐聚在 Tab 行右侧，按钮组
        以左边框分隔。查询工具行是静态搬移（#profile 选项由 init 填充），
        个人/部门控件随数据渲染重建，值保留链在各自构造函数里。 */
     .header-toolbar { flex:1 1 auto; display:flex; align-items:center; justify-content:flex-end; gap:8px; min-width:0; overflow-x:auto; overflow-y:hidden; padding-bottom:1px; scrollbar-width:thin; }
-    .header-toolbar .filter-bar { flex:0 1 auto; display:flex; align-items:center; justify-content:flex-end; gap:6px; min-width:0; flex-wrap:nowrap; }
+    .header-toolbar .filter-bar { flex:0 1 auto; display:flex; align-items:center; justify-content:flex-start; gap:6px; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; min-width:0; flex-wrap:nowrap; }
     .header-toolbar .filter-bar > div { display:flex; align-items:center; gap:6px; min-width:0; }
     .header-toolbar .filter-bar > div[hidden] { display:none; }
     .header-toolbar .filter-bar[hidden] { display:none; }
@@ -142,10 +126,10 @@
     #routeCheckModal .modal-close:active { transform:scale(.95); }
     #routeCheckModal .modal-body { display:block; padding:20px; overflow-y:auto; }
     html.modal-open, body.modal-open { overflow:hidden; }
-    @media (max-width:800px) { header { grid-template-columns:1fr; align-items:flex-start; row-gap:8px; } input { min-width:180px; width:100%; } .header-toolbar { flex:1 1 100%; justify-content:flex-start; flex-wrap:wrap; } .header-toolbar .filter-bar { flex-wrap:wrap; } .header-toolbar .btn-group { flex-wrap:wrap; border-left:0; padding-left:0; margin-left:0; } }
-    @media (max-width:560px) { .trend-grid { grid-template-columns:minmax(0,1fr); } .form-grid { grid-template-columns:1fr; } .field.full { grid-column:auto; } .modal-actions { flex-direction:column; } .modal-actions button { width:100%; } .tab { padding:10px 14px; min-height:40px; } button { min-height:40px; } .select-add-btn { height:40px; min-width:40px; } .trend-start-btn { width:40px; min-width:40px; min-height:40px; } .modal-close { width:40px; height:40px; min-width:40px; min-height:40px; } }
+    @media (max-width:800px) {  input { min-width:180px; width:100%; } .header-toolbar { flex:1 1 100%; justify-content:flex-start; flex-wrap:wrap; } .header-toolbar .filter-bar { flex-wrap:wrap; } .header-toolbar .btn-group { flex-wrap:wrap; border-left:0; padding-left:0; margin-left:0; } }
+    @media (max-width:560px) { .trend-grid { grid-template-columns:minmax(0,1fr); } .form-grid { grid-template-columns:1fr; } .field.full { grid-column:auto; } .modal-actions { flex-direction:column; } .modal-actions button { width:100%; }  button { min-height:40px; } .select-add-btn { height:40px; min-width:40px; } .trend-start-btn { width:40px; min-width:40px; min-height:40px; } .modal-close { width:40px; height:40px; min-width:40px; min-height:40px; } }
     @media (max-height:560px) { .modal { align-items:stretch; } .modal-content { max-height:calc(100dvh - 16px); } }
-  
+
 /* Agent/Device Inventory design alignment for isolated iframe documents.
    Scope: only color, surfaces, controls and tables; do not change tab geometry,
    JS data hooks, canvas/terminal, modal visibility or scroll ownership. */
@@ -183,11 +167,8 @@
 :where(td) { border-color: var(--border); }
 ::selection { background: rgba(139,116,232,.25); color: var(--text); }
 
-
 /* Gerrit 保留已有各视图/列表/对话框交互，只对齐公共视觉。 */
-header { background: var(--panel); border-bottom: 1px solid var(--border); box-shadow: none; }
-.tab.active { color: var(--primary); }
-.tab.active::after { background: var(--primary); }
+
 :where(.stat-card, .trend-panel, .modal-content, .wrap, .dept-table-wrap) {
     background: var(--panel); border-color: var(--border); border-radius: 8px; box-shadow: none;
 }
@@ -196,17 +177,19 @@ header { background: var(--panel); border-bottom: 1px solid var(--border); box-s
 :where(table) tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--panel)); }
 
 </style>
-<link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-stage5">
+<link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport">
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-ui-foundations">
+<link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261114-unified-tabs">
+<script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
 </head>
 <body>
-<header>
-  <div class="tabs" role="tablist" aria-label="看板视图" data-keydown="gerritTabKeydown" data-key="ArrowLeft,ArrowRight,Home,End" data-r0="event">
-    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="department" data-click="switchTab" data-a0="department">🏢 部门看板</button>
-    <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="personal" data-click="switchTab" data-a0="personal"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#trend"></use></svg> 个人看板</button>
-    <button type="button" class="tab" role="tab" aria-selected="false" data-tab="query" data-click="switchTab" data-a0="query"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg> 查询</button>
-  </div>
-  <div class="header-toolbar">
+<header class="workspace-header">
+  <nav class="tabs workspace-tabs" role="tablist" aria-label="看板视图" data-keydown="gerritTabKeydown" data-key="ArrowLeft,ArrowRight,Home,End" data-r0="event">
+    <button type="button" class="tab workspace-tab" role="tab" aria-selected="false" data-tab="department" data-click="switchTab" data-a0="department">🏢 部门看板</button>
+    <button type="button" class="tab active workspace-tab" role="tab" aria-selected="true" data-tab="personal" data-click="switchTab" data-a0="personal"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#trend"></use></svg> 个人看板</button>
+    <button type="button" class="tab workspace-tab" role="tab" aria-selected="false" data-tab="query" data-click="switchTab" data-a0="query"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg> 查询</button>
+  </nav>
+  <div class="header-toolbar workspace-actions">
     <div id="tabFilters" class="filter-bar" hidden>
       <div id="queryFilters" hidden>
         <select id="profile" data-change="loadChanges" aria-label="查询场景"></select>

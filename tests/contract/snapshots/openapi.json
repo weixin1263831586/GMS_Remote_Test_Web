@@ -2476,6 +2476,74 @@
         "title": "PlanSettingsRequest",
         "type": "object"
       },
+      "RadarConfig": {
+        "properties": {
+          "dashboard_url": {
+            "anyOf": [
+              {
+                "format": "uri",
+                "maxLength": 2083,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dashboard Url"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "notify": {
+            "default": "changes",
+            "pattern": "^(always|changes)$",
+            "title": "Notify",
+            "type": "string"
+          },
+          "recipients": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Recipients",
+            "type": "array"
+          },
+          "scan_time": {
+            "default": "04:00",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "title": "Scan Time",
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "enum": [
+                "requirements",
+                "packages",
+                "mainline",
+                "artifacts",
+                "bulletins",
+                "exemptions"
+              ],
+              "type": "string"
+            },
+            "maxItems": 6,
+            "minItems": 1,
+            "title": "Tasks",
+            "type": "array"
+          },
+          "timezone": {
+            "default": "Asia/Shanghai",
+            "maxLength": 100,
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "title": "RadarConfig",
+        "type": "object"
+      },
       "ReportCopyCreate": {
         "properties": {
           "report_name": {
@@ -15285,7 +15353,7 @@
     },
     "/api/email/outbox": {
       "get": {
-        "description": "历史邮件：普通用户看自己的记录，管理员可看全量。\n\n- ``channel``：按触发通道过滤（manual/automation/ops/redmine_reminder）；\n- ``sent``：``true`` / ``false`` 过滤成败；缺省返回全部（含失败尝试）；\n- ``admin_view=true``：仅 admin 角色生效，跨 owner 返回全部记录。",
+        "description": "历史邮件：普通用户看自己的记录，管理员可看全量。\n\n- ``channel``：按触发通道过滤（manual/automation/ops/redmine_reminder/update_radar）；\n- ``sent``：``true`` / ``false`` 过滤成败；缺省返回全部（含失败尝试）；\n- ``admin_view=true``：仅 admin 角色生效，跨 owner 返回全部记录。",
         "parameters": [
           {
             "in": "query",
@@ -16496,6 +16564,96 @@
         "summary": "List New Gms Update Monitor Artifacts"
       }
     },
+    "/api/gms-update-monitor/bulletins": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Year",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "android_version",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Android Version",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Gms Update Monitor Bulletins"
+      }
+    },
     "/api/gms-update-monitor/changes": {
       "get": {
         "parameters": [
@@ -17165,6 +17323,263 @@
           }
         },
         "summary": "Gms Update Monitor Sync Status"
+      }
+    },
+    "/api/gms-update-radar/runs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "History"
+      }
+    },
+    "/api/gms-update-radar/runs/{run_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Detail"
+      }
+    },
+    "/api/gms-update-radar/runs/{run_id}/email": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Email Preview"
+      },
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Email"
+      }
+    },
+    "/api/gms-update-radar/scan": {
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Scan"
+      }
+    },
+    "/api/gms-update-radar/settings": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Settings"
+      },
+      "put": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RadarConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Settings"
+      }
+    },
+    "/api/gms-update-radar/status": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Status"
       }
     },
     "/api/knowledge/android-internals/search": {
@@ -18165,6 +18580,133 @@
           }
         },
         "summary": "List Mainline Known Issues"
+      }
+    },
+    "/api/mainline-known-issues/critical-patches": {
+      "get": {
+        "description": "Critical Fix Supplementary Bulletins 补丁（数据源：GMS Update Monitor 库）。\n\npatch_id 形如 ``A-568181732``，数字段与 Mainline 豁免表的\nexemption_id 同属 Google bug ID 空间；命中豁免时附带\n``exemptions``（issue_type / test_module / test_case），供分析\n「补丁修复 ↔ 豁免条目」关联。库不存在时优雅降级为空集。",
+        "parameters": [
+          {
+            "description": "Patch id, description, Android version, month, or deadline keyword",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Patch id, description, Android version, month, or deadline keyword",
+              "maxLength": 256,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Mainline Critical Patches"
+      }
+    },
+    "/api/mainline-known-issues/security-patches": {
+      "get": {
+        "parameters": [
+          {
+            "description": "CVE id, module, or note keyword",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "CVE id, module, or note keyword",
+              "maxLength": 256,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Mainline Security Patches"
       }
     },
     "/api/mainline-known-issues/summary": {
@@ -26067,6 +26609,38 @@
           }
         },
         "summary": "Gms Update Monitor Page Js"
+      }
+    },
+    "/gms-update-radar": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Radar Page"
+      }
+    },
+    "/gms-update-radar/page.js": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Radar Script"
       }
     },
     "/mainline-known-issues": {

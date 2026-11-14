@@ -8,7 +8,7 @@ from pathlib import Path
 from jinja2 import FileSystemLoader, TemplateNotFound, TemplateSyntaxError, meta, nodes
 from starlette.templating import Jinja2Templates
 
-from bootstrap.shell_assets import ShellRuntimeBundle, ShellStylesBundle
+from bootstrap.shell_assets import ShellAssetVersioner, ShellRuntimeBundle, ShellStylesBundle
 
 
 _INCLUDE = re.compile(r"{%\s*include\s+(['\"])([^'\"]+)\1\s*%}")
@@ -19,10 +19,11 @@ class _ScopedTemplateError(Exception):
 
 
 class ShellTemplateLoader(FileSystemLoader):
-    def __init__(self, directory, *, runtime_bundle=None, style_bundle=None):
+    def __init__(self, directory, *, runtime_bundle=None, style_bundle=None, asset_versioner=None):
         super().__init__(directory)
         self.runtime_bundle = runtime_bundle
         self.style_bundle = style_bundle
+        self.asset_versioner = asset_versioner
 
     def get_source(self, environment, template):
         if template != "shell.html":
@@ -63,6 +64,9 @@ class ShellTemplateLoader(FileSystemLoader):
             source = expand(template)
         except _ScopedTemplateError:
             return super().get_source(environment, template)
+        if self.asset_versioner is not None:
+            source = self.asset_versioner.rewrite(source)
+            checks.append(self.asset_versioner.is_current)
         for bundle in (self.style_bundle, self.runtime_bundle):
             if bundle is not None:
                 source, asset = bundle.rewrite(source)
@@ -102,6 +106,7 @@ def create_shell_templates(
     templates.style_bundle = ShellStylesBundle(static_directory) if build_assets else None
     templates.env.loader = ShellTemplateLoader(
         directory, runtime_bundle=templates.runtime_bundle, style_bundle=templates.style_bundle,
+        asset_versioner=ShellAssetVersioner(static_directory) if build_assets else None,
     )
     # Deployed source is immutable for the lifetime of a process. Development
     # still reloads changes in any fragment, including nested includes.

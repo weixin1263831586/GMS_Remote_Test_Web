@@ -39,6 +39,7 @@ const UT_BUILTIN_TOOLS = {
         }
     ],
     '测试工具': [
+        window.GmsUpdateRadarSettings.builtinTool,
         {
             icon: '📦',
             title: 'Mainline包豁免项',
@@ -46,6 +47,16 @@ const UT_BUILTIN_TOOLS = {
             url: '/mainline-known-issues',
             action: 'mainline-sync',
             builtin_id: 'mainline-known-issues'
+        },
+        {
+            icon: '🩹',
+            title: 'Critical_Patch',
+            description: '查看GMS关键修复补充公告（Critical Fix Supplementary Bulletins），扫描入口在GMS Update Monitor',
+            url: '/mainline-known-issues',
+            action: 'gms-update-sync',
+            builtin_id: 'gms-bulletins-monitor',
+            sync_sources: ['gms_bulletins'],
+            sync_title: 'Critical_Patch'
         },
         {
             icon: '✅',
@@ -353,7 +364,7 @@ function ut_renderAllCategories(grid) {
         section.appendChild(header);
 
         const cards = document.createElement('div');
-        cards.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px;';
+        cards.className = 'tools-grid';
         tools.forEach((tool, index) => {
             cards.appendChild(ut_createToolCard(tool, category, index, toolsCategoryColor(catIndex)));
         });
@@ -412,6 +423,7 @@ function ut_createToolCard(tool, category, index, cardColor) {
 
     const isSyncTool = tool.action === 'mainline-sync' || tool.action === 'gms-update-sync';
     const isShareFirmwareTool = tool.action === 'shareFirmware';
+    if (tool.builtin_id === 'gms-update-radar') actions.appendChild(window.GmsUpdateRadarSettings.createEditButton());
     // sync 工具显示触发按钮
     if (isSyncTool) {
         const downloadBtn = document.createElement('button');
@@ -566,7 +578,7 @@ async function ut_startMainlineKnownIssuesSync(button) {
             // db 不存在，弹框提示后直接全量扫描
             showConfirmDialog(
                 '首次扫描提示',
-                '首次使用需要全量扫描，请确保本机浏览器已打开 https://docs.partner.android.com/mainline/release/release-notes 并可正常访问。'
+                '首次使用需要全量扫描。扫描会读取本机 Firefox 中 docs.partner.android.com 的 Google 登录 Cookie（页面无需打开），登录已失效时请在 Firefox 中重新登录后重试。'
             ).then(confirmed => {
                 if (confirmed) {
                     ut_confirmMainlineKnownIssuesSync('full');
@@ -674,7 +686,7 @@ async function ut_startGmsUpdateMonitorSync(button, tool) {
         if (!status.db_exists) {
             const confirmed = await showConfirmDialog(
                 '首次扫描提示',
-                '首次使用将执行全量扫描，请确保本机浏览器已可正常访问 docs.partner.android.com。'
+                '首次使用将执行全量扫描。扫描会读取本机 Firefox 中 docs.partner.android.com 的 Google 登录 Cookie（页面无需打开），登录已失效时请在 Firefox 中重新登录后重试。'
             );
             if (confirmed) {
                 ut_confirmGmsUpdateMonitorSync('full', sources, syncTitle);

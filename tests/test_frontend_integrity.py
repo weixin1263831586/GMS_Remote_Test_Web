@@ -403,7 +403,7 @@ class FrontendIntegrityTests(unittest.TestCase):
             )
         # 顶部操作区与 Tab 同行（Redmine 看板同构）：管理 Tab 的搜索与
         # 添加主机由 selectClusterDashboardTab 按 active tab 切显隐。
-        self.assertIn('class="dash-tabs-actions"', html)
+        self.assertRegex(html, r'class="dash-tabs-actions(?: [^"]+)?"')
         self.assertIn('id="show-onboarding"', html)
         self.assertIn('class="section-head-copy"', html)
         self.assertIn('id="cluster-search"', html)
@@ -936,7 +936,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         # 部署拓扑为只读展示：VID:PID 列表以逗号连接渲染，Web 端不提交
         # 去重（saveConfig 只保留 local_server）。
         self.assertIn("config.usbip_vid_pids.join(', ')", controls)
-        self.assertIn("test-control.js?v=20261107-config-sections", main_text)
+        self.assertRegex(main_text, r'test-control\.js\?v=[^"\s]+')
 
     def test_unselectable_devices_stay_selected_but_render_unchecked(self):
         navigation = read_text("web/static/js/navigation.js")

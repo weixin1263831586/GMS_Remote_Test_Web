@@ -63,6 +63,26 @@ def init_db(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS gms_update_bulletin_patches (
+            source_key TEXT NOT NULL,
+            item_key TEXT NOT NULL,
+            year TEXT NOT NULL,
+            patch_id TEXT NOT NULL,
+            patch_kind TEXT NOT NULL DEFAULT '',
+            android_versions TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL,
+            bulletin_month TEXT NOT NULL,
+            deadline TEXT NOT NULL,
+            bulletin_url TEXT NOT NULL DEFAULT '',
+            content_hash TEXT NOT NULL,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            PRIMARY KEY (source_key, item_key)
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS gms_update_artifacts (
             source_key TEXT NOT NULL,
             item_key TEXT NOT NULL,
@@ -86,6 +106,17 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    # 旧库升级：bulletin 表补 v2 新列（幂等，按 PRAGMA table_info 判定）。
+    bulletin_columns = {
+        row[1] for row in conn.execute('PRAGMA table_info(gms_update_bulletin_patches)').fetchall()
+    }
+    for column, ddl in (
+        ('patch_kind', "ALTER TABLE gms_update_bulletin_patches ADD COLUMN patch_kind TEXT NOT NULL DEFAULT ''"),
+        ('android_versions', "ALTER TABLE gms_update_bulletin_patches ADD COLUMN android_versions TEXT NOT NULL DEFAULT ''"),
+        ('bulletin_url', "ALTER TABLE gms_update_bulletin_patches ADD COLUMN bulletin_url TEXT NOT NULL DEFAULT ''"),
+    ):
+        if column not in bulletin_columns:
+            conn.execute(ddl)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS gms_update_packages (
@@ -465,6 +496,29 @@ def sync_source(conn: sqlite3.Connection, run_id: int, fetched: FetchedDocument,
             'content_hash',
         ],
         entity_type='mainline_package',
+        timestamp=timestamp,
+    )
+    changes += replace_records(
+        conn,
+        run_id=run_id,
+        source_key=fetched.source.key,
+        table='gms_update_bulletin_patches',
+        key_column='item_key',
+        records=parsed.bulletin_patches,
+        columns=[
+            'source_key',
+            'item_key',
+            'year',
+            'patch_id',
+            'patch_kind',
+            'android_versions',
+            'description',
+            'bulletin_month',
+            'deadline',
+            'bulletin_url',
+            'content_hash',
+        ],
+        entity_type='gms_bulletin',
         timestamp=timestamp,
     )
     changes += replace_records(

@@ -69,6 +69,7 @@ from features.system.ssh import ssh_manager
 from features.system.ssh_async import ssh_async_manager
 from features.system.state import global_state
 from features.system.update_monitor import api as gms_update_monitor
+from features.system.update_radar import router as gms_update_radar_router
 from features.test_execution import api as tests
 from features.test_execution.api import (
     make_empty_suite_target,
@@ -141,6 +142,7 @@ ALL_ROUTERS = [
     gerrit_dashboard.page_router,
     gms_update_monitor.router,
     gms_update_monitor.page_router,
+    gms_update_radar_router,
     health_api.router,
     integrations.router,
     mainline_known_issues.router,

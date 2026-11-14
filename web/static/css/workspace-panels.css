@@ -25,7 +25,10 @@
 .agent-session-delete { flex: none; width: 30px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-left: 1px solid var(--border-light); background: transparent; color: var(--text-muted); cursor: pointer; }
 .agent-session-delete:hover { color: var(--danger-color); background: color-mix(in srgb, var(--danger-color) 10%, transparent); }
 #agent-chat-messages { gap: 18px; padding: 18px 16px; background: var(--card-bg); min-height: 0; }
-.agent-message-row, .agent-message-row.user { justify-content: flex-start; align-items: flex-start; gap: 10px; }
+.agent-message-row { justify-content: flex-start; align-items: flex-start; gap: 10px; }
+/* 聊天习惯（微信/QQ）：Agent 消息靠左，用户消息靠右且头像位于最外侧；
+   头像在 DOM 中始终居首，row-reverse 让用户头像落到右缘。 */
+.agent-message-row.user { flex-direction: row-reverse; justify-content: flex-start; }
 .agent-avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 30px; height: 30px; border: 1px solid var(--border-light); border-radius: 50%; background: var(--lighter-bg); color: var(--primary-light); }
 /* 用户=紫色、Agent=绿色：头像底色与消息气泡同色系，一眼区分两侧。 */
 .agent-message-row.user .agent-avatar { border-color: transparent; background: var(--primary-gradient); color: var(--text-on-accent); }

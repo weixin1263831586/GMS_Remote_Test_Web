@@ -6,6 +6,8 @@ from __future__ import annotations
 # ruff: noqa: F403, F405, E402
 import json
 import re
+import time
+from dataclasses import replace
 from pathlib import Path
 
 from lxml import html
@@ -572,6 +574,240 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
     )
 
 
+_BULLETIN_VERSION_CELL = re.compile(r'(?:Android\s+)?(\d+)(?:\s+(QPR\d))?')
+_BULLETIN_TITLE_SCOPE = re.compile(r'-\s*Android\s+(.+)$')
+_BULLETIN_TITLE_PAREN = re.compile(r'\((\d+(?:\s+and\s+\d+)*)\)')
+_BULLETIN_TITLE_SPLIT = re.compile(r',|\band\b|\|')
+_BULLETIN_BODY_VERSIONS = re.compile(r'Android\s+(\d+(?:\s+QPR\d)?)')
+
+
+def _normalize_bulletin_version(token: str) -> str | None:
+    """把 "16" / "16 QPR2" / "Android 16" 规范成 "16" / "16 QPR2"。"""
+    match = _BULLETIN_VERSION_CELL.fullmatch(token.strip())
+    if not match:
+        return None
+    number, qpr = match.group(1), match.group(2)
+    return f'{number} {qpr}' if qpr else number
+
+
+def _sort_bulletin_versions(versions) -> list[str]:
+    return sorted(set(versions), key=lambda value: (int(value.split()[0]), value))
+
+
+def _bulletin_title_versions(title: str) -> list[str]:
+    """页面标题的版本范围："... Bulletin - Android 16, 16 QPR2, and 17"。
+
+    后续版本不带 "Android" 前缀，因此正文正则会漏掉 "16 QPR2, and 17"。
+    """
+    match = _BULLETIN_TITLE_SCOPE.search(title)
+    if not match:
+        # 旧公告标题格式不同："Nov 2020 Update Bulletin (10 and 11)"。
+        paren = _BULLETIN_TITLE_PAREN.search(title)
+        if not paren:
+            return []
+        return _sort_bulletin_versions(
+            version for version in (
+                _normalize_bulletin_version(token)
+                for token in paren.group(1).split('and')
+            ) if version
+        )
+    versions: set[str] = set()
+    for token in _BULLETIN_TITLE_SPLIT.split(match.group(1)):
+        version = _normalize_bulletin_version(token)
+        if version:
+            versions.add(version)
+        elif token.strip():
+            break  # 枚举在首个非版本片段处结束（页尾 "| Android Partners" 等）
+    return _sort_bulletin_versions(versions)
+
+
+def _bulletin_section_versions(nodes: list, title_versions: list[str]) -> list[str]:
+    """提取单个补丁小节覆盖的全部 Android 版本。
+
+    小节内 "Android version" 表每行对应一个适用版本（同一补丁跨
+    Android 16 / 16 QPR2 / 17 各有不同的提交与下载），是权威来源；
+    缺表时回退到正文 "Android N" 提法与页面标题枚举的并集。
+    """
+    versions: set[str] = set()
+    for node in nodes:
+        tables = [node] if node.tag == 'table' else node.xpath('.//table')
+        for table in tables:
+            header_cells = table.xpath('.//tr[1]/th')
+            headers = [text_content(cell).strip().lower() for cell in header_cells]
+            if not headers or not headers[0].startswith('android version'):
+                continue
+            for row in table.xpath('.//tr'):
+                cells = row.xpath('./td')
+                if not cells:
+                    continue
+                version = _normalize_bulletin_version(text_content(cells[0]))
+                if version:
+                    versions.add(version)
+    if versions:
+        return _sort_bulletin_versions(versions)
+    for node in nodes:
+        versions.update(_BULLETIN_BODY_VERSIONS.findall(text_content(node)))
+    return _sort_bulletin_versions(versions | set(title_versions))
+
+
+def parse_gms_bulletins(fetched: FetchedDocument, session=None, *, timeout: float = 30.0) -> ParsedSource:
+    """Parse Critical Fix Supplementary Bulletin tables (per-year sections).
+
+    The overview page's Bulletin cells link to per-month bulletin pages
+    (``/partners/releases/cf/<month>-<year>#<patch_id>``); each detail page
+    groups patches under "Mandatory" vs "Strongly recommended" headings and
+    annotates the affected Android versions. We store the link plus the
+    kind/versions so the table stays clickable and filterable.
+    """
+    patches: list[BulletinPatchRecord] = []
+    article = fetched.doc.xpath('//article[contains(@class, "devsite-article")]')
+    root = article[0] if article else fetched.doc
+
+    headings = root.xpath('.//*[self::h2 or self::h3]')
+    for heading in headings:
+        year_match = re.fullmatch(r'(\d{4})\s+bulletins?', text_content(heading))
+        if not year_match:
+            continue
+        year = year_match.group(1)
+        level = heading_level(heading)
+        # 同级及更高级标题之间的兄弟节点里找表格。
+        for sibling in heading.itersiblings():
+            sibling_level = heading_level(sibling)
+            if sibling_level and sibling_level <= level:
+                break
+            # 表格可能是 sibling 自身（article 直下）或其后人（div 包裹）。
+            tables = ([sibling] if sibling.tag == 'table' else []) + sibling.xpath('.//table')
+            for table in tables:
+                for row in table.xpath('.//tr'):
+                    cells = [text_content(cell) for cell in row.xpath('./td|./th')]
+                    if len(cells) < 3:
+                        continue
+                    patch_match = re.match(r'(A-\d+)\s*(.*)', cells[0])
+                    if not patch_match:
+                        continue
+                    patch_id, description = patch_match.group(1), patch_match.group(2)
+                    # Bulletin 列的链接 → 月度详情页（#锚点为补丁 ID 数字）。
+                    month_link = row.xpath('.//td//a[@href]')
+                    bulletin_url = ''
+                    for link_el in month_link:
+                        href = link_el.get('href') or ''
+                        if '/partners/releases/cf/' in href:
+                            bulletin_url = urljoin(fetched.final_url, href)
+                            break
+                    payload = {
+                        'source_key': fetched.source.key,
+                        'year': year,
+                        'patch_id': patch_id,
+                        'description': description,
+                        'bulletin_month': cells[1],
+                        'deadline': cells[2],
+                    }
+                    patches.append(
+                        BulletinPatchRecord(
+                            source_key=fetched.source.key,
+                            item_key=normalize_key(fetched.source.key, year, patch_id),
+                            year=year,
+                            patch_id=patch_id,
+                            patch_kind='',
+                            android_versions='',
+                            description=description,
+                            bulletin_month=cells[1],
+                            deadline=cells[2],
+                            bulletin_url=bulletin_url,
+                            content_hash=stable_hash(payload),
+                        )
+                    )
+
+    # 详情页补齐分类（Mandatory / Strongly recommended）与 Android 版本。
+    # 每个月度页只抓一次并缓存：53 个补丁通常集中在 ~12 个详情页，不去重
+    # 的重复请求会触发 Google 反爬软封（返回 200 空壳页，无法解析）。
+    detail_cache: dict[str, tuple[object, list[str]]] = {}
+    patch_kinds: dict[str, str] = {}
+    patch_versions: dict[str, str] = {}
+    for patch in patches:
+        detail_url = patch.bulletin_url.split('#', 1)[0]
+        if not detail_url or not session:
+            continue
+        if detail_url not in detail_cache:
+            time.sleep(0.4)
+            status, _final, detail_text = fetch_html(session, detail_url, timeout)
+            detail_doc = None
+            if status == 200 and detail_text:
+                try:
+                    detail_doc = html.fromstring(detail_text)
+                except Exception:
+                    detail_doc = None
+            if detail_doc is not None and not detail_doc.xpath('//article[contains(@class, "devsite-article")]'):
+                detail_doc = None  # 反爬软封页：200 但无正文，按未富化处理
+            page_title_versions: list[str] = []
+            if detail_doc is not None:
+                og_titles = detail_doc.xpath('//meta[@property="og:title"]/@content')
+                if og_titles:
+                    page_title_versions = _bulletin_title_versions(og_titles[0])
+            detail_cache[detail_url] = (detail_doc, page_title_versions)
+        detail_root, page_title_versions = detail_cache[detail_url]
+        if detail_root is None:
+            continue
+        patch_kind = ''
+        android_versions: list[str] = []
+        for section in detail_root.xpath('.//h2'):
+            section_title = text_content(section).lower()
+            if 'mandatory' in section_title:
+                section_kind = 'mandatory'
+            elif 'strongly recommended' in section_title:
+                section_kind = 'strongly_recommended'
+            else:
+                continue
+            for heading in section.itersiblings():
+                if heading.tag == 'h2':
+                    break
+                if heading.tag != 'h3':
+                    continue
+                heading_text = text_content(heading)
+                if patch.patch_id not in heading_text:
+                    continue
+                patch_kind = section_kind
+                section_nodes = []
+                for node in heading.itersiblings():
+                    if node.tag in ('h2', 'h3'):
+                        break
+                    section_nodes.append(node)
+                android_versions = _bulletin_section_versions(section_nodes, page_title_versions)
+                break
+            if patch_kind:
+                break
+        if patch_kind or android_versions:
+            patch_kinds[patch.item_key] = patch_kind
+            patch_versions[patch.item_key] = ', '.join(f'Android {v}' for v in android_versions)
+
+    if patch_kinds or patch_versions:
+        def _payload(record) -> dict:
+            return {
+                'source_key': record.source_key,
+                'year': record.year,
+                'patch_id': record.patch_id,
+                'description': record.description,
+                'bulletin_month': record.bulletin_month,
+                'deadline': record.deadline,
+            }
+
+        patches = [
+            replace(
+                patch,
+                patch_kind=patch_kinds.get(patch.item_key, ''),
+                android_versions=patch_versions.get(patch.item_key, ''),
+                content_hash=stable_hash({
+                    **_payload(patch),
+                    'kind': patch_kinds.get(patch.item_key, ''),
+                    'versions': patch_versions.get(patch.item_key, ''),
+                }),
+            )
+            for patch in patches
+        ]
+
+    return ParsedSource(bulletin_patches=patches)
+
+
 PARSERS = {
     'cts_downloads': parse_cts_downloads,
     'vts_downloads': parse_vts_downloads,
@@ -579,4 +815,5 @@ PARSERS = {
     'gms_downloads': parse_gms_downloads,
     'gms_requirements': parse_gms_requirements,
     'mainline_release_notes': parse_mainline_release_notes,
+    'gms_bulletins': parse_gms_bulletins,
 }

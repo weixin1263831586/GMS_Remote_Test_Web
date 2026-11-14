@@ -24,6 +24,14 @@ _STYLESHEET = re.compile(
 )
 _CSS_IMPORT = re.compile(r'@import\s+url\("(/static/css/[a-z0-9-]+\.css)(?:\?[^\"]*)?"\)\s*;')
 _CSS_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+# head.html 中 script/link 标签引用的静态资源 URL（含可选的旧手工 ?v= 标记）。
+# 早期这些版本号靠人工维护日期标签，忘记 bump 就会让浏览器继续用旧缓存；
+# 现由 ShellAssetVersioner 按内容摘要统一重写。
+_SHELL_ASSET_URL = re.compile(
+    r'((?:<script\b[^>]*?\bsrc=|<link\b[^>]*?\bhref=)")'
+    r'(/static/[a-z0-9/._-]+\.(?:js|css))'
+    r'(\?v=[a-z0-9._-]+)?(")'
+)
 
 
 @dataclass(frozen=True)
@@ -117,6 +125,53 @@ class ShellStylesBundle:
         self.asset = asset
         tag = f'<link rel="stylesheet" href="/static/{STYLES_PATH}?v={asset.digest}">'
         return source[:matches[0].start()] + tag + source[matches[-1].end():], asset
+
+
+class ShellAssetVersioner:
+    """Rewrite static script/stylesheet URLs with content digests.
+
+    head.html 曾维护约 60 个手工 ``?v=<日期标签>``：任何一处忘记 bump，
+    浏览器就会继续使用旧缓存（本仓库真实踩坑：tools 网格改造时样式/脚本
+    反复不生效）。版本号改为内容摘要后，任何文件变动都会改变 URL；生产
+    模式在启动时计算一次，开发模式通过 ``is_current`` 纳入模板刷新判定。
+    """
+
+    def __init__(self, static_directory: Path):
+        self.directory = static_directory
+        self._versions: dict[str, tuple[tuple[int, int], str]] = {}
+
+    def _digest_for(self, url: str) -> str | None:
+        path = self.directory / url.removeprefix("/static/")
+        try:
+            stat = path.stat()
+        except OSError:
+            return None  # 文件缺失时保持原样，不做失败即崩
+        key = (stat.st_mtime_ns, stat.st_size)
+        cached = self._versions.get(url)
+        if cached and cached[0] == key:
+            return cached[1]
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+        self._versions[url] = (key, digest)
+        return digest
+
+    def is_current(self) -> bool:
+        try:
+            for url, (key, _digest) in self._versions.items():
+                stat = (self.directory / url.removeprefix("/static/")).stat()
+                if (stat.st_mtime_ns, stat.st_size) != key:
+                    return False
+        except OSError:
+            return False
+        return True
+
+    def rewrite(self, source: str):
+        def substitute(match):
+            digest = self._digest_for(match.group(2))
+            if digest is None:
+                return match.group(0)
+            return f'{match.group(1)}{match.group(2)}?v={digest}{match.group(4)}'
+
+        return _SHELL_ASSET_URL.sub(substitute, source)
 
 
 class ShellStaticFiles(StaticFiles):

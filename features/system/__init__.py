@@ -10,6 +10,9 @@ from .mainline_issues import (
 from .mainline_issues import (
     query_exemption_match as query_mainline_exemption_match,
 )
+from .mainline_issues import (
+    query_security_patches_by_cve as query_mainline_security_patches,
+)
 from .models import VNCStartRequest, VPNConnectRequest
 from .network import check_local_vpn_connected
 from .notifications import queue_notification
@@ -67,6 +70,7 @@ __all__ = [
     "list_sdk_sources",
     "novnc_url",
     "query_mainline_exemption_match",
+    "query_mainline_security_patches",
     "queue_notification",
     "registry_state",
     "sdk_manage_router",

@@ -51,10 +51,10 @@
   <main>
     <div class="tabs">
       <button data-tab="changes" class="active" data-click="setTab" data-a0="changes">变更</button>
-      <button data-tab="artifacts" data-click="setTab" data-a0="artifacts">测试套件</button>
-      <button data-tab="packages" data-click="setTab" data-a0="packages">GMS包</button>
-      <button data-tab="mainline" data-click="setTab" data-a0="mainline">Mainline包</button>
-      <button data-tab="requirements" data-click="setTab" data-a0="requirements">认证要求章节</button>
+      <button data-tab="requirements" data-click="setTab" data-a0="requirements">GMS要求</button>
+      <button data-tab="packages" data-click="setTab" data-a0="packages">GMS包更新</button>
+      <button data-tab="mainline" data-click="setTab" data-a0="mainline">Mainline包更新</button>
+      <button data-tab="artifacts" data-click="setTab" data-a0="artifacts">测试套件更新</button>
     </div>
     <div class="filters">
       <input id="q" placeholder="搜索关键字">
@@ -65,6 +65,7 @@
         <option value="gts_downloads">GTS</option>
         <option value="gms_downloads">GMS Download</option>
         <option value="gms_requirements">GMS Requirements</option>
+        <option value="gms_bulletins">GMS Bulletins</option>
       </select>
       <input id="type_filter" placeholder="类型/版本">
       <button data-click="reload" data-a0="true">查询</button>

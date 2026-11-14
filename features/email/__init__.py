@@ -9,12 +9,13 @@ from .api import (
     configure_attachment_resolver,
     configure_manager_provider,
 )
-from .service import send_email
+from .service import normalize_email_addresses, send_email
 
 
 __all__ = [
     "api",
     "configure_attachment_resolver",
     "configure_manager_provider",
+    "normalize_email_addresses",
     "send_email",
 ]

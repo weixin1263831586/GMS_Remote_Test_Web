@@ -1,6 +1,7 @@
 """The bundled Shell keeps dependency order and normal static HTTP semantics."""
 
 import hashlib
+import re
 from html.parser import HTMLParser
 from pathlib import Path
 from unittest.mock import patch
@@ -62,10 +63,18 @@ def test_real_shell_replaces_only_consecutive_runtime_scripts():
     start = next(index for index, src in enumerate(old_scripts) if "/shell-client-identity.js" in src)
     end = next(index for index, src in enumerate(old_scripts) if "/shell-late-init.js" in src) + 1
     asset = templates.runtime_bundle.asset
-    bundled_url = f"/static/{RUNTIME_PATH}?v={asset.digest}"
     assert end - start == 14
-    assert new_scripts == [*old_scripts[:start], bundled_url, *old_scripts[end:]]
+    # 非 bundle 资源保持原始路径，但 ?v= 统一被 ShellAssetVersioner 重写为
+    # 内容摘要（旧手工日期标签不再参与），因此断言仅比较 path 部分。
+    expected_paths = [src.split("?")[0] for src in old_scripts]
+    expected_paths[start:end] = [f"/static/{RUNTIME_PATH}"]  # bundle 合并为一条
+    actual_paths = [src.split("?")[0] for src in new_scripts]
+    assert actual_paths == expected_paths
     assert len(new_scripts) == len(old_scripts) - 13
+    # 所有 URL 的 ?v= 均为 12 位内容摘要（手工日期标签已消灭）。
+    for src in new_scripts:
+        version = src.split("?v=")[-1]
+        assert re.fullmatch(r"[0-9a-f]{12}|[0-9a-f]{64}", version), src
     assert [path.name for path, *_ in asset.sources] == [Path(src.split("?")[0]).name for src in old_scripts[start:end]]
     assert asset.digest == hashlib.sha256(asset.content).hexdigest()
     old_styles = ScriptSources(old_source).styles
@@ -74,8 +83,10 @@ def test_real_shell_replaces_only_consecutive_runtime_scripts():
     bundled = ScriptSources(old_source).bundled_styles
     start = old_styles.index(bundled[0])
     assert old_styles[start:start + len(bundled)] == bundled
-    assert new_styles == [*old_styles[:start], f"/static/{STYLES_PATH}?v={styles.digest}",
-                          *old_styles[start + len(bundled):]]
+    # 样式同样只比较路径（?v= 已由 ShellAssetVersioner 统一改为内容摘要）。
+    expected_style_paths = [href.split("?")[0] for href in old_styles]
+    expected_style_paths[start:start + len(bundled)] = [f"/static/{STYLES_PATH}"]
+    assert [href.split("?")[0] for href in new_styles] == expected_style_paths
     assert b"@import" not in styles.content
     assert {"common.css", "common-components.css", "common-layout.css", "common-page.css",
             "apk-analysis.css", "form-controls.css"} <= {path.name for path, *_ in styles.sources}
@@ -124,6 +135,37 @@ def test_development_script_edits_refresh_content_and_version(tmp_path):
 def test_runtime_scripts_cannot_move_across_another_dependency(tmp_path):
     with pytest.raises(ValueError, match="consecutive"):
         runtime_fixture(tmp_path, between='<script src="/static/js/dependency.js" defer></script>')
+
+
+def test_static_asset_urls_are_versioned_by_content_digest(tmp_path):
+    from bootstrap.shell_assets import ShellAssetVersioner
+
+    static = tmp_path / "static"
+    (static / "js").mkdir(parents=True)
+    (static / "js" / "widget.js").write_text("window.w = 1;")
+    page = tmp_path / "page.html"
+    page.write_text(
+        '<script src="/static/js/widget.js?v=20260101-old" defer></script>\n'
+        '<script src="/static/js/missing.js?v=old" defer></script>\n'
+    )
+    versioner = ShellAssetVersioner(static)
+    rewritten = versioner.rewrite(page.read_text())
+
+    # 已存在的资源：手工日期标签被内容摘要替换。
+    match = re.search(r'widget\.js\?v=([0-9a-f]{12})', rewritten)
+    assert match, rewritten
+    # 文件缺失的资源保持原样（不做失败即崩）。
+    assert "missing.js?v=old" in rewritten
+
+    # 内容变化 → 摘要变化（浏览器缓存自动失效，无需人工 bump ?v=）。
+    (static / "js" / "widget.js").write_text("window.w = 2;")
+    assert versioner.rewrite(page.read_text()) != rewritten
+
+    # 开发模式判定：文件再次变动后 is_current 必须为 False，触发模板刷新。
+    # （stat 检查依赖 size/mtime，用不同长度内容避免 fs 时间戳粒度问题。）
+    assert versioner.is_current()
+    (static / "js" / "widget.js").write_text("window.w = 333;")
+    assert not versioner.is_current()
 
 
 def test_api_only_application_does_not_require_shell_files(tmp_path):
