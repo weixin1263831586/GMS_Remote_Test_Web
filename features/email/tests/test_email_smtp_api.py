@@ -32,7 +32,7 @@ class SmtpApiTests(unittest.TestCase):
     def test_save_then_get_masks_password(self):
         saved: dict = {}
 
-        def fake_update(updates, *, remove_keys=None):
+        def fake_update(updates):
             saved.update(updates)
             return True
 
@@ -59,7 +59,7 @@ class SmtpApiTests(unittest.TestCase):
         # use_ssl 必须按提交值保存，不能只按端口 465 推断。
         saved: dict = {}
 
-        def fake_update(updates, *, remove_keys=None):
+        def fake_update(updates):
             saved.update(updates)
             return True
 
@@ -139,7 +139,7 @@ class SmtpApiTests(unittest.TestCase):
     def test_enabled_toggle_persists_and_defaults_to_true(self):
         saved: dict = {}
 
-        def fake_update(updates, *, remove_keys=None):
+        def fake_update(updates):
             saved.update(updates)
             return True
 

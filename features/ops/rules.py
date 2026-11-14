@@ -11,7 +11,6 @@ Snapshot keys (all optional; missing keys simply skip their rules):
   ``profile_id``/``status``/``id``)
 - ``disk_free_gb`` / ``min_free_gb``: controller data-root pressure
 - ``worker_status``: ``features.automation.get_worker_status()`` output
-- ``kill_switch``: current advancement_paused flag (for audit rows)
 """
 
 from __future__ import annotations

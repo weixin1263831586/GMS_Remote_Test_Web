@@ -30,7 +30,6 @@ class ModelSpec:
     local: bool = False
     enabled: bool = True
     max_tokens: int | None = None
-    temperature: float | None = None
     capabilities: list[str] = field(default_factory=list)
     max_context_size: int | None = None
     default_effort: str | None = None
@@ -58,7 +57,6 @@ def _spec_from_provider(provider_name: str, provider: dict[str, Any]) -> ModelSp
         local=is_local_provider(provider_name, provider),
         enabled=bool(provider.get("enabled", False)),
         max_tokens=_as_int(provider.get("max_tokens")),
-        temperature=float(provider["temperature"]) if provider.get("temperature") is not None else None,
         capabilities=[str(item) for item in provider.get("capabilities") or []],
         max_context_size=_as_int(provider.get("max_context_size")),
         default_effort=str(provider["default_effort"]) if provider.get("default_effort") else None,
@@ -120,8 +118,3 @@ def list_model_options(ai_config: dict[str, Any] | None) -> dict[str, Any]:
             "provider": spec.provider,
         })
     return {"models": models, "default_model": default_model_alias(ai_config)}
-
-
-def sanitized_model_catalog(ai_config: dict[str, Any] | None) -> dict[str, Any]:
-    """脱敏目录：供 kkagent 配置生成等内部消费（不含 api_key 明文判断）。"""
-    return list_model_options(ai_config)

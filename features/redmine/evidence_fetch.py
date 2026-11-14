@@ -509,13 +509,13 @@ class EvidenceFetcher:
                         # 不阻塞事件循环上的其他 HTTP 请求与任务。
                         derived_rel, note = await asyncio.to_thread(
                             extract_zip_derived_text,
-                            self.store, self._atomic_write,
+                            self.store,
                             job["artifact_id"], job["snapshot_rel"], job["path"],
                         )
                     else:
                         derived_rel, note = await asyncio.to_thread(
                             extract_system_archive_text,
-                            self.store, self._atomic_write,
+                            self.store,
                             job["artifact_id"], job["snapshot_rel"], job["path"],
                         )
                 except Exception as exc:  # 派生器未捕获的异常也只记派生状态

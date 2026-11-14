@@ -124,16 +124,6 @@
             runDeviceConfigQuery(context);
         }
 
-        function dcfgIsRemote(context = null) {
-            const selectedWorker = context?.workerId || dcfgWorkerId;
-            return Boolean(selectedWorker && !isLocalWorkspaceWorker(selectedWorker));
-        }
-
-        function dcfgStorageDeviceId(context = null) {
-            if (context) return context.storageId;
-            return dcfgIsRemote() ? `${dcfgWorkerId}:${dcfgDeviceSerial}` : (dcfgDeviceSerial || '');
-        }
-
         async function dcfgInspect(action, values = {}, context = dcfgCaptureContext()) {
             if (!context.remote) throw new Error('dcfgInspect 仅用于远端 Worker');
             if (!dcfgContextIsCurrent(context)) throw new Error('Device Info 已切换到其他设备');

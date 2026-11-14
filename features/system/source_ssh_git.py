@@ -56,8 +56,11 @@ from .source_provider_contract import (
 # 远端 git grep 全树耗时与本地同量级；上限放宽到 120s 覆盖跨机房链路。
 SSH_GIT_DEFAULT_TIMEOUT_SECONDS = 60
 SSH_GIT_GREP_TIMEOUT_SECONDS = 120
-# repo_manifest 多仓模式：服务端超时必须低于 MCP 快路径 120s HTTP 上限；
-# 全仓串行超时返回 limited 结果 + hint（agent 会用 path_filter 收窄重试）。
+# repo_manifest 多仓模式的墙钟预算：全局 deadline（波间检查）与单分片
+# execute 超时共用该值。实际最坏墙钟 ≈ deadline + 最后一波（≤100s）+
+# 命中仓回查 60s ≈ 260s；冷缓存（首次子仓发现 +180s）可达 ~440s。
+# 客户端 HTTP 预算由 GMS_SDK_CURL_TIMEOUT（CLI 默认 480s）覆盖，
+# 全仓超时返回 limited 结果 + hint（agent 会用 path_filter 收窄重试）。
 SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS = 100
 # 全量发现模式：并行 SSH 分片参数（每分片一条独立连接、一条串行循环命令）。
 # - 每片 32 仓按实测吞吐校准（远端 0.7-1.5s/仓 → 每片 25-50s，100s 内）；
@@ -83,6 +86,7 @@ _READONLY_GIT_SUBCOMMANDS = frozenset({"rev-parse", "log", "grep", "show"})
 #   <commit>:<rel path>\0<line>\0<text> —— git grep -z -n 记录
 _REPO_SEP = "@@GMS_SDK_REPO@@"
 _SUBJ_SEP = "@@GMS_SDK_SUBJ@@"
+_INCOMPLETE_SEP = "@@GMS_SDK_INCOMPLETE@@"
 _HEAD_LABEL = "HEAD"
 
 
@@ -148,6 +152,7 @@ def _parse_multi_output(
     matches: list[dict] = []
     scanned = 0
     limited = False
+    incomplete = False
     current: tuple[str, str] | None = None  # (repo_rel, commit)
     start = 0
     length = len(stdout)
@@ -159,6 +164,9 @@ def _parse_multi_output(
             break
         unit = stdout[start:end]
         start = end + 1
+        if unit == _INCOMPLETE_SEP:
+            incomplete = True
+            continue
         if unit.startswith(_REPO_SEP):
             header = unit[len(_REPO_SEP):]
             repo_abs, _, commit = header.partition("\t")
@@ -202,7 +210,7 @@ def _parse_multi_output(
         })
         if len(matches) > limit:
             limited = True
-    return matches[:limit], scanned, limited or _TRUNCATION_MARKER in stdout
+    return matches[:limit], scanned, limited or incomplete or _TRUNCATION_MARKER in stdout
 
 
 class SSHGitProvider(LocalGitProvider):
@@ -410,6 +418,14 @@ class SSHGitProvider(LocalGitProvider):
     # 多仓命令是**固定模板**：查询词/路径全部经 shlex.quote 进入 ``in_q`` /
     # ``in_f`` 赋值边界，循环变量 ``$r`` 只来自内置仓库清单，远端 shell 永远
     # 不会执行任何拼接出的额外语句。git 子命令仍限于白名单四件套。
+    # 仓库清单经 ``printf '%s\n' | while IFS= read -r`` 逐行消费：
+    # read -r 不做单词拆分，含空格的仓库路径不再被 Shell 撕裂。
+
+    @staticmethod
+    def _repos_stdin(repos: tuple[str, ...]) -> str:
+        """把仓库清单变成 ``printf '%s\\n' q1 q2 | while IFS= read -r r`` 前缀。"""
+        repos_sql = " ".join(shlex.quote(repo) for repo in repos)
+        return f"printf '%s\\n' {repos_sql} | while IFS= read -r r; do "
 
     def _shard_grep_command(
         self, query: str, path_grep: str, repos: tuple[str, ...],
@@ -425,20 +441,20 @@ class SSHGitProvider(LocalGitProvider):
         一颗老鼠屎坏一锅粥（整分片超时、全部仓的命中丢失）；仓级超时把
         慢仓的损失限制在该仓自身（跳过该仓、其余仓照常出结果）。
         """
-        repos_sql = " ".join(shlex.quote(repo) for repo in repos)
         per_repo_guard = (
             f"timeout {int(per_repo_timeout)} " if per_repo_timeout > 0 else ""
         )
         return (
             "in_q=" + shlex.quote(query) + "; "
             "in_f=" + (shlex.quote(path_grep) if path_grep else "''") + "; "
-            "in=$(printf '%s\\n' " + repos_sql + "); "
-            "for r in $in; do "
-            "printf '@@GMS_SDK_REPO@@%s\\tHEAD\\n' \"$r\"; "
+            + self._repos_stdin(repos)
+            + "printf '@@GMS_SDK_REPO@@%s\\tHEAD\\n' \"$r\"; "
             f"{per_repo_guard}"
             "git --no-optional-locks -C \"$r\" grep --fixed-strings --ignore-case "
             "--no-color --no-heading --no-break --no-column --full-name "
             "-z -n -I -e \"$in_q\" $in_f HEAD -- 2>/dev/null; "
+            'rc=$?; if [ "$rc" -gt 1 ]; then '
+            "printf '@@GMS_SDK_INCOMPLETE@@\\n'; fi; "
             "done"
         )
 
@@ -446,9 +462,7 @@ class SSHGitProvider(LocalGitProvider):
         self, with_subject: bool, repos: tuple[str, ...] = (),
     ) -> str:
         """逐仓收集 HEAD commit（可选主题），metadata/命中仓回查专用。"""
-        repos_sql = " ".join(shlex.quote(repo) for repo in (repos or self._repos_all()))
         body = (
-            "for r in $in; do "
             "c=$(git --no-optional-locks -C \"$r\" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) || continue; "
             "printf '@@GMS_SDK_REPO@@%s\\t%s\\n' \"$r\" \"$c\"; "
         )
@@ -458,7 +472,7 @@ class SSHGitProvider(LocalGitProvider):
                 "printf '@@GMS_SDK_SUBJ@@%s\\n' \"$s\"; "
             )
         body += "done"
-        return "in=$(printf '%s\\n' " + repos_sql + "); " + body
+        return self._repos_stdin(repos or self._repos_all()) + body
 
     def _parse_heads_output(self, stdout: str) -> dict[str, dict[str, str]]:
         """解析 heads/命中仓回查输出；{repo_rel: {commit, subject}}。"""
@@ -718,10 +732,12 @@ class SSHGitProvider(LocalGitProvider):
     ) -> dict[str, Any]:
         """全量/多仓聚合检索：分片并行 HEAD grep，命中仓后置解析 commit。
 
-        - path_filter 下推到仓库选择（rel 包含该子串的仓才执行）；
+        - path_filter 两层语义：命中子仓名则下推收窄仓库集合；含 ``/`` 的
+          文件级路径（如 frameworks/base/core/java）未命中子仓名时回退为
+          强相关排序全量搜索，命中按完整文件路径过滤（_parse_multi_output）；
         - 全量发现模式的子仓清单经 ``_repos_all()`` 自动枚举（TTL 缓存）；
-        - 分片并行把千仓全库 grep 的墙钟压进 100s（低于 MCP 快路径 120s
-          HTTP 上限）；超时分片返回已聚合的部分结果 + limited=True + hint。
+        - 分片并行检索，墙钟预算在波间检查，客户端 HTTP 预算由 CLI 覆盖；
+          超时分片返回部分结果 + limited=True + hint。
         """
         label = str(revision or "").strip() or self.config.default_revision
         if label and (label.startswith("-") or ".." in label):
@@ -729,11 +745,32 @@ class SSHGitProvider(LocalGitProvider):
         repos = self._repos_all()
         ranking: list[tuple[str, float, str]] = []
         if filter_value:
-            repos = tuple(
+            repo_hits = tuple(
                 repo for repo in repos
                 if filter_value in self._repo_rel(repo).lower()
             )
-            if not repos:
+            if repo_hits:
+                repos = repo_hits
+            elif "/" in filter_value:
+                # 文件级 path_filter（如 frameworks/base/core/java）不命中
+                # 子仓名：不能直接返回空——子仓 frameworks/base 里正有该
+                # 路径。回退到强相关排序全量搜索，文件级过滤在
+                # _parse_multi_output 按完整路径逐条判断。
+                # 注意：包含该子串的文件才保留，filter 实际是路径子串过滤。
+                from .source_repo_rank import (
+                    codesearch_hints_for_query,
+                    knowledge_hints_for_query,
+                    rank_repos,
+                )
+
+                ranking = rank_repos(
+                    query, [self._repo_rel(r) for r in repos],
+                    knowledge_hints=knowledge_hints_for_query(query),
+                    codesearch_hints=codesearch_hints_for_query(query),
+                )
+                rel_to_abs = {self._repo_rel(r): r for r in repos}
+                repos = tuple(rel_to_abs[rel] for rel, _, _ in ranking)
+            else:
                 return self._multi_payload(
                     label, [], 0, False,
                     hint=f"path_filter '{filter_value}' 未命中任何子仓；"
@@ -756,12 +793,14 @@ class SSHGitProvider(LocalGitProvider):
             )
             rel_to_abs = {self._repo_rel(r): r for r in repos}
             repos = tuple(rel_to_abs[rel] for rel, _, _ in ranking)
+        repos_total = len(repos)  # 计划检索的子仓数（path_filter 收窄后）
         shards = self._shards(repos)
         matches: list[dict[str, Any]] = []
         scanned = 0
         limited = False
         first_error: SourceProviderError | None = None
         results: list[CommandResult] = []
+        repos_pending = repos_total  # 尚未消费结果的仓库数，包含未发起的波。
         executor = ThreadPoolExecutor(max_workers=SSH_GIT_SHARD_WAVE_SIZE)
         deadline = time.monotonic() + SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS
         try:
@@ -771,18 +810,27 @@ class SSHGitProvider(LocalGitProvider):
             # （远端 sshd MaxStartups 约束）；强相关仓经排序已集中在前
             # 几片，通常第一波就产出全部命中。
             for wave_start in range(0, len(shards), SSH_GIT_SHARD_WAVE_SIZE):
+                # 全局预算检查在**波间**：deadline 一过不再发起新波
+                # （已聚合的部分结果 + limited=True 返回）。进行中的波
+                # 总是等完——强相关仓集中在首批，砍掉在飞的波会把最
+                # 有价值的命中一起丢掉；单波墙钟由每分片的
+                # execute_command 超时（SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS）
+                # 兜底，不会无限等待。
+                if wave_start > 0 and time.monotonic() >= deadline:
+                    limited = True
+                    break
                 wave = shards[wave_start:wave_start + SSH_GIT_SHARD_WAVE_SIZE]
                 futures = {executor.submit(self._run_shard, s, query, ""): s
                            for s in wave}
                 pending = set(futures)
                 while pending:
                     remaining = deadline - time.monotonic()
-                    if remaining <= 0 and not results:
-                        limited = True
-                        break
-                    done, pending = wait(pending, timeout=max(0.0, remaining),
+                    # 波内始终等到本波分片完成：remaining 耗尽后以
+                    # timeout=None 继续等待（阻塞等完，不空转轮询）。
+                    done, pending = wait(pending, timeout=max(0.0, remaining) or None,
                                          return_when=FIRST_COMPLETED)
                     for future in done:
+                        repos_pending -= len(futures[future])
                         try:
                             result = future.result(timeout=0)
                         except TimeoutError:
@@ -798,6 +846,7 @@ class SSHGitProvider(LocalGitProvider):
                             limited = True
                             continue
                         if result.code not in (0, 1):
+                            limited = True
                             first_error = first_error or SourceProviderError(
                                 f"git grep 失败: {_stderr_tail(result)}",
                                 status_code=502,
@@ -811,11 +860,9 @@ class SSHGitProvider(LocalGitProvider):
                         matches.extend(shard_matches)
                         scanned += shard_scanned
                         limited = limited or shard_limited
-                    if len(matches) >= limit:
-                        limited = len(matches) > limit
-                        break
-                if limited and len(matches) >= limit:
-                    break
+                if len(matches) >= limit:
+                    limited = limited or len(matches) > limit or repos_pending > 0
+                    break  # limit 已满：不再发起后续波
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
         if not results and first_error is not None and not matches:
@@ -833,9 +880,12 @@ class SSHGitProvider(LocalGitProvider):
             match["commit"] = commit
             match["result_id"] = self._make_result_id(match["path"], commit)
             kept.append(match)
-        if kept and len(kept) < len(matches):
+        if len(kept) < len(matches):
             limited = True
-        payload = self._multi_payload(label, kept, scanned, limited)
+        payload = self._multi_payload(
+            label, kept, scanned, limited,
+            repos_total=repos_total, repos_pending=repos_pending,
+        )
         if ranking:
             payload["ranking"] = [
                 {"repo": rel, "score": score, "reason": reason}
@@ -850,7 +900,7 @@ class SSHGitProvider(LocalGitProvider):
 
     def _multi_payload(
         self, label: str, matches: list[dict[str, Any]], scanned: int, limited: bool,
-        hint: str = "",
+        hint: str = "", *, repos_total: int = 0, repos_pending: int = 0,
     ) -> dict[str, Any]:
         payload = {
             "source_id": self.config.source_id,
@@ -859,13 +909,28 @@ class SSHGitProvider(LocalGitProvider):
             "multi_repo": True,
             "discovered": self.config.discover_repos,
             "revision": label,
+            # 多仓检索在**各子仓 HEAD** 上执行；label 只是标签。请求了具体
+            # revision 时必须显式声明不精确，不能让调用方把 HEAD 结果当作
+            # 目标版本结果（跨版本补丁归属分析依赖该语义）。
+            "revision_is_head": True,
             "total": len(matches),
             "scanned_files": scanned,
             "limited": bool(limited),
+            # 覆盖元数据与 limited 分开表达：调用方可判断“结果是否覆盖
+            # 全部子仓”，而不是从 limited/total 反推。
+            "coverage_complete": not limited and repos_pending == 0,
+            "repos_total": repos_total,
+            "repos_pending": repos_pending,
             "matches": matches,
         }
         if hint:
             payload["hint"] = hint
+        elif label and label.lower() not in ("head", ""):
+            payload["hint"] = (
+                f"多仓检索在子仓 HEAD 上执行；请求的 revision '{label}' 仅作为"
+                "标签返回，命中 commit 才是各仓真实 HEAD。跨版本对比请使用"
+                "目标子仓的单仓源指定 revision"
+            )
         return payload
 
     # ---------------------------------------------------------------- read

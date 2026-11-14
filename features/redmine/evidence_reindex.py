@@ -33,7 +33,7 @@ def repair_budget_indexes(store, snapshot):
                 with source.open("rb") as handle:
                     is_zip = handle.read(2) == b"PK"
                 extract = extract_zip_derived_text if is_zip else extract_system_archive_text
-                derived, note = extract(store, None, artifact["artifact_id"], relative, source)
+                derived, note = extract(store, artifact["artifact_id"], relative, source)
             else:
                 continue
         except (OSError, ValueError):

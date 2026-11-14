@@ -9,7 +9,6 @@ from typing import Any
 from fastapi import APIRouter, Body, Request
 from pydantic import BaseModel, Field
 
-from features.assistant.capabilities import capabilities_payload
 from features.assistant.context import record_user_message, update_context
 from features.assistant.executor import executor
 from features.assistant.payloads import jsonable as _jsonable
@@ -589,11 +588,3 @@ async def cancel_agent_session(session_id: str, request: Request):
     _append_step(session, "Agent 已取消", "warning", detail)
     _append_message(session, "assistant", detail if redmine_active else "Agent 会话已取消。如果测试仍在运行，请到测试界面停止测试。")
     return success_response({"session": _session_payload(session)})
-
-
-@router.get("/api/agent/capabilities")
-async def get_agent_capabilities():
-    """List supported Agent capabilities with full tool catalog."""
-    from features.assistant.kkagent_bridge import availability_snapshot
-
-    return success_response(capabilities_payload(availability_snapshot()))

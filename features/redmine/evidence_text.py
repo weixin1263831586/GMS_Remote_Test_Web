@@ -102,13 +102,15 @@ def derive_member_index(store, artifact_id: str, snapshot_rel: str, members):
     """
     relative = f"{snapshot_rel}/derived/{artifact_id}.txt"
     destination = store.resolve_internal(relative)
-    included = 0
     errors = []
     index_members: list[dict[str, Any]] = []
     cursor = 0
     with atomic_output(destination) as output:
         for name, opener in members:
-            if cursor >= DERIVED_TEXT_MAX_CHARS:
+            # 累计预算：检查**本成员帧头 + 内容**能否全部放入剩余额度，
+            # 而不是只看单成员是否超总预算。
+            remaining = DERIVED_TEXT_MAX_CHARS - cursor
+            if remaining <= 0:
                 errors.append(
                     f"成员 {name} 起超出 {DERIVED_TEXT_MAX_CHARS} 字符派生预算，"
                     "其余成员未计入索引"
@@ -121,20 +123,29 @@ def derive_member_index(store, artifact_id: str, snapshot_rel: str, members):
                         encoding = detect_stream_encoding(source)
                         for text in decoded_chunks(source, encoding):
                             length += len(text)
-                            if length > DERIVED_TEXT_MAX_CHARS:
+                            if length > remaining:
                                 raise _MemberBudgetError(name)
                             spool.write(text.encode("utf-8"))
                 except _MemberBudgetError:
+                    # 保留已完成索引；调用方把 derived_status 记为 partial
+                    # ——未索引成员绝不能当作不存在。
                     errors.append(
-                        f"成员 {name} 超出 {DERIVED_TEXT_MAX_CHARS} 字符派生预算，未计入索引"
+                        f"成员 {name} 超出剩余 {remaining} 字符派生预算"
+                        f"（总预算 {DERIVED_TEXT_MAX_CHARS}），未计入索引"
                     )
-                    continue
+                    break
                 except (OSError, ValueError, RuntimeError, EOFError, UnicodeError, zipfile.BadZipFile) as exc:
                     errors.append(f"成员 {name} 读取失败: {type(exc).__name__}，检索索引不完整")
                     continue
                 encoded = base64.urlsafe_b64encode(name.encode("utf-8")).decode("ascii").rstrip("=")
-                output.write(f"<<<zip-member-v2:{encoded}:{length}>>>\n".encode())
-                cursor += len(f"<<<zip-member-v2:{encoded}:{length}>>>\n")
+                header = f"<<<zip-member-v2:{encoded}:{length}>>>\n"
+                if len(header) + length + 1 > remaining:
+                    errors.append(
+                        f"成员 {name} 的帧头与内容超出剩余 {remaining} 字符派生预算，未计入索引"
+                    )
+                    break
+                output.write(header.encode())
+                cursor += len(header)
                 spool.seek(0)
                 shutil.copyfileobj(spool, output, length=TEXT_CHUNK_BYTES)
                 output.write(b"\n")
@@ -147,8 +158,7 @@ def derive_member_index(store, artifact_id: str, snapshot_rel: str, members):
                     "start": cursor - length - 1,
                     "length": length,
                 })
-                included += 1
-    if not included:
+    if not index_members:
         destination.unlink(missing_ok=True)
         return "", "; ".join(errors)
     sidecar = destination.parent / f"{destination.name}.idx.json"

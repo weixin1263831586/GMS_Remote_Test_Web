@@ -45,7 +45,3 @@ class PostBurnInventoryRefreshTests(unittest.TestCase):
         ), patch("asyncio.to_thread", new=_sync_to_thread):
             # 不得抛出：刷新是 best-effort。
             firmware_recovery.refresh_post_burn_inventory(repository, "local-worker")
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -97,11 +97,34 @@ class UserSourceStoreTests(unittest.TestCase):
             self.store.add(**kwargs)
         self.assertEqual(ctx.exception.status_code, 409)
 
+    def test_corrupt_store_blocks_writes_and_backs_up(self):
+        """损坏的存储文件绝不能被空数据覆盖：读失败、写阻断、留备份。"""
+        self.path.write_text("{not valid json", encoding="utf-8")
+        with self.assertRaises(UserSourceStoreError) as ctx:
+            self.store.list_sources()
+        self.assertEqual(ctx.exception.status_code, 503)
+        # add 走同一加载路径，必须同样失败而不是静默重置。
+        with self.assertRaises(UserSourceStoreError):
+            self.store.add(
+                source_id="a16", repo_root="/data/sdk",
+                ssh_host="h", ssh_port=22, ssh_username="u",
+            )
+        # 原文件原样保留 + .corrupt 备份存在。
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "{not valid json")
+        backup = self.path.with_suffix(self.path.suffix + ".corrupt")
+        self.assertEqual(backup.read_text(encoding="utf-8"), "{not valid json")
+        self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+        # 修复后（恢复合法内容）可正常使用。
+        self.path.write_text('{"version": 1, "sources": {}}', encoding="utf-8")
+        self.assertEqual(self.store.list_sources(), [])
+
     def test_validation_rules(self):
         with self.assertRaises(UserSourceStoreError):
             validate_source_id("Bad Id")
         with self.assertRaises(UserSourceStoreError):
             validate_source_id("-bad")
+        # 大小写保持：目录名风格的混合大小写 source_id 合法且原样保留。
+        self.assertEqual(validate_source_id("7_Android17_1017"), "7_Android17_1017")
         with self.assertRaises(UserSourceStoreError):
             validate_repo_root("relative/path")
         with self.assertRaises(UserSourceStoreError):
@@ -168,6 +191,26 @@ class UserSourceStoreTests(unittest.TestCase):
 
 
 class RegistryMergeTests(unittest.TestCase):
+    def setUp(self):
+        """快照 source_provider 模块级全局：registry 相关测试会改写它们，
+        不恢复会污染后续测试（SdkApiTests 读到残留的 static 配置）。"""
+        import features.system.source_provider as sp
+
+        self._sp = sp
+        self._saved = (
+            sp._REGISTRY, sp._REGISTRY_SECRET, sp._LAST_STATIC_CONFIG,
+            sp._USER_STORE, sp._REGISTRY_BUILT_AT,
+        )
+        self.addCleanup(self._restore_globals)
+
+    def _restore_globals(self):
+        import features.system.source_provider as sp
+
+        (
+            sp._REGISTRY, sp._REGISTRY_SECRET, sp._LAST_STATIC_CONFIG,
+            sp._USER_STORE, sp._REGISTRY_BUILT_AT,
+        ) = self._saved
+
     def test_merge_user_sources_into_registry_configs(self):
         from features.system.source_provider import _build_registry_configs
 
@@ -257,13 +300,128 @@ class RegistryMergeTests(unittest.TestCase):
                 state = sp.initialize_source_runtime(static_config)
                 self.assertEqual(state, "AVAILABLE")
                 after_add = sp.reload_source_runtime()
-            self.assertEqual(after_add, "AVAILABLE")
-            ids = {
-                provider.config.source_id
-                for provider in sp.source_registry()._providers.values()
-            }
+                self.assertEqual(after_add, "AVAILABLE")
+                # 断言在 patch 块内：source_registry() 的跨进程 mtime 检测
+                # 只针对**本 registry 构建时**的存储指纹；块外调用会读到
+                # 真实部署存储（生产源与本测试无关）。
+                ids = {
+                    provider.config.source_id
+                    for provider in sp.source_registry()._providers.values()
+                }
             self.assertIn("static-local", ids)
             self.assertIn("user-a17", ids)
+
+    def test_registry_auto_reload_detects_cross_process_changes(self):
+        """mtime+size 变化检测：另一进程写入 store 后读路径自动重建。"""
+        import features.system.source_provider as sp
+
+        with TemporaryDirectory() as directory:
+            store_path = Path(directory) / "user_sources.json"
+            store = UserSourceStore(store_path)
+            store_path.write_text('{"version": 1, "sources": {}}', encoding="utf-8")
+            _stub_secrets(store)
+            static_config = {
+                "sdk_sources": {
+                    "providers": [
+                        {
+                            "source_id": "static-local",
+                            "provider": "local_git",
+                            "repo_root": "/local/repo",
+                        }
+                    ]
+                }
+            }
+            with mock.patch.object(
+                sp, "user_source_store", return_value=store
+            ), mock.patch.object(
+                sp, "derive_application_key", create=True
+            ) as derive:
+                derive.return_value = b"k"
+                self.assertEqual(sp.initialize_source_runtime(static_config), "AVAILABLE")
+                self.assertIn(
+                    "static-local",
+                    {
+                        p.config.source_id
+                        for p in sp.source_registry()._providers.values()
+                    },
+                )
+                # 模拟另一进程（Web worker B）添加 SDK 源：直接改文件。
+                store.add(
+                    source_id="user-b",
+                    repo_root="/sdk/b",
+                    ssh_host="10.0.0.9",
+                    ssh_port=22,
+                    ssh_username="builder",
+                    ssh_password="pw",
+                )
+                ids = {
+                    p.config.source_id
+                    for p in sp.source_registry()._providers.values()
+                }
+                self.assertIn("user-b", ids)  # 读路径自动重建
+                self.assertIn("static-local", ids)
+
+    def test_corrupt_store_breaks_hot_reload_without_reset(self):
+        """热更新读到损坏存储：保留旧 registry，不静默清空。"""
+        import features.system.source_provider as sp
+
+        with TemporaryDirectory() as directory:
+            store_path = Path(directory) / "user_sources.json"
+            store = UserSourceStore(store_path)
+            _stub_secrets(store)
+            store.add(
+                source_id="user-a16",
+                repo_root="/sdk/a16",
+                ssh_host="10.0.0.9",
+                ssh_port=22,
+                ssh_username="builder",
+                ssh_password="pw",
+            )
+            with mock.patch.object(
+                sp, "user_source_store", return_value=store
+            ), mock.patch.object(
+                sp, "derive_application_key", create=True
+            ) as derive:
+                derive.return_value = b"k"
+                self.assertEqual(sp.initialize_source_runtime({}), "AVAILABLE")
+                # 另一进程写入后文件损坏。
+                store_path.write_text("{broken", encoding="utf-8")
+                registry = sp.source_registry()  # 重建失败 → 旧 registry
+                ids = {
+                    p.config.source_id for p in registry._providers.values()
+                }
+                self.assertIn("user-a16", ids)
+
+    def test_sdk_availability_refreshes_after_another_process_adds_or_deletes(self):
+        sp = self._sp
+        with TemporaryDirectory() as directory:
+            store = UserSourceStore(Path(directory) / "sources.json")
+            with mock.patch.object(sp, "user_source_store", return_value=store), \
+                 mock.patch("foundation.secrets.derive_application_key", return_value=b"test"):
+                sp.initialize_source_runtime({})
+                self.assertFalse(sp.sdk_sources_available())
+                store.add(source_id="later", provider="local_git", repo_root="/sdk/later")
+                self.assertTrue(sp.sdk_sources_available())
+                store.delete("later")
+                self.assertFalse(sp.sdk_sources_available())
+
+    def test_write_during_registry_build_is_detected_on_next_read(self):
+        sp = self._sp
+        with TemporaryDirectory() as directory:
+            store = UserSourceStore(Path(directory) / "sources.json")
+            build = sp._build_registry_configs
+
+            def build_then_write(config):
+                configs = build(config)
+                store.add(source_id="concurrent", provider="local_git", repo_root="/sdk/new")
+                return configs
+
+            with mock.patch.object(sp, "user_source_store", return_value=store), \
+                 mock.patch("foundation.secrets.derive_application_key", return_value=b"test"):
+                with mock.patch.object(sp, "_build_registry_configs", side_effect=build_then_write):
+                    sp.initialize_source_runtime({})
+                ids = {source["source_id"] for source in sp.source_registry().list_sources()}
+                self.assertIn("concurrent", ids)
 
 
 if __name__ == "__main__":

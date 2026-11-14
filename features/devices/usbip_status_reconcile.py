@@ -25,6 +25,8 @@ import time
 import uuid
 from typing import Any
 
+from .usbip_support import _normalize_host as _normalize_host
+
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +40,6 @@ REMOTE_VERIFY_COMMAND_TIMEOUT = 90
 _verify_throttle: dict[str, float] = {}
 _throttle_lock = asyncio.Lock()
 _running_verify_tasks: set[asyncio.Task] = set()
-
-
-def _normalize_host(host: str) -> str:
-    host = str(host or "").strip()
-    return host.split("@", 1)[-1] if "@" in host else host
 
 
 def _throttle_key(device_host: str, worker_id: str) -> str:

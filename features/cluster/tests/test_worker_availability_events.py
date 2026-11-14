@@ -81,7 +81,3 @@ class WorkerAvailabilityEventTests(unittest.TestCase):
     def test_initial_registration_stays_silent(self):
         self.register()
         self.assertEqual(self.events, [])
-
-
-if __name__ == "__main__":
-    unittest.main()

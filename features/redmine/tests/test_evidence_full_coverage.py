@@ -53,7 +53,7 @@ def test_zip_over_old_member_frame_and_total_limits_has_searchable_tails(tmp_pat
         Path, "read_bytes", side_effect=AssertionError("whole-file reads are forbidden"),
     ):
         derived, note = extract_zip_derived_text(
-            store, None, artifact["artifact_id"], f"661066/{snapshot['snapshot_id']}", source,
+            store, artifact["artifact_id"], f"661066/{snapshot['snapshot_id']}", source,
         )
     assert not note
     store.update_artifact(artifact["artifact_id"], derived_text_path=derived, derived_status="ready")
@@ -88,7 +88,7 @@ def test_compressed_log_tails_are_indexed(compression, tmp_path):
         with compressor.open(source, "wb") as handle:
             handle.write(payload.encode())
     store = EvidenceStore(tmp_path / "owner")
-    derived, note = extract_system_archive_text(store, None, "art_test", "1/snap", source)
+    derived, note = extract_system_archive_text(store, "art_test", "1/snap", source)
     assert not note
     members = split_zip_derived_text(store.resolve_internal(derived).read_text())
     assert len(members) == 1 and members[0][1] == payload

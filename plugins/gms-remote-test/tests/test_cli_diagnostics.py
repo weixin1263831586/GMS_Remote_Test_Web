@@ -85,6 +85,32 @@ class CliDiagnosticsTests(unittest.TestCase):
             env=self.env,
         )
 
+    def test_sdk_http_timeout_is_overridable_and_scoped_to_sdk_calls(self):
+        result = self.run_snippet('''
+set -e
+unset GMS_SDK_CURL_TIMEOUT
+CURL_TIMEOUT=23
+GMS_RT_OUTPUT=json
+api_call() {
+    printf 'timeout=%s\\n' "$CURL_TIMEOUT" >&2
+    printf '{"data":{}}\\n'
+}
+gms-rt-sdk-search --source sdk --revision HEAD --query needle
+gms-rt-sdk-read signed-result
+printf 'global=%s\\n' "$CURL_TIMEOUT" >&2
+GMS_SDK_CURL_TIMEOUT=615
+gms-rt-sdk-search --source sdk --revision HEAD --query needle
+gms-rt-sdk-read signed-result
+printf 'global=%s\\n' "$CURL_TIMEOUT" >&2
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        observed = [line for line in result.stderr.splitlines()
+                    if line.startswith(("timeout=", "global="))]
+        self.assertEqual(observed, [
+            "timeout=480", "timeout=480", "global=23",
+            "timeout=615", "timeout=615", "global=23",
+        ])
+
     # ------------------------------------------------------------------
     # Global --help / -h interception
     # ------------------------------------------------------------------

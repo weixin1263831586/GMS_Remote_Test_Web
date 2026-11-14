@@ -264,12 +264,7 @@ async function showUsbipDiagnostics(selection) {
             const blob = new Blob([JSON.stringify(status, null, 2)], {
                 type: 'application/json'
             });
-            const url = URL.createObjectURL(blob);
-            const anchor = document.createElement('a');
-            anchor.href = url;
-            anchor.download = `usbip-diagnostics-${Date.now()}.json`;
-            anchor.click();
-            URL.revokeObjectURL(url);
+            triggerDownload(URL.createObjectURL(blob), `usbip-diagnostics-${Date.now()}.json`, true);
         });
         body.append(download, output);
     } catch (error) {

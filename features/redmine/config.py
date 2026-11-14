@@ -230,15 +230,6 @@ class RedmineConfig:
     def get_gerrit_dashboard_config(self) -> dict[str, Any]:
         return dict(self.load_config().get("gerrit_dashboard") or {})
 
-    def save_gerrit_dashboard_config(
-        self,
-        payload: dict[str, Any],
-    ) -> bool:
-        normalized = dict(payload)
-        if normalized.get("base_url"):
-            normalized["base_url"] = str(normalized["base_url"]).rstrip("/")
-        return self._save_runtime_section("gerrit_dashboard", normalized)
-
     def _save_runtime_section(
         self,
         name: str,

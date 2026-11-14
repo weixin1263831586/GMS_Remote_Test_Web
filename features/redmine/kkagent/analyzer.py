@@ -79,7 +79,6 @@ def analyzer_version() -> str:
     return PROMPT_VERSION
 
 
-REPAIR_MAX_TURNS = 0
 # 同一 session 最多纠正两轮，不重开会话。
 REPAIR_RESUME_RETRIES = 2
 
@@ -329,12 +328,11 @@ class KkAgentRedmineAnalyzer:
             "-p", prompt,
         ]
 
-    def build_repair_command(self, prompt: str, session_id: str, *, max_turns: int = REPAIR_MAX_TURNS) -> list[str]:
+    def build_repair_command(self, prompt: str, session_id: str) -> list[str]:
         """在**同一个** session 上继续：只补证据/修 JSON，不重开分析。"""
         return [
             self.binary,
             "--output-format", "stream-json",
-            *(["--max-turns", str(max_turns)] if max_turns > 0 else []),
             "--resume", session_id,
             "-p", prompt,
         ]
@@ -973,7 +971,6 @@ class _StreamFallback:
 
 __all__ = [
     "PROMPT_VERSION",
-    "REPAIR_MAX_TURNS",
     "KkAgentAnalysisResult",
     "KkAgentRedmineAnalyzer",
     "ProgressTap",

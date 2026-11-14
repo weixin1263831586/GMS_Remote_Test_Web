@@ -40,8 +40,6 @@ from .users import _now
 logger = logging.getLogger(__name__)
 
 
-SNAPSHOT_STATUSES = ("queued", "fetching", "downloading", "ready", "partial", "failed")
-ARTIFACT_STATUSES = ("metadata", "downloading", "ready", "partial", "rejected", "failed")
 # 保留策略（evidence 快照是证据分析链里最大的持续磁盘开销：附件原样落盘，
 # 实测单工单可达 GB 级且历史上无任何清理）。仅终态且非进行中的快照可回收：
 #   - GMS_EVIDENCE_RETENTION_DAYS（默认 90）：按 created_at 年龄回收；
@@ -71,7 +69,6 @@ def _evidence_retention_config() -> dict[str, int]:
 #   missing 派生失败且无文本产出（OCR 依赖缺失/超时、解包失败）
 #   empty   派生正常执行但零文本（无文字截图/照片），非证据缺口
 # 空字符串表示该附件未参与派生（text/log 原件即 UTF-8、rejected/failed）。
-DERIVED_STATUSES = ("ready", "partial", "missing", "empty")
 
 
 def new_snapshot_id() -> str:

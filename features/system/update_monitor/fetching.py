@@ -19,7 +19,6 @@ SCHEMA_VERSION = 1
 
 # 单次扫描的 Mainline PRELOAD 月份上限。
 MAINLINE_MONTH_DEPTH = 12
-MAINLINE_INDEX_URL = 'https://docs.partner.android.com/mainline/release/release-notes?authuser=2'
 
 
 from .models import *

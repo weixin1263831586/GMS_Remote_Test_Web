@@ -784,7 +784,3 @@ class ClusterApiHardeningTests(ClusterApiHardeningFixture, unittest.TestCase):
         payload = response.json()["command"]["payload"]
         self.assertEqual(payload["password"], "***redacted***")
         self.assertEqual(payload["ssid"], "corp-net")
-
-
-if __name__ == "__main__":
-    unittest.main()

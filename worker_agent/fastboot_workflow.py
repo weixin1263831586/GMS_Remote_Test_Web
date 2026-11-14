@@ -83,11 +83,6 @@ _OEM_PROFILE_ROCKCHIP_VBOOT_LEGACY = BootloaderOemProfile(
     ("at-{action}-vboot", "board:{action}"),
 )
 
-BOOTLOADER_OEM_PROFILES: dict[str, BootloaderOemProfile] = {
-    profile.name: profile
-    for profile in (_OEM_PROFILE_ROCKCHIP_BOARD, _OEM_PROFILE_ROCKCHIP_VBOOT_LEGACY)
-}
-
 
 def resolve_bootloader_oem_profile(
     identity: str = "", vendor_api_level: int = 0

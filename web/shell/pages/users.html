@@ -3,7 +3,10 @@
                 <div class="users-view-tabs" id="users-view-tabs" role="tablist" aria-label="用户管理视图" style="display: none;">
                     <button id="users-list-tab" class="btn-xs active" type="button" role="tab" aria-selected="true" data-click="agentAccessToggle" data-a0="false">用户列表</button>
                     <div id="agent-access-entry">
-                        <button id="agent-access-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="agentAccessToggle" data-a0="true">🔑 Agent 接入</button>
+                        <button id="agent-access-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="agentAccessToggle" data-a0="true">Agent 接入</button>
+                    </div>
+                    <div id="sdk-config-entry">
+                        <button id="sdk-config-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="sdkConfigToggle" data-a0="true">SDK 配置</button>
                     </div>
                 </div>
             {% include 'components/page-header-end.html' %}
@@ -11,18 +14,18 @@
             <div id="users-main-view">
                 <!-- 用户统计卡片 -->
                 <div class="users-stats page-stat-row">
-                    <button class="user-stat-card page-stat-card workbench-stat" type="button" data-user-status-card="" data-click="setUsersStatusFilter" data-a0=""><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#users"></use></svg></span><span class="workbench-stat-copy">
-                        <span class="page-stat-value total" id="total-users-count">-</span>
+                    <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#users"></use></svg></span><span class="workbench-stat-copy">
+                        <span class="page-stat-value tone-primary" id="total-users-count">-</span>
                         <span class="page-stat-label">全部用户</span>
-                    </span></button>
-                    <button class="user-stat-card page-stat-card workbench-stat" type="button" data-user-status-card="online" data-click="setUsersStatusFilter" data-a0="online"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#check"></use></svg></span><span class="workbench-stat-copy">
-                        <span class="page-stat-value online" id="active-users-count">-</span>
+                    </span></div>
+                    <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#check"></use></svg></span><span class="workbench-stat-copy">
+                        <span class="page-stat-value tone-success" id="active-users-count">-</span>
                         <span class="page-stat-label">空闲在线</span>
-                    </span></button>
-                    <button class="user-stat-card page-stat-card workbench-stat" type="button" data-user-status-card="testing" data-click="setUsersStatusFilter" data-a0="testing"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#test"></use></svg></span><span class="workbench-stat-copy">
-                        <span class="page-stat-value testing" id="testing-users-count">-</span>
+                    </span></div>
+                    <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#test"></use></svg></span><span class="workbench-stat-copy">
+                        <span class="page-stat-value tone-warning" id="testing-users-count">-</span>
                         <span class="page-stat-label">正在测试</span>
-                    </span></button>
+                    </span></div>
                 </div>
 
                 <!-- 用户列表 -->
@@ -50,25 +53,24 @@
                 </div>
             </div>
 
-            <!-- Agent 接入：创建配对码、查看接入凭据。 -->
+            <!-- Agent 接入：创建配对码、查看接入凭据。统计卡模板与用户列表一致。 -->
             <div id="agent-access-panel" style="display: none;">
-                <div class="agent-access-intro">
-                    <div>
-                        <h2>Agent 接入</h2>
-                        <p id="agent-access-summary">授权 Kimi、Codex 或 kkagent 在目标服务器上使用平台能力。</p>
-                    </div>
-                    <button id="agent-access-create-toggle" class="btn-xs btn-primary" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-access-create-modal" data-click="agentAccessToggleCreate">＋ 创建配对码</button>
-                </div>
-                <div class="agent-access-stats" aria-label="Agent Token 统计">
-                    <button class="agent-access-stat" type="button" data-agent-token-status-card="" data-click="agentAccessSetStatusFilter" data-a0="">
-                        <strong id="agent-token-total-count">—</strong><span>接入凭据总数</span>
-                    </button>
-                    <button class="agent-access-stat" type="button" data-agent-token-status-card="active" data-click="agentAccessSetStatusFilter" data-a0="active">
-                        <strong id="agent-token-active-count">—</strong><span>当前有效</span>
-                    </button>
-                    <button class="agent-access-stat" type="button" data-agent-token-status-card="inactive" data-click="agentAccessSetStatusFilter" data-a0="inactive">
-                        <strong id="agent-token-inactive-count">—</strong><span>已失效</span>
-                    </button>
+                <div class="agent-stats page-stat-row">
+                    <div class="page-stat-card workbench-stat">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#users"></use></svg></span><span class="workbench-stat-copy">
+                        <span class="page-stat-value tone-primary" id="agent-token-total-count">—</span>
+                        <span class="page-stat-label">接入凭据总数</span>
+                    </span></div>
+                    <div class="page-stat-card workbench-stat">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#check"></use></svg></span><span class="workbench-stat-copy">
+                        <span class="page-stat-value tone-success" id="agent-token-active-count">—</span>
+                        <span class="page-stat-label">当前有效</span>
+                    </span></div>
+                    <div class="page-stat-card workbench-stat">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#warning"></use></svg></span><span class="workbench-stat-copy">
+                        <span class="page-stat-value tone-danger" id="agent-token-inactive-count">—</span>
+                        <span class="page-stat-label">已失效</span>
+                    </span></div>
                 </div>
 
                 <section class="agent-access-list-section" aria-label="已接入的 Agent">
@@ -78,6 +80,7 @@
                             <span id="agent-access-list-count">仅显示接入凭据信息，不展示原始 Token。</span>
                         </div>
                         <div class="agent-access-list-actions">
+                            <button id="agent-access-create-toggle" class="btn-xs btn-primary" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-access-create-modal" data-click="agentAccessToggleCreate">＋ 创建配对码</button>
                             <input id="agent-access-search" class="combo-box" type="search" placeholder="搜索 Agent、Token ID 或设备" aria-label="搜索 Agent Token" data-input="agentAccessFilterTokens">
                             <select id="agent-access-status-filter" class="combo-box" aria-label="按状态筛选 Agent Token" data-change="agentAccessFilterTokens">
                                 <option value="">全部状态</option><option value="active">有效</option>
@@ -106,6 +109,10 @@
                     </table>
                     </div>
                 </section>
+            </div>
+
+            <!-- SDK 配置：Agent 源码检索的数据源绑定（本机 / 编译服务器 / OpenGrok）。 -->
+            <div id="sdk-config-panel" style="display: none;">
                 <section class="agent-access-list-section" aria-label="已配置的 SDK 源码源">
                     <div class="agent-access-toolbar">
                         <div class="agent-access-list-label">
@@ -113,8 +120,8 @@
                             <span id="agent-sdk-sources-count">分析 Redmine 问题时的只读源码取证来源（本机 / 编译服务器 / OpenGrok）。</span>
                         </div>
                         <div class="agent-access-list-actions">
-                            <button id="agent-sdk-sources-add" class="btn-xs btn-primary" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-sdk-add-modal" data-click="agentAccessToggleAddSdk">＋ 添加SDK</button>
-                            <button id="agent-sdk-sources-refresh" class="btn-xs" type="button" data-click="agentAccessLoadSdkSources" data-r0="el"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                            <button id="agent-sdk-sources-add" class="btn-xs btn-primary" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-sdk-add-modal" data-click="sdkConfigToggleAddSdk">＋ 添加SDK</button>
+                            <button id="agent-sdk-sources-refresh" class="btn-xs" type="button" data-click="sdkConfigLoadSources" data-r0="el"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
                         </div>
                     </div>
                     <div class="agent-access-table-wrap">
@@ -125,13 +132,14 @@
                                 <th>类型</th>
                                 <th>位置 / 连接目标</th>
                                 <th>检索模式</th>
+                                <th>Android 版本</th>
                                 <th>默认 revision</th>
                                 <th>路径校验</th>
                                 <th>操作</th>
                             </tr>
                         </thead>
                         <tbody id="agent-sdk-sources-tbody">
-                            <tr><td colspan="7" class="agent-access-empty">加载中...</td></tr>
+                            <tr><td colspan="8" class="agent-access-empty">加载中...</td></tr>
                         </tbody>
                     </table>
                     </div>

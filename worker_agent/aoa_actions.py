@@ -993,34 +993,6 @@ def record_aoa_profile(
     }
 
 
-def _rescale_aoa_command(command: str, old_x: float, old_y: float,
-                         new_x: float, new_y: float) -> str:
-    """把按轴映射生成的 AOA 命令重缩放到实测映射（click/longClick/swipe）。
-
-    旧逻辑坐标 → 原始像素（按轴比例）→ 新逻辑坐标（实测比例）。
-    key/sleep/wake/home/back 等无坐标命令原样返回。
-    """
-    head, _, rest = command.partition(" ")
-    if head in ("click", "longClick"):
-        parts = rest.split()
-        if len(parts) == 2:
-            x, y = int(parts[0]), int(parts[1])
-            nx = min(360, max(0, round(x * old_x / new_x)))
-            ny = min(640, max(0, round(y * old_y / new_y)))
-            return f"{head} {nx} {ny}"
-    elif head == "swipe":
-        parts = rest.split()
-        if len(parts) == 5:
-            x1, y1, ms, x2, y2 = (int(parts[0]), int(parts[1]),
-                                  parts[2], int(parts[3]), int(parts[4]))
-            nx1 = min(360, max(0, round(x1 * old_x / new_x)))
-            ny1 = min(640, max(0, round(y1 * old_y / new_y)))
-            nx2 = min(360, max(0, round(x2 * old_x / new_x)))
-            ny2 = min(640, max(0, round(y2 * old_y / new_y)))
-            return f"swipe {nx1} {ny1} {ms} {nx2} {ny2}"
-    return command
-
-
 def record_aoa_input(serial: str, raw_action: dict) -> dict[str, Any]:
     """Execute one allow-listed ADB input and return its AOAv2 command."""
     action = aoa_profile.parse_record_input_action(raw_action)

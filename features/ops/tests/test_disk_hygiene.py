@@ -117,13 +117,6 @@ class DiskHygieneTests(unittest.TestCase):
         protected = self._stage_file(data_root, "run-active", "update.img", age_days=30)
         free = self._stage_file(data_root, "run-done", "update.img", age_days=30)
 
-        class FakeStore:
-            def list_runs(self, limit=500):
-                return [
-                    {"id": "run-active", "status": "flashing"},
-                    {"id": "run-done", "status": "completed"},
-                ]
-
         with mock.patch.object(
             disk_hygiene, "_protected_stage_run_ids",
             return_value={"run-active"},

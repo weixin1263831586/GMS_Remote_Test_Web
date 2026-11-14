@@ -6,15 +6,11 @@ from typing import Any
 from . import runtime
 from .usbip import usbip_manager
 from .usbip_protocol import recompute_protocol_mode
+from .usbip_support import _normalize_host as _normalize_host
 from .usbip_transaction import USBIP_PORT_COMMAND, parse_usbip_port_entries
 
 
 logger = logging.getLogger(__name__)
-
-
-def _normalize_host(host: str) -> str:
-    host = str(host or "").strip()
-    return host.split("@", 1)[-1] if "@" in host else host
 
 
 def _local_transport_target(

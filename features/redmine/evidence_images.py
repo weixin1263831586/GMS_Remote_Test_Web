@@ -10,11 +10,16 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .evidence import OCR_MAX_IMAGE_PIXELS, OCR_TIMEOUT_SECONDS
+from .evidence import (
+    OCR_MAX_IMAGE_PIXELS,
+    OCR_TIMEOUT_SECONDS,
+    OCR_TOTAL_TIMEOUT_SECONDS,
+)
 from .evidence_store import EvidenceStore
 
 
@@ -22,12 +27,37 @@ logger = logging.getLogger(__name__)
 
 
 def ocr_image_text(image, pytesseract) -> str:
-    """Cover large images with overlapping tiles instead of rejecting them."""
+    """Return OCR text with an explicit warning when tile coverage is partial."""
+    text, note = _ocr_image_text(image, pytesseract)
+    return f"{text}\n[{note}]" if note else text
+
+
+def _ocr_image_text(image, pytesseract) -> tuple[str, str]:
+    """Cover large images with overlapping tiles instead of rejecting them.
+
+    单次 tesseract 调用受 OCR_TIMEOUT_SECONDS 约束；分片场景另有
+    OCR_TOTAL_TIMEOUT_SECONDS 总预算——大图切成几十个 tile 时，逐片
+    各给 120s 的总耗时可能到小时级，必须整体截断（已识别 tile 的文本
+    保留，截断显式标注）。
+    """
+    deadline = time.monotonic() + OCR_TOTAL_TIMEOUT_SECONDS
+    note = ""
+
+    def recognize(region) -> str:
+        nonlocal note
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            note = f"OCR truncated: total {OCR_TOTAL_TIMEOUT_SECONDS}s budget exceeded"
+            return ""
+        return str(pytesseract.image_to_string(
+            region, lang="chi_sim+eng",
+            timeout=min(OCR_TIMEOUT_SECONDS, remaining),
+        ) or "")
+
     width, height = image.size
     if width * height <= OCR_MAX_IMAGE_PIXELS:
-        return str(pytesseract.image_to_string(
-            image, lang="chi_sim+eng", timeout=OCR_TIMEOUT_SECONDS,
-        ) or "")
+        text = recognize(image)
+        return text, note
     tile_width = min(width, 4096, OCR_MAX_IMAGE_PIXELS)
     tile_height = max(1, OCR_MAX_IMAGE_PIXELS // tile_width)
     step_x = max(1, tile_width - min(64, tile_width // 4))
@@ -37,10 +67,18 @@ def ocr_image_text(image, pytesseract) -> str:
         for left in range(0, width, step_x):
             with image.crop((left, top, min(width, left + tile_width),
                              min(height, top + tile_height))) as tile:
-                texts.append(str(pytesseract.image_to_string(
-                    tile, lang="chi_sim+eng", timeout=OCR_TIMEOUT_SECONDS,
-                ) or ""))
-    return "\n".join(texts)
+                try:
+                    texts.append(recognize(tile))
+                except RuntimeError as exc:
+                    if "timeout" not in str(exc).lower():
+                        raise
+                    note = f"OCR truncated: {exc}"
+            if note:
+                break
+        if note:
+            break
+    text = "\n".join(texts)
+    return text, note
 
 
 def _load_ocr_dependencies() -> tuple[Any, Any]:
@@ -65,8 +103,8 @@ def extract_image_ocr_text(
 ) -> tuple[str, str]:
     """对图片附件做完整 OCR，产出可检索派生文本。
 
-    返回 ``(derived_rel, error)``，签名与 zip/archive 派生函数一致。
-    语义分两档（原件状态与派生状态分离——status 保持"原件保存成功即
+    返回 ``(derived_rel, error)``，与 zip/archive 派生结果一致。
+    语义分三档（原件状态与派生状态分离——status 保持"原件保存成功即
     ready"，派生结果只落在 derived_status）：
     - OCR 正常执行但图片本身无文字（空结果）：返回 ``("", "")``，附件
       ready、derived_status=empty，不是证据缺口（示意图/照片类截图是
@@ -76,7 +114,9 @@ def extract_image_ocr_text(
       并把 derive 阶段错误写进快照 errors（拉低 completeness 的
       derived_text 维度），让 missing_information 显性化，原件保持
       ready（2026-10 #656295/#655644 复盘）。
-    识别语言 chi_sim+eng；大图分块完整覆盖，OCR 文本完整保存。
+    - 分块识别超时：保留已识别的文本并返回 error，派生状态记 partial；
+      尚无文本产出则记 missing，不把截断标注当成识别结果。
+    识别语言 chi_sim+eng；OCR 文本完整保存。
     """
     try:
         pytesseract, Image = _load_ocr_dependencies()
@@ -94,18 +134,20 @@ def extract_image_ocr_text(
 
             _pt.tesseract_cmd = cmd
         with Image.open(image_path) as image:
-            text = ocr_image_text(image, pytesseract)
+            text, note = _ocr_image_text(image, pytesseract)
     except Exception as exc:
         logger.debug("OCR failed for %s: %s", image_path, exc)
         detail = str(exc).strip().splitlines()
         summary = detail[-1][:200] if detail else type(exc).__name__
         return "", f"OCR 失败: {type(exc).__name__}: {summary}"
     if not text.strip():
-        return "", ""
+        return "", note
+    if note:
+        text += f"\n[{note}]"
     payload = text.strip().encode("utf-8")
     derived_rel = f"{snapshot_rel}/derived/{artifact_id}.txt"
     try:
         atomic_write(store.resolve_internal(derived_rel), payload)
     except OSError as exc:
         return "", f"派生文本写入失败: {type(exc).__name__}"
-    return derived_rel, ""
+    return derived_rel, note

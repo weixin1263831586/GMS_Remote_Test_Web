@@ -585,33 +585,6 @@ class RedmineDashboardConfigTests(unittest.TestCase):
 
         self.assertEqual(cfg["chart_date_ranges"], {"personal_daily": {"start": "2026-06-01", "end": "2026-06-13"}})
 
-    @patch.dict('os.environ')
-    def test_gerrit_dashboard_runtime_save_preserves_other_runtime_config(self):
-        os.environ.pop('GMS_DATA_ROOT', None)
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "core").mkdir()
-            configs = root / "configs"
-            configs.mkdir()
-            (configs / "config.json").write_text(json.dumps({"gerrit_dashboard": {"base_url": "https://old.example.com"}}), encoding="utf-8")
-            (configs / "config_runtime.json").write_text(json.dumps({"sidebar_order": ["test"]}), encoding="utf-8")
-
-            manager = ConfigManager(base_dir=str(root / "core"))
-
-            self.assertTrue(manager.save_gerrit_dashboard_config({
-                "base_url": "https://10.10.10.29/",
-                "rest_username": "dev",
-                "rest_password": "secret",
-                "ssh_identity_file": "/tmp/key",
-                "department_profiles": [{"id": "sys-1", "name": "系统一部", "owners": ["dev@example.com"]}],
-            }))
-
-            runtime = json.loads((configs / "config_runtime.json").read_text(encoding="utf-8"))
-            self.assertEqual(runtime["sidebar_order"], ["test"])
-            self.assertEqual(runtime["gerrit_dashboard"]["base_url"], "https://10.10.10.29")
-            self.assertEqual(runtime["gerrit_dashboard"]["ssh_identity_file"], "/tmp/key")
-            self.assertEqual(runtime["gerrit_dashboard"]["department_profiles"][0]["owners"], ["dev@example.com"])
-
 
 if __name__ == "__main__":
     unittest.main()

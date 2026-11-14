@@ -51,7 +51,3 @@ class WatchdogHookTests(unittest.TestCase):
         workers = service.list_workers()  # no ops registration at all
         self.assertEqual(workers[0]["status"], "offline")
         repository.mark_worker_offline.assert_called_once_with("worker-a")
-
-
-if __name__ == "__main__":
-    unittest.main()

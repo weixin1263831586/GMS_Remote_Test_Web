@@ -253,12 +253,6 @@ def test_record_setup_wizard_flags(monkeypatch):
     assert result["wizard"]["secure.tv_setup_complete"] is True
 
 
-def test_rescale_swipe_preserves_duration_and_rescales_both_points():
-    assert aoa_actions._rescale_aoa_command(
-        "swipe 100 200 500 200 400", 2, 2, 4, 4
-    ) == "swipe 50 100 500 100 200"
-
-
 def test_interactive_record_receipt_excludes_inline_screenshot(monkeypatch):
     monkeypatch.setattr(aoa_actions, "_display_size", lambda _: (720, 1280))
     monkeypatch.setattr(aoa_actions, "_adb_run", lambda *a, **k: _completed(0, ""))

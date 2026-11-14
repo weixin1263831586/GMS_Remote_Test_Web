@@ -903,6 +903,12 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             page.evaluate("switchPage('devices')")
             page.evaluate("aoaViewToggle(true)")
             expect(page.locator("#aoa-panel")).to_be_visible()
+            # 当前视图页签高亮：active 态与可见面板一一对应。
+            self.assertEqual(
+                page.evaluate(
+                    "['devices-list-tab','aoa-tab']"
+                    ".map(id => document.getElementById(id).classList.contains('active'))"),
+                [False, True])
             page.reload(wait_until="domcontentloaded")
             page.wait_for_load_state("load")
             page.wait_for_function("typeof window.switchPage === 'function'")
@@ -914,10 +920,30 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             self.close_initial_modals(page)
             page.evaluate("agentAccessToggle(true)")
             expect(page.locator("#agent-access-panel")).to_be_visible()
+            # 当前页签控件高亮：active 态与可见面板一一对应。
+            self.assertEqual(
+                page.evaluate(
+                    "['users-list-tab','agent-access-tab','sdk-config-tab']"
+                    ".map(id => document.getElementById(id).classList.contains('active'))"),
+                [False, True, False])
             page.reload(wait_until="domcontentloaded")
             page.wait_for_load_state("load")
             page.wait_for_function("typeof window.switchPage === 'function'")
             expect(page.locator("#agent-access-panel")).to_be_visible()
+
+            # SDK 配置页签：切换与 F5 恢复，与 Agent 接入同机制。
+            page.evaluate("sdkConfigToggle(true)")
+            expect(page.locator("#sdk-config-panel")).to_be_visible()
+            expect(page.locator("#agent-access-panel")).not_to_be_visible()
+            self.assertEqual(
+                page.evaluate(
+                    "['users-list-tab','agent-access-tab','sdk-config-tab']"
+                    ".map(id => document.getElementById(id).classList.contains('active'))"),
+                [False, False, True])
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_load_state("load")
+            page.wait_for_function("typeof window.switchPage === 'function'")
+            expect(page.locator("#sdk-config-panel")).to_be_visible()
             self.assert_no_page_errors(page_errors)
         finally:
             page.close()

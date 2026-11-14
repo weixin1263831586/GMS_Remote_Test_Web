@@ -83,6 +83,26 @@ def test_member_budget_stop_keeps_prefix_partial_and_never_silent(tmp_path):
     assert "aaaa" in text and "bbbb" not in text
 
 
+def test_member_budget_includes_frame_headers_and_newlines(tmp_path):
+    import io
+    import json
+
+    store = EvidenceStore(tmp_path)
+    # 首成员占 35 字符；剩余 2 字符能容纳 b 的正文，放不下其帧头。
+    with patch("features.redmine.evidence_text.DERIVED_TEXT_MAX_CHARS", 37):
+        derived, note = derive_member_index(store, "art_frames", "1/s1", [
+            ("a.txt", lambda: io.BytesIO(b"aaaa")),
+            ("b.txt", lambda: io.BytesIO(b"b")),
+        ])
+    assert derived and "预算" in note
+    path = store.resolve_internal(derived)
+    text = path.read_text(encoding="utf-8")
+    assert len(text) == 35
+    sidecar = json.loads(path.with_name(path.name + ".idx.json").read_text())
+    assert sidecar["total_chars"] == len(text)
+    assert [member["name"] for member in sidecar["members"]] == ["a.txt"]
+
+
 def test_rar7z_extraction_runs_under_a_time_budget(tmp_path):
     store = EvidenceStore(tmp_path)
     source = tmp_path / "evil.7z"
@@ -90,7 +110,7 @@ def test_rar7z_extraction_runs_under_a_time_budget(tmp_path):
     with patch(
         "features.redmine.evidence_archives.extract_system_archive"
     ) as extract:
-        extract_system_archive_text(store, None, "art3", "1/s1", source)
+        extract_system_archive_text(store, "art3", "1/s1", source)
     _args, kwargs = extract.call_args
     assert kwargs["timeout"] == EXTRACT_TIMEOUT_SECONDS > 0
 

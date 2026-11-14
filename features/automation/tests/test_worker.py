@@ -63,10 +63,6 @@ class _FakeAutomationService:
         return result
 
 
-class _make:
-    """Helpers to build build-job and automation-run rows for tests."""
-
-
 def _make_build_job(store, *, job_id, status, started_at, created_at=None):
     return store.create_job({
         "id": job_id,

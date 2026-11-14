@@ -710,15 +710,19 @@
             }
 
             if (pageName === 'users') {
+                const savedUsersView = sessionStorage.getItem('gms_users_view');
                 if (window.agentAccessPanelIsOpen?.()) {
                     stopUsersAutoRefresh();
                     agentAccessReload();
-                } else if (sessionStorage.getItem('gms_users_view') === 'agent'
-                        && typeof agentAccessToggle === 'function'
+                } else if (window.sdkConfigPanelIsOpen?.()) {
+                    stopUsersAutoRefresh();
+                    sdkConfigLoadSources();
+                } else if ((savedUsersView === 'agent' || savedUsersView === 'sdk')
+                        && typeof usersViewSwitch === 'function'
                         && (agentAccessIsAdmin() || state.elevated)) {
-                    // F5 恢复「Agent 接入」页签；非管理员不做自动恢复，
-                    // 避免每次进入用户页都弹出交互式提权弹框。
-                    await agentAccessToggle(true);
+                    // F5 恢复「Agent 接入」/「SDK 配置」页签；非管理员不做
+                    // 自动恢复，避免每次进入用户页都弹出交互式提权弹框。
+                    await usersViewSwitch(savedUsersView);
                 } else {
                     // 未提权时 loadUsersList 会等待交互式提权弹框，
                     // 不能阻塞页面初始化的完成语义：定时器立即启动，

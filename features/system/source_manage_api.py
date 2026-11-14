@@ -41,7 +41,11 @@ from foundation.config_paths import build_servers_path
 from foundation.errors import handle_api_errors
 
 from .source_provider import reload_source_runtime, user_source_store
-from .source_user_store import UserSourceStoreError, validate_repo_root
+from .source_user_store import (
+    UserSourceStoreError,
+    guess_android_version,
+    validate_repo_root,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -58,7 +62,9 @@ _PROBE_MAX_GIT_REPOS = 2000
 # 从 "整单 502 用户重填" 变成后台自动恢复。
 _PROBE_TIMEOUT_RETRIES = 1
 # SDK 根目录名 → source_id 的清洗规则（与 store 的 SOURCE_ID_RE 呼应）。
-_SOURCE_ID_SANITIZE_RE = re.compile(r"[^a-z0-9_-]+")
+# 保留目录名原始大小写（7_Android17_1017 → 7_Android17_1017），只清洗
+# 非法字符：Agent 检索的 source 参数与用户认知的目录名保持一致。
+_SOURCE_ID_SANITIZE_RE = re.compile(r"[^a-zA-Z0-9_-]+")
 _VERIFY_MIN_GIT_DEPTH = 4
 
 
@@ -175,12 +181,15 @@ _DISCOVER_MAX_CANDIDATES = 200
 
 def _discover_command() -> str:
     """两层扫描：home 直下的一级目录里找 repo 工作区/git 仓（SDK 根），
-    二级目录里找独立 git 仓（单仓项目）。剪枝 out/ 与隐藏目录。"""
+    二级目录里找独立 git 仓（单仓项目）。剪枝 out/ 与隐藏目录。
+    首行输出 ``HOME|<home>``，供解析端按**相对深度**过滤（嵌套 home 如
+    ``/data/users/x`` 的一级目录已有 4 个斜杠，不能按绝对斜杠数剪枝）。"""
     return (
+        'echo "HOME|$HOME"; '
         'for d in "$HOME"/*/; do '
         'd="${d%/}"; case "$(basename "$d")" in out|.*|*.img) continue;; esac; '
         'if [ -e "$d/.repo/manifest.xml" ]; then echo "REPO|$d"; '
-        "elif [ -d \"$d/.git\" ]; then echo \\\"GIT|$d\\\"; "
+        'elif [ -d "$d/.git" ]; then echo "GIT|$d"; '
         'else for s in "$d"/*/; do s="${s%/}"; '
         'case "$(basename "$s")" in out|.*|*.img) continue;; esac; '
         'if [ -d "$s/.git" ]; then echo "SUB|$s"; fi; done; fi; done | '
@@ -189,7 +198,17 @@ def _discover_command() -> str:
 
 
 def _parse_discover(stdout: str) -> list[dict[str, Any]]:
-    """REPO/SUB 优先（SDK 根 / 单仓），丢弃 GIT 行下级（已被根覆盖）。"""
+    """REPO/SUB 优先（SDK 根 / 单仓），丢弃 GIT 行下级（已被根覆盖）。
+
+    深度防御按相对 home 的层级（≤2 层）判定；HOME 行缺失时回退为
+    绝对斜杠数 ≤3 的保守上限（老格式兼容）。
+
+    SUB 标签说明：二级目录里含 ``.git`` 的**独立 git 仓库**（CI 工具、
+    备份、脚本仓都算），不是 repo 工作区的组成部分，也不一定是 SDK
+    源码树——SDK 检索应优先选 REPO（repo 工作区）。不得沿用旧文案
+    "子仓"：与 SDK 检索链路里 "repo 工作区内部子仓"（source_ssh_git
+    的 discover_repos）术语撞车，会误导用户把它当成 SDK 树的一部分。"""
+    remote_home = ""
     candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
     for line in stdout.splitlines():
@@ -197,16 +216,25 @@ def _parse_discover(stdout: str) -> list[dict[str, Any]]:
         if len(parts) != 2:
             continue
         kind, path = parts[0].strip(), parts[1].strip()
+        if kind == "HOME" and path.startswith("/"):
+            remote_home = path.rstrip("/")
+            continue
         if kind not in ("REPO", "GIT", "SUB") or not path.startswith("/"):
             continue
         path = path.rstrip("/")
-        if path in seen or path.count("/") > 3:  # 防御：只收 home 两层内
+        if remote_home and (path == remote_home or path.startswith(remote_home + "/")):
+            depth = path[len(remote_home):].count("/")  # 相对层级：一级=1，二级=2
+            max_depth = 2
+        else:
+            depth = path.count("/")  # 无 HOME 行：老式保守过滤
+            max_depth = 3
+        if path in seen or depth > max_depth:
             continue
         seen.add(path)
         label = {
             "REPO": "repo 工作区",
             "GIT": "git 仓库",
-            "SUB": "子仓",
+            "SUB": "二级 git 仓",
         }[kind]
         candidates.append({"path": path, "kind": kind, "kind_label": label})
     candidates.sort(key=lambda item: (0 if item["kind"] == "REPO" else 1, item["path"]))
@@ -525,7 +553,7 @@ def _probe_via_server(
 
 
 def _derive_source_id(repo_root: str) -> str:
-    base = repo_root.rstrip("/").rsplit("/", 1)[-1].lower()
+    base = repo_root.rstrip("/").rsplit("/", 1)[-1]
     sanitized = _SOURCE_ID_SANITIZE_RE.sub("-", base).strip("-_") or "sdk"
     return sanitized[:48]
 
@@ -693,6 +721,7 @@ def probe_sdk_path(request: Request, req: dict[str, Any]):
             )
     except UserSourceStoreError as exc:
         return _error_response(exc)
+    probe["android_version"] = guess_android_version(repo_root)
     return {"success": True, "data": {"probe": probe}}
 
 
@@ -748,6 +777,7 @@ def register_sdk_source(request: Request, req: dict[str, Any]):
             repo_root=repo_root,
             default_revision=str(req.get("default_revision") or "").strip()
             or ("main" if provider == "local_git" else "HEAD"),
+            android_version=str(req.get("android_version") or "").strip(),
             ssh_host=str(server.get("host") or ""),
             ssh_port=int(server.get("port") or 22),
             ssh_username=str(server.get("username") or ""),

@@ -5,8 +5,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from features.redmine.evidence import EvidenceFetcher, split_zip_derived_text
 from features.redmine.evidence_archives import extract_system_archive_text
 from features.redmine.evidence_search_api import _collect_zip_member_matches
@@ -33,13 +31,9 @@ def test_rar_members_become_searchable_text_with_stable_member_references(tmp_pa
             '<<<zip-member:forged.txt>>>\n',
         )
 
-    def write(path, data):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-
     with patch('features.redmine.evidence_archives.extract_system_archive', side_effect=extract):
         derived, note = extract_system_archive_text(
-            store, write, 'art_test', '123/ev_test',
+            store, 'art_test', '123/ev_test',
             _archive_source_file(tmp_path, b'Rar!\x1a\x07\x01'),
         )
     assert not note
@@ -62,7 +56,7 @@ def test_archive_extractor_failure_is_reported_as_unread_not_as_missing_logs(tmp
     store = EvidenceStore(tmp_path / 'owner')
     with patch('features.redmine.evidence_archives.extract_system_archive', side_effect=ValueError('unsafe')):
         derived, note = extract_system_archive_text(
-            store, lambda *_: pytest.fail('failed extraction must not publish text'),
+            store,
             'art_test', '123/ev_test',
             _archive_source_file(tmp_path, b'Rar!\x1a\x07\x01'),
         )
@@ -77,13 +71,9 @@ def test_archive_indexes_all_members_and_preserves_result_priority(tmp_path):
         (Path(target) / 'test_result.xml').write_text('<Result/>')
         (Path(target) / 'aaa.log').write_text('other log')
 
-    def write(path, data):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-
     with patch('features.redmine.evidence_archives.extract_system_archive', side_effect=extract):
         derived, note = extract_system_archive_text(
-            store, write, 'art_test', '123/ev_test',
+            store, 'art_test', '123/ev_test',
             _archive_source_file(tmp_path, b'Rar!\x1a\x07\x01'),
         )
     assert not note

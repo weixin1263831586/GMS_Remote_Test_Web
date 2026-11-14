@@ -341,6 +341,9 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         result = self.provider.search("", "run")
         self.assertTrue(result["multi_repo"])
         self.assertEqual(result["total"], 2)
+        self.assertTrue(result["coverage_complete"])
+        self.assertEqual(result["repos_total"], 2)
+        self.assertEqual(result["repos_pending"], 0)
         first, second = result["matches"]
         self.assertEqual(first["path"], "frameworks/base/core/java/A.java")
         self.assertEqual(first["commit"], self.COMMIT_FB)
@@ -381,6 +384,101 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         self.assertIn("'run(); rm -rf /'", command)
         tokens = shlex.split(command)
         self.assertTrue(any("run(); rm -rf /" in token for token in tokens))
+
+    def test_shard_command_is_space_safe(self):
+        """含空格的仓库路径必须原样到达 ``git -C``：read -r 不做单词拆分。"""
+        import subprocess
+
+        spaced = "/remote/sdk/my repo"
+        command = self.provider._shard_grep_command("needle", "", (spaced,))
+        self.assertIn("IFS= read -r r", command)
+        # 执行实际生成的命令，并检查 git 收到的完整参数。
+        probe = "git() { printf '[%s]\\n' \"$@\"; }; " + command
+        out = subprocess.run(
+            ["bash", "-c", probe], capture_output=True, text=True, timeout=30,
+        ).stdout.strip()
+        self.assertIn("[/remote/sdk/my repo]", out.splitlines())
+
+    def test_limit_counts_pending_repos_instead_of_shards(self):
+        from features.system import source_ssh_git as mod
+
+        repos = tuple(f"/remote/sdk/r{i}" for i in range(5))
+        stdout = (f"{_REPO_SEP}/remote/sdk/r0\t{_HEAD_LABEL}\n"
+                  + _grep_record(_HEAD_LABEL, "A.java", 1, "x"))
+        provider = self._provider(self._handler(grep_stdout=stdout), repos=repos)
+        with unittest.mock.patch.object(mod, "SSH_GIT_SHARD_REPOS", 2), \
+             unittest.mock.patch.object(mod, "SSH_GIT_SHARD_WAVE_SIZE", 1), \
+             unittest.mock.patch.object(provider, "_resolve_hit_commits",
+                                        return_value={"r0": "a" * 40}):
+            result = provider.search("", "x", limit=1)
+        self.assertEqual(result["repos_total"], 5)
+        self.assertEqual(result["repos_pending"], 3)
+        self.assertTrue(result["limited"])
+        self.assertFalse(result["coverage_complete"])
+
+    def test_limit_waits_for_other_shards_and_marks_truncated_results(self):
+        import threading
+
+        from features.system import source_ssh_git as mod
+        from foundation.command_result import CommandResult
+
+        first_finished = threading.Event()
+
+        def run_shard(shard, _query, _path):
+            if shard[0] == self.REPO_FB:
+                first_finished.set()
+            else:
+                self.assertTrue(first_finished.wait(timeout=5))
+            rel = self.provider._repo_rel(shard[0])
+            return CommandResult(
+                stdout=f"{_REPO_SEP}{shard[0]}\t{_HEAD_LABEL}\n"
+                       + _grep_record(_HEAD_LABEL, "A.java", 1, rel),
+                code=0,
+            )
+
+        with unittest.mock.patch.object(mod, "SSH_GIT_SHARD_REPOS", 1), \
+             unittest.mock.patch.object(self.provider, "_run_shard", side_effect=run_shard), \
+             unittest.mock.patch.object(self.provider, "_resolve_hit_commits", return_value={
+                 "frameworks/base": self.COMMIT_FB, "kernel-6.1": self.COMMIT_KERN,
+             }):
+            result = self.provider.search("", "x", limit=1)
+        self.assertEqual(result["repos_pending"], 0)
+        self.assertTrue(result["limited"])
+        self.assertFalse(result["coverage_complete"])
+
+    def test_failed_commit_lookup_marks_empty_result_incomplete(self):
+        provider = self._provider(self._handler(grep_stdout=self._grep_stdout()))
+        with unittest.mock.patch.object(provider, "_resolve_hit_commits", return_value={}):
+            result = provider.search("", "run")
+        self.assertEqual(result["total"], 0)
+        self.assertTrue(result["limited"])
+        self.assertFalse(result["coverage_complete"])
+
+    def test_repo_failure_keeps_later_hits_and_marks_coverage_incomplete(self):
+        import subprocess
+
+        from foundation.command_result import CommandResult
+
+        command = self.provider._shard_grep_command("needle", "", (self.REPO_FB, self.REPO_KERN))
+        # 首仓模拟 timeout 的 124，末仓成功；shell 总退出码仍然是 0。
+        script = (
+            'git() { if [ "$3" = /remote/sdk/frameworks/base ]; then return 124; fi; '
+            "printf '%s\\0%s\\0%s\\n' 'HEAD:A.java' 1 needle; }; " + command
+        )
+        completed = subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, timeout=10, check=True,
+        )
+        provider = self._provider(self._handler(
+            grep_stdout=completed.stdout, heads_stdout=self._heads_stdout(),
+        ))
+        with unittest.mock.patch.object(provider, "_run_shard", return_value=CommandResult(
+            stdout=completed.stdout, code=0,
+        )):
+            result = provider.search("", "needle")
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["matches"][0]["repo"], "kernel-6.1")
+        self.assertTrue(result["limited"])
+        self.assertFalse(result["coverage_complete"])
 
     def test_discover_enumerates_and_caches_in_process(self):
         def handler(command: str, timeout: int):
@@ -454,6 +552,95 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         # 小清单不分片
         small = tuple(f"/remote/sdk/r{i}" for i in range(10))
         self.assertEqual(len(self.provider._shards(small)), 1)
+
+    # ---- wave-budget regression tests --------------------------------
+    # 2026-11-13 #661066：全量检索实际墙钟超预算后，旧逻辑「有部分结果
+    # 就一直等完全部波」导致请求远超客户端 HTTP 预算（curl 30s 先断，
+    # 服务端仍在跑 4 分钟+）。预算语义改为：deadline 只阻止**新波**，
+    # 在飞的分片总是等完。
+
+    def test_deadline_stops_new_waves_and_returns_partial(self):
+        """deadline 过期后不再发起新波；已有部分结果 + limited=True 返回。"""
+        import time as _t
+
+        from features.system import source_ssh_git as mod
+        from foundation.command_result import CommandResult
+
+        executed: list[str] = []
+        repos = tuple(f"/remote/sdk/r{i:02d}" for i in range(3))
+        grep_stdout = (
+            f"{_REPO_SEP}/remote/sdk/r00\t{_HEAD_LABEL}\n"
+            + _grep_record(_HEAD_LABEL, "A.java", 1, "x"))
+
+        def handler(command: str, timeout: int):
+            executed.append(command)
+            if " grep " in command:
+                _t.sleep(0.1)
+                if "r00" in command:
+                    return CommandResult(stdout=grep_stdout, code=0)
+                return CommandResult(stdout="", code=1)
+            if "rev-parse" in command:
+                return CommandResult(
+                    stdout=f"{_REPO_SEP}/remote/sdk/r00\t{'a' * 40}\n",
+                    code=0)
+            return CommandResult(stdout="", stderr="unexpected", code=3)
+
+        provider = self._provider(handler, repos=repos)
+        with unittest.mock.patch.object(mod, "SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS", 0.05), \
+             unittest.mock.patch.object(mod, "SSH_GIT_SHARD_REPOS", 1), \
+             unittest.mock.patch.object(mod, "SSH_GIT_SHARD_WAVE_SIZE", 1), \
+             unittest.mock.patch.object(
+                 provider, "_resolve_hit_commits", lambda hits: {
+                     "r00": "a" * 40} if hits else {}), \
+             unittest.mock.patch.object(
+                 provider, "_repo_rel", lambda repo: repo.split("/")[-1]):
+            # 三个分片三个波：波 1 耗尽预算后，波 2/3 不再发起。
+            result = provider.search("", "x")
+        grep_count = sum(1 for c in executed if " grep " in c)
+        self.assertLess(grep_count, 3, "deadline 过期后不应发起全部波")
+        self.assertTrue(result["limited"])
+        self.assertEqual(result["total"], 1)
+
+    def test_first_wave_completes_even_after_deadline(self):
+        """首个波总是执行完（deadline 只阻止后续波），结果完整覆盖。"""
+        import time as _t
+
+        from features.system import source_ssh_git as mod
+        from foundation.command_result import CommandResult
+
+        executed: list[str] = []
+        repos = ("/remote/sdk/frameworks/base", "/remote/sdk/kernel-6.1")
+
+        def handler(command: str, timeout: int):
+            executed.append(command)
+            if " grep " in command:
+                _t.sleep(0.1)
+                if "frameworks/base" in command:
+                    return CommandResult(
+                        stdout=f"{_REPO_SEP}/remote/sdk/frameworks/base\t{_HEAD_LABEL}\n"
+                               + _grep_record(_HEAD_LABEL, "A.java", 1, "x"),
+                        code=0)
+                return CommandResult(
+                    stdout=f"{_REPO_SEP}/remote/sdk/kernel-6.1\t{_HEAD_LABEL}\n"
+                           + _grep_record(_HEAD_LABEL, "gpio.c", 2, "y"),
+                    code=0)
+            if "rev-parse" in command:
+                return CommandResult(
+                    stdout=f"{_REPO_SEP}/remote/sdk/frameworks/base\t{'a' * 40}\n"
+                           f"{_REPO_SEP}/remote/sdk/kernel-6.1\t{'b' * 40}\n",
+                    code=0)
+            return CommandResult(stdout="", stderr="unexpected", code=3)
+
+        provider = self._provider(handler, repos=repos)
+        with unittest.mock.patch.object(mod, "SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS", 0.02), \
+             unittest.mock.patch.object(mod, "SSH_GIT_SHARD_REPOS", 1), \
+             unittest.mock.patch.object(mod, "SSH_GIT_SHARD_WAVE_SIZE", 2):
+            result = provider.search("", "x")
+        grep_count = sum(1 for c in executed if " grep " in c)
+        self.assertEqual(grep_count, 2, "两个分片同一波：超预算仍等完整波")
+        self.assertEqual(result["total"], 2)
+        # 波内等完不算截断（没有丢任何仓的覆盖）。
+        self.assertFalse(result["limited"])
 
 
 class SSHGitConfigTests(unittest.TestCase):

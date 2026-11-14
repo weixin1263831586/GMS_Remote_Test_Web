@@ -60,12 +60,6 @@ function filterWebsiteOnlyTools(toolsByCategory) {
     return filtered;
 }
 
-
-function switchCategory(category) {
-    currentCategory = category;
-    renderToolsGrid();
-}
-
 function renderToolsGrid() {
     const grid = document.getElementById('tools-grid');
     if (!grid) return;

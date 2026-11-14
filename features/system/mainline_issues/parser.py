@@ -107,10 +107,6 @@ def stable_doc_hash(doc: html.HtmlElement) -> str:
     return hashlib.sha256(stable_text.encode('utf-8')).hexdigest()
 
 
-def direct_text(node: html.HtmlElement) -> str:
-    return ' '.join(' '.join(node.xpath('./text()')).split())
-
-
 def extract_release_years(index_doc: html.HtmlElement) -> list[int]:
     nav_nodes = index_doc.xpath('//nav[contains(@class, "devsite-book-nav")]')
     if not nav_nodes:

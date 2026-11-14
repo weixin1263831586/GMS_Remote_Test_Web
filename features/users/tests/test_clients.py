@@ -5,16 +5,6 @@ from unittest.mock import patch
 from features.users import clients
 
 
-class _ConfigManager:
-    def __init__(self, trusted_proxies=None):
-        self.trusted_proxies = trusted_proxies
-
-    def load_config(self):
-        if self.trusted_proxies is None:
-            return {}
-        return {'trusted_proxies': self.trusted_proxies}
-
-
 def _patch_config(trusted_proxies=None):
     """Patch the trusted-proxy config seam (now foundation-level).
 

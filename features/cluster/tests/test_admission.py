@@ -200,7 +200,3 @@ class WatchdogObservabilityTests(unittest.TestCase):
             service.start_watchdog()
 
         return captured.records
-
-
-if __name__ == "__main__":
-    unittest.main()

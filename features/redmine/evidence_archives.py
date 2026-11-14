@@ -7,7 +7,6 @@ import gzip
 import lzma
 import tarfile
 import tempfile
-from collections.abc import Callable
 from pathlib import Path
 
 from foundation.archives import extract_system_archive
@@ -19,8 +18,7 @@ from .evidence_zip import _member_priority
 
 
 def extract_system_archive_text(
-    store: EvidenceStore, write_file: Callable[[Path, bytes], None],
-    artifact_id: str, snapshot_rel: str, source: Path,
+    store: EvidenceStore, artifact_id: str, snapshot_rel: str, source: Path,
 ) -> tuple[str, str]:
     with source.open("rb") as handle:
         head = handle.read(8)

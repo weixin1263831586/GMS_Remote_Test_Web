@@ -741,10 +741,8 @@ function aoaCommandsExport() {
         commands: aoaPanelState.commands,
         metadata: aoaHidMetadata(),
     };
-    const url = URL.createObjectURL(new Blob(
-        [JSON.stringify(payload, null, 2)], {type: 'application/json'}));
-    const link = document.createElement('a'); link.href = url; link.download = 'aoa-profile.json';
-    link.click(); URL.revokeObjectURL(url);
+    triggerDownload(URL.createObjectURL(new Blob(
+        [JSON.stringify(payload, null, 2)], {type: 'application/json'})), 'aoa-profile.json', true);
 }
 
 function aoaCommandsImport() {

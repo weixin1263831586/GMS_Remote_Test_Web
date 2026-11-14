@@ -24,8 +24,6 @@ if TYPE_CHECKING:  # pragma: no cover
     from .daily_brief_repository import DailyBriefRepository
 
 JOB_KINDS = frozenset({"run", "issue"})
-ACTIVE_JOB_STATUSES = ("queued", "running")
-ACTIVE_RUN_STATUSES = ("pending", "snapshotting", "analyzing")
 
 
 def new_job_id() -> str:
@@ -331,8 +329,6 @@ TERMINAL_RUN_STATUSES_SQL = frozenset({"completed", "partial", "failed", "cancel
 
 
 __all__ = [
-    "ACTIVE_JOB_STATUSES",
-    "ACTIVE_RUN_STATUSES",
     "JOB_KINDS",
     "DailyBriefJobStore",
     "new_job_id",

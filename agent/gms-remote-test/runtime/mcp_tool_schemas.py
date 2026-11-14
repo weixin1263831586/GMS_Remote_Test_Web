@@ -1599,7 +1599,11 @@ ALL_TOOLS: list[dict[str, Any]] = [
                 "or commit). Every match carries the resolved commit and a "
                 "signed result_id for gms_rt_sdk_read. Omit revision to "
                 "use the source's default_revision automatically (an "
-                "unknown source errors with the available source list)."
+                "unknown source errors with the available source list). "
+                "Full-SDK sources grep 1000+ repos over SSH and one call "
+                "can take 1-4 minutes: issue it and wait, do not retry on "
+                "timeout with identical arguments — narrow with path (e.g. "
+                "frameworks/base) instead."
             ),
             "inputSchema": {
                 "type": "object",

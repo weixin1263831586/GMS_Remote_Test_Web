@@ -920,18 +920,3 @@ def call_provider_chain(
         'provider_errors': errors,
         'attempted_providers': attempted,
     }
-
-
-# 全局实例
-_universal_analyzer = None
-
-def get_universal_analyzer() -> UniversalAIAnalyzer:
-    """获取通用AI分析器实例"""
-    global _universal_analyzer
-    from foundation.config import config_manager
-
-    ai_config = config_manager.get_ai_config()
-
-    # 每次都重新创建实例以确保使用最新配置
-    _universal_analyzer = UniversalAIAnalyzer(ai_config)
-    return _universal_analyzer

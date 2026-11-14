@@ -671,20 +671,9 @@ function renderWeeklyReportHtml(data) {
 
 function copyWeeklyReportMarkdown() {
     if (!weeklyReportMarkdown) { showToast('请先生成周报', 'warning'); return; }
-    const done = () => showToast('Markdown 已复制', 'success');
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(weeklyReportMarkdown).then(done).catch(() => _fallbackCopy(weeklyReportMarkdown, done));
-    } else {
-        _fallbackCopy(weeklyReportMarkdown, done);
-    }
-}
-
-function _fallbackCopy(text, cb) {
-    try {
-        const ta = document.createElement('textarea');
-        ta.value = text; document.body.appendChild(ta); ta.select();
-        document.execCommand('copy'); document.body.removeChild(ta); cb();
-    } catch (e) { showToast('复制失败', 'error'); }
+    copyTextToClipboard(weeklyReportMarkdown)
+        .then(() => showToast('Markdown 已复制', 'success'))
+        .catch(() => showToast('复制失败', 'error'));
 }
 
 function downloadWeeklyReport() {
@@ -694,10 +683,7 @@ function downloadWeeklyReport() {
     const safeName = (d.name || '周报').replace(/[\\/:*?"<>|/\s]+/g, '_');
     const name = `${safeName}_${r.start || ''}_${r.end || ''}.md`;
     const blob = new Blob([weeklyReportMarkdown], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = name; document.body.appendChild(a); a.click();
-    document.body.removeChild(a); URL.revokeObjectURL(url);
+    triggerDownload(URL.createObjectURL(blob), name, true);
 }
 
 async function sendWeeklyReportEmail() {

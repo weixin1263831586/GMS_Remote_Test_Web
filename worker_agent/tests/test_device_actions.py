@@ -775,7 +775,7 @@ def test_run_with_output_stream_reports_lines_without_trailing_newline():
                    return_value=process):
             result = device_actions._run_with_output_stream(
                 ["fake"], timeout=5,
-                on_output=lambda line, err: received.append(line))
+                on_output=lambda line, _: received.append(line))
     finally:
         _os.close(r)
     assert received == ["progress 50%"]

@@ -31,7 +31,6 @@ from features.redmine.repository import (
     display_names_from_mapping,
     find_user_mapping_for_names,
     load_redmine_user_map_for_owner,
-    load_user_map_payload_for_owner,
     owner_attachments_dir,
     owner_db_path,
     owner_docs_dir,
@@ -144,10 +143,6 @@ def _owner_id_from_request(request: Request) -> str:
 
 def _load_user_map_for_request(request: Request) -> list[dict[str, Any]]:
     return load_redmine_user_map_for_owner(_owner_id_from_request(request))
-
-
-def _load_user_map_payload_for_request(request: Request) -> dict[str, Any]:
-    return load_user_map_payload_for_owner(_owner_id_from_request(request))
 
 
 def get_redmine_dashboard_config_for_request(request: Request) -> dict[str, Any]:

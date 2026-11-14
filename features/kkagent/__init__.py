@@ -22,7 +22,6 @@ from .analyzer import (
     UniversalAIAnalyzer,
     call_provider_chain,
     first_local_provider,
-    get_universal_analyzer,
 )
 from .config import ContextBudgetError, analysis_command, context_limited_config, model_config
 from .errors import (
@@ -71,7 +70,6 @@ from .registry import (
     default_model_alias,
     list_model_options,
     resolve_model_spec,
-    sanitized_model_catalog,
 )
 from .sandbox import read_bounded, restricted_runtime
 from .session import (
@@ -127,7 +125,6 @@ __all__ = [
     "endpoint_url",
     "extract_turn_events",
     "first_local_provider",
-    "get_universal_analyzer",
     "has_textual_gms_tool_call",
     "interrupted_exit",
     "is_local_provider",
@@ -145,7 +142,6 @@ __all__ = [
     "resolve_model_spec",
     "restricted_runtime",
     "run_headless_turn",
-    "sanitized_model_catalog",
     "settle_reader_future",
     "signal_label",
     "strip_ansi",

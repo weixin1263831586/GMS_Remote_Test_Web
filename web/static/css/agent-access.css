@@ -1,12 +1,13 @@
 /* Agent enrollment: overview, focused configuration, and connection records. */
-#agent-access-panel {
+#agent-access-panel,
+#sdk-config-panel {
     gap: 14px;
     overflow: auto;
 }
 
-#agent-access-panel > * { flex-shrink: 0; }
+#agent-access-panel > *,
+#sdk-config-panel > * { flex-shrink: 0; }
 
-.agent-access-intro,
 .agent-access-toolbar,
 .agent-access-card-heading,
 .agent-access-form-actions,
@@ -19,20 +20,16 @@
     gap: 14px;
 }
 
-.agent-access-intro { padding: 4px 0 4px 8px; }
-/* 裸文字块与公共页面外框的呼吸量（20261113170706 截图）：标题/说明
-   这类无边框文字直接从 15px 容器边贴到外框线上。只缩进文字块本身，
-   统计卡片、表格等自带边框的组件保持贴边原样。 */
+/* 裸文字块与公共页面外框的呼吸量：标题/说明这类无边框文字直接从
+   15px 容器边贴到外框线上。只缩进文字块本身，统计卡片、表格等自带
+   边框的组件保持贴边原样。 */
 .agent-access-list-label { padding-left: 8px; }
-.agent-access-intro > div { min-width: 0; }
-.agent-access-intro h2 { margin: 0; font-size: 17px; font-weight: 650; }
-.agent-access-intro p { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
 #agent-access-create-toggle { flex-shrink: 0; white-space: nowrap; }
 
-.agent-access-stats { margin: 0; gap: 12px; }
-.agent-access-stat { display: flex; align-items: center; gap: 12px; padding: 12px 16px; appearance: none; }
-.agent-access-stat strong { font-size: 22px; }
-.agent-access-stat span { margin: 0; font-size: 12px; }
+/* 面板是 flex gap 容器，统计卡行的 margin-bottom（page-stat-row 模板
+   为非 flex 容器自带）会被叠加成 24px；清零后节奏为 14px。 */
+#agent-access-panel .page-stat-row,
+#sdk-config-panel .page-stat-row { margin-bottom: 0; }
 
 .agent-access-create-card,
 .agent-access-code-card {
@@ -108,9 +105,16 @@
 .agent-access-code-next { padding-top: 14px; border-top: 1px solid var(--border-color); color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
 .agent-access-code-next .btn-xs { flex-shrink: 0; }
 
-.agent-access-list-section { display: flex; flex-direction: column; min-height: 220px; flex: 1 0 auto; gap: 12px; }
-.agent-access-list-label { min-width: 0; }
-.agent-access-list-label > span { display: block; margin-top: 5px; color: var(--text-secondary); font-size: 11px; }
+.agent-access-list-section { display: flex; flex-direction: column; min-height: 220px; flex: 1 0 auto; }
+.agent-access-list-label {
+    min-width: 0;
+    /* 标题与计数说明同行（基线对齐）；窄屏放不下时自然换行。 */
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+}
+.agent-access-list-label > span { color: var(--text-secondary); font-size: 11px; }
 .agent-access-list-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
 #agent-access-search { width: 210px; min-width: 0; }
 #agent-access-status-filter { width: 104px; }
@@ -147,12 +151,8 @@
 }
 
 @media (max-width: 600px) {
-    #agent-access-panel { gap: 12px; }
-    .agent-access-intro { align-items: flex-start; flex-wrap: wrap; }
-    .agent-access-stats { gap: 6px; }
-    .agent-access-stat { flex-direction: column; align-items: flex-start; gap: 5px; padding: 10px; }
-    .agent-access-stat strong { font-size: 20px; }
-    .agent-access-stat span { font-size: 10px; }
+    #agent-access-panel,
+    #sdk-config-panel { gap: 12px; }
     .agent-access-create-card,
     .agent-access-code-card { padding: 14px; }
     .agent-access-card-heading { flex-wrap: wrap; gap: 8px; }
@@ -199,12 +199,3 @@
 #agent-sdk-add-probe-text {
     overflow-wrap: anywhere;
 }
-
-/* 「添加SDK」弹框可读性：字号整体上调（12px 基准 → 14px）。 */
-#agent-sdk-add-modal .modal-title { font-size: 17px; }
-#agent-sdk-add-modal .agent-access-field { font-size: 14px; }
-#agent-sdk-add-modal .agent-access-field > span:first-child { font-size: 14px; }
-#agent-sdk-add-modal .agent-access-field small { font-size: 12.5px; }
-#agent-sdk-add-modal .combo-box,
-#agent-sdk-add-modal .btn-xs { font-size: 14px; }
-#agent-sdk-add-modal .agent-access-form-hint { font-size: 12.5px; }

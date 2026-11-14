@@ -870,29 +870,30 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
         finally:
             page.close()
 
-    def test_user_status_cards_filter_without_removed_select(self):
+    def test_user_status_cards_are_display_only(self):
         page = self.new_page()
         try:
             self.goto_shell(page)
-            page.wait_for_function("typeof setUsersStatusFilter === 'function'")
+            # 统计卡已改为纯展示（与设备/审计页一致）：无点击处理器、
+            # 无状态筛选标记，渲染只走 displayUsersList → renderUsersList。
             result = page.evaluate("""() => {
                 const fixtures = [
                     {client_id: 'idle-user', status: 'online', local_devices: {devices: []}},
                     {client_id: 'busy-user', status: 'testing', local_devices: {devices: []}}
                 ];
                 displayUsersList(fixtures);
-                setUsersStatusFilter('testing');
-                const filtered = document.getElementById('users-table-body').textContent;
-                displayUsersList(fixtures);
-                const refreshed = document.getElementById('users-table-body').textContent;
-                setUsersStatusFilter('');
-                return {filtered, refreshed, all: document.getElementById('users-table-body').textContent};
+                const rows = document.getElementById('users-table-body').textContent;
+                return {
+                    rows,
+                    clickHandlers: ['setUsersStatusFilter', 'agentAccessSetStatusFilter']
+                        .filter(name => typeof window[name] === 'function'),
+                    statusCards: document.querySelectorAll('[data-user-status-card], [data-agent-token-status-card]').length,
+                };
             }""")
-            self.assertIn('busy-user', result['filtered'])
-            self.assertNotIn('idle-user', result['filtered'])
-            self.assertNotIn('idle-user', result['refreshed'])
-            self.assertIn('idle-user', result['all'])
-            self.assertIn('busy-user', result['all'])
+            self.assertIn('busy-user', result['rows'])
+            self.assertIn('idle-user', result['rows'])
+            self.assertEqual(result['clickHandlers'], [])
+            self.assertEqual(result['statusCards'], 0)
         finally:
             page.close()
 

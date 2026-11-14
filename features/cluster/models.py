@@ -89,7 +89,6 @@ class WorkerHeartbeat(BaseModel):
     connection_generation: int = Field(default=0, ge=0)
     command_states: list[WorkerCommandState] = Field(default_factory=list, max_length=200)
     adb_proxy: dict[str, Any] = Field(default_factory=dict)
-    timestamp: str = ""
 
 
 class CommandAck(BaseModel):

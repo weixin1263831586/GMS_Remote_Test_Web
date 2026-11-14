@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 import threading
 from pathlib import Path
@@ -90,16 +89,6 @@ class BuildStore:
             row = conn.execute("SELECT * FROM build_jobs WHERE id = ?", (job_id,)).fetchone()
         return self._row_to_dict(row)
 
-    def get_job_by_source_key(self, source_key: str) -> dict[str, Any] | None:
-        if not source_key:
-            return None
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM build_jobs WHERE source_key = ? ORDER BY created_at DESC LIMIT 1",
-                (source_key,),
-            ).fetchone()
-        return self._row_to_dict(row)
-
     def list_jobs(self, status: str = "", limit: int = 50) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit or 50), 500))
         with self._connect() as conn:
@@ -174,11 +163,3 @@ class BuildStore:
                 (job_id,),
             ).fetchone()
         return self._row_to_dict(row)
-
-    @staticmethod
-    def decode_artifacts(job: dict[str, Any]) -> list[dict[str, Any]]:
-        try:
-            artifacts = json.loads(job.get("artifact_json") or "[]")
-            return artifacts if isinstance(artifacts, list) else []
-        except json.JSONDecodeError:
-            return []

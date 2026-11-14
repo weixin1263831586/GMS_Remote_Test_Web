@@ -73,7 +73,7 @@ def test_calibration_adb_timeout_does_not_block_usb_cleanup(monkeypatch):
 
 
 def test_adb_same_serial_on_wrong_port_does_not_count_as_recovered(monkeypatch):
-    monkeypatch.setattr(aoa_actions.subprocess, "run", lambda *a, **kw: SimpleNamespace(
+    monkeypatch.setattr(aoa_actions.subprocess, "run", lambda *a, **_kw: SimpleNamespace(
         stdout="List of devices attached\nABC device usb:2-4\n"))
     with bind_usb("1-2.3"):
         result = aoa_actions._wait_adb_state("ABC", 0)

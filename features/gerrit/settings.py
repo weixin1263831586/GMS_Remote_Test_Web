@@ -62,8 +62,5 @@ class GerritConfig:
             self.runtime_config_path.chmod(0o600)
         return saved
 
-    def get_redmine_dashboard_config(self) -> dict[str, Any]:
-        return dict(self.load_config().get("redmine_dashboard") or {})
-
 
 config_manager = GerritConfig()

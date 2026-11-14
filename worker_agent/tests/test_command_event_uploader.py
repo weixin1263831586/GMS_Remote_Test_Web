@@ -33,7 +33,7 @@ def test_flush_waits_for_inflight_batch():
     uploader = CommandEventUploader(slow_upload, batch_size=10)
     uploader.submit({"sequence": 0})
     time.sleep(0.3)  # 让 uploader dequeue 并进入 in-flight
-    assert not uploader._inflight.is_zero()
+    assert not uploader._inflight.wait_zero(0)
 
     result = {}
     import threading
@@ -45,7 +45,7 @@ def test_flush_waits_for_inflight_batch():
     release["go"] = True
     t.join(timeout=6)
     assert not t.is_alive()
-    assert uploader._inflight.is_zero()
+    assert uploader._inflight.wait_zero(0)
 
 
 def uploaded_done(_uploader):

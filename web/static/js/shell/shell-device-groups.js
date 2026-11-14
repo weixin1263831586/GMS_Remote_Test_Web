@@ -224,16 +224,6 @@
         }
 
         // ===== 工具栏交互 =====
-        function toggleGroupView() {
-            state.groupView = !state.groupView;
-            localStorage.setItem('gms_group_view', state.groupView ? '1' : '0');
-            const btn = document.getElementById('btn-toggle-groupview');
-            if (btn) btn.classList.toggle('active', state.groupView);
-            setupMgmtGroupDelegation();
-            displayDevicesManagement(filteredDevicesForView());
-        }
-        window.toggleGroupView = toggleGroupView;
-
         function onGroupFilterChange() {
             const sel = document.getElementById('device-group-filter');
             state.groupFilter = sel ? sel.value : '';

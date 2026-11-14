@@ -699,7 +699,3 @@ class ClusterJobApiHardeningTests(unittest.TestCase):
         payload = response.json()["job"]
         self.assertEqual(payload["owner_id"], "N387pLbIBhpMw5JsWUL9hg")
         self.assertEqual(payload["client_display_id"], "hcq@172.16.14.66")
-
-
-if __name__ == "__main__":
-    unittest.main()

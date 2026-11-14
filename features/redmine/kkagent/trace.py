@@ -22,8 +22,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from features.kkagent import (
-    TOOL_INPUT_JSON_CHARS,
-    TOOL_OUTPUT_PREVIEW_CHARS,
     KkAgentStreamTrace,
     consume_line,
 )
@@ -282,13 +280,6 @@ class KkAgentTrace(KkAgentStreamTrace):
                 continue
             covered.update(call.search_artifact_ids)
         return covered
-
-    def window_read_only_artifact_ids(self) -> set[str]:
-        """只被 artifact_read 读过窗口、但没有任何覆盖完整搜索的 artifact。
-
-        读过 4096 字符首窗不等于看过日志尾部——这些 artifact 需要
-        search（或更长的 read）才算取证完整。"""
-        return self.read_artifact_ids() - self.search_covered_artifact_ids()
 
     # ---------------------------------------------------- 归属（target-scoped）
 
@@ -569,8 +560,6 @@ def trace_from_summary(summary: dict[str, Any]) -> KkAgentTrace:
 
 
 __all__ = [
-    "TOOL_INPUT_JSON_CHARS",
-    "TOOL_OUTPUT_PREVIEW_CHARS",
     "KkAgentTrace",
     "ToolTrace",
     "consume_event",

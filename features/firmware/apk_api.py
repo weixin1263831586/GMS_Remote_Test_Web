@@ -8,7 +8,6 @@ import os
 import re
 import shutil
 import xml.etree.ElementTree as ET
-from typing import Any
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -493,68 +492,6 @@ async def download_apk_source(task_id: str, request: Request):
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}.zip"'},
     )
-
-
-@router.get("/api/apk/doctor")
-@handle_api_errors
-async def apk_doctor(request: Request):
-    """JADX/Java 环境健康检查。
-
-    不返回完整环境变量集合；只报告 jadx 路径、版本探测结果和修复建议。
-    """
-    _require_apk_scope(request)
-
-    from features.firmware.apk import _jadx_subprocess_env, _resolve_jadx_java_home, _resolve_jadx_path
-
-    result: dict[str, Any] = {
-        "jadx_path": _resolve_jadx_path(),
-        "jadx_java_home": _resolve_jadx_java_home(),
-        "jadx_version": "",
-        "java_version": "",
-        "java_home_valid": True,
-        "ok": True,
-        "error": "",
-    }
-    env = None
-    try:
-        env = _jadx_subprocess_env()
-    except FileNotFoundError as exc:
-        result.update({"java_home_valid": False, "ok": False, "error": str(exc)})
-        return ApiResponse.success(result)
-
-    async def _probe(binary: str, args: list[str]) -> str:
-        try:
-            process = await asyncio.create_subprocess_exec(
-                binary, *args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                env=env,
-            )
-            try:
-                stdout, _ = await asyncio.wait_for(process.communicate(), timeout=20)
-            except asyncio.TimeoutError:
-                process.terminate()
-                await process.wait()
-                return ""
-            return stdout.decode("utf-8", errors="replace").strip()[:400]
-        except (OSError, ValueError):
-            return ""
-
-    java_bin = "java"
-    if env and env.get("JAVA_HOME"):
-        java_bin = os.path.join(env["JAVA_HOME"], "bin", "java")
-    result["java_version"] = await _probe(java_bin, ["-version"])
-    result["jadx_version"] = await _probe(result["jadx_path"], ["--version"])
-    if not result["java_version"]:
-        result["ok"] = False
-        result["error"] = (
-            "无法运行 java；请配置 jadx_java_home（configs/local/config.json）"
-            "或 GMS_JADX_JAVA_HOME 指向可用的 JDK（jadx 需要 JDK 11 及以上）"
-        )
-    elif not result["jadx_version"]:
-        result["ok"] = False
-        result["error"] = f"无法运行 jadx（{result['jadx_path']}）；请检查 jadx_path 配置"
-    return ApiResponse.success(result)
 
 
 @router.get("/api/apk/tasks")

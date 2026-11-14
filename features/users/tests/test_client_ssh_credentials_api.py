@@ -32,10 +32,6 @@ class ClientSshCredentialsApiTests(unittest.TestCase):
                 saved_sink["list"] = nxt
                 return True
 
-            def save_client_ssh_credentials(self, credentials):
-                saved_sink["list"] = list(credentials)
-                return True
-
             def delete_client_ssh_credential(self, device_host):
                 # 仿 foundation/config.py：锁内过滤+写回单一临界区。
                 username, _, hostname = device_host.partition("@")

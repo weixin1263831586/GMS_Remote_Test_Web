@@ -117,7 +117,6 @@ class UseLeasedBorrowTests(unittest.TestCase):
                 str(claim.get("device_key") or "")
                 for claim in repo.claims.list_active(owner_id="alice")
             }
-            owned |= repo.owned_reservation_device_ids("alice")
             self.assertIn("worker-A:RK3576GMS1", owned)
 
     def test_plain_user_cannot_mutate_other_reservation(self):
@@ -129,7 +128,6 @@ class UseLeasedBorrowTests(unittest.TestCase):
                 str(claim.get("device_key") or "")
                 for claim in repo.claims.list_active(owner_id="alice")
             }
-            owned |= repo.owned_reservation_device_ids("alice")
             self.assertNotIn("worker-A:RK3576GMS1", owned)
 
 

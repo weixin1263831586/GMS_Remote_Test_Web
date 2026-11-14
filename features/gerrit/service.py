@@ -285,7 +285,7 @@ async def query_gerrit_dual_mode(
         if rest_error:
             result["rest_error"] = rest_error
         return result
-    if rest_error and not cfg.get("ssh_host"):
+    if rest_error:
         rest_error = f"{rest_error}; 未配置 SSH fallback，请配置 REST 账号/HTTP Password 或 ssh_host/ssh_user"
     return {"items": [], "stats": {}, "error": rest_error or "Gerrit REST/SSH 未配置", "rest_error": rest_error, "source": ""}
 

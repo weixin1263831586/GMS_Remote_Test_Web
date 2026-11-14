@@ -15,7 +15,6 @@ import mimetypes
 import os
 import re
 import socket
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -233,20 +232,6 @@ class IconFetcher:
 
         except Exception as e:
             logger.warning(f"保存图标缓存失败: {e}")
-
-    def get_cache_stats(self) -> dict[str, Any]:
-        return {
-            'size': len(self.cache),
-            'keys': list(self.cache.keys())
-        }
-
-    def clear_cache(self):
-        self.cache.clear()
-        try:
-            if os.path.exists(self.CACHE_FILE):
-                os.remove(self.CACHE_FILE)
-        except Exception as e:
-            logger.warning(f"删除缓存文件失败: {e}")
 
     def _cache_result(self, cache_key: str, result: IconResult) -> bool:
         """缓存结果并持久化（跳过内容相同的重复写入）"""
@@ -846,25 +831,6 @@ class IconFetcher:
             return True
 
         return False
-
-
-@asynccontextmanager
-async def get_icon_fetcher(timeout: int = 10, use_cache: bool = True):
-    """
-    IconFetcher异步上下文管理器
-
-    使用方式:
-        async with get_icon_fetcher(timeout=10) as fetcher:
-            result = await fetcher.fetch_icon_async(url)
-    """
-    fetcher = IconFetcher(timeout=timeout, use_cache=use_cache)
-    try:
-        yield fetcher
-    finally:
-        await fetcher.close()
-
-
-# 便捷函数
 
 
 # ---- merged from favicon_security.py ----

@@ -15,7 +15,7 @@ def test_outgoing_coordinates_are_transformed_exactly_once(monkeypatch, session_
     _stall_usb(monkeypatch, state, set())
     core, _ = aoa_actions._usb()
     monkeypatch.setattr(aoa_actions, "_usb", lambda: (core, SimpleNamespace(dispose_resources=lambda _: None)))
-    monkeypatch.setattr(aoa_actions, "_configure_accessory", lambda *a, **kw: _stall_device_factory(state, set()))
+    monkeypatch.setattr(aoa_actions, "_configure_accessory", lambda *a: _stall_device_factory(state, set()))
     monkeypatch.setattr(aoa_actions, "_ensure_native_mode", lambda *a: True)
     clock = [0.0]
     monkeypatch.setattr(aoa_actions.time, "monotonic", lambda: clock[0])
@@ -52,7 +52,7 @@ def test_failed_probes_never_claim_success_or_measurement(monkeypatch):
 
     monkeypatch.setattr(aoa_actions, "_display_size", lambda _: (800, 1280))
     monkeypatch.setattr("worker_agent.aoa_calibration.display_context", lambda *a: verified_mapping().context)
-    monkeypatch.setattr(aoa_actions, "_calibrate_touch_affine", lambda *a, **kw: None)
+    monkeypatch.setattr(aoa_actions, "_calibrate_touch_affine", lambda *a, **_kw: None)
     monkeypatch.setattr(aoa_actions, "cleanup_diagnostics", lambda: [])
     result = aoa_actions.record_aoa_input("ABC", {"action": "calibrate", "hid_touch_mode": "direct"})
     assert result["success"] is False
@@ -67,7 +67,7 @@ def test_teardown_noise_keeps_a_verified_calibration(monkeypatch):
     measured = verified_mapping()
     monkeypatch.setattr(aoa_actions, "_display_size", lambda _: (1080, 1920))
     monkeypatch.setattr("worker_agent.aoa_calibration.display_context", lambda *a: measured.context)
-    monkeypatch.setattr(aoa_actions, "_calibrate_touch_affine", lambda *a, **kw: measured)
+    monkeypatch.setattr(aoa_actions, "_calibrate_touch_affine", lambda *a, **_kw: measured)
     monkeypatch.setattr(aoa_actions, "cleanup_diagnostics", lambda: [
         {"step": "reset_usb", "error": "[Errno 2] Entity not found"},
         {"step": "verify_adb_state", "error": "adb wait timeout"}])
@@ -87,7 +87,7 @@ def test_probe_phase_errors_still_discard_the_mapping(monkeypatch):
     measured = verified_mapping()
     monkeypatch.setattr(aoa_actions, "_display_size", lambda _: (1080, 1920))
     monkeypatch.setattr("worker_agent.aoa_calibration.display_context", lambda *a: measured.context)
-    monkeypatch.setattr(aoa_actions, "_calibrate_touch_affine", lambda *a, **kw: measured)
+    monkeypatch.setattr(aoa_actions, "_calibrate_touch_affine", lambda *a, **_kw: measured)
     monkeypatch.setattr(aoa_actions, "cleanup_diagnostics", lambda: [
         {"step": "release_touch", "error": "device vanished"}])
     result = aoa_actions.record_aoa_input("ABC", {"action": "calibrate", "hid_touch_mode": "pointer"})
@@ -132,7 +132,7 @@ def test_real_calibration_pipeline_separates_fitting_and_validation(monkeypatch,
     from tests.aoa_fixtures import verified_mapping
 
     monkeypatch.setattr(aoa_actions, "_usb", lambda: (None, SimpleNamespace(dispose_resources=lambda _: None)))
-    monkeypatch.setattr(aoa_actions, "_adb_run", lambda *a, **kw: SimpleNamespace(
+    monkeypatch.setattr(aoa_actions, "_adb_run", lambda *a, **_kw: SimpleNamespace(
         stdout="Status: ok\nmTopFocusedDisplayId=0\nmCurrentFocus=Window{123 u0 com.gms.remote.aoacalibration/.CalibrationActivity}",
         stderr="", returncode=0))
     monkeypatch.setattr(aoa_actions, "_configure_accessory", lambda *a: object())
@@ -186,7 +186,7 @@ def test_calibration_surface_open_failure_propagates_through_real_pipeline(monke
 
     monkeypatch.setattr("worker_agent.aoa_calibration.open_calibration_surface", missing_app)
     monkeypatch.setattr(aoa_actions, "_adb_run",
-                        lambda *a, **kw: SimpleNamespace(returncode=0, stdout="", stderr=""))
+                        lambda *a, **_kw: SimpleNamespace(returncode=0, stdout="", stderr=""))
     monkeypatch.setattr(aoa_actions, "_usb",
                         lambda: (None, SimpleNamespace(dispose_resources=lambda _: None)))
     with pytest.raises(CalibrationSurfaceUnavailableError, match="安全标定应用"):

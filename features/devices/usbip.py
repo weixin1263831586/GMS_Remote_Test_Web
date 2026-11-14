@@ -61,12 +61,6 @@ from .usbip_source_inventory import (
 from .usbip_source_inventory import (
     list_source_devices as _list_source_devices_impl,
 )
-from .usbip_source_inventory import (
-    query_windows_adb_serials as _query_adb_serials_impl,
-)
-from .usbip_source_inventory import (
-    query_windows_usb_serials as _query_usb_serials_impl,
-)
 from .usbip_source_sessions import (
     bind_source_devices as _bind_source_devices_impl,
 )
@@ -237,18 +231,6 @@ class USBIPManager:
     ) -> dict[str, Any]:
         """List Android USB/IP busids on a Windows source without binding."""
         return _list_source_devices_impl(self, device_host, device_password)
-
-    def _query_windows_usb_serials(
-        self,
-        ssh,
-        vendor_ids: set[str] | None = None,
-    ) -> dict[str, str]:
-        """Query Windows for USB device serials, keyed by ``vid:pid``."""
-        return _query_usb_serials_impl(self.ssh_manager, ssh, vendor_ids)
-
-    def _query_windows_adb_serials(self, ssh) -> list[str]:
-        """Return stable Android serials visible to Windows ADB."""
-        return _query_adb_serials_impl(self.ssh_manager, ssh)
 
     # ============ Protocol delegates (impl in usbip_protocol) ============
 

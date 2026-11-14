@@ -222,7 +222,3 @@ class SuiteDispatchTests(_ClusterApiTestBase):
             )
             self.assertEqual(response.status_code, 200)
             queued.assert_not_called()
-
-
-if __name__ == "__main__":
-    unittest.main()

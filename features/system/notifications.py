@@ -365,23 +365,6 @@ def store_notification(
     return notification_store.upsert(owner_id, record)
 
 
-async def push_notification(
-    client_id: str,
-    title: str,
-    message: str = "",
-    level: str = "info",
-    category: str = "system",
-    data: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """保存并通过 WebSocket 推送通知。"""
-    record = store_notification(client_id, title, message, level, category, data)
-    await safe_websocket_send(client_id, {
-        'type': 'notification',
-        'notification': record
-    })
-    return record
-
-
 def queue_notification(
     client_id: str,
     title: str,
@@ -392,8 +375,8 @@ def queue_notification(
 ) -> dict[str, Any] | None:
     """保存通知并异步调度 WebSocket 推送；供同步端点/工作线程调用。
 
-    与 push_notification 等价，但不需要事件循环：推送被调度到应用
-    lifespan 绑定的 ASGI 循环上。owner 为空时什么也不做。
+    不需要事件循环：推送被调度到应用 lifespan 绑定的 ASGI 循环上。
+    owner 为空时什么也不做。
     """
     owner_id = str(client_id or '').strip()
     if not owner_id:

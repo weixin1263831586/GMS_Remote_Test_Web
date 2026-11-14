@@ -728,6 +728,11 @@ gms-rt-sdk-search() {
         shift
     done
     [ -z "$source" ] || [ -z "$query" ] && { error "Usage: gms-rt-sdk-search --source ID [--revision REV] --query TEXT"; return "$GMS_RT_EXIT_USAGE"; }
+    # SDK 全仓检索走远端编译服务器 SSH grep（千仓级），服务端墙钟最坏
+    # ~260s（冷缓存首查 +180s 子仓发现）。通用 30s CURL_TIMEOUT 会把仍在
+    # 执行的服务端请求掐断（exit 28），模型侧表现为 sdk_search 恒失败。
+    # 函数级 local 覆盖（bash 动态作用域对 api_call 生效），不动全局默认。
+    local CURL_TIMEOUT="${GMS_SDK_CURL_TIMEOUT:-480}"
     check_jq
     # revision 缺省时自动解析该 source 的 default_revision；未知 source
     # 直接列出可用 source，省一次 gms-rt-sdk-sources 往返。
@@ -782,6 +787,9 @@ gms-rt-sdk-read() {
         error "       (result_id comes from gms-rt-sdk-search matches; source/path/commit are bound inside)"
         return "$GMS_RT_EXIT_USAGE"
     }
+    # 与 gms-rt-sdk-search 相同：sdk 源在远端编译服务器时 read 可能要等
+    # SSH 往返，通用 30s 不够（覆盖环境变量与 search 保持一致）。
+    local CURL_TIMEOUT="${GMS_SDK_CURL_TIMEOUT:-480}"
     check_jq
     local url="/sdk/read?result_id=$(_urlencode "$result_id")&offset=$offset&limit=$limit"
     if [ "$GMS_RT_OUTPUT" = "json" ]; then

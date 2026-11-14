@@ -722,7 +722,3 @@ class ClusterRepositoryTests(unittest.TestCase):
 
         self.assertEqual(worker_id, "worker-246")
         self.assertEqual(devices, ["worker-246:worker-246"])
-
-
-if __name__ == "__main__":
-    unittest.main()

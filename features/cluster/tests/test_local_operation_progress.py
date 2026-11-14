@@ -88,7 +88,3 @@ class LocalOperationProgressTests(unittest.TestCase):
             return {"success": True}
 
         execute_local_operation(repo, command, execute)
-
-
-if __name__ == "__main__":
-    unittest.main()

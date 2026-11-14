@@ -2,7 +2,7 @@
 #devices-main-view > * + * { margin-top: 10px; }
 #devices-main-view > * { flex-shrink: 0; }
 #devices-main-view .page-stat-row { gap: 10px; margin: 0; }
-#devices-main-view .inventory-stat { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px 15px; background: var(--card-bg); }
+#devices-main-view .inventory-stat { display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 95px; padding: 14px 15px; background: var(--card-bg); }
 #devices-main-view .inventory-stat[hidden] { display: none; }
 .inventory-stat-icon { display: grid; place-items: center; flex: none; width: 42px; height: 42px; color: var(--primary-light); background: var(--lighter-bg); border-radius: 9px; }
 .inventory-stat-icon .ui-icon { width: 25px; height: 25px; }

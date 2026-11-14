@@ -8,16 +8,13 @@ from . import api
 from .api import (
     configure_attachment_resolver,
     configure_manager_provider,
-    router,
 )
-from .service import resolve_email_config, send_email
+from .service import send_email
 
 
 __all__ = [
     "api",
     "configure_attachment_resolver",
     "configure_manager_provider",
-    "resolve_email_config",
-    "router",
     "send_email",
 ]

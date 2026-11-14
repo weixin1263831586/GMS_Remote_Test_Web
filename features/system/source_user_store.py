@@ -35,7 +35,27 @@ from foundation.secrets import decrypt_secret, encrypt_secret
 logger = logging.getLogger(__name__)
 
 STORE_VERSION = 1
-SOURCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+SOURCE_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
+
+# 目录名 → Android 版本的识别模式（大小写不敏感）：Android17 /
+# android-16 / aosp-15 等常见命名；bp2a 级别代号太冷僻不猜。
+# guess_android_version 只做展示提示（列表"Android 版本"列 + 添加
+# 弹框预填），识别不到返回空串；不参与检索行为。目录名不含
+# Android/aosp 字样时不回退纯数字（避免把 0623 这类日期误判成版本）。
+_ANDROID_VERSION_RE = re.compile(
+    r"(?:android|aosp)[-_. ]*(1[0-9])|(?<![0-9.])(1[0-9])(?![0-9.])",
+    re.IGNORECASE,
+)
+
+
+def guess_android_version(repo_root: str) -> str:
+    base = repo_root.rstrip("/").rsplit("/", 1)[-1]
+    if not re.search(r"android|aosp", base, re.IGNORECASE):
+        return ""
+    match = _ANDROID_VERSION_RE.search(base)
+    if not match:
+        return ""
+    return f"Android{match.group(1) or match.group(2)}"
 
 # 单文件防御性上限：远超真实部署（几十个 SDK 根），防失控写入。
 MAX_SOURCES = 128
@@ -62,7 +82,8 @@ def validate_source_id(source_id: Any) -> str:
     text = _clean_text(source_id, field="源 ID", max_length=64)
     if not SOURCE_ID_RE.fullmatch(text):
         raise UserSourceStoreError(
-            "源 ID 只能由小写字母/数字/中划线/下划线组成，且以字母或数字开头"
+            "源 ID 只能由字母/数字/中划线/下划线组成，且以字母或数字开头，"
+            "大小写保持原样"
         )
     return text
 
@@ -119,8 +140,29 @@ class UserSourceStore:
         try:
             data = json.loads(raw)
         except json.JSONDecodeError as exc:
-            logger.error("用户 SDK 源存储损坏，按空存储处理：%s", exc)
-            return {}
+            # 配置损坏绝不能按空存储继续——后续任何 add/update 都会用空
+            # 数据覆盖原文件，已注册源与加密口令将不可恢复地丢失。这里
+            # 显式报错（写路径被阻断），并把损坏文件保留为 .corrupt 副本
+            # 供人工恢复。
+            backup = self.path.with_suffix(self.path.suffix + ".corrupt")
+            try:
+                try:
+                    descriptor = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                except FileExistsError:
+                    pass
+                else:
+                    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                        handle.write(raw)
+                    logger.error(
+                        "用户 SDK 源存储损坏，已备份到 %s；写入被阻断", backup
+                    )
+            except OSError:
+                logger.error("用户 SDK 源存储损坏，且备份失败；写入被阻断")
+            raise UserSourceStoreError(
+                "SDK 源存储文件损坏（JSON 解析失败），已阻断写入以保护原文件；"
+                "请人工检查 .corrupt 备份后修复或删除该文件",
+                status_code=503,
+            ) from exc
         sources = data.get("sources") if isinstance(data, dict) else None
         if not isinstance(sources, dict):
             return {}
@@ -188,6 +230,7 @@ class UserSourceStore:
         ssh_username: str = "",
         ssh_password: str = "",
         default_revision: str = "HEAD",
+        android_version: str = "",
         discover_repos: bool = True,
         discover_ttl_hours: int = 24,
         label: str = "",
@@ -196,6 +239,9 @@ class UserSourceStore:
         sid = validate_source_id(source_id)
         root = validate_repo_root(repo_root)
         now_iso = _utcnow_iso()
+        # Android 版本：空值时从目录名自动识别（Android17/aosp-android-16
+        # 等），识别不到存空串；手动传入值原样保留（128 字符防御上限）。
+        version = str(android_version or "").strip()[:128] or guess_android_version(root)
         if provider == "local_git":
             # 本机 Git 仓库：无 SSH 连接段；revision 绑定语义与静态配置一致。
             record: dict[str, Any] = {
@@ -203,6 +249,7 @@ class UserSourceStore:
                 "provider": "local_git",
                 "repo_root": root,
                 "default_revision": str(default_revision or "HEAD").strip()[:128],
+                "android_version": version,
                 "label": str(label or "").strip()[:120],
                 "added_by": str(added_by or "").strip()[:64],
                 "added_at": now_iso,
@@ -216,6 +263,7 @@ class UserSourceStore:
                 "provider": "ssh_git",
                 "repo_root": root,
                 "default_revision": str(default_revision or "HEAD").strip()[:128],
+                "android_version": version,
                 "discover_repos": bool(discover_repos),
                 "discover_ttl_hours": max(1, int(discover_ttl_hours or 24)),
                 "label": str(label or "").strip()[:120],
@@ -316,6 +364,7 @@ def user_source_to_provider_config(record: dict[str, Any], *, password: str = ""
         "provider": provider,
         "repo_root": record.get("repo_root") or "",
         "default_revision": record.get("default_revision") or "HEAD",
+        "android_version": str(record.get("android_version") or ""),
     }
     if provider == "ssh_git":
         item.update({

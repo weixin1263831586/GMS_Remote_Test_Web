@@ -8,7 +8,7 @@ import logging
 import sqlite3
 import threading
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -347,38 +347,5 @@ class TestReportDB:
             )
             conn.commit()
         return cursor.rowcount == 1
-
-    def get_statistics(self, *, owner_id: str) -> dict[str, Any]:
-        if not owner_id:
-            raise ValueError("owner_id is required")
-        week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-        owner_where = " WHERE owner_id=?" if owner_id else ""
-        owner_and = " AND owner_id=?" if owner_id else ""
-        owner_values: tuple[Any, ...] = (owner_id,) if owner_id else ()
-        with self._connect() as conn:
-            total = int(
-                conn.execute(
-                    f"SELECT COUNT(*) FROM reports{owner_where}", owner_values
-                ).fetchone()[0]
-            )
-            types = conn.execute(
-                f"SELECT test_type, COUNT(*) AS count FROM reports{owner_where} GROUP BY test_type",
-                owner_values,
-            ).fetchall()
-            recent = int(
-                conn.execute(
-                    f"SELECT COUNT(*) FROM reports WHERE created_at>=?{owner_and}",
-                    (week_ago, *owner_values),
-                ).fetchone()[0]
-            )
-            last = conn.execute(
-                f"SELECT MAX(updated_at) FROM reports{owner_where}", owner_values
-            ).fetchone()[0]
-        return {
-            "total_reports": total,
-            "type_counts": {str(row["test_type"]): int(row["count"]) for row in types},
-            "recent_week": recent,
-            "last_update": last,
-        }
 
 test_report_db = TestReportDB()

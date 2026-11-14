@@ -34,8 +34,6 @@ class DeviceLifecycleTests(unittest.TestCase):
             self.assertTrue(attempted.wait(timeout=1))
             reconnect.stop_usbip_reconnect_tasks(timeout=1)
 
-        self.assertEqual(reconnect.active_usbip_reconnect_hosts(), [])
-
     def test_usb_monitor_thread_stops(self):
         usb_monitor = monitor.USBMonitor(
             device_getter=lambda: [],

@@ -19,10 +19,6 @@ from pathlib import Path
 from features.email.parsing import safe_header_text
 
 
-class EmailEnvelope(dict):
-    """结构化信封：管线在台账与返回值中直接展开。"""
-
-
 def resolve_allowed_attachment(
     path: str, allowed_roots: list[str | os.PathLike[str]]
 ) -> Path | None:
@@ -56,7 +52,7 @@ def build_mime_message(
     is_html: bool = False,
     attachment_paths: list[str] | None = None,
     allowed_attachment_roots: list[str | os.PathLike[str]] | None = None,
-) -> tuple[MIMEMultipart, EmailEnvelope]:
+) -> tuple[MIMEMultipart, dict]:
     """Assemble the MIME message and return ``(message, envelope)``.
 
     envelope 携带 ``from_addr / to / cc / recipients / attachments_missing /
@@ -98,7 +94,7 @@ def build_mime_message(
         except Exception as exc:  # 单个附件失败不阻断整体发送
             missing_attachments.append(f"{resolved} ({exc})")
 
-    envelope = EmailEnvelope(
+    envelope = dict(
         from_addr=from_addr,
         to=list(to_list),
         cc=list(cc_list),

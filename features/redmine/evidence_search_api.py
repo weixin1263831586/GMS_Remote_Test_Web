@@ -173,20 +173,6 @@ def _scan_text_multi(
     return results
 
 
-def _scan_text(chunks, needle: str, *, stop_after: int,
-               context: int = SNIPPET_CONTEXT_CHARS,
-               with_lines: bool = False,
-               scan_state: _TextScanState | None = None) -> list[_Occurrence]:
-    """单 needle 特例：见 :func:`_scan_text_multi`。"""
-    return [
-        occ
-        for _, occ in _scan_text_multi(
-            chunks, [needle], stop_after=stop_after,
-            context=context, with_lines=with_lines, scan_state=scan_state,
-        )
-    ]
-
-
 def _scan_file_multi(path, needles: list[str], *, stop_after: int,
                      limits: dict[str, int] | None = None, on_match=None,
                      context: int = SNIPPET_CONTEXT_CHARS):
@@ -211,12 +197,6 @@ def _scan_file_multi(path, needles: list[str], *, stop_after: int,
         limits=limits, scan_state=state, on_match=on_match, context=context,
     )
     return hits, state.complete, bytes_read, total
-
-
-def _scan_file(path, needle: str, *, stop_after: int):
-    """单关键词特例：全文扫描 →（命中列表，是否扫到 EOF，已扫字节，总字节）。"""
-    hits, complete, scanned, total = _scan_file_multi(path, [needle], stop_after=stop_after)
-    return [occ for _, occ in hits], complete, scanned, total
 
 
 class _ZipStreamState:
@@ -276,35 +256,6 @@ def _iter_zip_members(path, state: _ZipStreamState):
             yield name, chunks(), state.chars_scanned
             if remaining:
                 return
-
-
-def _collect_text_match(
-    matches: list[dict[str, Any]],
-    kind: str,
-    path: str,
-    text: str,
-    needle: str,
-    meta: dict[str, Any] | None,
-) -> bool:
-    index = text.lower().find(needle.lower())
-    if index < 0:
-        return False
-    start = max(0, index - SNIPPET_CONTEXT_CHARS)
-    end = min(len(text), index + len(needle) + SNIPPET_CONTEXT_CHARS)
-    entry: dict[str, Any] = {
-        "kind": kind,
-        "path": path,
-        "char_index": index,
-        "snippet": text[start:end],
-    }
-    if meta is not None:
-        if kind in {"journal", "journal_detail"}:
-            entry["journal_id"] = meta.get("id")
-        else:
-            entry["artifact_id"] = meta.get("artifact_id")
-            entry["filename"] = meta.get("filename")
-    matches.append(entry)
-    return True
 
 
 def _occurrence_entry(
@@ -414,7 +365,8 @@ def _search_all_evidence(store, snapshot, needles, limit, offset,
     from .evidence_reindex import repair_budget_indexes
 
     repair_budget_indexes(store, snapshot)
-    rows = {needle: {"query": needle, "total": 0, "matches": []} for needle in needles}
+    rows = {needle: {"query": needle, "total": 0, "display": 0, "matches": []}
+            for needle in needles}
     warnings = []
     scanned_bytes = total_bytes = 0
     complete = True
@@ -432,13 +384,16 @@ def _search_all_evidence(store, snapshot, needles, limit, offset,
         row["hits"] += 1
 
     def add_hit(needle, entry, *, collapsed=False):
-        # total 始终按 raw 命中计数；分页页窗口用 raw 序号，折叠只影响
-        # 页内是否携带该条 entry（False=携带）。
+        # total 始终按 raw 命中计数（诚实反映重复）；分页窗口用**非折叠
+        # 展示序列**的连续下标（display）——折叠命中不留空洞，页游标
+        # next_offset 恒前进，不会出现"整页被折叠 → next_offset 不动"的
+        # 重复请求死循环。
         row = rows[needle]
-        index = row["total"]
         row["total"] += 1
         if collapsed:
             return
+        index = row["display"]
+        row["display"] += 1
         if offset <= index < offset + limit:
             row["matches"].append(entry)
 
@@ -480,22 +435,25 @@ def _search_all_evidence(store, snapshot, needles, limit, offset,
             total_bytes += size
             # 折叠状态按 artifact 迭代重置；闭包经默认参数绑定当前迭代
             # 的 dict 对象（B023），sink 惰性调用时不会看到下一次迭代。
-            collapse_last: dict[str, int] = {}
+            # 键含 needle：多个关键词各自独立折叠，互不挤占。
+            collapse_last: dict[tuple[str, str], int] = {}
 
-            def _collapsed(member_key, global_offset, _last=collapse_last) -> bool:
+            def _collapsed(needle, member_key, global_offset,
+                           _last=collapse_last) -> bool:
                 if not collapse:
                     return False
-                previous = _last.get(member_key)
+                key = (needle, member_key)
+                previous = _last.get(key)
                 if previous is not None and abs(global_offset - previous) <= COLLAPSE_GAP_CHARS:
                     return True
-                _last[member_key] = global_offset
+                _last[key] = global_offset
                 return False
 
             def artifact_sink(needle, occ, artifact=artifact):
                 # per-artifact 计数在折叠判定之前：artifact_hits 必须
                 # 诚实反映 raw 命中数，折叠只影响分页页内容。
                 note_artifact_hit(artifact)
-                if _collapsed("", occ.offset):
+                if _collapsed(needle, "", occ.offset):
                     add_hit(needle, None, collapsed=True)
                     return
                 entry = _occurrence_entry(occ, "artifact", "", artifact)
@@ -511,7 +469,7 @@ def _search_all_evidence(store, snapshot, needles, limit, offset,
                         global_offset = body_offset + occ.offset
                         # 计数先于折叠（见 artifact_sink）。
                         note_artifact_hit(artifact)
-                        if _collapsed(member, global_offset):
+                        if _collapsed(needle, member, global_offset):
                             add_hit(needle, None, collapsed=True)
                             return
                         entry = _occurrence_entry(occ, "artifact",
@@ -555,7 +513,8 @@ def _search_all_evidence(store, snapshot, needles, limit, offset,
     for row in rows.values():
         row["offset"] = offset
         row["returned"] = len(row["matches"])
-        row["truncated"] = row["total"] > offset + row["returned"]
+        # truncated 按 display（非折叠）总数判断：页后还有展示条目才翻页。
+        row["truncated"] = row["display"] > offset + row["returned"]
         row["next_offset"] = offset + row["returned"] if row["truncated"] else None
     data = {"snapshot_id": snapshot["snapshot_id"], "queries": list(rows.values()),
             "total_matches": sum(len(row["matches"]) for row in rows.values()),

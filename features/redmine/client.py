@@ -94,11 +94,6 @@ class RedmineClient(RedmineAttachmentMixin):
         """Update a Redmine issue through python-redmine."""
         await asyncio.to_thread(self._redmine.issue.update, int(issue_id), **fields)
 
-    async def list_issue_journals(self, issue_id: str) -> list[Any]:
-        """Fetch issue journals through python-redmine."""
-        issue = await self.get_issue(issue_id, include=["journals"])
-        return list(getattr(issue, "journals", []) or [])
-
     async def fetch_issue_subjects(self, issue_ids: list[int]) -> dict[int, str]:
         """Fetch only each issue's current subject (cheap display refresh).
 
@@ -658,51 +653,6 @@ class RedmineClient(RedmineAttachmentMixin):
                 break
         result.sort(key=lambda item: (item.get("resolved_on") or "", item.get("issue_id") or 0), reverse=True)
         return result
-
-    async def discover_assignees_from_issues(
-        self,
-        limit: int = 2000,
-        status_id: str = "*",
-        sort: str = "updated_on:desc",
-    ) -> list[dict[str, Any]]:
-        """Discover assignable users from issue payloads when /users is forbidden."""
-        limit = max(1, min(int(limit or 2000), 5000))
-        page_size = min(limit, 100)
-
-        def _fetch():
-            users: dict[int, dict[str, Any]] = {}
-            offset = 0
-            fetched = 0
-            while fetched < limit:
-                issues = self._redmine.issue.filter(
-                    status_id=status_id,
-                    sort=sort,
-                    limit=page_size,
-                    offset=offset,
-                )
-                page = list(issues)
-                if not page:
-                    break
-                fetched += len(page)
-                for issue in page:
-                    assigned = getattr(issue, "assigned_to", None)
-                    user_id = int(getattr(assigned, "id", 0) or 0) if assigned else 0
-                    if not user_id:
-                        continue
-                    users[user_id] = {
-                        "id": user_id,
-                        "name": str(getattr(assigned, "name", "") or assigned or ""),
-                        "login": "",
-                        "firstname": "",
-                        "lastname": "",
-                        "mail": "",
-                    }
-                if len(page) < page_size:
-                    break
-                offset += page_size
-            return list(users.values())
-
-        return await asyncio.to_thread(_fetch)
 
     async def search_assigned_issues(
         self,

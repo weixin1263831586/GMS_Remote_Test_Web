@@ -14,7 +14,6 @@ import subprocess
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
@@ -324,8 +323,7 @@ class WorkerAgent:
                    "adb_proxy": _safe_adb_proxy_status(),
                    "session_id": self.client.session_id or self.session_id,
                    "connection_generation": self.client.connection_generation,
-                   "command_states": command_states,
-                   "timestamp": datetime.now(timezone.utc).isoformat()}
+                   "command_states": command_states}
         if include_suites:
             payload["suites"] = self.suites
         response = self.client.heartbeat(payload)

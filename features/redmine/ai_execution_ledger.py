@@ -70,7 +70,6 @@ STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
 STATUS_UNKNOWN = "unknown"
 
-_TERMINAL_STATUSES = (STATUS_COMPLETED, STATUS_FAILED, STATUS_UNKNOWN)
 _ACTIVE_STATUSES = (STATUS_PENDING, STATUS_RECEIVED)
 
 _SCHEMA = (
@@ -355,16 +354,6 @@ class AIExecutionLedger:
             row = conn.execute(
                 "SELECT * FROM redmine_ai_execution_receipts WHERE receipt_id=?",
                 (receipt_id,),
-            ).fetchone()
-            return dict(row) if row is not None else None
-
-    def latest_for_key(self, owner_id: str, key: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM redmine_ai_execution_receipts "
-                "WHERE owner_id=? AND logical_key=? "
-                "ORDER BY created_at DESC, attempt DESC LIMIT 1",
-                (owner_id, key),
             ).fetchone()
             return dict(row) if row is not None else None
 

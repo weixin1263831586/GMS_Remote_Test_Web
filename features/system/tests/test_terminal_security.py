@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,16 +18,6 @@ from features.system.terminal_service import (
     handle_terminal_input,
 )
 from foundation.device_claims import DeviceClaimRegistry
-
-
-def _pin_adb_binary():
-    """Pin a deterministic adb binary for resolver-backed call sites.
-
-    测试机不一定安装 platform-tools；解析器现在会在设备轮询/终端探测/
-    ADB 握手里被调用，统一钉到 /bin/true（存在且可执行）保证行为只取决于
-    打桩的 subprocess.run，而不是 runner 的 PATH。
-    """
-    return patch.dict(os.environ, {"GMS_ADB_PATH": "/bin/true"})
 
 
 class _FakeChannel:

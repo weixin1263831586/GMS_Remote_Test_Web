@@ -90,7 +90,3 @@ class StartTestNotificationTests(unittest.TestCase):
             service().repository.claim_terminal_notification.return_value = True
             commands_api.synchronize_command(_command(status="running"))
             queue.assert_not_called()
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -103,7 +103,6 @@ def confidence_below_review_threshold(result: dict[str, Any]) -> bool:
 
 
 BRIEF_MODES = ("nightly", "delta", "manual")
-ISSUE_STATUSES = ("pending", "running", "completed", "failed", "cancelled", "stale")
 # Data freshness and execution status are independent dimensions:
 # execution_status（completed/partial/failed/cancelled）描述 AI 分析本身；
 # data_quality 描述输入数据可信程度——"晨报完成"不等于"数据是新的"。

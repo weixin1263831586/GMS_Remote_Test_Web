@@ -193,9 +193,6 @@ def query_params_for_tool(tool: AgentTool, params: dict[str, Any]) -> dict[str, 
 
 
 __all__ = [
-    "body_params_for_tool",
     "build_call_kwargs",
     "cached_signature",
-    "get_model_by_tool",
-    "query_params_for_tool",
 ]

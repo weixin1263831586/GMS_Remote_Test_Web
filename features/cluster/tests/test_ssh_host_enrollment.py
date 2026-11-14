@@ -58,7 +58,3 @@ class SshHostEnrollmentTests(unittest.TestCase):
                     "fingerprint": "SHA256:forged",
                 }],
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

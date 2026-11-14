@@ -37,12 +37,6 @@
   },
   {
     "methods": [
-      "GET"
-    ],
-    "path": "/api/agent/capabilities"
-  },
-  {
-    "methods": [
       "POST"
     ],
     "path": "/api/agent/chat"
@@ -106,12 +100,6 @@
       "GET"
     ],
     "path": "/api/apk/definition/{task_id}"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/api/apk/doctor"
   },
   {
     "methods": [
@@ -802,12 +790,6 @@
       "GET"
     ],
     "path": "/api/cluster/suite-library-download/{safe_filename}/{filename}"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/api/cluster/suite-library/{filename}"
   },
   {
     "methods": [

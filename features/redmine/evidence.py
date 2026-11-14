@@ -21,7 +21,7 @@ import base64
 import logging
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -43,7 +43,6 @@ SNAPSHOT_ISSUE_TIMEOUT_SECONDS = 30
 ATTACHMENT_CONNECT_TIMEOUT_SECONDS = 10
 ATTACHMENT_READ_TIMEOUT_SECONDS = 120
 MAX_REDIRECTS = 3
-SNAPSHOT_TTL_SECONDS = 300
 # 派生并发限制只控制内存/CPU，不限制成员大小、数量或完整处理时间。
 DERIVE_CONCURRENCY = 4
 
@@ -67,6 +66,9 @@ EXTRACT_TIMEOUT_SECONDS = _env_limit("GMS_EVIDENCE_EXTRACT_TIMEOUT_SECONDS", 180
 # OCR 单次调用时长预算（0 = 不限时是明确的 CPU 风险，必须兜底）；
 # tesseract 超时抛 RuntimeError，由派生层降级 derived_status=missing。
 OCR_TIMEOUT_SECONDS = _env_limit("GMS_EVIDENCE_OCR_TIMEOUT_SECONDS", 120)
+# OCR 单图总耗时预算：大图 tile 化后逐片 120s 的累计可达小时级；
+# 超过总预算停止剩余 tile，已识别文本保留并显式标注截断。
+OCR_TOTAL_TIMEOUT_SECONDS = _env_limit("GMS_EVIDENCE_OCR_TOTAL_TIMEOUT_SECONDS", 300)
 OCR_MAX_IMAGE_PIXELS = _env_limit("GMS_EVIDENCE_OCR_MAX_IMAGE_PIXELS", 16_000_000)
 
 TEXT_KIND_EXTENSIONS = {
@@ -80,19 +82,12 @@ IMAGE_MIME_TYPES = {
 }
 ANALYZABLE_KINDS = {"text", "log", "image", "pdf", "archive", "apk"}
 
-_TEXT_ENCODINGS = ("utf-8", "gb18030", "utf-16", "latin-1")
 # 派生文本里的成员分隔标记（行级），search 用它还原
 # ``attachment:<file>.zip!/<member>`` 引用与行号。
 _ZIP_MEMBER_MARKER_RE = re.compile(r"^<<<zip-member:(.*?)>>>$")
 _ZIP_MEMBER_V2_RE = re.compile(
     r"(?m)^<<<zip-member-v2:([A-Za-z0-9_-]+):([0-9]+)>>>\n"
 )
-_ZIP_MEMBER_MARKER_PREFIX = "<<<zip-member:"
-_ZIP_MEMBER_MARKER_SUFFIX = ">>>"
-
-
-def zip_member_marker(name: str) -> str:
-    return f"{_ZIP_MEMBER_MARKER_PREFIX}{name}{_ZIP_MEMBER_MARKER_SUFFIX}"
 
 
 def zip_member_block(name: str, text: str) -> str:
@@ -298,23 +293,6 @@ def _classify_attachment(filename: str, content_type: str) -> str:
             return "image"
         return "binary"
     return "unknown"
-
-
-def _detect_text_encoding(data: bytes) -> str:
-    for encoding in _TEXT_ENCODINGS:
-        try:
-            data.decode(encoding)
-            return encoding
-        except (UnicodeDecodeError, LookupError):
-            continue
-    return ""
-
-
-@dataclass
-class _FetchResult:
-    snapshot_id: str = ""
-    status: str = "failed"
-    errors: list[dict[str, str]] = field(default_factory=list)
 
 
 def _now_iso() -> str:

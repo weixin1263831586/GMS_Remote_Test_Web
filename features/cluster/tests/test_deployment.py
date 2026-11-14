@@ -554,7 +554,3 @@ class GtsCredentialResolutionTests(unittest.TestCase):
             os.environ.pop("GMS_GTS_CREDENTIAL_FILE", None)
             with self.assertRaises(ValueError):
                 _resolve_gts_credential()
-
-
-if __name__ == "__main__":
-    unittest.main()

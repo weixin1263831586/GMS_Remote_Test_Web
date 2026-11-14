@@ -381,15 +381,12 @@ async function copyFirmwareShareLink(id) {
     if (!await ensureFirmwareShareReady(id)) return;
     const url = `${window.location.origin}/api/firmware-shares/${encodeURIComponent(id)}/download`;
     try {
-        if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(url);
-        } else {
-            fallbackCopyText(url);
-        }
+        // 旧实现调用的 fallbackCopyText 全库无定义（非安全上下文路径会抛
+        // ReferenceError）；统一改用 utils.js 的共享剪贴板助手。
+        await copyTextToClipboard(url);
         showToast('分享链接已复制，无需登录即可打开下载', 'success');
     } catch (error) {
-        fallbackCopyText(url);
-        showToast('分享链接已复制，无需登录即可打开下载', 'success');
+        showToast('复制失败：' + (error && error.message ? error.message : '请手动复制'), 'error');
     }
 }
 

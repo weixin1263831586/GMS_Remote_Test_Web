@@ -2,7 +2,6 @@
         let usersRefreshInterval = null;
         let usersHasLoaded = false;
         let usersListCache = [];
-        let usersStatusFilter = '';
         let usersLocalDevicesReloadTimer = null;
         // 用户取消提权后置位：自动刷新不再每 10 秒重复探测/弹框；
         // 提权成功或列表加载成功时清除。
@@ -112,7 +111,8 @@
                 if (currentPage === 'users'
                     && !document.hidden
                     && !usersAccessDenied
-                    && !window.agentAccessPanelIsOpen?.()) {
+                    && !window.agentAccessPanelIsOpen?.()
+                    && !window.sdkConfigPanelIsOpen?.()) {
                     loadUsersList();
                 }
             }, 10000);
@@ -141,20 +141,7 @@
                 : (user.status || (user.running ? 'testing' : 'offline'));
         }
 
-        function setUsersStatusFilter(status) {
-            usersStatusFilter = ['online', 'testing', 'offline'].includes(status) ? status : '';
-            filterUsersList();
-        }
-
-        function filterUsersList() {
-            const status = usersStatusFilter;
-            const filtered = usersListCache.filter(user => !status || getUserDisplayStatus(user) === status);
-            document.querySelectorAll('[data-user-status-card]').forEach(card => {
-                card.classList.toggle('active', card.dataset.userStatusCard === status);
-            });
-            renderUsersList(filtered);
-        }
-
+        // 顶部统计卡为纯展示（与设备/审计页一致），不做点击筛选。
         function displayUsersList(users) {
             const tbody = document.getElementById('users-table-body');
             if (!tbody) return;
@@ -168,7 +155,7 @@
             document.getElementById('total-users-count').textContent = totalCount;
             document.getElementById('active-users-count').textContent = activeCount;
             document.getElementById('testing-users-count').textContent = testingCount;
-            filterUsersList();
+            renderUsersList(usersListCache);
 
             // 有用户直连设备仍在后台 SSH 枚举（显示"枚举中…"）时，
             // 3 秒后补一次加载，不等 10 秒轮询。
@@ -177,7 +164,9 @@
                 && usersListCache.some(user => user.local_devices === null)) {
                 clearTimeout(usersLocalDevicesReloadTimer);
                 usersLocalDevicesReloadTimer = setTimeout(() => {
-                    if (currentPage === 'users' && !document.hidden && !window.agentAccessPanelIsOpen?.()) {
+                    if (currentPage === 'users' && !document.hidden
+                        && !window.agentAccessPanelIsOpen?.()
+                        && !window.sdkConfigPanelIsOpen?.()) {
                         loadUsersList();
                     }
                 }, 3000);
@@ -188,11 +177,10 @@
             const tbody = document.getElementById('users-table-body');
             if (!tbody) return;
             if (users.length === 0) {
-                const filtersActive = Boolean(usersStatusFilter);
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="9" class="users-empty-message">
-                            ${filtersActive ? '没有匹配当前筛选条件的用户' : '暂无用户'}
+                            暂无用户
                         </td>
                     </tr>
                 `;

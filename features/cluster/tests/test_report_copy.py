@@ -476,7 +476,3 @@ class ReportCopyApiTests(unittest.TestCase):
         self.assertEqual(same_worker.status_code, 400)
         self.assertEqual(same_worker.json()["code"], "MALFORMED_REQUEST")
         self.assertEqual(unknown_suite.status_code, 409)
-
-
-if __name__ == "__main__":
-    unittest.main()

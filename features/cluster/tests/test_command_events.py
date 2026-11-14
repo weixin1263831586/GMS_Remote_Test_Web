@@ -206,7 +206,3 @@ class CommandEventsApiTests(unittest.TestCase):
             self.assertTrue(data["success"])
             self.assertEqual([e["sequence"] for e in data["events"]], [1])
             self.assertEqual(data["command"], {"id": "cmd-1", "status": "running"})
-
-
-if __name__ == "__main__":
-    unittest.main()

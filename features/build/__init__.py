@@ -35,7 +35,6 @@ __all__ = [
     "JOB_QUEUED",
     "JOB_RUNNING",
     "BuildExecutionError",
-    "BuildService",
     "BuildStore",
     "get_build_service",
     "open_build_artifact",

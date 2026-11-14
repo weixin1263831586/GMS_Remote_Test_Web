@@ -1021,13 +1021,15 @@ body.apk-resizing {
     transition: none;
 }
 
-#agent-access-entry {
+#agent-access-entry,
+#sdk-config-entry {
     display: flex;
     align-items: stretch;
     border-left: 1px solid var(--border-color);
 }
 
-#agent-access-entry > .btn-xs {
+#agent-access-entry > .btn-xs,
+#sdk-config-entry > .btn-xs {
     flex: 1;
 }
 
@@ -1039,13 +1041,17 @@ body.apk-resizing {
 }
 
 .users-view-tabs .btn-xs.active {
-    color: var(--text-primary);
-    background: var(--light-bg);
+    /* 与桌面页 host-workspace-layouts（单屏/左右/上下/四屏）一致：
+       当前视图页签用主色渐变醒目标识。规则顺序在 :hover 之后，
+       悬停在 active 页签上时渐变背景不会被 hover 覆盖。 */
+    color: #fff;
+    background: var(--primary-gradient);
     box-shadow: none;
 }
 
 #users-main-view,
 #agent-access-panel,
+#sdk-config-panel,
 #audit-main-view,
 #audit-outbox-panel {
     flex: 1;
@@ -1055,80 +1061,15 @@ body.apk-resizing {
 
 #users-main-view,
 #agent-access-panel,
+#sdk-config-panel,
 #audit-main-view,
 #audit-outbox-panel {
     display: flex;
     flex-direction: column;
 }
 
-/* users 统计卡行布局由 common.css 的 .page-stat-row 模板统一（宽屏
-   flex gap 15，窄屏由下方媒体查询网格化，与 audit-stats 行为一致）；
-   agent-access 面板仍用本页 3 列网格。 */
-.agent-access-stats {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
-    margin-bottom: 10px;
-}
-
-.agent-access-stat {
-    min-width: 0;
-    padding: 12px 14px;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    color: inherit;
-    background: var(--light-bg);
-    box-shadow: var(--shadow-sm);
-    text-align: left;
-    cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-/* users 卡片外壳（内距/边框/圆角/底色）由 page-stat-card 模板提供，
-   保证与审计/API/设备页统计卡像素同高；这里只保留按钮语义差异。 */
-.user-stat-card {
-    min-width: 0;
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.user-stat-card:hover,
-.user-stat-card.active,
-.agent-access-stat:hover,
-.agent-access-stat.active {
-    border-color: var(--primary-light);
-}
-
-.user-stat-card.active,
-.agent-access-stat.active {
-    background: color-mix(in srgb, var(--primary-color) 10%, var(--light-bg));
-}
-
-.agent-access-stat strong,
-.agent-access-stat span {
-    display: block;
-}
-
-.agent-access-stat strong {
-    font-size: 24px;
-    line-height: 1.1;
-    font-weight: 750;
-}
-
-.user-stat-card .page-stat-value.total { color: var(--primary-color); }
-.user-stat-card .page-stat-value.online { color: var(--success-color); }
-.user-stat-card .page-stat-value.testing { color: var(--warning-color); }
-.agent-access-stat:nth-child(1) strong { color: var(--primary-color); }
-.agent-access-stat:nth-child(2) strong { color: var(--success-color); }
-.agent-access-stat:nth-child(3) strong { color: var(--danger-color); }
-
-.agent-access-stat span {
-    margin-top: 5px;
-    color: var(--text-secondary);
-    font-size: 10px;
-}
+/* Agent 接入统计卡已并入 page-stat-row/workbench-stat 模板
+   （与用户列表/设备/审计页同源），本页无专属统计卡规则。 */
 
 .users-table-wrap {
     border: 1px solid var(--border-color);

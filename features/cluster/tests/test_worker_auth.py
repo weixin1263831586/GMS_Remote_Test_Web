@@ -178,7 +178,3 @@ class WorkerAuthPersistenceTests(unittest.TestCase):
             ):
                 revoke_worker_token("worker-1")
             self.assertEqual(token_path.read_text(encoding="utf-8"), "[1]")
-
-
-if __name__ == "__main__":
-    unittest.main()

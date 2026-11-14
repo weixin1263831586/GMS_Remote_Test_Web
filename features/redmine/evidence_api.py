@@ -429,7 +429,6 @@ async def get_evidence_artifacts(snapshot_id: str, request: Request):
 def _artifact_file(owner_id: str, artifact_id: str, *, derived: bool = False) -> tuple[dict[str, Any], Path]:
     artifact = _get_artifact(owner_id, artifact_id)
     store = owner_evidence_store(owner_id)
-    rel = str(artifact.get("derived_text_path") or "") if derived else str(artifact.get("stored_path") or "")
     # stored_path 已在 _artifact_from_row 中剥离，需要直接查询数据库。
     # 数字附件 ID 别名解析后必须用解析出的 art_* id 查路径，原样字符串
     # 查不到行（2026-09-24 别名回归测试抓到）。
@@ -620,24 +619,6 @@ def _failure_first_stack(reason: str) -> str:
         if any(marker in stripped for marker in ("Exception", "Error", "at ", "Assertion")):
             return stripped[:200]
     return next((line.strip()[:200] for line in str(reason or "").splitlines() if line.strip()), "")
-
-
-def _failures_from_report_dict(result: dict[str, Any], source: str) -> list[dict[str, Any]]:
-    """ReportAnalyzer._report_to_dict 结构 → 失败用例行。"""
-    rows: list[dict[str, Any]] = []
-    for item in (result.get("failures") or [])[:_FAILURES_MAX_ROWS]:
-        if not isinstance(item, dict):
-            continue
-        reason = str(item.get("reason") or item.get("error_message") or "")
-        rows.append({
-            "module": str(item.get("module") or ""),
-            "test": str(item.get("name") or item.get("test_name") or ""),
-            "result": "fail",
-            "failure_message": reason[:_FAILURES_MAX_MESSAGE_CHARS],
-            "first_stack_line": _failure_first_stack(reason),
-            "source": source,
-        })
-    return rows
 
 
 def _failures_from_test_result_xml(text: str, source: str) -> list[dict[str, Any]]:

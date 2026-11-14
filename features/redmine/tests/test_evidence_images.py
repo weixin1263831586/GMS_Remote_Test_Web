@@ -199,6 +199,57 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         self.assertEqual(artifact["derived_status"], "ready")
         self.assertFalse(artifact["error"])
 
+    def test_large_image_ocr_respects_total_budget(self):
+        """tile 总耗时超预算：停止剩余 tile，保留已识别文本并标注截断。"""
+        with patch("features.redmine.evidence_images.OCR_MAX_IMAGE_PIXELS", 100), patch(
+            "features.redmine.evidence_images.OCR_TOTAL_TIMEOUT_SECONDS", 0,
+        ), patch(
+            "pytesseract.image_to_string", return_value="tile text",
+        ) as ocr:
+            result, store = self._fetch_with_png()
+        # 总预算 0 → deadline 即刻过期：零次识别，只剩截断标注。
+        self.assertEqual(ocr.call_count, 0)
+        artifact = store.get_artifact_by_attachment_id(
+            "776701", snapshot_id=result["snapshot_id"],
+        )
+        self.assertEqual(artifact["derived_status"], "missing")
+        self.assertFalse(artifact["text_available"])
+        self.assertIn("truncated", artifact["error"])
+
+    def test_tile_timeout_keeps_prefix_and_marks_derived_text_partial(self):
+        from features.redmine.evidence import snapshot_completeness
+
+        tiles = iter(["recognized prefix", RuntimeError("Tesseract process timeout")])
+
+        def recognize(image, **_kwargs):
+            if image.size == (1, 1):  # fixture 中原有的无文字小图
+                return ""
+            value = next(tiles)
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        with patch("features.redmine.evidence_images.OCR_MAX_IMAGE_PIXELS", 100), patch(
+            "pytesseract.image_to_string", side_effect=recognize,
+        ) as ocr:
+            result, store = self._fetch_with_png()
+        self.assertEqual(sum(call.args[0].size != (1, 1) for call in ocr.call_args_list), 2)
+        artifact = store.get_artifact_by_attachment_id(
+            "776701", snapshot_id=result["snapshot_id"],
+        )
+        self.assertEqual(artifact["derived_status"], "partial")
+        self.assertTrue(artifact["text_available"])
+        self.assertIn("timeout", artifact["error"])
+        self.assertFalse(snapshot_completeness(result)["derived_text"])
+        with store._connect() as conn:
+            row = conn.execute(
+                "SELECT derived_text_path FROM redmine_evidence_artifacts WHERE artifact_id = ?",
+                (str(artifact["artifact_id"]),),
+            ).fetchone()
+        payload = store.resolve_internal(row["derived_text_path"]).read_text()
+        self.assertIn("recognized prefix", payload)
+        self.assertIn("truncated", payload)
+
     def test_derived_text_preserves_full_utf8_output(self):
         """OCR output is retained in full, including multibyte text at the tail."""
         from pathlib import Path

@@ -9,12 +9,6 @@ const terminalConfig = {
     ssh_user: (window.__GMS_BOOTSTRAP__ && window.__GMS_BOOTSTRAP__.ubuntu_user) || ''
 };
 
-function terminalDefaultHostLabel() {
-    const user = terminalConfig.ssh_user || '';
-    const host = terminalConfig.ssh_host || '';
-    return (user || host) ? `${user}@${host}`.replace(/^@/, '') : '';
-}
-
 async function loadTerminalClusterHosts() {
     const localWorkerId = workspaceLocalWorkerId();
     terminalConfig.worker_id = localWorkerId;
@@ -388,28 +382,11 @@ function initTerminal() {
             return false;
         }
         const selection = terminal.getSelection();
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(selection).catch(() => fallbackCopyText(selection));
-        } else {
-            fallbackCopyText(selection);
-        }
+        copyTextToClipboard(selection).catch(() => {});
         terminal.clearSelection();
         terminal.focus();
         debugLog('复制成功:', selection);
         return true;
-    }
-
-    function fallbackCopyText(text) {
-        const textArea = document.createElement('textarea');
-        textArea.value = text;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-999999px';
-        textArea.style.top = '-999999px';
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
     }
 
     function pasteTextToTerminal(text) {

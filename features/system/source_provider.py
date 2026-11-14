@@ -145,7 +145,7 @@ def initialize_source_runtime(config: dict[str, Any] | None = None) -> str:
     secret = derive_application_key("gms-sdk-source-v1:")
     _REGISTRY_SECRET = secret
     _LAST_STATIC_CONFIG = dict(config or {})
-    configure_source_registry(_build_registry_configs(_LAST_STATIC_CONFIG), secret)
+    _rebuild_source_registry(_LAST_STATIC_CONFIG, secret)
     return registry_state()
 
 
@@ -163,11 +163,18 @@ def user_source_store() -> UserSourceStore:
 
 
 def _build_registry_configs(config: dict[str, Any]) -> list[ProviderConfig]:
-    """静态 providers + 用户注册源合并；用户存储损坏/解密失败不拖垮静态源。"""
+    """静态 providers + 用户注册源合并。
+
+    单条记录解密/解析失败只跳过该条（不拖垮其他源与静态源）；但存储
+    **文件损坏**（JSON 解析失败）必须向上抛——吞掉它会让热重载/初始化
+    用"没有用户源"的空视图重建 registry，表现为已注册源静默消失。
+    """
     providers = load_provider_configs(config)
     static_ids = {item.source_id for item in providers}
     try:
         records = user_source_store().list_sources()
+    except UserSourceStoreError:
+        raise  # 存储文件损坏/不可读：调用方决定保留旧 registry 或显式失败
     except Exception as exc:
         logger.warning("用户 SDK 源存储不可读，仅使用静态配置：%s", exc)
         return providers
@@ -204,15 +211,50 @@ def reload_source_runtime() -> str:
     """
     if _REGISTRY_SECRET is None:
         return initialize_source_runtime()
-    configure_source_registry(
-        _build_registry_configs(_LAST_STATIC_CONFIG or {}), _REGISTRY_SECRET
-    )
+    _rebuild_source_registry(_LAST_STATIC_CONFIG or {}, _REGISTRY_SECRET)
     return registry_state()
 
 
+def _rebuild_source_registry(config: dict[str, Any], secret: bytes) -> None:
+    global _REGISTRY, _REGISTRY_BUILT_AT
+    # 在读取记录前取指纹：构建期间的并发写入必须由下一次读检测到。
+    fingerprint = _user_store_fingerprint()
+    registry = SourceRegistry(_build_registry_configs(config), secret)
+    _REGISTRY = registry
+    _REGISTRY_BUILT_AT = fingerprint
+
+
 def configure_source_registry(configs: list[ProviderConfig], secret: bytes) -> None:
-    global _REGISTRY
+    global _REGISTRY, _REGISTRY_BUILT_AT
     _REGISTRY = SourceRegistry(configs, secret)
+    _REGISTRY_BUILT_AT = _user_store_fingerprint()
+
+
+# 跨进程热更新：记录 registry 构建时用户存储的 (mtime_ns, size)。其他进程
+# （Web 双 worker / daily-brief Worker）添加或删除 SDK 源后，本进程在下次
+# ``source_registry()`` 读路径上检测到文件变化即自动重建，无需重启；
+# ``reload_source_runtime()`` 保留为显式触发入口。经 UserSourceStore 的
+# fcntl 文件锁保护下原子替换（os.replace），mtime+size 双指标不会读到半写状态。
+_REGISTRY_BUILT_AT: tuple[int, int] | None = None
+
+
+def _user_store_fingerprint() -> tuple[int, int] | None:
+    """用户存储文件指纹；文件不存在时返回 None（视为无变化基线）。"""
+    try:
+        stat = user_source_store().path.stat()
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
+def _registry_is_stale() -> bool:
+    """构建后用户存储被其他进程改动 → 需要重建。"""
+    if _REGISTRY is None or _REGISTRY_SECRET is None:
+        return False  # 未初始化进程走显式 503，不做隐式初始化
+    current = _user_store_fingerprint()
+    if current is None:
+        return False
+    return current != _REGISTRY_BUILT_AT
 
 
 def source_registry() -> SourceRegistry:
@@ -224,12 +266,21 @@ def source_registry() -> SourceRegistry:
     ``sdk_sources_available()`` 由 None（fail-safe 强制取证）变 False，
     evidence gate 随之降级放水。未初始化必须显式失败（503 依赖不可用），
     初始化入口只有 :func:`initialize_source_runtime`。
+
+    已初始化进程在用户存储被其他进程修改后自动重建（mtime+size 变化检测），
+    保证多进程部署下「添加SDK / 删除」最终一致；重建失败保留旧 registry
+    并记录错误（不吞成空配置）。
     """
     if _REGISTRY is None:
         raise SourceProviderError(
             "SDK source 运行时未初始化；请先调用 initialize_source_runtime()",
             status_code=503,
         )
+    if _registry_is_stale():
+        try:
+            reload_source_runtime()
+        except Exception:
+            logger.exception("SDK source registry 热更新失败；沿用旧 registry")
     return _REGISTRY
 
 
@@ -268,6 +319,6 @@ def sdk_sources_available() -> bool | None:
     if registry_state() == "UNINITIALIZED":
         return None
     # registry 已初始化（AVAILABLE/UNAVAILABLE）：空 registry = 部署确认
-    # 无源（降级依据），有源 = 要求取证。不经过 source_registry() 的
-    # 未初始化异常路径。
-    return bool(_REGISTRY is not None and _REGISTRY.list_sources())
+    # 无源（降级依据），有源 = 要求取证。读路径同样检查跨进程更新，
+    # 避免初始为空的 Worker 永久绕过新注册源的取证要求。
+    return bool(source_registry().list_sources())

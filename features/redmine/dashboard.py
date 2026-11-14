@@ -6,6 +6,10 @@ from collections.abc import Iterable
 from datetime import date, datetime
 from typing import Any
 
+from foundation.dashboard_config import (
+    bounded_int as _bounded_int,
+)
+
 
 DEFAULT_REDMINE_STATS = {
     "stale_days": 3,
@@ -20,14 +24,6 @@ DEFAULT_DEPARTMENT_DASHBOARD = {
     "list_limit": 50,
     "issue_limit": 500,
 }
-
-def _bounded_int(value, default: int, minimum: int, maximum: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = default
-    return max(minimum, min(maximum, parsed))
-
 
 def _profile_id(value: Any, fallback: str = "") -> str:
     text = str(value or fallback).strip().lower()

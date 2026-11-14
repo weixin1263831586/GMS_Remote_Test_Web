@@ -302,7 +302,7 @@ def test_worker_runs_flash_then_aoa_before_ack_and_fence_release(tmp_path, recov
     agent.runtime = Mock()
     agent.heartbeat = Mock()  # 恢复后的终态清单强制上报不真发心跳
     image = b"firmware"
-    agent.client.download.side_effect = lambda endpoint, target, **kw: target.write_bytes(image)
+    agent.client.download.side_effect = lambda endpoint, target, **_kw: target.write_bytes(image)
     calls = []
     command = {"id": "cmd", "command_type": "flash_firmware", "payload": {
         "stage_id": "fw-" + "b" * 32, "filename": "update.img", "size_bytes": len(image),

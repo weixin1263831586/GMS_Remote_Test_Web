@@ -140,19 +140,5 @@ class NoVNCAccessService:
             ).fetchone()
         return row is not None
 
-    def revoke_session(self, session_token: str) -> None:
-        if not session_token:
-            return
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE novnc_access_grants
-                SET revoked_at = ?
-                WHERE session_hash = ? AND revoked_at IS NULL
-                """,
-                (_iso(_utcnow()), _hash(session_token)),
-            )
-            conn.commit()
-
 
 novnc_access_service = NoVNCAccessService()

@@ -48,10 +48,6 @@ class _InflightCounter:
             if self._count <= 0:
                 self._zero.notify_all()
 
-    def is_zero(self) -> bool:
-        with self._lock:
-            return self._count <= 0
-
     def wait_zero(self, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         with self._lock:

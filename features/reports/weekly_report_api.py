@@ -952,12 +952,11 @@ async def get_weekly_report_ai_summary(
     Body: {"start","end","owner","name","redmine","gerrit","android17","gms_test"}
     前端把已生成的周报数据回传；缺失项由后端现取兜底。
     """
-    import json as _json
 
     body = {}
     try:
         raw = await request.body()
-        body = _json.loads(raw or b"{}")
+        body = json.loads(raw or b"{}")
     except Exception:
         body = {}
 

@@ -16,7 +16,6 @@ import asyncio
 import json
 import os
 import shutil
-from typing import Any
 
 from features.kkagent import child_env, settle_reader_future, terminate_process_tree
 
@@ -135,29 +134,10 @@ async def preflight_gms_auth(
     return parse_selfcheck_payload(stdout, env_extra)
 
 
-def mandatory_tools_ready(trace_tools: list[str]) -> tuple[bool, list[str]]:
-    """校验一次分析的轨迹里是否出现过强制取证工具（供 Gate 复用）。"""
-    missing: list[str] = []
-    if not any("redmine_issue_fetch" in name or "redmine_issue" in name
-               for name in trace_tools):
-        missing.append("gms_rt_redmine_issue_fetch")
-    if not any("redmine_journals" in name for name in trace_tools):
-        missing.append("gms_rt_redmine_journals")
-    return (not missing), missing
-
-
-def capability_summary(payload: dict[str, Any]) -> str:
-    """selfcheck data 的简短摘要，用于失败信息（不展开全文）。"""
-    profile = str(payload.get("profile") or "")
-    return f"profile={profile}" if profile else "selfcheck"
-
-
 __all__ = [
     "GMS_SELFCHECK_BINARY",
     "GMS_SELFCHECK_SCRIPT",
     "SELFCHECK_TIMEOUT_SECONDS",
-    "capability_summary",
-    "mandatory_tools_ready",
     "parse_selfcheck_payload",
     "preflight_gms_auth",
     "selfcheck_command",

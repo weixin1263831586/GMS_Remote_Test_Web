@@ -29,10 +29,7 @@ SFTP_REKEY_BYTES = pow(2, 40)  # 减少重新密钥协商频率
 SFTP_REKEY_PACKETS = pow(2, 40)
 
 # Windows SSHD 安装命令常量
-SSHD_UNINSTALL_CMD = 'Get-Service sshd | Stop-Service -Force; Remove-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0'
-SSHD_REMOVE_FILES_CMD = 'Remove-Item -Path "C:\\ProgramData\\ssh" -Recurse -Force -ErrorAction SilentlyContinue'
 SSHD_INSTALL_CMD = 'Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0'
-SSHD_CHECK_CMD = 'Get-WindowsCapability -Online | Where-Object Name -like \'OpenSSH*\''
 SSHD_START_CMD = 'Start-Service sshd'
 SSHD_ENABLE_CMD = 'Set-Service -Name sshd -StartupType \'Automatic\''
 
@@ -292,15 +289,6 @@ class SSHManager:
                 'error': str(e),
                 'install_guide': SSHD_INSTALL_GUIDE
             }
-
-    def close_all(self):
-        """关闭所有连接"""
-        while not self.pool.empty():
-            try:
-                ssh = self.pool.get_nowait()
-                ssh.close()
-            except queue.Empty:
-                break
 
     @contextmanager
     def connection(self, config: dict):

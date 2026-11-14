@@ -14,6 +14,12 @@ from .usbip import find_device_host_password, usbip_manager
 from .usbip_flash import resolve_usbip_flash_routes
 from .usbip_operations import usbip_operation_gate
 from .usbip_persistence import migrate_local_usbip_busid
+from .usbip_support import (
+    _invalidate_device_cache,
+    _known_usbip_sources,
+    _local_worker_id,
+    _normalize_host,
+)
 from .usbip_transport_probe import probe_existing_local_usbip_transport
 
 
@@ -48,14 +54,6 @@ def _runtime_usbip_sources() -> dict[str, dict[str, Any]]:
     runtime_config = runtime.config_manager.get_runtime_config()
     sources = runtime_config.get("usbip_devices_source", {})
     return sources if isinstance(sources, dict) else {}
-
-
-def _known_usbip_sources() -> dict[str, dict[str, Any]]:
-    with runtime.global_state.usbip_devices_source_lock:
-        sources = dict(runtime.global_state.usbip_devices_source)
-    sources.update(getattr(usbip_manager, "device_sources", {}) or {})
-    sources.update(_runtime_usbip_sources())
-    return sources
 
 
 def usbip_source_host_for_device(device_id: str) -> str:
@@ -160,23 +158,6 @@ def _reconnect_paused_for_devices(
         is_usbip_reconnect_paused(device_id=device_id)
         for device_id in device_ids or ()
     )
-
-
-def _normalize_host(host: str) -> str:
-    """Strip user@ prefix and whitespace so host identities compare reliably."""
-    host = str(host or "").strip()
-    if "@" in host:
-        host = host.split("@", 1)[-1]
-    return host
-
-
-def _local_worker_id() -> str:
-    try:
-        from foundation.cluster_port import get_cluster_service
-
-        return str(get_cluster_service().config.local_worker_id or "")
-    except Exception:
-        return ""
 
 
 def _resolved_busids_for_devices(device_ids: set[str]) -> list[str]:
@@ -470,13 +451,6 @@ def schedule_usbip_reconnect(
         worker.start()
         logger.info("[USB/IP Reconnect] scheduled for %s (%s)", device_host, reason)
         return True
-
-
-def active_usbip_reconnect_hosts() -> list[str]:
-    with _tasks_lock:
-        return sorted(
-            host for host, task in _tasks.items() if task.is_alive()
-        )
 
 
 def reconcile_observed_usbip_devices(current_devices: Iterable[str]) -> dict[str, list[str]]:
@@ -903,8 +877,7 @@ def _record_reconnected_devices(
                 "timestamp": now,
             }
 
-    with runtime.global_state.device_cache_lock:
-        runtime.global_state.device_cache = {"devices": [], "timestamp": 0}
+    _invalidate_device_cache()
 
     try:
         runtime_config = runtime.config_manager.get_runtime_config()

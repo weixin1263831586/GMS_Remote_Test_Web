@@ -88,16 +88,6 @@ def controller_suite_library(
     return {"success": True, "archives": archives}
 
 
-@router.get("/suite-library/{filename}")
-def download_controller_suite_archive(
-    filename: str,
-    _user: CurrentUser | None = Depends(
-        require_authenticated_user_when_auth_required
-    ),
-):
-    return _download(_archive(filename))
-
-
 @router.get("/suite-library-download/{safe_filename}/{filename}")
 def download_controller_suite_archive_named(
     safe_filename: str,

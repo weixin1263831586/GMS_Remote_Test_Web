@@ -39,7 +39,6 @@ class ScoredTool:
     """带分数的工具匹配结果。"""
     tool: AgentTool
     score: float
-    matched_keywords: list[str]
 
 
 # ==================== Keyword Supplements ====================
@@ -293,13 +292,11 @@ class ToolRegistry:
         self._tools: dict[str, AgentTool] = {}
         self._keyword_index: dict[str, list[str]] = {}  # keyword -> [tool_name, ...]
         self._category_index: dict[str, list[str]] = {}  # category -> [tool_name, ...]
-        self._path_index: dict[str, str] = {}            # api_path -> tool_name
 
     # ---------- Registration ----------
 
     def register(self, tool: AgentTool) -> None:
         self._tools[tool.name] = tool
-        self._path_index[tool.api_path] = tool.name
         self._category_index.setdefault(tool.category, []).append(tool.name)
         for kw in tool.keywords:
             kw_lower = kw.lower()
@@ -375,10 +372,6 @@ class ToolRegistry:
     def get(self, name: str) -> AgentTool | None:
         return self._tools.get(name)
 
-    def get_by_path(self, api_path: str) -> AgentTool | None:
-        name = self._path_index.get(api_path)
-        return self._tools.get(name) if name else None
-
     def get_by_category(self, category: str) -> list[AgentTool]:
         names = self._category_index.get(category, [])
         return [self._tools[n] for n in names if n in self._tools]
@@ -393,7 +386,6 @@ class ToolRegistry:
         """关键词匹配评分，返回按分数排序的工具列表。"""
         lowered = text.lower().strip()
         scores: dict[str, float] = {}
-        matched: dict[str, list[str]] = {}
 
         # 对每个关键词做匹配
         for keyword, tool_names in self._keyword_index.items():
@@ -405,7 +397,6 @@ class ToolRegistry:
                     weight *= 2.0
                 for tn in tool_names:
                     scores[tn] = scores.get(tn, 0.0) + weight
-                    matched.setdefault(tn, []).append(keyword)
 
         # 排序
         ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
@@ -416,7 +407,6 @@ class ToolRegistry:
                 results.append(ScoredTool(
                     tool=tool,
                     score=round(score, 2),
-                    matched_keywords=matched.get(tn, []),
                 ))
         return results
 

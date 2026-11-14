@@ -863,8 +863,6 @@ window.copyCurlCommandFromData = function(element) {
 
     // 检查是否为纯文本端点（不需要jq格式化）
     const isPlainTextEndpoint = text.includes('/api/test/logs/stream') ||
-                                text.includes('/api/terminal/ws') ||
-                                text.includes('/api/screen/ws') ||
                                 // 匹配根路径（如 "http://localhost:5001/" 或 "http://192.168.1.10:5001/"）
                                 (text.match(/http:\/\/[^\/]+:\d+\/"$/) !== null);
 
@@ -980,37 +978,12 @@ function copyText(text, options = {}) {
         }
     };
 
-    const doFallback = () => {
-        try {
-            const textArea = document.createElement('textarea');
-            textArea.value = textToCopy;
-            textArea.style.position = 'fixed';
-            textArea.style.left = '-999999px';
-            document.body.appendChild(textArea);
-            textArea.select();
-            const successful = document.execCommand('copy');
-            document.body.removeChild(textArea);
-            if (successful) {
-                onSuccess();
-            } else {
-                showToast('✗ 复制失败，请手动复制', 'error');
-            }
-        } catch (err) {
-            console.error('[Copy] Fallback error:', err);
-            showToast('✗ 复制失败：' + err.message, 'error');
-        }
-    };
-
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(textToCopy).then(() => {
-            onSuccess();
-        }).catch(err => {
-            console.error('[Copy] Clipboard API failed:', err);
-            doFallback();
-        });
-    } else {
-        doFallback();
-    }
+    copyTextToClipboard(textToCopy).then(() => {
+        onSuccess();
+    }).catch(err => {
+        console.error('[Copy] Copy failed:', err);
+        showToast('✗ 复制失败：' + (err && err.message ? err.message : '请手动复制'), 'error');
+    });
 }
 
 /**

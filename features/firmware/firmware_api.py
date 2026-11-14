@@ -818,14 +818,6 @@ async def burn_firmware(
                                     "log_type": "info",
                                 })
 
-                    async def _source_progress(percentage: float) -> None:
-                        if client_id in runtime.global_state.websocket_connections:
-                            with contextlib.suppress(Exception):
-                                await runtime.safe_websocket_send(client_id, {
-                                    "type": "firmware_progress",
-                                    "percentage": round(float(percentage), 2),
-                                })
-
                     await _source_log(
                         "Starting source-side firmware burn "
                         "(Windows Source Agent + RKDevTool)..."

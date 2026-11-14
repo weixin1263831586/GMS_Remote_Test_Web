@@ -522,16 +522,6 @@ function streamCommandEvents(commandId, workerId) {
     return () => { stopped = true; };
 }
 
-async function burnSerialNumber() {
-    if (selectedTestDeviceIds().length === 0) {
-        showToast('请先选择要烧写SN码的设备', 'warning');
-        return;
-    }
-
-    // Show SN configuration modal
-    ModalManager.open('sn-modal');
-}
-
 function closeSnModal() {
     ModalManager.close('sn-modal');
 }

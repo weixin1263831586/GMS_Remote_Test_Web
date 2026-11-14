@@ -33,38 +33,6 @@ from foundation.config import settings
 logger = logging.getLogger(__name__)
 
 
-_ERROR_LINE_PATTERNS = [
-    # Stack traces
-    r"at\s+[\w.$]+\([^)]*\.\w+:\d+\)",
-    r"Caused by:\s*[\w.]+(?:Exception|Error)",
-    r"java\.\w+\.\w+(?:Exception|Error)",
-    # JUnit / Android test
-    r"junit\.framework\.(?:AssertionFailedError|ComparisonFailure)",
-    r"android\.os\.ServiceSpecificException",
-    r"android\.hardware\.\w+",
-    r"com\.android\.\w+\.(?:Exception|Error)",
-    # GMS / certification
-    r"not certified|attestation|integrity|KeyMint|RKPD|STRONGBOX",
-    r"Cannot add more profiles|config_user_types|config_multiuserMaximumUsers",
-    # General
-    r"\bFAIL(?:URE)?:\b",
-    r"\bASSUMPTION_FAILURE:\b",
-    r"\bFATAL\b",
-    r"\bdenied\b",
-    r"\bError:\s",
-]
-_ERROR_LINE_RE = re.compile("|".join(_ERROR_LINE_PATTERNS), re.IGNORECASE)
-
-AI_MODEL_TIMEOUT = 120          # seconds for AI model HTTP request
-AI_MODEL_MAX_TOKENS = 2400
-MAX_FAILURE_LINES = 30
-MAX_ERROR_BLOCKS = 5
-SIMILARITY_THRESHOLD_HIGH = 70  # score >= this → "high" similarity
-SIMILARITY_THRESHOLD_MEDIUM = 40  # score >= this → "medium" similarity
-MAX_REFERENCES = 5
-TOP_CANDIDATES_FOR_AI = 8
-
-
 def _load_agent_config() -> dict[str, Any]:
     """Load redmine_agent section from config.json, with env overrides."""
     cfg = config_manager.load_config().get("redmine_agent", {})
@@ -106,21 +74,6 @@ def _obj_name(value: Any) -> str:
         return ""
     return str(getattr(value, "name", "") or value)
 
-
-def _obj_email(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(
-        getattr(value, "mail", "")
-        or getattr(value, "email", "")
-        or getattr(value, "login", "")
-        or ""
-    )
-
-
-def _truncate(text: str, limit: int) -> str:
-    text = str(text or "")
-    return text if len(text) <= limit else text[:limit] + "\n...[truncated]"
 
 class RedmineAgent(
     AttachmentAnalysisMixin,

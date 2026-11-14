@@ -43,7 +43,11 @@ def test_shell_style_bundle_keeps_all_links_adjacent() -> None:
 
 def test_kpis_preserve_existing_metric_ids_and_actions() -> None:
     expected = {
-        "users": ("total-users-count", "active-users-count", "testing-users-count"),
+        # users 页两个视图共用 page-stat-card 模板：用户列表 3 张 +
+        # Agent 接入 3 张（agent-token-*-count），同页共 6 个图标。
+        "users": ("total-users-count", "active-users-count", "testing-users-count",
+                  "agent-token-total-count", "agent-token-active-count",
+                  "agent-token-inactive-count"),
         "api-docs": ("total-apis-count", "get-apis-count", "post-apis-count",
                      "filtered-apis-count", "skills-count"),
         "security-audit": ("audit-total-count", "audit-web-count",
@@ -55,7 +59,13 @@ def test_kpis_preserve_existing_metric_ids_and_actions() -> None:
         for field in ids:
             assert source.count(f'id="{field}"') == 1, (page, field)
     users = (SHELL / "pages" / "users.html").read_text(encoding="utf-8")
-    assert users.count('data-click="setUsersStatusFilter"') == 3
+    # 统计卡为纯展示（与设备/审计页一致）：不允许点击筛选处理器；
+    # 旧专属统计卡模板（agent-access-stat）与 intro 区已删除。
+    assert 'setUsersStatusFilter' not in users
+    assert 'data-user-status-card' not in users
+    # 精确匹配旧专属统计卡模板的 class（不含 status-filter 下拉的子串）。
+    assert 'class="agent-access-stat"' not in users
+    assert 'agent-access-intro' not in users
 
 
 def test_rework_styles_do_not_target_approved_workspaces() -> None:

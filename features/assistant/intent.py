@@ -29,7 +29,6 @@ class ResolvedIntent:
     params: dict[str, Any]
     needs_confirm: bool
     is_run_test: bool
-    context_entities: dict[str, Any]
     stage: str                          # 匹配阶段: exact/context/keyword/regex/fallback
 
     @staticmethod
@@ -37,7 +36,7 @@ class ResolvedIntent:
         return ResolvedIntent(
             tool_name="", tool=None, confidence=0.0, params={},
             needs_confirm=False, is_run_test=False,
-            context_entities={}, stage="fallback",
+            stage="fallback",
         )
 
 
@@ -333,7 +332,7 @@ def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
         return ResolvedIntent(
             tool_name="greeting", tool=None, confidence=1.0,
             params={}, needs_confirm=False, is_run_test=False,
-            context_entities={}, stage="exact",
+            stage="exact",
         )
 
     # --- Stage 0: Capabilities ---
@@ -342,13 +341,13 @@ def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
             return ResolvedIntent(
                 tool_name="page_overview", tool=None, confidence=1.0,
                 params={}, needs_confirm=False, is_run_test=False,
-                context_entities={}, stage="exact",
+                stage="exact",
             )
         tool = registry.get("agent_capabilities")
         return ResolvedIntent(
             tool_name="agent_capabilities", tool=tool, confidence=1.0,
             params={}, needs_confirm=False, is_run_test=False,
-            context_entities={}, stage="exact",
+            stage="exact",
         )
 
     # --- Stage 1: Exact command match ---
@@ -371,7 +370,7 @@ def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
             return ResolvedIntent(
                 tool_name=tool_name, tool=tool, confidence=0.95,
                 params=params, needs_confirm=(tool.requires_confirm if tool else False),
-                is_run_test=False, context_entities={}, stage="exact",
+                is_run_test=False, stage="exact",
             )
 
     # --- Stage 2: Context reference resolution ---
@@ -402,7 +401,7 @@ def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
             return ResolvedIntent(
                 tool_name=tool_name, tool=tool, confidence=0.8,
                 params=params, needs_confirm=(tool.requires_confirm if tool else False),
-                is_run_test=False, context_entities=entities, stage="context",
+                is_run_test=False, stage="context",
             )
 
     # --- Stage 3: Keyword scoring ---
@@ -419,7 +418,6 @@ def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
                 params=_extract_params_for_tool(text, tool),
                 needs_confirm=False,
                 is_run_test=False,
-                context_entities={},
                 stage="rule",
             )
     if "gerrit" in lowered_text and ("配置" in text or "设置" in text):
@@ -432,7 +430,6 @@ def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
                 params=_extract_params_for_tool(text, tool),
                 needs_confirm=False,
                 is_run_test=False,
-                context_entities={},
                 stage="rule",
             )
 
@@ -450,7 +447,6 @@ def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
                 params={key: query},
                 needs_confirm=False,
                 is_run_test=False,
-                context_entities={},
                 stage="rule",
             )
 
@@ -468,7 +464,6 @@ def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
                 params=params,
                 needs_confirm=False,
                 is_run_test=False,
-                context_entities={},
                 stage="rule",
             )
 
@@ -491,7 +486,6 @@ def resolve(message: str, session: dict[str, Any]) -> ResolvedIntent:
             params=params,
             needs_confirm=best.tool.requires_confirm,
             is_run_test=False,
-            context_entities={},
             stage="keyword",
         )
 
@@ -538,7 +532,6 @@ def _resolve_run_test(text: str, session: dict[str, Any]) -> ResolvedIntent:
         },
         needs_confirm=True,
         is_run_test=True,
-        context_entities={},
         stage="exact",
     )
 

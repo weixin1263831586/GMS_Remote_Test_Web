@@ -35,10 +35,6 @@ from features.firmware.apk import (
 )
 from features.firmware.runtime import configure_runtime
 from features.gerrit import api as gerrit_dashboard
-from features.gerrit.config import (
-    denormalize_gerrit_dashboard_config,
-    normalize_gerrit_dashboard_config,
-)
 from features.gerrit.service import query_gerrit_dual_mode
 from features.gerrit.settings import config_manager as gerrit_config_manager
 from features.knowledge.service import set_ask_analyzer_factory
@@ -182,11 +178,6 @@ def configure_config_sections() -> None:
         'redmine_dashboard',
         normalizer=normalize_redmine_dashboard_profiles,
         denormalizer=denormalize_redmine_dashboard_config,
-    )
-    config_manager.configure_section_normalizer(
-        'gerrit_dashboard',
-        normalizer=normalize_gerrit_dashboard_config,
-        denormalizer=denormalize_gerrit_dashboard_config,
     )
 
 

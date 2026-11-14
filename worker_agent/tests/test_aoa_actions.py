@@ -161,7 +161,7 @@ def test_record_appends_pacing_sleeps(monkeypatch):
 
     monkeypatch.setattr(aoa_actions, "_display_size", lambda _serial: (800, 1280))
     monkeypatch.setattr(aoa_actions, "_adb_run",
-                        lambda _serial, *args, **kw: FakeCompleted())
+                        lambda _serial, *args: FakeCompleted())
     monkeypatch.setattr(
         aoa_actions, "_dump_elements",
         lambda _serial, _sleep=None: (
@@ -244,7 +244,7 @@ def test_calibration_failure_still_releases_probe(monkeypatch):
     monkeypatch.setattr(aoa_actions, "_open_device", lambda _c, _s: None)
     monkeypatch.setattr(
         aoa_actions, "_adb_run",
-        lambda _serial, *args, **kw: (adb_calls.append(args), type(
+        lambda _serial, *args, **_kw: (adb_calls.append(args), type(
             "R", (), {"returncode": 0, "stdout": "", "stderr": ""}))[-1])
     result = aoa_actions._calibrate_touch_mapping("serial", 800, 1280, lambda _t: None)
     assert result is None
@@ -265,14 +265,14 @@ def test_record_uses_measured_calibration(monkeypatch):
 
     monkeypatch.setattr(aoa_actions, "_display_size", lambda _serial: (800, 1280))
     monkeypatch.setattr(aoa_actions, "_adb_run",
-                        lambda _serial, *args, **kw: FakeCompleted())
+                        lambda _serial, *args: FakeCompleted())
     from foundation.aoa_calibration import five_point_calibration_points, mapping_from_samples
 
     measured = mapping_from_samples("pointer",
         [((x, y), (x * 2.2, y * 2.2)) for x, y in five_point_calibration_points(360, 640)],
         display_pixels=(800, 1280),
         validation_samples=[((120, 213), (264, 468.6)), ((240, 427), (528, 939.4))])
-    monkeypatch.setattr(aoa_actions, "_calibrate_touch_affine", lambda *a, **kw: measured)
+    monkeypatch.setattr(aoa_actions, "_calibrate_touch_affine", lambda *a, **_kw: measured)
     monkeypatch.setattr(
         aoa_actions, "_dump_elements",
         lambda _serial, _sleep=None: (
@@ -312,7 +312,7 @@ def test_record_uses_affine_mapping_for_profile_commands(monkeypatch):
     )
     monkeypatch.setattr(aoa_actions, "_display_size", lambda _serial: (800, 1280))
     monkeypatch.setattr(aoa_actions, "_adb_run",
-                        lambda _serial, *args, **kw: FakeCompleted())
+                        lambda _serial, *args: FakeCompleted())
     monkeypatch.setattr(aoa_actions, "_calibrate_touch_affine",
                         lambda *args, **kwargs: mapping)
     monkeypatch.setattr(aoa_actions, "_dump_elements",

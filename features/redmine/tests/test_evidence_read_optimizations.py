@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 
 from features.auth import CurrentUser
 from features.redmine import evidence_api, evidence_search_api
+from features.redmine.evidence_search_api import COLLAPSE_GAP_CHARS
 from features.redmine.evidence_text import derive_member_index
 from features.redmine.repository_storage import RepositoryStorageMixin
 
@@ -273,6 +274,62 @@ class _EvidenceOptimizeTests(unittest.TestCase):
         hit = {h["artifact_id"]: h["hits"] for h in folded["artifact_hits"]}
         self.assertEqual(hit[artifact["artifact_id"]], 6)
         self.assertEqual(folded["total_occurrences"], 6)
+
+    def test_search_collapse_pagination_always_advances(self):
+        """折叠后翻页不留空洞：next_offset 恒前进、页并集覆盖全部展示条目。
+
+        回归：旧实现按 raw 序号开窗，页内命中全被折叠时返回 0 条且
+        next_offset 不动，调用方会无限重复同一页。
+        """
+        store = self._store()
+        artifact = store.create_artifact(
+            snapshot_id=self.snapshot["snapshot_id"],
+            attachment_id="880003",
+            filename="dense.log",
+            original_filename="dense.log",
+            content_type="text/plain",
+            kind="log",
+            declared_size=512,
+        )
+        rel = f"660451/{self.snapshot['snapshot_id']}/attachments/{artifact['artifact_id']}/dense.log"
+        # 6 组相邻命中（每组 3 条密集重复）+ 远端 1 条独立命中。
+        dense = "\n".join(f"SameStack group{i} line{j}" for i in range(2)
+                          for j in range(3))
+        payload = dense + "\n" + "x" * (5 * COLLAPSE_GAP_CHARS) + "\nFarStack tail\n"
+        store.resolve_internal(rel).parent.mkdir(parents=True, exist_ok=True)
+        store.resolve_internal(rel).write_bytes(payload.encode("utf-8"))
+        store.update_artifact(
+            artifact["artifact_id"], status="ready",
+            size_bytes=len(payload), sha256="f" * 64, stored_path=rel,
+        )
+        snapshot = store.get_snapshot(self.snapshot["snapshot_id"])
+
+        collected = []
+        offset, next_offset = 0, 0
+        while next_offset is not None:
+            page = evidence_search_api._search_all_evidence(
+                store, snapshot, ["SameStack"], 1, offset, collapse=True,
+            )
+            row = page["queries"][0]
+            self.assertEqual(row["offset"], offset)
+            self.assertTrue(
+                all(hit is not None for hit in row["matches"]),
+                "折叠页绝不允许出现空洞条目",
+            )
+            collected.extend(row["matches"])
+            next_offset = row["next_offset"]
+            self.assertNotEqual(
+                next_offset, offset,
+                "next_offset 停滞：调用方将无限重复同一页",
+            )
+            offset = next_offset
+        # 展示条目全部可达：翻页收集数 == 全量 display 总数。
+        full = evidence_search_api._search_all_evidence(
+            store, snapshot, ["SameStack"], 50, 0, collapse=True,
+        )["queries"][0]
+        self.assertGreater(len(collected), 0)
+        self.assertLess(len(collected), full["total"])
+        self.assertEqual(len(collected), full["display"])
 
     def test_search_artifact_filter_and_context(self):
         store = self._store()

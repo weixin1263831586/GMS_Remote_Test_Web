@@ -1022,6 +1022,14 @@ body {
     gap: 0;
     justify-content: flex-end;
 }
+/* 当前视图页签（设备列表 / AOA工作台）主色渐变高亮，与主机桌面
+   布局页签（单屏/左右/上下/四屏）、用户管理页签同一套视觉语言。
+   双 ID 特异度高于任何通用 .btn hover，悬停不会覆盖 active 背景。 */
+#page-devices #devices-view-tabs .btn-xs.active {
+    background: var(--primary-gradient);
+    color: #fff;
+    border-color: var(--primary-color);
+}
 /* 带图标标题（APK分析）：图标随行盒顶对齐，向下补偿半行距使其与
    14px 字形（行盒内居中偏移 1.6px）垂直居中。 */
 .page-header-row > .section-title .section-title-icon { margin-top: 1.6px; }

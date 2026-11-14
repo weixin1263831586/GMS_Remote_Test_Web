@@ -54,7 +54,6 @@ SUITE_PATH_TYPE_MARKERS = (
 DETECTABLE_SUITE_TYPES = (
     frozenset(TRADEFED_BINARY_MAP) | frozenset(SPECIAL_TEST_TYPES.values())
 )
-TRADEFED_BINARY_LIST = list(set(TRADEFED_BINARY_MAP.values()))
 def get_test_type_from_binary(binary_name: str) -> str:
     """Return the suite type for a tradefed launcher name."""
     if result := SPECIAL_TEST_TYPES.get(binary_name):

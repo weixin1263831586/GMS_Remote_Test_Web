@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 from fastapi import Request
 
@@ -67,10 +68,28 @@ def _usbip_remote_host(device_host: str, usbip_attach_host: str | None = None) -
     hostname, _port = split_host_port(host)
     return hostname or "127.0.0.1"
 
+def _normalize_host(host: str) -> str:
+    """Strip user@ prefix and whitespace so host identities compare reliably."""
+    host = str(host or "").strip()
+    if "@" in host:
+        host = host.split("@", 1)[-1]
+    return host
+
 def _local_worker_id() -> str:
     from foundation.cluster_port import get_local_worker_id
 
     return get_local_worker_id()
+
+def _known_usbip_sources() -> dict[str, dict[str, Any]]:
+    """Merge in-memory and runtime-config USB/IP device source maps."""
+    with runtime.global_state.usbip_devices_source_lock:
+        sources = dict(runtime.global_state.usbip_devices_source)
+    sources.update(getattr(usbip_manager, "device_sources", {}) or {})
+    runtime_config = runtime.config_manager.get_runtime_config() or {}
+    persisted = runtime_config.get("usbip_devices_source") or {}
+    if isinstance(persisted, dict):
+        sources.update(persisted)
+    return sources
 
 def _adb_proxy_target_assignments(worker_id: str) -> list[dict]:
     """Return persisted ADB Proxy routes that currently target a Worker."""
@@ -362,8 +381,10 @@ __all__ = [
     "_clear_usbip_device_sources",
     "_detach_ubuntu_usbip_for_devices",
     "_invalidate_device_cache",
+    "_known_usbip_sources",
     "_local_worker_id",
     "_mark_usbip_source_disconnected",
+    "_normalize_host",
     "_persist_device_source_removal",
     "_resolve_usbip_device_host",
     "_usbip_devices_for_host",

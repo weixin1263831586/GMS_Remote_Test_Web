@@ -59,7 +59,3 @@ class LocalFileBrowseRootsTests(unittest.TestCase):
                 )
             names = [item["name"] for item in result["files"]]
             self.assertIn("android-cts", names)
-
-
-if __name__ == "__main__":
-    unittest.main()

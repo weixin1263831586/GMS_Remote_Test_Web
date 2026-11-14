@@ -34,10 +34,7 @@ class GlobalState:
     """全局状态管理"""
 
     def __init__(self):
-        self.running_tests = {}  # {client_id: test_info}
         self.test_logs = {}      # {client_id: log_entries}
-        self.ssh_connections = {}  # {client_id: ssh_connection}
-        self.scrcpy_sessions = {}  # {device_id: session_info}
         self.device_cache = {'devices': [], 'timestamp': 0}  # 3秒TTL
         self.device_cache_lock = threading.Lock()
         self.websocket_connections = {}  # {client_id: websocket}

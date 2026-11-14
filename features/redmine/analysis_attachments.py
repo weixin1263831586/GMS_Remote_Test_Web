@@ -9,17 +9,17 @@ import re
 import shutil
 import tempfile
 import zipfile
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from features.redmine.analysis_common import MAX_FAILURE_LINES, _truncate
 from features.redmine.cert_rules import detect_certification_errors
 from features.redmine.models import RedmineAttachment
 from features.redmine.tesseract_finder import (
     bundled_tesseract_cmd,
     configure_bundled_tesseract,
 )
-from features.redmine.utils import sanitize_attachment_filename, to_iso8601
+from features.redmine.utils import sanitize_attachment_filename
 
 
 if TYPE_CHECKING:
@@ -55,63 +55,7 @@ _ERROR_LINE_PATTERNS = [
 ]
 _ERROR_LINE_RE = re.compile("|".join(_ERROR_LINE_PATTERNS), re.IGNORECASE)
 
-AI_MODEL_TIMEOUT = 120          # seconds for AI model HTTP request
-AI_MODEL_MAX_TOKENS = 2400      # max tokens for AI model response
-MAX_FAILURE_LINES = 30          # max error lines to extract
 MAX_ERROR_BLOCKS = 5            # max grouped error blocks
-SIMILARITY_THRESHOLD_HIGH = 70  # score >= this → "high" similarity
-SIMILARITY_THRESHOLD_MEDIUM = 40  # score >= this → "medium" similarity
-MAX_REFERENCES = 5              # max similar references to return
-TOP_CANDIDATES_FOR_AI = 8       # top candidates sent to AI semantic scoring
-
-
-SYNC_PRESERVE_FIELDS = {
-    "failures_json",
-    "references_json",
-    "ai_json",
-    "summary",
-    "reply_draft",
-    "doc_path",
-    "doc_content",
-    "error",
-    "error_info",
-    "error_analysis",
-    "solution",
-    "patch_direction",
-}
-
-
-def _now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
-
-
-def _iso(value: Any) -> str:
-    # Delegate to the shared normalizer so all mixins format Redmine
-    # timestamps identically (handles datetime + space-separated strings).
-    return to_iso8601(value)
-
-
-def _obj_name(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(getattr(value, "name", "") or value)
-
-
-def _obj_email(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(
-        getattr(value, "mail", "")
-        or getattr(value, "email", "")
-        or getattr(value, "login", "")
-        or ""
-    )
-
-
-def _truncate(text: str, limit: int) -> str:
-    text = str(text or "")
-    return text if len(text) <= limit else text[:limit] + "\n...[truncated]"
-
 
 
 class AttachmentAnalysisMixin:

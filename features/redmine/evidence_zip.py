@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import zipfile
-from collections.abc import Callable
 from pathlib import Path
 
 from .evidence import TEXT_KIND_EXTENSIONS
@@ -24,15 +23,14 @@ def _member_priority(filename: str) -> tuple[int, str]:
 
 def extract_zip_derived_text(
     store: EvidenceStore,
-    write_file: Callable[[Path, bytes], None],
     artifact_id: str,
     snapshot_rel: str,
     source: Path,
 ) -> tuple[str, str]:
     """Read every text member and atomically publish its complete index.
 
-    write_file remains accepted for existing callers. Streaming publication
-    uses temporary-file/rename semantics without a whole-archive bytes value.
+    Streaming publication uses temporary-file/rename semantics without a
+    whole-archive bytes value.
     """
     try:
         with zipfile.ZipFile(source) as archive:

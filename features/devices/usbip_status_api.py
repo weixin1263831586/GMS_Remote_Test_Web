@@ -48,6 +48,7 @@ from .usbip_persistence import (
 from .usbip_persistence import (
     usbip_assignment_lock as _usbip_assignment_lock,
 )
+from .usbip_support import _invalidate_device_cache as _invalidate_device_cache
 from .usbip_support import _local_worker_id as _local_worker_id
 from .usbip_support import _resolve_usbip_device_host as _resolve_usbip_device_host
 from .usbip_transport_probe import probe_existing_local_usbip_transport
@@ -284,8 +285,7 @@ async def _reconcile_local_usbip_status(
     }
     with runtime.global_state.usbip_states_lock:
         runtime.global_state.usbip_states[device_host] = stale
-    with runtime.global_state.device_cache_lock:
-        runtime.global_state.device_cache = {"devices": [], "timestamp": 0}
+    _invalidate_device_cache()
 
     if expected_devices:
         reconnect.schedule_usbip_reconnect(

@@ -82,7 +82,6 @@ function updateDashGauges(){
   detailEl.innerHTML=`CPU ${Math.round(cpu)}% · 内存 ${oneDecimal(memUsed)}/${oneDecimal(memTotal)}G · 磁盘 ${diskStr} · 负载 ${oneDecimal(worker.load_1m)}`;
  }
 }
-const dashPieNameToState={'可用':'available','外部占用':'external_busy','已分配':'allocated','Fastboot':'fastboot','未知':'unknown'};
 const dashStateColors={available:'#48c78e',external_busy:'#e5b94f',allocated:'#a78bfa',fastboot:'#4f8cff',offline:'#ef6572',unknown:'#6b7280'};
 const dashStateNames={available:'可用',external_busy:'外部占用',allocated:'已分配',fastboot:'Fastboot',unknown:'未知'};
 function updateDashDevicePie(){

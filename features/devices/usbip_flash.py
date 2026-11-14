@@ -11,31 +11,11 @@ from foundation.networking import parse_host_address, split_host_port
 from . import runtime
 from .usbip import usbip_manager
 from .usbip_linux_source import ensure_ubuntu_usbip_server
-
-
-def _normalize_host(host: str) -> str:
-    host = str(host or "").strip()
-    return host.split("@", 1)[-1] if "@" in host else host
-
-
-def _local_worker_id() -> str:
-    try:
-        from foundation.cluster_port import get_cluster_service
-
-        return str(get_cluster_service().config.local_worker_id or "")
-    except Exception:
-        return ""
-
-
-def _known_sources() -> dict[str, dict[str, Any]]:
-    with runtime.global_state.usbip_devices_source_lock:
-        sources = dict(runtime.global_state.usbip_devices_source)
-    sources.update(getattr(usbip_manager, "device_sources", {}) or {})
-    runtime_config = runtime.config_manager.get_runtime_config() or {}
-    persisted = runtime_config.get("usbip_devices_source") or {}
-    if isinstance(persisted, dict):
-        sources.update(persisted)
-    return sources
+from .usbip_support import (
+    _known_usbip_sources as _known_sources,
+)
+from .usbip_support import _local_worker_id as _local_worker_id
+from .usbip_support import _normalize_host as _normalize_host
 
 
 def resolve_usbip_flash_routes(
@@ -155,23 +135,6 @@ def open_usbip_source_ssh(
 
 def _valid_usbip_busid(busid: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9._-]{1,64}", str(busid or "").strip()))
-
-
-def bind_usbip_busid_via_ssh(
-    ssh, busid: str, *, force: bool = False,
-) -> dict[str, Any]:
-    """Share one present instance, optionally keeping the VBox stub resident."""
-    busid = str(busid or "").strip()
-    if not _valid_usbip_busid(busid):
-        return {"success": False, "error": "无效的USB/IP BUSID"}
-    command = f"usbipd bind --busid {busid}"
-    if force:
-        command += " --force"
-    result = usbip_manager.ssh_manager.execute_command(
-        ssh, command, timeout=15,
-    )
-    detail = (result.stderr or result.stdout or "").strip()
-    return {"success": result.ok, "code": result.code, "detail": detail}
 
 
 def usbipd_policy_line_covers_busid(output: str, busid: str) -> bool:

@@ -142,44 +142,6 @@ BUSID  VID:PID    DEVICE                                                        
         manager.ssh_manager = FakeSshManager()
         self.assertEqual(manager._find_android_devices(object(), {}), ["1-1"])
 
-    def test_windows_usb_serial_fallback_handles_android_pid_mode_change(self):
-        class FakeSshManager:
-            def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
-                return CommandResult(
-            stdout="USB\\VID_2207&PID_350E\\RK3576GMS1\n""USB\\VID_03F0&PID_134A\\5&GENERATED&0&9\n",
-            stderr="",
-            code=0,
-        )
-
-        manager = USBIPManager()
-        manager.ssh_manager = FakeSshManager()
-
-        serials = manager._query_windows_usb_serials(
-            object(), {"2207"}
-        )
-
-        self.assertEqual(serials["2207:350e"], "RK3576GMS1")
-        self.assertEqual(serials["*"], "RK3576GMS1")
-
-    def test_windows_adb_serial_fallback_reads_single_device(self):
-        class FakeSshManager:
-            def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
-                self.command = cmd
-                return CommandResult(
-        stdout="List of devices attached\nRK3576GMS1\tdevice\n",
-        stderr="",
-        code=0,
-    )
-
-        manager = USBIPManager()
-        manager.ssh_manager = FakeSshManager()
-
-        self.assertEqual(
-            manager._query_windows_adb_serials(object()),
-            ["RK3576GMS1"],
-        )
-        self.assertEqual(manager.ssh_manager.command, "adb devices")
-
     def test_detach_source_sessions_clears_selected_export_without_unbind(self):
         commands = []
 

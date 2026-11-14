@@ -127,6 +127,38 @@ function triggerDownload(url, filename, isBlobUrl = false) {
     }
 }
 
+// 剪贴板写入统一入口：优先异步 Clipboard API（仅安全上下文可用），
+// 失败或缺失时回退到隐藏 textarea + execCommand。返回 Promise：
+// 成功 resolve，失败（含 execCommand 返回 false）reject。
+// api-docs / automation / redmine 各有同名不同签名的页面级 copyText，
+// 共享助手必须用独立命名，避免无条件导出 window.copyText 造成覆盖。
+function copyTextToClipboard(text) {
+    const value = String(text ?? '');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(value).catch(() => copyTextViaExecCommand(value));
+    }
+    return Promise.resolve().then(() => copyTextViaExecCommand(value));
+}
+
+function copyTextViaExecCommand(value) {
+    const textArea = document.createElement('textarea');
+    textArea.value = value;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    textArea.style.top = '-999999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    let copied = false;
+    try {
+        copied = document.execCommand('copy');
+    } finally {
+        document.body.removeChild(textArea);
+    }
+    if (!copied) throw new Error('浏览器未允许复制，请手动复制');
+    return value;
+}
+
 window.debounce = debounce;
 window.throttle = throttle;
 window.normalizeApiTextError = normalizeApiTextError;
@@ -135,3 +167,4 @@ window.safeHeaderPercentEncode = safeHeaderPercentEncode;
 window.togglePasswordVisibility = togglePasswordVisibility;
 window.formatBytes = formatBytes;
 window.triggerDownload = triggerDownload;
+window.copyTextToClipboard = copyTextToClipboard;

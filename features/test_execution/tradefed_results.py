@@ -164,10 +164,6 @@ def extract_project_from_result_fields(item: dict[str, Any]) -> str:
     return raw[:2].upper() + raw[2:]
 
 
-# Compatibility for callers written before the helper became public.
-_extract_project_from_fields = extract_project_from_result_fields
-
-
 def _enrich_local_results(results: list[dict], suite_path: str) -> None:
     """Read build_fingerprint from each result's XML and extract project."""
     suite_root = os.path.dirname(suite_path.rstrip("/"))

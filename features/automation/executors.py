@@ -23,6 +23,9 @@ from features.automation.executor_contract import (
 )
 from features.automation.jenkins_client import JenkinsClient
 from features.automation.recovery_executor import RecoveryExecutorMixin
+
+# 活跃态清单唯一事实源（与 cluster state_machine 同源设计）；内联副本已收口。
+from foundation.cluster_port import ACTIVE_JOB_STATUSES
 from foundation.test_execution_options import matches_device_selector, validate_execution_options
 
 
@@ -1007,8 +1010,7 @@ class HttpAutomationExecutor(RecoveryExecutorMixin):
                 return result
             job = result.get("response", {}).get("job") or result.get("job") or {}
             status = str(job.get("status") or "")
-            if status in {"created", "queued", "leasing", "assigned", "dispatching", "running",
-                          "stopping", "collecting", "worker_lost"}:
+            if status in ACTIVE_JOB_STATUSES:
                 return {
                     "success": True,
                     "running": True,

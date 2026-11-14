@@ -456,14 +456,5 @@ class VNCManager:
             logger.error(f"Error getting VNC status: {e}")
             return {'running': False, 'error': str(e)}
 
-    def start_desktop_vnc(
-        self,
-        host: str = None,
-        password: str = None,
-        vnc_password: str = None
-    ) -> dict[str, Any]:
-        """启动Ubuntu主机桌面VNC（委托给start_vnc）"""
-        return self.start_vnc(host, password, vnc_password)
-
 
 vnc_manager = VNCManager()

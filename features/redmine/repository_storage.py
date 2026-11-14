@@ -51,14 +51,6 @@ class RepositoryStorageMixin:
                 ).fetchall()
         return [self._decode_row(row) for row in rows]
 
-    def get_unresolved_issues(self, limit: int = 50) -> list[dict[str, Any]]:
-        with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM redmine_agent_issues WHERE is_resolved = 0 ORDER BY updated_on DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        return [self._decode_row(row) for row in rows]
-
     def get_resolved_issues_by_date(
         self,
         owner_names: list[str] | None = None,

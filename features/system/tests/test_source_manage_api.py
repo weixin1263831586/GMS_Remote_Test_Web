@@ -106,6 +106,23 @@ class _ManageApiHarness(unittest.TestCase):
         self.client = TestClient(self.app)
         self.addCleanup(self.client.close)
 
+    def _make_temp_git_repo(self, name: str = "repo") -> Path:
+        """真实临时 git 仓（git init + 1 commit），供 local_git 源探测。"""
+        import subprocess
+
+        repo = self.root / "repos" / name
+        repo.mkdir(parents=True)
+        (repo / "README.md").write_text("temp repo\n", encoding="utf-8")
+        for command in (
+            ["git", "init", "-q"],
+            ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+             "add", "README.md"],
+            ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+             "commit", "-qm", "init"],
+        ):
+            subprocess.run(command, cwd=repo, check=True, timeout=60)
+        return repo
+
 
 class ManageApiGuardTests(_ManageApiHarness):
     def test_agent_token_cannot_read_servers(self):
@@ -234,6 +251,25 @@ class ManageApiFlowTests(_ManageApiHarness):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_derive_source_id_preserves_case(self):
+        """目录名派生 source_id 必须保留原始大小写（7_Android17_1017）。"""
+        derive = self.manage._derive_source_id
+        self.assertEqual(derive("/home/hcj/7_Android17_1017"), "7_Android17_1017")
+        self.assertEqual(derive("/home/hcj/6_SDK-AOSP_v2.1/"), "6_SDK-AOSP_v2-1")
+        # 非法字符仍被清洗，空结果回退 "sdk"。
+        self.assertEqual(derive("/home/hcj/###"), "sdk")
+
+    def test_guess_android_version(self):
+        guess = self.manage.guess_android_version
+        self.assertEqual(guess("/home/hcj/7_Android17_1017"), "Android17")
+        self.assertEqual(guess("/home/hcj/android-16-bp2a"), "Android16")
+        self.assertEqual(guess("/home/hcj/AOSP_15_workspace"), "Android15")
+        self.assertEqual(guess("/home/hcj/aosp_android_14.0.0_r1"), "Android14")
+        # 无 Android/aosp 字样不猜：0623 等日期/编号不得误判成版本。
+        self.assertEqual(guess("/home/hcj/6_Android16_0623"), "Android16")
+        self.assertEqual(guess("/home/hcj/my_project_0623"), "")
+        self.assertEqual(guess("/home/hcj/backup_2024"), "")
+
     def test_register_rejects_path_without_git(self):
         with self._patch_ssh(stdout="DIR_OK\n0\n"):
             response = self.client.post(
@@ -257,7 +293,7 @@ class ManageApiFlowTests(_ManageApiHarness):
             )
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()["data"]["source"]
-        self.assertEqual(payload["source_id"], "6_android16_0623")
+        self.assertEqual(payload["source_id"], "6_Android16_0623")
         self.assertEqual(payload["registry_state"], "AVAILABLE")
         self.assertNotIn("ssh_password_enc", payload)
         reload.assert_called_once()
@@ -265,7 +301,7 @@ class ManageApiFlowTests(_ManageApiHarness):
         raw = self.store_path.read_text(encoding="utf-8")
         self.assertNotIn("one-shot-pw", raw)
         self.assertIn("ssh_password_enc", raw)
-        self.assertEqual(self.store.get_password("6_android16_0623"), "one-shot-pw")
+        self.assertEqual(self.store.get_password("6_Android16_0623"), "one-shot-pw")
 
     def test_delete_removes_and_reloads(self):
         self.store.add(
@@ -290,6 +326,12 @@ class ManageApiFlowTests(_ManageApiHarness):
 
 
 class DiscoverTests(_ManageApiHarness):
+    def test_parse_discover_keeps_legacy_output_without_home_marker(self):
+        candidates = self.manage._parse_discover(
+            "GIT|/home/builder/sdk\nSUB|/home/builder/work/sdk\n"
+        )
+        self.assertEqual([item["path"] for item in candidates], ["/home/builder/sdk"])
+
     def test_parse_target_formats(self):
         parse = self.manage._parse_target
         self.assertEqual(
@@ -306,8 +348,9 @@ class DiscoverTests(_ManageApiHarness):
 
     def test_discover_lists_repo_workspaces(self):
         stdout = (
-            "REPO|/home/hcq/6_Android16_0623\n"
-            "SUB|/home/hcq/single-project\n"
+            "HOME|/home/hcj\n"
+            "REPO|/home/hcj/6_Android16_0623\n"
+            "SUB|/home/hcj/single-project\n"
             "junk\n"
         )
         with mock.patch.object(
@@ -321,8 +364,62 @@ class DiscoverTests(_ManageApiHarness):
         self.assertEqual(response.status_code, 200, response.text)
         candidates = response.json()["data"]["candidates"]
         self.assertEqual(candidates[0]["kind"], "REPO")
-        self.assertEqual(candidates[0]["path"], "/home/hcq/6_Android16_0623")
+        self.assertEqual(candidates[0]["path"], "/home/hcj/6_Android16_0623")
         self.assertIn("repo 工作区", candidates[0]["kind_label"])
+        # SUB 是普通目录下的独立 git 仓；标签不得与 SDK 检索链路
+        # 里 "repo 工作区内部子仓"（discover_repos）术语撞车。
+        sub = next(item for item in candidates if item["kind"] == "SUB")
+        self.assertEqual(sub["kind_label"], "二级 git 仓")
+
+    def test_discover_keeps_git_single_repo_in_nested_home(self):
+        """嵌套 home（/data/users/x）的一级目录有 4 个斜杠，不能误剪。"""
+        stdout = (
+            "HOME|/data/users/hcq\n"
+            "GIT|/data/users/hcq/my-project\n"
+            "REPO|/data/users/hcq/aosp\n"
+            "SUB|/data/users/hcq/aosp/deep/extra\n"  # 三层：剪掉
+        )
+        with mock.patch.object(
+            self.manage, "_run_remote_probe", return_value=(stdout, 0)
+        ), mock.patch.object(
+            self.manage, "_resolve_password_by_target", return_value="pw"
+        ):
+            response = self.client.post(
+                "/api/sdk/manage/discover", json={"target": "hcq@10.0.0.9"}
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        candidates = response.json()["data"]["candidates"]
+        kinds = {(item["kind"], item["path"]) for item in candidates}
+        self.assertIn(("GIT", "/data/users/hcq/my-project"), kinds)
+        self.assertIn(("REPO", "/data/users/hcq/aosp"), kinds)
+        self.assertNotIn(("SUB", "/data/users/hcq/aosp/deep/extra"), kinds)
+
+    def test_discover_command_executes_and_marks_git_repos(self, ):
+        """真实执行 _discover_command：GIT 单仓（含空格路径）必须被识别。
+
+        这是评审要求的 shell 集成测试——只检查命令字符串挡不住
+        转义回归（历史上 GIT 行的 \" 转义让 GIT 类型静默丢失）。"""
+        import subprocess
+
+        home = self.root / "remote-home"
+        git_repo = home / "my repo"
+        (git_repo / ".git").mkdir(parents=True)
+        repo_ws = home / "6_A16"
+        (repo_ws / ".repo").mkdir(parents=True)
+        (repo_ws / ".repo" / "manifest.xml").write_text("<manifest/>")
+        # SUB 只在「一级目录既非 repo 工作区也非 git 仓」时向二级探测。
+        sub_repo = home / "workspaces" / "lib"
+        (sub_repo / ".git").mkdir(parents=True)
+        stdout = subprocess.run(
+            ["bash", "-c", self.manage._discover_command()],
+            env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+            capture_output=True, text=True, timeout=60, check=True,
+        ).stdout
+        candidates = {item["path"]: item["kind"]
+                      for item in self.manage._parse_discover(stdout)}
+        self.assertEqual(candidates.get(str(git_repo)), "GIT")
+        self.assertEqual(candidates.get(str(repo_ws)), "REPO")
+        self.assertEqual(candidates.get(str(sub_repo)), "SUB")
 
     def test_discover_requires_target(self):
         response = self.client.post("/api/sdk/manage/discover", json={})
@@ -373,20 +470,21 @@ class DiscoverTests(_ManageApiHarness):
         source = response.json()["data"]["source"]
         self.assertEqual(source["ssh_host"], "10.0.0.9")
         self.assertEqual(source["ssh_username"], "hcq")
-        self.assertEqual(source["source_id"], "6_android16_0623")
+        self.assertEqual(source["source_id"], "6_Android16_0623")
         # env 解析出的口令被加密存储
         self.assertEqual(
-            self.store.get_password("6_android16_0623"), "env-pw"
+            self.store.get_password("6_Android16_0623"), "env-pw"
         )
 
 
 class ManageListLiveTests(_ManageApiHarness):
     def test_local_git_list_verifies_locally(self):
         """local_git 源在 list 刷新时本地探测，不 SSH。"""
+        repo = self._make_temp_git_repo("local-fb")
         self.store.add(
             source_id="local-fb",
             provider="local_git",
-            repo_root="/home/hcq/GMS_Remote_Test_Web",
+            repo_root=str(repo),
             default_revision="main",
         )
         with mock.patch.object(self.manage, "_run_remote_probe") as remote:
@@ -412,13 +510,14 @@ class ManageListLiveTests(_ManageApiHarness):
         self.assertFalse(self.store.get("local-gone")["last_verified_ok"])
 
     def test_register_local_git_source(self):
+        repo = self._make_temp_git_repo("registered")
         with mock.patch.object(self.manage, "reload_source_runtime") as reload:
             reload.return_value = "AVAILABLE"
             response = self.client.post(
                 "/api/sdk/manage/sources",
                 json={
                     "provider": "local_git",
-                    "repo_root": "/home/hcq/GMS_Remote_Test_Web",
+                    "repo_root": str(repo),
                     "default_revision": "main",
                 },
             )

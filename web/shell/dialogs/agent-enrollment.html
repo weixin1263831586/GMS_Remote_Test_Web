@@ -81,14 +81,14 @@
     <div class="modal-content agent-access-modal-content">
         <div class="modal-header">
             <span id="agent-sdk-add-title" class="modal-title">添加 SDK 源码源</span>
-            <button type="button" class="modal-close" aria-label="关闭添加SDK" data-click="agentAccessToggleAddSdk" data-a0="false">&times;</button>
+            <button type="button" class="modal-close" aria-label="关闭添加SDK" data-click="sdkConfigToggleAddSdk" data-a0="false">&times;</button>
         </div>
         <div class="modal-body agent-access-modal-body">
-            <form id="agent-sdk-add-form" class="agent-access-create-card" data-submit="agentAccessSubmitAddSdk" data-prevent>
+            <form id="agent-sdk-add-form" class="agent-access-create-card" data-submit="sdkConfigSubmitAdd" data-prevent>
                 <div class="agent-access-form-grid">
                     <label class="agent-access-field">
                         <span>源类型</span>
-                        <select id="agent-sdk-add-type" class="combo-box" data-change="agentAccessOnSdkTypeChange">
+                        <select id="agent-sdk-add-type" class="combo-box" data-change="sdkConfigOnTypeChange">
                             <option value="ssh_git">编译服务器（SSH 只读）</option>
                             <option value="local_git">本机 Git 仓库</option>
                         </select>
@@ -96,7 +96,7 @@
                     </label>
                     <label class="agent-access-field agent-sdk-ssh-only" id="agent-sdk-add-target-field">
                         <span>编译服务器 <em>必填</em>（填完按回车自动发现目录）</span>
-                        <input id="agent-sdk-add-target" class="combo-box mono" maxlength="255" placeholder="hcq@10.10.10.206" autocomplete="off" data-change="agentAccessOnSdkTargetChange" data-keydown="agentAccessOnSdkTargetKeydown" data-key="Enter" data-prevent>
+                        <input id="agent-sdk-add-target" class="combo-box mono" maxlength="255" placeholder="hcq@10.10.10.206" autocomplete="off" data-change="sdkConfigOnTargetChange" data-keydown="sdkConfigOnTargetKeydown" data-key="Enter" data-prevent>
                         <small>格式 user@host[:port]；口令优先取编译服务器配置，没有则用下方口令框。</small>
                     </label>
                 </div>
@@ -106,12 +106,12 @@
                         <select id="agent-sdk-add-path" class="combo-box mono" required>
                             <option value="">请先填写服务器并按回车「发现目录」</option>
                         </select>
-                        <small id="agent-sdk-add-path-hint">远端 home（≤2 层）下的 repo 工作区 / git 仓库。</small>
+                        <small id="agent-sdk-add-path-hint">SDK 检索优先选「repo 工作区」；「二级 git 仓」是普通目录下的独立 git 仓库（CI 脚本、备份、工具仓都算），不一定是 SDK 源码树。</small>
                     </label>
                     <label class="agent-access-field">
                         <span>源 ID（可选）</span>
                         <input id="agent-sdk-add-id" class="combo-box mono" maxlength="64" placeholder="留空按目录名自动生成">
-                        <small>小写字母/数字/中划线/下划线，用于 Agent 检索时的 source 参数。</small>
+                        <small>字母/数字/中划线/下划线（自动生成时保留目录名大小写），用于 Agent 检索时的 source 参数。</small>
                     </label>
                 </div>
                 <div class="agent-access-form-grid agent-sdk-ssh-only" id="agent-sdk-add-cred-row">
@@ -128,13 +128,18 @@
                 </div>
                 <div class="agent-access-form-grid">
                     <label class="agent-access-field">
+                        <span>Android 版本（可选）</span>
+                        <input id="agent-sdk-add-android-version" class="combo-box mono" maxlength="128" placeholder="选中目录后自动识别，可手动修改">
+                        <small>仅用于列表展示；从目录名识别（如 Android17），识别不到可手动填写。</small>
+                    </label>
+                    <label class="agent-access-field">
                         <span>手动路径兜底（可选）</span>
                         <input id="agent-sdk-add-path-manual" class="combo-box mono" maxlength="512" placeholder="下拉没有时手动输入绝对路径" autocomplete="off">
                         <small>填写后优先于下拉框；用于发现不到的深层目录。</small>
                     </label>
                     <label class="agent-access-field">
                         <span>重新发现（可选）</span>
-                        <button id="agent-sdk-add-discover-btn" class="btn-xs" type="button" data-click="agentAccessDiscoverSdkRoots">发现目录</button>
+                        <button id="agent-sdk-add-discover-btn" class="btn-xs" type="button" data-click="sdkConfigDiscoverRoots">发现目录</button>
                         <small id="agent-sdk-add-discover-hint">服务器路径填错改动后可手动重刷下拉。</small>
                     </label>
                 </div>
@@ -146,8 +151,8 @@
         <div class="agent-access-form-actions">
             <span class="agent-access-form-hint">注册前会连接服务器校验路径与 git 仓库；只读检索，绝不写入远端。</span>
             <div>
-                <button class="btn-xs" type="button" data-click="agentAccessToggleAddSdk" data-a0="false">取消</button>
-                <button id="agent-sdk-add-probe-btn" class="btn-xs" type="button" data-click="agentAccessProbeSdkPath">校验路径</button>
+                <button class="btn-xs" type="button" data-click="sdkConfigToggleAddSdk" data-a0="false">取消</button>
+                <button id="agent-sdk-add-probe-btn" class="btn-xs" type="button" data-click="sdkConfigProbePath">校验路径</button>
                 <button id="agent-sdk-add-submit" class="btn-xs btn-primary" type="submit" form="agent-sdk-add-form">添加</button>
             </div>
         </div>

@@ -435,7 +435,7 @@ class ConfigManager(ConfigPersistenceMixin):
         return denormalizer(raw) if denormalizer else dict(raw)
 
     def _get_section(self, key: str) -> dict[str, Any]:
-        """读取并规范化配置中的某个区段（如 redmine_dashboard / gerrit_dashboard）。"""
+        """读取并规范化配置中的某个区段（如 redmine_dashboard / redmine_stats）。"""
         return self._normalize_section(key, self.load_config().get(key) or {})
 
     def _save_section(self, key: str, payload: dict[str, Any], *, merge_from_runtime: bool = False) -> bool:
@@ -480,14 +480,6 @@ class ConfigManager(ConfigPersistenceMixin):
     def save_redmine_dashboard_config(self, dashboard_config: dict[str, Any]) -> bool:
         """Save Redmine dashboard profiles to runtime config."""
         return self._save_section('redmine_dashboard', dashboard_config)
-
-    def get_gerrit_dashboard_config(self) -> dict[str, Any]:
-        """Return normalized Gerrit dashboard configuration."""
-        return self._get_section('gerrit_dashboard')
-
-    def save_gerrit_dashboard_config(self, dashboard_config: dict[str, Any]) -> bool:
-        """Save Gerrit dashboard settings to runtime config."""
-        return self._save_section('gerrit_dashboard', dashboard_config)
 
     def save_client_ssh_credentials(self, credentials: list) -> bool:
         """Persist host-scoped SSH credentials encrypted at rest."""

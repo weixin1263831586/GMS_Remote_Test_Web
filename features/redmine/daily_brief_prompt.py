@@ -467,6 +467,11 @@ or token budget. Cross-check competing explanations and verify proposed fixes
 against the actual failure, product configuration and suite version. Follow useful
 leads until resolved or blocked by unavailable evidence. Avoid repeating identical
 failed calls; try relevant alternatives and state remaining evidence gaps.
+A full-SDK gms_rt_sdk_search (no path filter) greps 1000+ repos over SSH and
+can legitimately take 1-4 minutes: issue it once and wait for the result. A
+timeout error means slow, not broken — do not give up on source evidence
+because of it; retry only with `path` narrowed to the relevant repo (e.g.
+frameworks/base), never with identical arguments.
 Do not substitute speculation for unavailable facts, or claim completion of checks
 you could not perform. Keep the final summary clear without truncating investigation.
 

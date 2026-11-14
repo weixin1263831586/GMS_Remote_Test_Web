@@ -139,8 +139,7 @@ def register_worker(body: WorkerRegistration, request: Request,
             ),
             "payload": {},
         })
-    return {"success": True, "worker": worker, "heartbeat_interval_seconds": 15,
-            "device_report_interval_seconds": 10, "suite_report_interval_seconds": 300,
+    return {"success": True, "worker": worker,
             "session_id": worker.get("session_id", ""),
             "connection_generation": worker.get("connection_generation", 0)}
 

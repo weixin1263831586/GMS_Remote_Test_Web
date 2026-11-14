@@ -168,7 +168,3 @@ class AsyncOnce:
 
     async def __call__(self, *args, **kwargs):
         return self._return_value
-
-
-if __name__ == "__main__":
-    unittest.main()

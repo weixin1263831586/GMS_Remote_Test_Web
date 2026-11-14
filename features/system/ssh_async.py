@@ -83,24 +83,6 @@ class SSHAsyncManager:
                 logger.error(f"[SSH] Failed to connect to {host}: {e}")
                 raise
 
-    async def execute_command_with_stream(
-        self,
-        ssh: paramiko.SSHClient,
-        command: str,
-        log_callback,
-        timeout: int = 300,
-        get_pty: bool = False,
-    ) -> CommandResult:
-        """执行 SSH 命令，通过回调输出日志并返回 :class:`CommandResult`。
-
-        实现委托给 SSHExecutor.run_stream（stdout 走 ``recv``、stderr 走
-        ``recv_stderr``，drain 完成后再取退出码）。
-        """
-        return await ssh_executor.run_stream(
-            ssh, command, log_callback, timeout, get_pty=get_pty,
-        )
-
-
     async def execute_command_simple(
         self,
         host: str,
@@ -129,11 +111,6 @@ class SSHAsyncManager:
                 logger.error(f"[SSH] Error closing connection to {host}: {e}")
         if keys:
             logger.info(f"[SSH] Closed {len(keys)} connection(s) to {host}")
-
-    def close_all(self):
-        """关闭所有连接"""
-        for host in {key[0] for key in self.connections}:
-            self.close(host)
 
 
 ssh_async_manager = SSHAsyncManager()
