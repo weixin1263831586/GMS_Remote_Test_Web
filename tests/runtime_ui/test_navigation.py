@@ -992,7 +992,7 @@ class RuntimeNavigationTests(RuntimeUiHarness):
                 f"{self.base_url}/"
             )
             guide_images = page.locator("#sidebar-settings-panel-guide .project-guide-image-button img")
-            expect(guide_images).to_have_count(11)
+            expect(guide_images).to_have_count(13)
             for image_index in range(guide_images.count()):
                 guide_images.nth(image_index).scroll_into_view_if_needed()
                 expect(guide_images.nth(image_index)).to_have_js_property("naturalWidth", 1600)

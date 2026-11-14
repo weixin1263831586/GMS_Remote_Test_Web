@@ -10,7 +10,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 
 from features.assistant import kkagent_bridge
-from features.assistant.session_log import _append_message, _append_step
+from features.assistant.session_log import _append_message, _append_step, _settle_step
 from features.assistant.session_registry import _now_iso
 
 
@@ -66,6 +66,19 @@ def progress(session: dict, state: PlanningState, status: str, detail: str, *, w
             "started_at": _now_iso(),
         })
         session["updated_at"] = _now_iso()
+
+
+def finish_progress(session: dict, state: PlanningState, status: str, detail: str) -> None:
+    """规划步骤收敛：复用 progress 的就地更新并补记耗时。"""
+    progress(session, state, status, detail)
+    step = next((item for item in session["steps"] if item["id"] == state.progress_id), None)
+    if step is None:
+        return
+    # started_at 固定为首次追加时刻（progress 每轮会刷新 data.started_at，
+    # 那是"本轮模型等待"起点；整体耗时必须从步骤创建算起）。
+    step.setdefault("started_at", step.get("created_at"))
+    _settle_step(step)
+    session["updated_at"] = _now_iso()
 
 
 async def infer(session: dict, state: PlanningState, context: str):

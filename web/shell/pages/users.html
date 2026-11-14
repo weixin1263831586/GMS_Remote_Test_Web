@@ -113,6 +113,8 @@
 
             <!-- SDK 配置：Agent 源码检索的数据源绑定（本机 / 编译服务器 / OpenGrok）。 -->
             <div id="sdk-config-panel" style="display: none;">
+                <!-- 统计卡模板与用户列表/Agent 接入一致；卡片按 Android 版本由 sdkConfigRenderStats 动态生成。 -->
+                <div class="agent-stats page-stat-row" id="agent-sdk-stat-row"></div>
                 <section class="agent-access-list-section" aria-label="已配置的 SDK 源码源">
                     <div class="agent-access-toolbar">
                         <div class="agent-access-list-label">

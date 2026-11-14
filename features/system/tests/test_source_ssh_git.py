@@ -332,6 +332,36 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         self.assertEqual(meta["commit"], self.COMMIT_FB)
         self.assertEqual(meta["repos"]["kernel-6.1"]["subject"], "Fix kernel")
 
+    def test_multi_search_rejects_non_head_revision(self):
+        """多仓模式显式 revision（分支/tag/commit）必须 422 拒绝。
+
+        回归（2026-11-14 审核意见）：旧实现接受任意 revision 标签却仍在
+        各子仓 HEAD 上检索，跨版本分析会把 HEAD 结果当作目标版本证据。
+        """
+        self.provider = self._provider(self._handler(
+            grep_stdout=self._grep_stdout(),
+            heads_stdout=self._heads_stdout(),
+        ))
+        for revision in ("android-16-release", "a" * 40):
+            with self.assertRaises(SourceProviderError) as ctx:
+                self.provider.search(revision, "run")
+            self.assertEqual(ctx.exception.status_code, 422)
+        # 检索从未发生（无 grep 命令发出）。
+        self.assertFalse([c for c in self.executed if " grep " in c])
+        # 元数据端点同样拒绝。
+        with self.assertRaises(SourceProviderError) as ctx:
+            self.provider.revision_metadata("android-16-release")
+        self.assertEqual(ctx.exception.status_code, 422)
+        # HEAD 与源默认 revision 仍放行。
+        self.assertTrue(self.provider.search("", "run")["multi_repo"])
+        self.assertTrue(self.provider.search("HEAD", "run")["multi_repo"])
+
+    def test_multi_metadata_marks_revision_is_head(self):
+        self.provider = self._provider(self._handler(
+            heads_stdout=self._heads_stdout(True)))
+        meta = self.provider.revision_metadata("")
+        self.assertTrue(meta["revision_is_head"])
+
     def test_search_resolves_hit_commits_and_reads(self):
         self.provider = self._provider(self._handler(
             grep_stdout=self._grep_stdout(),
@@ -356,6 +386,28 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         show_cmd = [c for c in self.executed if " show " in c][-1]
         self.assertIn("-C /remote/sdk/kernel-6.1", show_cmd)
         self.assertIn(f"{self.COMMIT_KERN}:drivers/gpio.c", show_cmd)
+
+    def test_filename_path_filter_searches_all_repos_not_empty(self):
+        """文件名 path_filter 不命中子仓名：全量搜索 + 完整路径过滤。
+
+        回归（2026-11-14 审核意见）：旧实现对未命中子仓名且不含 ``/`` 的
+        filter 直接返回空结果且 coverage_complete=true（没搜索却声明完整
+        覆盖）。正确语义：按完整文件路径过滤，零命中才是诚实空结果。
+        """
+        self.provider = self._provider(self._handler(
+            grep_stdout=self._grep_stdout(),
+            heads_stdout=self._heads_stdout(),
+        ))
+        result = self.provider.search("", "run", path_filter="A.java")
+        self.assertEqual(
+            [match["path"] for match in result["matches"]],
+            ["frameworks/base/core/java/A.java"],
+        )
+        # 两个子仓都被检索（分片命令覆盖全部仓），覆盖元数据如实完整。
+        self.assertEqual(result["repos_total"], 2)
+        self.assertEqual(result["repos_pending"], 0)
+        self.assertTrue(result["coverage_complete"])
+        self.assertFalse(result["limited"])
 
     def test_search_grep_runs_at_head_without_per_repo_revparse(self):
         self.provider = self._provider(self._handler(

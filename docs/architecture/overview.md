@@ -44,6 +44,12 @@ Web「系统架构 → 平台总览」顶部的分层功能图按接入与规划
 套件 `results` / `logs`，从测试套件浏览器访问；已登记报告由 Controller
 索引，从报告管理访问。
 
+对话 Agent 默认由 kkagent 根据项目工具注册表规划，Controller 继续负责
+鉴权、资源预检和执行；需确认的计划在预检通过后由用户确认。对话引擎与
+报告分析模型分别展示状态，失败可显式重试，见 [ADR 0031](adr/0031-conversation-project-agent.md)。
+工单分析使用匹配版本的 APK / SDK 证据，发布前逐段复核候选结论；复核不
+代表根因已经由设备复现，见 [ADR 0036](adr/0036-analysis-claim-review.md)。
+
 1. **Controller**：FastAPI 应用（入口 `app.py`）。负责 Web UI、认证、权限、任务调度、配置、报告、集群状态和外部系统集成。
 2. **Worker Agent**（`worker_agent/`）：运行在实际执行 GMS 测试的 Linux 主机上，负责 ADB、Fastboot、Tradefed、USB/IP Client、本地资源探测与任务执行。
 3. **Device Source**：Android 设备物理 USB 所在主机。直接 USB/IP 来源工作流当前主要支持 Windows + `usbipd-win`（Ubuntu 来源支持设备共享、分配与重连）。

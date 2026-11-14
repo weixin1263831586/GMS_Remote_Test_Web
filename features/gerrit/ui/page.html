@@ -11,6 +11,16 @@
     * { box-sizing:border-box; }
     body { margin:0; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--page-background); color:var(--text); }
     html { scrollbar-gutter:stable; overflow-y:scroll; scroll-padding-top:86px; }
+    /* 根滚动条对齐平台全局 8px 样式（common-components.css）：滚动条带
+       宽度（scrollbar-gutter 预留量）与 shell 探针同源同值，shell 骨架屏
+       注入等宽右 pad 后，星轨圆心与页面内容列/加载舞台三方重合，加载与
+       揭示交接零跳变；视觉与外层 shell 一致。
+       注意：不要再给根加 scrollbar-width/color——标准属性会覆盖
+       ::-webkit-scrollbar 的宽度，让预留量与 shell 探针不一致。 */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--darker-bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
     header { position:sticky; top:0; z-index:1000; min-height:44px; display:flex; align-items:center; gap:16px; padding:0 16px; border-bottom:0; background:var(--panel); box-shadow:0 8px 18px rgba(0,0,0,.22); flex-wrap:wrap; row-gap:6px; }
     .header-title { font-size:18px; font-weight:700; white-space:nowrap; margin:0; }
     select,input { height:30px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:0 8px; font-size:13px; }
@@ -186,7 +196,7 @@ header { background: var(--panel); border-bottom: 1px solid var(--border); box-s
 :where(table) tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--panel)); }
 
 </style>
-<link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261113-orbit-stage2">
+<link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-stage5">
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-ui-foundations">
 </head>
 <body>

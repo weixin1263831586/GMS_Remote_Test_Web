@@ -118,6 +118,42 @@ class UserSourceStoreTests(unittest.TestCase):
         self.path.write_text('{"version": 1, "sources": {}}', encoding="utf-8")
         self.assertEqual(self.store.list_sources(), [])
 
+    def test_structurally_invalid_store_blocks_writes(self):
+        """语法合法但结构错误的存储同样阻断写入（2026-11-14 审核意见）。
+
+        旧实现把 ``sources: []``、缺 version 等结构损坏当空存储返回，
+        后续 add 用空数据覆盖原文件、已注册源静默丢失。
+        """
+        cases = [
+            '{"version": 1, "sources": []}',        # sources 是数组
+            '{"sources": {}}',                       # 缺 version
+            '{"version": "1", "sources": {}}',       # version 类型错
+            '{"version": 2, "sources": {}}',         # 版本不识别
+            '{"version": 1}',                        # 缺 sources
+            '[]',                                    # 顶层不是对象
+            '{"version": 1, "sources": {"a": []}}',  # 记录不是对象
+            '{"version": 1, "sources": {"a": {"source_id": "b"}}}',  # 键不一致
+        ]
+        for content in cases:
+            with self.subTest(content=content):
+                backup = self.path.with_suffix(self.path.suffix + ".corrupt")
+                backup.unlink(missing_ok=True)
+                self.path.write_text(content, encoding="utf-8")
+                with self.assertRaises(UserSourceStoreError) as ctx:
+                    self.store.list_sources()
+                self.assertEqual(ctx.exception.status_code, 503)
+                # add 走同一加载路径，必须同样失败而不是静默重置。
+                with self.assertRaises(UserSourceStoreError):
+                    self.store.add(
+                        source_id="a16", repo_root="/data/sdk",
+                        ssh_host="h", ssh_port=22, ssh_username="u",
+                    )
+                # 原文件原样保留。
+                self.assertEqual(self.path.read_text(encoding="utf-8"), content)
+        # 修复后可正常使用。
+        self.path.write_text('{"version": 1, "sources": {}}', encoding="utf-8")
+        self.assertEqual(self.store.list_sources(), [])
+
     def test_validation_rules(self):
         with self.assertRaises(UserSourceStoreError):
             validate_source_id("Bad Id")
@@ -360,6 +396,53 @@ class RegistryMergeTests(unittest.TestCase):
                 }
                 self.assertIn("user-b", ids)  # 读路径自动重建
                 self.assertIn("static-local", ids)
+
+    def test_registry_rebuilds_when_store_file_disappears(self):
+        """存储文件被删除：读路径必须重建（用户源消失），不能沿用旧 registry。
+
+        2026-11-14 审核意见：旧指纹把"文件不存在"与"无变化"混为同一
+        返回值，文件消失后旧 registry（含已删除文件里的用户源）被静默
+        沿用。现在"确认不存在"是独立指纹态，与构建时基线不同 → stale。
+        """
+        import features.system.source_provider as sp
+
+        with TemporaryDirectory() as directory:
+            store_path = Path(directory) / "user_sources.json"
+            store = UserSourceStore(store_path)
+            _stub_secrets(store)
+            store.add(
+                source_id="user-gone",
+                repo_root="/sdk/gone",
+                ssh_host="10.0.0.9",
+                ssh_port=22,
+                ssh_username="builder",
+                ssh_password="pw",
+            )
+            static_config = {"sdk_sources": {"providers": [
+                {"source_id": "static-local", "provider": "local_git",
+                 "repo_root": "/local/repo"},
+            ]}}
+            with mock.patch.object(
+                sp, "user_source_store", return_value=store
+            ), mock.patch.object(
+                sp, "derive_application_key", create=True
+            ) as derive:
+                derive.return_value = b"k"
+                self.assertEqual(
+                    sp.initialize_source_runtime(static_config), "AVAILABLE")
+                self.assertIn(
+                    "user-gone",
+                    {p.config.source_id
+                     for p in sp.source_registry()._providers.values()},
+                )
+                # 模拟管理员手工删除存储文件。
+                store_path.unlink()
+                ids = {
+                    p.config.source_id
+                    for p in sp.source_registry()._providers.values()
+                }
+                self.assertNotIn("user-gone", ids)  # 读路径重建：用户源消失
+                self.assertIn("static-local", ids)  # 静态源不受影响
 
     def test_corrupt_store_breaks_hot_reload_without_reset(self):
         """热更新读到损坏存储：保留旧 registry，不静默清空。"""

@@ -327,6 +327,22 @@
 
         const LAZY_FRAME_PROGRESS_DELAY_MS = 650;
 
+        // 平台滚动条带宽度：与 redmine/gerrit iframe 根（html）同款声明
+        // 组合（overflow:scroll + scrollbar-gutter:stable + 全局
+        // ::-webkit-scrollbar 8px）下的预留量。经典滚动条环境等于实际
+        // 滚动条宽，overlay 环境等于 gutter 预留量——两侧度量恒等。供
+        // 舞台契约的骨架屏 pad 使用（见 loading-orbit.css）。
+        function platformScrollbarWidthPx() {
+            if (window.__platformScrollbarWidthPx === undefined) {
+                const probe = document.createElement('div');
+                probe.style.cssText = 'position:absolute;top:-999px;left:-999px;width:60px;height:60px;overflow:scroll;scrollbar-gutter:stable;';
+                document.body.appendChild(probe);
+                window.__platformScrollbarWidthPx = Math.max(0, probe.offsetWidth - probe.clientWidth);
+                probe.remove();
+            }
+            return window.__platformScrollbarWidthPx;
+        }
+
         function prepareLazyFrameLoadingSurface(frame) {
             const shell = frame?.closest('.embedded-frame-shell');
             const status = shell?.querySelector('.embedded-frame-loading');
@@ -514,6 +530,12 @@
                 setLazyFrameStatus(frame, status?.dataset.loadingText || '页面仍在准备中…');
                 shell.dataset.frameState = 'loading';
                 shell.dataset.frameProgress = 'hidden';
+                // 舞台契约（redmine/gerrit）：iframe 页根滚动条统一平台 8px
+                // 样式，骨架屏右侧 pad 实测同宽，星轨圆心与 iframe 舞台/
+                // 内容列完全重合（overlay 滚动条环境实测为 0，同样成立）。
+                if (status && (frame.id === 'redmine-agent-frame' || frame.id === 'gerrit-dashboard-frame')) {
+                    status.style.setProperty('--iframe-scrollbar-width', platformScrollbarWidthPx() + 'px');
+                }
             }
             if (frame.__surfaceReadyFallbackTimer) clearTimeout(frame.__surfaceReadyFallbackTimer);
             if (frame.__surfaceProgressTimer) clearTimeout(frame.__surfaceProgressTimer);

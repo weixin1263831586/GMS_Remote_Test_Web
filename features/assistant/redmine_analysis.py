@@ -19,6 +19,7 @@ from .session_log import (
     _append_message,
     _append_step,
     _persist_transcript,
+    _settle_step,
     complete_recovery_step,
 )
 from .session_registry import (
@@ -187,6 +188,7 @@ def _update_step(session, active, status, detail):
         save_session_anchor(session)
     elif (step.get("status"), step.get("detail")) != (status, detail):
         step.update(status=status, detail=redact_sensitive_data(detail), created_at=step.get("created_at") or _now_iso())
+        _settle_step(step)  # 终态补记 finished_at / duration_seconds
         session["updated_at"] = _now_iso()
         _persist_transcript(session)
 

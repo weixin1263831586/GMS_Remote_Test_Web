@@ -771,3 +771,164 @@ class RuntimeDashboardsTests(RuntimeUiHarness):
             self.assert_no_page_errors(page_errors)
         finally:
             page.close()
+
+    def test_redmine_tab_loading_stage_center_matches_shell_skeleton(self):
+        """切 Tab 加载舞台（iframe 内 fixed）与 shell 骨架屏交接圆心零位移。
+
+        回归：iframe 页 html 常驻滚动条让 inset:0 舞台与 shell 骨架屏、
+        内容列的居中基准差半个滚动条宽，文案行高（iframe 默认 normal vs
+        shell 1.6）又差出几像素——用户看到「Tab 加载瞬间动画原点往左漂移
+        一点」。舞台契约：舞台锚定 iframe 布局视口（== 页头/内容列圆心），
+        shell 骨架屏注入等宽右 pad（实测平台滚动条宽度）。挂起数据接口
+        让两边动画同时在场，在主视口坐标系断言三方星轨/页头圆心重合。
+        """
+        page = self.new_page()
+        try:
+            page.route("**/api/redmine-agent/**", lambda route: None)
+            self.goto_shell(page)
+            page.evaluate("switchPage('redmine-agent', null)")
+
+            frame = None
+            for _ in range(60):
+                try:
+                    frame = self.frame_for(page, "#redmine-agent-frame")
+                except AssertionError:
+                    frame = None
+                if frame and frame.query_selector(".loading-orbit--stage .loading-orbit-bar"):
+                    break
+                page.wait_for_timeout(100)
+            self.assertIsNotNone(frame, "iframe 文档未出现 Tab 加载舞台")
+
+            shell_geometry = page.evaluate(
+                """() => {
+                    const frame = document.querySelector('#redmine-agent-frame');
+                    const shell = frame.closest('.embedded-frame-shell');
+                    const bar = shell.querySelector('.embedded-frame-skeleton-bar')
+                        .getBoundingClientRect();
+                    const text = shell.querySelector('.loading-orbit-text');
+                    const status = shell.querySelector('.embedded-frame-loading');
+                    return {
+                        frameState: shell.dataset.frameState,
+                        bar: {x: bar.x, y: bar.y, width: bar.width, height: bar.height},
+                        textLineHeight: text ? getComputedStyle(text).lineHeight : '',
+                        padVar: status ? status.style.getPropertyValue('--iframe-scrollbar-width') : '(no status)',
+                        probeWidth: window.__platformScrollbarWidthPx,
+                        skeletonPad: getComputedStyle(
+                            shell.querySelector('.embedded-frame-skeleton')
+                        ).paddingRight,
+                    };
+                }"""
+            )
+            self.assertEqual(shell_geometry["frameState"], "loading", shell_geometry)
+
+            stage_box = frame.query_selector(
+                ".loading-orbit--stage .loading-orbit-bar"
+            ).bounding_box()
+            header_box = frame.query_selector("header").bounding_box()
+            stage_text_line_height = frame.evaluate(
+                """() => getComputedStyle(
+                    document.querySelector('.loading-orbit--stage .loading-orbit-text')
+                ).lineHeight"""
+            )
+            scrollbar_width = frame.evaluate(
+                "window.innerWidth - document.documentElement.clientWidth"
+            )
+            frame_debug = frame.evaluate(
+                """() => ({
+                    innerWidth: window.innerWidth,
+                    clientWidth: document.documentElement.clientWidth,
+                    scrollbarWidthProp: getComputedStyle(document.documentElement).scrollbarWidth,
+                    stageWidth: document.querySelector('.loading-orbit--stage')
+                        .getBoundingClientRect().width,
+                })"""
+            )
+
+            stage_center = (
+                stage_box["x"] + stage_box["width"] / 2,
+                stage_box["y"] + stage_box["height"] / 2,
+            )
+            skeleton_center = (
+                shell_geometry["bar"]["x"] + shell_geometry["bar"]["width"] / 2,
+                shell_geometry["bar"]["y"] + shell_geometry["bar"]["height"] / 2,
+            )
+            header_center_x = header_box["x"] + header_box["width"] / 2
+            context = (
+                f"shell={shell_geometry} stage={stage_box} header_x={header_center_x} "
+                f"scrollbar={scrollbar_width} frame_debug={frame_debug}"
+            )
+            # 骨架屏（shell 侧）↔ 舞台（iframe 侧）：切 Tab 瞬间圆心零位移。
+            self.assertAlmostEqual(
+                skeleton_center[0], stage_center[0], delta=0.6,
+                msg=f"交接瞬间圆心横向偏移: {context}",
+            )
+            self.assertAlmostEqual(
+                skeleton_center[1], stage_center[1], delta=0.6,
+                msg=f"交接瞬间圆心纵向偏移: {context}",
+            )
+            # 舞台 ↔ 页头/内容列：揭示瞬间圆心零位移（历史上左跳半个滚动条宽）。
+            self.assertAlmostEqual(
+                stage_center[0], header_center_x, delta=0.6,
+                msg=f"舞台与内容列圆心横向偏移: {context}",
+            )
+            self.assertAlmostEqual(
+                shell_geometry["bar"]["width"], stage_box["width"], delta=1,
+                msg=f"星轨尺寸不一致: {context}",
+            )
+            self.assertEqual(shell_geometry["textLineHeight"], stage_text_line_height, shell_geometry)
+        finally:
+            page.close()
+
+    def test_cluster_loading_orbit_centers_in_grid_container(self):
+        """主机集群 Worker 管理区的加载动画在多列 grid 中仍居中。
+
+        回归：#workers 是 .cards 多列 grid，注入的 .loading-orbit 以前
+        只占第一列单元格，动画跑到页面最左边；现在 grid-column:1/-1
+        横跨整行后必须与容器同心。挂起集群接口让动画保持在场。
+        """
+        page = self.new_page()
+        try:
+            page.route("**/api/cluster/**", lambda route: None)
+            self.goto_shell(page)
+            page.evaluate("switchPage('cluster', null)")
+
+            frame = None
+            for _ in range(60):
+                try:
+                    frame = self.frame_for(page, "#cluster-frame")
+                except AssertionError:
+                    frame = None
+                if frame and frame.query_selector("#workers .loading-orbit-bar"):
+                    break
+                page.wait_for_timeout(100)
+            self.assertIsNotNone(frame, "iframe 文档未出现 Worker 区加载动画")
+
+            geometry = frame.evaluate(
+                """() => {
+                    const pane = document.getElementById('tab-management');
+                    if (pane && pane.hidden && typeof selectClusterDashboardTab === 'function') {
+                        selectClusterDashboardTab('management', {persist: false});
+                    }
+                    const workers = document.getElementById('workers').getBoundingClientRect();
+                    const bar = document.querySelector('#workers .loading-orbit-bar')
+                        .getBoundingClientRect();
+                    const orbit = document.querySelector('#workers > .loading-orbit')
+                        .getBoundingClientRect();
+                    return {
+                        workersCenterX: workers.x + workers.width / 2,
+                        orbitWidth: orbit.width,
+                        workersWidth: workers.width,
+                        barCenterX: bar.x + bar.width / 2,
+                    };
+                }"""
+            )
+            self.assertGreater(geometry["orbitWidth"], 0, geometry)
+            self.assertAlmostEqual(
+                geometry["orbitWidth"], geometry["workersWidth"], delta=1,
+                msg=f"加载占位未横跨 grid 整行: {geometry}",
+            )
+            self.assertAlmostEqual(
+                geometry["barCenterX"], geometry["workersCenterX"], delta=1,
+                msg=f"加载动画未与容器同心: {geometry}",
+            )
+        finally:
+            page.close()

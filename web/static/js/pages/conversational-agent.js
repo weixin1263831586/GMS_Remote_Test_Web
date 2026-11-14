@@ -381,6 +381,15 @@ function agentArtifactDownloadHtml(download) {
     return `<div class="agent-artifact-download">固件下载 ${percent}% · ${formatBytes(done)} / ${formatBytes(total)}${rate}<br><progress max="100" value="${percent}" aria-label="固件下载进度"></progress></div>`;
 }
 
+function formatAgentDuration(seconds) {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value < 0) return '';
+    if (value < 60) return `${Math.round(value)} 秒`;
+    const minutes = Math.floor(value / 60);
+    const rest = Math.round(value % 60);
+    return rest ? `${minutes} 分 ${rest} 秒` : `${minutes} 分钟`;
+}
+
 function renderAgentSteps(session) {
     const stepsEl = $('agent-steps');
     const statusEl = $('agent-status');
@@ -405,6 +414,15 @@ function renderAgentSteps(session) {
         const waitStarted = Date.parse(step.data?.started_at || '');
         const waiting = step.status === 'running' && step.data?.kind === 'agent_model_wait' && Number.isFinite(waitStarted);
         const waitDetail = waiting ? ` · 已等待 ${Math.max(0, Math.floor((Date.now() - waitStarted) / 1000))} 秒` : '';
+        // 耗时：终态用后端落盘的 duration_seconds；运行中从 started_at
+        // 实时累计（轮询刷新时自动更新）。取不到起点则不显示。
+        let durationText = '';
+        const startMs = Date.parse(step.started_at || step.created_at || '');
+        if (step.status === 'running' && Number.isFinite(startMs)) {
+            durationText = `已进行 ${formatAgentDuration((Date.now() - startMs) / 1000)}`;
+        } else if (step.duration_seconds !== undefined && step.duration_seconds !== null) {
+            durationText = `耗时 ${formatAgentDuration(step.duration_seconds)}`;
+        }
         // Run 卡片：内嵌实时阶段条（后端监控循环回写 data.progress），
         // 不再只是一个跳转按钮；跳转保留为次级操作。
         const runId = String(step.data?.automation_run_id || '');
@@ -426,7 +444,7 @@ function renderAgentSteps(session) {
                         ${GmsUi.badge(...presentation)}
                     </div>
                     <div class="agent-step-detail">${escapeHtml((step.detail || '') + waitDetail)}</div>
-                    <time class="agent-step-time">${escapeHtml(formatAgentTime(step.created_at))}</time>
+                    <time class="agent-step-time"><span>${escapeHtml(formatAgentTime(step.created_at))}</span>${durationText ? `<span class="agent-step-duration">${escapeHtml(durationText)}</span>` : ''}</time>
                     ${runLink}
                 </div>
             </article>

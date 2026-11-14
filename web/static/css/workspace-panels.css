@@ -60,7 +60,8 @@
 .agent-step-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 5px; }
 .agent-step-title { min-width: 0; overflow-wrap: anywhere; font-size: 13px; font-weight: 600; }
 .agent-step-detail { color: var(--text-secondary); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
-.agent-step-time { display: block; margin-top: 6px; color: var(--text-muted); font: 10px/1.5 var(--ui-font-mono); }
+.agent-step-time { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; color: var(--text-muted); font: 10px/1.5 var(--ui-font-mono); }
+.agent-step-duration { flex-shrink: 0; }
 .agent-run-progress { margin-top: 10px; }
 
 /* Three work areas keep their own scroll surfaces and existing control IDs. */

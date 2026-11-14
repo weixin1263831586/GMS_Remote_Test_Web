@@ -78,7 +78,77 @@ async def test_discovered_aoa_catalog_is_scoped_to_current_owner(monkeypatch):
 
 
 def test_catalog_entries_are_readonly_and_have_public_execution_surfaces():
-    for name in ("firmware_shares", "aoa_profiles"):
+    for name in ("firmware_shares", "aoa_profiles", "sdk_sources"):
         tool = registry.get(name)
         assert tool.is_readonly and not tool.is_dangerous
         assert tool.executor_ref.count(".") == 1
+
+
+def test_sdk_question_discovers_registered_sources_first():
+    names = [item.tool.name for item in registry.find("有哪些SDK可用", top_k=5)]
+    assert names and names[0] == "sdk_sources"
+
+
+@pytest.mark.asyncio
+async def test_sdk_sources_lists_registered_providers_without_paths(monkeypatch):
+    from features.auth import CurrentUser
+    from features.system import source_api
+
+    request = _bare_request()
+    request.state.current_user = CurrentUser(
+        id="owner", username="owner", role="user", display_name="owner",
+    )
+    listed = Mock(return_value=[{
+        "source_id": "7_Android17_1017",
+        "provider": "ssh_git",
+        "default_revision": "main",
+        "repo_root_exposed": False,
+        "ssh_host": "10.0.0.9",
+        "ssh_port": 22,
+        "ssh_username": "hcq",
+        "repo_root": "/srv/aosp",
+    }])
+    monkeypatch.setattr(source_api, "source_registry", lambda: SimpleNamespace(list_sources=listed))
+    result = await ActionExecutor().execute({}, request, "sdk_sources", {})
+    assert result.success
+    assert result.data["sources"][0]["source_id"] == "7_Android17_1017"
+    assert "repo_root" not in result.data["sources"][0]
+    assert "7_Android17_1017" in result.formatted_text
+    assert "hcq@10.0.0.9:22" in result.formatted_text
+    assert "/srv/aosp" not in result.formatted_text
+    listed.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_sdk_sources_reports_an_empty_registry(monkeypatch):
+    from features.auth import CurrentUser
+    from features.system import source_api
+
+    request = _bare_request()
+    request.state.current_user = CurrentUser(
+        id="owner", username="owner", role="user", display_name="owner",
+    )
+    listed = Mock(return_value=[])
+    monkeypatch.setattr(source_api, "source_registry", lambda: SimpleNamespace(list_sources=listed))
+    result = await ActionExecutor().execute({}, request, "sdk_sources", {})
+    assert result.success
+    assert result.data["sources"] == []
+    assert result.formatted_text == "尚未登记 SDK 源。"
+
+
+@pytest.mark.asyncio
+async def test_sdk_sources_keeps_the_scope_gate(monkeypatch):
+    from features.auth import CurrentUser
+    from features.system import source_api
+
+    request = _bare_request()
+    request.state.current_user = CurrentUser(
+        id="agent:t1", username="agent", role="agent_service",
+        extra_permissions=frozenset({"devices.read"}),
+    )
+    listed = Mock(side_effect=AssertionError("must not list sources before sdk.read"))
+    monkeypatch.setattr(source_api, "source_registry", lambda: SimpleNamespace(list_sources=listed))
+    result = await ActionExecutor().execute({}, request, "sdk_sources", {})
+    assert result.success is False
+    assert result.data["status_code"] == 403
+    listed.assert_not_called()

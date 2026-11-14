@@ -41,9 +41,12 @@ async function sdkConfigLoadSources(button) {
         if (label) label.textContent = ' 刷新中…';
     }
     try {
+        // 「刷新」按钮（button 非空）走 sync 强校验；页签自动加载走
+        // auto（fresh 缓存直接显示，stale/pending 转后台校验不阻塞）。
+        const verifyMode = button ? 'sync' : 'auto';
         const [registryResp, manageResp] = await Promise.allSettled([
             apiCall('/api/sdk/sources', 'GET', null, {silentToast: true}),
-            apiCall('/api/sdk/manage/sources', 'GET', null, {silentToast: true}),
+            apiCall(`/api/sdk/manage/sources?verify=${verifyMode}`, 'GET', null, {silentToast: true}),
         ]);
         if (sequence !== agentSdkSourcesSequence) return;
         if (registryResp.status === 'rejected') throw registryResp.reason;
@@ -71,7 +74,46 @@ async function sdkConfigLoadSources(button) {
     }
 }
 
+// ---------- 顶部统计栏（模板与用户列表/Agent 接入一致） ----------
+
+// 版本卡排序：Android<数字> 按数字升序；其余（含"未识别"）排最后。
+function sdkConfigVersionSortKey(version) {
+    const match = /^(?:Android|android)[-_. ]?(\d+)$/.exec(version);
+    if (match) return [0, Number(match[1])];
+    if (/^\d+$/.test(version)) return [0, Number(version)]; // 兼容纯数字写法
+    return [1, version]; // "未识别" 等排最后
+}
+
+function sdkConfigRenderStats(sources) {
+    const row = document.getElementById('agent-sdk-stat-row');
+    if (!row) return;
+    const total = sources.length;
+    // 按 android_version 分组计数；空值归「未识别」。
+    const counts = new Map();
+    sources.forEach(source => {
+        const version = (source.android_version || '').trim() || '未识别';
+        counts.set(version, (counts.get(version) || 0) + 1);
+    });
+    const versions = Array.from(counts.entries())
+        .sort((a, b) => {
+            const [ga, va] = sdkConfigVersionSortKey(a[0]);
+            const [gb, vb] = sdkConfigVersionSortKey(b[0]);
+            return ga !== gb ? ga - gb : va - vb;
+        });
+    const card = (icon, tone, value, label) => `
+        <div class="page-stat-card workbench-stat">
+            <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#${icon}"></use></svg></span><span class="workbench-stat-copy">
+            <span class="page-stat-value ${tone}">${value}</span>
+            <span class="page-stat-label">${label}</span>
+        </span></div>`;
+    row.innerHTML = card('users', 'tone-primary', total, '全部 SDK 源')
+        + versions.map(([version, count]) =>
+            card('test', version === '未识别' ? 'tone-warning' : 'tone-success', count, version === '未识别' ? '未识别版本' : version)
+        ).join('');
+}
+
 function sdkConfigRenderSources(tbody, sources) {
+    sdkConfigRenderStats(sources);
     const count = document.getElementById('agent-sdk-sources-count');
     if (count) {
         count.textContent = sources.length
@@ -114,15 +156,26 @@ function sdkConfigRenderSources(tbody, sources) {
         let live = '<span class="agent-access-empty">—</span>';
         let action = '<span class="agent-access-empty">—</span>';
         if (userRecord) {
-            const ok = Boolean(userRecord.live?.verified);
+            const state = userRecord.verify_state || 'stale';
+            const ok = userRecord.live ? Boolean(userRecord.live.verified) : null;
             const reason = agentAccessEscape(userRecord.live?.reason || '');
-            const title = ok
-                ? ' title="最近一次刷新时路径存在且含 git 仓库"'
-                : ` title="${reason}"`;
             const verifiedAt = userRecord.last_verified_at
                 ? agentAccessEscape(userRecord.last_verified_at) : '';
-            const badgeText = ok ? '✓ 存在' : `✗ ${reason || '不可用'}`;
-            live = `<span class="agent-access-status-badge ${ok ? 'ok' : 'bad'}"${title}${verifiedAt ? ` data-verified="${verifiedAt}"` : ''}>${badgeText}</span>`;
+            let badge;
+            if (ok === null) {
+                // 后台校验进行中（pending=从未校验 / stale=上次结果已过期）。
+                const tip = state === 'pending'
+                    ? '尚未校验，后台校验进行中；稍后刷新查看结果'
+                    : `上次校验（${verifiedAt || '时间未知'}）已过期，后台校验进行中`;
+                badge = `<span class="agent-access-status-badge pending" title="${tip}">… 校验中</span>`;
+            } else {
+                const title = ok
+                    ? ' title="最近一次刷新时路径存在且含 git 仓库"'
+                    : ` title="${reason}"`;
+                const badgeText = ok ? '✓ 存在' : `✗ ${reason || '不可用'}`;
+                badge = `<span class="agent-access-status-badge ${ok ? 'ok' : 'bad'}"${title}${verifiedAt ? ` data-verified="${verifiedAt}"` : ''}>${badgeText}</span>`;
+            }
+            live = badge;
             action = `<button class="btn-xxs" type="button" data-click="sdkConfigDeleteSource" data-a0="${agentAccessEscape(source.source_id)}">删除</button>`;
         }
         return `<tr>
@@ -148,10 +201,37 @@ function sdkConfigOnTypeChange() {
 }
 
 function sdkConfigResetPathOptions() {
-    const select = document.getElementById('agent-sdk-add-path');
-    if (select) {
-        select.innerHTML = '<option value="">请先填写服务器并按回车「发现目录」</option>';
+    const list = document.getElementById('agent-sdk-add-path-list');
+    if (list) {
+        list.innerHTML = '<div class="agent-sdk-path-empty">请先填写服务器并按回车「发现目录」</div>';
+        list.dataset.count = '0';
     }
+    const actions = document.getElementById('agent-sdk-add-path-actions');
+    if (actions) actions.hidden = true;
+}
+
+function sdkConfigSelectAllPaths(all) {
+    const list = document.getElementById('agent-sdk-add-path-list');
+    if (!list) return;
+    list.querySelectorAll('input[type="checkbox"]').forEach(box => { box.checked = Boolean(all); });
+    sdkConfigRefreshPathHint();
+}
+
+function sdkConfigSelectedPaths() {
+    const list = document.getElementById('agent-sdk-add-path-list');
+    if (!list) return [];
+    return Array.from(list.querySelectorAll('input[type="checkbox"]:checked'))
+        .map(box => box.value);
+}
+
+function sdkConfigRefreshPathHint() {
+    const hint = document.getElementById('agent-sdk-add-path-hint');
+    if (!hint) return;
+    const selected = sdkConfigSelectedPaths().length;
+    const total = document.getElementById('agent-sdk-add-path-list')?.dataset.count || '0';
+    hint.textContent = selected
+        ? `已选 ${selected} / ${total} 条；提交时将按目录名批量注册（重名自动加 -2/-3 后缀）。`
+        : '勾选要添加的 SDK 根目录（可多选批量添加）；只列出 repo 工作区与 Android 源码树。';
 }
 
 function sdkConfigOnTargetChange() {
@@ -188,11 +268,10 @@ function sdkConfigTarget() {
 }
 
 function sdkConfigResolvedPath() {
-    // 手动兜底优先于下拉
+    // 手动兜底优先于勾选列表（probe / 单条注册语义）
     const manual = document.getElementById('agent-sdk-add-path-manual')?.value?.trim() || '';
     if (manual) return manual;
-    const select = document.getElementById('agent-sdk-add-path');
-    return select?.value?.trim() || '';
+    return sdkConfigSelectedPaths()[0] || '';
 }
 
 // 选中目录/手动路径变化后预填 Android 版本：仅当输入框为空时填入后端
@@ -226,7 +305,8 @@ async function sdkConfigDiscoverRootsInner() {
     const type = document.getElementById('agent-sdk-add-type')?.value || 'ssh_git';
     const target = sdkConfigTarget();
     const button = document.getElementById('agent-sdk-add-discover-btn');
-    const select = document.getElementById('agent-sdk-add-path');
+    const list = document.getElementById('agent-sdk-add-path-list');
+    const actions = document.getElementById('agent-sdk-add-path-actions');
     const hint = document.getElementById('agent-sdk-add-path-hint');
     const password = document.getElementById('agent-sdk-add-password')?.value || '';
     if (type !== 'local_git' && !target) {
@@ -234,7 +314,11 @@ async function sdkConfigDiscoverRootsInner() {
         return;
     }
     if (button) { button.disabled = true; button.textContent = '发现中…'; }
-    if (select) select.innerHTML = '<option value="">发现中…</option>';
+    if (list) {
+        list.innerHTML = '<div class="agent-sdk-path-empty">发现中…</div>';
+        list.dataset.count = '0';
+    }
+    if (actions) actions.hidden = true;
     try {
         let candidates;
         if (type === 'local_git') {
@@ -245,19 +329,24 @@ async function sdkConfigDiscoverRootsInner() {
             candidates = Array.isArray(resp?.data?.candidates) ? resp.data.candidates : [];
         }
         if (!candidates.length) {
-            if (select) select.innerHTML = '<option value="">未发现候选目录；可改用手动路径兜底</option>';
-            if (hint) hint.textContent = '下拉为空时，在「手动路径兜底」输入完整绝对路径。';
+            if (list) list.innerHTML = '<div class="agent-sdk-path-empty">未发现候选目录；可改用手动路径兜底</div>';
+            if (hint) hint.textContent = '列表为空时，在「手动路径兜底」输入完整绝对路径。';
             return;
-        }        if (select) {
-            select.innerHTML = '<option value="">请选择 SDK 根目录…</option>' + candidates.map(c =>
-                `<option value="${agentAccessEscape(c.path)}">[${agentAccessEscape(c.kind_label || c.kind)}] ${agentAccessEscape(c.path)}</option>`
-            ).join('');
-            if (hint) hint.textContent = `发现 ${candidates.length} 个候选；不在列表中的目录用「手动路径兜底」。`;
-            // 选中目录后预填 Android 版本识别结果；输入框已有手动值时不覆盖。
-            select.addEventListener('change', () => sdkConfigPrefillAndroidVersion());
+        }
+        if (list) {
+            // 默认全选：用户通常想把发现的 SDK 树一次加完，取消勾选即可剔除。
+            list.innerHTML = candidates.map(c => `
+                <label class="agent-sdk-path-item">
+                    <input type="checkbox" value="${agentAccessEscape(c.path)}" checked data-change="sdkConfigRefreshPathHint">
+                    <span class="agent-sdk-path-kind">${agentAccessEscape(c.kind_label || c.kind)}</span>
+                    <span class="agent-sdk-path-value mono">${agentAccessEscape(c.path)}</span>
+                </label>`).join('');
+            list.dataset.count = String(candidates.length);
+            if (actions) actions.hidden = false;
+            if (hint) sdkConfigRefreshPathHint();
         }
     } catch (error) {
-        if (select) select.innerHTML = `<option value="">发现失败：${agentAccessEscape(error.message || '')}</option>`;
+        if (list) list.innerHTML = `<div class="agent-sdk-path-empty">发现失败：${agentAccessEscape(error.message || '')}</div>`;
         if (hint) hint.textContent = '发现失败时可直接在「手动路径兜底」输入完整路径。';
     } finally {
         if (button) { button.disabled = false; button.textContent = '发现目录'; }
@@ -324,29 +413,53 @@ async function sdkConfigSubmitAdd(event) {
     if (submit?.disabled || !ModalManager.isOpen('agent-sdk-add-modal')) return;
     const type = document.getElementById('agent-sdk-add-type')?.value || 'ssh_git';
     const target = sdkConfigTarget();
-    const repoRoot = sdkConfigResolvedPath();
-    const sourceId = document.getElementById('agent-sdk-add-id')?.value?.trim() || '';
+    const manual = document.getElementById('agent-sdk-add-path-manual')?.value?.trim() || '';
+    const selected = sdkConfigSelectedPaths();
+    // 手动兜底路径只作为单条添加；勾选列表（含 1 条）都走批量端点。
+    const paths = manual ? [manual] : selected;
     const password = document.getElementById('agent-sdk-add-password')?.value || '';
     const revision = document.getElementById('agent-sdk-add-revision')?.value?.trim() || '';
     if (type === 'ssh_git' && !target) { showToast('请填写编译服务器地址（user@host）', 'warning'); return; }
-    if (!repoRoot) { showToast('请先「发现目录」并选择，或在手动路径兜底里填写', 'warning'); return; }
-    if (submit) { submit.disabled = true; submit.textContent = '添加中…'; }
+    if (!paths.length) { showToast('请先「发现目录」并勾选，或在手动路径兜底里填写', 'warning'); return; }
+    if (submit) { submit.disabled = true; submit.textContent = paths.length > 1 ? `添加中（${paths.length} 条）…` : '添加中…'; }
     try {
         const granted = window.requestElevatedAccess
-            ? await window.requestElevatedAccess(`添加 SDK 源码源：${repoRoot}`)
+            ? await window.requestElevatedAccess(`添加 SDK 源码源：${paths.join('、')}`)
             : true;
         if (!granted || !ModalManager.isOpen('agent-sdk-add-modal')) return;
-        const resp = await apiCall('/api/sdk/manage/sources', 'POST', {
+        const payload = {
             provider: type,
             target,
-            repo_root: repoRoot,
-            source_id: sourceId,
             password,
             default_revision: revision,
             android_version: document.getElementById('agent-sdk-add-android-version')?.value?.trim() || '',
-        }, {silentToast: true});
-        const created = resp?.data?.source || {};
-        showToast(`已添加 SDK 源「${created.source_id || repoRoot}」，Agent 检索立即可用`, 'success');
+        };
+        let summary;
+        if (paths.length === 1) {
+            const resp = await apiCall('/api/sdk/manage/sources', 'POST', {
+                ...payload,
+                repo_root: paths[0],
+                source_id: document.getElementById('agent-sdk-add-id')?.value?.trim() || '',
+            }, {silentToast: true});
+            const created = resp?.data?.source || {};
+            summary = {ok: 1, bad: 0, first: created.source_id || paths[0]};
+        } else {
+            // 批量：一次 SSH 连接探测全部路径；source_id 一律按目录名生成。
+            const resp = await apiCall('/api/sdk/manage/sources/batch', 'POST', {
+                ...payload,
+                repo_roots: paths,
+            }, {silentToast: true});
+            const created = Array.isArray(resp?.data?.created) ? resp.data.created : [];
+            const failed = Array.isArray(resp?.data?.failed) ? resp.data.failed : [];
+            summary = {ok: created.length, bad: failed.length, first: created[0]?.source_id || ''};
+        }
+        if (summary.bad) {
+            showToast(`已添加 ${summary.ok} 条，${summary.bad} 条失败（详情见列表校验列）`, 'warning');
+        } else if (summary.ok > 1) {
+            showToast(`已批量添加 ${summary.ok} 个 SDK 源（如「${summary.first}」等），Agent 检索立即可用`, 'success');
+        } else {
+            showToast(`已添加 SDK 源「${summary.first}」，Agent 检索立即可用`, 'success');
+        }
         ModalManager.close('agent-sdk-add-modal');
         document.getElementById('agent-sdk-add-path-manual').value = '';
         document.getElementById('agent-sdk-add-id').value = '';

@@ -153,6 +153,29 @@ python tools/scripts/agent/sync_package.py .
 `make agent-check` 的四步顺序（两个独立 pytest 进程 → 秘密扫描 →
 `tools/scripts/agent/release.py --check`）是硬性要求，勿合并为单进程。
 
+## 项目操作指导与架构图
+
+“导航设置 → 项目操作指导”的说明与图注维护在
+`web/shell/dialogs/sidebar-visibility.html`。操作入口、确认方式、模型行为或
+功能变化时，同步核对说明和 `web/static/images/guide/` 下的截图。
+
+运行 `python tools/scripts/docs/generate_guide_screenshots.py` 可重新生成全部
+指导图。脚本启动临时认证实例，用 `guide_fixtures.py` 的演示数据渲染当前
+页面，不连接真实测试主机或模型、不执行测试或烧写。图注位于截图下方，
+编号放在控件外侧；全部生成且与指南引用清单一致后才替换目标文件。
+不要把真实配对码、Token、密码或业务日志放进截图。
+
+只修订个别截图时可追加 `--only agent-routing.png cluster-refresh.png`；脚本
+只替换指定图片，全量生成时仍校验画廊引用与实际捕获完全一致。模型状态
+通过真实页面的加载函数读取演示接口，保存前验证可用状态，避免异步覆盖。
+
+架构拓扑的节点与连线以 `docs/architecture/*-topology.mmd` 为准，展示布局在
+`features/system/topology_view.py`；节点统一 16 px，连线标签统一 12 px，
+标签沿连线排列，反向斜线保持文字可读。SVG 按原始尺寸显示，窄视口在图内
+滚动，避免四个视图因缩放比例不同导致字号不一致。修改后运行拓扑契约测试
+与 `tests/runtime_ui/test_architecture_views.py`，检查边方向、文字边界、标签
+重叠以及重复切换后的显示。
+
 ## 文档政策
 
 - **源码注释不得引用不存在的评审文档编号**：注释里只应引用真实存在的 ADR

@@ -2868,6 +2868,12 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/sdk/manage/sources/batch"
+  },
+  {
+    "methods": [
       "DELETE"
     ],
     "path": "/api/sdk/manage/sources/{source_id}"

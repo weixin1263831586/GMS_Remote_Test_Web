@@ -29,6 +29,10 @@
     /* 与 .loading-orbit 同构的行距：文字行（含空占位）把星轨中心上推
        同样的距离，保证骨架屏 → 数据区揭示时圆心零位移。 */
     gap: 26px;
+    /* 舞台契约（仅 redmine/gerrit 注入）：iframe 页根滚动条统一平台 8px
+       样式，这里右侧 pad 实测同宽，骨架屏圆心 == iframe 舞台/内容列
+       圆心（布局视口中心）；overlay 滚动条环境实测为 0，同样成立。 */
+    padding-right: var(--iframe-scrollbar-width, 0px);
 }
 
 .loading-orbit {
@@ -36,6 +40,10 @@
        跳动 → 动画二次缩放。改用视口高度百分比 + px 上限，只随窗口
        resize 变化，不随容器布局抖动。 */
     --stage: min(58vh, 620px);
+    /* 落在 grid 容器（cluster #workers.cards、automation dash-cards 等
+       多列网格）时必须横跨整行：否则只占第一列单元格，动画跑到页面
+       最左边。非 grid 容器里该属性无效，无副作用。 */
+    grid-column: 1 / -1;
     align-self: stretch;
     min-height: 320px;
     height: 100%;
@@ -43,11 +51,13 @@
     gap: 26px;
 }
 
-/* 页面级舞台（.loading-orbit--stage，看板 Tab 主内容区专用）：
-   fixed 锚定 iframe 视口居中。iframe 视口 == shell 内容盒，与 shell
-   骨架屏（cqh 基准）同一几何，揭示交接无缝；页头 Tab 栏/工具栏行的
-   显隐与增高只改变文档流，不再牵动动画位置（流内 align-content:center
-   会随内容盒顶部移动——这就是之前切 Tab 时动画位移的根因）。
+/* 页面级舞台（.loading-orbit--stage，redmine/gerrit 看板 Tab 主内容区专用）：
+   fixed 锚定 iframe「布局视口」居中（inset:0 自动扣除根滚动条带），
+   圆心 == 页头/内容列圆心——加载与揭示交接全程零跳变；页头 Tab 栏/
+   工具栏行的显隐与增高只改变文档流，不再牵动动画位置（流内
+   align-content:center 会随内容盒顶部移动——这是最早切 Tab 动画位移的根因）。
+   对侧的 shell 骨架屏由 shell-page-switching.js 注入等宽右 pad
+   （--iframe-scrollbar-width，实测平台滚动条宽度），三方圆心重合。
    pointer-events:none 不拦截页头操作；z-index 低于 sticky 表头与模态。 */
 .loading-orbit--stage {
     position: fixed;
@@ -75,13 +85,16 @@
     animation: embedded-frame-orbit-breathe 6s ease-in-out infinite;
 }
 
-/* 数据区舞台：文案放在动画下方同一栅格。 */
+/* 数据区舞台：文案放在动画下方同一栅格。行高钉死为 shell body 的 1.6：
+   文字行参与圆心定位（星轨中心 = 容器中心上移 (gap+行高)/2），iframe 页
+   body 行高是默认 normal，比骨架屏矮数像素 → 圆心纵向残留 ~2px 偏移。 */
 .loading-orbit .loading-orbit-text,
 .embedded-frame-skeleton .loading-orbit-text {
     grid-column: 1 / -1;
     text-align: center;
     color: var(--text-secondary);
     font-size: 13px;
+    line-height: 1.6;
 }
 
 /* 骨架屏的文字行只是几何占位：与数据区舞台同构（同高文字行把星轨中心

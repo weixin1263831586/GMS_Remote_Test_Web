@@ -23007,7 +23007,19 @@
     },
     "/api/sdk/manage/sources": {
       "get": {
-        "description": "用户注册源 + 实时存在性校验（每次刷新检查 SDK 路径是否还在）。\n\nlocal_git（本机）走本地探测；ssh_git 走远端 verify。每次刷新都会\n把结果写回 ``last_verified_at/ok``。",
+        "description": "用户注册源 + 存在性校验（校验状态与列表响应解耦）。\n\nlocal_git（本机）走本地探测；ssh_git 走远端 verify。\n\n校验模式（2026-11-14 审核意见：多台编译服务器失联时，同步校验会让\n列表卡 25s×N，用户必须仍能立即查看/管理/删除已注册源）：\n\n- ``auto``（默认）：``last_verified_at`` 在新鲜窗口内的源直接返回\n  缓存结果（``verify_state=fresh``）；从未校验（pending）或超窗\n  （stale）的源转**后台线程**校验并落盘，本响应立即返回；前端下次\n  刷新即可看到最新结果。\n- ``sync``：显式强校验（「刷新」按钮），同步等待全部校验完成——\n  旧行为，单源失败不阻断其余条目。\n\n``verify_state`` 表达结果时鲜性：fresh（窗口内）/ stale（超窗，附\n上次结果）/ pending（从未校验）；``live.verified`` 表达结果本身。",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "verify",
+            "required": false,
+            "schema": {
+              "default": "auto",
+              "title": "Verify",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -23016,6 +23028,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List User Sdk Sources"
@@ -23054,6 +23076,44 @@
           }
         },
         "summary": "Register Sdk Source"
+      }
+    },
+    "/api/sdk/manage/sources/batch": {
+      "post": {
+        "description": "批量注册：一次 SSH 连接顺序探测全部路径，逐条注册。\n\n远端认证阶段实测可达 60s+（206 sshd），逐路径各连一次会把认证\n成本放大 N 倍；批量模式只付一次连接成本。单条失败（重名/非 SDK\n目录/路径不存在）不阻断其余条目，结果逐条回传供前端展示。",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register Sdk Sources Batch"
       }
     },
     "/api/sdk/manage/sources/{source_id}": {

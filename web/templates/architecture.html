@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GMS Remote Test - 系统架构</title>
   <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
-  <link rel="stylesheet" href="/static/css/architecture-layers.css?v=20261113-layers">
+  <link rel="stylesheet" href="/static/css/architecture-layers.css?v=20261114-compact">
   <style>
     :root { color-scheme: dark; --bg:var(--dark-bg); --panel:var(--card-bg); --line:var(--border-color); --text:var(--text-primary); --muted:var(--text-secondary); --blue:var(--primary-color); --green:var(--success-color); --amber:var(--warning-color); --violet:var(--primary-light); }
     * { box-sizing: border-box; }
@@ -25,13 +25,13 @@
     .arch-tab.active { color: var(--blue); }
     .arch-tab.active::after { content: ''; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--blue); }
     .arch-pane { min-width: 0; }
-    section { margin: 18px 0; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(145deg, color-mix(in srgb, var(--card-bg) 98%, transparent), color-mix(in srgb, var(--card-bg) 78%, transparent)); }
-    h2 { margin: 0 0 16px; font-size: 18px; color: var(--blue); }
-    .grid { display: grid; gap: 14px; }
+    section { margin: 12px 0; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(145deg, color-mix(in srgb, var(--card-bg) 98%, transparent), color-mix(in srgb, var(--card-bg) 78%, transparent)); }
+    h2 { margin: 0 0 12px; font-size: 18px; color: var(--blue); }
+    .grid { display: grid; gap: 10px; }
     .roles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .workers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .sources { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .card { min-height: 120px; padding: 16px; border: 1px solid var(--line); border-top: 3px solid var(--blue); border-radius: 10px; background: color-mix(in srgb, var(--darker-bg) 72%, transparent); }
+    .card { padding: 12px; border: 1px solid var(--line); border-top: 3px solid var(--blue); border-radius: 10px; background: color-mix(in srgb, var(--darker-bg) 72%, transparent); }
     .card.agent { border-top-color: var(--violet); }
     .card.worker { border-top-color: var(--amber); }
     .card.source { border-top-color: var(--green); }
@@ -40,7 +40,7 @@
     .card ul { margin: 0; padding-left: 18px; }
     .topology { overflow-x: auto; }
     .topology svg {
-      display: block; width: 100%; min-width: 920px;
+      display: block; width: auto; margin: 0 auto;
       font-family: "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
     }
     .note { margin-top: 14px; padding: 12px; border-left: 3px solid var(--amber); color: var(--muted); background: rgba(251, 191, 36, .06); font-size: 12px; line-height: 1.6; }
@@ -75,7 +75,7 @@
           <div class="arch-layer-label"><strong>接入与规划</strong><span>ACCESS</span><small>用户与 Agent</small></div>
           <div class="arch-layer-content">
             <article class="arch-layer-item"><h3>Web 工作台</h3><p>设备管理、测试执行、实时日志、报告分析与 ATS 工作流。</p></article>
-            <article class="arch-layer-item"><h3>对话 Agent</h3><p>kkagent 理解目标、规划工具调用并提供诊断建议。</p></article>
+            <article class="arch-layer-item"><h3>对话 Agent</h3><p>kkagent 规划项目工具调用，按需提问、预检和确认执行。</p></article>
             <article class="arch-layer-item"><h3>外部 Agent Runtime</h3><p>Codex / Kimi / kkagent 通过 CLI / MCP 使用平台能力。</p></article>
           </div>
         </div>
@@ -85,7 +85,7 @@
           <div class="arch-layer-content">
             <article class="arch-layer-item"><h3>认证与权限</h3><p>账号会话、Token、scope / ACL，以及受控操作审批。</p></article>
             <article class="arch-layer-item"><h3>任务与设备调度</h3><p>ATS 编排、Cluster Job、类型化命令队列、设备 Claim / Lease。</p></article>
-            <article class="arch-layer-item"><h3>报告与证据分析</h3><p>登记报告索引、工单取证、APK / SDK 分析与知识检索。</p></article>
+            <article class="arch-layer-item"><h3>报告与证据分析</h3><p>报告索引、工单取证与结论复核、APK / SDK 版本绑定和知识检索。</p></article>
             <article class="arch-layer-item"><h3>状态与审计</h3><p>SQLite 状态、执行回执、Artifact 引用与操作审计。</p></article>
           </div>
         </div>

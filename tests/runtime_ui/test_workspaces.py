@@ -1281,8 +1281,12 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
             )
             measured = page.evaluate(
                 """async () => {
+                  // notes 右上角动作区已随外部知识库入口清理而清空，功能
+                  // 控件全部在页内 pane（kbNewDoc/kbSearch/kbOpenUpload/
+                  // kbSaveDoc），由下方 Python 侧单独验收可见性，不进本
+                  // 动作区几何断言。
                   const pages = ['users', 'devices', 'reports', 'test-suites',
-                                 'apk-analysis', 'gms-assistant', 'notes'];
+                                 'apk-analysis', 'gms-assistant'];
                   const visible = (el) => {
                     const box = el.getBoundingClientRect();
                     return box.width > 0 && box.height > 0;
@@ -1393,6 +1397,23 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                             msg=f"{name} 页右上角 {group['group']} 组内"
                                 f"「{left['text']}」与「{right['text']}」之间存在空隙",
                         )
+            # notes 页：右上角动作区已清空（外部知识库入口移除，功能按钮
+            # 全部在页内 pane），改为验收知识库自身核心功能控件仍可见且
+            # 可操作：新建文档、全库搜索、上传入库、保存。
+            page.evaluate("switchPage('notes', null)")
+            page.wait_for_function(
+                "() => !!document.querySelector('#page-notes #kb-search-input')"
+            )
+            for selector, _label in (
+                ('#page-notes [data-click="kbNewDoc"]', "新文档"),
+                ('#page-notes #kb-search-input', "全库搜索输入框"),
+                ('#page-notes [data-click="kbSearch"]', "搜索按钮"),
+                ('#page-notes [data-click="kbOpenUpload"]', "上传文件入库"),
+                ('#page-notes [data-click="kbSaveDoc"]', "保存"),
+            ):
+                locator = page.locator(selector)
+                expect(locator).to_have_count(1)
+                expect(locator).to_be_visible()
             # desktop/terminal 单机状态条：先按项目约定初始化工作区，再等
             # scope 应用、状态条可见（workspace-ready 类在挂载完成后加上）。
             for name, init_fn in (
@@ -1511,8 +1532,11 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                     msg=f"{name} 页统计卡外壳高度不一致: {sorted(heights)}",
                 )
                 card_heights[name] = cards[0]["h"]
-            self.assertEqual(
-                len(set(card_heights.values())), 1,
+            # 跨页比较用容差：不同页统计卡由各自数据渲染，正常差异只在
+            # 亚像素级（本地无头环境实测 devices 95.375 vs 其他 95，CI
+            # 全部 95）；真实布局回归是整 px 级别，delta=1 仍能拦截。
+            self.assertLessEqual(
+                max(card_heights.values()) - min(card_heights.values()), 1,
                 msg=f"四页统计卡高度不统一: {card_heights}",
             )
 

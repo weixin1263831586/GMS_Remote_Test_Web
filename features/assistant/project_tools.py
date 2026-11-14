@@ -84,4 +84,15 @@ def definitions():
             "is_dangerous": False, "requires_confirm": False,
             "executor_ref": "features.devices:list_aoa_profiles", "response_type": "list",
         },
+        {
+            "name": "sdk_sources", "category": "sdk",
+            "description": "列出平台已登记的 Android SDK 源码源，供回答有哪些可用",
+            "api_path": "/api/sdk/sources", "method": "GET", "params": [],
+            "keywords": [
+                "SDK", "sdk", "有哪些SDK", "SDK可用", "哪些SDK", "可用SDK",
+                "源码源", "Android源码", "源码检索",
+            ],
+            "is_readonly": True, "is_dangerous": False, "requires_confirm": False,
+            "executor_ref": "features.system:list_sdk_sources", "response_type": "list",
+        },
     ]

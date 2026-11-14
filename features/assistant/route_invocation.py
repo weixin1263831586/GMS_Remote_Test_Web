@@ -46,6 +46,7 @@ _TOOL_PAGES = {
     "automation": "automation",
     "cluster": "cluster",
     "build": "automation",
+    "sdk": "users",
     "knowledge": "notes",
 }
 

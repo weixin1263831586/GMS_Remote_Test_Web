@@ -62,6 +62,7 @@ class SourceRegistry:
                 "source_id": provider.config.source_id,
                 "provider": provider.kind,
                 "default_revision": provider.config.default_revision,
+                "android_version": provider.config.android_version,
                 "repo_root_exposed": False,
             }
             if isinstance(provider, SSHGitProvider):
@@ -238,22 +239,37 @@ def configure_source_registry(configs: list[ProviderConfig], secret: bytes) -> N
 _REGISTRY_BUILT_AT: tuple[int, int] | None = None
 
 
-def _user_store_fingerprint() -> tuple[int, int] | None:
-    """用户存储文件指纹；文件不存在时返回 None（视为无变化基线）。"""
+_FINGERPRINT_MISSING: tuple[str] = ("missing",)
+
+
+def _user_store_fingerprint() -> tuple[int, int] | tuple[str] | None:
+    """用户存储文件指纹（三态，2026-11-14 审核意见）。
+
+    - ``(mtime_ns, size)``：文件存在；
+    - ``_FINGERPRINT_MISSING``：文件确认不存在（无用户源的基线，与
+      "存在但内容没变"是不同状态——文件被删除后旧 registry 必须重建，
+      不能继续用已消失的用户源）；
+    - ``None``：stat 失败（权限/I/O 错误）——**歧义态**，调用方必须按
+      "可能已变化"处理（触发重建），不能当作无变化静默沿用旧 registry。
+    """
     try:
         stat = user_source_store().path.stat()
+    except FileNotFoundError:
+        return _FINGERPRINT_MISSING
     except OSError:
         return None
     return (stat.st_mtime_ns, stat.st_size)
 
 
 def _registry_is_stale() -> bool:
-    """构建后用户存储被其他进程改动 → 需要重建。"""
+    """构建后用户存储被其他进程改动（或文件消失/stat 失败）→ 需要重建。"""
     if _REGISTRY is None or _REGISTRY_SECRET is None:
         return False  # 未初始化进程走显式 503，不做隐式初始化
     current = _user_store_fingerprint()
     if current is None:
-        return False
+        # stat 歧义态：保守判定为 stale。重建读失败时保留旧 registry 并
+        # 记录错误（显式可见），绝不把"读不出状态"当成"没有变化"。
+        return True
     return current != _REGISTRY_BUILT_AT
 
 

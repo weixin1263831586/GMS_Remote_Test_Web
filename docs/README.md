@@ -15,6 +15,7 @@
 | Redmine 晨报 | [每日晨报](redmine-daily-brief.md) | 账号配置、后台 Worker、诊断、进度和取消 |
 | Agent | [概览](agent/overview.md) | [安装](agent/installation.md)、[profile](agent/profiles.md)、[安全边界](agent/security-model.md)、[排障](agent/troubleshooting.md) |
 | CLI | [约定与示例](cli/examples.md) | [生成的命令参考](cli/command-reference.md) |
+| API 变更 | [废弃/移除 API 迁移说明](api-deprecations.md) | 外部脚本的迁移指引：被删接口、替代路径与 curl 对照 |
 | 支持环境 | [Python / Ubuntu 矩阵](platform-support-matrix.md) | 当前 CI 基线、OCR 限制及迁移条件 |
 
 ## 架构与维护

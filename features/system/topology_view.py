@@ -24,17 +24,17 @@ CMD_LABEL = '#ede9fe'
 FONT_FAMILY = "'Noto Sans CJK SC', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif"
 
 NODE_FONT_SIZE = 16
-EDGE_FONT_SIZE = 14
+EDGE_FONT_SIZE = 12
 NODE_LINE_LIMIT = 228
 EDGE_LINE_LIMIT = 210
-NODE_PAD_X = 18
-NODE_PAD_Y = 14
-NODE_LINE_H = 22
-EDGE_PAD_X = 10
-EDGE_PAD_Y = 6
-EDGE_LINE_H = 18
+NODE_PAD_X = 16
+NODE_PAD_Y = 12
+NODE_LINE_H = 20
+EDGE_PAD_X = 8
+EDGE_PAD_Y = 4
+EDGE_LINE_H = 16
 MIN_NODE_W = 168
-MIN_NODE_H = 60
+MIN_NODE_H = 56
 
 
 def _estimate_text_width(text: str, font_size: int = NODE_FONT_SIZE, ascii_em: float = 0.66) -> int:
@@ -57,6 +57,17 @@ def _wrap_label(text: str, font_size: int, max_width: int, ascii_em: float) -> l
     """
     if _estimate_text_width(text, font_size, ascii_em) <= max_width or len(text) < 4:
         return [text]
+    if _estimate_text_width(text, font_size, ascii_em) > max_width * 2:
+        limit = 1
+        while limit < len(text) and _estimate_text_width(text[:limit + 1], font_size, ascii_em) <= max_width:
+            limit += 1
+        natural = [index for index in range(1, limit + 1) if text[index - 1] in ' /：']
+        split_at = natural[-1] if natural else limit
+        if not natural:
+            while split_at < len(text) and text[split_at - 1].isascii() and text[split_at].isascii() \
+                    and text[split_at - 1].isalnum() and text[split_at].isalnum():
+                split_at += 1
+        return [text[:split_at], *_wrap_label(text[split_at:], font_size, max_width, ascii_em)]
     best: tuple[int, int] | None = None
     for index in range(2, len(text) - 1):
         left, right = text[:index], text[index:]
@@ -71,6 +82,8 @@ def _wrap_label(text: str, font_size: int, max_width: int, ascii_em: float) -> l
             bonus = -90
         elif prev == '/':
             bonus = -30
+        elif prev.isascii() and nxt.isascii() and prev.isalnum() and nxt.isalnum():
+            continue
         else:
             bonus = 40
         rank = abs(left_w - right_w) + bonus
@@ -329,9 +342,8 @@ class TopologyLayout:
 
 
 # Coordinates are presentation only. Nodes, labels, and directed edges come
-# exclusively from docs/architecture/*-topology.mmd. A unidirectional caption
-# sits in a gap on its shaft. A bidirectional caption rides its own parallel
-# shaft and reads along that arrow.
+# exclusively from docs/architecture/*-topology.mmd. Every caption reads along
+# its own shaft; bidirectional channels use separate parallel lanes.
 LAYOUTS = {
     'platform-topology.mmd': TopologyLayout(
         positions={
@@ -339,15 +351,15 @@ LAYOUTS = {
             # lane, so heartbeat / command captions stack in a clear gap.
             'Browser': (190, 70),
             'Agent': (560, 70),
-            'Controller': (560, 300),
-            'DB': (980, 300),
+            'Controller': (560, 250),
+            'DB': (980, 250),
             'Build': (980, 110),
-            'Source': (190, 300),
-            'WorkerA': (190, 560),
-            'WorkerB': (560, 560),
-            'Devices': (190, 820),
-            'Suite': (560, 820),
-            'External': (1120, 520),
+            'Source': (190, 250),
+            'WorkerA': (190, 450),
+            'WorkerB': (560, 450),
+            'Devices': (190, 650),
+            'Suite': (560, 650),
+            'External': (980, 450),
         },
         kinds={
             'Browser': '#38bdf8',
@@ -364,12 +376,12 @@ LAYOUTS = {
     'usbip-topology.mmd': TopologyLayout(
         positions={
             'DevSrc': (360, 70),
-            'WinSrc': (120, 270),
-            'LinuxSrc': (600, 270),
-            'Worker': (360, 490),
-            'Ctrl': (1040, 490),
-            'Tools': (360, 700),
-            'DevWorker': (360, 900),
+            'WinSrc': (120, 240),
+            'LinuxSrc': (600, 240),
+            'Worker': (360, 420),
+            'Ctrl': (960, 420),
+            'Tools': (360, 540),
+            'DevWorker': (360, 660),
         },
         kinds={
             'DevSrc': '#34d399',
@@ -384,12 +396,12 @@ LAYOUTS = {
     'aoa-topology.mmd': TopologyLayout(
         positions={
             'Browser': (190, 80),
-            'Ctrl': (700, 80),
-            'Store': (1180, 80),
-            'Worker': (700, 360),
-            'Acc': (340, 590),
-            'Dev': (340, 830),
-            'Adb': (980, 830),
+            'Ctrl': (680, 80),
+            'Store': (1060, 80),
+            'Worker': (680, 330),
+            'Acc': (300, 480),
+            'Dev': (300, 650),
+            'Adb': (960, 650),
         },
         kinds={
             'Browser': '#38bdf8',
@@ -404,11 +416,11 @@ LAYOUTS = {
     'firmware-topology.mmd': TopologyLayout(
         positions={
             'Browser': (210, 80),
-            'Ctrl': (730, 80),
-            'Worker': (730, 360),
-            'Loader': (300, 600),
-            'Dev': (300, 850),
-            'AoaRec': (1060, 600),
+            'Ctrl': (710, 80),
+            'Worker': (710, 300),
+            'Loader': (300, 480),
+            'Dev': (300, 650),
+            'AoaRec': (1010, 480),
         },
         kinds={
             'Browser': '#38bdf8',
@@ -509,17 +521,16 @@ def _build_edge(
         tx, ty = _border_point(rects[end], x2, y2, x1, y1)
     sx, sy, tx, ty = _shorten(sx, sy, tx, ty, 3, 6)
     out_x, out_y = _preferred_perp(tx - sx, ty - sy)
-    angle = 0.0
-    if bow and label:
+    angle = _reading_angle(tx - sx, ty - sy)
+    if label:
         shaft = math.hypot(tx - sx, ty - sy)
         # One line stays thin enough for a shallow pair (a horizontal lane only
         # has the box height to separate the two shafts). Wrap when that line
         # cannot keep stubs at both ends of the shaft.
         lines, pill_w, pill_h = _pill_metrics(label, max_width=10**6)
-        if pill_w > shaft - 100:
-            budget = max(128, min(176, int(shaft - 64)))
+        if pill_w > shaft - 38:
+            budget = max(48, min(176, int(shaft - 46)))
             lines, pill_w, pill_h = _pill_metrics(label, max_width=budget)
-        angle = _reading_angle(tx - sx, ty - sy)
     # Vertical pairs stack both captions in the lower half of the shaft, clear
     # of arrows that leave the upper node toward the side. Diagonal pairs
     # stagger toward opposite ends. Other pairs stay near mid-shaft.
@@ -561,17 +572,11 @@ def _build_edge(
 def _reading_angle(dx: float, dy: float) -> float:
     """Degrees that run a caption along its own arrow.
 
-    SVG ``rotate()`` is clockwise and y grows downward: 0° reads to the right,
-    90° reads downward, and -90° reads upward. A shaft that points almost due
-    left would turn the whole line upside down, so that one case is flipped
-    and the caption stays on the shaft. Downward and diagonal return arrows
-    keep the arrow's own reading direction.
+    Keep the text parallel to its arrow and within ±90° so return lanes do
+    not turn the words upside down. Vertical captions follow the arrowhead.
     """
     angle = math.degrees(math.atan2(dy, dx))
-    # A return arrow that points mostly left puts the glyphs upside down.
-    # Flip only that case. Downward and down-left arrows keep the reading
-    # direction, so each caption still runs with its own arrowhead.
-    if angle > 155 or angle < -155:
+    if angle > 90 or angle < -90:
         angle += 180 if angle < 0 else -180
     return angle
 
@@ -779,6 +784,7 @@ def _place_aligned(
     edge: _EdgeDraw,
     node_rects: list[tuple[float, float, float, float]],
     placed: list[tuple[float, float, float, float, float]],
+    foreign: list[tuple[float, float, float, float]],
 ) -> tuple[float, tuple[float, float, float, float], tuple[float, float], tuple[float, float]]:
     """Seat a caption on its own shaft, rotated to read along that arrow.
 
@@ -808,6 +814,14 @@ def _place_aligned(
         for ox, oy, ow, oh, o_angle in placed:
             if _rotated_hits_rotated(cx, cy, edge.pill_w, edge.pill_h, edge.angle, ox, oy, ow, oh, o_angle, pad=4):
                 score += 2500
+        rad = math.radians(edge.angle)
+        cos_a, sin_a = math.cos(rad), math.sin(rad)
+        local_rect = (-edge.pill_w / 2, -edge.pill_h / 2, edge.pill_w / 2, edge.pill_h / 2)
+        for sx, sy, tx, ty in foreign:
+            local = [((x - cx) * cos_a + (y - cy) * sin_a,
+                      -(x - cx) * sin_a + (y - cy) * cos_a) for x, y in ((sx, sy), (tx, ty))]
+            if _segment_hits_rect(*local[0], *local[1], local_rect, pad=3):
+                score += 900
         if best is None or score < best[0]:
             best = (score, (cx, cy), (t0, t1), aabb)
     if best is None:
@@ -822,20 +836,24 @@ def _seat_on_shaft(
     edge: _EdgeDraw,
     node_rects: list[tuple[float, float, float, float]],
     placed: list[tuple[float, float, float, float, float]],
+    foreign: list[tuple[float, float, float, float]],
 ) -> tuple[tuple[float, float, float, float], tuple[float, float], tuple[float, float]]:
     """Place the caption, wrapping it shorter when the long form has nowhere clear."""
-    best = _place_aligned(edge, node_rects, placed)
-    if best[0] >= 2500:
-        for max_width in (168, 140, 120):
+    best = _place_aligned(edge, node_rects, placed, foreign)
+    best_metrics = edge.lines, edge.pill_w, edge.pill_h
+    if best[0] >= 900:
+        for max_width in (168, 140, 120, 96, 72, 48):
             lines, width, height = _pill_metrics(edge.label, max_width=max_width)
             if width >= edge.pill_w - 1:
                 continue
             edge.lines, edge.pill_w, edge.pill_h = lines, width, height
-            candidate = _place_aligned(edge, node_rects, placed)
+            candidate = _place_aligned(edge, node_rects, placed, foreign)
             if candidate[0] < best[0]:
                 best = candidate
-            if candidate[0] < 2500:
+                best_metrics = edge.lines, edge.pill_w, edge.pill_h
+            if candidate[0] < 900:
                 break
+    edge.lines, edge.pill_w, edge.pill_h = best_metrics
     return best[1], best[2], best[3]
 
 
@@ -896,7 +914,6 @@ def render_topology(source: str, source_name: str = 'platform-topology.mmd') -> 
         _build_edge(start, end, label, arrow, positions, rects, styles, arrow_id) for start, end, label, arrow in edges
     ]
     node_rects = list(rects.values())
-    placed_boxes: list[tuple[float, float, float, float]] = []
     placed_oriented: list[tuple[float, float, float, float, float]] = []
 
     def _place_order(index: int) -> tuple[int, float, float]:
@@ -913,19 +930,13 @@ def render_topology(source: str, source_name: str = 'platform-topology.mmd') -> 
         edge = drawn[index]
         if not edge.label:
             continue
-        if edge.bow:
-            edge.pill, edge.label_at, edge.gap = _seat_on_shaft(edge, node_rects, placed_oriented)
-            edge.gapped = True
-            placed_oriented.append((edge.label_at[0], edge.label_at[1], edge.pill_w, edge.pill_h, edge.angle))
-        else:
-            foreign = [seg for other, item in enumerate(drawn) if other != index for seg in item.segments]
-            edge.pill, edge.gapped = _place_pill(edge, node_rects, placed_boxes, foreign)
-            left, top, right, bottom = edge.pill
-            placed_oriented.append(((left + right) / 2, (top + bottom) / 2, edge.pill_w, edge.pill_h, 0.0))
-        placed_boxes.append(edge.pill)
+        foreign = [seg for other, item in enumerate(drawn) if other != index for seg in item.segments]
+        edge.pill, edge.label_at, edge.gap = _seat_on_shaft(edge, node_rects, placed_oriented, foreign)
+        edge.gapped = True
+        placed_oriented.append((edge.label_at[0], edge.label_at[1], edge.pill_w, edge.pill_h, edge.angle))
 
     bounds = list(rects.values()) + [edge.pill for edge in drawn if edge.pill is not None]
-    pad = 36
+    pad = 24
     min_x = min(item[0] for item in bounds) - pad
     min_y = min(item[1] for item in bounds) - pad
     width = max(item[2] for item in bounds) + pad - min_x
@@ -933,6 +944,7 @@ def render_topology(source: str, source_name: str = 'platform-topology.mmd') -> 
     parts = [
         (
             f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{min_x:.1f} {min_y:.1f} {width:.1f} {height:.1f}" '
+            f'width="{width:.1f}" height="{height:.1f}" '
             f'role="img" aria-labelledby="{title_id}" data-topology-source="{html.escape(source_name)}" '
             f'font-family="{FONT_FAMILY}">'
         ),

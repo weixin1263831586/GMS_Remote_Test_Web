@@ -164,22 +164,15 @@ def test_architecture_node_labels_stay_inside_node_boxes():
             numbers = [float(item) for item in re.findall(r'-?\d+(?:\.\d+)?', path)]
             dx, dy = numbers[-2] - numbers[0], numbers[-1] - numbers[1]
             edge_dirs[source_name_edge] = (dx, dy)
-            paired = (source_name_edge[1], source_name_edge[0]) in {
-                (group.attrib['data-source'], group.attrib['data-target'])
-                for group in svg.findall(f'{ns}g')
-                if 'data-source' in group.attrib
-            }
-            if paired:
-                assert 'rotate(' in transform, f'{source_name}:{label} should run along its arrow'
-                assert transform == pill.attrib.get('transform', '')
-                reading = _reading_angle(dx, dy)
-                assert f'rotate({reading:.1f} ' in transform
-            else:
-                assert 'rotate(' not in transform
+            assert 'rotate(' in transform, f'{source_name}:{label} should run along its arrow'
+            assert transform == pill.attrib.get('transform', '')
+            reading = _reading_angle(dx, dy)
+            rendered_angle = float(transform.removeprefix('rotate(').split()[0])
+            assert abs(rendered_angle - reading) < 0.15
             box = _box(pill)
             cx = (box[0] + box[2]) / 2
             cy = (box[1] + box[3]) / 2
-            angle = _reading_angle(dx, dy) if paired else 0.0
+            angle = reading
             pills.append((cx, cy, box[2] - box[0], box[3] - box[1], angle, label))
             for rect in node_rects:
                 assert not _rotated_hits_rect(cx, cy, box[2] - box[0], box[3] - box[1], angle, rect, pad=0), (

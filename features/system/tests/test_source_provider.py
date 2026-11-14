@@ -459,6 +459,32 @@ class LoadProviderConfigsTests(unittest.TestCase):
         ]}})
         self.assertEqual([item.source_id for item in loaded], ["g"])
 
+    def test_android_version_flows_to_registry_listing(self):
+        """android_version 从配置项到 list_sources 端到端可见。
+
+        回归（2026-11-14 审核意见）：用户经「添加SDK」注册时填写的
+        Android 版本此前在 ProviderConfig 丢失，管理页「Android 版本」
+        列恒为空。三种 provider 都必须透传该展示字段。
+        """
+        loaded = load_provider_configs({"sdk_sources": {"providers": [
+            {"source_id": "loc", "provider": "local_git",
+             "repo_root": "/srv/a17", "android_version": "17"},
+            {"source_id": "ssh", "provider": "ssh_git",
+             "repo_root": "/srv/a16", "ssh_host": "10.0.0.1",
+             "ssh_username": "u", "ssh_password": "p",
+             "android_version": "16"},
+            {"source_id": "cs", "provider": "codesearch",
+             "base_url": "https://x", "project": "P", "token": "t",
+             "android_version": "15"},
+        ]}})
+        self.assertEqual([item.android_version for item in loaded],
+                         ["17", "16", "15"])
+        registry = SourceRegistry(loaded, b"k")
+        listing = {item["source_id"]: item for item in registry.list_sources()}
+        self.assertEqual(listing["loc"]["android_version"], "17")
+        self.assertEqual(listing["ssh"]["android_version"], "16")
+        self.assertEqual(listing["cs"]["android_version"], "15")
+
 
 class RegistryStateTests(unittest.TestCase):
     """未初始化 ≠ 确认无 source（三态）。"""

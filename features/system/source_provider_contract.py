@@ -125,6 +125,9 @@ class ProviderConfig:
     # 结果缓存（进程内 + data_root 磁盘，TTL 过期后下次检索重新发现）。
     discover_repos: bool = False
     discover_ttl_hours: int = 24
+    # 展示元数据：Android 版本标签（如 "16"），来自静态配置或用户注册
+    # 记录；仅供管理页「Android 版本」列展示，不参与检索语义。
+    android_version: str = ""
 
 
 def _codesearch_token(item: dict[str, Any]) -> str:
@@ -190,6 +193,7 @@ def load_provider_configs(config: dict[str, Any]) -> list[ProviderConfig]:
                 base_url=base_url,
                 project=project,
                 token=token,
+                android_version=str(item.get("android_version") or "").strip(),
             ))
             continue
         if provider == "ssh_git":
@@ -236,6 +240,7 @@ def load_provider_configs(config: dict[str, Any]) -> list[ProviderConfig]:
                 repos=repos,
                 discover_repos=discover_repos,
                 discover_ttl_hours=discover_ttl,
+                android_version=str(item.get("android_version") or "").strip(),
             ))
             continue
         if provider != "local_git":
@@ -250,6 +255,7 @@ def load_provider_configs(config: dict[str, Any]) -> list[ProviderConfig]:
                 provider=provider,
                 repo_root=repo_root,
                 default_revision=str(item.get("default_revision") or "").strip(),
+                android_version=str(item.get("android_version") or "").strip(),
             )
         )
     return providers

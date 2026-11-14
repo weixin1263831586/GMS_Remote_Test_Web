@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime
 from typing import Any
 
 from features.assistant import session_store
@@ -14,6 +15,35 @@ from foundation.redaction import redact_sensitive_data
 
 
 _logger = logging.getLogger(__name__)
+
+
+# 步骤终态集合：进入这些状态时记录 finished_at / duration_seconds。
+_STEP_TERMINAL_STATUSES = ("done", "warning", "error")
+
+
+def _settle_step(step: dict[str, Any]) -> None:
+    """步骤进入终态时补记结束时刻与耗时（秒，1 位小数）。幂等。
+
+    开始时刻取 ``started_at``（追加时刻）；历史数据缺字段时回退
+    ``created_at``，解析失败按 0 秒兜底——耗时只是展示信息，
+    任何异常都不应影响会话流转。
+    """
+    if step.get("status") not in _STEP_TERMINAL_STATUSES or step.get("finished_at"):
+        return
+    finished = _now_iso()
+    step["finished_at"] = finished
+    duration = 0.0
+    try:
+        started = datetime.fromisoformat(
+            str(step.get("started_at") or step.get("created_at") or finished)
+        )
+        duration = max(
+            0.0,
+            (datetime.fromisoformat(finished) - started).total_seconds(),
+        )
+    except (TypeError, ValueError):
+        pass
+    step["duration_seconds"] = round(duration, 1)
 
 
 def _persist_transcript(session: dict[str, Any]) -> None:
@@ -43,16 +73,21 @@ def _new_message(role: str, content: str, kind: str = "text", data: dict[str, An
 
 
 def _append_step(session: dict[str, Any], title: str, status: str = "done", detail: str = "", data: dict[str, Any] | None = None) -> None:
+    now = _now_iso()
     step = {
         "id": str(uuid.uuid4()),
         "title": title,
         "status": status,
         "detail": detail,
         "data": data or {},
-        "created_at": _now_iso(),
+        "created_at": now,
+        # 耗时统计起点：与 created_at 同值，但语义独立（created_at 是
+        # 排序/展示时间戳，started_at 专供 duration 计算）。
+        "started_at": now,
     }
     safe = _display_record(session, step)
     session.setdefault("steps", []).append(safe)
+    _settle_step(safe)
     session["updated_at"] = _now_iso()
     _persist_transcript(session)
 
@@ -96,6 +131,7 @@ def complete_recovery_step(
     step = _find_step(session, active.get("recovery_step_id"))
     if step is not None and step.get("status") == "running":
         step.update(status=status, detail=redact_sensitive_data(detail))
+        _settle_step(step)
         session["updated_at"] = _now_iso()
         _persist_transcript(session)
     active.pop("recovery_step_id", None)

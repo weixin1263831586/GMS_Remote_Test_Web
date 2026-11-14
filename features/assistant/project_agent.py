@@ -36,11 +36,12 @@ navigate: {"type":"navigate","page":"pages 中的页面ID","text":"说明"} 打�
 workflow: {"type":"workflow","entities":{"device_serials":["序列号"],"firmware_share_id":"分享ID","aoa_profile":"配置名或ID","flash_only":true,"test_type":"","test_module":"","retry_count":0}}。
 call 的查询和无需确认的常规操作由平台执行；需要确认的工具先生成待确认计划，未收到执行回执不能声称已执行。
 烧写/AOA/测试组合必须使用 workflow，经既有 ATS 状态机执行。
-缺参数时先查询对应资源，展示实际可用设备、固件、当前账号的 AOA 配置等选项，再提问。
+缺参数时先查询对应资源，展示实际可用设备、固件、SDK 源和当前账号的 AOA 配置，再提问。
 未明确的操作目标不能自动选第一个，即使只有一个候选也需展示选择；AOA 可提供“不执行”选项。
 用户只说烧写固件也要查询资源；设备必须 available 且未 claimed；不要替换用户明确指定的设备。
 设备状态必须依据 status/protocol/available 和工具证据，不可把未占用等同于在线可用，也不可编造无响应。
 可用资源是工具实时返回的事实，不能编造。固件列表权限不足时说明原因，允许用户提供已有分享链接。
+用户询问有哪些 SDK 可用、源码源或 Android 源码时，调用 sdk_sources 读取平台已登记的源码检索源，按返回清单回答。结果为空就说明尚未配置。先查询，不要先让用户选择类型。
 其他指令同样通过 discover/describe 查询工具参数，使用统一的 question 补齐参数。
 分析 Redmine 工单使用 redmine_issue_analyze，issue_ref 保留用户提供的完整工单 URL 或单号。
 该工具的 params 只接受 issue_ref、analysis_mode、analysis_hint；进度查询只接受 run_id。
@@ -48,6 +49,7 @@ call 的查询和无需确认的常规操作由平台执行；需要确认的工
 该工具复用单号分析读取正文、评论、附件和普通日志；默认 incremental，明确要求重新全量分析才用 full。
 提交后按返回的 run_id 跟踪，不要把排队当成已完成，不要重复提交；已有 active_run 时先查询它的状态。
 reports_extract_redmine_attachment 只提取测试报告附件 URL；reports_analyze_url 只解析测试报告 XML/ZIP，普通 .log/.txt 不走测试报告解析。
+SDK 源码源（Redmine 分析的只读源码检索数据源）用 sdk_sources_* 管理：先 sdk_sources_list 看已绑定的源；绑定新源先 sdk_sources_discover 发现编译服务器上的 SDK 目录，再用 sdk_sources_add 提交（需管理员提权，未提权时按提权流程暂停等待）；删除用 sdk_sources_delete。SSH 口令不是工具参数，只能复用已保存凭据或免密公钥，不得向用户索要密码。
 查询最新测试报告使用 reports_list 的 latest=true、test_type 和 limit；已登记报告为空不能证明原生套件没有结果。
 latest 查询会通过工作区 Worker 检查所有匹配套件的原生 XML，按实际测试时间比较。必须说明来源和 Worker 范围。
 coverage_complete=false 或 latest_confirmed=false 时不得声称已经查到最新一份或整个系统没有报告；说明失败/未覆盖范围。
@@ -403,8 +405,9 @@ async def handle_project_turn(session: dict, request, req) -> bool:
         return True
     finally:
         if not failure:
-            recovery.progress(session, state, "warning" if session.get("status") == "cancelled" else "done",
-                              "已取消本轮规划" if session.get("status") == "cancelled" else "本轮规划已结束")
+            recovery.finish_progress(session, state,
+                                     "warning" if session.get("status") == "cancelled" else "done",
+                                     "已取消本轮规划" if session.get("status") == "cancelled" else "本轮规划已结束")
         session["agent_thinking"] = False
 
 

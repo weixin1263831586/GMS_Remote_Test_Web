@@ -102,16 +102,20 @@
                 </div>
                 <div class="agent-access-form-grid">
                     <label class="agent-access-field">
-                        <span>SDK 根目录 <em>必选</em></span>
-                        <select id="agent-sdk-add-path" class="combo-box mono" required>
-                            <option value="">请先填写服务器并按回车「发现目录」</option>
-                        </select>
-                        <small id="agent-sdk-add-path-hint">SDK 检索优先选「repo 工作区」；「二级 git 仓」是普通目录下的独立 git 仓库（CI 脚本、备份、工具仓都算），不一定是 SDK 源码树。</small>
+                        <span>SDK 根目录 <em>必选</em>（可多选批量添加）</span>
+                        <div id="agent-sdk-add-path-list" class="agent-sdk-path-list" role="group" aria-label="候选 SDK 根目录">
+                            <div class="agent-sdk-path-empty">请先填写服务器并按回车「发现目录」</div>
+                        </div>
+                        <div class="agent-sdk-path-actions" id="agent-sdk-add-path-actions" hidden>
+                            <button type="button" class="btn-xxs" data-click="sdkConfigSelectAllPaths" data-a0="true">全选</button>
+                            <button type="button" class="btn-xxs" data-click="sdkConfigSelectAllPaths" data-a0="false">清空</button>
+                        </div>
+                        <small id="agent-sdk-add-path-hint">只列出 repo 工作区与 Android 源码树（含 build/envsetup.sh）；普通 git 仓（CI 工具、备份）不是 SDK 树，不再列为候选。</small>
                     </label>
                     <label class="agent-access-field">
                         <span>源 ID（可选）</span>
-                        <input id="agent-sdk-add-id" class="combo-box mono" maxlength="64" placeholder="留空按目录名自动生成">
-                        <small>字母/数字/中划线/下划线（自动生成时保留目录名大小写），用于 Agent 检索时的 source 参数。</small>
+                        <input id="agent-sdk-add-id" class="combo-box mono" maxlength="64" placeholder="留空按目录名自动生成" disabled>
+                        <small>批量添加时忽略此项，一律按目录名自动生成（重名自动加 -2/-3）。单条添加时保留目录名大小写。</small>
                     </label>
                 </div>
                 <div class="agent-access-form-grid agent-sdk-ssh-only" id="agent-sdk-add-cred-row">
@@ -129,13 +133,13 @@
                 <div class="agent-access-form-grid">
                     <label class="agent-access-field">
                         <span>Android 版本（可选）</span>
-                        <input id="agent-sdk-add-android-version" class="combo-box mono" maxlength="128" placeholder="选中目录后自动识别，可手动修改">
-                        <small>仅用于列表展示；从目录名识别（如 Android17），识别不到可手动填写。</small>
+                        <input id="agent-sdk-add-android-version" class="combo-box mono" maxlength="128" placeholder="留空按目录名自动识别（如 Android17）">
+                        <small>仅用于列表展示；批量添加时每条路径按各自目录名自动识别，此框只在单条添加时生效。</small>
                     </label>
                     <label class="agent-access-field">
                         <span>手动路径兜底（可选）</span>
-                        <input id="agent-sdk-add-path-manual" class="combo-box mono" maxlength="512" placeholder="下拉没有时手动输入绝对路径" autocomplete="off">
-                        <small>填写后优先于下拉框；用于发现不到的深层目录。</small>
+                        <input id="agent-sdk-add-path-manual" class="combo-box mono" maxlength="512" placeholder="列表没有时手动输入绝对路径" autocomplete="off" data-change="sdkConfigPrefillAndroidVersion">
+                        <small>填写后只添加这一条路径（优先于勾选列表）；用于发现不到的深层目录。</small>
                     </label>
                     <label class="agent-access-field">
                         <span>重新发现（可选）</span>

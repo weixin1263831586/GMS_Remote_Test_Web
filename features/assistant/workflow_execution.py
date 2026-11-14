@@ -139,6 +139,9 @@ def update_workflow_run_step(
     changed = any(previous.get(key) != progress[key] for key in ("status", "current_stage", "error"))
     step.setdefault("data", {})["status"] = status
     step.setdefault("data", {})["progress"] = progress
+    from features.assistant.session_log import _settle_step
+
+    _settle_step(step)  # 终态补记 finished_at / duration_seconds
     session["updated_at"] = _now_iso()
     return changed
 

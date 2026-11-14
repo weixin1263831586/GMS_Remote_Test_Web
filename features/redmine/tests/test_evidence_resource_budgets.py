@@ -23,6 +23,7 @@ from features.redmine.evidence import (
 from features.redmine.evidence_archives import extract_system_archive_text
 from features.redmine.evidence_store import EvidenceStore
 from features.redmine.evidence_text import derive_member_index
+from features.redmine.evidence_zip import extract_zip_derived_text
 
 
 def test_resource_budgets_are_env_overridable(monkeypatch):
@@ -136,3 +137,102 @@ def test_attachment_stream_budget_aborts_download(tmp_path):
         )
     # .part 清理由真实调用方 _download_attachment 的 except 分支负责；
     # 此处只验证下载流在触顶时中止。
+
+
+def _counting_opener_log(opener):
+    """包装 opener：记录实际从解压流读出的字节数（预算封顶观测点）。"""
+    reads: list[int] = []
+
+    def wrapped():
+        stream = opener()
+
+        class _Counting:
+            def read(self, n=-1):
+                data = stream.read(n)
+                reads.append(len(data))
+                return data
+
+            def seek(self, *args):
+                return stream.seek(*args)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return stream.__exit__(*exc)
+
+        return _Counting()
+
+    return wrapped, reads
+
+
+def test_encoding_prescan_is_bounded_by_char_budget(tmp_path):
+    """编码预扫描与派生共用同一字符预算（2026-11-14 审核意见）。
+
+    旧实现 detect_stream_encoding 先全量扫描整个成员（1MB 有效 UTF-8
+    也全读全解码），预算拦得住写入、拦不住预扫描的解压 CPU。新实现
+    单遍解码触顶即停：1MB 成员 + 10 字符预算，实际读取远小于成员全量。
+    """
+    import io
+
+    payload = b"a" * 1_000_000
+    wrapped, reads = _counting_opener_log(lambda: io.BytesIO(payload))
+    with patch("features.redmine.evidence_text.DERIVED_TEXT_MAX_CHARS", 10):
+        derived, note = derive_member_index(
+            EvidenceStore(tmp_path), "art_scan2", "1/s1",
+            [("big.txt", wrapped)],
+        )
+    assert not derived and "超出" in note
+    total_read = sum(reads)
+    # 旧实现两次全量扫描 = 2MB；新实现第一块 256KB 内触顶即停。
+    assert total_read < 400_000, total_read
+
+
+def test_zip_declared_size_pre_rejection(tmp_path):
+    """ZIP 声明大小超预算的成员不解压（元数据提前拒绝）。"""
+    store = EvidenceStore(tmp_path)
+    snapshot = store.create_snapshot(issue_id=1, download_policy="all")
+    snapshot_rel = f"1/{snapshot['snapshot_id']}"
+    source = tmp_path / "mix.zip"
+    with zipfile.ZipFile(source, "w") as archive:
+        archive.writestr("small.txt", "ok-text")
+        archive.writestr("bomb.txt", "z" * 500)
+    with zipfile.ZipFile(source) as archive, patch(
+        "features.redmine.evidence_zip.DERIVED_TEXT_MAX_CHARS", 100
+    ):
+        derived, note = extract_zip_derived_text(
+            store, "art_zip", snapshot_rel, source
+        )
+    assert derived and "ok-text" in store.resolve_internal(derived).read_text(encoding="utf-8")
+    assert ("声明大小" in note and "bomb.txt" not in note.split("；")[-1]) or "1 个成员" in note
+    # 纯炸弹包：没有任何成员可提取时也要显性化，不能返回"干净空"。
+    source2 = tmp_path / "bomb.zip"
+    with zipfile.ZipFile(source2, "w") as archive:
+        archive.writestr("bomb.txt", "z" * 500)
+    with zipfile.ZipFile(source2) as archive, patch(
+        "features.redmine.evidence_zip.DERIVED_TEXT_MAX_CHARS", 100
+    ):
+        derived2, note2 = extract_zip_derived_text(
+            store, "art_zip2", snapshot_rel, source2
+        )
+    assert not derived2 and "声明大小" in note2
+
+
+def test_gb18030_member_survives_candidate_retry(tmp_path):
+    """候选编码重试后 spool 必须干净：GB18030 成员全文正确落盘。"""
+    import io
+
+    store = EvidenceStore(tmp_path)
+    snapshot = store.create_snapshot(issue_id=1, download_policy="all")
+    snapshot_rel = f"1/{snapshot['snapshot_id']}"
+    text = ("复现步骤：连接设备后触发异常。" * 20)
+    payload = text.encode("gb18030")
+    derived, note = derive_member_index(store, "art_gb", snapshot_rel, [
+        ("cn.txt", lambda: io.BytesIO(payload)),
+    ])
+    assert derived and not note
+    body = store.resolve_internal(derived).read_text(encoding="utf-8")
+    assert "复现步骤：连接设备后触发异常。" in body
+    sidecar = store.resolve_internal(derived)
+    index = sidecar.with_name(sidecar.name + ".idx.json")
+    assert index.is_file()

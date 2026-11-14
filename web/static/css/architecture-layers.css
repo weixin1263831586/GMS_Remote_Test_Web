@@ -1,10 +1,10 @@
 .layers-section { font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif; }
-.layers-section .layers-intro { margin: -5px 0 18px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.layers-section .layers-intro { margin: -3px 0 12px; color: var(--muted); font-size: 13px; line-height: 1.7; }
 .architecture-layers { margin: 0; }
 .arch-layer {
   --layer-color: var(--blue);
   display: grid;
-  grid-template-columns: 116px minmax(0, 1fr);
+  grid-template-columns: 108px minmax(0, 1fr);
   border: 1px solid color-mix(in srgb, var(--layer-color) 48%, var(--line));
   border-radius: 12px;
   overflow: hidden;
@@ -18,7 +18,7 @@
   flex-direction: column;
   justify-content: center;
   gap: 5px;
-  padding: 18px 12px;
+  padding: 12px 10px;
   border-right: 1px solid color-mix(in srgb, var(--layer-color) 32%, var(--line));
   color: var(--layer-color);
   background: color-mix(in srgb, var(--layer-color) 12%, var(--panel));
@@ -27,19 +27,19 @@
 .arch-layer-label strong { font-size: 15px; }
 .arch-layer-label span { font-size: 11px; letter-spacing: .04em; }
 .arch-layer-label small { color: var(--muted); font-size: 11px; }
-.arch-layer-content { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 14px; min-width: 0; }
+.arch-layer-content { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 10px; min-width: 0; }
 .arch-layer--controller .arch-layer-content, .arch-layer--worker .arch-layer-content { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .arch-layer--resources .arch-layer-content { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.arch-layer-item { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
-.arch-layer-item h3 { margin: 0 0 7px; color: var(--text); font-size: 13px; line-height: 1.5; }
-.arch-layer-item p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
-.arch-layer-bridge { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px 20px; padding: 10px 12px; color: var(--muted); font-size: 11px; line-height: 1.6; text-align: center; }
+.arch-layer-item { min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.arch-layer-item h3 { margin: 0 0 5px; color: var(--text); font-size: 13px; line-height: 1.5; }
+.arch-layer-item p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.arch-layer-bridge { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px; padding: 7px 10px; color: var(--muted); font-size: 11px; line-height: 1.6; text-align: center; }
 .arch-layer-bridge strong { color: var(--text); font-weight: 500; }
-.arch-integrations { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
-.arch-integration { padding: 13px 15px; border: 1px dashed var(--line); border-radius: 8px; }
-.arch-integration h3 { margin: 0 0 6px; color: var(--text); font-size: 12px; }
+.arch-integrations { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.arch-integration { padding: 10px 12px; border: 1px dashed var(--line); border-radius: 8px; }
+.arch-integration h3 { margin: 0 0 5px; color: var(--text); font-size: 13px; }
 .arch-integration p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
-.architecture-layers figcaption { margin-top: 16px; padding: 12px 15px; border-left: 3px solid var(--blue); background: color-mix(in srgb, var(--blue) 6%, var(--panel)); color: var(--muted); font-size: 12px; line-height: 1.8; }
+.architecture-layers figcaption { margin-top: 10px; padding: 10px 12px; border-left: 3px solid var(--blue); background: color-mix(in srgb, var(--blue) 6%, var(--panel)); color: var(--muted); font-size: 12px; line-height: 1.7; }
 .architecture-layers figcaption strong { color: var(--text); }
 @media (max-width: 1100px) {
   .arch-layer { grid-template-columns: 100px minmax(0, 1fr); }

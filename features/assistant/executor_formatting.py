@@ -83,10 +83,40 @@ def format_payload(tool: AgentTool, payload: dict[str, Any]) -> str:
         devices = first_list("devices")
         if devices:
             return f"查询到 {len(devices)} 台设备。"
+        if tool.name == "sdk_sources":
+            return _format_sdk_sources(data)
         items = first_list("items", "jobs", "workers", "docs")
         if items:
             return f"{tool.display_name}：查询到 {len(items)} 条记录。"
     return f"{tool.display_name}已完成。"
+
+
+def _format_sdk_sources(data: dict[str, Any]) -> str:
+    """只展示 source_id、类型、默认版本和 SSH 目标，不带路径或凭据。"""
+    sources = data.get("sources")
+    if not isinstance(sources, list) or not sources:
+        return "尚未登记 SDK 源。"
+    labels = {
+        "local_git": "本机 Git 仓库",
+        "ssh_git": "编译服务器",
+        "codesearch": "OpenGrok",
+    }
+    lines = [f"已登记 {len(sources)} 个 SDK 源："]
+    for item in sources:
+        if not isinstance(item, dict):
+            continue
+        source_id = str(item.get("source_id") or "未命名")
+        provider = labels.get(str(item.get("provider") or ""), str(item.get("provider") or "未知类型"))
+        revision = str(item.get("default_revision") or "").strip() or "未设置默认版本"
+        host = str(item.get("ssh_host") or "").strip()
+        location = ""
+        if host:
+            user = str(item.get("ssh_username") or "").strip()
+            port = item.get("ssh_port") or 22
+            target = f"{user}@{host}:{port}" if user else f"{host}:{port}"
+            location = f"，{target}"
+        lines.append(f"- {source_id}（{provider}，默认版本 {revision}{location}）")
+    return "\n".join(lines)
 
 
 def format_device_info_payload(payload: dict[str, Any]) -> str:

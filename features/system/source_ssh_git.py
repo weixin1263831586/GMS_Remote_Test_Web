@@ -95,6 +95,21 @@ def _stderr_tail(result: CommandResult) -> str:
     return (lines[-1][:200] if lines else "") or f"git exit {result.code}"
 
 
+def _is_head_label(label: str, default_revision: str) -> bool:
+    """多仓模式允许的 revision 标签：空 / HEAD / 源声明的默认 revision。
+
+    多仓检索固定在各子仓 HEAD 上执行；默认 revision（如静态配置声明的
+    "main"）是源注册时已知的标签语义，允许作为同义标签通过。其他显式
+    revision（分支/tag/commit）必须拒绝——静默用 HEAD 结果冒充目标版本
+    会让跨版本补丁归属分析误判根因（2026-11-14 审核意见）。
+    """
+    value = str(label or "").strip().lower()
+    if not value or value == "head":
+        return True
+    declared = str(default_revision or "").strip().lower()
+    return bool(declared) and value == declared
+
+
 def _parse_remote_grep_output(
     stdout: str, commit: str, path_filter: str, limit: int,
 ) -> tuple[list[dict], int, bool]:
@@ -604,6 +619,16 @@ class SSHGitProvider(LocalGitProvider):
         self._verify_repo()
         if self._multi:
             label = str(revision or "").strip() or self.config.default_revision
+            # 多仓模式没有可绑定的单一 revision：HEAD 以外的显式 revision
+            # 拒绝解析（不能把各仓 HEAD 元数据标注成目标版本，调用方会
+            # 据此做跨版本归属判断）。
+            if not _is_head_label(label, self.config.default_revision):
+                raise SourceProviderError(
+                    f"多仓 SDK 源不支持 revision '{label}'：元数据在各子仓"
+                    " HEAD 上收集，无法绑定目标版本 commit。请用 HEAD，或为"
+                    "目标子仓注册单仓源并指定 default_revision。",
+                    status_code=422,
+                )
             repos = self._repos_all()
             # 逐仓 rev-parse 是 0.5s/仓：大仓清单（全量发现模式可达千仓）
             # 只返回 repo_count + 相对路径清单，不做逐仓 HEAD 收集。
@@ -614,6 +639,7 @@ class SSHGitProvider(LocalGitProvider):
                     "commit": "",
                     "reproducible": True,
                     "multi_repo": True,
+                    "revision_is_head": True,
                     "discovered": self.config.discover_repos,
                     "repo_count": len(repos),
                     "repos": {self._repo_rel(r): {} for r in repos},
@@ -627,6 +653,7 @@ class SSHGitProvider(LocalGitProvider):
                 "commit_subject": heads[first]["subject"],
                 "reproducible": True,
                 "multi_repo": True,
+                "revision_is_head": True,
                 "discovered": self.config.discover_repos,
                 "repo_count": len(heads),
                 "repos": heads,
@@ -732,9 +759,13 @@ class SSHGitProvider(LocalGitProvider):
     ) -> dict[str, Any]:
         """全量/多仓聚合检索：分片并行 HEAD grep，命中仓后置解析 commit。
 
-        - path_filter 两层语义：命中子仓名则下推收窄仓库集合；含 ``/`` 的
-          文件级路径（如 frameworks/base/core/java）未命中子仓名时回退为
-          强相关排序全量搜索，命中按完整文件路径过滤（_parse_multi_output）；
+        - path_filter 两层语义：命中子仓名则下推收窄仓库集合（优化）；未命中
+          任何子仓名时（文件名或文件级路径，如 SensorPrivacyService.java、
+          frameworks/base/core/java）不能返回空——目标文件就在各子仓里，
+          回退为强相关排序全量搜索，path_filter 统一在 _parse_multi_output
+          按**完整文件路径**逐条过滤。仓库预筛选只是优化，不允许改变查询
+          结果的正确性（2026-11-14 审核意见：文件名 filter 假阴性且
+          coverage_complete=true）；
         - 全量发现模式的子仓清单经 ``_repos_all()`` 自动枚举（TTL 缓存）；
         - 分片并行检索，墙钟预算在波间检查，客户端 HTTP 预算由 CLI 覆盖；
           超时分片返回部分结果 + limited=True + hint。
@@ -742,6 +773,17 @@ class SSHGitProvider(LocalGitProvider):
         label = str(revision or "").strip() or self.config.default_revision
         if label and (label.startswith("-") or ".." in label):
             raise SourceProviderError("revision 非法", status_code=422)
+        # revision 语义收紧（2026-11-14 审核意见）：多仓检索固定在各子仓
+        # HEAD 上执行。HEAD/默认 revision 之外的显式 revision（分支、tag、
+        # commit）必须显式拒绝——否则用户请求 Android14 版本却拿到 HEAD
+        # 命中，跨版本失败分析的根因归属直接失真。拒绝并指引替代路径。
+        if not _is_head_label(label, self.config.default_revision):
+            raise SourceProviderError(
+                f"多仓 SDK 源不支持 revision '{label}'：检索在各子仓 HEAD 上"
+                "执行，无法绑定目标版本 commit（跨版本分析会误判根因归属）。"
+                "请用 HEAD 检索，或为目标子仓注册单仓源并指定 default_revision。",
+                status_code=422,
+            )
         repos = self._repos_all()
         ranking: list[tuple[str, float, str]] = []
         if filter_value:
@@ -751,12 +793,11 @@ class SSHGitProvider(LocalGitProvider):
             )
             if repo_hits:
                 repos = repo_hits
-            elif "/" in filter_value:
-                # 文件级 path_filter（如 frameworks/base/core/java）不命中
-                # 子仓名：不能直接返回空——子仓 frameworks/base 里正有该
-                # 路径。回退到强相关排序全量搜索，文件级过滤在
-                # _parse_multi_output 按完整路径逐条判断。
-                # 注意：包含该子串的文件才保留，filter 实际是路径子串过滤。
+            else:
+                # path_filter 未命中任何子仓名（文件名或文件级路径）：
+                # 不能直接返回空——目标文件就在各子仓里。回退到强相关
+                # 排序全量搜索，文件级过滤在 _parse_multi_output 按
+                # 完整路径逐条判断；全搜索零命中是诚实的空结果。
                 from .source_repo_rank import (
                     codesearch_hints_for_query,
                     knowledge_hints_for_query,
@@ -770,12 +811,6 @@ class SSHGitProvider(LocalGitProvider):
                 )
                 rel_to_abs = {self._repo_rel(r): r for r in repos}
                 repos = tuple(rel_to_abs[rel] for rel, _, _ in ranking)
-            else:
-                return self._multi_payload(
-                    label, [], 0, False,
-                    hint=f"path_filter '{filter_value}' 未命中任何子仓；"
-                         "可用子仓见 revision 元数据",
-                )
         else:
             # 无 path_filter：按强相关排序（codesearch 符号落点 / knowledge
             # 锚点 / 子系统映射 / 路径词法），强相关仓集中在首批分片，

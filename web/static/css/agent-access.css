@@ -192,10 +192,79 @@
     color: #c62828;
 }
 
+/* SDK 源后台校验进行中（pending/stale）：中性色，与 ok/bad 明确区分。 */
+.agent-access-status-badge.pending {
+    background: rgba(120, 120, 120, 0.12);
+    color: #616161;
+}
+
 #agent-sdk-add-probe-result {
     margin-top: 12px;
 }
 
 #agent-sdk-add-probe-text {
     overflow-wrap: anywhere;
+}
+
+/* 「添加SDK」候选目录多选列表（弹框）：有界滚动，勾选即选中路径。 */
+.agent-sdk-path-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 200px;
+    min-height: 34px;
+    padding: 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--light-bg);
+    overflow-y: auto;
+}
+
+.agent-sdk-path-empty {
+    padding: 6px 8px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.agent-sdk-path-item {
+    display: grid;
+    grid-template-columns: 14px auto minmax(0, 1fr);
+    gap: 6px;
+    align-items: center;
+    min-width: 0;
+    padding: 5px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    background: var(--card-bg, #fff);
+    cursor: pointer;
+}
+
+.agent-sdk-path-item:has(input:checked) {
+    border-color: color-mix(in srgb, var(--primary-color) 45%, var(--border-color));
+    background: color-mix(in srgb, var(--primary-color) 6%, transparent);
+}
+
+.agent-sdk-path-kind {
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(120, 120, 120, 0.12);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.agent-sdk-path-value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    direction: rtl;
+    text-align: left;
+}
+
+.agent-sdk-path-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
 }

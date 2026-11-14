@@ -47,6 +47,54 @@ def detect_stream_encoding(source) -> str:
     raise UnicodeError("文本编码未识别")
 
 
+def decode_member_with_budget(source, remaining: int, write, reset) -> int:
+    """单遍候选解码 + 字符预算硬边界（返回总字符数）。
+
+    编码检测与正式派生在**同一遍**流式读取内完成（2026-11-14 审核意见）：
+    旧实现先全量扫描选编码、再全量解码派生，压缩炸弹的解压 CPU/时间
+    花了至少两遍，且第一遍（检测）不受任何预算约束。本函数按候选编码
+    逐块解码，累计字符数超过 ``remaining`` 立即抛
+    :class:`_MemberBudgetError`（解压输入被字符预算间接封顶）；
+    全部候选都校验失败时抛最后一个 :class:`UnicodeError`。
+
+    ``write(text)`` 在每个已验证块上被调用（派生落盘）；候选失败时调用
+    ``reset()`` 清空已写入内容，再从流头重试下一候选。
+    """
+    source.seek(0)
+    head = source.read(4)
+    if head.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        candidates = ("utf-16",)
+    elif head.startswith(codecs.BOM_UTF8):
+        candidates = ("utf-8-sig",)
+    else:
+        candidates = ("utf-8", "gb18030", "utf-16", "latin-1")
+    last_error: UnicodeError | None = None
+    for encoding in candidates:
+        source.seek(0)
+        decoder = codecs.getincrementaldecoder(encoding)("strict")
+        length = 0
+        try:
+            while raw := source.read(TEXT_CHUNK_BYTES):
+                text = decoder.decode(raw)
+                if text:
+                    length += len(text)
+                    if length > remaining:
+                        raise _MemberBudgetError
+                    write(text)
+            text = decoder.decode(b"", final=True)
+            if text:
+                length += len(text)
+                if length > remaining:
+                    raise _MemberBudgetError
+                write(text)
+            return length
+        except UnicodeError as exc:  # 候选失败：清空重试下一候选
+            last_error = exc
+            reset()
+            continue
+    raise last_error or UnicodeError("文本编码未识别")
+
+
 def decoded_chunks(source, encoding: str):
     decoder = codecs.getincrementaldecoder(encoding)("strict")
     while raw := source.read(TEXT_CHUNK_BYTES):
@@ -118,14 +166,20 @@ def derive_member_index(store, artifact_id: str, snapshot_rel: str, members):
                 break
             with tempfile.TemporaryFile() as spool:
                 try:
-                    length = 0
+                    def _spool_write(text: str) -> None:
+                        spool.write(text.encode("utf-8"))
+
+                    def _spool_reset() -> None:
+                        spool.seek(0)
+                        spool.truncate(0)
+
                     with opener() as source:
-                        encoding = detect_stream_encoding(source)
-                        for text in decoded_chunks(source, encoding):
-                            length += len(text)
-                            if length > remaining:
-                                raise _MemberBudgetError(name)
-                            spool.write(text.encode("utf-8"))
+                        # 单遍预算化解码：编码检测与派生同预算（压缩炸弹的
+                        # 解压消耗被封顶在剩余字符额度内，预扫描不再绕过
+                        # 预算）。候选失败时清空 spool 重试。
+                        length = decode_member_with_budget(
+                            source, remaining, _spool_write, _spool_reset,
+                        )
                 except _MemberBudgetError:
                     # 保留已完成索引；调用方把 derived_status 记为 partial
                     # ——未索引成员绝不能当作不存在。

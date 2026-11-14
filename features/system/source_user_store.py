@@ -140,33 +140,67 @@ class UserSourceStore:
         try:
             data = json.loads(raw)
         except json.JSONDecodeError as exc:
-            # 配置损坏绝不能按空存储继续——后续任何 add/update 都会用空
-            # 数据覆盖原文件，已注册源与加密口令将不可恢复地丢失。这里
-            # 显式报错（写路径被阻断），并把损坏文件保留为 .corrupt 副本
-            # 供人工恢复。
-            backup = self.path.with_suffix(self.path.suffix + ".corrupt")
-            try:
-                try:
-                    descriptor = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                except FileExistsError:
-                    pass
-                else:
-                    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                        handle.write(raw)
-                    logger.error(
-                        "用户 SDK 源存储损坏，已备份到 %s；写入被阻断", backup
-                    )
-            except OSError:
-                logger.error("用户 SDK 源存储损坏，且备份失败；写入被阻断")
-            raise UserSourceStoreError(
-                "SDK 源存储文件损坏（JSON 解析失败），已阻断写入以保护原文件；"
-                "请人工检查 .corrupt 备份后修复或删除该文件",
-                status_code=503,
-            ) from exc
-        sources = data.get("sources") if isinstance(data, dict) else None
+            self._handle_corrupt(
+                raw, "SDK 源存储文件损坏（JSON 解析失败）", exc,
+            )
+        if not isinstance(data, dict):
+            self._handle_corrupt(raw, "SDK 源存储结构损坏（顶层不是对象）")
+        version = data.get("version")
+        # Schema 严格校验（2026-11-14 审核意见）：语法合法但结构错误
+        # （version 缺失/不识别、sources 是数组、记录不是对象、记录
+        # source_id 与键不一致）同样不能按空存储继续——后续 add 会用
+        # 空数据覆盖原文件，已注册源与加密口令不可恢复地丢失。
+        if not isinstance(version, int) or isinstance(version, bool):
+            self._handle_corrupt(raw, "SDK 源存储结构损坏（version 缺失或非法）")
+        if version != STORE_VERSION:
+            self._handle_corrupt(
+                raw,
+                f"SDK 源存储版本不识别（version={version}，当前支持 "
+                f"{STORE_VERSION}）",
+            )
+        sources = data.get("sources")
         if not isinstance(sources, dict):
-            return {}
-        return {str(k): v for k, v in sources.items() if isinstance(v, dict)}
+            self._handle_corrupt(
+                raw, "SDK 源存储结构损坏（sources 不是对象）",
+            )
+        for key, value in sources.items():
+            if not isinstance(value, dict) or not isinstance(key, str):
+                self._handle_corrupt(
+                    raw, "SDK 源存储结构损坏（记录不是对象）",
+                )
+            if str(value.get("source_id") or "") != key:
+                self._handle_corrupt(
+                    raw,
+                    f"SDK 源存储结构损坏（记录 '{key}' 的 source_id 与键不一致）",
+                )
+        return sources
+
+    def _handle_corrupt(
+        self, raw: str, message: str,
+        exc: Exception | None = None,
+    ) -> None:
+        """结构损坏统一处理：保留 .corrupt 原文备份 + 503 阻断写入。"""
+        backup = self.path.with_suffix(self.path.suffix + ".corrupt")
+        try:
+            try:
+                descriptor = os.open(
+                    backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600,
+                )
+            except FileExistsError:
+                pass
+            else:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                    handle.write(raw)
+                logger.error(
+                    "用户 SDK 源存储损坏，已备份到 %s；写入被阻断", backup
+                )
+        except OSError:
+            logger.error("用户 SDK 源存储损坏，且备份失败；写入被阻断")
+        raise UserSourceStoreError(
+            f"{message}，已阻断写入以保护原文件；"
+            "请人工检查 .corrupt 备份后修复或删除该文件",
+            status_code=503,
+        ) from exc
 
     def _write(self, sources: dict[str, dict[str, Any]]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -253,8 +287,6 @@ class UserSourceStore:
                 "label": str(label or "").strip()[:120],
                 "added_by": str(added_by or "").strip()[:64],
                 "added_at": now_iso,
-                "last_verified_at": now_iso,
-                "last_verified_ok": False,
             }
         elif provider == "ssh_git":
             connection = validate_connection(ssh_host, ssh_username, ssh_port)
@@ -269,8 +301,6 @@ class UserSourceStore:
                 "label": str(label or "").strip()[:120],
                 "added_by": str(added_by or "").strip()[:64],
                 "added_at": now_iso,
-                "last_verified_at": now_iso,
-                "last_verified_ok": False,
                 **connection,
             }
         else:

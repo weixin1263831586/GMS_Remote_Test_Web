@@ -25,6 +25,13 @@ def model(monkeypatch):
     return turn, execute
 
 
+def test_project_protocol_queries_registered_sdk_sources_before_asking():
+    assert "sdk_sources" in agent._PROTOCOL
+    assert "先查询，不要先让用户选择类型" in agent._PROTOCOL
+    payload = json.loads(agent._context(session(), []))
+    assert "SDK" in payload["tools"]["sdk_sources"]
+
+
 def decision(kind, **fields):
     return BridgeTurnResult(ok=True, text=json.dumps({"type": kind, **fields}), session_id="model-session")
 
