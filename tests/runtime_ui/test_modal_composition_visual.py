@@ -157,6 +157,9 @@ class ModalCompositionVisualTests(RuntimeUiHarness):
         try:
             self.goto_shell(page)
             page.set_viewport_size({"width": 1440, "height": 900})
+            # Initial auth/login callbacks are unrelated to this geometry test;
+            # they can otherwise open elevate-modal over the route dialog.
+            page.evaluate("window.requestElevatedAccess = async () => true")
             page.locator("#check-routing-btn").click()
             route = page.locator("#route-check-dialog .modal-content")
             route.wait_for(state="visible")

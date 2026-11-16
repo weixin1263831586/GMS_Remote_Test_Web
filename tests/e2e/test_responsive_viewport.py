@@ -112,6 +112,11 @@ class ResponsiveViewportE2ETests(runtime_ui_smoke.RuntimeUiHarness):
         """
         page = self.new_page()
         self.addCleanup(page.close)
+        # Ensure each viewport starts on the same initial shell, not a cached
+        # iframe page left over from the previous viewport's navigation.
+        page.add_init_script(
+            "try { localStorage.setItem('gms_current_page', 'test'); } catch (e) {}"
+        )
         for viewport in IFRAME_VIEWPORTS:
             page.set_viewport_size(viewport)
             page.goto(self.base_url, wait_until="domcontentloaded")

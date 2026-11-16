@@ -652,8 +652,11 @@ class RuntimeModalsTests(RuntimeUiHarness):
                             clip: getComputedStyle(el).clipPath};
                 }"""
             )
-            self.assertLessEqual(metrics["width"], 652)
-            self.assertLess(metrics["height"], 700)
+            # Firmware has real side-by-side source and recovery panels.
+            # Unlike ordinary 620px forms, this purpose-built workflow needs 900px.
+            self.assertGreaterEqual(metrics["width"], 875)
+            self.assertLessEqual(metrics["width"], 902)
+            self.assertLess(metrics["height"], 800)
             self.assertEqual(metrics["border"], "1px")
             self.assertEqual(metrics["clip"], "none")
             page.evaluate("() => ModalManager.close('firmware-modal')")

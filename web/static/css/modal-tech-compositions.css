@@ -382,9 +382,15 @@
 .tech-device-routing-composition .adb-proxy-assignments {
   border:1px solid #58416e;min-height:75px;background:#191521;
 }
-:is(#adb-proxy-modal,#usbip-attach-modal) > .modal-content {
+/* ADB Proxy has wider assignment comparison; USB/IP is a fixed-width
+   source/target flow. Preserve the original 620px USB/IP contract. */
+#adb-proxy-modal > .modal-content {
   width:min(800px,calc(100vw - 24px));
   max-width:min(800px,calc(100vw - 24px));
+}
+#usbip-attach-modal > .modal-content {
+  width:min(620px,calc(100vw - 24px));
+  max-width:min(620px,calc(100vw - 24px));
 }
 :is(#adb-proxy-modal,#usbip-attach-modal) .device-routing-modal-buttons {gap:10px;padding:12px 19px}
 
