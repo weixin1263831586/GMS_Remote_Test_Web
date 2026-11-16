@@ -210,7 +210,6 @@ def test_firmware_and_report_copy_actions_are_outside_scrollable_bodies() -> Non
         ("report-copy", "tech-report-transfer-footer"),
     ):
         source = (DIALOGS / (name + ".html")).read_text(encoding="utf-8")
-        end_body = source.index("</div>", source.index('class="modal-body'))
         # Explicit footer is after the actual scroll body; action callbacks
         # stay unchanged. Browser E2E checks final layout at 390px.
         assert footer in source
