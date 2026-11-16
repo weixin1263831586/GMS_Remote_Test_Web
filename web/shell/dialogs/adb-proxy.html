@@ -5,8 +5,8 @@
                 <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#plug"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">🔌 ADB设备接入</span></div>
                 <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeAdbProxyModal">&times;</button>
             </div>
-            <div class="modal-body">
-                <form id="adb-proxy-form" data-submit="submitAdbProxyConnect" data-prevent autocomplete="off">
+            <div class="modal-body tech-device-routing-composition"><p class="tech-workflow-lede">选择 ADB 设备来源及接入主机；接入后可执行 ADB 与测试操作</p>
+                <form class="tech-routing-setup-panel" id="adb-proxy-form" data-submit="submitAdbProxyConnect" data-prevent autocomplete="off">
                     <div class="adb-proxy-section-head">
                         <div class="adb-proxy-section-title">新建接入</div>
                         <div style="display: flex; align-items: center; gap: 8px;">
@@ -47,13 +47,14 @@
                         </select>
                     </div>
                 </form>
-                <div class="adb-proxy-section-head">
-                    <div class="adb-proxy-section-title">当前接入</div>
+                <section class="tech-routing-current"><div class="adb-proxy-section-head">
+                    <div class="adb-proxy-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#server"></use></svg> 当前接入</div>
                     <button class="btn-xxs" type="button" style="min-width: 0; padding: 4px 8px;" data-click="refreshAdbProxyAssignments"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
                 </div>
                 <div id="adb-proxy-assignments" class="adb-proxy-assignments">
                     正在读取接入状态...
                 </div>
+                </section>
                 <div id="adb-proxy-message" class="modal-info-text">
                     ADB通过adbproxy-rs接入后会显示在目标主机；可执行ADB和测试操作，Fastboot、锁定及烧写操作将被禁用。来源与目标需版本兼容且内网/VPN可直达。
                 </div>

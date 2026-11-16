@@ -5,8 +5,8 @@
                 <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#plug"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">📱 USB/IP设备接入</span></div>
                 <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeUsbipAttachModal">&times;</button>
             </div>
-            <div class="modal-body">
-                <form id="usbip-attach-form" data-submit="submitUsbipAttach" data-prevent autocomplete="off">
+            <div class="modal-body tech-device-routing-composition"><p class="tech-workflow-lede">选择物理 USB 设备的来源主机及目标 Worker</p>
+                <form class="tech-routing-setup-panel" id="usbip-attach-form" data-submit="submitUsbipAttach" data-prevent autocomplete="off">
                     <div class="adb-proxy-section-head">
                         <div class="adb-proxy-section-title">新建接入</div>
                         <button class="btn-xxs" type="button" style="min-width: 0; padding: 4px 8px;" data-click="refreshUsbipSourceDevices"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
@@ -28,8 +28,8 @@
                         </select>
                     </div>
                 </form>
-                <div class="adb-proxy-section-head">
-                    <div class="adb-proxy-section-title">当前接入</div>
+                <section class="tech-routing-current"><div class="adb-proxy-section-head">
+                    <div class="adb-proxy-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#server"></use></svg> 当前接入</div>
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <label class="btn-xxs" for="usbip-show-all-assignments" style="min-width: 0; padding: 4px 8px; user-select: none;">
                             <input type="checkbox" id="usbip-show-all-assignments" data-change="loadUsbipAssignments" style="margin: 0 4px 0 0; vertical-align: middle;">
@@ -41,6 +41,7 @@
                 <div id="usbip-assignments" class="adb-proxy-assignments">
                     正在读取接入状态...
                 </div>
+                </section>
                 <div id="usbip-attach-message" class="modal-info-text">
                     可多选USB设备；同一设备同一时间只能接入一台主机。来源支持 Windows（usbipd-win）或 Ubuntu/Linux（用户态 usbipd）+ SSH，目标需 Linux USB/IP；网络中断可使分配进入待确认/待清理。
                 </div>
