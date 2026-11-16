@@ -812,3 +812,46 @@
    display:block;margin-top:6px;
  }
 }
+
+
+/* Complete four-corner outline: keep the real border intact, add only accents.
+   The other two corners are pseudo-elements; existing HTML supplies TL/BR. */
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog::before,
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog::after {
+  content:"" !important;
+  display:block !important;
+  position:absolute;
+  width:16px;height:16px;
+  background:transparent;
+  pointer-events:none;
+  z-index:12;
+  filter:drop-shadow(0 0 5px rgba(202,142,248,.7));
+  border:0;
+  border-radius:0;
+  clip-path:none;
+}
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog::before {
+  top:0;right:0;bottom:auto;left:auto;
+  border-top:2px solid #d1a4ff;
+  border-right:2px solid #d1a4ff;
+  border-top-right-radius:8px;
+}
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog::after {
+  bottom:0;left:0;top:auto;right:auto;
+  border-bottom:2px solid #d1a4ff;
+  border-left:2px solid #d1a4ff;
+  border-bottom-left-radius:8px;
+}
+#route-check-dialog .route-check-corner {
+  display:block !important;
+  opacity:.9;
+  stroke:#bf8fe5;
+  stroke-width:2;
+  filter:drop-shadow(0 0 4px rgba(180,114,231,.45));
+}
+@media(prefers-reduced-motion:reduce) {
+  :is(.modal,.modal-backdrop) .modal-content.tech-dialog::before,
+  :is(.modal,.modal-backdrop) .modal-content.tech-dialog::after {
+    transition:none;
+  }
+}
