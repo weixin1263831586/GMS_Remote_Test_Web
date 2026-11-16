@@ -2,13 +2,13 @@
         <div class="modal-content modal-xl modal-pin tech-dialog tech-dialog--test-results">
         <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
             <div class="modal-header tech-dialog-header">
-                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#chart"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">测试结果列表 <span id="test-results-modal-suite" style="font-size: 12px; color: var(--text-secondary); font-weight: normal;"></span></div></span>
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#chart"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">测试结果列表 <span id="test-results-modal-suite" style="font-size: 12px; color: var(--text-secondary); font-weight: normal;"></span></span></div>
                 <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
                     <button type="button" class="btn-xs" data-click="minimizeTestResultsModal">缩小</button>
                     <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeTestResultsModal">&times;</button>
                 </div>
             </div>
-            <div class="modal-body" style="display: flex; flex-direction: column; height: 100%; overflow: hidden; padding: 0 20px;">
+            <div class="modal-body tech-results-workbench" style="display: flex; flex-direction: column; height: 100%; overflow: hidden; padding: 0 20px;">
                 <div class="modal-info-text" style="display: flex; justify-content: space-between; align-items: center; padding: 2px 0;">
                     <span id="test-results-modal-status">点击某一行测试结果可跳转到对应目录</span>
                     <button class="btn-xxs" data-click="loadTestResults" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
