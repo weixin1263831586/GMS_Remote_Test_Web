@@ -219,3 +219,25 @@ def test_firmware_and_report_copy_actions_are_outside_scrollable_bodies() -> Non
     )
     assert "#firmware-modal .tech-firmware-footer" in styles
     assert "#report-copy-modal .tech-report-transfer-footer" in styles
+
+
+def test_composition_css_revision_is_identical_across_workspaces() -> None:
+    """All iframe pages and Shell must load identical CSS versioned asset."""
+    import re
+
+    sources = (
+        "web/shell/components/head.html",
+        "features/redmine/ui/page.html",
+        "features/gerrit/ui/page.html",
+        "features/automation/ui/page.html",
+        "features/cluster/ui/page.html",
+        "features/devices/ui/page.html",
+        "features/system/update_radar/ui/page.html",
+    )
+    revisions = set()
+    for path in sources:
+        html = (ROOT / path).read_text(encoding="utf-8")
+        found = re.findall(r"modal-tech-compositions\\.css\\?v=([^\\\"]+)", html)
+        assert len(found) == 1, path
+        revisions.add(found[0])
+    assert len(revisions) == 1, revisions
