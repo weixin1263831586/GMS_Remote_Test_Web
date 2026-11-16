@@ -729,3 +729,86 @@
   .tech-dialog--cluster-onboarding .onboarding-grid {margin:7px;padding:10px}
   .tech-embedded-workflow {padding:10px 12px !important}
 }
+
+
+/* Dynamic route test: real hosts on top, only returned API results below. */
+#route-check-dialog > .modal-content {
+  width:min(720px,calc(100vw - 24px));
+  max-width:min(720px,calc(100vw - 24px));
+  max-height:calc(100dvh - 24px);
+  border:1px solid #9b72bc !important;
+  border-radius:9px !important;
+  background:#1b1827 !important;
+}
+#route-check-dialog .tech-route-composition {
+  padding:15px 18px;
+  overflow:auto;
+}
+#route-check-dialog .tech-route-composition > .form-group {
+  display:grid;
+  grid-template-columns:125px minmax(0,1fr);
+  align-items:center;
+  gap:6px 12px;
+  min-height:61px;
+  background:#231d2f;
+  border:1px solid #5c4773;
+  border-radius:8px;
+  padding:10px 12px;
+}
+#route-check-dialog .tech-route-composition > .form-group label {
+  margin:0;font-weight:650;color:#eee0f8;
+}
+#route-check-dialog .tech-route-composition > .form-group small {
+  grid-column:2;
+  margin:0;color:#b8aac8;font-size:11px;
+}
+#route-check-dialog .tech-route-composition .route-check-field {
+  background:#14121d;border:1px solid #7d6196;border-radius:5px;
+}
+#route-check-dialog .tech-route-live-results {
+  margin:10px 0 0;
+  border:1px solid #6b5085;
+  border-radius:8px;
+  background:#211b2c;
+  padding:10px 13px;
+}
+#route-check-dialog .tech-route-live-results:has(.ping-result:empty) {
+  display:none;
+}
+#route-check-dialog .tech-route-live-heading {
+  display:flex;align-items:center;gap:8px;
+  padding-bottom:7px;margin-bottom:8px;
+  font-size:13px;font-weight:650;color:#efd5ff;
+  border-bottom:1px solid #674c7f;
+}
+#route-check-dialog .tech-route-live-heading .ui-icon {
+  width:17px;height:17px;color:#c58eea;
+}
+#route-check-dialog .tech-route-live-results #ping-result {
+  margin:0;
+  max-height:240px;
+  overflow-y:auto;
+  background:#15121e;
+  color:#e6d7f0;
+}
+#route-check-dialog .route-check-actions {
+  min-height:62px;
+  border-top:1px solid #6b507e;
+  background:#201b2a;
+}
+#route-check-dialog .route-check-actions #ping-test-btn {
+  background:#7845b6;
+  border:1px solid #b98fe8;
+  color:#fff;
+}
+@media(max-width:640px) {
+ #route-check-dialog .tech-route-composition > .form-group {
+   display:block;min-height:0;
+ }
+ #route-check-dialog .tech-route-composition > .form-group label {
+   display:block;margin-bottom:8px;
+ }
+ #route-check-dialog .tech-route-composition > .form-group small {
+   display:block;margin-top:6px;
+ }
+}
