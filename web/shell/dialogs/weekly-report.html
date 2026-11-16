@@ -6,7 +6,7 @@
                 <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeWeeklyReportModal">&times;</button>
             </div>
             <div class="modal-body tech-weekly-workbench" style="display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 0;">
-                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <div class="tech-weekly-filters" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                     <label style="display:flex; align-items:center; gap:4px; font-size:13px;">成员
                         <select id="weekly-report-member" data-change="onWeeklyReportMemberChange" style="height: 32px; padding: 0 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); max-width: 220px;">
                         </select>
@@ -30,7 +30,7 @@
                     </div>
                     <span id="weekly-report-status" style="font-size: 12px; color: var(--text-secondary);"></span>
                 </div>
-                <div id="weekly-report-content" class="tech-weekly-output" style="flex: 1; min-height: 0; overflow: auto; padding: 4px 2px; font-size: 13px; line-height: 1.6;"></div>
+                <div id="weekly-report-content" class="tech-weekly-output tech-weekly-document" style="flex: 1; min-height: 0; overflow: auto; padding: 4px 2px; font-size: 13px; line-height: 1.6;"></div>
             </div>
         </div>
     </div>

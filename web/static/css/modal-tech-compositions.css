@@ -994,3 +994,51 @@
   .tech-dialog--dynamic-redmine-auth .tech-dynamic-auth-form .modal-form-row {grid-template-columns:1fr}
   .tech-dialog--dynamic-ai-analysis .tech-ai-analysis-body {padding:10px}
 }
+
+
+/* Test results: status toolbar and real suite-results list, both scroll-safe. */
+#test-results-modal .tech-results-workbench {gap:10px;min-height:0}
+#test-results-modal .tech-results-toolbar {
+  flex:none;min-height:43px;padding:7px 12px !important;
+  border:1px solid #675080;border-radius:8px;background:#292237;
+}
+#test-results-modal .tech-results-toolbar button {flex:none}
+#test-results-modal .tech-results-table {
+  min-height:0;border:1px solid #70558d !important;
+  border-radius:8px;background:#171420 !important;overscroll-behavior:contain;
+}
+/* UI control: screenshot and actual clickable UI XML elements are distinct. */
+#ui-control-modal .tech-ui-inspector-layout {min-height:0;align-items:stretch !important}
+#ui-control-modal .tech-ui-screen-panel,
+#ui-control-modal .tech-ui-inspector-panel {
+  box-sizing:border-box;min-width:0;min-height:0;
+  border:1px solid #655080;border-radius:9px;background:#211b2e;
+  padding:13px 14px;
+}
+#ui-control-modal .tech-ui-screen-panel img {
+  background:#11111b;border-color:#785d92 !important;
+}
+#ui-control-modal .tech-ui-inspector-panel #ui-control-elements {
+  background:#17131f;border-color:#705387 !important;
+}
+#ui-control-modal .tech-ui-inspector-panel #ui-control-search {
+  background:#15131e;border-color:#775c94;min-width:0;
+}
+/* Weekly report: controls remain a live toolbar; output is a distinct document. */
+#weekly-report-modal .tech-weekly-filters {
+  flex:none;padding:11px 14px;border:1px solid #614d7e;
+  border-radius:8px;background:#241e30;
+}
+#weekly-report-modal .tech-weekly-document {
+  box-sizing:border-box;min-height:0;
+  padding:17px 20px !important;
+  border:1px solid #6b5485 !important;
+  border-radius:9px;background:#181520 !important;
+  color:#e8def2;line-height:1.7;
+}
+@media(max-width:700px) {
+  #ui-control-modal .tech-ui-inspector-layout {flex-direction:column}
+  #ui-control-modal .tech-ui-screen-panel {max-width:100% !important;flex:none !important}
+  #ui-control-modal .tech-ui-inspector-panel {min-height:220px}
+  #weekly-report-modal .tech-weekly-filters {padding:9px}
+}
