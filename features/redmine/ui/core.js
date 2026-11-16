@@ -491,8 +491,8 @@ function openRedmineReplyModal(issueId, replyText, meta) {
           <input type="file" id="${fileInputId}" data-redmine-files multiple style="display:none" data-change="updateRedmineReplyFileList" data-a0="${fileInputId}" data-a1="${fileListId}">
           <div id="${fileInputId}-drop" class="redmine-reply-drop" data-click="_actClickById" data-a0="${fileInputId}">拖拽文件到此处，或点击选择文件</div>
           <div id="${fileListId}" class="redmine-reply-file-list"></div>
-        </div>
-        <div class="modal-buttons">
+        </section>
+        <div class="modal-buttons tech-dialog-actions">
           <button class="secondary" data-click="removeDynamicModal" data-a0="${modalId}">取消</button>
           <button data-click="confirmAndSendRedmineReply" data-a0="${modalId}">确认并发送</button>
         </div>
