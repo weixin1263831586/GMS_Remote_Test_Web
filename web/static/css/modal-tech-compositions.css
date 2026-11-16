@@ -1216,3 +1216,28 @@
     grid-template-columns:minmax(0,1fr);
   }
 }
+
+/* True modal footers: actions are outside scrollable bodies so destructive
+   workflows remain reachable at 390px and with large dynamic result sets. */
+#firmware-modal .tech-firmware-footer,
+#report-copy-modal .tech-report-transfer-footer {
+  flex:0 0 auto;
+  margin:0 !important;
+  padding:11px 20px 13px !important;
+  background:#1d1929;
+  border-top:1px solid #71548e;
+}
+#firmware-modal .tech-firmware-footer {gap:9px}
+#report-copy-modal .tech-report-transfer-footer {gap:9px}
+#firmware-modal .modal-body.tech-firmware-composition,
+#report-copy-modal .modal-body.tech-report-transfer-composition {
+  flex:1 1 auto;
+  min-height:0;
+  overscroll-behavior:contain;
+}
+@media(max-width:520px){
+  #firmware-modal .tech-firmware-footer,
+  #report-copy-modal .tech-report-transfer-footer {
+    padding:10px 12px !important;
+  }
+}

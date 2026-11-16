@@ -202,3 +202,21 @@ def test_dynamic_system_config_is_purpose_grouped_without_changing_field_ids() -
     assert "grid-template-columns:minmax(0,1.55fr) minmax(0,1fr)" in css
 
 
+
+
+def test_firmware_and_report_copy_actions_are_outside_scrollable_bodies() -> None:
+    for name, footer in (
+        ("firmware", "tech-firmware-footer"),
+        ("report-copy", "tech-report-transfer-footer"),
+    ):
+        source = (DIALOGS / (name + ".html")).read_text(encoding="utf-8")
+        end_body = source.index("</div>", source.index('class="modal-body'))
+        # Explicit footer is after the actual scroll body; action callbacks
+        # stay unchanged. Browser E2E checks final layout at 390px.
+        assert footer in source
+        assert source.index('class="modal-body') < source.index(footer)
+    styles = (ROOT / "web/static/css/modal-tech-compositions.css").read_text(
+        encoding="utf-8"
+    )
+    assert "#firmware-modal .tech-firmware-footer" in styles
+    assert "#report-copy-modal .tech-report-transfer-footer" in styles

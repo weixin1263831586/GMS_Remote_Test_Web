@@ -663,6 +663,47 @@ class RuntimeModalsTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_firmware_and_report_copy_actions_remain_visible_on_mobile(self):
+        """Footer buttons must not disappear under the scrolling form at 390px."""
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.set_viewport_size({"width": 390, "height": 844})
+            for modal_id, action in (
+                ("firmware-modal", 'button[data-click="submitFirmwareBurn"]'),
+                ("report-copy-modal", "#report-copy-submit"),
+            ):
+                with self.subTest(modal=modal_id):
+                    page.evaluate("(id) => ModalManager.open(id)", modal_id)
+                    result = page.locator(f"#{modal_id}").evaluate(
+                        """modal => {
+                            const panel = modal.querySelector('.modal-content');
+                            const body = modal.querySelector('.modal-body');
+                            const buttons = modal.querySelector('.modal-buttons');
+                            const action = buttons.querySelector(
+                                modal.id === 'firmware-modal'
+                                    ? '[data-click="submitFirmwareBurn"]'
+                                    : '#report-copy-submit'
+                            );
+                            const rect = action.getBoundingClientRect();
+                            const panelRect = panel.getBoundingClientRect();
+                            return {
+                                actionVisible: rect.height > 0 && rect.bottom <= innerHeight + 1,
+                                bodyBottom: body.getBoundingClientRect().bottom,
+                                footerTop: buttons.getBoundingClientRect().top,
+                                panelBottom: panelRect.bottom,
+                                footerInsideBody: body.contains(buttons),
+                            };
+                        }"""
+                    )
+                    self.assertFalse(result["footerInsideBody"], result)
+                    self.assertTrue(result["actionVisible"], result)
+                    self.assertLessEqual(result["bodyBottom"], result["footerTop"] + 1)
+                    self.assertLessEqual(result["panelBottom"], 845)
+                    page.evaluate("(id) => ModalManager.close(id)", modal_id)
+        finally:
+            page.close()
+
     def test_main_shell_modals_fit_supported_viewports_and_stack_in_order(self):
         page = self.new_page()
         page_errors = []
