@@ -855,3 +855,28 @@
     transition:none;
   }
 }
+
+
+/* Dedicated structures for sync strategy, archive extraction, GSI and Wi-Fi. */
+#mainline-sync-modal .tech-mainline-choice-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+#mainline-sync-modal .tech-mainline-option {display:flex;flex-direction:column;gap:10px;padding:14px;border:1px solid #695183;border-radius:9px;background:#251e32;min-width:0}
+#mainline-sync-modal .tech-mainline-option--incremental {border-top:2px solid #b68aeb}
+#mainline-sync-modal .tech-mainline-option--full {border-top:2px solid #d5aa6e}
+#mainline-sync-modal .tech-mainline-option p {flex:1;margin:0;color:#c9bfd5;font-size:12px;line-height:1.6}
+#mainline-sync-modal .tech-mainline-option .tech-workflow-section-title {margin:0}
+#mainline-sync-modal .tech-mainline-option button {align-self:stretch;min-height:38px}
+#mainline-sync-modal .tech-workflow-operation-note {padding:10px 12px;margin-top:12px;border-left:2px solid #a47cd1;background:#2c2438;color:#d5c5e5;font-size:12px}
+#extract-suite-modal .tech-purpose-form {display:flex;flex-direction:column;gap:10px}
+#extract-suite-modal .tech-extract-source {border-top:2px solid #ae83df}
+#extract-suite-modal .tech-extract-target {border-top:2px solid #8067b2}
+#extract-suite-modal .tech-purpose-panel .modal-form-row {margin-bottom:8px}
+#gsi-modal .tech-gsi-source-layout {display:flex;flex-direction:column;gap:10px}
+#gsi-modal .tech-gsi-required {border-top:2px solid #b989ee}
+#gsi-modal .tech-gsi-optional {border-top:2px solid #8066aa}
+#gsi-modal .tech-gsi-optional .modal-form-row {margin-bottom:0}
+#wifi-modal .tech-wifi-hint {display:flex;gap:9px;align-items:flex-start;padding:11px 12px;margin-top:10px;border:1px solid #5f477c;border-left:3px solid #a478d8;border-radius:6px;background:#292235;color:#d4c6e3;font-size:12px;line-height:1.6}
+#wifi-modal .tech-wifi-hint .ui-icon {flex:none;width:18px;height:18px;color:#c995ff}
+@media(max-width:600px) {
+ #mainline-sync-modal .tech-mainline-choice-grid {grid-template-columns:1fr}
+ #mainline-sync-modal .tech-mainline-option {padding:11px}
+}
