@@ -1160,3 +1160,59 @@
   border:1px solid #bf8fee;
   color:#fff;
 }
+
+/* System configuration is a live, data-bound workspace (not a static form).
+   Preserve config JSON read-only topology, editable log knobs, SMTP ledger,
+   credential table and network routes as separate semantic sections. */
+#config-modal .tech-config-layout {
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  gap:12px;
+}
+#config-modal .tech-config-layout > .config-section-notice {
+  margin:0;
+  padding:12px 14px;
+  background:#342c22;
+  border:1px solid #84663d;
+  border-left:3px solid #d9ab57;
+  color:#ead2a9;
+}
+#config-modal .tech-config-layout > #test-control-config-form {
+  min-width:0;
+  display:grid;
+  grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);
+  align-items:start;
+  gap:12px;
+}
+#config-modal .tech-config-layout .config-section {
+  min-width:0;
+  margin:0;
+  background:#241e30;
+  border:1px solid #665080;
+  border-radius:8px;
+}
+#config-modal .tech-config-layout .config-section-accent-deploy {
+  border-top:2px solid #ad77e3;
+}
+#config-modal .tech-config-layout .config-section-accent-logs {
+  border-top:2px solid #73bca1;
+}
+#config-modal .tech-config-layout > .config-section-accent-email,
+#config-modal .tech-config-layout > .config-section-accent-creds,
+#config-modal .tech-config-layout > .config-section-accent-routes {
+  grid-column:1/-1;
+}
+#config-modal .tech-config-layout .config-section-accent-email {border-top:2px solid #b77edb}
+#config-modal .tech-config-layout .config-section-accent-creds {border-top:2px solid #78afcc}
+#config-modal .tech-config-layout .config-section-accent-routes {border-top:2px solid #c4a36d}
+#config-modal .tech-config-layout :is(.config-section-accent-creds,.config-section-accent-routes) > table {
+  background:#17141e;
+  border:1px solid #58416d;
+  border-radius:5px;
+}
+#config-modal .tech-config-layout :is(input,select) {min-width:0}
+@media(max-width:680px) {
+  #config-modal .tech-config-layout > #test-control-config-form {
+    grid-template-columns:minmax(0,1fr);
+  }
+}

@@ -326,6 +326,7 @@ async function showConfig() {
     // ADR：结构用 HTML、数据用 DOM property —— 模板不插入任何配置数据，
     // 避免 " < > & 破坏属性 / DOM 注入 / 字段消失类 UI 完整性问题。
     modalBody.innerHTML = `
+        <div class="tech-config-layout" role="group" aria-label="系统配置工作区">
         <div class="config-section config-section-notice">
             部署拓扑（用户/主机/路径/VID:PID）为静态配置：请由管理员在
             <code>configs/local/config.json</code> 修改后重启生效；此处只读展示，
@@ -486,6 +487,7 @@ async function showConfig() {
                 <button class="btn-xxs btn-primary" id="static-route-add-btn" type="button">添加</button>
             </div>
             <small>程序启动和每次保存时自动应用（幂等）。修改路由表需要 root；普通用户运行时需配置 sudoers 免密 ip route。</small>
+        </div>
         </div>
     `;
 

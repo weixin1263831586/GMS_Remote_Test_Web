@@ -179,3 +179,26 @@ def test_workflow_css_keeps_background_visible_and_never_clips_modal_root() -> N
         ".tech-tools-composition", ".tech-serial-binding-composition",
     ):
         assert layout in layer
+
+def test_dynamic_system_config_is_purpose_grouped_without_changing_field_ids() -> None:
+    js = (ROOT / "web/static/js/pages/test-control.js").read_text(encoding="utf-8")
+    css = (ROOT / "web/static/css/modal-tech-compositions.css").read_text(
+        encoding="utf-8"
+    )
+    assert 'class="tech-config-layout"' in js
+    for group in (
+        "config-section-accent-deploy", "config-section-accent-logs",
+        "config-section-accent-email", "config-section-accent-creds",
+        "config-section-accent-routes",
+    ):
+        assert group in js
+    for control in (
+        "config-ubuntu-host", "config-email-password",
+        "config-log-history-limit", "client-cred-host",
+        "static-route-destination",
+    ):
+        assert f'id="{control}"' in js
+    assert "#config-modal .tech-config-layout" in css
+    assert "grid-template-columns:minmax(0,1.55fr) minmax(0,1fr)" in css
+
+
