@@ -1042,3 +1042,115 @@
   #ui-control-modal .tech-ui-inspector-panel {min-height:220px}
   #weekly-report-modal .tech-weekly-filters {padding:9px}
 }
+
+
+/* Dynamic Redmine has distinct workflows: input hint, AI evidence, replay and timeline. */
+:is(.tech-dialog--dynamic-single-hint,
+    .tech-dialog--dynamic-single-analysis,
+    .tech-dialog--dynamic-daily-stats,
+    .tech-dialog--dynamic-daily-fallback,
+    .tech-dialog--dynamic-agent-session,
+    .tech-dialog--dynamic-execution-timeline,
+    .tech-dialog--dynamic-redmine-core-reply) {
+  border:1px solid #926ab7 !important;
+  background:#1a1624;
+}
+.tech-dialog--dynamic-single-hint .tech-single-hint-workflow {
+  display:flex;flex-direction:column;gap:12px;
+  background:#211a2d;padding:19px;
+}
+.tech-dialog--dynamic-single-hint .tech-single-hint-workflow > label {
+  color:#dbcae8;line-height:1.6;font-size:13px;
+}
+.tech-dialog--dynamic-single-hint .tech-single-hint-workflow > textarea {
+  min-height:180px;resize:vertical;
+  border:1px solid #8567a2;
+  background:#14121d;color:#f4e9fa;
+  padding:13px;border-radius:6px;font-size:13px;
+}
+:is(.tech-dialog--dynamic-single-analysis,
+    .tech-dialog--dynamic-daily-stats,
+    .tech-dialog--dynamic-daily-fallback) .tech-daily-analysis-workbench {
+  background:#1a1623;
+  overflow-y:auto;
+  padding:15px;
+}
+:is(.tech-dialog--dynamic-single-analysis,
+    .tech-dialog--dynamic-daily-stats,
+    .tech-dialog--dynamic-daily-fallback) .tech-daily-analysis-workbench :is(
+  .daily-brief-result-card,.analysis-card,.daily-brief-stats,.analysis-panel
+) {
+  background:#261e32;
+  border:1px solid #624879;
+  border-radius:8px;
+}
+.tech-dialog--dynamic-agent-session .tech-agent-session-workbench,
+.tech-dialog--dynamic-execution-timeline .tech-execution-timeline-workbench {
+  background:#16131d;
+  padding:13px 17px;
+  min-height:0;
+  overflow-y:auto;
+}
+.tech-dialog--dynamic-agent-session .issue-session-note {
+  border-left:3px solid #a376ce;
+  border-radius:5px;
+  background:#292036;
+  padding:10px;
+  color:#d8c7e6;
+}
+.tech-dialog--dynamic-agent-session :is(.issue-session-stream,.issue-session-raw-stream) {
+  background:#13111b;
+  border:1px solid #644a7f;
+  border-radius:7px;
+  padding:12px;
+}
+.tech-dialog--dynamic-execution-timeline .analysis-timeline {
+  border-left:2px solid #865fbc;
+  padding-left:12px;
+  background:#1b1725;
+}
+.tech-dialog--dynamic-execution-timeline .analysis-timeline-meta {
+  color:#d7c3e7;
+  font-size:12px;
+}
+.tech-dialog--dynamic-redmine-core-reply .tech-dynamic-reply-body {
+  padding:15px 19px;
+}
+.tech-dialog--dynamic-redmine-core-reply .tech-dynamic-reply-body :is(
+  .tech-reply-issue-card,.tech-reply-text-card,.tech-reply-attachments
+) {
+  display:flex;flex-direction:column;gap:7px;
+  min-width:0;
+  border:1px solid #644b7e;
+  border-radius:8px;
+  background:#271e33;
+  padding:12px;
+  margin:0 0 10px;
+}
+.tech-dialog--dynamic-redmine-core-reply .tech-dynamic-reply-body label {
+  color:#d9c6e9;font-size:13px;font-weight:600;
+}
+.tech-dialog--dynamic-redmine-core-reply .tech-dynamic-reply-body :is(input:not([type=file]),textarea) {
+  width:100%;min-width:0;
+  padding:9px;
+  border:1px solid #8a69a6;
+  background:#16131d;color:#f1e5fa;
+  border-radius:6px;font-size:13px;
+}
+.tech-dialog--dynamic-redmine-core-reply .redmine-reply-drop {
+  border:2px dashed #a675db;
+  border-radius:8px;
+  background:#30233d;
+  padding:22px;
+  color:#e7cff8;
+  text-align:center;
+}
+.tech-dialog--dynamic-redmine-core-reply .tech-dialog-actions {
+  border-top:1px solid #604676;
+  padding-top:12px;
+}
+.tech-dialog--dynamic-redmine-core-reply .tech-dialog-actions > button:last-child {
+  background:#7948b4;
+  border:1px solid #bf8fee;
+  color:#fff;
+}
