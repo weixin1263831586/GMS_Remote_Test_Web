@@ -5,25 +5,25 @@
                 <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#terminal"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">👤 客户端用户名识别</span></div>
                 <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeUsernameDetectModal">&times;</button>
             </div>
-            <div class="modal-body">
-                <form id="username-detect-form" data-submit="submitUsernameDetect" data-prevent autocomplete="off">
-                <div class="modal-form-row tech-structured-row">
+            <div class="modal-body tech-ssh-composition"><p class="tech-workflow-lede">识别当前客户端的可用 SSH 用户名与连接方式</p>
+                <form class="tech-ssh-form" id="username-detect-form" data-submit="submitUsernameDetect" data-prevent autocomplete="off">
+                <div class="modal-form-row tech-structured-row tech-ssh-host-row">
                     <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#network"></use></svg></span>
                     <label>客户端IP:</label>
                     <input type="text" id="username-detect-ip" readonly />
                 </div>
-                <div class="modal-form-row tech-structured-row">
+                <div class="modal-form-row tech-structured-row tech-ssh-user-row">
                     <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#user"></use></svg></span>
                     <label>用户名:</label>
                     <input type="text" id="username-detect-username" placeholder="请输入客户端用户名" data-keypress="handleUsernameDetectKeyPress" data-r0="event" autocomplete="username" />
                 </div>
-                <div class="modal-form-row tech-structured-row">
+                <div class="modal-form-row tech-structured-row tech-ssh-auth-row">
                     <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#lock"></use></svg></span>
                     <label>SSH密码:</label>
                     <input type="password" id="username-detect-password" placeholder="可选，用于SSH验证" data-keypress="handleUsernameDetectKeyPress" data-r0="event" autocomplete="current-password" />
                 </div>
                 </form>
-                <div class="modal-ssh-info">
+                <div class="modal-ssh-info tech-workflow-inline-hint">
                     <small>SSH可达时会验证用户名；通过 Tailscale 等远程访问时可留空密码直接保存。</small>
                 </div>
                 <div class="modal-buttons tech-dialog-actions">
