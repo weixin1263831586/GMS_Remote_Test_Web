@@ -5,17 +5,17 @@
                     <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#users"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span id="client-account-switch-title" class="modal-title">切换网页登录账号</span></div>
                     <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeClientAccountSwitchModal">&times;</button>
                 </div>
-                <div class="modal-body">
+                <div class="modal-body tech-account-switch-composition">
                     <p class="modal-info-text">客户端保持不变：<strong id="client-account-switch-identity">检测中...</strong></p>
                     <p id="client-account-switch-status" class="modal-info-text">仅可切换以下账号；切换后需要输入目标账号密码。</p>
-                    <div class="client-account-switch-options">
+                    <section class="tech-account-options"><h3 class="tech-workflow-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#users"></use></svg> 可切换账号</h3><div class="client-account-switch-options">
                         <button id="client-account-switch-admin-option" type="button" class="client-account-switch-option" data-click="selectClientAccountSwitch" data-a0="admin">
                             <span>★ 管理员账号</span><small>管理平台与用户</small>
                         </button>
                         <button id="client-account-switch-client-option" type="button" class="client-account-switch-option" data-click="selectClientAccountSwitch" data-a0="client">
                             <span id="client-account-switch-client-label">当前客户端账号</span><small>可运行每日晨报</small>
                         </button>
-                    </div>
+                    </div></section>
                 </div>
             </div>
         </div>

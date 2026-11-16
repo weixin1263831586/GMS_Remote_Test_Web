@@ -5,12 +5,12 @@
                 <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#download"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">⚠️ usbipd 安装指南</span></div>
                 <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeInstallGuide">&times;</button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body tech-guide-composition tech-guide-composition--install-guide">
                 <div class="modal-info-text" style="background: #302717; border-left: 4px solid var(--warning-color); padding: 10px; margin-bottom: 15px; border-radius: 6px; color: var(--warning-color);">
                     📋 检测到 Windows 主机缺少必要组件，需要安装 usbipd
                 </div>
 
-                <div style="margin-bottom: 15px;">
+                <section class="tech-guide-steps">
                     <div style="font-weight: 600; margin-bottom: 10px; color: var(--text-primary);">🔧 手动安装步骤：</div>
                     <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 3px; padding: 10px;">
                         <ol style="margin: 0; padding-left: 20px; color: var(--text-secondary); line-height: 1.8;">
@@ -29,7 +29,7 @@
                         <div id="install-progress-bar" style="background: var(--primary-color); height: 100%; width: 0%; transition: width 0.3s;"></div>
                     </div>
                     <div id="install-status" style="margin-top: 4px; font-size: 15px; color: var(--text-secondary);">准备安装...</div>
-                </div>
+                </section>
 
                 <div class="modal-buttons tech-dialog-actions">
                     <button class="btn-xxs" data-click="closeInstallGuide">关闭</button>

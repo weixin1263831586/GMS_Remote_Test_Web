@@ -5,19 +5,19 @@
                 <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#folder"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title" id="file-browser-title">浏览文件</span></div>
                 <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeFileBrowserModal">&times;</button>
             </div>
-            <div class="modal-body" style="overflow: hidden; display: flex; flex-direction: column;">
+            <div class="modal-body tech-file-browser-composition" style="overflow: hidden; display: flex; flex-direction: column;">
                 <div id="file-browser-worker-row" style="display:none; align-items:center; gap:8px; margin-bottom:8px;">
                     <label style="font-size:12px; color: var(--text-secondary); white-space:nowrap;">Worker 主机:</label>
                     <select id="file-browser-worker-select" data-change="onFileBrowserWorkerChange" style="flex:1; min-width:0; padding:4px 6px;"></select>
                 </div>
                 <div class="file-browser-path" id="file-browser-current-path" style="margin-bottom: 10px;"></div>
-                <div class="file-browser-header">
+                <div class="file-browser-header tech-file-table-head">
                     <span class="file-browser-icon"></span>
                     <span>名称</span>
                     <span style="text-align:right;">大小</span>
                     <span style="text-align:right;">修改时间</span>
                 </div>
-                <div class="file-browser-list" id="file-browser-list" style="flex: 1; overflow-y: auto; min-height: 0;">
+                <div class="file-browser-list tech-file-inventory" id="file-browser-list" style="flex: 1; overflow-y: auto; min-height: 0;">
                     <!-- 文件列表将动态生成 -->
                 </div>
                 <div class="modal-buttons tech-dialog-actions" style="justify-content: space-between;">
