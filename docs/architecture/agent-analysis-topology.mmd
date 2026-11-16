@@ -1,0 +1,23 @@
+%% 后台 Worker 负责取证、引用召回和复核；Agent 按 run_id 查询任务权威状态。
+flowchart TB
+    Chat["对话 Agent（工单 / URL）"]
+    Planner["kkagent 规划 / 工具发现"]
+    Guard["Controller / 鉴权与校验"]
+    Run["Redmine 队列 / run_id"]
+    Collect["分析 Worker / 取证预检"]
+    Evidence["Redmine 正文 / 附件 / 日志"]
+    References["Mainline / CF / 安全补丁"]
+    Review["模型分析 / 逐段复核"]
+    Monitor["Controller 状态 / 报告"]
+    Reply["原会话 / 结果与执行步骤"]
+
+    Chat -->|"分析目标"| Planner
+    Planner -.->|"受控调用"| Guard
+    Guard -->|"校验 / 入队"| Run
+    Run -.->|"后台 Worker 领取"| Collect
+    Evidence -->|"工单取证"| Collect
+    References -->|"引用正文"| Collect
+    Collect -->|"预检证据包"| Review
+    Review -->|"结果 / 状态"| Monitor
+    Planner -.->|"run_id 查询"| Monitor
+    Monitor -->|"终态反馈"| Reply

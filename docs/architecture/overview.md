@@ -36,9 +36,22 @@ flowchart TB
 
 本图的规范源为 [`platform-topology.mmd`](platform-topology.mmd)，README 与 Web 架构页由契约测试约束为同一组角色和消息方向。
 
+## 业务流程与双平面说明
+
+Web「系统架构」另提供两个独立的流程图：
+
+- [测试执行闭环](test-flow-topology.mmd)：Web / Agent 意图 → Controller 鉴权、设备 Claim 与套件预检 → ATS / Cluster Job → Worker Poll、Tradefed / ADB → 原生日志 / 登记报告 → 可选 AI 诊断。**原生套件目录与已登记报告不是同一个存储**。
+- [Agent 工单诊断](agent-analysis-topology.mmd)：Agent 工具规划 → Controller 校验入队 → 分析 Worker 取证预检（工单证据及 Mainline / Critical Fix / 安全补丁正文）→ 模型分析与逐段复核 → 状态和报告落库。Agent 按 run_id 查询并回送原会话；后台任务与 Agent 跟踪生命周期分开。此分析 Worker 是 Redmine 后台服务，不是设备执行 Worker。
+
+USB/IP 数据面中设备**物理连接在 Source 主机**，Worker 使用 `vhci_hcd` 虚拟 USB 总线访问设备；[USB/IP 拓扑](usbip-topology.mmd) 不应画成设备重新物理连接 Worker。本地 USB 烧写与 Windows Source-side Flash 是两条不同的路径，见 [固件烧写拓扑](firmware-topology.mmd) 和 ADR 0005；Linux Source 的整包固件烧写尚未实现，拒绝而不是跨 USB/IP 勉强继续。
+
+USB/IP 的 Source 端 bind 经受审计 SSH（ADR 0004）；远端 Worker 的 attach 经认证命令队列（ADR 0001），命令随 Poll 响应返回。测试与烧写图同时展示下发和 ACK / 状态回报，原生测试结果仍保留来源边界。
+
+六张 Web 图使用同一个 SVG 模板：统一 14px 节点字体、12px 箭头标签、208 × 72 节点框、直角连线和水平文字。紫色节点表示接入 / Agent，蓝色表示 Controller，黄色表示执行端，绿色表示资源 / 外部系统；蓝色实线表示数据或回执，紫色虚线表示控制调用。布局在 `features/system/topology_layouts.py`，角色、文本和有向边以各 `.mmd` 为准；新增节点或边时必须同步布局并通过几何契约检查。桌面图按相同画布等比适配，小屏在图内横向滚动。
+
 ## 四个主要角色
 
-Web「系统架构 → 平台总览」顶部的分层功能图按接入与规划、Controller
+Web「系统架构 → 平台总览」的「分层职责、部署与接入边界」按接入与规划、Controller
 控制与编排、Worker 执行与结果、设备与接入资源展示职责。外部集成和构建
 主机单独列示，具体部署关系与消息方向以总体拓扑为准。Worker 原生结果位于
 套件 `results` / `logs`，从测试套件浏览器访问；已登记报告由 Controller
