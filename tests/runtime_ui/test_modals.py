@@ -669,10 +669,7 @@ class RuntimeModalsTests(RuntimeUiHarness):
         try:
             self.goto_shell(page)
             page.set_viewport_size({"width": 390, "height": 844})
-            for modal_id, action in (
-                ("firmware-modal", 'button[data-click="submitFirmwareBurn"]'),
-                ("report-copy-modal", "#report-copy-submit"),
-            ):
+            for modal_id in ("firmware-modal", "report-copy-modal"):
                 with self.subTest(modal=modal_id):
                     page.evaluate("(id) => ModalManager.open(id)", modal_id)
                     result = page.locator(f"#{modal_id}").evaluate(
