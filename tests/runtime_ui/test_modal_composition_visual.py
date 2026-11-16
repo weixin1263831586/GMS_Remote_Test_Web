@@ -10,6 +10,7 @@ from pathlib import Path
 
 from tests.runtime_ui.harness import RuntimeUiHarness
 
+
 ROOT = Path(__file__).resolve().parents[2]
 REVIEW_ROOT = ROOT / "artifacts/modal-review"
 # These dialogs intentionally exercise different workflow shapes and sizes.
