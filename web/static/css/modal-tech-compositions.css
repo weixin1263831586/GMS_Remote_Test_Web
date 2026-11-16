@@ -561,3 +561,171 @@
   #client-account-switch-modal .client-account-switch-options {grid-template-columns:1fr}
   .tech-purpose-body--gsi .tech-image-sources > .modal-form-row {grid-template-columns:1fr}
 }
+
+
+/* Redmine and Gerrit use their own source forms and dynamic result panels. */
+.tech-embedded-workflow {
+  padding:17px 20px !important;
+  min-height:0;overflow-y:auto;
+  background:#1b1827;
+}
+.tech-embedded-workflow > .tech-workflow-lede {
+  padding:10px 12px;
+  margin:0 0 14px;
+  border-left:2px solid #a97edc;
+  background:#292135;
+  border-radius:5px;
+  color:#cfbfdd;
+  font-size:12px;
+}
+.tech-embedded-workflow :is(input:not([type=checkbox]):not([type=radio]),select,textarea) {
+  border-color:#614d78;
+  background:#15121c;
+  font-size:13px;
+}
+.tech-embedded-workflow :is(label,.field-label) {font-size:13px;color:#e7d8f1}
+.tech-embedded-workflow--redmine-reset > .tech-workflow-lede,
+.tech-embedded-workflow--redmine-internal-create > .tech-workflow-lede {
+  border-left:3px solid #e5a655;
+  background:#35251e;color:#f4d092;
+}
+.tech-embedded-workflow--redmine-reset :is(.danger,.btn-danger),
+.tech-embedded-workflow--redmine-internal-create :is(.danger,.btn-danger) {
+  background:#813d42;color:#fff;border-color:#d77786;
+}
+.tech-embedded-workflow--redmine-user,
+.tech-embedded-workflow--redmine-department,
+.tech-embedded-workflow--redmine-project,
+.tech-embedded-workflow--gerrit-personal,
+.tech-embedded-workflow--gerrit-department,
+.tech-embedded-workflow--gerrit-owner {
+  background:#211b2c;
+}
+.tech-embedded-workflow--redmine-user :is(input,select),
+.tech-embedded-workflow--redmine-department :is(input,select),
+.tech-embedded-workflow--redmine-project :is(input,select) {min-height:35px}
+.tech-embedded-workflow--redmine-settings,
+.tech-embedded-workflow--gerrit-settings {background:#1a1723}
+.tech-embedded-workflow--redmine-settings :is(.form-row,.settings-row),
+.tech-embedded-workflow--gerrit-settings :is(.form-row,.settings-row) {
+  padding:8px 11px;
+  border:1px solid #5f4877;
+  border-radius:6px;
+  background:#231d2d;
+}
+.tech-embedded-workflow--redmine-trend-range,
+.tech-embedded-workflow--gerrit-trend-range {background:#21192e}
+.tech-embedded-workflow--redmine-trend-range input[type=date],
+.tech-embedded-workflow--gerrit-trend-range input[type=date] {
+  min-height:38px;color:#ead8ff;border:1px solid #9270ae;
+}
+.tech-embedded-workflow--redmine-trend-detail,
+.tech-embedded-workflow--gerrit-trend-detail {
+  background:#15131d;
+  overflow:auto;
+}
+.tech-embedded-workflow--redmine-trend-detail :is(table,.trend-detail-row),
+.tech-embedded-workflow--gerrit-trend-detail :is(table,.trend-detail-row) {
+  background:#201a2c;border-color:#604879;
+}
+.tech-embedded-workflow--redmine-batch-import textarea {
+  min-height:160px;
+  background:#14111d;
+  border:1px dashed #a374d6;
+}
+.tech-embedded-workflow--redmine-knowledge {background:#191521}
+.tech-embedded-workflow--redmine-knowledge :is(pre,textarea,.knowledge-case) {
+  border:1px solid #5e4878;background:#211b2d;border-radius:7px;
+}
+.tech-embedded-workflow--redmine-reference textarea {
+  min-height:170px;background:#14121e;border-color:#8a6caf;
+}
+.tech-embedded-workflow--redmine-reference :is(input,select) {min-height:36px}
+.tech-embedded-workflow--gerrit-route {
+  background:#1b1926;
+  border-left:3px solid #9b73d0;
+}
+.tech-embedded-workflow--gerrit-route :is(.status,.route-result) {
+  background:#16131f;border-color:#5c4673;
+}
+
+/* Worker onboarding is a real provisioning form, not a mock topology diagram. */
+.tech-dialog--cluster-onboarding,
+.tech-dialog--cluster-worker-config {
+  border-color:#9575bb !important;
+  background:#1b1826 !important;
+}
+.tech-dialog--cluster-onboarding .tech-cluster-intro,
+.tech-dialog--cluster-worker-config .tech-cluster-intro {
+  margin:10px 18px 8px;
+  border-left:2px solid #b17fe1;
+  background:#2b2138;padding:9px 12px;
+}
+.tech-dialog--cluster-onboarding .onboarding-grid {
+  background:#211b2c;
+  border:1px solid #654b80;
+  border-radius:9px;
+  margin:8px 16px;
+  padding:15px;gap:13px;
+}
+.tech-dialog--cluster-onboarding .onboarding-grid > label,
+.tech-dialog--cluster-worker-config .onboarding-grid > label {
+  display:flex;flex-direction:column;gap:7px;
+  font-size:13px;color:#e7d7f6;
+}
+.tech-dialog--cluster-onboarding .command-box {
+  margin:12px 16px;
+  padding:12px;
+  border:1px solid #674a86;
+  border-radius:7px;
+  background:#16131e;
+}
+.tech-dialog--cluster-onboarding .command-box :is(code,pre) {
+  color:#d9baff;background:#16131e;
+}
+.tech-dialog--cluster-worker-config .onboarding-grid {
+  margin:10px 17px;padding:15px;border:1px solid #6b538a;
+  border-radius:8px;background:#211b2e;
+}
+.tech-dialog--cluster-worker-config .actions {margin:10px 17px 16px}
+.tech-dialog--cluster-worker-config .actions button.primary,
+.tech-dialog--cluster-onboarding .command-box .primary {
+  background:#7946b3;border:1px solid #bb87f0;color:#fff;
+}
+
+/* Serial binding: device/port identity versus communication policy. */
+#binding-modal .tech-serial-binding-composition {
+  display:flex;flex-direction:column;gap:9px;padding:15px 19px;
+}
+#binding-modal .tech-serial-binding-composition :is(.tech-serial-target-card,.tech-serial-settings) {
+  min-width:0;
+  padding:12px;
+  background:#241e30;
+  border:1px solid #634c7e;
+  border-radius:8px;
+}
+#binding-modal .tech-serial-target-card #binding-port {
+  padding:7px 10px;background:#17131e;border:1px solid #594270;
+  border-radius:5px;color:#dfc5f6;overflow-wrap:anywhere;
+}
+#binding-modal .tech-serial-binding-composition :is(label:not(.switch-row),.modal-hint) {
+  font-size:12px;color:#d3c2df;
+}
+#binding-modal .tech-serial-binding-composition :is(input,select,textarea) {
+  min-width:0;
+  border:1px solid #73568c;
+  border-radius:5px;background:#17131e;
+}
+#binding-modal .tech-serial-settings {display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#binding-modal .tech-serial-settings .tech-workflow-section-title,
+#binding-modal .tech-serial-settings label:has(textarea),
+#binding-modal .tech-serial-settings .switch-row,
+#binding-modal .tech-serial-settings datalist {grid-column:1/-1}
+#binding-modal .tech-serial-settings label {min-width:0;display:flex;flex-direction:column;gap:7px}
+#binding-modal .tech-serial-settings .switch-row {flex-direction:row}
+#binding-modal .modal-actions {border-top:1px solid #624878;padding:13px 18px}
+@media(max-width:670px) {
+  #binding-modal .tech-serial-settings {grid-template-columns:1fr}
+  .tech-dialog--cluster-onboarding .onboarding-grid {margin:7px;padding:10px}
+  .tech-embedded-workflow {padding:10px 12px !important}
+}
