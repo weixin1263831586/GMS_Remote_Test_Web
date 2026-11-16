@@ -5,13 +5,12 @@
                 <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#copy"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">🔁 拷贝测试报告</span></div>
                 <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeReportCopyModal">&times;</button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body tech-report-transfer-composition">
                 <div class="modal-info-text" style="margin-bottom: 12px;">
                     选择一个 Tradefed results 报告，复制到同一主机的其他套件或另一主机所选套件的 results 目录。目标中已存在同名报告时不会覆盖。
                 </div>
-                <div style="display:grid;grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr);gap:12px;align-items:start;">
-                    <div style="min-width:0;">
-                        <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">报告来源</div>
+                <div class="tech-report-transfer-grid">
+                    <section class="tech-transfer-panel tech-transfer-source"><h3 class="tech-workflow-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#folder"></use></svg> 报告来源</h3>
                         <div class="modal-form-row" style="display:block;">
                             <label for="report-copy-source-worker" style="display:block;margin-bottom:4px;">来源主机</label>
                             <select id="report-copy-source-worker" class="combo-box" data-change="onReportCopySourceWorkerChange" style="width:100%;"></select>
@@ -24,10 +23,9 @@
                             <label for="report-copy-source-report" style="display:block;margin-bottom:4px;">来源报告</label>
                             <select id="report-copy-source-report" class="combo-box" style="width:100%;"></select>
                         </div>
-                    </div>
-                    <div aria-hidden="true" style="padding-top:96px;text-align:center;color:var(--primary-color);font-size:22px;">→</div>
-                    <div style="min-width:0;">
-                        <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">拷贝目标</div>
+                    </section>
+                    <div class="tech-transfer-arrow" aria-hidden="true">→</div>
+                    <section class="tech-transfer-panel tech-transfer-target"><h3 class="tech-workflow-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#server"></use></svg> 拷贝目标</h3>
                         <div class="modal-form-row" style="display:block;">
                             <label for="report-copy-target-worker" style="display:block;margin-bottom:4px;">目标主机</label>
                             <select id="report-copy-target-worker" class="combo-box" data-change="onReportCopyTargetWorkerChange" style="width:100%;"></select>
@@ -40,7 +38,7 @@
                             <label for="report-copy-target-path" style="display:block;margin-bottom:4px;">目标目录</label>
                             <input id="report-copy-target-path" type="text" readonly style="width:100%;box-sizing:border-box;" />
                         </div>
-                    </div>
+                    </section>
                 </div>
                 <div id="report-copy-status" class="modal-info-text" style="display:none;margin-top:12px;white-space:pre-wrap;"></div>
                 <div class="modal-buttons tech-dialog-actions">

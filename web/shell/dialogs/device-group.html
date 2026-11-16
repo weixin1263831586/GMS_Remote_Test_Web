@@ -5,19 +5,19 @@
                 <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#grid"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title" id="device-group-modal-title">新建分组</span></div>
                 <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseModal" data-a0="device-group-modal">&times;</button>
             </div>
-            <div class="modal-body">
-                <div class="modal-form-row tech-structured-row">
+            <div class="modal-body tech-device-group-composition"><p class="tech-workflow-lede">设置分组名称并选择需要纳入管理的设备</p>
+                <div class="modal-form-row tech-structured-row tech-group-name-card">
                     <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#users"></use></svg></span>
                     <label>分组名称:</label>
                     <input type="hidden" id="device-group-edit-id"/>
                     <input type="text" id="device-group-name" class="host-input" placeholder="如：产线A / Android17回归" autocomplete="off"/>
                 </div>
-                <div class="modal-form-row tech-structured-row" style="align-items:flex-start;">
+                <section class="tech-group-members-panel"><h3 class="tech-workflow-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#device"></use></svg> 分组设备</h3><div class="modal-form-row tech-structured-row" style="align-items:flex-start;">
                     <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#device"></use></svg></span>
                     <label>成员设备:</label>
                     <div id="device-group-picklist" class="group-picklist" style="flex:1; max-height:240px; overflow-y:auto;"></div>
                 </div>
-                <div class="modal-info-text" style="margin-top:8px;">
+                </section><div class="modal-info-text" style="margin-top:8px;">
                     💡 离线设备也可勾选保留在组内，重新上线后自动归位
                 </div>
                 <div class="modal-buttons tech-dialog-actions">

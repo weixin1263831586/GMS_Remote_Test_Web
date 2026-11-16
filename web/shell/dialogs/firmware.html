@@ -5,8 +5,8 @@
                 <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#chip"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">烧写固件</span></div>
                 <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeFirmwareModal">&times;</button>
             </div>
-            <div class="modal-body">
-                <div class="modal-fieldset">
+            <div class="modal-body tech-firmware-composition"><p class="tech-workflow-lede">确认目标设备、选择固件与烧写后恢复策略</p><div class="tech-firmware-layout">
+                <section class="modal-fieldset tech-firmware-source-panel"><h3 class="tech-workflow-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#device"></use></svg> 设备与固件文件</h3>
                     <div class="modal-form-row">
                         <label>目标设备:</label>
                         <div class="firmware-target-list" id="firmware-target-devices">未选择</div>
@@ -20,9 +20,9 @@
                         </div>
                     </div>
                     <div class="firmware-file-meta is-empty" id="firmware-file-meta"></div>
-                </div>
-                <div class="modal-fieldset">
-                    <div class="modal-fieldset-title">烧写后恢复（AOA）</div>
+                </section>
+                <section class="modal-fieldset tech-firmware-recovery-panel">
+                    <div class="modal-fieldset-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 烧写后恢复（AOA）</div>
                     <div class="modal-form-row">
                         <label><input type="checkbox" id="firmware-aoa-enabled" data-change="toggleFirmwareAoa" />
                             自动完成开机向导并开启 USB 调试</label>
@@ -43,8 +43,8 @@
                         一次一台本地 USB 设备；开机后自动回放并验证 ADB。
                     </div>
                     <button class="btn-xxs" type="button" data-click="openFirmwareAoaProfile">查看所选 AOA 配置 / 补齐固件声明</button>
-                </div>
-                <div class="modal-info-text">
+                </section></div>
+                <div class="modal-info-text tech-firmware-warning">
                     ⚠️ 烧写将重启设备进入刷机模式并清除数据，请确认目标设备。
                 </div>
                 <div class="modal-buttons tech-dialog-actions">
