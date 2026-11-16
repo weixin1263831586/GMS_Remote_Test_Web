@@ -351,3 +351,213 @@
 @media(prefers-reduced-motion:reduce) {
  #kb-upload-modal #kb-upload-drop-zone.tech-knowledge-dropzone {transition:none}
 }
+
+
+/* USB/IP and ADB Proxy: source/target routing, device inventory, active leases. */
+.tech-device-routing-composition {display:flex;flex-direction:column;gap:9px}
+.tech-device-routing-composition .tech-workflow-lede {margin:0}
+.tech-device-routing-composition .tech-routing-setup-panel,
+.tech-device-routing-composition .tech-routing-current {
+  padding:12px;
+  border:1px solid #655083;
+  border-radius:9px;
+  background:#231e30;
+  min-height:0;
+}
+.tech-device-routing-composition .adb-proxy-section-head {
+  background:#30253c;
+  border:0;
+  border-bottom:1px solid #795b98;
+  padding:8px 10px;
+  margin:0 0 11px;
+}
+.tech-device-routing-composition .adb-proxy-section-title {
+  display:flex;align-items:center;gap:7px;color:#f0dfff;
+  font-size:13px;font-weight:650;
+}
+.tech-device-routing-composition .adb-proxy-section-title .ui-icon {width:17px;height:17px;color:#c38aff}
+.tech-device-routing-composition .device-routing-fields {
+  background:#181521;border:1px solid #5e4477;padding:12px;border-radius:7px;
+}
+.tech-device-routing-composition .adb-proxy-assignments {
+  border:1px solid #58416e;min-height:75px;background:#191521;
+}
+:is(#adb-proxy-modal,#usbip-attach-modal) > .modal-content {
+  width:min(800px,calc(100vw - 24px));
+  max-width:min(800px,calc(100vw - 24px));
+}
+:is(#adb-proxy-modal,#usbip-attach-modal) .device-routing-modal-buttons {gap:10px;padding:12px 19px}
+
+/* Tool/URL editor: metadata, icon selection and path are actually separate. */
+.tech-tools-composition {padding:16px 19px !important}
+.tech-tools-composition .tech-purpose-panel {min-width:0}
+.tech-tools-composition .tech-tool-details {
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;align-items:stretch;
+}
+.tech-tools-composition .tech-tool-details > .tech-workflow-section-title {grid-column:1/-1;margin-bottom:0}
+.tech-tools-composition .tech-tool-details > .modal-form-row {
+  min-width:0;min-height:64px;display:flex;align-items:center;
+  margin:0;padding:9px;
+}
+.tech-tools-composition .tech-tool-details > .modal-form-row:has(textarea),
+.tech-tools-composition .tech-tool-details > .modal-form-row:has(#emoji-picker),
+.tech-tools-composition .tech-tool-details > .modal-form-row:has(#ut-tool-filepath),
+.tech-tools-composition .tech-tool-details > .modal-form-row:has(#tool-url) {grid-column:1/-1}
+.tech-tools-composition .tech-tool-details .tech-field-glyph {flex:none}
+.tech-tools-composition .tech-tool-details label {min-width:75px;color:#e7d5f4}
+.tech-tools-composition .tech-tool-details :is(input,select,textarea) {flex:1;min-width:0}
+.tech-tools-composition .tech-tool-details #emoji-picker {min-width:0;flex:1}
+.tech-tools-composition .tech-tool-details .modal-form-row:has(#ut-tool-filepath) > div {flex:1;min-width:0}
+.tech-tools-composition--category .tech-tool-details,
+.tech-tools-composition--ut-category .tech-tool-details {grid-template-columns:1fr}
+.tech-tools-composition--category .tech-tool-details > .modal-form-row,
+.tech-tools-composition--ut-category .tech-tool-details > .modal-form-row {min-height:59px}
+.tech-tools-composition #icon-preview {margin-top:10px;border:1px solid #655082;border-radius:7px}
+
+/* Sharing firmware: new link form on top, actual saved inventory beneath. */
+#firmware-share-modal .modal-body.tech-firmware-share-composition {display:flex;flex-direction:column;gap:12px;padding:16px 20px}
+#firmware-share-modal :is(.tech-share-setup,.tech-share-inventory) {
+  min-height:0;min-width:0;
+  border:1px solid #604b78;border-radius:8px;
+  background:#221b2c;padding:12px 15px;
+}
+#firmware-share-modal .tech-share-setup {flex:none}
+#firmware-share-modal .tech-share-inventory {flex:1;overflow:hidden;display:flex;flex-direction:column}
+#firmware-share-modal .tech-share-inventory .tech-share-table {
+  flex:1;min-height:90px;max-height:none !important;
+  background:#15131f;
+}
+#firmware-share-modal .tech-share-setup .modal-buttons {justify-content:flex-end !important}
+#firmware-share-modal .tech-share-setup .modal-form-row {border:0;background:transparent}
+#firmware-share-modal .tech-share-setup .modal-form-row label {font-weight:650}
+
+/* Permission confirmation: protective, status-aware, not a generic blue form. */
+#firmware-share-password-modal .tech-password-composition {padding:18px 22px}
+#firmware-share-password-modal .tech-password-composition .tech-purpose-panel {margin-top:10px}
+#firmware-share-password-modal .tech-password-composition .tech-structured-row {min-height:58px}
+#elevate-modal .tech-purpose-panel {border-color:#80608c}
+#elevate-modal .tech-auth-feedback {min-height:17px;font-size:12px}
+#device-password-modal .tech-purpose-panel {border-color:#5a4975}
+#vpn-credential-modal .tech-purpose-panel {border-color:#5b5077}
+#sn-modal .tech-destructive-notice,
+#gsi-modal .tech-destructive-notice {
+  padding:10px 12px;border-left:3px solid #d6a653;
+  background:#30271f;color:#edca87;font-size:12px;
+}
+
+/* Actual fields for Wi-Fi, SN, credentials, GSI, archive and local suites. */
+.tech-purpose-body {padding:18px 21px !important}
+.tech-purpose-body .tech-workflow-lede {margin-bottom:11px}
+.tech-purpose-body .tech-purpose-panel,
+.tech-password-composition .tech-purpose-panel,
+.tech-tools-composition .tech-purpose-panel {
+  border:1px solid #614b7e;
+  border-radius:8px;
+  padding:12px;
+  min-width:0;
+  background:#221c2e;
+}
+.tech-purpose-body .tech-purpose-panel .tech-structured-row {margin-bottom:8px}
+.tech-purpose-body .tech-purpose-panel .modal-form-row {
+  min-width:0;gap:8px;
+}
+.tech-purpose-body .tech-purpose-panel > .modal-form-row:last-child {margin-bottom:0}
+.tech-purpose-body .tech-purpose-panel :is(input,select,textarea) {min-width:0}
+.tech-purpose-body--gsi .tech-image-sources {display:flex;flex-direction:column;gap:8px}
+.tech-purpose-body--gsi .tech-image-sources > .modal-form-row {
+  display:grid;grid-template-columns:130px minmax(0,1fr);
+  border:1px solid #4f3f63;border-radius:6px;background:#1a1724;
+  padding:8px 10px;min-height:48px;
+}
+.tech-purpose-body--gsi .tech-image-sources .input-with-btn {display:flex;gap:6px;flex-wrap:wrap}
+.tech-purpose-body--gsi .tech-image-sources .input-with-btn > input {flex:1 1 160px}
+.tech-purpose-body--extract-suite .tech-purpose-panel > .modal-form-row {min-height:50px}
+.tech-purpose-body--wifi .tech-purpose-form .tech-purpose-panel .tech-structured-row {min-height:54px}
+.tech-purpose-body--add-local-suite .tech-purpose-panel .host-input {min-width:0}
+
+/* Account switching: two independent clickable account options; no fake login. */
+#client-account-switch-modal .tech-account-switch-composition {padding:17px 20px}
+#client-account-switch-modal .tech-account-switch-composition > .modal-info-text {
+  border-left:2px solid #895cbc;background:#272034;
+  border-radius:5px;padding:10px;margin-bottom:9px;
+}
+#client-account-switch-modal .tech-account-options {
+  border:1px solid #5c4772;border-radius:8px;padding:11px;background:#221c2e;
+}
+#client-account-switch-modal .client-account-switch-options {
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;
+}
+#client-account-switch-modal .client-account-switch-option {
+  display:flex;flex-direction:column;align-items:flex-start;
+  gap:7px;min-width:0;
+  background:#1b1625;border:1px solid #6f538b;
+  padding:14px;border-radius:7px;color:#f3e5ff;
+}
+#client-account-switch-modal .client-account-switch-option:hover {background:#342440;border-color:#b785ed}
+
+/* Assistants and file browsing: distinct technical affordances. */
+#gms-assistant-config-modal .tech-assistant-config-composition {padding:19px}
+#gms-assistant-config-modal .tech-assistant-config-composition .modal-form-row {
+  border:0;background:transparent;padding:0;margin:0;
+}
+#file-browser-modal .tech-file-browser-composition {padding:15px 17px}
+#file-browser-modal .file-browser-path {
+  border:1px solid #6b5287;border-radius:6px;padding:8px 11px;background:#2b213a;color:#e1ceef;
+}
+#file-browser-modal .tech-file-table-head {
+  border:1px solid #59466d;border-bottom:0;
+  background:#30253d;color:#f0dcff;
+}
+#file-browser-modal .tech-file-inventory {border:1px solid #59466d;background:#17141e}
+#guide-image-modal .tech-image-lightbox-composition {background:#16131d}
+#guide-image-modal .tech-image-stage {margin:0;display:flex;flex-direction:column;min-height:0;height:100%;gap:10px}
+#guide-image-modal .tech-image-stage #guide-image-viewport {flex:1;min-height:0;background:#120f18}
+#guide-image-modal .tech-image-stage figcaption {flex:none;color:#cdbadf;font-size:12px}
+
+/* Documentation and scan modes: warnings, code steps and real actions. */
+:is(#install-guide-modal,#sshd-install-guide-modal) .tech-guide-composition {padding:17px 20px}
+:is(#install-guide-modal,#sshd-install-guide-modal) .tech-guide-steps {
+  background:#221b2d;border:1px solid #634d7d;
+  border-radius:8px;padding:12px;margin-bottom:12px;
+}
+:is(#install-guide-modal,#sshd-install-guide-modal) .tech-guide-steps :is(pre,code) {font-size:12px}
+#sshd-install-guide-modal .tech-guide-composition > .modal-info-text {
+  background:#302719 !important;color:#e8c46c !important;
+  border-left-color:#daaa54 !important;
+}
+#mainline-sync-modal .tech-mainline-strategy {padding:19px 21px}
+#mainline-sync-modal .tech-mainline-strategy > .modal-info-text {
+  background:#261d32;padding:16px;line-height:1.7;
+}
+#mainline-sync-modal .tech-mainline-choices .btn-primary {min-height:44px;flex:1}
+
+/* Configuration workspace, live test table, serial interaction and weekly report. */
+#config-modal .tech-config-workbench {background:#1a1724;padding:15px}
+#config-modal .tech-config-workbench :is(fieldset,.config-section) {
+  background:#241e30;border:1px solid #58446d;border-radius:8px;padding:12px;
+}
+#device-config-modal .dcfg-tabs {border-bottom:1px solid #795b99}
+#device-config-modal .dcfg-tab.active {background:#191522}
+#device-config-modal .dcfg-toolbar {background:#241d30;border:1px solid #5d4775;border-radius:7px;padding:9px}
+#sidebar-visibility-modal .sidebar-settings-tabs {border-bottom:1px solid #795997;background:#241d30}
+#sidebar-visibility-modal .sidebar-settings-panel {background:#1b1725}
+#test-results-modal #test-results-list {background:#15121d;border-color:#785a95}
+#test-results-modal #test-results-modal-status {color:#d7cae4}
+#ui-control-modal #ui-control-elements {background:#15131e;border-color:#735690}
+#ui-control-modal #ui-control-screenshot {border-color:#735690;box-shadow:0 0 0 2px #21192f}
+#weekly-report-modal #weekly-report-content {
+  background:#15131d;border:1px solid #5e4a74;border-radius:8px;padding:13px;
+}
+#radar-settings-modal #radar-settings-fields {border:1px solid #634b7f;background:#221c2c;padding:14px}
+#radar-settings-modal .radar-task-fieldset {background:#181420;border-color:#71578c}
+#usage-examples-modal .modal-body :is(pre,code) {background:#15121e;color:#d9c0f1}
+
+/* Avoid "screenshot at 1672px" assumptions: layout respects smaller windows. */
+@media(max-width:780px) {
+  .tech-tools-composition .tech-tool-details {grid-template-columns:1fr}
+  .tech-tools-composition .tech-tool-details > .modal-form-row {grid-column:1/-1}
+  #firmware-share-modal .tech-share-setup > div[style*="display: grid"] {grid-template-columns:1fr !important}
+  #client-account-switch-modal .client-account-switch-options {grid-template-columns:1fr}
+  .tech-purpose-body--gsi .tech-image-sources > .modal-form-row {grid-template-columns:1fr}
+}
