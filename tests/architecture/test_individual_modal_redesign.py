@@ -54,15 +54,15 @@ def test_tailscale_has_five_dedicated_icon_rows_with_original_callbacks() -> Non
     ):
         assert hook in source
     styles = (ROOT / SOURCE_FILES[0]).read_text(encoding="utf-8")
-    assert "width: min(78vw" in styles
-    assert "height: min(87dvh" in styles
-    assert "max-height: calc(100dvh - 32px)" in styles
+    assert "width:min(820px" in styles
+    assert "height:auto" in styles
+    assert "clip-path: none !important" in styles
     assert "Desktop sizing: compact" not in styles
     assert source.count('class="tech-brand-icon"') == 4
     assert "tech-footer-trace" in source
     assert "data-modal-initial-focus" in source
     assert ".tech-tailscale-row" in styles
-    assert "clip-path: polygon(" in styles
+    assert "border: 1px solid var(--tech-edge) !important" in styles
 
 
 def test_modal_styles_contain_no_background_gradients_or_visibility_owner() -> None:

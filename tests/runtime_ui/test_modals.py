@@ -590,49 +590,70 @@ class RuntimeModalsTests(RuntimeUiHarness):
         finally:
             page.close()
 
-    def test_tailscale_reference_proportions_and_brand_icons(self):
-        """Use the approved 1672x941 reference ratio, not a 1000x640 preset."""
+    def test_tailscale_compact_typography_and_border(self):
+        """Use original 16/13px typography, visible border, natural height."""
         page = self.new_page()
         try:
             self.goto_shell(page)
             page.set_viewport_size({"width": 1672, "height": 941})
             page.evaluate("() => ModalManager.open('tailscale-info-modal')")
-            metrics = page.locator("#tailscale-info-modal").evaluate(
+            report = page.locator("#tailscale-info-modal").evaluate(
                 """modal => {
-                    const panel = modal.querySelector('.modal-content');
-                    const rect = panel.getBoundingClientRect();
-                    const header = modal.querySelector('.tech-dialog-header');
-                    const footer = modal.querySelector('.tech-dialog-footer');
-                    const rows = [...modal.querySelectorAll('.tech-tailscale-row')];
-                    const firstButton = rows[0].querySelector('.tech-row-action');
+                    const content = modal.querySelector('.modal-content');
+                    const box = content.getBoundingClientRect();
+                    const title = modal.querySelector('.modal-title');
+                    const label = modal.querySelector('.tech-tailscale-row label');
+                    const input = modal.querySelector('.tech-tailscale-row input');
+                    const btn = modal.querySelector('.tech-tailscale-row button');
                     return {
-                        width: rect.width, height: rect.height,
-                        centered: Math.abs((rect.left + rect.right) / 2 - innerWidth / 2),
-                        headerHeight: header.getBoundingClientRect().height,
-                        footerHeight: footer.getBoundingClientRect().height,
-                        rowHeights: rows.map(row => row.getBoundingClientRect().height),
-                        buttonWidth: firstButton.getBoundingClientRect().width,
-                        brandIcons: modal.querySelectorAll('.tech-brand-icon').length,
-                        extraTitleRail: getComputedStyle(
-                            modal.querySelector('.tech-title-group .modal-title'),
-                            '::before'
-                        ).display,
-                        buttonBg: getComputedStyle(firstButton).backgroundImage,
+                        width: box.width,
+                        height: box.height,
+                        border: getComputedStyle(content).borderTopWidth,
+                        clip: getComputedStyle(content).clipPath,
+                        fontTitle: getComputedStyle(title).fontSize,
+                        fontLabel: getComputedStyle(label).fontSize,
+                        fontInput: getComputedStyle(input).fontSize,
+                        fontButton: getComputedStyle(btn).fontSize,
+                        brands: modal.querySelectorAll('.tech-brand-icon').length,
                     };
                 }"""
             )
-            self.assertAlmostEqual(metrics["width"], 1672 * 0.78, delta=4)
-            self.assertAlmostEqual(metrics["height"], 941 * 0.87, delta=4)
-            self.assertLess(metrics["centered"], 2)
-            self.assertAlmostEqual(metrics["headerHeight"], 104, delta=2)
-            self.assertAlmostEqual(metrics["footerHeight"], 136, delta=2)
-            self.assertEqual(len(metrics["rowHeights"]), 5)
-            for height in metrics["rowHeights"]:
-                self.assertGreaterEqual(height, 90)
-            self.assertAlmostEqual(metrics["buttonWidth"], 150, delta=2)
-            self.assertEqual(metrics["brandIcons"], 4)
-            self.assertEqual(metrics["extraTitleRail"], "none")
-            self.assertEqual(metrics["buttonBg"], "none")
+            self.assertLessEqual(report["width"], 822)
+            self.assertLess(report["height"], 650)
+            self.assertEqual(report["border"], "1px")
+            self.assertEqual(report["clip"], "none")
+            for key, value in (
+                ("fontTitle", "16px"),
+                ("fontLabel", "13px"),
+                ("fontInput", "13px"),
+                ("fontButton", "13px"),
+            ):
+                self.assertEqual(report[key], value, report)
+            self.assertEqual(report["brands"], 4)
+        finally:
+            page.close()
+
+    def test_firmware_and_route_modals_keep_full_borders(self):
+        """Two formerly clipped/oversized panels remain bounded and readable."""
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.set_viewport_size({"width": 1440, "height": 960})
+            page.evaluate("() => ModalManager.open('firmware-modal')")
+            firmware = page.locator("#firmware-modal .modal-content")
+            metrics = firmware.evaluate(
+                """el => {
+                    const rect = el.getBoundingClientRect();
+                    return {width: rect.width, height: rect.height,
+                            border: getComputedStyle(el).borderTopWidth,
+                            clip: getComputedStyle(el).clipPath};
+                }"""
+            )
+            self.assertLessEqual(metrics["width"], 652)
+            self.assertLess(metrics["height"], 700)
+            self.assertEqual(metrics["border"], "1px")
+            self.assertEqual(metrics["clip"], "none")
+            page.evaluate("() => ModalManager.close('firmware-modal')")
         finally:
             page.close()
 

@@ -87,35 +87,55 @@
 .tech-dialog--extract-suite .modal-fieldset {background:#221e30;border-color:#534269}
 .tech-dialog--gsi .modal-body {padding:20px 24px}
 .tech-dialog--gsi .modal-fieldset {padding:13px;background:#201b2b;border-color:#524265}
-.tech-dialog--firmware.modal-content {
-  width:min(1000px,calc(100vw - 42px));
-  max-width:min(1000px,calc(100vw - 42px));
+
+/* Firmware: original compact panel hierarchy; no forced height/empty column. */
+#firmware-modal > .modal-content.tech-dialog--firmware {
+  width:min(650px,calc(100vw - 24px));
+  max-width:min(650px,calc(100vw - 24px));
+  height:auto;
+  min-height:0;
+  max-height:calc(100dvh - 24px);
 }
-.tech-dialog--firmware .modal-body {
-  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
-  align-content:start;gap:16px;padding:22px 26px;
+#firmware-modal .tech-dialog--firmware .modal-body {
+  display:block;
+  overflow-y:auto;
+  padding:12px 16px;
 }
 .tech-dialog--firmware .modal-fieldset {
-  margin:0;padding:17px;border:1px solid #56406e;
-  background:#211c2c;border-radius:9px;min-width:0;
+  display:block;
+  margin:0 0 10px;
+  padding:10px 12px;
+  border:1px solid var(--tech-edge-soft);
+  border-radius:6px;
+  background:var(--tech-panel);
 }
-.tech-dialog--firmware .modal-fieldset:first-child {border-top:3px solid #b589fa}
-.tech-dialog--firmware .modal-fieldset:nth-child(2) {border-top:3px solid #8f6bcc}
+.tech-dialog--firmware .modal-fieldset:first-child,
+.tech-dialog--firmware .modal-fieldset:nth-child(2) {
+  border-top:1px solid var(--tech-edge-soft);
+}
 .tech-dialog--firmware .modal-fieldset-title {
-  color:#eee1ff;font-size:15px;padding:0 0 9px;
-  border-bottom:1px solid #56406e;margin-bottom:12px;
+  margin:0 0 8px;
+  padding:0 0 6px;
+  border-bottom:1px solid var(--tech-edge-soft);
+  font-size:13px;
+  color:var(--text-primary);
 }
-.tech-dialog--firmware .modal-fieldset .modal-form-row {
-  flex-wrap:wrap;align-items:flex-start;gap:6px;
-}
-.tech-dialog--firmware .modal-fieldset .modal-form-row > label {font-weight:650}
-.tech-dialog--firmware .modal-fieldset .input-with-btn {min-width:0;flex:1}
-.tech-dialog--firmware .modal-info-text,
-.tech-dialog--firmware .modal-buttons {grid-column:1/-1;margin-top:0}
+.tech-dialog--firmware .modal-fieldset .modal-form-row {flex-wrap:wrap;gap:6px}
+.tech-dialog--firmware .modal-fieldset .modal-form-row > label {font-size:13px}
+.tech-dialog--firmware .input-with-btn {min-width:0;flex:1}
 .tech-dialog--firmware .modal-info-text {
-  background:#33281c;color:#e7b854;border-left-color:#e7b854;
+  margin-top:7px;
+  padding:7px 9px;
+  font-size:12px;
+  color:var(--warning-color);
+  background:#30281e;
+  border-left-color:var(--warning-color);
 }
-.tech-dialog--firmware .modal-buttons {padding-top:14px;border-top:1px solid #4c3d5f}
+.tech-dialog--firmware .modal-buttons {
+  margin-top:8px;
+  padding-top:9px;
+  border-top:1px solid var(--tech-edge-soft);
+}
 
 /* Report copies are fixed 760x500 by runtime-ui contract. Keep dimensions. */
 .tech-dialog--report-copy .modal-body {padding:14px 20px;overflow-y:auto}
@@ -252,69 +272,102 @@
 }
 
 
-/* Live-generated route probe dialog owns SVG corner geometry already.
-   Align it with approved purple Tech reference without fabricating ping results. */
+
+/* Routing probe: single solid perimeter instead of clipped pseudo-frame. */
 #route-check-dialog .modal-content.modal-s {
-  width:min(920px,calc(100vw - 40px));
-  max-width:min(920px,calc(100vw - 40px));
-  min-height:515px;
-  background:transparent;
+  width:min(650px,calc(100vw - 24px));
+  max-width:min(650px,calc(100vw - 24px));
+  min-height:0;
+  height:auto;
+  max-height:calc(100dvh - 24px);
+  overflow:hidden;
+  border:1px solid var(--tech-edge) !important;
+  border-radius:8px !important;
+  background:var(--tech-deep) !important;
+  box-shadow:0 18px 42px rgba(0,0,0,.48);
 }
+#route-check-dialog .modal-content::before,
+#route-check-dialog .modal-content::after {
+  content:none !important;
+  display:none !important;
+}
+#route-check-dialog .route-check-corner {display:none}
 #route-check-dialog .modal-header {
-  min-height:79px;padding:15px 32px 11px;
+  min-height:54px;
+  padding:10px 18px;
+  border-bottom:1px solid var(--tech-edge-soft);
+  background:var(--tech-deep);
 }
-#route-check-dialog .modal-title {font-size:24px;gap:16px}
+#route-check-dialog .modal-title {font-size:16px;gap:10px;letter-spacing:0}
 #route-check-dialog .route-check-badge {
-  width:45px;height:45px;
-  background:#403056;border-color:#9e6add;
-  border-radius:8px;
+  width:30px;height:30px;
+  background:#38294a;
+  border:1px solid var(--tech-edge);
+  border-radius:6px;box-shadow:none;
 }
-#route-check-dialog .route-check-badge svg {width:29px;height:29px}
-#route-check-dialog .route-check-title-sep {height:30px;width:2px}
-#route-check-dialog .route-check-slashes {background:none;width:50px;height:auto}
+#route-check-dialog .route-check-badge svg {width:18px;height:18px}
+#route-check-dialog .route-check-title-sep {height:20px;width:2px}
+#route-check-dialog .route-check-slashes {
+  width:auto;height:auto;
+  background:none;
+  transform:none;
+  box-shadow:none;
+}
 #route-check-dialog .route-check-slashes::before {
-  content:"////";font:bold italic 23px/1 ui-monospace,monospace;
-  letter-spacing:-3px;color:#c18af4;
+  content:"///";font:italic 15px/1 monospace;
+  letter-spacing:-2px;color:var(--tech-edge);
 }
-#route-check-dialog .route-check-form {padding:21px 40px 18px}
+#route-check-dialog .route-check-rule {
+  width:calc(100% - 36px);
+  margin:0 18px;
+  height:9px;
+}
+#route-check-dialog .route-check-form {
+  padding:10px 18px 5px;
+  overflow-y:auto;
+}
 #route-check-dialog .route-check-form .form-group {
-  display:grid;grid-template-columns:180px minmax(0,1fr);gap:9px 14px;
-  align-items:center;
-  background:#211c2c;border:1px solid #514066;
-  border-radius:8px;padding:15px 18px;
-  margin-bottom:11px;
+  display:block;
+  margin:0 0 10px;
+  padding:10px 12px;
+  border:1px solid var(--tech-edge-soft);
+  border-radius:6px;
+  background:var(--tech-panel);
 }
-#route-check-dialog .route-check-form .form-group label {
-  font-size:16px;margin:0;
+#route-check-dialog .route-check-form label {
+  font-size:13px;
+  margin-bottom:7px;
 }
-#route-check-dialog .route-check-form .form-group small {
-  grid-column:2;margin:-5px 0 0;
+#route-check-dialog .route-check-form small {
+  display:block;
+  margin:6px 0 0;
+  font-size:12px;
 }
-#route-check-dialog .route-check-field {min-height:50px}
+#route-check-dialog .route-check-field {min-height:38px}
+#route-check-dialog .route-check-form input[type="text"] {font-size:13px}
 #route-check-dialog .route-check-actions {
-  min-height:90px;padding:17px 28px 22px;
-  background:#1b1926;
+  min-height:56px;
+  margin:0;
+  padding:10px 18px;
+  gap:8px;
+  border-top:1px solid var(--tech-edge-soft);
+  background:var(--tech-deep);
 }
 #route-check-dialog .route-check-actions .btn-xxs {
-  min-height:46px;border-radius:6px;font-size:15px;
+  min-height:34px;
+  padding:6px 13px;
+  font-size:13px;
 }
-#route-check-dialog .route-check-actions .btn-primary,
-#route-check-dialog .route-check-actions .btn-primary:hover:not(:disabled) {
-  background:#7545b7;
-  border-color:#bb8dfa;color:white;
+#route-check-dialog .route-check-actions .btn-primary {
+  background:var(--primary-color);
+  border-color:var(--tech-edge);
   box-shadow:none;
 }
 #route-check-dialog .route-check-actions .btn-primary:hover:not(:disabled) {
-  background:#8f53cf;
+  background:var(--primary-strong);box-shadow:none;
 }
-@media(max-width:650px) {
-  #route-check-dialog .modal-content.modal-s {width:calc(100vw - 24px);max-width:calc(100vw - 24px)}
-  #route-check-dialog .modal-header {min-height:64px;padding:8px 15px}
-  #route-check-dialog .modal-title {font-size:16px;gap:7px}
-  #route-check-dialog .route-check-badge {width:32px;height:32px}
-  #route-check-dialog .route-check-form {padding:11px 14px}
-  #route-check-dialog .route-check-form .form-group {grid-template-columns:minmax(0,1fr);gap:6px;padding:10px}
-  #route-check-dialog .route-check-form .form-group small {grid-column:1;margin:0}
-  #route-check-dialog .route-check-actions {min-height:70px;padding:12px}
-  #route-check-dialog .route-check-slashes {display:none}
+@media(max-width:600px) {
+  #route-check-dialog .modal-header {padding:9px 12px}
+  #route-check-dialog .route-check-form {padding:8px 12px}
+  #route-check-dialog .route-check-actions {padding:9px 12px}
 }
