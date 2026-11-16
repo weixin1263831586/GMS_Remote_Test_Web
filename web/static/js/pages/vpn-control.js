@@ -62,7 +62,7 @@ async function checkRouting(targetHost) {
             <svg class="route-check-rule" viewBox="0 0 640 16" preserveAspectRatio="none" aria-hidden="true">
                 <polyline points="0,1 468,1 498,14 640,14" fill="none" stroke="currentColor" stroke-width="1.25" vector-effect="non-scaling-stroke"/>
             </svg>
-            <div class="modal-body route-check-form">
+            <div class="modal-body route-check-form tech-route-composition">
                 <div class="form-group">
                     <label for="test-host-ip">测试主机IP:</label>
                     <div class="route-check-field">
@@ -79,7 +79,13 @@ async function checkRouting(targetHost) {
                     </div>
                     <small>您当前浏览器的 IP 地址</small>
                 </div>
-                <div id="ping-result" class="ping-result"></div>
+                <section class="tech-route-live-results" aria-label="实际网络探测结果">
+                    <div class="tech-route-live-heading">
+                        <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#network"></use></svg>
+                        <span>探测结果</span>
+                    </div>
+                    <div id="ping-result" class="ping-result"></div>
+                </section>
             </div>
             <div class="route-check-actions modal-buttons">
                 <svg class="route-check-ticks" viewBox="0 0 132 20" aria-hidden="true">
