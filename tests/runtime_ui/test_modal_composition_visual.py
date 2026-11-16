@@ -29,6 +29,124 @@ VIEWPORTS = ((1440, 900), (390, 844))
 
 
 class ModalCompositionVisualTests(RuntimeUiHarness):
+
+    def test_embedded_redmine_gerrit_and_cluster_gallery(self) -> None:
+        """Screenshot the independently laid out embedded workspace dialogs."""
+        REVIEW_ROOT.mkdir(parents=True, exist_ok=True)
+        page = self.new_page()
+        records: list[dict[str, str | int]] = []
+        try:
+            for url_path, workspace in (
+                ("/redmine-agent", "redmine"),
+                ("/gerrit-dashboard", "gerrit"),
+            ):
+                page.set_viewport_size({"width": 1440, "height": 900})
+                page.goto(f"{self.base_url}{url_path}", wait_until="domcontentloaded")
+                page.wait_for_function("typeof showModal === 'function'")
+                modal_ids = page.locator(".modal[id]").evaluate_all(
+                    "nodes => nodes.map(node => node.id)"
+                )
+                self.assertGreaterEqual(len(modal_ids), 5)
+                for modal_id in modal_ids:
+                    page.evaluate("id => showModal(id)", modal_id)
+                    panel = page.locator(f"#{modal_id} .modal-content")
+                    panel.wait_for(state="visible")
+                    metrics = panel.evaluate(
+                        """panel => {
+                            const box=panel.getBoundingClientRect();
+                            const style=getComputedStyle(panel);
+                            return {
+                                left:box.left,top:box.top,
+                                right:box.right,bottom:box.bottom,
+                                border:style.borderTopWidth,
+                            };
+                        }"""
+                    )
+                    try:
+                        with self.subTest(workspace=workspace, modal=modal_id):
+                            self.assertGreaterEqual(metrics["left"], -1)
+                            self.assertGreaterEqual(metrics["top"], -1)
+                            self.assertLessEqual(metrics["right"], 1441)
+                            self.assertLessEqual(metrics["bottom"], 901)
+                            self.assertEqual(metrics["border"], "1px")
+                            name = f"{workspace}-{modal_id}-1440x900.png"
+                            page.screenshot(
+                                path=str(REVIEW_ROOT / name),
+                                animations="disabled", full_page=False,
+                            )
+                            records.append({
+                                "name": modal_id, "workspace": workspace,
+                                "width": 1440, "height": 900, "file": name,
+                            })
+                    finally:
+                        page.evaluate("id => hideModal(id)", modal_id)
+
+            page.goto(f"{self.base_url}/cluster", wait_until="domcontentloaded")
+            page.wait_for_function("typeof syncClusterModalState === 'function'")
+            for modal_id in ("onboarding", "worker-config-modal"):
+                page.evaluate(
+                    """id => {
+                        document.getElementById(id).hidden = false;
+                        syncClusterModalState();
+                    }""",
+                    modal_id,
+                )
+                panel = page.locator(f"#{modal_id} .onboarding-modal")
+                panel.wait_for(state="visible")
+                name = f"cluster-{modal_id}-1440x900.png"
+                try:
+                    with self.subTest(workspace="cluster", modal=modal_id):
+                        r = panel.bounding_box()
+                        self.assertIsNotNone(r)
+                        self.assertGreaterEqual(r["x"], -1)
+                        self.assertGreaterEqual(r["y"], -1)
+                        self.assertLessEqual(r["x"] + r["width"], 1441)
+                        self.assertLessEqual(r["y"] + r["height"], 901)
+                        page.screenshot(
+                            path=str(REVIEW_ROOT / name),
+                            animations="disabled", full_page=False,
+                        )
+                        records.append({
+                            "name": modal_id, "workspace": "cluster",
+                            "width": 1440, "height": 900, "file": name,
+                        })
+                finally:
+                    page.evaluate(
+                        """id => {
+                            document.getElementById(id).hidden = true;
+                            syncClusterModalState();
+                        }""",
+                        modal_id,
+                    )
+
+            (REVIEW_ROOT / "embedded-manifest.json").write_text(
+                json.dumps(records, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            import html
+
+            cards = "".join(
+                '<figure><figcaption>' + html.escape(item["workspace"]) +
+                ' / ' + html.escape(item["name"]) +
+                '</figcaption><img loading="lazy" src="' +
+                html.escape(item["file"]) + '"></figure>'
+                for item in records
+            )
+            (REVIEW_ROOT / "embedded-index.html").write_text(
+                '<!doctype html><html lang="zh-CN"><meta charset="utf-8">'
+                '<title>嵌入式业务弹框审核</title>'
+                '<style>body{background:#111019;color:#ebdef8;max-width:1500px;'
+                'margin:auto;font:14px sans-serif;padding:20px}'
+                'figure{padding:12px;border:1px solid #78529a;margin:16px 0}'
+                'img{display:block;max-width:100%;height:auto}</style>'
+                '<h1>Redmine / Gerrit / Cluster 真实浏览器弹框</h1>'
+                + cards + '</html>',
+                encoding="utf-8",
+            )
+        finally:
+            page.close()
+
+
     def test_real_dialog_gallery_and_computed_style_contracts(self) -> None:
         REVIEW_ROOT.mkdir(parents=True, exist_ok=True)
         page = self.new_page()
