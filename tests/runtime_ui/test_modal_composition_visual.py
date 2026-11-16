@@ -148,6 +148,62 @@ class ModalCompositionVisualTests(RuntimeUiHarness):
             page.close()
 
 
+
+    def test_dynamic_route_and_ats_credential_dialog_screenshots(self) -> None:
+        """Dynamic dialogs are not in Shell templates; capture them separately."""
+        REVIEW_ROOT.mkdir(parents=True, exist_ok=True)
+        page = self.new_page()
+        records: list[dict[str, str | int]] = []
+        try:
+            self.goto_shell(page)
+            page.set_viewport_size({"width": 1440, "height": 900})
+            page.locator("#check-routing-btn").click()
+            route = page.locator("#route-check-dialog .modal-content")
+            route.wait_for(state="visible")
+            rect = route.bounding_box()
+            self.assertIsNotNone(rect)
+            self.assertGreaterEqual(rect["x"], -1)
+            self.assertGreaterEqual(rect["y"], -1)
+            self.assertLessEqual(rect["x"] + rect["width"], 1441)
+            self.assertLessEqual(rect["y"] + rect["height"], 901)
+            path = REVIEW_ROOT / "dynamic-route-check-1440x900.png"
+            page.screenshot(
+                path=str(path), animations="disabled", full_page=False,
+            )
+            records.append({
+                "name": "route-check-dialog", "workspace": "shell-dynamic",
+                "width": 1440, "height": 900, "file": path.name,
+            })
+            page.locator("#route-check-dialog .route-check-close").click()
+            self.assertEqual(page.locator("#route-check-dialog").count(), 0)
+
+            page.goto(f"{self.base_url}/automation", wait_until="domcontentloaded")
+            page.wait_for_function("typeof promptBuildPassword === 'function'")
+            page.evaluate("void promptBuildPassword()")
+            dialog = page.locator(".password-dialog")
+            dialog.wait_for(state="visible")
+            rect = dialog.bounding_box()
+            self.assertIsNotNone(rect)
+            self.assertGreaterEqual(rect["x"], -1)
+            self.assertGreaterEqual(rect["y"], -1)
+            self.assertLessEqual(rect["x"] + rect["width"], 1441)
+            self.assertLessEqual(rect["y"] + rect["height"], 901)
+            path = REVIEW_ROOT / "dynamic-ats-credential-1440x900.png"
+            page.screenshot(
+                path=str(path), animations="disabled", full_page=False,
+            )
+            records.append({
+                "name": "password-dialog", "workspace": "automation",
+                "width": 1440, "height": 900, "file": path.name,
+            })
+            page.keyboard.press("Escape")
+            (REVIEW_ROOT / "dynamic-manifest.json").write_text(
+                json.dumps(records, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        finally:
+            page.close()
+
     def test_real_dialog_gallery_and_computed_style_contracts(self) -> None:
         REVIEW_ROOT.mkdir(parents=True, exist_ok=True)
         page = self.new_page()
