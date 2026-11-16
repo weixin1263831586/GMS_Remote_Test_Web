@@ -5,13 +5,13 @@
                 <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#chip"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">烧写SN码</span></div>
                 <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeSnModal">&times;</button>
             </div>
-            <div class="modal-body">
-                <div class="modal-form-row tech-structured-row">
+            <div class="modal-body tech-purpose-body tech-purpose-body--sn"><p class="tech-workflow-lede">将 SN 序列号写入设备，操作前请确认烧写模式</p>
+                <section class="tech-purpose-panel"><h3 class="tech-workflow-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chip"></use></svg> 序列号设置</h3><div class="modal-form-row tech-structured-row">
                     <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#chip"></use></svg></span>
                     <label>SN 码:</label>
                     <input type="text" id="sn-code" placeholder="请输入SN码" />
                 </div>
-                <div class="modal-info-text">
+                </section><div class="modal-info-text tech-destructive-notice">
                     ⚠️ 该功能需要在 loader 模式下烧写 SN 码到设备。
                 </div>
                 <div class="modal-buttons tech-dialog-actions">

@@ -5,8 +5,8 @@
                 <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#package"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">烧写GSI镜像</span></div>
                 <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeGsiModal">&times;</button>
             </div>
-            <div class="modal-body">
-                <div class="modal-form-row">
+            <div class="modal-body tech-purpose-body tech-purpose-body--gsi"><p class="tech-workflow-lede">选择系统镜像与可选的 Vendor Boot 镜像进行烧写</p>
+                <section class="tech-purpose-panel tech-image-sources"><h3 class="tech-workflow-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg> 镜像与烧写脚本</h3><div class="modal-form-row">
                     <label>GSI烧写脚本:</label>
                     <div class="input-with-btn">
                         <input type="text" id="gsi-script" placeholder="请选择GSI烧写脚本" />
@@ -29,7 +29,7 @@
                         <button class="btn-small" data-click="browseRemoteFileForGsiVendor">服务器</button>
                     </div>
                 </div>
-                <div class="modal-info-text">
+                </section><div class="modal-info-text tech-destructive-notice">
                     ⚠️ GSI烧写会在需要时自动解锁 Bootloader（通常会清除设备数据），并自动处理分区删除、镜像烧写和设备重启。
                 </div>
                 <div class="modal-buttons tech-dialog-actions">
