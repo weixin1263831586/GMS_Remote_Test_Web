@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import codecs
 import json
@@ -301,6 +302,22 @@ async def wait_evidence_snapshot(
     except EvidenceError as exc:
         return _error_response(exc)
     return {"success": True, "data": _snapshot_payload(snapshot)}
+
+
+@router.get("/evidence/{snapshot_id}/references")
+@handle_api_errors
+async def get_evidence_references(
+    snapshot_id: str, request: Request,
+    q: str = Query("", max_length=256),
+):
+    require_agent_scope("redmine.read")(request)
+    require_agent_scope("artifacts.read_own")(request)
+    from .reference_recall import collect_snapshot_references
+
+    data = await asyncio.to_thread(
+        collect_snapshot_references, _owner(request), snapshot_id, query=q,
+    )
+    return {"success": True, "data": data}
 
 
 @router.get("/evidence/{snapshot_id}/issue")

@@ -51,130 +51,11 @@
     font-size: 13px;
 }
 
-.report-upload-zone {
-    background: var(--light-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 8px 12px;
-    text-align: center;
-    transition: border-color 0.3s ease, background-color 0.3s ease, transform 0.3s ease;
-    cursor: pointer;
-    position: relative;
-    overflow: hidden;
-    min-height: 80px;
-    max-height: 80px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
+/* 上传区状态/进度条规则统一在 common-page.css，此处仅保留外框几何。 */
 
 .analysis-upload-frame {
     padding: 0;
     margin-bottom: 10px;
-}
-
-/* 上传前占满屏幕 */
-.report-upload-zone.upload-empty {
-    height: 50vh;
-    min-height: 50vh;
-    max-height: 50vh;
-    flex: 0 0 50vh;
-}
-
-.report-upload-zone:hover {
-    border-color: var(--primary-color);
-    background: var(--lighter-bg);
-}
-
-.report-upload-zone.drag-over {
-    border-color: var(--success-color);
-    background: color-mix(in srgb, var(--success-color) 10%, transparent);
-    transform: scale(1.02);
-}
-
-.report-upload-content {
-    transition: var(--transition-normal);
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    width: 100%;
-    justify-content: center;
-}
-
-.report-upload-content > div:first-child {
-    font-size: 20px;
-    margin-bottom: 0;
-    flex-shrink: 0;
-}
-
-.report-upload-content > div:nth-child(2) {
-    font-size: 11px;
-    font-weight: 600;
-    margin-bottom: 0;
-    text-align: left;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 300px;
-}
-
-.report-upload-content > div:nth-child(3) {
-    font-size: 9px;
-    color: var(--text-secondary);
-    margin-bottom: 0;
-    text-align: left;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 200px;
-}
-
-.report-upload-content button {
-    margin-left: 6px;
-    padding: 4px 10px;
-    font-size: 10px;
-    flex-shrink: 0;
-}
-
-.report-upload-zone.drag-over .report-upload-content {
-    opacity: 0.5;
-}
-
-/* 缩小状态下隐藏详细说明 */
-.report-upload-zone:not(.upload-empty) .upload-instructions {
-    display: none;
-}
-
-/* 缩小状态下调整布局和间距 */
-.report-upload-zone:not(.upload-empty) .report-upload-content {
-    gap: 10px;
-    padding: 0;
-}
-
-.report-upload-zone:not(.upload-empty) .report-upload-content > div:nth-child(2) {
-    font-size: 14px;
-    white-space: nowrap;
-}
-
-.report-upload-zone:not(.upload-empty) button {
-    padding: 6px 12px;
-    font-size: 11px;
-}
-
-.apk-upload-progress {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: color-mix(in srgb, var(--success-color) 20%, transparent);
-    overflow: hidden;
-}
-
-.apk-upload-progress-bar {
-    height: 100%;
-    background: var(--success-color);
-    transition: width 0.3s ease;
 }
 
 #report-summary > div {
@@ -973,6 +854,11 @@
     min-width: 0;
     max-width: none;
 }
+
+/* 工具卡片操作按钮（tools-render.js 渲染，data-tools-action 委托分发）。 */
+.btn-act:hover { opacity: 0.8; }
+.btn-act.act-edit:hover { background: var(--primary-gradient); color: white; border-color: var(--primary-color); }
+.btn-act.act-danger:hover { background: var(--danger-color); color: white; border-color: var(--danger-color); }
 
 /* Tools Scroll Container */
 #tools-scroll-container {

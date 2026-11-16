@@ -50,7 +50,7 @@ def detect_stream_encoding(source) -> str:
 def decode_member_with_budget(source, remaining: int, write, reset) -> int:
     """单遍候选解码 + 字符预算硬边界（返回总字符数）。
 
-    编码检测与正式派生在**同一遍**流式读取内完成（2026-11-14 审核意见）：
+    编码检测与正式派生在**同一遍**流式读取内完成：
     旧实现先全量扫描选编码、再全量解码派生，压缩炸弹的解压 CPU/时间
     花了至少两遍，且第一遍（检测）不受任何预算约束。本函数按候选编码
     逐块解码，累计字符数超过 ``remaining`` 立即抛

@@ -338,8 +338,8 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        # v29 adds mandatory paragraph-level claim review before publication.
-        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v29")
+        # v31 对齐官方引用别名、复核上下文及独立事实修正流程。
+        self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v31")
 
     def test_diagnostic_prompt_has_no_journal_timeline_section(self):
         """处理时间线只是 Redmine journal 流水的复述，读者点开工单就有；

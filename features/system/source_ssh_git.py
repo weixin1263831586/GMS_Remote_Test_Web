@@ -101,7 +101,7 @@ def _is_head_label(label: str, default_revision: str) -> bool:
     多仓检索固定在各子仓 HEAD 上执行；默认 revision（如静态配置声明的
     "main"）是源注册时已知的标签语义，允许作为同义标签通过。其他显式
     revision（分支/tag/commit）必须拒绝——静默用 HEAD 结果冒充目标版本
-    会让跨版本补丁归属分析误判根因（2026-11-14 审核意见）。
+    会让跨版本补丁归属分析误判根因。
     """
     value = str(label or "").strip().lower()
     if not value or value == "head":
@@ -764,8 +764,8 @@ class SSHGitProvider(LocalGitProvider):
           frameworks/base/core/java）不能返回空——目标文件就在各子仓里，
           回退为强相关排序全量搜索，path_filter 统一在 _parse_multi_output
           按**完整文件路径**逐条过滤。仓库预筛选只是优化，不允许改变查询
-          结果的正确性（2026-11-14 审核意见：文件名 filter 假阴性且
-          coverage_complete=true）；
+          结果的正确性（文件名 filter 有假阴性且
+          coverage_complete=true 风险）；
         - 全量发现模式的子仓清单经 ``_repos_all()`` 自动枚举（TTL 缓存）；
         - 分片并行检索，墙钟预算在波间检查，客户端 HTTP 预算由 CLI 覆盖；
           超时分片返回部分结果 + limited=True + hint。
@@ -773,7 +773,7 @@ class SSHGitProvider(LocalGitProvider):
         label = str(revision or "").strip() or self.config.default_revision
         if label and (label.startswith("-") or ".." in label):
             raise SourceProviderError("revision 非法", status_code=422)
-        # revision 语义收紧（2026-11-14 审核意见）：多仓检索固定在各子仓
+        # revision 语义收紧：多仓检索固定在各子仓
         # HEAD 上执行。HEAD/默认 revision 之外的显式 revision（分支、tag、
         # commit）必须显式拒绝——否则用户请求 Android14 版本却拿到 HEAD
         # 命中，跨版本失败分析的根因归属直接失真。拒绝并指引替代路径。

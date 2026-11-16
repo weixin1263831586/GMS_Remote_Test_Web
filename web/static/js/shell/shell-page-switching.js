@@ -480,6 +480,9 @@
                 const shell = frame.closest('.embedded-frame-shell');
                 if (!shell) return;
                 frame.dataset.documentLoaded = 'true';
+                // 子文档已加载（defer 脚本先于 load 执行完毕），此时补发
+                // 页签聚焦消息让 ←/→ 首次进入即可用；无挂起时为空操作。
+                flushEmbeddedActiveTabFocus(frame);
                 if (frame.dataset.waitForReady === 'true'
                         && frame.dataset.surfaceReadyReceived !== 'true') {
                     // 同源微前端在首批数据已原子渲染后主动通知。
@@ -831,6 +834,9 @@
             if (typeof clearDomCache === 'function') clearDomCache();
 
             currentPage = pageName;
+            // 任何切页路径都要让 iframe 微前端页的 ←/→ 页签切换立即可用；
+            // 首次加载未就绪时由 markLazyFrameReady 稍后补发。
+            focusEmbeddedActiveTab(pageName);
 
             // 保存当前页面。hash 参与刷新恢复，localStorage/cookie 用于首次无 hash 的回退。
             saveCurrentPageState(pageName, { updateHash: options.updateHash !== false });

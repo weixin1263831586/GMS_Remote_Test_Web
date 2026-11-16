@@ -409,6 +409,7 @@ def list_command_events(
 @router.post("/workers/{worker_id}/commands/poll")
 async def poll_commands(
     worker_id: str,
+    request: Request,
     authorization: str | None = Header(default=None),
     worker_session: str = Header(default="", alias="X-GMS-Worker-Session"),
     worker_generation: int = Header(default=0, alias="X-GMS-Worker-Generation"),
@@ -418,6 +419,9 @@ async def poll_commands(
         raise HTTPException(404, "worker is not registered")
     _require_worker_session(worker_id, worker_session, worker_generation)
     for _ in range(20):
+        # Uvicorn 排空连接前协议层会标记在途 scope，此时不再认领新命令。
+        if request.scope.get("gms.shutdown_requested"):
+            break
         commands = service().repository.poll_commands(worker_id)
         if commands:
             return {"success": True, "commands": commands}

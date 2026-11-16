@@ -117,7 +117,7 @@ mcp_debug_tools = _load_typed_tools("mcp_debug_tools")
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.84"
+SERVER_VERSION = "0.22.86"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -2191,6 +2191,7 @@ _TOOLSETS = {
             "gms_rt_redmine_issue",
             "gms_rt_redmine_triage",
             "gms_rt_redmine_history_search",
+            "gms_rt_redmine_references",
             "gms_rt_redmine_journals",
             "gms_rt_redmine_attachments",
             "gms_rt_redmine_attachment_download",
@@ -2531,6 +2532,18 @@ def redmine_triage_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     if arguments.get("refresh"):
         args.append("--refresh")
     return run_cli("gms-rt-redmine-triage", args)
+
+
+def redmine_references_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    snapshot = str(arguments.get("snapshot_id") or "").strip()
+    if not snapshot:
+        return "snapshot_id is required", True
+    if len(snapshot) > 256 or len(str(arguments.get("query") or "")) > 256:
+        return "snapshot_id and query must not exceed 256 characters", True
+    args = [snapshot]
+    if arguments.get("query"):
+        args.extend(["--query", str(arguments["query"])])
+    return run_cli("gms-rt-redmine-references", args)
 
 
 def redmine_history_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
@@ -2982,6 +2995,7 @@ _TOOL_HANDLERS = {
     "gms_rt_redmine_issue": redmine_issue_tool,
     "gms_rt_redmine_triage": redmine_triage_tool,
     "gms_rt_redmine_history_search": redmine_history_search_tool,
+    "gms_rt_redmine_references": redmine_references_tool,
     "gms_rt_redmine_journals": redmine_journals_tool,
     "gms_rt_redmine_attachments": redmine_attachments_tool,
     "gms_rt_redmine_attachment_download": redmine_attachment_download_tool,

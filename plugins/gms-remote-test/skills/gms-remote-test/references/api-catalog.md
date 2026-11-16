@@ -85,6 +85,24 @@ Related commands intentionally have different contracts:
 
 ## Redmine evidence workflow (read-only)
 
+`gms-rt-redmine-references SNAPSHOT_ID [--query IDENTIFIERS]` (MCP:
+`gms_rt_redmine_references`) recalls official Mainline CVE/security-patch
+releases, test exemptions and GMS Critical Fix bulletins from the owner's
+snapshot description, journals and retained attachment/OCR text. It requires
+both `redmine.read` and `artifacts.read_own`. Each source reports `matched`,
+`no_match`, `not_applicable` or `unavailable`; `coverage_complete=false` means
+some input was not scanned, so absence is not negative evidence. Hits include
+stable `ref:mainline:*` citations, official URLs, release metadata and content
+SHA-256. A release containing a fix does not prove the target build installed it.
+
+```bash
+gms-rt-redmine-references SNAPSHOT_ID --query CVE-2026-58835 --json --non-interactive
+```
+
+The Controller performs this recall before Redmine single-issue and daily-brief
+analysis; use the tool to supplement identifiers discovered later. Official
+references supplement Redmine history and commit-pinned source evidence.
+
 Pre-flight checklist (run both before the first fetch; ~10 seconds to
 discover a scope or credential gap instead of failing at step 4):
 

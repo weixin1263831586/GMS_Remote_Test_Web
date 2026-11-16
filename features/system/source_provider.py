@@ -243,7 +243,7 @@ _FINGERPRINT_MISSING: tuple[str] = ("missing",)
 
 
 def _user_store_fingerprint() -> tuple[int, int] | tuple[str] | None:
-    """用户存储文件指纹（三态，2026-11-14 审核意见）。
+    """用户存储文件指纹（三态）。
 
     - ``(mtime_ns, size)``：文件存在；
     - ``_FINGERPRINT_MISSING``：文件确认不存在（无用户源的基线，与

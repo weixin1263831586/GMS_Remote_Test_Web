@@ -462,7 +462,7 @@ class LoadProviderConfigsTests(unittest.TestCase):
     def test_android_version_flows_to_registry_listing(self):
         """android_version 从配置项到 list_sources 端到端可见。
 
-        回归（2026-11-14 审核意见）：用户经「添加SDK」注册时填写的
+        回归：用户经「添加SDK」注册时填写的
         Android 版本此前在 ProviderConfig 丢失，管理页「Android 版本」
         列恒为空。三种 provider 都必须透传该展示字段。
         """

@@ -389,13 +389,17 @@ def query_security_patches_by_cve(
             normalized.append(cve_id)
     if not normalized:
         return []
+    # RC/PRELOAD 标签按字母序不等于时间序：限定条数时新 PRELOAD 须排在旧 RC 前。
+    conn.create_function("mainline_release_date", 1, lambda url: (
+        re.findall(r"\d{4}-\d{2}-\d{2}", str(url or "")) or [""]
+    )[-1])
     placeholders = ', '.join('?' for _ in normalized)
     rows = conn.execute(
         f"""
         SELECT {_SECURITY_PATCH_COLUMNS}
         FROM mainline_security_patches
         WHERE cve_id IN ({placeholders})
-        ORDER BY release_year DESC, source_url DESC, cve_id, mainline_module
+        ORDER BY release_year DESC, mainline_release_date(source_url) DESC, source_url DESC, cve_id, mainline_module
         LIMIT ?
         """,
         (*normalized, limit),

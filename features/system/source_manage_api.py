@@ -724,7 +724,7 @@ def list_user_sdk_sources(request: Request, verify: str = "auto"):
 
     local_git（本机）走本地探测；ssh_git 走远端 verify。
 
-    校验模式（2026-11-14 审核意见：多台编译服务器失联时，同步校验会让
+    校验模式（多台编译服务器失联时，同步校验会让
     列表卡 25s×N，用户必须仍能立即查看/管理/删除已注册源）：
 
     - ``auto``（默认）：``last_verified_at`` 在新鲜窗口内的源直接返回

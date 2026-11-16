@@ -38,7 +38,7 @@ def extract_zip_derived_text(
 
     Streaming publication uses temporary-file/rename semantics without a
     whole-archive bytes value. ZIP 声明大小（file_size）超过派生总预算的
-    成员先被拒绝（2026-11-14 审核意见：元数据可提前拒绝的炸弹不解压）；
+    成员先被拒绝（元数据可提前拒绝的炸弹不解压）；
     声明撒谎（file_size 偏小）的成员由字符预算在解码流上硬停。
     """
     try:

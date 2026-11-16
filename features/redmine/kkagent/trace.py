@@ -67,6 +67,7 @@ class ToolTrace(_EngineToolTrace):
     search_coverage_complete: bool = False
     # 搜索调用命中的 artifact id（从 matches/artifact_id 提取，供覆盖归属）。
     search_artifact_ids: list[str] = field(default_factory=list)
+    reference_lookup: dict[str, Any] = field(default_factory=dict)
 
     def to_summary(self) -> dict[str, Any]:
         return {
@@ -83,6 +84,7 @@ class ToolTrace(_EngineToolTrace):
             "source_context": self.source_context,
             "search_coverage_complete": self.search_coverage_complete,
             "search_artifact_ids": self.search_artifact_ids,
+            "reference_lookup": self.reference_lookup,
         }
 
 
@@ -343,6 +345,7 @@ class KkAgentTrace(KkAgentStreamTrace):
                 if value:
                     refs.update({f"#{value}", str(value)})
             refs.update(str(value) for value in call.snapshot_ids if value)
+            refs.update(str(value) for value in call.reference_lookup.get("references", []) if value)
             path = str(call.tool_input.get("path") or call.tool_input.get("file") or "")
             task_id = str(call.tool_input.get("task_id") or "")
             if is_source and path:
@@ -351,7 +354,7 @@ class KkAgentTrace(KkAgentStreamTrace):
                 refs.add(f"apk:{task_id}:manifest")
             ledger.append({
                 "evidence_id": f"EV-{index:03d}",
-                "kind": "source" if is_source else "tool",
+                "kind": "source" if is_source else "reference" if call.reference_lookup else "tool",
                 "tool_name": call.tool_name,
                 "reproducible": call.source_reproducible if is_source else None,
                 "refs": sorted(refs),
@@ -399,6 +402,19 @@ class KkAgentTrace(KkAgentStreamTrace):
             call.text_artifact_ids = text_ids
             call.all_artifact_ids = all_ids
         call.snapshot_ids = _collect_snapshot_ids(output)
+        if "redmine_references" in call.tool_name and call.succeeded:
+            from ..reference_recall import reference_check_summary
+
+            value = output
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except ValueError:
+                    value = {}
+            while isinstance(value, dict) and isinstance(value.get("data"), dict):
+                value = value["data"]
+            if isinstance(value, dict) and isinstance(value.get("sources"), dict):
+                call.reference_lookup = reference_check_summary(value)
         if "artifact_search" in call.tool_name:
             call.search_coverage_complete, call.search_artifact_ids = (
                 _search_coverage(output)

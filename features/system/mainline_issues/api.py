@@ -261,10 +261,9 @@ async def list_mainline_security_patches(
             '(cve_id LIKE ? ESCAPE "\\" OR mainline_module LIKE ? ESCAPE "\\" OR '
             'version_note LIKE ? ESCAPE "\\" OR release_label LIKE ? ESCAPE "\\" OR '
             'source_url LIKE ? ESCAPE "\\" OR product_section LIKE ? ESCAPE "\\" OR '
-            'source_title LIKE ? ESCAPE "\\" OR cve_id IN (SELECT cve_id FROM mainline_known_issues WHERE exemption_id LIKE ? ESCAPE "\\"))'
+            'source_title LIKE ? ESCAPE "\\")'
         )
         params.extend([like] * 7)
-        params.append(like)
     where_sql = f"WHERE {' AND '.join(where)}" if where else ''
     with _connect_db() as conn:
         total = conn.execute(
@@ -347,7 +346,6 @@ async def list_mainline_critical_patches(
         conn.close()
 
     items = []
-    page_ids = [str(row['patch_id']) for row in rows]
     with _connect_db() as mainline_conn:
         for row in rows:
             item = dict(row)

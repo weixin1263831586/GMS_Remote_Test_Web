@@ -1,6 +1,6 @@
 # Redmine Daily Triage（每日晨报分析规范）
 
-版本：`redmine_daily_triage_v12`
+版本：`redmine_daily_triage_v31`
 
 用途：对当天个人看板待处理 Redmine issue（`waiting_my_reply` /
 `no_reply_3_days`）做只读取证与结构化分析，输出可直接进入 Daily Brief
@@ -19,6 +19,21 @@ diagnostic 深度诊断），二者唯一的区别是触发来源：晨报由 ni
 超时未回复事项，不代表全量新增、关闭或等待外部的工作清单。
 
 ## 单条深度分析工作流
+
+Controller 会在模型启动前读取本单正文、日志、附件/OCR，提取 CVE、Google
+bug ID、测试模块及用例标识，查询 Mainline 安全补丁、测试豁免和 Critical
+Fix 公告。命中结果带 `ref:mainline:*` 引用、官方链接、版本及内容摘要哈希，
+必须讨论相关命中的适用性。后续新发现标识时可调用
+`gms_rt_redmine_references(snapshot_id=..., query=...)` 补查；scope 同时要求
+`redmine.read` 和 `artifacts.read_own`。无命中、未查询、库不可用、证据未完整
+扫描必须分别表述；官方发布包含修复不能等同于送测镜像已集成或实测通过。
+
+引用可使用实际返回的 `ref:mainline:*`、官方链接，或 Controller 已提供映射的
+`EV-*`；不得自编证据号。报告修正和结论复核均复用已查询的官方内容，不必
+重复检索相同资料。若标题、跟帖、构建路径的平台标注冲突，应并列说明；
+实际 SPL 等构建属性未经读取时，先要求核实，不能把安全公告日期当成属性值。
+事实复核的修正机会独立于输出格式和补充取证的修复次数；每份新报告必须重新
+复核，持续无法通过时保留失败状态，不能沿用旧报告的复核结论。
 
 用户点击「深度分析此项」时，按指定 run_id 的冻结快照执行下列诊断
 （批量晨报逐 issue 执行完全相同的步骤）。历史检索是否完成仍由实际

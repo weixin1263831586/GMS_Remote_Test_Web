@@ -604,7 +604,7 @@ class ManageListLiveTests(_ManageApiHarness):
     def test_auto_mode_returns_cached_and_defers_background_verify(self):
         """auto 模式：新鲜缓存直接返回；过期源转后台校验，响应不等待。
 
-        2026-11-14 审核意见：多台编译服务器失联时同步校验卡住列表——
+        多台编译服务器失联时同步校验会卡住列表——
         auto 模式必须立即返回（stale 源带缓存结果 + verify_state），
         校验完成后 last_verified_* 落盘，下次刷新可见。
         """

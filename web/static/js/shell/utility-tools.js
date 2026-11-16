@@ -228,6 +228,41 @@ function ut_renderToolsGrid() {
     const grid = document.getElementById('ut-grid');
     if (!grid) return;
     ut_renderAllCategories(grid);
+    // 动作按钮委托分发（与常用网址页同一套 data-tools-action 模型）。
+    toolsBindGridActions(grid, {
+        'open-tool': el => openToolLink(el.dataset.url || ''),
+        'builtin-open': el => { const fn = window[el.dataset.builtinAction]; if (typeof fn === 'function') fn(); },
+        'download-tool': el => ut_downloadTool(el.dataset.toolId, el.dataset.toolTitle),
+        'edit-category': el => ut_editCategory(el.dataset.category),
+        'add-tool': el => ut_addNewToolToCategory(el.dataset.category),
+        'delete-category': el => ut_deleteCategory(el.dataset.category),
+        'edit-tool': el => { const index = Number.parseInt(el.dataset.index || '', 10); if (Number.isInteger(index)) ut_editTool(el.dataset.category, index); },
+        'delete-tool': el => { const index = Number.parseInt(el.dataset.index || '', 10); if (Number.isInteger(index)) ut_deleteTool(el.dataset.category, index); },
+        'trigger-sync': el => {
+            const index = Number.parseInt(el.dataset.index || '', 10);
+            const tool = ut_categorizedTools[el.dataset.category]?.[index];
+            if (!tool) return;
+            if (el.dataset.syncKind === 'gms-update-sync') ut_startGmsUpdateMonitorSync(el, tool);
+            else ut_startMainlineKnownIssuesSync(el);
+        },
+        'radar-edit': el => {
+            el.disabled = true;
+            window.GmsUpdateRadarSettings.open()
+                .catch(error => window.showToast?.(error.message, 'error'))
+                .finally(() => { el.disabled = false; });
+        },
+        'hide-builtin': el => {
+            const category = el.dataset.category;
+            const index = Number.parseInt(el.dataset.index || '', 10);
+            const tool = ut_categorizedTools[category]?.[index];
+            if (!tool) return;
+            ut_hideBuiltin(el.dataset.builtinId);
+            ut_categorizedTools[category].splice(index, 1);
+            ut_saveCategories();
+            ut_renderToolsGrid();
+            showToast(`已隐藏「${tool.title}」`, 'info');
+        },
+    });
     ut_restoreSyncButtonState();
 }
 
@@ -290,244 +325,131 @@ async function ut_restoreSyncButtonState() {
 }
 
 function ut_renderAllCategories(grid) {
-    grid.innerHTML = '';
     const categories = Object.keys(ut_categorizedTools);
     if (categories.length === 0) {
-        grid.innerHTML = `
-            <div style="text-align: center; padding: 60px 20px; color: var(--text-muted);">
-                <div style="font-size: 64px; margin-bottom: 20px;">🧰</div>
-                <div style="font-size: 16px; margin-bottom: 8px;">还没有工具</div>
-                <div style="font-size: 13px;">点击下方按钮添加分类和工具</div>
-            </div>`;
+        grid.innerHTML = toolsRenderEmptyGrid({
+            icon: '🧰', title: '还没有工具', hint: '点击下方按钮添加分类和工具',
+        });
         return;
     }
 
-    categories.forEach((category, catIndex) => {
-        const tools = ut_categorizedTools[category];
-        const catInfo = ut_getCategoryInfo(category);
-        const section = document.createElement('div');
-        section.className = 'category-section';
-        section.dataset.category = category;
-        section.dataset.categoryIndex = catIndex;
-        section.draggable = true;
-        section.style.marginBottom = '4px';
+    grid.innerHTML = categories.map((category, catIndex) => toolsRenderCategorySection({
+        category,
+        catIndex,
+        icon: ut_getCategoryInfo(category).icon,
+        count: ut_categorizedTools[category].length,
+        addButtonBackground: 'var(--primary-gradient)',
+        sectionStyle: 'margin-bottom: 4px;',
+        cardsHtml: ut_categorizedTools[category]
+            .map((tool, index) => ut_createToolCard(tool, category, index, toolsCategoryColor(catIndex)))
+            .join('\n'),
+    })).join('');
+
+    // 分类节拖拽本页直绑；dnd-sort.js 的 initDragAndDrop 还会按
+    // .category-section 全局叠加绑定（历史现状，见文件尾隐患标注）。
+    grid.querySelectorAll('.category-section').forEach(section => {
+        if (section.dataset.utDragBound === 'true') return;
+        section.dataset.utDragBound = 'true';
         section.addEventListener('dragstart', handleCategoryDragStart);
         section.addEventListener('dragend', handleCategoryDragEnd);
         section.addEventListener('dragover', handleCategoryDragOver);
         section.addEventListener('drop', ut_handleCategoryDrop);
+    });
 
-        const header = document.createElement('div');
-        header.className = 'category-header';
-        header.style.cssText = 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); cursor: move;';
-
-        const titleWrap = document.createElement('div');
-        titleWrap.style.cssText = 'display: flex; align-items: center;';
-
-        const icon = document.createElement('span');
-        icon.style.cssText = 'font-size: 16px; margin-right: 6px; cursor: grab;';
-        icon.textContent = catInfo.icon || '📁';
-        titleWrap.appendChild(icon);
-
-        const title = document.createElement('span');
-        title.style.cssText = 'font-size: 16px; font-weight: 600; color: var(--text-primary); cursor: pointer;';
-        title.textContent = category;
-        title.addEventListener('click', () => ut_editCategory(category));
-        titleWrap.appendChild(title);
-
-        const count = document.createElement('span');
-        count.style.cssText = 'margin-left: 10px; padding: 2px 8px; background: var(--light-bg); border-radius: 10px; font-size: 11px; color: var(--text-muted);';
-        count.textContent = String(tools.length);
-        titleWrap.appendChild(count);
-
-        const actions = document.createElement('div');
-        actions.style.cssText = 'display: flex; gap: 6px;';
-
-        const addBtn = document.createElement('button');
-        addBtn.textContent = '添加工具';
-        addBtn.style.cssText = `padding: 6px 16px; background: var(--primary-gradient); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;`;
-        addBtn.addEventListener('mouseenter', () => { addBtn.style.opacity = '0.85'; });
-        addBtn.addEventListener('mouseleave', () => { addBtn.style.opacity = '1'; });
-        addBtn.addEventListener('click', () => ut_addNewToolToCategory(category));
-        actions.appendChild(addBtn);
-
-        const deleteBtn = document.createElement('button');
-        deleteBtn.textContent = '🗑️';
-        deleteBtn.title = '删除分类';
-        deleteBtn.style.cssText = 'padding: 6px 12px; background: var(--danger-color); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s;';
-        deleteBtn.addEventListener('mouseenter', () => { deleteBtn.style.opacity = '0.85'; });
-        deleteBtn.addEventListener('mouseleave', () => { deleteBtn.style.opacity = '1'; });
-        deleteBtn.addEventListener('click', () => ut_deleteCategory(category));
-        actions.appendChild(deleteBtn);
-
-        header.appendChild(titleWrap);
-        header.appendChild(actions);
-        section.appendChild(header);
-
-        const cards = document.createElement('div');
-        cards.className = 'tools-grid';
-        tools.forEach((tool, index) => {
-            cards.appendChild(ut_createToolCard(tool, category, index, toolsCategoryColor(catIndex)));
+    // 悬停反馈只能内联：other-workspaces.css 对 #page-tools 的
+    // .tool-card:hover 有 transform:none 覆盖，CSS 悬停会被压掉。
+    grid.querySelectorAll('.tool-card').forEach(card => {
+        if (card.dataset.utHoverBound === 'true') return;
+        card.dataset.utHoverBound = 'true';
+        card.addEventListener('mouseenter', () => {
+            card.style.transform = 'translateY(-2px)';
+            card.style.boxShadow = 'var(--shadow-md)';
+            card.style.borderColor = card.style.getPropertyValue('--card-accent') || '';
         });
-        section.appendChild(cards);
-        grid.appendChild(section);
+        card.addEventListener('mouseleave', () => {
+            card.style.transform = 'translateY(0)';
+            card.style.boxShadow = 'none';
+            card.style.borderColor = 'var(--border-color)';
+        });
     });
 }
 
 function ut_createToolCard(tool, category, index, cardColor) {
-    const card = document.createElement('div');
-    card.className = 'tool-card';
-    card.title = tool.description || '';
-    card.dataset.toolCategory = category;
-    card.dataset.toolIndex = index;
-    card.draggable = true;
-    card.style.cssText = `background: var(--card-bg); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-top: 2px solid ${cardColor}; transition: all 0.2s; cursor: grab; min-width: 100px; max-width: 130px; min-height: 118px;`;
-    if (tool.action === 'openWeeklyReport') {
-        card.addEventListener('click', () => openWeeklyReport());
-    } else if (tool.action === 'shareFirmware') {
-        card.addEventListener('click', () => shareFirmware());
-    } else if (tool.url) {
-        card.addEventListener('click', () => openToolLink(tool.url));
-    } else if (tool.tool_id && tool.action !== 'mainline-sync') {
-        card.addEventListener('click', () => ut_downloadTool(tool.tool_id, tool.title));
-    }
-    card.addEventListener('mouseenter', () => {
-        card.style.transform = 'translateY(-2px)';
-        card.style.boxShadow = 'var(--shadow-md)';
-        card.style.borderColor = cardColor;
-    });
-    card.addEventListener('mouseleave', () => {
-        card.style.transform = 'translateY(0)';
-        card.style.boxShadow = 'none';
-        card.style.borderColor = 'var(--border-color)';
-    });
-    card.addEventListener('dragstart', handleToolDragStart);
-    card.addEventListener('dragend', handleToolDragEnd);
-    card.addEventListener('dragover', handleToolDragOver);
-    card.addEventListener('drop', ut_handleToolDrop);
-
-    const icon = document.createElement('div');
-    icon.style.cssText = 'width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--light-bg); border-radius: 6px; font-size: 24px; pointer-events: none;';
-    icon.textContent = tool.icon || '🔧';
-    card.appendChild(icon);
-
-    const textWrap = document.createElement('div');
-    textWrap.style.cssText = 'text-align: center; width: 100%; pointer-events: none;';
-    const title = document.createElement('div');
-    title.style.cssText = 'font-size: 12px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%;';
-    title.textContent = tool.title || '';
-    textWrap.appendChild(title);
-    card.appendChild(textWrap);
-
-    const actions = document.createElement('div');
-    actions.style.cssText = 'display: flex; gap: 3px; width: 100%; margin-top: auto;';
-
     const isSyncTool = tool.action === 'mainline-sync' || tool.action === 'gms-update-sync';
     const isShareFirmwareTool = tool.action === 'shareFirmware';
-    if (tool.builtin_id === 'gms-update-radar') actions.appendChild(window.GmsUpdateRadarSettings.createEditButton());
+    // 有 tool_id 且无 url 的下载型工具不显示下载按钮（点击卡片即下载）
+    const isDownloadOnlyTool = !isSyncTool && tool.tool_id && !tool.url;
+
+    const actions = [];
+    if (tool.builtin_id === 'gms-update-radar') {
+        actions.push(`
+                <button type="button" class="btn-act act-edit" aria-label="修改" title="修改雷达执行时间、收件人、发送策略和监听任务" data-tools-action="radar-edit"
+                        style="flex: 1; padding: 3px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--lighter-bg); color: var(--text-primary); font-size: 12px; cursor: pointer; line-height: 1;">
+                    ✏️
+                </button>`);
+    }
     // sync 工具显示触发按钮
     if (isSyncTool) {
-        const downloadBtn = document.createElement('button');
-        downloadBtn.textContent = '触发扫描';
-        downloadBtn.title = tool.action === 'gms-update-sync' ? '扫描 GMS/CTS 更新' : '扫描 Mainline release notes';
-        downloadBtn.style.cssText = 'flex: 2; padding: 2px 3px; background: var(--success-color); color: white; border: none; border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
-        downloadBtn.addEventListener('mouseenter', () => { downloadBtn.style.opacity = '0.8'; });
-        downloadBtn.addEventListener('mouseleave', () => { downloadBtn.style.opacity = '1'; });
-        downloadBtn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            if (tool.action === 'gms-update-sync') {
-                ut_startGmsUpdateMonitorSync(downloadBtn, tool);
-            } else {
-                ut_startMainlineKnownIssuesSync(downloadBtn);
-            }
-        });
-        actions.appendChild(downloadBtn);
+        actions.push(`
+                <button type="button" class="btn-act" aria-label="触发扫描" title="${tool.action === 'gms-update-sync' ? '扫描 GMS/CTS 更新' : '扫描 Mainline release notes'}" data-tools-action="trigger-sync" data-sync-kind="${tool.action}" data-category="${escapeIconAttr(category)}" data-index="${index}"
+                        style="flex: 2; padding: 2px 3px; background: var(--success-color); color: white; border: none; border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;">
+                    触发扫描
+                </button>`);
     }
-    // 有 tool_id 且无 url 的下载型工具不显示下载按钮（点击卡片即下载）
     // 只有有 url 的非内置工具才显示下载按钮
-    const isDownloadOnlyTool = !isSyncTool && tool.tool_id && !tool.url;
     if (!tool.builtin_id && !isSyncTool && !isShareFirmwareTool && !isDownloadOnlyTool) {
-        const downloadBtn = document.createElement('button');
-        downloadBtn.textContent = '下载';
-        downloadBtn.title = '下载文件';
-        downloadBtn.style.cssText = 'flex: 2; padding: 2px 3px; background: var(--success-color); color: white; border: none; border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
-        downloadBtn.addEventListener('mouseenter', () => { downloadBtn.style.opacity = '0.8'; });
-        downloadBtn.addEventListener('mouseleave', () => { downloadBtn.style.opacity = '1'; });
-        downloadBtn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            ut_downloadTool(tool.tool_id, tool.title);
-        });
-        actions.appendChild(downloadBtn);
+        actions.push(`
+                <button type="button" class="btn-act" aria-label="下载文件" title="下载文件" data-tools-action="download-tool" data-tool-id="${escapeIconAttr(tool.tool_id)}" data-tool-title="${escapeIconAttr(tool.title)}"
+                        style="flex: 2; padding: 2px 3px; background: var(--success-color); color: white; border: none; border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;">
+                    下载
+                </button>`);
     }
-
     if (!tool.builtin_id) {
-        const editBtn = document.createElement('button');
-        editBtn.textContent = '✏️';
-        editBtn.style.cssText = 'flex: 1; padding: 2px 3px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
-        editBtn.addEventListener('mouseenter', () => {
-            editBtn.style.background = 'var(--primary-gradient)';
-            editBtn.style.color = 'white';
-            editBtn.style.borderColor = 'var(--primary-color)';
-        });
-        editBtn.addEventListener('mouseleave', () => {
-            editBtn.style.background = 'transparent';
-            editBtn.style.color = 'var(--text-secondary)';
-            editBtn.style.borderColor = 'var(--border-color)';
-        });
-        editBtn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            ut_editTool(category, index);
-        });
-        actions.appendChild(editBtn);
-
-        const deleteBtn = document.createElement('button');
-        deleteBtn.textContent = '🗑️';
-        deleteBtn.style.cssText = 'flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
-        deleteBtn.addEventListener('mouseenter', () => {
-            deleteBtn.style.background = 'var(--danger-color)';
-            deleteBtn.style.color = 'white';
-            deleteBtn.style.borderColor = 'var(--danger-color)';
-        });
-        deleteBtn.addEventListener('mouseleave', () => {
-            deleteBtn.style.background = 'transparent';
-            deleteBtn.style.color = 'var(--text-muted)';
-            deleteBtn.style.borderColor = 'var(--border-color)';
-        });
-        deleteBtn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            ut_deleteTool(category, index);
-        });
-        actions.appendChild(deleteBtn);
+        actions.push(`
+                <button type="button" class="btn-act act-edit" aria-label="编辑工具" data-tools-action="edit-tool" data-category="${escapeIconAttr(category)}" data-index="${index}"
+                        style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;">
+                    ✏️
+                </button>`);
+        actions.push(`
+                <button type="button" class="btn-act act-danger" aria-label="删除工具" data-tools-action="delete-tool" data-category="${escapeIconAttr(category)}" data-index="${index}"
+                        style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;">
+                    🗑️
+                </button>`);
     }
-
     // Built-in tools get a hide button so users can remove them.
     if (tool.builtin_id) {
-        const hideBtn = document.createElement('button');
-        hideBtn.textContent = '🗑️';
-        hideBtn.title = '隐藏此内置工具';
-        hideBtn.style.cssText = 'flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;';
-        hideBtn.addEventListener('mouseenter', () => {
-            hideBtn.style.background = 'var(--danger-color)';
-            hideBtn.style.color = 'white';
-            hideBtn.style.borderColor = 'var(--danger-color)';
-        });
-        hideBtn.addEventListener('mouseleave', () => {
-            hideBtn.style.background = 'transparent';
-            hideBtn.style.color = 'var(--text-muted)';
-            hideBtn.style.borderColor = 'var(--border-color)';
-        });
-        hideBtn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            ut_hideBuiltin(tool.builtin_id);
-            ut_categorizedTools[category].splice(index, 1);
-            ut_saveCategories();
-            ut_renderToolsGrid();
-            showToast(`已隐藏「${tool.title}」`, 'info');
-        });
-        actions.appendChild(hideBtn);
+        actions.push(`
+                <button type="button" class="btn-act act-danger" aria-label="隐藏此内置工具" title="隐藏此内置工具" data-tools-action="hide-builtin" data-builtin-id="${escapeIconAttr(tool.builtin_id)}" data-category="${escapeIconAttr(category)}" data-index="${index}"
+                        style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;">
+                    🗑️
+                </button>`);
     }
 
-    card.appendChild(actions);
-    return card;
+    // 卡片点击语义与原逐节点绑定一致：内置动作 > url 打开 > tool_id 下载。
+    let clickAttrs = '';
+    if (tool.action === 'openWeeklyReport') {
+        clickAttrs = 'data-tools-action="builtin-open" data-builtin-action="openWeeklyReport"';
+    } else if (tool.action === 'shareFirmware') {
+        clickAttrs = 'data-tools-action="builtin-open" data-builtin-action="shareFirmware"';
+    } else if (tool.url) {
+        clickAttrs = `data-tools-action="open-tool" data-url="${escapeIconAttr(tool.url)}"`;
+    } else if (tool.tool_id && !isSyncTool) {
+        clickAttrs = `data-tools-action="download-tool" data-tool-id="${escapeIconAttr(tool.tool_id)}" data-tool-title="${escapeIconAttr(tool.title)}"`;
+    }
+
+    return toolsRenderToolCard({
+        tool,
+        category,
+        index,
+        cardColor,
+        actionsHtml: actions.join(''),
+        clickAttrs,
+        actionsStyle: 'margin-top: auto;',
+        dragAttrs: 'data-dragstart="handleToolDragStart" data-r0="event"'
+            + ' data-dragend="handleToolDragEnd" data-r1="event"'
+            + ' data-dragover="handleToolDragOver" data-r2="event"'
+            + ' data-drop="ut_handleToolDrop" data-r3="event"',
+    });
 }
 
 // 常用工具拖拽排序。

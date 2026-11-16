@@ -11,6 +11,7 @@ import logging  # noqa: E402
 import uvicorn  # noqa: E402
 
 from bootstrap.application import create_app  # noqa: E402
+from bootstrap.http_protocol import ShutdownHttpProtocol  # noqa: E402
 from foundation.config import settings  # noqa: E402
 from foundation.log_setup import configure_stderr_logging  # noqa: E402
 
@@ -36,6 +37,7 @@ if __name__ == '__main__':
         port=settings.server_port,
         proxy_headers=settings.proxy_headers_enabled,
         forwarded_allow_ips=settings.forwarded_allow_ips,
+        http=ShutdownHttpProtocol,
         timeout_keep_alive=120,
         access_log=settings.environment != 'production',
         limit_concurrency=500,

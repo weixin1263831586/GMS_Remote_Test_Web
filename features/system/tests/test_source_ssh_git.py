@@ -335,7 +335,7 @@ class SSHGitMultiRepoTests(unittest.TestCase):
     def test_multi_search_rejects_non_head_revision(self):
         """多仓模式显式 revision（分支/tag/commit）必须 422 拒绝。
 
-        回归（2026-11-14 审核意见）：旧实现接受任意 revision 标签却仍在
+        回归：旧实现接受任意 revision 标签却仍在
         各子仓 HEAD 上检索，跨版本分析会把 HEAD 结果当作目标版本证据。
         """
         self.provider = self._provider(self._handler(
@@ -390,7 +390,7 @@ class SSHGitMultiRepoTests(unittest.TestCase):
     def test_filename_path_filter_searches_all_repos_not_empty(self):
         """文件名 path_filter 不命中子仓名：全量搜索 + 完整路径过滤。
 
-        回归（2026-11-14 审核意见）：旧实现对未命中子仓名且不含 ``/`` 的
+        回归：旧实现对未命中子仓名且不含 ``/`` 的
         filter 直接返回空结果且 coverage_complete=true（没搜索却声明完整
         覆盖）。正确语义：按完整文件路径过滤，零命中才是诚实空结果。
         """

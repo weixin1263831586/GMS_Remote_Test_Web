@@ -26,6 +26,8 @@ typed tools for common workflows:
 - tests: `gms_rt_test_suites_list`, `gms_rt_test_start`,
   `gms_rt_jobs_follow`, `gms_rt_jobs_cancel`
 - evidence: `gms_rt_redmine_*`, `gms_rt_apk_*`, `gms_rt_sdk_*`
+- official CVE fixes, test exemptions and Critical Fix bulletins:
+  `gms_rt_redmine_references` (same owner-scoped evidence snapshot)
 
 MCP tool names use underscores (`gms_rt_devices`). Standalone CLI command
 names use hyphens (`gms-rt-devices-list`). Keep existing MCP names stable;

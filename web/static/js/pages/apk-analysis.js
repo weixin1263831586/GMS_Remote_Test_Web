@@ -240,7 +240,7 @@ async function handleApkFile(file) {
 
     const uploadProgress = $('apk-upload-progress');
     const uploadProgressFill = $('apk-progress-fill');
-    if (uploadProgress) uploadProgress.style.display = 'block';
+    if (uploadProgress) uploadProgress.style.opacity = '1';
     if (uploadProgressFill) uploadProgressFill.style.width = '0%';
 
     try {
@@ -279,7 +279,7 @@ async function handleApkFile(file) {
         showToast(`上传失败: ${e.message}`, 'error');
     } finally {
         setTimeout(() => {
-            if (uploadProgress) uploadProgress.style.display = 'none';
+            if (uploadProgress) uploadProgress.style.opacity = '0';
             if (uploadProgressFill) uploadProgressFill.style.width = '0%';
         }, 500);
     }
@@ -924,7 +924,7 @@ function resetApkAnalysis() {
     $('apk-analysis-status').style.display = 'none';
     $('apk-analysis-result').style.display = 'none';
     $('apk-file-input').value = '';
-    $('apk-upload-progress').style.display = 'none';
+    $('apk-upload-progress').style.opacity = '0';
     $('apk-progress-fill').style.width = '0%';
     $('apk-analysis-progress-container').style.display = 'none';
     $('apk-analysis-progress-bar').style.width = '0%';

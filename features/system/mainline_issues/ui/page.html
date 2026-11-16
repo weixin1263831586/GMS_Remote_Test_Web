@@ -5,34 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mainline Known Issues</title>
   <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
+  <link rel="stylesheet" href="/static/css/data-table-page.css?v=20261116-head32">
   <style>
     :root { color-scheme: dark; --border:var(--border-color); --muted:var(--text-secondary); --bg:var(--dark-bg); --text:var(--text-primary); --head:var(--light-bg); --card:var(--card-bg); --primary:var(--primary-color); }
-    body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:var(--text); background:var(--page-background); display:flex; flex-direction:column; height:100vh; overflow:hidden; }
-    header { padding:18px 24px 10px; background:var(--card); border-bottom:1px solid var(--border); flex-shrink:0; }
-    h1 { margin:0 0 8px; font-size:22px; color:var(--text); }
-    .summary { display:flex; flex-wrap:wrap; gap:8px 16px; color:var(--muted); font-size:13px; }
-    main { padding:16px 24px 24px; flex:1; overflow-y:auto; }
-    .filters { display:grid; grid-template-columns: minmax(220px, 1fr) 120px 150px 120px 120px; gap:8px; margin-bottom:12px; }
-    input, select { height:34px; border:1px solid var(--border); border-radius:6px; padding:0 10px; background:var(--card); color:var(--text); font:inherit; }
-    input::placeholder { color:var(--muted); }
+    .filters { grid-template-columns: minmax(220px, 1fr) 120px 150px 120px 120px; }
+    .filters.single-filter { grid-template-columns: minmax(300px, 1fr) 120px; } /* CVE/Critical_Patch 页签：搜索框占满水平方向 */
     select { appearance:auto; }
-    button { height:34px; cursor:pointer; background:var(--primary-gradient); color:white; border:none; border-radius:6px; padding:0 10px; font:inherit; font-weight:600; }
-    table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--border); font-size:13px; table-layout:fixed; }
-    th, td { border-bottom:1px solid var(--border); padding:8px 10px; text-align:left; vertical-align:top; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    th { background:var(--head); color:var(--text); position:sticky; top:0; z-index:1; }
-    td.wrap { white-space:normal; overflow:visible; text-overflow:unset; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; }
-    .table-wrap { max-height: calc(100vh - 190px); overflow:auto; border-radius:6px; }
-    .muted { color:var(--muted); }
-    .result-section { margin-bottom:16px; }
-    .section-title { font-size:14px; font-weight:600; margin:0 0 6px; display:flex; gap:8px; align-items:baseline; }
-    .section-title .muted { font-size:12px; font-weight:400; }
-    .pager { position:fixed; bottom:8px; right:12px; display:flex; align-items:center; gap:4px; background:var(--card); border:1px solid var(--border); border-radius:5px; padding:3px 6px; box-shadow:0 2px 8px rgba(0,0,0,.4); z-index:100; font-size:11px; }
-    .pager button { width:auto; height:22px; font-size:11px; padding:0 8px; font-weight:500; border-radius:4px; }
-    .pager .muted { color:var(--muted); font-size:11px; }
-    a { color:var(--primary); text-decoration:none; }
-    a:hover { text-decoration:underline; }
-    @media (max-width: 980px) { .filters { grid-template-columns: 1fr 1fr; } }
   </style>
 </head>
 <body>
@@ -42,11 +20,19 @@
   </header>
   <main>
     <div class="filters">
-      <input id="q" placeholder="模糊搜索 module / testcase / bug id / CVE号 / Android版本 / 类别 / issue text">
-      <select id="issue_type"><option value="">全部类型</option><option>CTS</option><option>MTS</option><option>GTS</option><option value="patch">安全补丁(CVE)</option><option value="critical">Critical_Patch</option></select>
+      <input id="q" placeholder="全局搜索：豁免条目 / 安全补丁(CVE) / Critical_Patch">
+      <select id="issue_type"><option value="">全部类型</option><option>CTS</option><option>MTS</option><option>GTS</option></select>
       <select id="product_section"><option value="">全部小节</option><option>Android</option><option>Android Go</option></select>
       <input id="exemption_id" placeholder="豁免ID">
-      <button data-click="reload" data-a0="true">查询</button>
+      <button data-click="runQuery" data-a0="true">查询</button>
+    </div>
+    <div class="tabs-row">
+      <div class="tabs">
+        <button data-tab="exemptions" class="active" data-click="setTab" data-a0="exemptions">豁免条目</button>
+        <button data-tab="patch" data-click="setTab" data-a0="patch">安全补丁 (CVE)</button>
+        <button data-tab="critical" data-click="setTab" data-a0="critical">Critical_Patch</button>
+      </div>
+      <span id="section-badge" class="section-badge"></span>
     </div>
     <div class="table-wrap">
       <div id="tables-area" class="tables-area"><span class="muted">加载中…</span></div>
@@ -58,6 +44,6 @@
     </div>
   </main>
   <script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script>
-  <script src="/mainline-known-issues/page.js?v=20261114-deadline-wide"></script>
+  <script src="/mainline-known-issues/page.js?v=20261116-badge-row"></script>
 </body>
 </html>

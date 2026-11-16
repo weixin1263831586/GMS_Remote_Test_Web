@@ -32,14 +32,16 @@
     height: 26px;
 }
 
+/* 分析页统一上传区模板（报告分析 / APK 分析共用）。 */
+.report-upload-zone,
 .apk-upload-zone {
+    background: var(--light-bg);
     border: 1px solid var(--border-color);
     border-radius: 8px;
     padding: 8px 12px;
     text-align: center;
     cursor: pointer;
     transition: border-color 0.3s ease, background-color 0.3s ease, transform 0.3s ease;
-    background: var(--light-bg);
     position: relative;
     overflow: hidden;
     min-height: 80px;
@@ -48,57 +50,37 @@
     align-items: center;
     justify-content: center;
 }
+.report-upload-zone.upload-empty,
 .apk-upload-zone.upload-empty {
     height: 50vh;
     min-height: 50vh;
     max-height: 50vh;
     flex: 0 0 50vh;
 }
+.report-upload-zone:hover,
 .apk-upload-zone:hover {
     border-color: var(--primary-color);
     background: var(--lighter-bg);
 }
+.report-upload-zone.drag-over,
 .apk-upload-zone.drag-over {
     border-color: var(--primary-color);
     background: color-mix(in srgb, var(--primary-color) 10%, transparent);
     transform: scale(1.02);
 }
+.report-upload-zone.drag-over .report-upload-content,
+.apk-upload-zone.drag-over .apk-upload-content {
+    opacity: 0.5;
+}
+.report-upload-content,
 .apk-upload-content {
+    transition: var(--transition-normal);
     display: flex;
     align-items: flex-start;
     justify-content: center;
     gap: 8px;
     width: 100%;
     color: var(--text-secondary);
-}
-.apk-upload-content > div:first-child {
-    font-size: 20px;
-    opacity: 0.8;
-    flex-shrink: 0;
-}
-.apk-upload-content > div:nth-child(2) {
-    text-align: left;
-}
-.apk-upload-zone:not(.upload-empty) .upload-instructions {
-    display: none;
-}
-.apk-upload-zone:not(.upload-empty) .apk-upload-content {
-    gap: 10px;
-    padding: 0;
-}
-.apk-upload-zone:not(.upload-empty) .apk-upload-content > div:nth-child(2) {
-    font-size: 14px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.apk-upload-zone:not(.upload-empty) button {
-    padding: 6px 12px;
-    font-size: 10px;
-}
-.report-upload-content,
-.apk-upload-content {
-    align-items: flex-start;
     font-family: inherit;
     font-size: 12px;
     line-height: 1.6;
@@ -113,6 +95,8 @@
 .apk-upload-content > div:first-child {
     flex: 0 0 28px;
     width: 28px;
+    font-size: 20px;
+    opacity: 0.8;
     text-align: center;
     align-self: center;
 }
@@ -157,7 +141,24 @@
     font-size: 12px;
     line-height: 1.6;
 }
-.report-upload-progress {
+/* 收起态：隐藏多行说明。 */
+.report-upload-zone:not(.upload-empty) .upload-instructions,
+.apk-upload-zone:not(.upload-empty) .upload-instructions {
+    display: none;
+}
+.report-upload-zone:not(.upload-empty) .report-upload-content,
+.apk-upload-zone:not(.upload-empty) .apk-upload-content {
+    gap: 10px;
+    padding: 0;
+}
+.report-upload-zone:not(.upload-empty) button,
+.apk-upload-zone:not(.upload-empty) button {
+    padding: 6px 12px;
+    font-size: 11px;
+}
+/* 上传进度条：默认隐藏，上传期间由 JS 拉起。 */
+.report-upload-progress,
+.apk-upload-progress {
     position: absolute;
     bottom: 0;
     left: 0;
@@ -169,7 +170,8 @@
     opacity: 0;
     transition: opacity 0.2s ease;
 }
-.report-upload-progress-bar {
+.report-upload-progress-bar,
+.apk-upload-progress-bar {
     height: 100%;
     background: linear-gradient(90deg, var(--primary-color), var(--primary-light));
     transition: width 0.3s ease;
@@ -1380,6 +1382,7 @@ body.apk-resizing {
 
     .test-btn-frame,
     .log-frame-header,
+    .report-upload-content,
     .apk-upload-content,
     .suite-browser-header,
     .suite-search-bar {
@@ -1387,11 +1390,13 @@ body.apk-resizing {
     }
 
     .test-btn-frame > *,
+    .report-upload-content > button,
     .apk-upload-content > button {
         max-width: 100%;
     }
 
-    .apk-upload-content > div:nth-child(2) {
+    .report-upload-content .analysis-upload-copy,
+    .apk-upload-content .analysis-upload-copy {
         min-width: 0;
         flex: 1 1 180px;
     }

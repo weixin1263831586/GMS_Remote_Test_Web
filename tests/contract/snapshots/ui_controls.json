@@ -355,17 +355,17 @@
     "handlers": [
       "loadAll",
       "page",
-      "reload",
+      "runQuery",
       "setTab",
       "startSync"
     ],
     "ids": [
       "pageinfo",
       "q",
-      "rows",
+      "section-badge",
       "source_key",
       "summary",
-      "thead",
+      "tables-area",
       "toast",
       "type_filter"
     ]
@@ -419,7 +419,8 @@
   "mainline-known-issues": {
     "handlers": [
       "page",
-      "reload"
+      "runQuery",
+      "setTab"
     ],
     "ids": [
       "exemption_id",
@@ -427,6 +428,7 @@
       "pageinfo",
       "product_section",
       "q",
+      "section-badge",
       "summary",
       "tables-area"
     ]
@@ -967,6 +969,7 @@
       "ut_closeMainlineSyncModal",
       "ut_closeToolModal",
       "ut_confirmMainlineKnownIssuesSync",
+      "ut_handleToolDrop",
       "ut_saveCategory",
       "ut_saveTool",
       "validateFirmwareShare"
@@ -975,6 +978,8 @@
       "${escapeHtml(activeClusterJob.attempt_id || ",
       "${escapeHtml(activeClusterJob.worker_id || ",
       "${escapeHtml(item.id)}",
+      "${escapeIconAttr(tool.builtin_id)}",
+      "${escapeIconAttr(tool.tool_id)}",
       "${kbEsc(doc.doc_id)}",
       "${kbEsc(l.target_id)}",
       "${kbEsc(version.version_id)}",

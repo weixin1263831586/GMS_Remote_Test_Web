@@ -6,12 +6,66 @@
       try { initialTab = window.sessionStorage.getItem(UPDATE_MONITOR_TAB_STORAGE_KEY) || ''; } catch (_) { initialTab = ''; }
     }
     let tab = updateMonitorTabs.includes(initialTab) ? initialTab : 'changes';
+    let globalSearchActive = false;
     let offset = 0;
     const limit = 100;
     let total = 0;
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const link = (url, text='下载') => url ? `<a href="${esc(url)}" target="_blank">${esc(text)}</a>` : '';
     const suiteDownloadLink = url => url ? `<a href="#" class="suite-download-link" data-url="${esc(url)}">下载</a>` : '';
+    // 统一表格模板：表头表格常驻滚动区外，表体在 .table-scroll 内滚动，
+    // 两表共用同一 colgroup 保证列对齐。
+    function tableHtml(headers, rows, emptyText, widths) {
+      const cols = (widths || []).map(w => `<col${w ? ` style="width:${esc(w)}"` : ''}>`).join('');
+      const colgroup = cols ? `<colgroup>${cols}</colgroup>` : '';
+      const head = `<table class="table-head-table">${colgroup}<thead><tr>${headers.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead></table>`;
+      const bodyRows = rows.length ? rows.join('') : `<tr><td colspan="${headers.length}" class="muted">${esc(emptyText)}</td></tr>`;
+      const body = `<div class="table-scroll"><table class="table-body-table">${colgroup}<tbody>${bodyRows}</tbody></table></div>`;
+      return `<div class="table-split">${head}${body}</div>`;
+    }
+    // 各 Tab 的表头/列宽/行渲染（未指定宽度的列独占剩余空间，放长文本列）。
+    const TABLE_META = {
+      changes: {
+        label: '变更',
+        headers: ['来源', '对象', '类型', '内容', '时间'],
+        widths: ['95px', '110px', '70px', '', '145px'],
+        rows: items => items.map(x => `<tr><td>${esc(x.source_key)}</td><td>${esc(x.entity_type)}</td><td>${esc(x.change_type)}</td><td class="wrap">${esc(JSON.stringify(x.after || x.before || {})).slice(0, 700)}</td><td>${esc(x.detected_at)}</td></tr>`),
+      },
+      artifacts: {
+        label: '测试套件更新',
+        headers: ['套件', 'Android', 'API level', '套件版本', '套件文件名', '架构', '页面', '下载'],
+        widths: ['80px', '250px', '70px', '26%', '', '60px', '70px', '70px'],
+        rows: items => items.map(x => {
+          const title = x.release_name || x.file_name || '';
+          const androidText = x.suite_type === 'GTS' && x.target_platform ? x.target_platform : x.android_version;
+          return `<tr><td>${esc(x.suite_type)}</td><td class="wrap">${esc(androidText)}</td><td>${esc(x.api_level)}</td><td class="wrap">${esc(title)}</td><td class="wrap">${esc(x.file_name)}</td><td>${esc(x.arch)}</td><td>${link(x.section_url, '页面')}</td><td>${suiteDownloadLink(x.download_url)}</td></tr>`;
+        }),
+      },
+      packages: {
+        label: 'GMS包更新',
+        headers: ['章节', 'Android', '文件', '生效日期', 'Gerrit Tag', '链接'],
+        widths: ['200px', '150px', '30%', '150px', '', '56px'],
+        rows: items => items.map(x => `<tr><td>${esc(x.section)}</td><td>${esc(x.android_version)}</td><td class="wrap">${esc(x.file_name || x.description)}</td><td>${esc(x.required_from)}</td><td>${esc(x.partner_gerrit_tag)}</td><td>${link(x.download_url)}</td></tr>`),
+      },
+      mainline: {
+        label: 'Mainline包更新',
+        headers: ['年份', '月份', 'PRELOAD版本', 'Partner Zip', 'CI构建', 'Notes'],
+        widths: ['80px', '90px', '32%', '140px', '90px', '70px'],
+        rows: items => items.map(x => {
+          const zipText = x.partner_zip_build_id || x.partner_zip_label || '';
+          return `<tr><td>${esc(x.year)}</td><td>${esc(x.month_label || x.month)}</td><td class="wrap">${link(x.notes_url, x.preload_version)}</td><td>${esc(zipText)}</td><td>${link(x.ci_build_url, zipText ? '构建' : '')}</td><td>${link(x.notes_url, '查看')}</td></tr>`;
+        }),
+      },
+      requirements: {
+        label: 'GMS要求',
+        headers: ['Android', '类型', '章节', 'Requirement ID', '要求摘要'],
+        widths: ['90px', '70px', '28%', '150px', ''],
+        rows: items => items.map(x => `<tr><td>${esc(x.android_version)}</td><td>${esc(x.change_kind)}</td><td class="wrap">${esc(x.section_title)}</td><td class="wrap">${esc(x.requirement_ids)}</td><td class="wrap">${esc(x.text_excerpt).slice(0, 700)}</td></tr>`),
+      },
+    };
+    // 全局搜索聚合表（分组行）：与 mainline-known-issues 同一列规范。
+    const GLOBAL_HEADERS = ['类别', '标识', '摘要', '时间/日期', '操作'];
+    const GLOBAL_WIDTHS = ['110px', '200px', '', '150px', '100px'];
     function showToast(message, type='info') {
       const el = document.getElementById('toast');
       if (!el) return;
@@ -32,12 +86,74 @@
     }
     function setTab(next) {
       tab = updateMonitorTabs.includes(next) ? next : 'changes'; offset = 0;
+      globalSearchActive = false; // 切 Tab 即退出全局搜索
       try { window.sessionStorage.setItem(UPDATE_MONITOR_TAB_STORAGE_KEY, tab); } catch (_) {}
       const url = new URL(window.location.href);
       if (tab === 'changes') url.searchParams.delete('tab');
       else url.searchParams.set('tab', tab);
       window.history.replaceState({}, '', url.toString());
       document.querySelectorAll('.tabs button').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+      reload(true);
+    }
+    // 全局搜索：一次查询并行命中全部 5 类内容，后端端点均支持 q 参数。
+    const GLOBAL_SEARCH_SOURCES = [
+      {key: 'changes', label: '变更', endpoint: '/api/gms-update-monitor/changes'},
+      {key: 'artifacts', label: '测试套件更新', endpoint: '/api/gms-update-monitor/artifacts'},
+      {key: 'packages', label: 'GMS包更新', endpoint: '/api/gms-update-monitor/packages'},
+      {key: 'mainline', label: 'Mainline包更新', endpoint: '/api/gms-update-monitor/mainline'},
+      {key: 'requirements', label: 'GMS要求', endpoint: '/api/gms-update-monitor/requirements/version-tags'}
+    ];
+    function globalRow(kind, x) {
+      if (kind === 'changes') {
+        return `<tr><td>变更</td><td>${esc(x.source_key)} · ${esc(x.entity_type)}</td><td class="wrap">[${esc(x.change_type)}] ${esc(JSON.stringify(x.after || x.before || {})).slice(0, 400)}</td><td>${esc(x.detected_at)}</td><td></td></tr>`;
+      }
+      if (kind === 'artifacts') {
+        return `<tr><td>测试套件更新</td><td>${esc(x.suite_type)} · ${esc(x.android_version)}</td><td class="wrap">${esc(x.release_name || x.file_name || '')}（API ${esc(x.api_level ?? '')}，${esc(x.file_name || '')}）</td><td></td><td>${link(x.section_url, '页面')} ${suiteDownloadLink(x.download_url)}</td></tr>`;
+      }
+      if (kind === 'packages') {
+        return `<tr><td>GMS包更新</td><td>${esc(x.section)} · ${esc(x.android_version)}</td><td class="wrap">${esc(x.file_name || x.description || '')}（Gerrit: ${esc(x.partner_gerrit_tag || '')}）</td><td>${esc(x.required_from)}</td><td>${link(x.download_url)}</td></tr>`;
+      }
+      if (kind === 'mainline') {
+        return `<tr><td>Mainline包更新</td><td>${esc(x.year)} · ${esc(x.month_label || x.month)}</td><td class="wrap">PRELOAD ${esc(x.preload_version || '')}（${esc(x.partner_zip_build_id || x.partner_zip_label || '')}）</td><td></td><td>${link(x.notes_url, '查看')}</td></tr>`;
+      }
+      return `<tr><td>GMS要求</td><td>${esc(x.android_version)} · ${esc(x.change_kind)}</td><td class="wrap">${esc(x.section_title || '')} ${esc(x.requirement_ids || '')}：${esc(x.text_excerpt || '').slice(0, 300)}</td><td></td><td></td></tr>`;
+    }
+    async function searchAll() {
+      const q = document.getElementById('q').value.trim();
+      if (!q) { globalSearchActive = false; reload(true); return; }
+      const params = new URLSearchParams({q, limit: 100, offset: 0});
+      const results = await Promise.all(GLOBAL_SEARCH_SOURCES.map(async src => {
+        try {
+          const r = await fetch(src.endpoint + '?' + params.toString());
+          const data = await r.json();
+          return {src, items: data.success ? data.data.items : [], total: data.success ? data.meta.total : 0};
+        } catch (_) {
+          return {src, items: [], total: 0};
+        }
+      }));
+      globalSearchActive = true;
+      const rows = [];
+      const counts = [];
+      let totalAll = 0;
+      results.forEach(({src, items, total}) => {
+        counts.push(`${src.label} ${total}`);
+        totalAll += total;
+        if (!items.length) return;
+        rows.push(`<tr class="group-row"><td colspan="5">${esc(src.label)} · 命中 ${total} 条${items.length < total ? `（显示前 ${items.length} 条）` : ''}</td></tr>`);
+        items.forEach(x => rows.push(globalRow(src.key, x)));
+      });
+      document.getElementById('tables-area').innerHTML = rows.length
+        ? tableHtml(GLOBAL_HEADERS, rows, '无记录', GLOBAL_WIDTHS)
+        : `<span class="muted">无匹配「${esc(q)}」的结果</span>`;
+      sectionBadgeText(`全局搜索「${q}」共 ${totalAll} 条`);
+      document.getElementById('pageinfo').textContent = `全局搜索「${q}」共 ${totalAll} 条（${counts.join(' · ')}）`;
+      document.querySelector('.pager').style.display = 'none';
+    }
+    function runQuery() {
+      const q = document.getElementById('q').value.trim();
+      if (q) { searchAll().catch(e => showToast('全局搜索失败: ' + e.message, 'error')); return; }
+      globalSearchActive = false;
+      document.querySelector('.pager').style.display = '';
       reload(true);
     }
     async function loadSummary() {
@@ -117,6 +233,7 @@
     }
     async function reload(reset=false) {
       if (reset) offset = 0;
+      document.querySelector('.pager').style.display = '';
       const {params, type} = paramsBase();
       let endpoint = '/api/gms-update-monitor/changes';
       if (tab === 'artifacts') {
@@ -142,43 +259,26 @@
       const data = await r.json();
       if (!data.success) throw new Error(data.error || 'query failed');
       total = data.meta.total;
-      renderRows(data.data.items);
+      renderTable(data.data.items);
       document.getElementById('pageinfo').textContent = `${total ? offset + 1 : 0}-${Math.min(offset + limit, total)} / ${total}`;
     }
-    function renderRows(items) {
-      if (tab === 'changes') {
-        document.getElementById('thead').innerHTML = '<tr><th style="width:95px">来源</th><th style="width:110px">对象</th><th style="width:70px">类型</th><th>内容</th><th style="width:145px">时间</th></tr>';
-        document.getElementById('rows').innerHTML = items.map(x => `<tr><td>${esc(x.source_key)}</td><td>${esc(x.entity_type)}</td><td>${esc(x.change_type)}</td><td class="wrap">${esc(JSON.stringify(x.after || x.before || {})).slice(0, 700)}</td><td>${esc(x.detected_at)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">无记录</td></tr>';
-      } else if (tab === 'artifacts') {
-        document.getElementById('thead').innerHTML = '<tr><th style="width:80px">套件</th><th style="width:250px">Android</th><th style="width:70px">API level</th><th style="width:26%">套件版本</th><th>套件文件名</th><th style="width:60px">架构</th><th style="width:70px">页面</th><th style="width:70px">下载</th></tr>';
-        document.getElementById('rows').innerHTML = items.map(x => {
-          const title = x.release_name || x.file_name || '';
-          const androidText = x.suite_type === 'GTS' && x.target_platform ? x.target_platform : x.android_version;
-          return `<tr><td>${esc(x.suite_type)}</td><td class="wrap">${esc(androidText)}</td><td>${esc(x.api_level)}</td><td class="wrap">${esc(title)}</td><td class="wrap">${esc(x.file_name)}</td><td>${esc(x.arch)}</td><td>${link(x.section_url, '页面')}</td><td>${suiteDownloadLink(x.download_url)}</td></tr>`;
-        }).join('') || '<tr><td colspan="8" class="muted">无记录</td></tr>';
-      } else if (tab === 'packages') {
-        document.getElementById('thead').innerHTML = '<tr><th style="width:200px">章节</th><th style="width:150px">Android</th><th style="width:30%">文件</th><th style="width:150px">生效日期</th><th>Gerrit Tag</th><th style="width:56px">链接</th></tr>';
-        document.getElementById('rows').innerHTML = items.map(x => `<tr><td>${esc(x.section)}</td><td>${esc(x.android_version)}</td><td class="wrap">${esc(x.file_name || x.description)}</td><td>${esc(x.required_from)}</td><td>${esc(x.partner_gerrit_tag)}</td><td>${link(x.download_url)}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">无记录</td></tr>';
-      } else if (tab === 'mainline') {
-        document.getElementById('thead').innerHTML = '<tr><th style="width:80px">年份</th><th style="width:90px">月份</th><th style="width:32%">PRELOAD版本</th><th style="width:140px">Partner Zip</th><th style="width:90px">CI构建</th><th style="width:70px">Notes</th></tr>';
-        document.getElementById('rows').innerHTML = items.map(x => {
-          const zipText = x.partner_zip_build_id || x.partner_zip_label || '';
-          return `<tr><td>${esc(x.year)}</td><td>${esc(x.month_label || x.month)}</td><td class="wrap">${link(x.notes_url, x.preload_version)}</td><td>${esc(zipText)}</td><td>${link(x.ci_build_url, zipText ? '构建' : '')}</td><td>${link(x.notes_url, '查看')}</td></tr>`;
-        }).join('') || '<tr><td colspan="6" class="muted">无记录</td></tr>';
-      } else {
-        document.getElementById('thead').innerHTML = '<tr><th style="width:90px">Android</th><th style="width:70px">类型</th><th style="width:28%">章节</th><th style="width:150px">Requirement ID</th><th>要求摘要</th></tr>';
-        document.getElementById('rows').innerHTML = items.map(x => `<tr><td>${esc(x.android_version)}</td><td>${esc(x.change_kind)}</td><td class="wrap">${esc(x.section_title)}</td><td class="wrap">${esc(x.requirement_ids)}</td><td class="wrap">${esc(x.text_excerpt).slice(0, 700)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">无记录</td></tr>';
-      }
+    function sectionBadgeText(text) {
+      document.getElementById('section-badge').textContent = text;
+    }
+    function renderTable(items) {
+      const meta = TABLE_META[tab];
+      sectionBadgeText(`${meta.label} · 共 ${total} 条`);
+      document.getElementById('tables-area').innerHTML = tableHtml(meta.headers, meta.rows(items), '无记录', meta.widths);
     }
     function page(delta) {
       const next = offset + delta * limit;
       if (next < 0 || next >= total) return;
       offset = next; reload(false);
     }
-    function loadAll() { loadSummary().catch(e => document.getElementById('summary').textContent = e.message); reload(false).catch(e => document.getElementById('rows').innerHTML = `<tr><td class="muted">${esc(e.message)}</td></tr>`); }
-    document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') reload(true); });
-    document.getElementById('type_filter').addEventListener('keydown', e => { if (e.key === 'Enter') reload(true); });
-    document.getElementById('rows').addEventListener('click', e => {
+    function loadAll() { loadSummary().catch(e => document.getElementById('summary').textContent = e.message); reload(false).catch(e => document.getElementById('tables-area').innerHTML = `<span class="muted">${esc(e.message)}</span>`); }
+    document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') runQuery(); });
+    document.getElementById('type_filter').addEventListener('keydown', e => { if (e.key === 'Enter') { globalSearchActive = false; reload(true); } });
+    document.getElementById('tables-area').addEventListener('click', e => {
       const linkEl = e.target.closest('.suite-download-link');
       if (!linkEl) return;
       e.preventDefault();

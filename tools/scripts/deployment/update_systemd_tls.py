@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Update installed TLS paths without configuration symlinks.
+"""Update installed TLS paths and HTTPS shutdown handling.
 
 Exit 0 means the unit is current or was updated, 3 means a dry run found an
 update, and 1 means the unit could not be checked or updated. Applying changes
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import stat
 import sys
 import tempfile
@@ -26,10 +27,21 @@ def update_unit(unit: Path, project_root: Path, cert_dir: Path, *, apply: bool) 
     legacy = str(project_root / "configs/certs") + "/"
     canonical = str(cert_dir) + "/"
     updated = original.replace(legacy.encode(), canonical.encode())
+    # The wrapper retains Uvicorn's CLI and explicit protocol overrides.
+    lines = []
+    for line in updated.splitlines(keepends=True):
+        if line.lstrip().startswith(b"ExecStart="):
+            line = re.sub(
+                rb"(-m\s+uvicorn)(?=\s|$)",
+                b"-m bootstrap.server",
+                line, count=1,
+            )
+        lines.append(line)
+    updated = b"".join(lines)
     if updated == original:
         return 0
     if not apply:
-        print("systemd HTTPS 证书路径需要更新")
+        print("systemd HTTPS 证书路径或连接关闭配置需要更新")
         return 3
 
     metadata = unit.stat()
@@ -57,7 +69,7 @@ def update_unit(unit: Path, project_root: Path, cert_dir: Path, *, apply: bool) 
             os.close(directory_fd)
     finally:
         temporary.unlink(missing_ok=True)
-    print(f"systemd HTTPS 证书路径已更新，原服务文件备份至 {backup_name}")
+    print(f"systemd HTTPS 配置已更新，原服务文件备份至 {backup_name}")
     return 0
 
 

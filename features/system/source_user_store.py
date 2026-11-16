@@ -146,7 +146,7 @@ class UserSourceStore:
         if not isinstance(data, dict):
             self._handle_corrupt(raw, "SDK 源存储结构损坏（顶层不是对象）")
         version = data.get("version")
-        # Schema 严格校验（2026-11-14 审核意见）：语法合法但结构错误
+        # Schema 严格校验：语法合法但结构错误
         # （version 缺失/不识别、sources 是数组、记录不是对象、记录
         # source_id 与键不一致）同样不能按空存储继续——后续 add 会用
         # 空数据覆盖原文件，已注册源与加密口令不可恢复地丢失。

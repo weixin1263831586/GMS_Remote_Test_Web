@@ -138,27 +138,25 @@ class ShellAssetVersioner:
 
     def __init__(self, static_directory: Path):
         self.directory = static_directory
-        self._versions: dict[str, tuple[tuple[int, int], str]] = {}
+        self._versions: dict[str, str] = {}
 
     def _digest_for(self, url: str) -> str | None:
         path = self.directory / url.removeprefix("/static/")
         try:
-            stat = path.stat()
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()[:12]
         except OSError:
             return None  # 文件缺失时保持原样，不做失败即崩
-        key = (stat.st_mtime_ns, stat.st_size)
-        cached = self._versions.get(url)
-        if cached and cached[0] == key:
-            return cached[1]
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()[:12]
-        self._versions[url] = (key, digest)
+        # 直接以内容哈希为缓存值：mtime/size 短路存在同长度快速改写的粒度盲区。
+        self._versions[url] = digest
         return digest
 
     def is_current(self) -> bool:
         try:
-            for url, (key, _digest) in self._versions.items():
-                stat = (self.directory / url.removeprefix("/static/")).stat()
-                if (stat.st_mtime_ns, stat.st_size) != key:
+            for url, digest in self._versions.items():
+                current = hashlib.sha256(
+                    (self.directory / url.removeprefix("/static/")).read_bytes()
+                ).hexdigest()[:12]
+                if current != digest:
                     return False
         except OSError:
             return False

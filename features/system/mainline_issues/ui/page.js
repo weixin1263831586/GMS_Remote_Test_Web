@@ -1,3 +1,10 @@
+    const MAINLINE_TAB_STORAGE_KEY = 'gms_mainline_known_issues_tab';
+    const mainlineTabs = ['exemptions', 'patch', 'critical'];
+    let initialTab = new URLSearchParams(window.location.search).get('tab') || '';
+    if (!mainlineTabs.includes(initialTab)) {
+      try { initialTab = window.sessionStorage.getItem(MAINLINE_TAB_STORAGE_KEY) || ''; } catch (_) { initialTab = ''; }
+    }
+    let tab = mainlineTabs.includes(initialTab) ? initialTab : 'exemptions';
     let offset = 0;
     const limit = 100;
     let total = 0;
@@ -14,20 +21,26 @@
     const PATCH_WIDTHS = ['164px', '154px', '', '224px', '80px'];
     const CRITICAL_HEADERS = ['年份', '补丁 ID', '类型', 'Android 版本', '说明', '公告月份', '完成期限', '关联豁免', '来源'];
     const CRITICAL_WIDTHS = ['80px', '118px', '92px', '232px', '', '108px', '156px', '190px', '80px'];
+    // 全局搜索（跨三类）统一聚合列规范，与 GMS Update Monitor 相同。
+    const GLOBAL_HEADERS = ['类别', '标识', '摘要', '发布', '操作'];
+    const GLOBAL_WIDTHS = ['130px', '260px', '', '210px', '80px'];
     async function fetchJson(url) {
       const r = await fetch(url);
       const data = await r.json();
       if (!data.success) throw new Error(data.error || 'query failed');
       return data;
     }
+    function sectionBadgeText(text) {
+      document.getElementById('section-badge').textContent = text;
+    }
     function tableHtml(headers, rows, emptyText, widths) {
+      // 表头表格常驻滚动区外（不依赖 th sticky），表体独立滚动；共用 colgroup 对齐。
       const cols = (widths || []).map(w => `<col${w ? ` style="width:${esc(w)}"` : ''}>`).join('');
       const colgroup = cols ? `<colgroup>${cols}</colgroup>` : '';
-      const head = '<thead><tr>' + headers.map(h => `<th>${esc(h)}</th>`).join('') + '</tr></thead>';
-      const body = rows.length
-        ? `<tbody>${rows.join('')}</tbody>`
-        : `<tbody><tr><td colspan="${headers.length}" class="muted">${esc(emptyText)}</td></tr></tbody>`;
-      return `<table>${colgroup}${head}${body}</table>`;
+      const head = `<table class="table-head-table">${colgroup}<thead><tr>${headers.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead></table>`;
+      const bodyRows = rows.length ? rows.join('') : `<tr><td colspan="${headers.length}" class="muted">${esc(emptyText)}</td></tr>`;
+      const body = `<div class="table-scroll"><table class="table-body-table">${colgroup}<tbody>${bodyRows}</tbody></table></div>`;
+      return `<div class="table-split">${head}${body}</div>`;
     }
     function exemptionRows(items) {
       return items.map(item => `
@@ -71,9 +84,6 @@
         </tr>`;
       });
     }
-    function sectionHtml(title, countText, tableMarkup) {
-      return `<div class="result-section"><div class="section-title">${esc(title)} <span class="muted">${esc(countText)}</span></div>${tableMarkup}</div>`;
-    }
     async function loadSummary() {
       const data = await fetchJson('/api/mainline-known-issues/summary');
       const parts = [`总数 ${data.total}`];
@@ -91,46 +101,112 @@
       }
       document.getElementById('summary').textContent = parts.join(' | ');
     }
+    // Tab 切换：一次只显示一张表，?tab= 与 sessionStorage 记忆当前页签。
+    function setTab(next) {
+      tab = mainlineTabs.includes(next) ? next : 'exemptions';
+      offset = 0;
+      try { window.sessionStorage.setItem(MAINLINE_TAB_STORAGE_KEY, tab); } catch (_) {}
+      const url = new URL(window.location.href);
+      if (tab === 'exemptions') url.searchParams.delete('tab');
+      else url.searchParams.set('tab', tab);
+      window.history.replaceState({}, '', url.toString());
+      document.querySelectorAll('.tabs button').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+      syncFilterVisibility();
+      reload(true);
+    }
+    // 小节/豁免ID/类型过滤仅对豁免条目表有意义。
+    function syncFilterVisibility() {
+      const exemptionOnly = tab === 'exemptions';
+      ['issue_type', 'product_section', 'exemption_id'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = exemptionOnly ? '' : 'none';
+      });
+      document.querySelector('.filters')?.classList.toggle('single-filter', !exemptionOnly);
+    }
+    // 全局搜索：关键字非空时并行查询三类内容聚合为统一表。
+    const GLOBAL_SEARCH_SOURCES = [
+      {key: 'exemptions', label: '豁免条目', endpoint: '/api/mainline-known-issues'},
+      {key: 'patch', label: '安全补丁 (CVE)', endpoint: '/api/mainline-known-issues/security-patches'},
+      {key: 'critical', label: 'Critical_Patch 补丁', endpoint: '/api/mainline-known-issues/critical-patches'},
+    ];
+    function globalRow(kind, x) {
+      if (kind === 'exemptions') {
+        return `<tr><td>豁免条目</td><td>${esc(x.issue_type)} · ${esc(x.product_section)} · <code>${esc(x.exemption_id)}</code></td><td class="wrap"><code>${esc(x.test_module)}</code> / <code>${esc(x.test_case)}</code> · ${esc(x.category)} · ${esc(x.android_versions)}</td><td>${releaseCell({...x, release_month: x.release_month || releaseMonthOf(x.source_url)})}</td><td><a href="${esc(x.source_url)}" target="_blank">打开</a></td></tr>`;
+      }
+      if (kind === 'patch') {
+        return `<tr><td>安全补丁 (CVE)</td><td><code>${esc(x.cve_id)}</code></td><td class="wrap">${esc(x.mainline_module)} · ${esc(x.version_note)}</td><td>${releaseCell({...x, release_month: x.release_month || releaseMonthOf(x.source_url)})}</td><td><a href="${esc(x.source_url)}" target="_blank">打开</a></td></tr>`;
+      }
+      return `<tr><td>Critical_Patch</td><td><code>${esc(x.patch_id)}</code> · ${esc(x.patch_kind)} · ${esc(x.android_versions)}</td><td class="wrap">${esc(x.description)}${x.deadline ? '（期限 ' + esc(x.deadline) + '）' : ''}</td><td>${esc(x.release_month || x.bulletin_month || '')}</td><td><a href="${esc(x.bulletin_url)}" target="_blank">打开</a></td></tr>`;
+    }
+    async function searchAll(q) {
+      const section = document.getElementById('product_section').value;
+      const results = await Promise.all(GLOBAL_SEARCH_SOURCES.map(async src => {
+        const params = new URLSearchParams({q, limit, offset: 0});
+        if (src.key === 'exemptions' && section) params.set('product_section', section);
+        try {
+          const data = await fetchJson(src.endpoint + '?' + params.toString());
+          return {src, items: data.items || [], total: data.total || 0, available: data.available !== false};
+        } catch (_) {
+          return {src, items: [], total: 0, available: true};
+        }
+      }));
+      const rows = [];
+      const counts = [];
+      let totalAll = 0;
+      results.forEach(({src, items, total: srcTotal, available}) => {
+        counts.push(`${src.label} ${srcTotal}`);
+        totalAll += srcTotal;
+        if (!available || !items.length) return;
+        rows.push(`<tr class="group-row"><td colspan="5">${esc(src.label)} · 命中 ${srcTotal} 条${items.length < srcTotal ? `（显示前 ${items.length} 条）` : ''}</td></tr>`);
+        items.forEach(x => rows.push(globalRow(src.key, x)));
+      });
+      document.getElementById('tables-area').innerHTML = rows.length
+        ? tableHtml(GLOBAL_HEADERS, rows, '无记录', GLOBAL_WIDTHS)
+        : `<span class="muted">无匹配「${esc(q)}」的结果</span>`;
+      sectionBadgeText(`全局搜索「${q}」共 ${totalAll} 条`);
+      document.querySelector('.pager').style.display = 'none';
+      document.getElementById('pageinfo').textContent = `全局搜索「${q}」共 ${totalAll} 条（${counts.join(' · ')}）`;
+    }
+    function runQuery() {
+      const q = document.getElementById('q').value.trim();
+      if (q) {
+        searchAll(q).catch(err => {
+          document.getElementById('tables-area').innerHTML = `<span class="muted">${esc(err.message)}</span>`;
+        });
+        return;
+      }
+      reload(true);
+    }
     async function reload(reset=false) {
       if (reset) offset = 0;
-      const type = document.getElementById('issue_type').value;
-      const params = new URLSearchParams({limit, offset});
       const q = document.getElementById('q').value.trim();
+      if (q) { await searchAll(q); return; }
+      document.querySelector('.pager').style.display = '';
+      const params = new URLSearchParams({limit, offset});
       if (q) params.set('q', q);
       const area = document.getElementById('tables-area');
       let sections = '';
-      if (type === 'patch') {
+      let badge = '';
+      if (tab === 'patch') {
         const data = await fetchJson('/api/mainline-known-issues/security-patches?' + params.toString());
         total = data.total;
-        sections = sectionHtml('安全补丁 (CVE)', `共 ${data.total} 条`,
-          tableHtml(PATCH_HEADERS, patchRows(data.items), '无记录', PATCH_WIDTHS));
-      } else if (type === 'critical') {
+        sections = tableHtml(PATCH_HEADERS, patchRows(data.items), '无记录', PATCH_WIDTHS);
+        badge = `安全补丁 (CVE) · 共 ${total} 条`;
+      } else if (tab === 'critical') {
         const data = await fetchJson('/api/mainline-known-issues/critical-patches?' + params.toString());
         total = data.total;
-        sections = sectionHtml('Critical_Patch 补丁', data.available ? `共 ${data.total} 条` : '数据源未扫描（GMS Update Monitor 中执行 Critical_Patch 扫描后可用）',
-          tableHtml(CRITICAL_HEADERS, criticalRows(data.items), '无记录', CRITICAL_WIDTHS));
-      } else if (type) {
-        params.set('issue_type', type);
+        sections = tableHtml(CRITICAL_HEADERS, criticalRows(data.items), '无记录', CRITICAL_WIDTHS);
+        badge = data.available ? `Critical_Patch · 共 ${total} 条` : 'Critical_Patch · 数据源未扫描（GMS Update Monitor 中执行 Critical_Patch 扫描后可用）';
+      } else {
+        const type = document.getElementById('issue_type').value;
+        if (type) params.set('issue_type', type);
         const data = await fetchJson('/api/mainline-known-issues?' + params.toString());
         total = data.total;
-        sections = sectionHtml(`豁免条目（${esc(type)}）`, `共 ${data.total} 条`,
-          tableHtml(EXEMPTION_HEADERS, exemptionRows(data.items), '无记录', EXEMPTION_WIDTHS));
-      } else {
-        // 全部类型：豁免 / 安全补丁 / Critical_Patch 三表并行查询，分区展示。
-        const [ex, pa, cr] = await Promise.all([
-          fetchJson('/api/mainline-known-issues?' + params.toString()),
-          fetchJson('/api/mainline-known-issues/security-patches?' + params.toString()),
-          fetchJson('/api/mainline-known-issues/critical-patches?' + params.toString()),
-        ]);
-        total = ex.total + pa.total + cr.total;
-        sections = sectionHtml('豁免条目', `共 ${ex.total} 条`,
-          tableHtml(EXEMPTION_HEADERS, exemptionRows(ex.items), '无记录', EXEMPTION_WIDTHS))
-          + sectionHtml('安全补丁 (CVE)', `共 ${pa.total} 条`,
-          tableHtml(PATCH_HEADERS, patchRows(pa.items), '无记录', PATCH_WIDTHS))
-          + sectionHtml('Critical_Patch 补丁', cr.available ? `共 ${cr.total} 条` : '数据源未扫描',
-          tableHtml(CRITICAL_HEADERS, criticalRows(cr.items), '无记录', CRITICAL_WIDTHS));
+        sections = tableHtml(EXEMPTION_HEADERS, exemptionRows(data.items), '无记录', EXEMPTION_WIDTHS);
+        badge = `${type ? `豁免条目（${esc(type)}）` : '豁免条目'} · 共 ${total} 条`;
       }
       area.innerHTML = sections;
+      sectionBadgeText(badge);
       document.getElementById('pageinfo').textContent = total > 0
         ? `${offset + 1}-${Math.min(offset + limit, total)} / ${total}`
         : `0 / 0`;
@@ -141,9 +217,12 @@
       offset = next;
       reload(false);
     }
-    document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') reload(true); });
+    document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') runQuery(); });
     document.getElementById('exemption_id').addEventListener('keydown', e => { if (e.key === 'Enter') reload(true); });
     document.getElementById('issue_type').addEventListener('change', () => reload(true));
+    document.querySelectorAll('.tabs button').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+    syncFilterVisibility();
+    try { window.sessionStorage.setItem(MAINLINE_TAB_STORAGE_KEY, tab); } catch (_) {}
     loadSummary().then(() => reload()).catch(err => {
       document.getElementById('summary').textContent = err.message;
     });

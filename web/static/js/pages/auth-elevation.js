@@ -108,6 +108,7 @@ async function requestElevatedAccess(actionLabel = '需要管理员权限', opti
     if (state.elevated) {
         try {
             const status = await fetchAuthStatus();
+            state.defaultAdminUsername = String(status.default_admin_username || '').trim();
             if (status.elevated) {
                 _markElevated(status.elevated_until);
                 debugLog('[Elevation] server confirmed the active elevation');
@@ -147,11 +148,12 @@ async function requestElevatedAccess(actionLabel = '需要管理员权限', opti
     if (userEl) userEl.value = '';
     if (pwdEl) pwdEl.value = '';
     if (msgEl) msgEl.textContent = '';
-    // Prefill the current username for convenience.  SSH-identified client
-    // identities look like "user@host" and are not browser credentials, so
-    // only plain platform account names are prefilled.
-    const prefillName = String(state.currentUser?.username || '');
-    if (userEl && prefillName && !prefillName.includes('@')) {
+    // auth-elevation 只接受管理员凭据：优先唯一启用的平台管理员，
+    // 回退当前用户；user@host 形态的 SSH 身份不是浏览器凭据，不回填。
+    const adminName = String(state.defaultAdminUsername || '').trim();
+    const currentName = String(state.currentUser?.username || '');
+    const prefillName = [adminName, currentName].find(name => name && !name.includes('@')) || '';
+    if (userEl && prefillName) {
         userEl.value = prefillName;
     }
 

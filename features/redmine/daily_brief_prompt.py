@@ -27,6 +27,8 @@ Use the read-only GMS MCP tools when you need more evidence:
 - gms_rt_redmine_artifact_search_batch (multi-keyword one-pass search; prefer it over
   repeated single-query searches on large logs)
 - gms_rt_redmine_history_search (cross-issue history: similar past issues + fixes)
+- gms_rt_redmine_references (official Mainline security patches/CVE fixes,
+  test exemptions and GMS Critical Fix bulletins, scoped to this evidence snapshot)
 - gms_rt_sdk_search / gms_rt_sdk_read (AOSP/kernel source; search/read results carry a
   "reproducible" flag — reproducible=true means the blob is pinned to a resolved git
   commit; reproducible=false means a dynamic index (OpenGrok) whose content may change:

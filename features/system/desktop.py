@@ -38,7 +38,7 @@ router = APIRouter()
 _VNC_STATUS_TTL = 10.0
 _vnc_status_cache: dict[str, float] = {"ts": 0.0, "value": None}
 _NOVNC_ZH_CN_LOCALE = Path(__file__).with_name("novnc_zh_cn.json")
-_NOVNC_ASSET_VERSION = "20260916-keypad-input"
+_NOVNC_ASSET_VERSION = "20261116-desktop-keyboard-v2"
 _NOVNC_HTTP_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
 _NOVNC_MAX_BODY_BYTES = 8 * 1024 * 1024
 _NOVNC_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
@@ -179,11 +179,23 @@ def novnc_asset_override(path: str, body: bytes) -> bytes:
             b'import Keyboard from "./input/keyboard.js?gms_asset=' + version + b'";',
             1,
         )
-        return body.replace(
+        body = body.replace(
             b'from "./clipboard.js";',
             b'from "./clipboard.js?gms_asset=' + version + b'";',
             1,
         )
+        # RFB.focus() 须防 iframe 抢焦点：自动路径（连接完成、_focusCanvas）
+        # 仅在本窗口已持有焦点时执行；显式点击路径必须绕过该守卫。
+        for focus_call in (b"this._canvas.focus(options);", b"this._canvas.focus();"):
+            body = body.replace(
+                focus_call,
+                b"if (window.self === window.top || document.hasFocus()) { " + focus_call + b" }",
+                1,
+            )
+        # 显式点击/触摸焦点：改为直接落点 _canvas。
+        for focus_call in (b"this.focus({ preventScroll: true });", b"this.focus();"):
+            body = body.replace(focus_call, focus_call.replace(b"this.focus", b"this._canvas.focus"), 1)
+        return body
     if normalized == "core/input/keyboard.js":
         return body.replace(
             b'from "./util.js";',
@@ -194,6 +206,13 @@ def novnc_asset_override(path: str, body: bytes) -> bytes:
         return body.replace(
             b'from "./domkeytable.js";',
             b'from "./domkeytable.js?gms_asset=' + version + b'";',
+            1,
+        )
+    if normalized == "core/input/domkeytable.js":
+        # 两个 Enter 键统一发 XK_Return，避免 x11vnc 下小键盘 Enter 被映射成 XK_KP_Enter。
+        return body.replace(
+            b'addNumpad("Enter", KeyTable.XK_Return, KeyTable.XK_KP_Enter);',
+            b'addStandard("Enter", KeyTable.XK_Return);',
             1,
         )
     if normalized == "core/clipboard.js":

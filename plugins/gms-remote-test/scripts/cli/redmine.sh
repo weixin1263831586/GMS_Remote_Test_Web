@@ -349,6 +349,29 @@ gms-rt-redmine-triage() {
     return 0
 }
 
+gms-rt-redmine-references() {
+    local snapshot_id="" query="" response
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -h|--help)
+                echo "Usage: gms-rt-redmine-references <snapshot_id> [--query IDENTIFIERS]"
+                echo "  Read official Mainline security fixes, test exemptions and Critical Fix references from retained evidence."
+                return 0 ;;
+            --query)
+                shift
+                [ "$#" -gt 0 ] || { error "--query requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                query="$1" ;;
+            *)
+                [ -z "$snapshot_id" ] || { error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE"; }
+                snapshot_id="$1" ;;
+        esac
+        shift
+    done
+    [ -n "$snapshot_id" ] || { error "Snapshot ID required"; return "$GMS_RT_EXIT_USAGE"; }
+    response=$(api_call "/redmine-agent/evidence/$(_urlencode "$snapshot_id")/references?q=$(_urlencode "$query")" "GET") || return $?
+    printf '%s\n' "$response"
+}
+
 gms-rt-redmine-history-search() {
     local query=""
     local limit=""

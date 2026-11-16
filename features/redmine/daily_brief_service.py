@@ -113,6 +113,10 @@ async def precollect_deep_evidence(
             )
         ) if progress is not None else None,
     )
+    from .reference_recall import append_reference_preflight
+
+    if not repository.is_cancel_requested(run.run_id):
+        await append_reference_preflight(run.owner_id, entry, preflight, progress)
     entry["_precollected_tool_traces"] = preflight.traces
     entry["_evidence_preflight"] = preflight.prompt_context()
     if repository.is_cancel_requested(run.run_id):

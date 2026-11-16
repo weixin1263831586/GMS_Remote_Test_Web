@@ -94,8 +94,8 @@ def test_daily_triage_reference_matches_runtime_evidence_contract():
     reference = (
         SKILL_DIR / "references" / "redmine-daily-triage.md"
     ).read_text(encoding="utf-8")
-    # v12：晨报批量与单条深度分析同工作流（ADR 0013）；triage 仅存历史渲染。
-    assert "redmine_daily_triage_v12" in reference
+    # v31 对齐官方引用别名、复核上下文及独立事实修正流程。
+    assert "redmine_daily_triage_v31" in reference
     assert "批量晨报 = 单条深度分析" in reference
     assert "仅保留用于渲染历史持久化结果" in reference
     assert "result_format=kkagent_markdown" in reference

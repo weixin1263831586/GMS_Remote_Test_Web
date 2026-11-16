@@ -56,9 +56,9 @@ class DesktopProxyTests(unittest.TestCase):
             b"if (!this._isAvailable) return false;",
         )
 
-        self.assertIn(b"gms_asset=20260916-keypad-input", entry)
-        self.assertIn(b"gms_asset=20260916-keypad-input", ui)
-        self.assertIn(b"gms_asset=20260916-keypad-input", rfb)
+        self.assertIn(b"gms_asset=20261116-desktop-keyboard-v2", entry)
+        self.assertIn(b"gms_asset=20261116-desktop-keyboard-v2", ui)
+        self.assertIn(b"gms_asset=20261116-desktop-keyboard-v2", rfb)
         self.assertIn(b'keyboard.js?gms_asset=', rfb)
         self.assertIn(b'util.js?gms_asset=', keyboard)
         self.assertIn(b'domkeytable.js?gms_asset=', keyboard_util)

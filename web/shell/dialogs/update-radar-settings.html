@@ -1,6 +1,9 @@
-<div id="radar-settings-modal" class="modal radar-settings-modal" role="dialog" aria-modal="true" aria-labelledby="radar-settings-title" aria-hidden="true">
-  <div class="modal-content">
-    <div class="modal-header"><h2 id="radar-settings-title">修改 GMS更新雷达</h2><button id="radar-settings-close" type="button" aria-label="关闭雷达设置">×</button></div>
+<div id="radar-settings-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="radar-settings-title" aria-hidden="true">
+  <div class="modal-content modal-m">
+    <div class="modal-header">
+      <span class="modal-title" id="radar-settings-title">修改 GMS更新雷达</span>
+      <button id="radar-settings-close" type="button" class="modal-close" aria-label="关闭雷达设置">&times;</button>
+    </div>
     <div class="modal-body">
       <p class="radar-hint">每天按计划全量扫描所选任务。关闭浏览器后仍由平台服务执行，停机错过的计划恢复后补跑一次。</p>
       <p id="radar-smtp-status" class="radar-hint">复用系统级 SMTP：在「测试执行 → 系统设置 → 邮件发送方」配置。</p>
@@ -23,7 +26,7 @@
           <label>发送策略<select id="radar-notify"><option value="changes">仅有变更或扫描失败时发</option><option value="always">每次扫描都发汇总，无更新也发</option></select></label>
           <label>邮件中的雷达页面地址<input id="radar-url" type="url" placeholder="https://controller.example.com/gms-update-radar"><small>填写收件人可访问的平台地址。</small></label>
           <p id="radar-settings-feedback" role="status" aria-live="polite"></p>
-          <div class="radar-settings-actions"><button id="radar-settings-cancel" type="button">取消</button><button id="radar-settings-save" type="submit">保存修改</button></div>
+          <div class="modal-buttons radar-settings-actions"><button id="radar-settings-cancel" type="button" class="btn-xxs">取消</button><button id="radar-settings-save" type="submit" class="btn-xxs btn-primary">保存修改</button></div>
         </fieldset>
       </form>
     </div>

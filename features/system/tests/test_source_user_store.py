@@ -119,7 +119,7 @@ class UserSourceStoreTests(unittest.TestCase):
         self.assertEqual(self.store.list_sources(), [])
 
     def test_structurally_invalid_store_blocks_writes(self):
-        """语法合法但结构错误的存储同样阻断写入（2026-11-14 审核意见）。
+        """语法合法但结构错误的存储同样阻断写入。
 
         旧实现把 ``sources: []``、缺 version 等结构损坏当空存储返回，
         后续 add 用空数据覆盖原文件、已注册源静默丢失。
@@ -400,7 +400,7 @@ class RegistryMergeTests(unittest.TestCase):
     def test_registry_rebuilds_when_store_file_disappears(self):
         """存储文件被删除：读路径必须重建（用户源消失），不能沿用旧 registry。
 
-        2026-11-14 审核意见：旧指纹把"文件不存在"与"无变化"混为同一
+        旧指纹把"文件不存在"与"无变化"混为同一
         返回值，文件消失后旧 registry（含已删除文件里的用户源）被静默
         沿用。现在"确认不存在"是独立指纹态，与构建时基线不同 → stale。
         """

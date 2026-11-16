@@ -205,6 +205,11 @@ def evaluate_evidence_gate(
         and not unread_text_artifact_ids
     )
     test_failure_subject = is_test_failure_subject(entry)
+    reference_calls = [(index, call) for index, call in enumerate(trace.tool_calls, 1)
+                       if "redmine_references" in call.tool_name and _targets_current(call)]
+    reference_checks = [{**call.reference_lookup, "evidence_id": f"EV-{index:03d}"}
+                        for index, call in reference_calls if call.succeeded and call.reference_lookup]
+    reference_refs = list(dict.fromkeys(ref for check in reference_checks for ref in check.get("references", [])))
     source_evidence_tool_count = trace.source_evidence_tool_count
     reproducible_source_evidence_count = trace.reproducible_source_evidence_count
     module = expected_module(entry)
@@ -222,6 +227,12 @@ def evaluate_evidence_gate(
     )
     return {
         "analysis_mode": "triage" if triage else "diagnostic",
+        "official_reference_required": bool(entry.get("_reference_lookup_required")) or bool(
+            re.search(r"CVE-\d{4}-\d{4,7}", str(entry.get("subject") or ""), re.I)
+        ),
+        "official_reference_attempted": bool(reference_calls),
+        "official_reference_checks": reference_checks,
+        "official_reference_refs": reference_refs,
         "history_search_required": not triage,
         "issue_fetched": any(
             ("redmine_issue_fetch" in name or "redmine_issue" in name)
@@ -324,6 +335,30 @@ def gate_errors(
 ) -> list[str]:
     """Gate 未满足的可读错误列表（作为 resume 修复的输入）。"""
     errors: list[str] = []
+    if gate.get("official_reference_required") and not gate.get("official_reference_attempted"):
+        errors.append("official references were not checked; call gms_rt_redmine_references on this issue's snapshot")
+    report = str((result or {}).get("detailed_report") or "")
+    refs = gate.get("official_reference_refs") or []
+    checks = gate.get("official_reference_checks") or []
+
+    def cited(check, references):
+        evidence_id = str(check.get("evidence_id") or "")
+        return any(str(ref) in report for ref in references) or bool(
+            evidence_id and re.search(rf"(?<![A-Za-z0-9_-]){re.escape(evidence_id)}(?![A-Za-z0-9_-])", report)
+        )
+
+    source_checks = [(check, name, source) for check in checks
+                     for name, source in (check.get("sources") or {}).items() if source.get("references")]
+    if report and refs and not source_checks and not (
+        any(cited(check, check.get("references") or []) for check in checks)
+        or any(str(ref) in report for ref in refs)
+    ):
+        errors.append("official Mainline/Critical Fix references matched but were omitted; "
+                      "discuss applicability and cite an observed reference token or source URL")
+    for check, name, source in source_checks:
+        if report and not cited(check, source["references"]):
+            citation = check.get("evidence_id") or "an observed reference token or source URL"
+            errors.append(f"official {name} references were omitted; discuss applicability and cite {citation}")
     if not gate.get("issue_fetched"):
         errors.append("issue was not fetched (gms_rt_redmine_issue_fetch missing)")
     if not gate.get("journals_checked"):

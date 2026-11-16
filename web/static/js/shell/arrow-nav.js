@@ -62,11 +62,67 @@ window.addEventListener('message', function(event) {
     navigateSidebarByArrow(event.data.key);
 });
 
+// ==================== 页头开关的 ←/→ 循环切换 ====================
+// 作用于内联 shell 页右上角的开关组：页头 tab 胶囊（用户管理/设备管理/
+// 安全审计）与布局按钮组（主机桌面/主机终端）。iframe 页（设备串口、
+// 系统架构、GMS ATS、主机集群、Redmine、Gerrit）的 Tab 切换在各自文档
+// 内已有专用 ←/→ 处理，本函数不参与。
+function headerToggleButtonsForPage(page) {
+    const root = document.getElementById(`page-${page}`);
+    if (!root) return [];
+    // .page-header-row 由 page-header/end 组件圈定，页面内容区的 tab
+    // 不受影响；offsetParent 过滤整组隐藏的情况（权限未开放、单机模式）。
+    const headerTabs = Array.from(root.querySelectorAll('.page-header-row [role="tab"]'))
+        .filter(btn => btn.offsetParent !== null);
+    if (headerTabs.length > 1) return headerTabs;
+    const layoutGroup = root.querySelector('.host-workspace-layouts');
+    if (layoutGroup && layoutGroup.offsetParent !== null) {
+        const buttons = Array.from(layoutGroup.querySelectorAll('button'))
+            .filter(btn => btn.offsetParent !== null);
+        if (buttons.length > 1) return buttons;
+    }
+    return [];
+}
+
+function navigateHeaderToggleByArrow(key, target = document.activeElement) {
+    if (key !== 'ArrowLeft' && key !== 'ArrowRight') return false;
+    target = target || document.body;
+
+    // 在输入框、文本域等元素中不拦截
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' || target.isContentEditable) {
+        return false;
+    }
+
+    const buttons = headerToggleButtonsForPage(currentPage);
+    if (buttons.length === 0) return false;
+
+    const index = buttons.findIndex(
+        btn => btn.classList.contains('active') || btn.getAttribute('aria-selected') === 'true'
+    );
+    // 没有激活项（如会话页签尚未建立）时不劫持按键
+    if (index === -1) return false;
+
+    const delta = key === 'ArrowRight' ? 1 : -1;
+    const next = buttons[(index + delta + buttons.length) % buttons.length];
+    // 复用按钮自身的 data-click 动作路径，切态逻辑与鼠标点击完全一致
+    next.click();
+    return true;
+}
+window.navigateHeaderToggleByArrow = navigateHeaderToggleByArrow;
+
 document.addEventListener('keydown', function(e) {
     // 只处理方向键
-    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown'
+            && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     if (navigateSidebarByArrow(e.key, e.target)) {
         e.preventDefault();
+        return;
+    }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        if (navigateHeaderToggleByArrow(e.key, e.target)) {
+            e.preventDefault();
+        }
     }
 });
 

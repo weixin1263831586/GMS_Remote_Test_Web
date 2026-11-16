@@ -3,11 +3,31 @@
 
 set -euo pipefail
 
+RESTART_STARTED=$SECONDS
+CLEAN_CACHE=false
+for argument in "$@"; do
+    case "$argument" in
+        --clean-cache) CLEAN_CACHE=true ;;
+        -h|--help)
+            echo "用法: $0 [--clean-cache]"
+            echo "默认保留 Python 缓存；--clean-cache 清理项目源码缓存。"
+            exit 0
+            ;;
+        *) echo "未知参数: $argument" >&2; exit 2 ;;
+    esac
+done
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
+
+STAGE_STARTED=$SECONDS
+finish_stage() {
+    echo -e "${BLUE}  耗时: $((SECONDS - STAGE_STARTED)) 秒${NC}"
+    STAGE_STARTED=$SECONDS
+}
 
 PROJECT_DIR="${GMS_WEB_APP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 PYTHON_BIN="${GMS_PYTHON_BIN:-${PROJECT_DIR}/.venv/bin/python}"
@@ -87,8 +107,8 @@ update_systemd_tls_paths() {
             sudo -- "${update_command[@]}" --apply \
                 || fail_service_action "更新 systemd HTTPS 证书路径需要 sudo 权限"
         fi
+        systemctl_admin daemon-reload || fail_service_action "无法重新加载 systemd 服务配置"
     fi
-    systemctl_admin daemon-reload || fail_service_action "无法重新加载 systemd 服务配置"
 }
 
 restart_local_vnc() {
@@ -182,19 +202,26 @@ echo ""
 # Prepare TLS and installed service paths before stopping a working service.
 ensure_https_cert
 update_systemd_tls_paths
+echo -e "${BLUE}配置与证书准备耗时: $((SECONDS - RESTART_STARTED)) 秒${NC}"
+STAGE_STARTED=$SECONDS
 
-# 1. 清理缓存
-echo -e "${YELLOW}[1/6] 清理 Python 缓存...${NC}"
-# 清理 Python 字节码缓存
-cache_count=$(find . -type d -name "__pycache__" 2>/dev/null | wc -l)
-pyc_count=$(find . -type f -name "*.pyc" 2>/dev/null | wc -l)
-
-find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-find . -type f -name "*.pyc" -delete 2>/dev/null || true
-find . -type f -name "*.pyo" -delete 2>/dev/null || true
-find . -type f -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
-
-echo -e "${GREEN}✓ 缓存已清理 (删除了 ${cache_count} 个 __pycache__ 目录和 ${pyc_count} 个 .pyc 文件)${NC}"
+# 1. Python 会校验字节码的新鲜度，正常重启无需全仓遍历或清缓存。
+echo -e "${YELLOW}[1/6] 准备 Python 缓存...${NC}"
+if [[ "${CLEAN_CACHE}" == "true" ]]; then
+    cache_roots=()
+    for cache_root in bootstrap features foundation worker_agent workflows web tests scripts tools/scripts __pycache__ .pytest_cache; do
+        [[ ! -d "${cache_root}" ]] || cache_roots+=("${cache_root}")
+    done
+    if (( ${#cache_roots[@]} )); then
+        find "${cache_roots[@]}" \
+            \( -type d \( -name '__pycache__' -o -name '.pytest_cache' \) -prune -exec rm -rf -- {} + \) \
+            -o \( -type f \( -name '*.pyc' -o -name '*.pyo' \) -exec rm -f -- {} + \)
+    fi
+    echo -e "${GREEN}✓ 项目源码缓存已清理${NC}"
+else
+    echo -e "${GREEN}✓ 保留 Python 缓存（需要清理时使用 --clean-cache）${NC}"
+fi
+finish_stage
 echo ""
 
 # 2. 备份旧日志
@@ -203,6 +230,7 @@ for log in fastapi.log; do
     [[ -f "$log" ]] && mv "$log" "${log}.backup.$(date +%Y%m%d_%H%M%S)"
 done
 echo -e "${GREEN}✓ 日志已备份${NC}"
+finish_stage
 echo ""
 
 # 3. 停止旧服务
@@ -216,9 +244,10 @@ if [[ "${DAILY_BRIEF_INSTALLED}" == "true" ]]; then
     echo -e "${GREEN}  ✓ 晨报 Worker 已停止${NC}"
 fi
 if [[ -f "${SYSTEMD_UNIT_FILE}" ]]; then
+    web_stop_started=$SECONDS
     systemctl_admin stop "${SYSTEMD_SERVICE}" \
         || fail_service_action "无法停止 Web (${SYSTEMD_SERVICE})"
-    echo -e "${GREEN}  ✓ systemd ${SYSTEMD_SERVICE} 已停止${NC}"
+    echo -e "${GREEN}  ✓ systemd ${SYSTEMD_SERVICE} 已停止 ($((SECONDS - web_stop_started)) 秒)${NC}"
 else
     echo -e "${BLUE}  ℹ systemd ${SYSTEMD_SERVICE} 未安装${NC}"
 fi
@@ -231,6 +260,7 @@ for port in "${PORT}"; do
         echo -e "${GREEN}  ✓ 端口 ${port} 残留进程已清理${NC}"
     fi
 done
+finish_stage
 echo ""
 
 # 4. 启动新服务
@@ -277,7 +307,7 @@ else
         PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-${PROJECT_DIR}/data/pycache}" \
         GMS_SOFTWARE_ROOT="${GMS_SOFTWARE_ROOT:-${HOME}/Software}" \
         APE_API_KEY="${APE_API_KEY:-${GMS_SOFTWARE_ROOT:-${HOME}/Software}/gts-rockchip.json}" \
-        "${PYTHON_BIN}" -m uvicorn app:app \
+        "${PYTHON_BIN}" -m bootstrap.server app:app \
         --host 0.0.0.0 --port "${PORT}" --limit-concurrency 512 \
         --timeout-keep-alive 120 --log-level info --access-log \
         --ssl-keyfile "${CERT_KEY}" --ssl-certfile "${CERT_CRT}" \
@@ -285,7 +315,7 @@ else
     echo $! > fastapi.pid
 fi
 
-# 健康检查（带重试，最多等待 60 秒；清理 Python 缓存后冷启动可能超过 20 秒）
+# 先探测再等待；使用总时限，连接和单次请求也各有超时。
 # 本机回环 + 自签证书场景：优先使用 GMS_CURL_CA_CERT 校验，仅在未配置时
 # 退化为 -k（与 gms-remote-test.sh 的 GMS_CURL_* 口径一致，-k 仅限本机回环）。
 if [[ -n "${GMS_CURL_CA_CERT:-}" ]]; then
@@ -295,13 +325,20 @@ else
 fi
 echo -e "${BLUE}  进行健康检查...${NC}"
 HEALTH_OK=false
-for attempt in $(seq 1 20); do
-    sleep 3
-    if timeout 5 curl -s -f "${CURL_TLS_ARGS[@]}" "https://localhost:${PORT}/api/system/health/live" >/dev/null 2>&1; then
+HEALTH_STARTED=$SECONDS
+HEALTH_DEADLINE=$((SECONDS + 60))
+attempt=0
+while (( SECONDS < HEALTH_DEADLINE )); do
+    if curl --connect-timeout 1 --max-time 2 -s -f "${CURL_TLS_ARGS[@]}" "https://localhost:${PORT}/api/system/health/live" >/dev/null 2>&1; then
         HEALTH_OK=true
         break
     fi
-    echo -e "${BLUE}  等待服务就绪... (${attempt}/20)${NC}"
+    attempt=$((attempt + 1))
+    if (( attempt == 1 || attempt % 5 == 0 )); then
+        echo -e "${BLUE}  等待服务就绪... (已等待 $((SECONDS - HEALTH_STARTED)) 秒)${NC}"
+    fi
+    (( SECONDS < HEALTH_DEADLINE )) || break
+    sleep 1
 done
 
 if [[ "${HEALTH_OK}" == "true" ]]; then
@@ -315,11 +352,13 @@ else
     fi
     exit 1
 fi
+finish_stage
 
 # 5. Web 启动钩子已经拉起 VNC；这里只确认状态或补启动，避免并发强制重启。
 echo -e "${YELLOW}[5/6] 确认本机 VNC（x11vnc / websockify）...${NC}"
 restart_local_vnc || fail_service_action "无法确认本机 VNC（x11vnc / websockify）"
 echo -e "${GREEN}  ✓ 本机 VNC（x11vnc / websockify）已就绪${NC}"
+finish_stage
 
 # 6. 重启本地 Worker Agent
 echo -e "${YELLOW}[6/6] 重启本地 Worker Agent...${NC}"
@@ -342,10 +381,12 @@ if [[ -f "${WORKER_UNIT_FILE}" ]]; then
         || fail_service_action "设备 Worker 未进入 active 状态 (${WORKER_SERVICE})"
     echo -e "${GREEN}  ✓ Worker Agent 已重启${NC}"
 fi
+finish_stage
 echo ""
 
 echo -e "${BLUE}========================================${NC}"
 echo -e "${GREEN}  ✓ 服务管理完成！${NC}"
+echo -e "${BLUE}  总耗时: $((SECONDS - RESTART_STARTED)) 秒${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 echo -e "📋 服务状态："

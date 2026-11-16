@@ -13,6 +13,7 @@ from .mainline_issues import (
 from .mainline_issues import (
     query_security_patches_by_cve as query_mainline_security_patches,
 )
+from .mainline_issues.recall import extract_reference_identifiers, recall_mainline_references
 from .models import VNCStartRequest, VPNConnectRequest
 from .network import check_local_vpn_connected
 from .notifications import queue_notification
@@ -64,6 +65,7 @@ __all__ = [
     "VNCStartRequest",
     "VPNConnectRequest",
     "check_local_vpn_connected",
+    "extract_reference_identifiers",
     "health_check",
     "init_mainline_issues_db",
     "initialize_source_runtime",
@@ -72,6 +74,7 @@ __all__ = [
     "query_mainline_exemption_match",
     "query_mainline_security_patches",
     "queue_notification",
+    "recall_mainline_references",
     "registry_state",
     "sdk_manage_router",
     "sdk_sources_available",

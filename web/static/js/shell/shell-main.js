@@ -75,6 +75,9 @@
             window.GmsWorkspace?.setActivePage(targetPage);
 
             currentPage = targetPage;
+            // 必须在 currentPage 赋值之后补发：flushEmbeddedActiveTabFocus
+            // 会校验 currentPage === 目标页，过早调用会丢弃挂起标记。
+            window.focusEmbeddedActiveTab?.(targetPage);
 
             // 更新页面标题
             document.title = PAGE_TITLES[targetPage] || 'GMS远程测试';

@@ -94,6 +94,7 @@ _gms_rt_command_usage() {
         gms-rt-redmine-credentials-status) printf '%s' 'gms-rt-redmine-credentials-status' ;;
         gms-rt-redmine-triage) printf '%s' 'gms-rt-redmine-triage [--stale-days N] [--list-limit N] [--refresh]' ;;
         gms-rt-redmine-history-search) printf '%s' 'gms-rt-redmine-history-search <query> [--limit N] [--exclude-issue-id N] [--resolved-only]' ;;
+        gms-rt-redmine-references) printf '%s' 'gms-rt-redmine-references <snapshot_id> [--query IDENTIFIERS]' ;;
         gms-rt-artifact-read) printf '%s' 'gms-rt-artifact-read <artifact_id> [--offset N|-N] [--limit N]' ;;
         gms-rt-redmine-artifact-image) printf '%s' 'gms-rt-redmine-artifact-image <artifact_id>' ;;
         gms-rt-artifact-search) printf '%s' 'gms-rt-artifact-search <snapshot_id> <query> [--limit N] [--offset N] [--artifact ID|NAME] [--member NAME] [--context N] [--collapse]' ;;
@@ -223,6 +224,7 @@ _gms_rt_command_summary() {
         gms-rt-redmine-credentials-status) printf '%s' 'Pre-flight check that the owner account has Redmine credentials configured (no secret material returned)' ;;
         gms-rt-redmine-triage) printf '%s' "List today's pending Redmine issues (waiting_my_reply + no_reply_3_days, deduped; read-only)" ;;
         gms-rt-redmine-history-search) printf '%s' "Search all historical Redmine issues (local archive + site search) for similar problems and reusable fixes (read-only)" ;;
+        gms-rt-redmine-references) printf '%s' 'Recall official Mainline CVE fixes, test exemptions and Critical Fix bulletins from an owner-scoped evidence snapshot (read-only)' ;;
         gms-rt-artifact-read) printf '%s' 'Read a text/log artifact derived text by char window (--offset N, negative = count from tail; --limit)' ;;
         gms-rt-redmine-artifact-image) printf '%s' 'Return an image artifact as JSON with base64 payload and metadata (for MCP image tooling)' ;;
         gms-rt-artifact-search) printf '%s' 'Search description, journals, and artifact text for a fixed query with evidence refs; filter by --artifact/--member, widen snippets with --context, fold repeats with --collapse' ;;
@@ -321,7 +323,7 @@ gms-rt-system-commands() {
             then {external_side_effects: false, resource_intensive: false, required_scope: "devices.read"}
             elif test("apk-analyze-attachment")
             then {external_side_effects: false, resource_intensive: true, required_scope: "apk.analyze_own"}
-            elif test("artifact-(read|search|failures)|redmine-attachment-download|redmine-attachments")
+            elif test("artifact-(read|search|failures)|redmine-attachment-download|redmine-attachments|redmine-references")
             then {external_side_effects: false, resource_intensive: false, required_scope: "artifacts.read_own"}
             elif test("redmine-|artifact-")
             then {external_side_effects: false, resource_intensive: false, required_scope: "redmine.read"}
@@ -591,6 +593,7 @@ ${YELLOW}Redmine Evidence (read-only analysis chain):${NC}
   gms-rt-redmine-issue-fetch     - Create/refresh a full evidence snapshot (journals untruncated, attachments hashed)
   gms-rt-redmine-triage          - List today's pending issues (waiting_my_reply + no_reply_3_days)
   gms-rt-redmine-history-search  - Search historical issues for similar problems and reusable fixes
+  gms-rt-redmine-references      - Recall official Mainline and Critical Fix references for a snapshot
   gms-rt-redmine-issue-show      - Show snapshot completeness and issue fields
   gms-rt-redmine-journals        - Read full journals with cursor pagination
   gms-rt-redmine-attachments     - List artifacts (kind, size, sha256, status)

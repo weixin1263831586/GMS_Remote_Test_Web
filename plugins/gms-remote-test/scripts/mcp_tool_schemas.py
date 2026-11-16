@@ -1156,6 +1156,25 @@ ALL_TOOLS: list[dict[str, Any]] = [
             },
         },
         {
+            "name": "gms_rt_redmine_references",
+            "description": (
+                "Recall official Mainline CVE/security-patch releases, test exemptions and GMS Critical Fix bulletins "
+                "from this owner's issue description, journals and retained attachment/OCR text. "
+                "Reports per-source matched/no_match/unavailable states and scan coverage. "
+                "Release inclusion does not prove the device contains the fix. "
+                "CLI equivalent: gms-rt-redmine-references."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "snapshot_id": {"type": "string", "minLength": 1, "maxLength": 256},
+                    "query": {"type": "string", "maxLength": 256},
+                },
+                "required": ["snapshot_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "gms_rt_redmine_history_search",
             "description": (
                 "Search ALL historical Redmine issues (owner's local archive "

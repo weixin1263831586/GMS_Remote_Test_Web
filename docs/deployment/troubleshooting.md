@@ -52,13 +52,17 @@ sudo journalctl -u gms-web-app -n 30   # systemd 模式
 tail -30 fastapi.log                    # nohup 模式
 ```
 
-清理 Python 缓存后的冷启动可能超过 20 秒，属正常现象；端口被残留进程占用时脚本会自动清理后重试。
+脚本默认保留 Python 缓存；显式使用 `--clean-cache` 后冷启动可能超过 20 秒。
+端口被残留进程占用时脚本会自动清理后重试。各阶段耗时会直接显示在终端，
+其中“停止 Web”的时间包含等待旧连接结束；新版本默认使用的 `bootstrap.server`
+会缩短已完成 HTTPS 响应后的 TLS 关闭等待，仍在执行的请求继续排空。
 
 若日志显示 `load_cert_chain` 抛出 `FileNotFoundError`，检查已安装服务的
 证书参数是否与 `configs/secrets/certs/` 一致。重新克隆仅恢复代码，原部署的
 本机配置和身份密钥需要按[配置恢复范围](configuration.md#重新克隆后仅恢复必要配置)从实际旧部署恢复；必要文件可能仍被引用于旧数据根，不能只按目录名筛选。执行最新的
-`./restart_services.sh` 会在停止服务前修正旧证书路径、备份原服务文件并重新加载
-systemd。路径修正失败时脚本会直接报错，需要在操作者终端提供 sudo 权限。
+`./restart_services.sh` 会在停止服务前修正旧证书路径、更新 Uvicorn 启动入口，
+备份原服务文件，并在 unit 有改动时重新加载 systemd。更新失败时脚本会直接报错，
+需要在操作者终端提供 sudo 权限。
 
 ## 5. Worker 注册失败
 

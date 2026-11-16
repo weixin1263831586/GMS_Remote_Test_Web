@@ -167,7 +167,7 @@ def _counting_opener_log(opener):
 
 
 def test_encoding_prescan_is_bounded_by_char_budget(tmp_path):
-    """编码预扫描与派生共用同一字符预算（2026-11-14 审核意见）。
+    """编码预扫描与派生共用同一字符预算。
 
     旧实现 detect_stream_encoding 先全量扫描整个成员（1MB 有效 UTF-8
     也全读全解码），预算拦得住写入、拦不住预扫描的解压 CPU。新实现

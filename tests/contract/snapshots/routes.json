@@ -2510,6 +2510,12 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/redmine-agent/evidence/{snapshot_id}/references"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/redmine-agent/evidence/{snapshot_id}/search"
   },
   {

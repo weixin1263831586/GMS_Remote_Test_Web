@@ -77,10 +77,10 @@
     transition: color .15s, background-color .15s;
 }
 .workspace-tabs > .workspace-tab:hover { color: var(--text-primary); }
+/* ←/→ 键盘切页签不画焦点框：与鼠标点击（仅 active 底线）保持一致观感。 */
 .workspace-tabs > .workspace-tab:focus-visible {
-    outline: 2px solid var(--primary-color);
-    outline-offset: -3px;
-    background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+    outline: none;
+    color: var(--text-primary);
 }
 .workspace-tabs > .workspace-tab.active { color: var(--primary-color); }
 .workspace-tabs > .workspace-tab.active::after {
