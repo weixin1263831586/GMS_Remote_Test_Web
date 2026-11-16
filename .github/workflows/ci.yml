@@ -510,6 +510,15 @@ jobs:
       - name: Browser E2E and smoke tests
         run: pytest tests/e2e tests/runtime_ui -q
 
+      - name: Upload real modal visual review screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: modal-visual-review
+          path: artifacts/modal-review/
+          if-no-files-found: warn
+          retention-days: 7
+
   release-ready:
     name: release-ready
     runs-on: ubuntu-latest
