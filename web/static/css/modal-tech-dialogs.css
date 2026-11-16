@@ -196,86 +196,6 @@
 .tech-dialog .modal-info-text[style*="color: var(--danger-color)"] {
   border-left-color:var(--danger-color);background:#302025;color:var(--danger-color);
 }
-/* Tailscale is a full-sized reference dialog, not modal-l's 760px compact form. */
-:is(.modal,.modal-backdrop) .modal-content.tech-dialog--tailscale {
-  width:min(1000px,calc(100vw - 48px));max-width:min(1000px,calc(100vw - 48px));
-  height:min(640px,calc(100dvh - 45px));max-height:calc(100dvh - 24px);
-}
-.tech-dialog--tailscale .tech-tailscale-body {
-  display:flex;flex-direction:column;justify-content:center;
-  gap:16px;padding:20px 26px !important;
-  overflow-y:auto;
-}
-.tech-dialog--tailscale .tech-tailscale-rows {display:flex;flex-direction:column;gap:6px}
-.tech-dialog--tailscale .tech-tailscale-row {
-  display:grid;grid-template-columns:44px minmax(130px,175px) minmax(0,1fr) 110px;
-  align-items:center;gap:12px;min-height:56px;margin:0;
-  padding:8px 14px;background:#211d2c;
-  border:1px solid #413451;border-radius:8px;
-}
-.tech-dialog--tailscale .tech-tailscale-row > label {
-  display:flex;align-items:center;gap:12px;
-  font-size:15px;font-weight:650;color:#f5f0ff;white-space:nowrap;
-}
-.tech-dialog--tailscale .tech-tailscale-row > label::before {
-  content:"";flex:none;height:24px;width:2px;background:var(--tech-edge);
-}
-.tech-dialog--tailscale .tech-tailscale-row > input {
-  margin:0;width:100%;min-width:0;height:42px;
-  padding:8px 14px;font-size:15px;
-  border:1px solid #7c6a9b;
-}
-.tech-dialog--tailscale .tech-tailscale-row > input:focus {box-shadow:none}
-.tech-dialog--tailscale .tech-tailscale-row .tech-row-action {
-  display:flex;align-items:center;justify-content:center;gap:8px;
-  width:110px;height:42px;padding:0 10px;border:1px solid var(--tech-edge);
-  font-size:14px;white-space:nowrap;background:#282034;
-}
-.tech-dialog--tailscale .tech-row-action .ui-icon {width:18px;height:18px}
-.tech-dialog--tailscale .tech-tailscale-help {
-  display:flex;align-items:center;gap:10px;flex:none;
-  min-height:40px;margin:0;padding:8px 12px;
-  font-size:13px;color:#c3b8d4;border-left:0;background:transparent;
-}
-.tech-dialog--tailscale .tech-hint-icon {display:inline-flex;color:var(--tech-bright);flex:none}
-.tech-dialog--tailscale .tech-hint-icon .ui-icon {width:18px;height:18px}
-.tech-dialog--tailscale .tech-dialog-footer {min-height:78px}
-@media (max-width:900px) {
-  :is(.modal,.modal-backdrop) .modal-content.tech-dialog--tailscale {
-    width:calc(100vw - 24px);max-width:calc(100vw - 24px);
-  }
-  .tech-dialog--tailscale .tech-tailscale-row {
-    grid-template-columns:44px minmax(115px,140px) minmax(0,1fr) 88px;gap:9px;padding:8px;
-  }
-  .tech-dialog--tailscale .tech-tailscale-row > label {font-size:13px}
-  .tech-dialog--tailscale .tech-tailscale-row > input {font-size:12px}
-  .tech-dialog--tailscale .tech-tailscale-row .tech-row-action {width:88px;font-size:12px}
-  .tech-dialog--tailscale .tech-tailscale-body {padding:15px !important}
-}
-@media (max-width:600px) {
-  :is(.modal,.modal-backdrop) .tech-dialog .modal-header {min-height:61px;padding:10px 15px}
-  .tech-dialog .tech-title-glyph {width:31px;height:31px}
-  .tech-dialog .tech-title-glyph .ui-icon {width:25px;height:25px}
-  .tech-dialog .tech-title-divider {height:26px}
-  .tech-dialog .tech-title-group {gap:8px}
-  :is(.modal,.modal-backdrop) .tech-dialog .tech-title-group .modal-title {font-size:17px}
-  .tech-dialog .tech-header-ticks {display:none}
-  .tech-dialog--tailscale .tech-tailscale-row {
-    grid-template-columns:34px minmax(0,1fr) 85px;
-    grid-template-areas:"icon label label" "input input action";
-    min-height:0;row-gap:8px;
-  }
-  .tech-dialog--tailscale .tech-tailscale-row .tech-field-glyph {grid-area:icon;width:32px;height:32px}
-  .tech-dialog--tailscale .tech-tailscale-row > label {grid-area:label;font-size:12px}
-  .tech-dialog--tailscale .tech-tailscale-row > label::before {height:18px}
-  .tech-dialog--tailscale .tech-tailscale-row > input {grid-area:input;height:37px;min-height:37px}
-  .tech-dialog--tailscale .tech-tailscale-row .tech-row-action {grid-area:action;width:85px;height:37px;min-height:37px}
-  .tech-dialog--tailscale .tech-tailscale-body {gap:9px}
-  .tech-dialog--tailscale .tech-tailscale-help {font-size:11px;padding:6px 3px}
-  .tech-dialog .tech-dialog-footer {min-height:65px;padding:10px 15px 12px !important}
-}
-
-
 /* Actual reference-image trace: a stepped line reaching from header centre
    toward the right, instead of a single straight underline. Pure flat color. */
 :is(.modal,.modal-backdrop) .tech-dialog > .tech-dialog-header::before {
@@ -336,43 +256,329 @@
 }
 
 
-/* Desktop sizing: compact 5-row module that fits a 1280px laptop without
-   dominating the viewport (user feedback: 1300×820 was oversized). */
-:is(.modal,.modal-backdrop) .modal-content.tech-dialog--tailscale {
-  width:min(1000px,calc(100vw - 48px));
-  max-width:min(1000px,calc(100vw - 48px));
-  height:min(640px,calc(100dvh - 45px));
+
+
+/*
+ * Tailscale reference calibration (source artwork 1672x941):
+ * modal x≈176..1476 (78vw), y≈50..870 (87dvh); header≈104,
+ * five 92px platform rows, footer≈136.
+ *
+ * This is the ONLY Tailscale sizing source. Do not append another
+ * "compact desktop" override: modal-l max-height must be overridden here.
+ */
+#tailscale-info-modal .modal-content.tech-dialog--tailscale {
+  width: min(78vw, 1500px, calc(100vw - 32px));
+  max-width: min(78vw, 1500px, calc(100vw - 32px));
+  height: min(87dvh, 900px, calc(100dvh - 32px));
+  max-height: calc(100dvh - 32px);
+  --tech-cut: 17px;
+  --tech-edge: #a16bdd;
+  --tech-bright: #d4a5ff;
+  --tech-deep: #1b1928;
+  background: var(--tech-deep) !important;
 }
-.tech-dialog--tailscale .tech-dialog-header {
-  min-height:64px;
-  padding:12px 28px;
+#tailscale-info-modal .tech-dialog-header {
+  box-sizing: border-box;
+  height: 104px;
+  min-height: 104px;
+  padding: 20px 52px;
+  background: #1b1928 !important;
 }
-.tech-dialog--tailscale .tech-title-glyph {
-  width:38px;
-  height:38px;
+#tailscale-info-modal .tech-title-group { gap: 22px; }
+#tailscale-info-modal .tech-title-glyph {
+  width: 64px;
+  height: 62px;
+  background: none !important;
+  border: 0 !important;
 }
-.tech-dialog--tailscale .tech-title-glyph .ui-icon {width:26px;height:26px}
-:is(.modal,.modal-backdrop) .tech-dialog--tailscale .tech-title-group .modal-title {
-  font-size:20px;
+#tailscale-info-modal .tech-title-glyph .tech-brand-icon {
+  display: block;
+  width: 52px;
+  height: 52px;
+  color: #d4a5ff;
+  filter: drop-shadow(0 0 6px rgba(180,120,240,.38));
 }
-.tech-dialog--tailscale .tech-tailscale-row {min-height:56px}
-.tech-dialog--tailscale .tech-field-glyph {width:38px;height:38px}
-.tech-dialog--tailscale .tech-tailscale-row > input {height:42px}
-.tech-dialog--tailscale .tech-tailscale-row > label {font-size:15px}
-.tech-dialog--tailscale .tech-dialog-footer {min-height:78px}
-@media(max-width:900px) {
-  .tech-dialog--tailscale .tech-dialog-header {min-height:71px;padding:12px 20px}
-  .tech-dialog--tailscale .tech-title-glyph {width:42px;height:42px}
-  .tech-dialog--tailscale .tech-title-glyph .ui-icon {width:32px;height:32px}
-  :is(.modal,.modal-backdrop) .tech-dialog--tailscale .tech-title-group .modal-title {font-size:21px}
-  .tech-dialog--tailscale .tech-tailscale-row {min-height:68px}
-  .tech-dialog--tailscale .tech-tailscale-row > label {font-size:13px}
-  .tech-dialog--tailscale .tech-field-glyph {width:42px;height:42px}
-  .tech-dialog--tailscale .tech-dialog-footer {min-height:75px}
+#tailscale-info-modal .tech-title-divider { height: 41px; width: 2px; }
+#tailscale-info-modal .tech-title-group .modal-title {
+  padding: 0;
+  color: #f7f4ff;
+  font-size: 36px;
+  font-weight: 750;
+  letter-spacing: .3px;
+  line-height: 1.18;
 }
-@media(max-width:600px) {
-  .tech-dialog--tailscale .tech-dialog-header {min-height:58px;padding:8px 14px}
-  :is(.modal,.modal-backdrop) .tech-dialog--tailscale .tech-title-group .modal-title {font-size:17px}
-  .tech-dialog--tailscale .tech-tailscale-row {min-height:0}
-  .tech-dialog--tailscale .tech-field-glyph {width:32px;height:32px}
+/* Legacy modal-tech.css inserts a second title rail with :not(#route...).
+   Only the single explicit divider from our HTML belongs here. */
+#tailscale-info-modal .tech-title-group .modal-title::before {
+  content: none !important;
+  display: none !important;
+}
+#tailscale-info-modal .tech-header-ticks { bottom: 17px; right: 16%; }
+#tailscale-info-modal .tech-header-ticks::before {
+  font-size: 26px;
+  color: #bd7ff2;
+}
+#tailscale-info-modal .modal-close {
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  min-height: 48px;
+  font-size: 41px;
+  font-weight: 300;
+  color: #f7f3ff;
+  border: 0 !important;
+}
+#tailscale-info-modal .tech-tailscale-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 16px;
+  overflow-y: auto;
+  padding: 28px 36px 15px !important;
+  background: #1b1928;
+}
+#tailscale-info-modal .tech-tailscale-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+#tailscale-info-modal .modal-form-row.tech-tailscale-row {
+  display: grid;
+  grid-template-columns: 56px minmax(192px, 226px) minmax(0, 1fr) 150px;
+  align-items: center;
+  column-gap: 20px;
+  flex: none;
+  min-height: 92px;
+  margin: 0;
+  padding: 10px 20px;
+  border: 1px solid #413351;
+  border-radius: 13px;
+  background: #211c2d;
+}
+#tailscale-info-modal .tech-field-glyph {
+  width: 56px;
+  height: 56px;
+  border: 1px solid #54406a;
+  border-radius: 8px;
+  color: #f4e9ff;
+  background: #50346d;
+}
+#tailscale-info-modal .tech-field-glyph .tech-brand-icon,
+#tailscale-info-modal .tech-field-glyph .ui-icon {
+  display: block;
+  width: 33px;
+  height: 33px;
+  color: #f4e9ff;
+}
+#tailscale-info-modal .tech-tailscale-row > label {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  min-width: 0 !important;
+  max-width: none;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 680;
+  color: #f8f5ff;
+  white-space: nowrap;
+}
+#tailscale-info-modal .tech-tailscale-row > label::before {
+  content: "";
+  flex: none;
+  width: 2px;
+  height: 37px;
+  background: #ac79e7;
+}
+#tailscale-info-modal .tech-tailscale-row > input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 57px;
+  min-height: 57px;
+  margin: 0;
+  padding: 10px 22px;
+  border: 1px solid #8b79aa;
+  border-radius: 7px;
+  background: #171420;
+  color: #eae5f7;
+  box-shadow: none;
+  font-size: 20px;
+  line-height: 1.35;
+}
+#tailscale-info-modal .tech-tailscale-row > input::placeholder {
+  color: #c7bdd3;
+  opacity: 1;
+}
+#tailscale-info-modal .tech-tailscale-row .tech-row-action {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 150px;
+  min-width: 150px;
+  height: 57px;
+  min-height: 57px;
+  padding: 0 13px;
+  border: 1px solid #b17ce8 !important;
+  border-radius: 0 !important;
+  background: #282038 !important;
+  color: #f8f2ff;
+  font-size: 22px;
+  font-weight: 650;
+  white-space: nowrap;
+  clip-path: polygon(11px 0,calc(100% - 11px) 0,100% 11px,100% calc(100% - 11px),calc(100% - 11px) 100%,11px 100%,0 calc(100% - 11px),0 11px);
+}
+#tailscale-info-modal .tech-tailscale-row .tech-row-action:hover:not(:disabled) {
+  border-color: #d7a9ff !important;
+  background: #422b59 !important;
+}
+#tailscale-info-modal .tech-row-action .ui-icon {
+  width: 27px;
+  height: 27px;
+  color: #f8f2ff;
+}
+#tailscale-info-modal .tech-tailscale-help {
+  box-sizing: border-box;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 15px;
+  min-height: 54px;
+  margin: 0 !important;
+  padding: 6px 8px !important;
+  border: 0 !important;
+  border-left: 0 !important;
+  background: transparent !important;
+  color: #c9c0d7;
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1.55;
+}
+#tailscale-info-modal .tech-hint-icon {
+  display: flex;
+  flex: none;
+  color: #c184f4;
+}
+#tailscale-info-modal .tech-hint-icon .ui-icon { width: 30px; height: 30px; }
+#tailscale-info-modal .tech-dialog-footer {
+  box-sizing: border-box;
+  min-height: 136px;
+  height: 136px;
+  padding: 20px 40px 26px !important;
+  border-top: 1px solid #503665;
+  background: #211d2c !important;
+}
+#tailscale-info-modal .tech-dialog-footer .tech-footer-ticks {
+  left: 52px;
+  bottom: 37px;
+}
+#tailscale-info-modal .tech-footer-ticks::before { font-size: 31px; color: #be87f7; }
+#tailscale-info-modal .tech-footer-ticks::after { content: none; display: none; }
+#tailscale-info-modal .tech-footer-trace {
+  position: absolute;
+  left: 110px;
+  bottom: 27px;
+  width: calc(100% - 375px);
+  height: 42px;
+  overflow: visible;
+  color: #9967c8;
+  pointer-events: none;
+}
+#tailscale-info-modal .tech-dialog-footer > button {
+  box-sizing: border-box;
+  width: 174px;
+  min-width: 174px;
+  height: 76px;
+  min-height: 76px;
+  border: 1px solid #a976e4 !important;
+  border-radius: 0 !important;
+  background: #292237 !important;
+  color: #f8f3ff;
+  font-size: 24px;
+  font-weight: 650;
+  clip-path: polygon(13px 0,calc(100% - 13px) 0,100% 13px,100% calc(100% - 13px),calc(100% - 13px) 100%,13px 100%,0 calc(100% - 13px),0 13px);
+}
+#tailscale-info-modal .tech-dialog-footer > button:hover:not(:disabled) {
+  border-color: #d7a9ff !important;
+  background: #402c57 !important;
+}
+#tailscale-info-modal .tech-corner-mark { filter: drop-shadow(0 0 7px #bd86f0); }
+/* Constrain width and horizontal scroll on compact / mobile viewports. */
+@media (max-width: 1100px) {
+  #tailscale-info-modal .modal-content.tech-dialog--tailscale {
+    width: min(94vw, calc(100vw - 24px));
+    max-width: min(94vw, calc(100vw - 24px));
+  }
+  #tailscale-info-modal .tech-dialog-header { height: 76px; min-height: 76px; padding: 12px 25px; }
+  #tailscale-info-modal .tech-title-glyph { width: 43px; height: 43px; }
+  #tailscale-info-modal .tech-title-glyph .tech-brand-icon { width: 38px; height: 38px; }
+  #tailscale-info-modal .tech-title-group .modal-title { font-size: 25px; }
+  #tailscale-info-modal .tech-tailscale-body { padding: 15px 18px !important; gap: 10px; }
+  #tailscale-info-modal .modal-form-row.tech-tailscale-row {
+    grid-template-columns: 44px minmax(120px, 155px) minmax(0,1fr) 98px;
+    min-height: 66px;
+    gap: 9px;
+    padding: 7px 10px;
+  }
+  #tailscale-info-modal .tech-field-glyph { width: 43px; height: 43px; }
+  #tailscale-info-modal .tech-field-glyph .tech-brand-icon,
+  #tailscale-info-modal .tech-field-glyph .ui-icon { width: 27px; height: 27px; }
+  #tailscale-info-modal .tech-tailscale-row > label { font-size: 14px; gap: 9px; }
+  #tailscale-info-modal .tech-tailscale-row > label::before { height: 23px; }
+  #tailscale-info-modal .tech-tailscale-row > input {
+    height: 42px; min-height: 42px; padding: 8px 10px; font-size: 13px;
+  }
+  #tailscale-info-modal .tech-tailscale-row .tech-row-action {
+    width: 98px; min-width: 98px; height: 42px; min-height: 42px; font-size: 14px; gap: 5px;
+  }
+  #tailscale-info-modal .tech-row-action .ui-icon { width: 20px; height: 20px; }
+  #tailscale-info-modal .tech-tailscale-help { font-size: 13px; min-height: 40px; }
+  #tailscale-info-modal .tech-hint-icon .ui-icon { width: 22px; height: 22px; }
+  #tailscale-info-modal .tech-dialog-footer { height: 88px; min-height: 88px; padding: 12px 25px !important; }
+  #tailscale-info-modal .tech-dialog-footer > button {
+    width: 120px; min-width: 120px; height: 52px; min-height: 52px; font-size: 16px;
+  }
+  #tailscale-info-modal .tech-footer-trace { bottom: 18px; width: calc(100% - 260px); }
+}
+@media (max-width: 690px) {
+  #tailscale-info-modal .tech-dialog-header {
+    height: 62px; min-height: 62px; padding: 10px 16px;
+  }
+  #tailscale-info-modal .tech-title-group { gap: 10px; }
+  #tailscale-info-modal .tech-title-glyph { width: 32px; height: 32px; }
+  #tailscale-info-modal .tech-title-glyph .tech-brand-icon { width: 28px; height: 28px; }
+  #tailscale-info-modal .tech-title-divider { height: 25px; }
+  #tailscale-info-modal .tech-title-group .modal-title { font-size: 18px; }
+  #tailscale-info-modal .tech-header-ticks { display: none; }
+  #tailscale-info-modal .tech-tailscale-body { padding: 11px 12px !important; }
+  #tailscale-info-modal .modal-form-row.tech-tailscale-row {
+    grid-template-columns: 34px minmax(0,1fr) 84px;
+    grid-template-areas: "icon label label" "input input action";
+    gap: 8px;
+    min-height: 0;
+    padding: 9px;
+  }
+  #tailscale-info-modal .tech-tailscale-row .tech-field-glyph {
+    grid-area: icon; width: 34px; height: 34px;
+  }
+  #tailscale-info-modal .tech-tailscale-row > label {
+    grid-area: label; font-size: 14px;
+  }
+  #tailscale-info-modal .tech-tailscale-row > input {
+    grid-area: input; height: 40px; min-height: 40px; font-size: 12px;
+  }
+  #tailscale-info-modal .tech-tailscale-row .tech-row-action {
+    grid-area: action; width: 84px; min-width: 84px; height: 40px; min-height: 40px; font-size: 12px;
+  }
+  #tailscale-info-modal .tech-row-action .ui-icon { width: 16px; height: 16px; }
+  #tailscale-info-modal .tech-tailscale-help { font-size: 11px; }
+  #tailscale-info-modal .tech-dialog-footer {
+    height: 65px; min-height: 65px; padding: 9px 15px !important;
+  }
+  #tailscale-info-modal .tech-dialog-footer > button {
+    width: 96px; min-width: 96px; height: 42px; min-height: 42px; font-size: 13px;
+  }
+  #tailscale-info-modal .tech-footer-trace { display: none; }
 }
