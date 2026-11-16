@@ -614,6 +614,8 @@ class RuntimeModalsTests(RuntimeUiHarness):
                         fontInput: getComputedStyle(input).fontSize,
                         fontButton: getComputedStyle(btn).fontSize,
                         brands: modal.querySelectorAll('.tech-brand-icon').length,
+                        backdropColor: getComputedStyle(modal).backgroundColor,
+                        backdropBlur: getComputedStyle(modal).backdropFilter,
                     };
                 }"""
             )
@@ -629,6 +631,8 @@ class RuntimeModalsTests(RuntimeUiHarness):
             ):
                 self.assertEqual(report[key], value, report)
             self.assertEqual(report["brands"], 4)
+            self.assertEqual(report["backdropColor"], "rgba(18, 13, 30, 0.4)")
+            self.assertIn("blur(3px)", report["backdropBlur"])
         finally:
             page.close()
 

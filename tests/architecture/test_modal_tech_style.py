@@ -43,6 +43,19 @@ def test_skin_is_solid_and_does_not_own_modal_lifecycle():
     assert "#radar-settings-save" in css
 
 
+def test_sdk_source_registration_uses_content_height_not_pinned_empty_space():
+    style = (ROOT / "web/static/css/agent-access.css").read_text(encoding="utf-8")
+    source = (ROOT / "web/shell/dialogs/agent-enrollment.html").read_text(
+        encoding="utf-8"
+    )
+    assert "#agent-sdk-add-modal > .agent-access-modal-content" in style
+    assert "height: auto;" in style
+    assert "max-height: min(86dvh" in style
+    assert "overflow-y: auto;" in style
+    assert 'id="agent-sdk-add-form"' in source
+    assert 'id="agent-sdk-add-submit"' in source
+
+
 def test_shell_style_bundle_keeps_modal_skin_inside_contiguous_sequence():
     source = SHELL_HEAD.read_text(encoding="utf-8")
     links = list(re.finditer(
