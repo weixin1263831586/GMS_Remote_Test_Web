@@ -1,0 +1,353 @@
+/*
+ * Domain-specific modal compositions.
+ * Every panel below is bound to existing HTML/JS IDs; no dummy buttons, state,
+ * progress or unsupported feature is created to mimic concept illustrations.
+ * The thin purple geometry is common vocabulary, not a generic form template.
+ *
+ * Loaded AFTER modal-tech.css, modal-tech-dialogs.css and modal-tech-cases.css.
+ * The existing 16px title / 13px form / 12px hint baseline remains unchanged.
+ */
+:root {
+  --tech-workflow-violet: #a779df;
+  --tech-workflow-light: #c99afa;
+  --tech-workflow-surface: #211b2d;
+  --tech-workflow-soft: #292138;
+  --tech-workflow-line: #55436d;
+}
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog {
+  border: 1px solid #9a75bb !important;
+  border-radius: 9px !important;
+  background: #1a1826 !important;
+  box-shadow: 0 18px 46px rgba(0,0,0,.42),0 0 0 1px rgba(181,117,233,.13);
+  clip-path: none !important;
+}
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog .tech-corner-mark--tl,
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog .tech-corner-mark--br {
+  width: 16px;
+  height: 16px;
+  border-color: var(--tech-workflow-light);
+  filter: drop-shadow(0 0 4px #bd83f6);
+}
+:is(.modal,.modal-backdrop) .tech-dialog > .tech-dialog-header {
+  position: relative;
+  min-height: 62px;
+  padding: 13px 23px;
+  background: #1a1826 !important;
+}
+:is(.modal,.modal-backdrop) .tech-dialog > .tech-dialog-header::before {
+  content: "" !important;
+  display: block !important;
+  pointer-events: none;
+  position: absolute;
+  z-index: 1;
+  left: 51%;
+  bottom: -1px;
+  width: 30%;
+  height: 16px;
+  background: var(--tech-workflow-violet);
+  clip-path: polygon(0 100%,10% 8%,100% 8%,100% 17%,10.6% 17%,.8% 100%);
+}
+.tech-dialog .tech-title-glyph {
+  border-color: #73529c;
+  background: #49305e;
+  color: #f1dfff;
+}
+.tech-dialog .tech-title-glyph .ui-icon {color:#e7c5ff}
+.tech-dialog .tech-title-divider {background:var(--tech-workflow-violet)}
+.tech-dialog .tech-header-ticks::before {color:var(--tech-workflow-violet)}
+.tech-workflow-lede {
+  margin: 0 0 14px;
+  color: #bcb1cc;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.tech-workflow-section-title,
+.tech-dialog .tech-workflow-section-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 0 10px;
+  margin: 0 0 13px;
+  border-bottom: 1px solid #574469;
+  color: #f3e7ff;
+  font-size: 14px;
+  font-weight: 680;
+  line-height: 1.45;
+}
+.tech-workflow-section-title .ui-icon {width:18px;height:18px;color:#c38cf1}
+.tech-workflow-inline-hint {line-height:1.65}
+.tech-workflow-subhead {
+  padding: 4px 10px 8px;
+  margin: 10px 0 1px;
+  color:#ddc9eb;
+  font-size:12px;
+  letter-spacing:.3px;
+}
+.tech-dialog .modal-form-row.tech-structured-row {
+  border-color: #544269;
+  background: #24202f;
+  border-radius:8px;
+}
+.tech-dialog .tech-field-glyph {background:#48315f;border-color:#6f5090}
+.tech-dialog .tech-dialog-actions {
+  position: relative;
+  padding-bottom: 17px;
+}
+.tech-dialog .tech-dialog-actions::before {
+  display: block !important;
+  content: "////" !important;
+  position:absolute;
+  left:12px;
+  bottom:13px;
+  font:italic 17px/1 ui-monospace,monospace;
+  letter-spacing:-3px;
+  color:var(--tech-workflow-violet);
+  pointer-events:none;
+}
+.tech-dialog .tech-dialog-actions::after {
+  display:block !important;
+  content:"" !important;
+  position:absolute;
+  left:63px;
+  bottom:17px;
+  width: min(155px,22%);
+  height: 7px;
+  background:#8064a3;
+  clip-path:polygon(0 85%,9% 10%,95% 10%,100% 100%,98% 100%,94% 23%,10% 23%,2% 100%);
+  pointer-events:none;
+}
+.tech-dialog .tech-dialog-actions .btn-primary {
+  background:#7844ae !important;
+  border-color:#b889ed !important;
+  color:#fff;
+  box-shadow:0 0 0 1px rgba(193,120,244,.1);
+}
+.tech-dialog .tech-dialog-actions .btn-primary:hover:not(:disabled) {
+  background:#8950c6 !important;
+  box-shadow:0 0 11px rgba(178,105,235,.3);
+}
+
+/* SSH credential flow: resolved client, editable identity, security note. */
+#username-detect-modal .modal-content {width:min(650px,calc(100vw - 24px));max-width:min(650px,calc(100vw - 24px));height:auto}
+#username-detect-modal .modal-body.tech-ssh-composition {padding:19px 24px 11px}
+#username-detect-modal .tech-ssh-form {display:flex;flex-direction:column;gap:8px}
+#username-detect-modal .tech-ssh-form .tech-structured-row {
+  display:grid;
+  grid-template-columns:36px minmax(98px,145px) minmax(0,1fr);
+  gap:12px;
+  margin:0;
+  min-height:58px;
+  padding:10px 13px;
+}
+#username-detect-modal .tech-ssh-host-row {
+  background:#202c2b;
+  border-color:#3d6660;
+}
+#username-detect-modal .tech-ssh-host-row input[readonly] {
+  color:#aee7d7;
+}
+#username-detect-modal .tech-workflow-inline-hint {
+  margin:13px 0 0;
+  padding:11px 14px;
+  background:#211d2b;
+  border-left:2px solid #a879df;
+}
+#username-detect-modal .tech-dialog-actions {margin-top:10px}
+
+/* Firmware: real target list and source path (left); AOA recovery (right).
+   Do not depict fake burn modes, file metadata or progress bars. */
+#firmware-modal .modal-content.tech-dialog--firmware {
+  width:min(900px,calc(100vw - 24px));
+  max-width:min(900px,calc(100vw - 24px));
+  height:auto;
+  min-height:0;
+  max-height:calc(100dvh - 24px);
+}
+#firmware-modal .modal-body.tech-firmware-composition {
+  display:block !important;
+  padding:18px 22px !important;
+  overflow-y:auto;
+}
+#firmware-modal .tech-firmware-layout {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  align-items:stretch;
+  gap:14px;
+}
+#firmware-modal .tech-firmware-layout .modal-fieldset {
+  box-sizing:border-box;
+  min-width:0;
+  margin:0;
+  padding:16px;
+  border:1px solid #695183;
+  border-radius:9px;
+  background:#231e30;
+}
+#firmware-modal .tech-firmware-layout :is(.tech-firmware-source-panel,.tech-firmware-recovery-panel) {border-top:2px solid #b27ee0}
+#firmware-modal .tech-firmware-layout .modal-form-row {
+  display:flex;flex-direction:column;align-items:stretch;
+  gap:7px;
+  margin:0 0 15px;
+  padding:0;
+  min-width:0;
+  background:transparent;border:0;
+}
+#firmware-modal .tech-firmware-layout .modal-form-row > label {width:100%;font-size:13px}
+#firmware-modal .tech-firmware-layout .modal-form-row > :is(input,select,.input-with-btn,.firmware-target-list) {width:100%;min-width:0}
+#firmware-modal .tech-firmware-layout .firmware-target-list {
+  background:#171520;border:1px solid #57416c;border-radius:5px;padding:9px;
+}
+#firmware-modal .tech-firmware-layout .input-with-btn {display:flex;gap:5px;flex-wrap:wrap}
+#firmware-modal .tech-firmware-layout .input-with-btn input {flex:1 1 175px;min-width:0}
+#firmware-modal .tech-firmware-layout .modal-fieldset-title {
+  display:flex;align-items:center;gap:8px;
+  font-size:14px;margin:0 0 13px;padding:0 0 10px;
+  border-bottom:1px solid #604b7b;
+  color:#f1e3ff;
+}
+#firmware-modal .tech-firmware-layout .modal-fieldset-title .ui-icon {width:17px;height:17px}
+#firmware-modal .tech-firmware-recovery-panel .modal-form-row:has([type="checkbox"]) {
+  display:block;background:#21182e;border:1px solid #55406e;padding:9px;
+}
+#firmware-modal .tech-firmware-recovery-panel .modal-form-row:has([type="checkbox"]) > label {
+  display:flex;align-items:center;gap:7px;
+}
+#firmware-modal .tech-firmware-recovery-panel .modal-hint-text {
+  font-size:12px;border-left:2px solid #a97ada;padding:9px 10px;
+  background:#2a2135;
+}
+#firmware-modal .tech-firmware-warning {
+  margin-top:13px;
+  padding:10px 13px;
+  border-left:3px solid #e2aa4e;
+  color:#f0cf97;
+  background:#332720;
+  font-size:12px;
+}
+#firmware-modal .tech-dialog-actions {border-top:1px solid #574467;padding-top:14px;margin-top:13px}
+
+/* Tradefed report copy: preserve runtime 760x500 contract & real selects. */
+#report-copy-modal .modal-content.report-copy-modal-content {width:min(760px,calc(100vw - 24px));max-width:min(760px,calc(100vw - 24px))}
+#report-copy-modal .modal-body.tech-report-transfer-composition {padding:14px 19px !important;overflow:auto}
+#report-copy-modal .tech-report-transfer-grid {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 32px minmax(0,1fr);
+  align-items:stretch;
+  gap:9px;
+}
+#report-copy-modal .tech-transfer-panel {
+  min-width:0;display:flex;flex-direction:column;
+  border:1px solid #58436e;
+  border-radius:8px;
+  padding:12px 13px;
+  background:#241e30;
+}
+#report-copy-modal .tech-transfer-panel .modal-form-row {
+  display:block;
+  margin:0 0 9px;
+  border:0;background:transparent;padding:0;
+}
+#report-copy-modal .tech-transfer-panel .modal-form-row select,
+#report-copy-modal .tech-transfer-panel .modal-form-row input {
+  box-sizing:border-box;
+  min-height:36px;
+  width:100%;
+  border:1px solid #77608d;
+  background:#15131d;
+  font-size:13px;
+}
+#report-copy-modal .tech-transfer-panel .modal-form-row label {margin-bottom:5px;color:#c8b7d9}
+#report-copy-modal .tech-transfer-panel .tech-workflow-section-title {margin-bottom:10px}
+#report-copy-modal .tech-transfer-arrow {display:flex;align-items:center;justify-content:center;color:#b88af3;font-size:23px}
+
+/* Diagnosis workspace: separate live summary and dynamically populated result. */
+#report-diagnosis-modal .modal-body.tech-diagnosis-workbench {padding:14px 17px;overflow:hidden}
+#report-diagnosis-modal .tech-diagnosis-layout {
+  display:grid;grid-template-columns:minmax(220px,26%) minmax(0,1fr);
+  min-height:0;height:100%;gap:13px;
+}
+#report-diagnosis-modal :is(.tech-diagnosis-summary-pane,.tech-diagnosis-result-pane) {
+  min-width:0;min-height:0;display:flex;flex-direction:column;
+  border:1px solid #5c4571;border-radius:8px;background:#201b2c;padding:12px;
+}
+#report-diagnosis-modal .tech-diagnosis-summary-pane #report-diagnostic-summary,
+#report-diagnosis-modal .tech-diagnosis-result-pane #report-diagnostic-result {
+  min-height:0;overflow:auto;flex:1;
+}
+#report-diagnosis-modal .tech-diagnosis-result-pane #report-diagnostic-result {background:#171420}
+#report-diagnosis-modal .tech-diagnosis-workbench .tech-workflow-section-title {flex:none}
+#report-diagnosis-modal .report-diagnosis-actions {gap:7px;flex-wrap:wrap}
+
+/* Device groups: separate naming from device member selection. */
+#device-group-modal .modal-body.tech-device-group-composition {padding:18px 20px}
+#device-group-modal .tech-group-name-card {min-height:63px;margin-bottom:12px}
+#device-group-modal .tech-group-members-panel {
+  border:1px solid #57416f;padding:12px;border-radius:8px;background:#231e30;
+}
+#device-group-modal .tech-group-members-panel .tech-structured-row {
+  align-items:flex-start;gap:9px;
+  border:0;background:transparent;padding:0;
+}
+#device-group-modal #device-group-picklist {max-height:200px !important;background:#15141e;border-color:#695287}
+
+/* Uploads: original file picker/drag/drop callbacks remain intact. */
+#kb-upload-modal .tech-knowledge-upload-composition {padding:18px 21px}
+#kb-upload-modal #kb-upload-drop-zone.tech-knowledge-dropzone {
+  border:2px dashed #af78e0 !important;
+  border-radius:11px !important;
+  padding:30px 18px !important;
+  background:#241c33 !important;
+  transition:background .15s,border-color .15s;
+}
+#kb-upload-modal #kb-upload-drop-zone.tech-knowledge-dropzone:hover,
+#kb-upload-modal #kb-upload-drop-zone.tech-knowledge-dropzone:focus-visible {
+  border-color:#dbb1ff !important;background:#342540 !important;
+}
+#kb-upload-modal .tech-upload-cloud {
+  margin:auto;width:56px;height:56px;
+  display:flex;align-items:center;justify-content:center;
+  border:1px solid #8761ae;border-radius:10px;background:#3c2852;
+}
+#kb-upload-modal .tech-upload-cloud .ui-icon {width:30px;height:30px;color:#ddafff}
+#kb-upload-modal .tech-upload-feedback {min-height:28px}
+
+/* Distinct Agent workflows: permission scope, pairing and SDK registration. */
+#agent-access-create-modal .tech-enrollment-layout .agent-access-scope-fieldset {
+  border-color:#71518d;background:#231d30;
+}
+#agent-access-create-modal .tech-enrollment-layout .agent-access-scope-option {
+  background:#181521;border-color:#56446b;
+}
+#agent-sdk-add-modal .modal-content.tech-dialog--sdk-source {
+  width:min(970px,calc(100vw - 24px));max-width:min(970px,calc(100vw - 24px));
+  height:auto;max-height:min(88dvh,calc(100dvh - 24px));
+}
+#agent-sdk-add-modal .tech-sdk-source-layout .agent-access-form-grid {gap:12px;margin-bottom:10px}
+#agent-sdk-add-modal .tech-sdk-source-layout .agent-access-field {
+  border:1px solid #4d3d60;padding:10px;border-radius:7px;background:#241e30;
+}
+#agent-sdk-add-modal .agent-sdk-path-list {border:1px dashed #9868ce;background:#17131f}
+#agent-access-scopes-modal .tech-dialog--agent-scopes .modal-body {background:#201b2d}
+
+/* Responsive handling: no fields, tabs or actions clipped on tablets/phones. */
+@media(max-width:950px) {
+ #firmware-modal .tech-firmware-layout {grid-template-columns:1fr}
+ #report-diagnosis-modal .tech-diagnosis-layout {grid-template-columns:1fr}
+ #report-diagnosis-modal .tech-diagnosis-summary-pane {max-height:200px}
+}
+@media(max-width:670px) {
+ #username-detect-modal .tech-ssh-form .tech-structured-row {
+   grid-template-columns:31px minmax(0,1fr);gap:7px;
+ }
+ #username-detect-modal .tech-ssh-form .tech-structured-row > label {grid-column:2}
+ #username-detect-modal .tech-ssh-form .tech-structured-row > :is(input,select,.password-input-wrap) {grid-column:1/-1}
+ #report-copy-modal .tech-report-transfer-grid {grid-template-columns:1fr}
+ #report-copy-modal .tech-transfer-arrow {display:none}
+ #report-copy-modal .tech-transfer-panel {padding:10px}
+ #device-group-modal .tech-group-members-panel .tech-structured-row {flex-wrap:wrap}
+ #device-group-modal #device-group-picklist {flex-basis:100%}
+ #firmware-modal .modal-body.tech-firmware-composition {padding:12px !important}
+}
+@media(prefers-reduced-motion:reduce) {
+ #kb-upload-modal #kb-upload-drop-zone.tech-knowledge-dropzone {transition:none}
+}
