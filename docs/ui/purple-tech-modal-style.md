@@ -83,3 +83,14 @@ python tools/scripts/maintenance/capture_modal_gallery.py \
 - 变更通过新结构测试 `tests/architecture/test_individual_modal_redesign.py` 和原有 `tests/runtime_ui/test_modals.py` 进行检查。
 - 所有弹框仍待**用户内网实际渲染截图验收**；没有在内网验收的前提下，不可宣称与参考图片逐像素一致。
 - 浏览器原生 alert/confirm、第三方外部网页、非弹框抽屉不属于可控 DOM 目标。
+
+
+## 2026-11-16 第三版：与已批准截图的几何参数对齐
+
+用户提供的 1672×941 参考图中，Tailscale 面板宽约 1300px、高约 820px，并非紧凑 1000×640 弹框。
+
+- `modal-tech-dialogs.css` 只保留一份 Tailscale 尺寸源：桌面端宽 `78vw`、高 `87dvh`（最大 1500×900），覆盖基础 `modal-l` 的 `85vh` 高度上限，窄屏使用独立断点。
+- 标题栏 104px、五行信息卡各 92px、底栏 136px；输入 57px、复制/打开按钮 150×57、关闭按钮 174×76；使用向量折线与纯色紫色描边，不使用 CSS 渐变。
+- `tailscale-info.html` 使用直接绘制的地球 / Windows / Apple / Android SVG，不再拿显示器、设备或包裹图标代替平台标识；保留所有原始 `id` 和 `data-click`。
+- 只读信息窗口打开时使用 `data-modal-initial-focus` 聚焦容器，避免第一个只读 URL 自动出现高亮边框；Tab 键和复制按钮仍由原 ModalManager 管理。
+- 浏览器回归测试新增 1672×941 基准几何与图标数量断言。严格的逐像素比对还需要在实际内网应用中验证。

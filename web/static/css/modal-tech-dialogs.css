@@ -263,6 +263,13 @@
   display: none !important;
 }
 
+/* Read-only info dialog: focus the frame on open rather than highlighting
+   the first URL field. ModalManager retains Tab, ESC, trap and focus restore. */
+#tailscale-info-modal .tech-dialog--tailscale:focus,
+#tailscale-info-modal .tech-dialog--tailscale:focus-visible {
+  outline: none;
+}
+
 /*
  * Tailscale reference calibration (source artwork 1672x941):
  * modal x≈176..1476 (78vw), y≈50..870 (87dvh); header≈104,
@@ -340,7 +347,7 @@
   justify-content: flex-start;
   gap: 16px;
   overflow-y: auto;
-  padding: 28px 36px 15px !important;
+  padding: 28px 36px 8px !important;
   background: #1b1928;
 }
 #tailscale-info-modal .tech-tailscale-rows {

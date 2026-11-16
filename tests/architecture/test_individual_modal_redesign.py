@@ -60,6 +60,7 @@ def test_tailscale_has_five_dedicated_icon_rows_with_original_callbacks() -> Non
     assert "Desktop sizing: compact" not in styles
     assert source.count('class="tech-brand-icon"') == 4
     assert "tech-footer-trace" in source
+    assert "data-modal-initial-focus" in source
     assert ".tech-tailscale-row" in styles
     assert "clip-path: polygon(" in styles
 
