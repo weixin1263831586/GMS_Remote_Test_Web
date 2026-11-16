@@ -440,9 +440,8 @@ class RuntimeModalsTests(RuntimeUiHarness):
                     };
                 }"""
             )
-            # 紫色科技风皮肤（modal-tech-dialogs.css）将表单控件统一为
-            # 42px 触控目标高度（min-height:42px），替代旧的 36px 紧凑值。
-            self.assertAlmostEqual(select_metrics["height"], 42, delta=0.5)
+            # 报告拷贝的专属紧凑表单继续沿用原有 36px 高度。
+            self.assertAlmostEqual(select_metrics["height"], 36, delta=0.5)
             self.assertLessEqual(
                 select_metrics["fontSize"]
                 + select_metrics["paddingTop"]

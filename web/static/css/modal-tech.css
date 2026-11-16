@@ -17,11 +17,11 @@
 
 /* Backdrop and shell. Keep .show/[hidden] visibility owned by controllers. */
 :is(.modal, .modal-backdrop) {
-    background-color: rgb(9 8 15 / 72%);
-    /* 参考图的磨砂效果：背后页面与低层弹框整体虚化，只保留轮廓光感；
-       blur 作用于 backdrop 自身之后的内容，弹框内容不受影响。 */
-    backdrop-filter: blur(14px) saturate(115%);
-    -webkit-backdrop-filter: blur(14px) saturate(115%);
+    /* Keep the GMS dashboard legible behind one active dialog.
+       Flat purple-black, with restrained blur; no compounded blackening. */
+    background-color: rgb(18 13 30 / 40%);
+    backdrop-filter: blur(3px) saturate(105%);
+    -webkit-backdrop-filter: blur(3px) saturate(105%);
 }
 :is(.modal, .modal-backdrop) .modal-content {
     position: relative;

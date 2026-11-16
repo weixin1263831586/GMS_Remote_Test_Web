@@ -9,8 +9,8 @@
   --tech-deep: #1c1b27;
   --tech-panel: #22202d;
   --tech-input: #14131e;
-  --tech-edge: #765b97;
-  --tech-edge-soft: #554467;
+  --tech-edge: #9575bb;
+  --tech-edge-soft: #6b5484;
   --tech-bright: var(--primary-light, #c4b5fd);
 }
 :is(.modal,.modal-backdrop) .modal-content.tech-dialog {
@@ -21,7 +21,7 @@
   border-radius: 8px !important;
   clip-path: none !important;
   overflow: hidden;
-  box-shadow: 0 18px 42px rgba(0,0,0,.48);
+  box-shadow: 0 16px 36px rgba(0,0,0,.42), 0 0 0 1px rgba(155,114,206,.14);
   font-size: 13px;
   line-height: 1.5;
 }

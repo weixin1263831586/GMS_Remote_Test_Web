@@ -24,6 +24,10 @@ EMBEDDED_UI = (
 def test_skin_is_solid_and_does_not_own_modal_lifecycle():
     css = TECH_STYLE.read_text(encoding="utf-8")
     assert "var(--primary-color" in css
+    assert "background-color: rgb(18 13 30 / 40%)" in css
+    assert "backdrop-filter: blur(3px) saturate(105%)" in css
+    assert "blur(14px)" not in css
+    assert "rgb(9 8 15 / 72%)" not in css
     assert "linear-gradient(" not in css
     assert "radial-gradient(" not in css
     assert "conic-gradient(" not in css
