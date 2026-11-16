@@ -162,6 +162,9 @@
 <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport">
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-ui-foundations">
 <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers">
+<link rel="stylesheet" href="/static/css/modal-tech.css?v=20261116-purple-tech">
+<link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261116-individual-rebuild">
+<link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261116-specialized-forms">
 <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261116-tab-focus-ring">
 <script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
 </head>
@@ -210,9 +213,9 @@
   </section>
 </main>
 <div id="settingsModal" class="modal">
-  <div class="modal-content modal-l modal-pin">
-    <div class="modal-header">
-      <h2>Gerrit 连接设置</h2>
+  <div class="modal-content modal-l modal-pin tech-dialog tech-dialog--gerrit-settings"><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header">
+      <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><h2>Gerrit 连接设置</h2></div>
       <button class="secondary" data-click="hideSettings">关闭</button>
     </div>
     <div class="modal-body">
@@ -230,15 +233,15 @@
       </div>
       <div class="muted">REST 返回 401 时，需要填写 Gerrit HTTP Password；如果 REST 不方便登录，可以填写 SSH Host/User，后端会自动 fallback 到 SSH。</div>
     </div>
-    <div class="modal-actions">
+    <div class="modal-actions tech-dialog-actions">
       <button class="secondary" data-click="hideSettings">取消</button>
       <button data-click="saveSettings">保存</button>
     </div>
   </div>
 </div>
 <div id="addPersonalModal" class="modal">
-  <div class="modal-content modal-l">
-    <div class="modal-header"><h2>添加成员</h2><button class="secondary" data-click="hideAddPersonalModal">关闭</button></div>
+  <div class="modal-content modal-l tech-dialog tech-dialog--gerrit-personal"><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header"><div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#user"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><h2>添加成员</h2></div><button class="secondary" data-click="hideAddPersonalModal">关闭</button></div>
     <div class="modal-body">
       <div class="form-grid">
         <div class="field"><label>显示名</label><input id="addPersonalName" placeholder="例如：张三"></div>
@@ -246,12 +249,12 @@
         <div class="field full"><label>所属部门</label><div class="select-with-add" style="width:100%"><select id="addPersonalDepartment" style="width:100%;min-width:0"></select><button class="select-add-btn" type="button" data-click="showAddDepartmentModal" data-a0="addPersonalDepartment" title="添加部门">＋</button></div></div>
       </div>
     </div>
-    <div class="modal-actions"><button class="secondary" data-click="hideAddPersonalModal">取消</button><button data-click="savePersonalProfile">保存</button></div>
+    <div class="modal-actions tech-dialog-actions"><button class="secondary" data-click="hideAddPersonalModal">取消</button><button data-click="savePersonalProfile">保存</button></div>
   </div>
 </div>
 <div id="addDepartmentModal" class="modal">
-  <div class="modal-content modal-l">
-    <div class="modal-header"><h2>添加部门看板</h2><button class="secondary" data-click="hideAddDepartmentModal">关闭</button></div>
+  <div class="modal-content modal-l tech-dialog tech-dialog--gerrit-department"><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header"><div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#users"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><h2>添加部门看板</h2></div><button class="secondary" data-click="hideAddDepartmentModal">关闭</button></div>
     <div class="modal-body">
       <div class="form-grid">
         <div class="field"><label>部门名称</label><input id="addDepartmentName" placeholder="例如：系统一部"></div>
@@ -259,37 +262,37 @@
         <div class="field full"><label>成员 Owner</label><input id="addDepartmentOwners" placeholder="多个成员用逗号分隔"></div>
       </div>
     </div>
-    <div class="modal-actions"><button class="secondary" data-click="hideAddDepartmentModal">取消</button><button data-click="saveDepartmentProfile">保存</button></div>
+    <div class="modal-actions tech-dialog-actions"><button class="secondary" data-click="hideAddDepartmentModal">取消</button><button data-click="saveDepartmentProfile">保存</button></div>
   </div>
 </div>
 <div id="addDepartmentOwnerModal" class="modal">
-  <div class="modal-content modal-l">
-    <div class="modal-header"><h2>添加部门成员</h2><button class="secondary" data-click="hideAddDepartmentOwnerModal">关闭</button></div>
+  <div class="modal-content modal-l tech-dialog tech-dialog--gerrit-owner"><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header"><div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#user"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><h2>添加部门成员</h2></div><button class="secondary" data-click="hideAddDepartmentOwnerModal">关闭</button></div>
     <div class="modal-body"><div class="field"><label>Owner 邮箱/账号</label><input id="addDepartmentOwnerValue" placeholder="name@rock-chips.com"></div></div>
-    <div class="modal-actions"><button class="secondary" data-click="hideAddDepartmentOwnerModal">取消</button><button data-click="saveDepartmentOwner">保存</button></div>
+    <div class="modal-actions tech-dialog-actions"><button class="secondary" data-click="hideAddDepartmentOwnerModal">取消</button><button data-click="saveDepartmentOwner">保存</button></div>
   </div>
 </div>
 <div id="trendStartModal" class="modal">
-  <div class="modal-content modal-l">
-    <div class="modal-header"><h2 id="trendStartModalTitle">设置统计日期范围</h2><button class="secondary" data-click="hideTrendStartModal">关闭</button></div>
+  <div class="modal-content modal-l tech-dialog tech-dialog--gerrit-trend-range"><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header"><div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><h2 id="trendStartModalTitle">设置统计日期范围</h2></div><button class="secondary" data-click="hideTrendStartModal">关闭</button></div>
     <div class="modal-body">
       <div class="form-grid">
         <div class="field"><label>开始日期</label><input type="date" id="trendStartDateInput"></div>
         <div class="field"><label>结束日期</label><input type="date" id="trendEndDateInput"></div>
       </div>
     </div>
-    <div class="modal-actions"><button class="secondary" data-click="clearTrendStartDate">清空</button><button data-click="saveTrendStartDate">保存并刷新</button></div>
+    <div class="modal-actions tech-dialog-actions"><button class="secondary" data-click="clearTrendStartDate">清空</button><button data-click="saveTrendStartDate">保存并刷新</button></div>
   </div>
 </div>
 <div id="trendDetailModal" class="modal">
-  <div class="modal-content modal-xl">
-    <div class="modal-header"><h2 id="trendDetailTitle">提交明细</h2><button class="secondary" data-click="hideModal" data-a0="trendDetailModal">关闭</button></div>
+  <div class="modal-content modal-xl tech-dialog tech-dialog--gerrit-trend-detail"><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header"><div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><h2 id="trendDetailTitle">提交明细</h2></div><button class="secondary" data-click="hideModal" data-a0="trendDetailModal">关闭</button></div>
     <div class="modal-body" id="trendDetailBody"><div class="muted">加载中…</div></div>
   </div>
 </div>
 <div id="routeCheckModal" class="modal">
-  <div class="modal-content modal-s">
-    <div class="modal-header"><h3>📡 检查路由连通性</h3><button class="modal-close" data-click="hideModal" data-a0="routeCheckModal">&times;</button></div>
+  <div class="modal-content modal-s tech-dialog tech-dialog--gerrit-route"><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header"><div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#network"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><h3>📡 检查路由连通性</h3></div><span class="tech-header-ticks" aria-hidden="true"></span><button class="modal-close" data-click="hideModal" data-a0="routeCheckModal">&times;</button></div>
     <div class="modal-body" id="routeCheckBody"><div class="muted">正在探测 Gerrit 服务器可达性…</div></div>
   </div>
 </div>

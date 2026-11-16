@@ -1,8 +1,9 @@
 <div id="firmware-share-modal" class="modal" style="z-index: 10040;">
-        <div class="modal-content modal-workspace">
-            <div class="modal-header">
-                <span class="modal-title">共享固件</span>
-                <button type="button" class="modal-close" aria-label="关闭" data-click="closeFirmwareShareModal">&times;</button>
+        <div class="modal-content modal-workspace tech-dialog tech-dialog--firmware-share">
+        <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#link"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">共享固件</span></div>
+                <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeFirmwareShareModal">&times;</button>
             </div>
             <div class="modal-body">
                 <div style="display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 12px; align-items: end;">
@@ -28,7 +29,7 @@
                     <input type="text" id="firmware-share-name" placeholder="可选，默认使用文件名" />
                 </div>
                 <div id="firmware-share-validation" class="modal-info-text" style="min-height: 20px;"></div>
-                <div class="modal-buttons" style="justify-content: flex-start; margin-top: 8px;">
+                <div class="modal-buttons tech-dialog-actions" style="justify-content: flex-start; margin-top: 8px;">
                     <button class="btn-xxs" data-click="validateFirmwareShare">校验</button>
                     <button class="btn-xxs btn-primary" data-click="createFirmwareShare">创建分享</button>
                     <button class="btn-xxs" data-click="loadFirmwareShares">刷新列表</button>

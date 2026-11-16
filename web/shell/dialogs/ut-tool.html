@@ -1,28 +1,34 @@
 <div id="ut-tool-modal" class="modal" style="display: none;">
-            <div class="modal-content modal-m">
-                <div class="modal-header">
-                    <span class="modal-title" id="ut-tool-modal-title">添加工具</span>
-                    <button type="button" class="modal-close" aria-label="关闭" data-click="ut_closeToolModal">&times;</button>
+            <div class="modal-content modal-m tech-dialog tech-dialog--ut-tool">
+        <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+                <div class="modal-header tech-dialog-header">
+                    <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#tool"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title" id="ut-tool-modal-title">添加工具</span></div>
+                    <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="ut_closeToolModal">&times;</button>
                 </div>
                 <div class="modal-body">
-                    <div class="modal-form-row">
+                    <div class="modal-form-row tech-structured-row">
+                        <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#grid"></use></svg></span>
                         <label>分类:</label>
                         <select id="ut-tool-category" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;">
                         </select>
                     </div>
-                    <div class="modal-form-row">
+                    <div class="modal-form-row tech-structured-row">
+                        <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#edit"></use></svg></span>
                         <label>工具名称:</label>
                         <input type="text" id="ut-tool-title" placeholder="例如：Gerrit Patch工具" maxlength="30" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
                     </div>
-                    <div class="modal-form-row">
+                    <div class="modal-form-row tech-structured-row">
+                        <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#star"></use></svg></span>
                         <label>图标 (Emoji):</label>
                         <input type="text" id="ut-tool-icon" placeholder="例如：📦" maxlength="4" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
                     </div>
-                    <div class="modal-form-row">
+                    <div class="modal-form-row tech-structured-row">
+                        <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#info"></use></svg></span>
                         <label>说明:</label>
                         <textarea id="ut-tool-desc" placeholder="工具的功能说明，鼠标悬停时显示" rows="3" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px; resize: vertical;"></textarea>
                     </div>
-                    <div class="modal-form-row">
+                    <div class="modal-form-row tech-structured-row">
+                        <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#folder"></use></svg></span>
                         <label>文件路径 (tools/):</label>
                         <div style="display: flex; gap: 6px; align-items: center;">
                             <input type="text" id="ut-tool-filepath" placeholder="例如：gerrit-patch（可下载工具的稳定 ID）" style="flex: 1; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
@@ -32,7 +38,7 @@
                     <div class="modal-info-text">
                         💡 提示：文件需放在服务器 tools/ 目录下
                     </div>
-                    <div class="modal-buttons">
+                    <div class="modal-buttons tech-dialog-actions">
                         <button class="btn-xxs" data-click="ut_closeToolModal">取消</button>
                         <button class="btn-xxs btn-primary" data-click="ut_saveTool">保存</button>
                     </div>

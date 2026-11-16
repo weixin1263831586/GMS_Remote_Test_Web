@@ -1,0 +1,378 @@
+/*
+ * Individually structured Purple-Tech dialogs.
+ * Ref: approved Tailscale artwork. Real DOM frame, icon rows, stepped rails.
+ * This file styles tech-dialog instances; it does not own visibility or the
+ * ModalManager/EmbeddedModalController lifecycle, focus, hidden, or z-index.
+ * NO gradients. Existing semantic IDs, controls and business callbacks remain.
+ */
+:root {
+  --tech-cut: 16px;
+  --tech-deep: #171622;
+  --tech-panel: #211d2e;
+  --tech-input: #13121e;
+  --tech-edge: #a271ee;
+  --tech-edge-soft: #62477e;
+  --tech-bright: #d1a3ff;
+  --tech-tint: #bfa7e8;
+}
+/* True clipped octagonal corners and visible thin perimeter, not a round card. */
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog {
+  position: relative;
+  isolation: isolate;
+  border: 1px solid var(--tech-edge) !important;
+  border-radius: 0 !important;
+  background: var(--tech-deep) !important;
+  box-shadow: 0 26px 60px rgba(0,0,0,.55);
+  clip-path: polygon(var(--tech-cut) 0,calc(100% - var(--tech-cut)) 0,100% var(--tech-cut),
+    100% calc(100% - var(--tech-cut)),calc(100% - var(--tech-cut)) 100%,
+    var(--tech-cut) 100%,0 calc(100% - var(--tech-cut)),0 var(--tech-cut));
+}
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog::before,
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  border: 0;
+  border-radius: 0;
+  width: auto;
+  height: auto;
+  clip-path: polygon(var(--tech-cut) 0,calc(100% - var(--tech-cut)) 0,100% var(--tech-cut),
+    100% calc(100% - var(--tech-cut)),calc(100% - var(--tech-cut)) 100%,
+    var(--tech-cut) 100%,0 calc(100% - var(--tech-cut)),0 var(--tech-cut));
+}
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog::before {
+  inset: 0;
+  background: var(--tech-edge);
+  z-index: 0;
+}
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog::after {
+  inset: 1px;
+  background: var(--tech-deep);
+  z-index: 0;
+}
+.tech-dialog .tech-corner-mark {
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+  width: 30px;
+  height: 30px;
+}
+.tech-dialog .tech-corner-mark--tl {
+  top: 0;left: 0;
+  border-top: 4px solid var(--tech-bright);
+  border-left: 4px solid var(--tech-bright);
+  clip-path: polygon(0 0,100% 0,100% 4px,4px 4px,4px 100%,0 100%);
+}
+.tech-dialog .tech-corner-mark--br {
+  bottom: 0;right: 0;
+  border-right: 4px solid var(--tech-bright);
+  border-bottom: 4px solid var(--tech-bright);
+}
+.tech-dialog > :not(.tech-corner-mark) { position: relative; z-index: 1; }
+:is(.modal,.modal-backdrop) .tech-dialog .modal-header,
+:is(.modal,.modal-backdrop) .tech-dialog .modal-head,
+:is(.modal,.modal-backdrop) .tech-dialog > .section-head {
+  min-height: 76px;
+  padding: 17px 32px;
+  gap: 18px;
+  background: var(--tech-deep) !important;
+  border-bottom: 1px solid var(--tech-edge-soft);
+  flex-shrink: 0;
+  box-shadow: inset 0 -1px 0 rgba(211,166,255,.08);
+}
+:is(.modal,.modal-backdrop) .tech-dialog .modal-header::after,
+:is(.modal,.modal-backdrop) .tech-dialog .modal-head::after,
+:is(.modal,.modal-backdrop) .tech-dialog > .section-head::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  bottom: -1px;
+  left: 34px;
+  width: 100px;
+  height: 3px;
+  background: var(--tech-bright);
+  clip-path: polygon(0 0,100% 0,93% 100%,0 100%);
+}
+.tech-dialog .tech-title-group {display:flex;align-items:center;gap:16px;min-width:0;flex:1}
+.tech-dialog .tech-title-glyph {
+  display: inline-flex;align-items:center;justify-content:center;
+  flex: none;width:46px;height:46px;
+  color: var(--tech-bright);
+}
+.tech-dialog .tech-title-glyph .ui-icon {width:32px;height:32px}
+.tech-dialog .tech-title-divider {height:35px;width:2px;flex:none;background:var(--tech-edge)}
+:is(.modal,.modal-backdrop) .tech-dialog .tech-title-group .modal-title,
+:is(.modal,.modal-backdrop) .tech-dialog .tech-title-group h2,
+:is(.modal,.modal-backdrop) .tech-dialog .tech-title-group h3 {
+  padding:0;margin:0;color:#f7f5ff;font-size:clamp(18px,1.5vw,24px);
+  font-weight:700;letter-spacing:.4px;line-height:1.3;
+}
+:is(.modal,.modal-backdrop) .tech-dialog .tech-title-group .modal-title::before {content:none}
+.tech-dialog .tech-header-ticks {
+  position:absolute;bottom:11px;right:20%;height:15px;width:52px;
+  color:var(--tech-edge);pointer-events:none;
+}
+/* Flat non-gradient alternative to decorative diagonal ticks. */
+.tech-dialog .tech-header-ticks {background:none;border:0}
+.tech-dialog .tech-header-ticks::before {
+  content:"////";color:var(--tech-edge);font:bold italic 22px/14px ui-monospace,monospace;letter-spacing:-3px;
+}
+:is(.modal,.modal-backdrop) .tech-dialog .modal-close {
+  width:40px;min-width:40px;height:40px;min-height:40px;flex:none;
+  color:#f9f6ff;border:0;background:transparent;font-size:30px;font-weight:400;
+}
+:is(.modal,.modal-backdrop) .tech-dialog .modal-close:hover {
+  color:var(--tech-bright);border:1px solid var(--tech-edge-soft);background:#282036;
+}
+:is(.modal,.modal-backdrop) .tech-dialog .modal-body {
+  padding:22px 28px;
+  color:var(--text-primary);
+  background:var(--tech-deep);
+  min-width:0;min-height:0;
+}
+:is(.modal,.modal-backdrop) .tech-dialog .tech-field-glyph {
+  flex:none;display:inline-flex;align-items:center;justify-content:center;
+  width:46px;height:46px;color:var(--tech-bright);background:#443059;
+  border:1px solid #553972;border-radius:7px;
+}
+.tech-dialog .tech-field-glyph .ui-icon {width:24px;height:24px}
+.tech-dialog .modal-form-row.tech-structured-row {
+  display:flex;align-items:center;gap:16px;
+  background:var(--tech-panel);border:1px solid #40334f;
+  border-radius:7px;padding:12px 14px;min-width:0;
+}
+.tech-dialog .modal-form-row.tech-structured-row > label:not(:has(input)) {
+  display:flex;align-items:center;gap:10px;
+  color:#f0eafb;font-size:13px;font-weight:650;min-width:105px;max-width:170px;
+}
+.tech-dialog .modal-form-row.tech-structured-row > label:not(:has(input))::before {
+  content:"";height:23px;width:2px;flex:none;background:var(--tech-edge);
+}
+.tech-dialog :is(.modal-form-row,.tech-tailscale-row) :is(input:not([type=checkbox]):not([type=radio]),select,textarea) {
+  border:1px solid #7d6b9c;color:#f7f5ff;background:var(--tech-input);
+  min-height:42px;border-radius:6px;
+}
+.tech-dialog :is(input:not([type=checkbox]):not([type=radio]),select,textarea):focus-visible {
+  outline:2px solid var(--tech-bright);outline-offset:1px;
+}
+.tech-dialog .tech-dialog-footer {
+  position:relative;min-height:89px;
+  display:flex;align-items:center;justify-content:flex-end;
+  gap:16px;margin:0 !important;padding:20px 30px 23px !important;
+  border-top:1px solid #48345f;
+  background:#1b1927 !important;
+}
+.tech-dialog .tech-dialog-footer .tech-footer-ticks {
+  position:absolute;left:34px;bottom:18px;color:var(--tech-edge);
+}
+.tech-dialog .tech-footer-ticks::before {content:"////";font:bold italic 25px/16px ui-monospace,monospace;letter-spacing:-3px}
+.tech-dialog .tech-dialog-footer .tech-footer-ticks::after {
+  content:"";position:absolute;top:12px;left:52px;width:130px;
+  border-bottom:1px solid var(--tech-edge);transform:skewX(-30deg);
+}
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions) > button:not(.modal-close),
+.tech-dialog .tech-row-action {
+  min-height:44px;padding:0 23px;border:1px solid var(--tech-edge);
+  border-radius:0;background:#272137;color:#f8f3ff;font-size:14px;font-weight:650;
+  clip-path:polygon(9px 0,calc(100% - 9px) 0,100% 9px,100% calc(100% - 9px),calc(100% - 9px) 100%,9px 100%,0 calc(100% - 9px),0 9px);
+  transition:background-color .15s,border-color .15s,box-shadow .15s;
+}
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions) > button:not(.modal-close):hover:not(:disabled),
+.tech-dialog .tech-row-action:hover:not(:disabled) {
+  background:#3b2b55;border-color:var(--tech-bright);
+}
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions) > :is(.btn-primary,.primary),
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions) > button[type=submit] {
+  background:#7140ba;color:white;border-color:#b485fa;
+}
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions) > :is(.btn-primary,.primary):hover:not(:disabled) {
+  background:#8551cd;
+}
+.tech-dialog .modal-info-text:not([style*="color: var(--danger-color)"]),
+.tech-dialog .tech-tailscale-help {
+  background:#282231;color:#c8bddd;border-left:3px solid var(--tech-edge);
+  border-radius:6px;line-height:1.7;
+}
+.tech-dialog .modal-info-text[style*="color: var(--danger-color)"] {
+  border-left-color:var(--danger-color);background:#302025;color:var(--danger-color);
+}
+/* Tailscale is a full-sized reference dialog, not modal-l's 760px compact form. */
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog--tailscale {
+  width:min(1250px,calc(100vw - 64px));max-width:min(1250px,calc(100vw - 64px));
+  height:min(812px,calc(100dvh - 45px));max-height:calc(100dvh - 24px);
+}
+.tech-dialog--tailscale .tech-tailscale-body {
+  display:flex;flex-direction:column;justify-content:center;
+  gap:22px;padding:26px 34px !important;
+  overflow-y:auto;
+}
+.tech-dialog--tailscale .tech-tailscale-rows {display:flex;flex-direction:column;gap:8px}
+.tech-dialog--tailscale .tech-tailscale-row {
+  display:grid;grid-template-columns:56px minmax(150px,195px) minmax(0,1fr) 122px;
+  align-items:center;gap:14px;min-height:72px;margin:0;
+  padding:10px 16px;background:#211d2c;
+  border:1px solid #413451;border-radius:9px;
+}
+.tech-dialog--tailscale .tech-tailscale-row > label {
+  display:flex;align-items:center;gap:15px;
+  font-size:17px;font-weight:650;color:#f5f0ff;white-space:nowrap;
+}
+.tech-dialog--tailscale .tech-tailscale-row > label::before {
+  content:"";flex:none;height:30px;width:2px;background:var(--tech-edge);
+}
+.tech-dialog--tailscale .tech-tailscale-row > input {
+  margin:0;width:100%;min-width:0;height:51px;
+  padding:10px 16px;font-size:17px;
+  border:1px solid #7c6a9b;
+}
+.tech-dialog--tailscale .tech-tailscale-row > input:focus {box-shadow:none}
+.tech-dialog--tailscale .tech-tailscale-row .tech-row-action {
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  width:122px;height:52px;padding:0 12px;border:1px solid var(--tech-edge);
+  font-size:17px;white-space:nowrap;background:#282034;
+}
+.tech-dialog--tailscale .tech-row-action .ui-icon {width:22px;height:22px}
+.tech-dialog--tailscale .tech-tailscale-help {
+  display:flex;align-items:center;gap:12px;flex:none;
+  min-height:49px;margin:0;padding:10px 14px;
+  font-size:14px;color:#c3b8d4;border-left:0;background:transparent;
+}
+.tech-dialog--tailscale .tech-hint-icon {display:inline-flex;color:var(--tech-bright);flex:none}
+.tech-dialog--tailscale .tech-hint-icon .ui-icon {width:22px;height:22px}
+.tech-dialog--tailscale .tech-dialog-footer {min-height:106px}
+@media (max-width:900px) {
+  :is(.modal,.modal-backdrop) .modal-content.tech-dialog--tailscale {
+    width:calc(100vw - 24px);max-width:calc(100vw - 24px);
+  }
+  .tech-dialog--tailscale .tech-tailscale-row {
+    grid-template-columns:44px minmax(115px,140px) minmax(0,1fr) 88px;gap:9px;padding:8px;
+  }
+  .tech-dialog--tailscale .tech-tailscale-row > label {font-size:13px}
+  .tech-dialog--tailscale .tech-tailscale-row > input {font-size:12px}
+  .tech-dialog--tailscale .tech-tailscale-row .tech-row-action {width:88px;font-size:12px}
+  .tech-dialog--tailscale .tech-tailscale-body {padding:15px !important}
+}
+@media (max-width:600px) {
+  :is(.modal,.modal-backdrop) .tech-dialog .modal-header {min-height:61px;padding:10px 15px}
+  .tech-dialog .tech-title-glyph {width:31px;height:31px}
+  .tech-dialog .tech-title-glyph .ui-icon {width:25px;height:25px}
+  .tech-dialog .tech-title-divider {height:26px}
+  .tech-dialog .tech-title-group {gap:8px}
+  :is(.modal,.modal-backdrop) .tech-dialog .tech-title-group .modal-title {font-size:17px}
+  .tech-dialog .tech-header-ticks {display:none}
+  .tech-dialog--tailscale .tech-tailscale-row {
+    grid-template-columns:34px minmax(0,1fr) 85px;
+    grid-template-areas:"icon label label" "input input action";
+    min-height:0;row-gap:8px;
+  }
+  .tech-dialog--tailscale .tech-tailscale-row .tech-field-glyph {grid-area:icon;width:32px;height:32px}
+  .tech-dialog--tailscale .tech-tailscale-row > label {grid-area:label;font-size:12px}
+  .tech-dialog--tailscale .tech-tailscale-row > label::before {height:18px}
+  .tech-dialog--tailscale .tech-tailscale-row > input {grid-area:input;height:37px;min-height:37px}
+  .tech-dialog--tailscale .tech-tailscale-row .tech-row-action {grid-area:action;width:85px;height:37px;min-height:37px}
+  .tech-dialog--tailscale .tech-tailscale-body {gap:9px}
+  .tech-dialog--tailscale .tech-tailscale-help {font-size:11px;padding:6px 3px}
+  .tech-dialog .tech-dialog-footer {min-height:65px;padding:10px 15px 12px !important}
+}
+
+
+/* Actual reference-image trace: a stepped line reaching from header centre
+   toward the right, instead of a single straight underline. Pure flat color. */
+:is(.modal,.modal-backdrop) .tech-dialog > .tech-dialog-header::before {
+  content:"";
+  position:absolute;
+  z-index:2;
+  pointer-events:none;
+  left:51%;
+  right:12%;
+  bottom:-1px;
+  height:18px;
+  background:var(--tech-edge);
+  clip-path:polygon(0 100%,6.5% 15%,100% 15%,100% 24%,7% 24%,.6% 100%);
+}
+.tech-dialog .tech-dialog-actions {
+  position:relative;
+  border-top:1px solid #503665;
+  padding-top:16px;
+}
+.tech-dialog .tech-dialog-actions::before {
+  content:"////";
+  position:absolute;
+  left:4px;
+  bottom:8px;
+  font:bold italic 21px/1 ui-monospace,monospace;
+  color:var(--tech-edge);
+  letter-spacing:-3px;
+  pointer-events:none;
+}
+.tech-dialog .tech-dialog-actions::after {
+  content:"";
+  position:absolute;
+  left:48px;
+  bottom:10px;
+  width:min(140px,25%);
+  height:10px;
+  background:var(--tech-edge-soft);
+  pointer-events:none;
+  clip-path:polygon(0 100%,10% 10%,95% 10%,100% 100%,97% 100%,94% 25%,10% 25%,2% 100%);
+}
+.tech-dialog .modal-header .tech-title-glyph,
+.tech-dialog .modal-head .tech-title-glyph,
+.tech-dialog > .section-head .tech-title-glyph {
+  background:#3c2b54;
+  border:1px solid #694590;
+  border-radius:8px;
+}
+.tech-dialog--tailscale .tech-title-glyph {
+  background:transparent !important;
+  border:0 !important;
+}
+.tech-dialog {
+  filter:drop-shadow(0 7px 13px rgba(131,77,191,.20));
+}
+@media(max-width:650px){
+ :is(.modal,.modal-backdrop) .tech-dialog > .tech-dialog-header::before {left:56%;right:18%;height:12px}
+ .tech-dialog .tech-dialog-actions::after {display:none}
+}
+
+
+/* Screenshot reference calibration (1672×941 reference, ~1300×820 dialog):
+   spacious 5-row module, 94px title rail and 116px action baseline. */
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog--tailscale {
+  width:min(1300px,calc(100vw - 64px));
+  max-width:min(1300px,calc(100vw - 64px));
+  height:min(820px,calc(100dvh - 45px));
+}
+.tech-dialog--tailscale .tech-dialog-header {
+  min-height:94px;
+  padding:19px 42px;
+}
+.tech-dialog--tailscale .tech-title-glyph {
+  width:58px;
+  height:58px;
+}
+.tech-dialog--tailscale .tech-title-glyph .ui-icon {width:41px;height:41px}
+:is(.modal,.modal-backdrop) .tech-dialog--tailscale .tech-title-group .modal-title {
+  font-size:30px;
+}
+.tech-dialog--tailscale .tech-tailscale-row {min-height:84px}
+.tech-dialog--tailscale .tech-field-glyph {width:54px;height:54px}
+.tech-dialog--tailscale .tech-tailscale-row > input {height:55px}
+.tech-dialog--tailscale .tech-tailscale-row > label {font-size:19px}
+.tech-dialog--tailscale .tech-dialog-footer {min-height:116px}
+@media(max-width:900px) {
+  .tech-dialog--tailscale .tech-dialog-header {min-height:71px;padding:12px 20px}
+  .tech-dialog--tailscale .tech-title-glyph {width:42px;height:42px}
+  .tech-dialog--tailscale .tech-title-glyph .ui-icon {width:32px;height:32px}
+  :is(.modal,.modal-backdrop) .tech-dialog--tailscale .tech-title-group .modal-title {font-size:21px}
+  .tech-dialog--tailscale .tech-tailscale-row {min-height:68px}
+  .tech-dialog--tailscale .tech-tailscale-row > label {font-size:13px}
+  .tech-dialog--tailscale .tech-field-glyph {width:42px;height:42px}
+  .tech-dialog--tailscale .tech-dialog-footer {min-height:75px}
+}
+@media(max-width:600px) {
+  .tech-dialog--tailscale .tech-dialog-header {min-height:58px;padding:8px 14px}
+  :is(.modal,.modal-backdrop) .tech-dialog--tailscale .tech-title-group .modal-title {font-size:17px}
+  .tech-dialog--tailscale .tech-tailscale-row {min-height:0}
+  .tech-dialog--tailscale .tech-field-glyph {width:32px;height:32px}
+}

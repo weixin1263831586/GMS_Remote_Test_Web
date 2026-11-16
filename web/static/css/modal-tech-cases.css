@@ -1,0 +1,320 @@
+/*
+ * Purpose-built dialog bodies. Each group maps to a real HTML dialog, preserving
+ * the original IDs/handlers/data bindings. No imaginary options/actions.
+ * Reference shape: approved Tailscale angled purple console, with independent
+ * information hierarchy for every operation (not a single modal-form template).
+ */
+/* Test routing / network control: two-stage source -> destination + inventory. */
+.tech-dialog--adb-proxy .modal-body,
+.tech-dialog--usbip-attach .modal-body {
+  padding:14px 20px !important;
+  background:#181621;
+}
+.tech-dialog--adb-proxy .adb-proxy-section-head,
+.tech-dialog--usbip-attach .adb-proxy-section-head {
+  border-bottom:1px solid #59416f;
+  padding:9px 12px;background:#241e31;
+  border-radius:6px 6px 0 0;margin-top:8px;
+}
+.tech-dialog--adb-proxy .device-routing-fields,
+.tech-dialog--usbip-attach .device-routing-fields {
+  border:1px solid #48395b;border-radius:8px;padding:10px;background:#211c2d;
+}
+.tech-dialog--adb-proxy .device-routing-device-row,
+.tech-dialog--usbip-attach .device-routing-device-row {margin-top:10px}
+.tech-dialog--adb-proxy .adb-proxy-assignments,
+.tech-dialog--usbip-attach .adb-proxy-assignments {
+  border:1px solid #483959;border-radius:6px;background:#14131f;
+}
+.tech-dialog--adb-proxy .modal-buttons,
+.tech-dialog--usbip-attach > .modal-buttons {border-top:1px solid #48345f;background:#1b1826}
+
+/* Simple creation/editing: a compact stack of clearly separated input cards. */
+.tech-dialog--add-local-suite .modal-body {padding:24px 26px}
+.tech-dialog--add-local-suite .modal-form-row {background:#231d2d;border-radius:8px}
+.tech-dialog--category .modal-body {padding:21px 24px}
+.tech-dialog--category .tech-structured-row {align-items:center;min-height:76px}
+.tech-dialog--device-group .modal-body {padding:22px}
+.tech-dialog--device-group .group-picklist {background:#141320;border:1px solid #6b5984;border-radius:6px;padding:10px}
+.tech-dialog--device-group .modal-form-row:has(.group-picklist) {min-height:175px}
+.tech-dialog--client-account-switch .modal-body {background:#211b2c}
+.tech-dialog--client-account-switch .modal-body > :first-child {border-color:#554069}
+.tech-dialog--sidebar-visibility .modal-body {background:#1c1928}
+.tech-dialog--sidebar-visibility .modal-body :is(label,.checkbox-row) {border-radius:6px}
+.tech-dialog--ui-control .modal-body {padding:22px 24px}
+.tech-dialog--ui-control .modal-body :is(.modal-fieldset,fieldset) {background:#201c2c;padding:13px}
+.tech-dialog--tool .modal-body {padding:20px 23px}
+.tech-dialog--tool .tech-structured-row {align-items:flex-start;min-height:66px}
+.tech-dialog--tool .tech-structured-row > label {padding-top:10px}
+.tech-dialog--ut-category .modal-body {padding:22px 25px}
+.tech-dialog--ut-category .tech-structured-row {min-height:71px}
+.tech-dialog--ut-tool .modal-body {padding:18px 24px}
+.tech-dialog--ut-tool .tech-structured-row {margin-bottom:9px}
+.tech-dialog--ut-tool .modal-info-text {margin-top:15px}
+.tech-dialog--usage-examples .modal-body {padding:21px 24px;line-height:1.75}
+.tech-dialog--usage-examples :is(pre,code) {background:#11121b;color:#d9c8f2}
+
+/* Credentials and identity: no invented "start detection" action. */
+.tech-dialog--username-detect.modal-content {
+  width:min(780px,calc(100vw - 32px));max-width:min(780px,calc(100vw - 32px));
+  min-height:min(495px,calc(100dvh - 24px));
+}
+.tech-dialog--username-detect .modal-body {padding:26px 32px}
+.tech-dialog--username-detect .tech-structured-row {min-height:70px;margin-bottom:11px}
+.tech-dialog--username-detect .tech-structured-row label {min-width:128px}
+.tech-dialog--username-detect .modal-ssh-info {
+  background:#1b302b;border:1px solid #385f58;border-left:3px solid #39c994;
+  color:#b9ddd2;padding:12px;font-size:12px;
+}
+.tech-dialog--username-detect .modal-buttons {border-top:1px solid #513c66;padding-top:16px}
+.tech-dialog--device-password .tech-structured-row {min-height:68px;margin-bottom:11px}
+.tech-dialog--device-password .modal-body {padding:22px 25px}
+.tech-dialog--elevate .tech-structured-row {min-height:65px;margin-bottom:9px}
+.tech-dialog--elevate .modal-body {padding:21px 25px}
+.tech-dialog--vpn-credential .tech-structured-row {min-height:74px}
+.tech-dialog--vpn-credential .modal-body {padding:23px}
+.tech-dialog--firmware-share-password .tech-structured-row {min-height:78px}
+.tech-dialog--firmware-share-password .modal-body {padding:23px 27px}
+.tech-dialog--wifi .tech-structured-row {min-height:72px;margin-bottom:10px}
+.tech-dialog--wifi .modal-body {padding:22px}
+.tech-dialog--sn .tech-structured-row {min-height:71px}
+.tech-dialog--sn .modal-body {padding:22px}
+.tech-dialog--gms-assistant-config .tech-structured-row {min-height:74px}
+.tech-dialog--gms-assistant-config .modal-body {padding:21px 26px}
+
+/* Test suite processing and firmware: independent two-stage containers. */
+.tech-dialog--extract-suite .modal-body {padding:20px 25px}
+.tech-dialog--extract-suite .modal-fieldset {background:#221e30;border-color:#534269}
+.tech-dialog--gsi .modal-body {padding:20px 24px}
+.tech-dialog--gsi .modal-fieldset {padding:13px;background:#201b2b;border-color:#524265}
+.tech-dialog--firmware.modal-content {
+  width:min(1000px,calc(100vw - 42px));
+  max-width:min(1000px,calc(100vw - 42px));
+}
+.tech-dialog--firmware .modal-body {
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  align-content:start;gap:16px;padding:22px 26px;
+}
+.tech-dialog--firmware .modal-fieldset {
+  margin:0;padding:17px;border:1px solid #56406e;
+  background:#211c2c;border-radius:9px;min-width:0;
+}
+.tech-dialog--firmware .modal-fieldset:first-child {border-top:3px solid #b589fa}
+.tech-dialog--firmware .modal-fieldset:nth-child(2) {border-top:3px solid #8f6bcc}
+.tech-dialog--firmware .modal-fieldset-title {
+  color:#eee1ff;font-size:15px;padding:0 0 9px;
+  border-bottom:1px solid #56406e;margin-bottom:12px;
+}
+.tech-dialog--firmware .modal-fieldset .modal-form-row {
+  flex-wrap:wrap;align-items:flex-start;gap:6px;
+}
+.tech-dialog--firmware .modal-fieldset .modal-form-row > label {font-weight:650}
+.tech-dialog--firmware .modal-fieldset .input-with-btn {min-width:0;flex:1}
+.tech-dialog--firmware .modal-info-text,
+.tech-dialog--firmware .modal-buttons {grid-column:1/-1;margin-top:0}
+.tech-dialog--firmware .modal-info-text {
+  background:#33281c;color:#e7b854;border-left-color:#e7b854;
+}
+.tech-dialog--firmware .modal-buttons {padding-top:14px;border-top:1px solid #4c3d5f}
+
+/* Report copies are fixed 760x500 by runtime-ui contract. Keep dimensions. */
+.tech-dialog--report-copy .modal-body {padding:14px 20px;overflow-y:auto}
+.tech-dialog--report-copy .modal-body > div[style*="display:grid"] {
+  gap:10px !important;align-items:stretch !important;
+}
+.tech-dialog--report-copy .modal-body > div[style*="display:grid"] > div:first-child,
+.tech-dialog--report-copy .modal-body > div[style*="display:grid"] > div:last-child {
+  min-width:0;border:1px solid #544068;
+  background:#211b2c;padding:10px 12px;border-radius:7px;
+}
+.tech-dialog--report-copy .modal-body > div[style*="display:grid"] label {color:#bfb0d4}
+.tech-dialog--report-copy .modal-body > div[style*="display:grid"] select {
+  background:#14131d;border-color:#695781;height:36px;
+}
+.tech-dialog--report-copy .modal-body > div[style*="display:grid"] > div:nth-child(2) {
+  color:#c39af6 !important;font-size:25px !important;
+}
+.tech-dialog--report-copy .modal-buttons {border-top:1px solid #533f68;padding-top:8px}
+
+/* Workspaces: preserve tabs, internal scroll, data tables, independent widths. */
+.tech-dialog--device-config .dcfg-header {padding:14px 20px;min-height:68px}
+.tech-dialog--device-config .dcfg-tabs {border-bottom-color:#65467a}
+.tech-dialog--device-config .dcfg-body {background:#181622}
+.tech-dialog--device-config :is(.dcfg-panel,.dcfg-tree,.dcfg-section) {
+  border-color:#53436b;
+}
+.tech-dialog--report-diagnosis .report-diagnosis-header {
+  background:#1a1727;min-height:64px;padding:12px 22px;
+}
+.tech-dialog--report-diagnosis .report-diagnosis-body {background:#171520}
+.tech-dialog--report-diagnosis :is(.report-diagnosis-card,.report-diagnosis-panel) {
+  background:#201b2c;border-color:#534067;
+}
+.tech-dialog--firmware-share .modal-body {background:#191722;padding:18px 24px}
+.tech-dialog--firmware-share .modal-body > div[style*="display: grid"] {
+  padding:13px;background:#211c2d;border:1px solid #524066;border-radius:8px;
+}
+.tech-dialog--firmware-share .modal-body table {
+  background:#181621;border-collapse:collapse;
+}
+.tech-dialog--firmware-share .modal-body thead {color:#e8d6ff}
+.tech-dialog--weekly-report .modal-body {background:#181723;padding:17px}
+.tech-dialog--weekly-report :is(.weekly-report-output,pre,textarea) {
+  background:#14121f;border-color:#604876;
+}
+.tech-dialog--kb-upload .modal-body {background:#191724}
+.tech-dialog--kb-upload :is(.drop-zone,.upload-zone) {
+  border:1px dashed #9f73de;background:#231a32;border-radius:9px;
+}
+.tech-dialog--test-results .modal-body {background:#191621}
+.tech-dialog--test-results :is(table,pre) {background:#15131e}
+.tech-dialog--guide-image .modal-body {background:#15131e}
+.tech-dialog--guide-image img {max-width:100%;object-fit:contain}
+.tech-dialog--file-browser .modal-body {padding:18px 22px}
+.tech-dialog--file-browser :is(.file-browser-tree,.file-browser-list) {
+  background:#191621;border-color:#56446e;
+}
+.tech-dialog--agent-enrollment .modal-body {background:#191724}
+.tech-dialog--agent-enrollment :is(.agent-access-panel,.agent-access-section) {
+  border:1px solid #554168;border-radius:7px;background:#231d30;
+}
+.tech-dialog--mainline-sync .modal-body {padding:17px 22px}
+.tech-dialog--mainline-sync :is(.status-row,.progress-wrap) {
+  background:#221b2e;border-color:#5d4576;
+}
+.tech-dialog--update-radar-settings .modal-body {padding:15px 22px}
+.tech-dialog--update-radar-settings .radar-task-fieldset {
+  background:#221c2d;border-color:#5a4370;
+}
+.tech-dialog--install-guide .modal-body {padding:19px 24px}
+.tech-dialog--install-guide :is(pre,code) {background:#15121e;color:#d3afff}
+.tech-dialog--sshd-install-guide .modal-body {padding:18px 22px}
+.tech-dialog--sshd-install-guide :is(pre,code) {background:#15121e;color:#d3afff}
+.tech-dialog--confirm .modal-body {padding:23px 26px}
+.tech-dialog--confirm #confirm-message {
+  padding:16px;background:#2f222b !important;
+  border:1px solid #815060;border-left:3px solid #f06b78;
+  color:#ffc0c7;border-radius:7px;
+}
+.tech-dialog--confirm #confirm-ok-btn {
+  background:#a63b51 !important;border-color:#e77b8f !important;color:white;
+}
+
+/* Isolated workspace dialogs: match the screenshot shell but preserve their
+   original fields, data mutations and custom independently-sized panels. */
+.tech-dialog--redmine-reset .modal-body {padding:22px}
+.tech-dialog--redmine-reset .modal-info-text {border-left-color:#f06b78}
+.tech-dialog--redmine-user .modal-body {padding:22px}
+.tech-dialog--redmine-department .modal-body {padding:22px}
+.tech-dialog--redmine-project .modal-body {padding:22px}
+.tech-dialog--redmine-settings .modal-body {padding:18px 22px}
+.tech-dialog--redmine-trend-range .modal-body {padding:20px 23px}
+.tech-dialog--redmine-trend-detail .modal-body {padding:18px 22px;background:#171621}
+.tech-dialog--redmine-batch-import .modal-body {padding:20px 25px}
+.tech-dialog--redmine-knowledge .modal-body {background:#191622}
+.tech-dialog--redmine-reference .modal-body {padding:22px}
+.tech-dialog--redmine-internal-create .modal-body {padding:22px}
+.tech-dialog--gerrit-settings .modal-body {padding:16px 23px}
+.tech-dialog--gerrit-personal .modal-body {padding:22px}
+.tech-dialog--gerrit-department .modal-body {padding:22px}
+.tech-dialog--gerrit-owner .modal-body {padding:22px}
+.tech-dialog--gerrit-trend-range .modal-body {padding:22px}
+.tech-dialog--gerrit-trend-detail .modal-body {background:#171520}
+.tech-dialog--gerrit-route .modal-body {padding:22px}
+.tech-dialog--cluster-onboarding .section-head,
+.tech-dialog--cluster-worker-config .section-head {
+  border-bottom:1px solid #684b85;
+}
+.tech-dialog--cluster-onboarding .onboarding-grid {gap:12px}
+.tech-dialog--cluster-worker-config .modal-body {padding:20px}
+.tech-dialog--serial-binding .modal-body {padding:21px 23px}
+.tech-dialog--serial-binding .modal-actions {border-top:1px solid #50395f}
+
+/* Mobile: no content clipping or sideways overflow of large multi-pane forms. */
+@media(max-width:800px) {
+ .tech-dialog--firmware .modal-body {grid-template-columns:1fr}
+ .tech-dialog--firmware .modal-fieldset {grid-column:1}
+ .tech-dialog--report-copy .modal-body > div[style*="display:grid"] {gap:5px !important}
+ .tech-dialog--report-copy .modal-body > div[style*="display:grid"] > div:nth-child(2) {
+   padding:0 !important;font-size:14px !important;
+ }
+ .tech-dialog--username-detect .modal-body {padding:15px}
+}
+@media(max-width:520px) {
+ .tech-dialog--username-detect .tech-structured-row,
+ .tech-dialog--device-group .tech-structured-row,
+ .tech-dialog--wifi .tech-structured-row {
+   flex-wrap:wrap;gap:6px;padding:9px;
+ }
+ .tech-dialog--username-detect .tech-structured-row > input,
+ .tech-dialog--device-group .tech-structured-row > input {flex:1 1 150px}
+ .tech-dialog--firmware .modal-body {padding:12px}
+}
+
+
+/* Live-generated route probe dialog owns SVG corner geometry already.
+   Align it with approved purple Tech reference without fabricating ping results. */
+#route-check-dialog .modal-content.modal-s {
+  width:min(920px,calc(100vw - 40px));
+  max-width:min(920px,calc(100vw - 40px));
+  min-height:515px;
+  background:transparent;
+}
+#route-check-dialog .modal-header {
+  min-height:79px;padding:15px 32px 11px;
+}
+#route-check-dialog .modal-title {font-size:24px;gap:16px}
+#route-check-dialog .route-check-badge {
+  width:45px;height:45px;
+  background:#403056;border-color:#9e6add;
+  border-radius:8px;
+}
+#route-check-dialog .route-check-badge svg {width:29px;height:29px}
+#route-check-dialog .route-check-title-sep {height:30px;width:2px}
+#route-check-dialog .route-check-slashes {background:none;width:50px;height:auto}
+#route-check-dialog .route-check-slashes::before {
+  content:"////";font:bold italic 23px/1 ui-monospace,monospace;
+  letter-spacing:-3px;color:#c18af4;
+}
+#route-check-dialog .route-check-form {padding:21px 40px 18px}
+#route-check-dialog .route-check-form .form-group {
+  display:grid;grid-template-columns:180px minmax(0,1fr);gap:9px 14px;
+  align-items:center;
+  background:#211c2c;border:1px solid #514066;
+  border-radius:8px;padding:15px 18px;
+  margin-bottom:11px;
+}
+#route-check-dialog .route-check-form .form-group label {
+  font-size:16px;margin:0;
+}
+#route-check-dialog .route-check-form .form-group small {
+  grid-column:2;margin:-5px 0 0;
+}
+#route-check-dialog .route-check-field {min-height:50px}
+#route-check-dialog .route-check-actions {
+  min-height:90px;padding:17px 28px 22px;
+  background:#1b1926;
+}
+#route-check-dialog .route-check-actions .btn-xxs {
+  min-height:46px;border-radius:6px;font-size:15px;
+}
+#route-check-dialog .route-check-actions .btn-primary,
+#route-check-dialog .route-check-actions .btn-primary:hover:not(:disabled) {
+  background:#7545b7;
+  border-color:#bb8dfa;color:white;
+  box-shadow:none;
+}
+#route-check-dialog .route-check-actions .btn-primary:hover:not(:disabled) {
+  background:#8f53cf;
+}
+@media(max-width:650px) {
+  #route-check-dialog .modal-content.modal-s {width:calc(100vw - 24px);max-width:calc(100vw - 24px)}
+  #route-check-dialog .modal-header {min-height:64px;padding:8px 15px}
+  #route-check-dialog .modal-title {font-size:16px;gap:7px}
+  #route-check-dialog .route-check-badge {width:32px;height:32px}
+  #route-check-dialog .route-check-form {padding:11px 14px}
+  #route-check-dialog .route-check-form .form-group {grid-template-columns:minmax(0,1fr);gap:6px;padding:10px}
+  #route-check-dialog .route-check-form .form-group small {grid-column:1;margin:0}
+  #route-check-dialog .route-check-actions {min-height:70px;padding:12px}
+  #route-check-dialog .route-check-slashes {display:none}
+}

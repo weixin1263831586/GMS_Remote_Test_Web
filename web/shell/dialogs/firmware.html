@@ -1,8 +1,9 @@
 <div id="firmware-modal" class="modal">
-        <div class="modal-content modal-s">
-            <div class="modal-header">
-                <span class="modal-title">烧写固件</span>
-                <button type="button" class="modal-close" aria-label="关闭" data-click="closeFirmwareModal">&times;</button>
+        <div class="modal-content modal-s tech-dialog tech-dialog--firmware">
+        <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#chip"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">烧写固件</span></div>
+                <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeFirmwareModal">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="modal-fieldset">
@@ -46,7 +47,7 @@
                 <div class="modal-info-text">
                     ⚠️ 烧写将重启设备进入刷机模式并清除数据，请确认目标设备。
                 </div>
-                <div class="modal-buttons">
+                <div class="modal-buttons tech-dialog-actions">
                     <button class="btn-xxs" data-click="closeFirmwareModal">取消</button>
                     <button class="btn-xxs btn-primary" data-click="submitFirmwareBurn">开始烧写</button>
                 </div>

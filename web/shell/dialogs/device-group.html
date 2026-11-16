@@ -1,23 +1,26 @@
 <div id="device-group-modal" class="modal" style="display: none;">
-        <div class="modal-content modal-m">
-            <div class="modal-header">
-                <span class="modal-title" id="device-group-modal-title">新建分组</span>
-                <button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseModal" data-a0="device-group-modal">&times;</button>
+        <div class="modal-content modal-m tech-dialog tech-dialog--device-group">
+        <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#grid"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title" id="device-group-modal-title">新建分组</span></div>
+                <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseModal" data-a0="device-group-modal">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="modal-form-row">
+                <div class="modal-form-row tech-structured-row">
+                    <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#users"></use></svg></span>
                     <label>分组名称:</label>
                     <input type="hidden" id="device-group-edit-id"/>
                     <input type="text" id="device-group-name" class="host-input" placeholder="如：产线A / Android17回归" autocomplete="off"/>
                 </div>
-                <div class="modal-form-row" style="align-items:flex-start;">
+                <div class="modal-form-row tech-structured-row" style="align-items:flex-start;">
+                    <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#device"></use></svg></span>
                     <label>成员设备:</label>
                     <div id="device-group-picklist" class="group-picklist" style="flex:1; max-height:240px; overflow-y:auto;"></div>
                 </div>
                 <div class="modal-info-text" style="margin-top:8px;">
                     💡 离线设备也可勾选保留在组内，重新上线后自动归位
                 </div>
-                <div class="modal-buttons">
+                <div class="modal-buttons tech-dialog-actions">
                     <button class="btn-xxs" data-click="_actCloseModal" data-a0="device-group-modal">取消</button>
                     <button class="btn-xxs btn-primary" data-click="submitDeviceGroup">保存</button>
                 </div>

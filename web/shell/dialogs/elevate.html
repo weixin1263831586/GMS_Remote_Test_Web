@@ -1,20 +1,24 @@
 <div id="elevate-modal" class="modal">
-        <div class="modal-content modal-s">
-            <div class="modal-header">
-                <span class="modal-title">🔐 管理员验证</span>
-                <button type="button" class="modal-close" aria-label="关闭" data-click="cancelElevate">&times;</button>
+        <div class="modal-content modal-s tech-dialog tech-dialog--elevate">
+        <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#shield"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">🔐 管理员验证</span></div>
+                <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="cancelElevate">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="elevate-form" data-submit="submitElevateForm" data-prevent autocomplete="off">
-                    <div class="modal-form-row">
+                    <div class="modal-form-row tech-structured-row">
+                        <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#user"></use></svg></span>
                         <label>操作:</label>
                         <input type="text" id="elevate-action-label" readonly value="需要管理员权限" />
                     </div>
-                    <div class="modal-form-row">
+                    <div class="modal-form-row tech-structured-row">
+                        <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#lock"></use></svg></span>
                         <label>管理员账号:</label>
                         <input type="text" id="elevate-username" placeholder="管理员账号" autocomplete="username" />
                     </div>
-                    <div class="modal-form-row">
+                    <div class="modal-form-row tech-structured-row">
+                        <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#clock"></use></svg></span>
                         <label>管理员密码:</label>
                         <div class="password-input-wrap">
                             <input type="password" id="elevate-password" placeholder="管理员密码" data-keypress="submitElevateForm" data-key="Enter" data-prevent autocomplete="current-password" />
@@ -26,7 +30,7 @@
                     <small>该操作需要管理员权限。验证通过后在当前会话期间执行同类操作无需重复输入，会话过期后需重新验证。</small>
                 </div>
                 <div id="elevate-message" class="auth-message" style="color: var(--danger-color); min-height: 16px;"></div>
-                <div class="modal-buttons">
+                <div class="modal-buttons tech-dialog-actions">
                     <button class="btn-xxs" data-click="cancelElevate">取消</button>
                     <button class="btn-xxs btn-primary" data-click="submitElevateForm">提权</button>
                 </div>

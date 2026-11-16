@@ -28,9 +28,16 @@ function createAnalysisModal(type, title, loadingMessage) {
     modal.id = modalId;
     modal.className = 'modal';
     modal.innerHTML = `
-        <div class="modal-content modal-xl">
-            <div class="modal-header">
-                <span class="modal-title"></span>
+        <div class="modal-content modal-xl tech-dialog tech-dialog--dynamic-analysis">
+            <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span>
+            <span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group">
+                    <span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#search"></use></svg></span>
+                    <span class="tech-title-divider" aria-hidden="true"></span>
+                    <span class="modal-title"></span>
+                </div>
+                <span class="tech-header-ticks" aria-hidden="true"></span>
                 <button type="button" class="modal-close" aria-label="关闭">&times;</button>
             </div>
             <div class="modal-body">

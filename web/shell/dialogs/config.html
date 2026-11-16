@@ -1,13 +1,14 @@
 <div id="config-modal" class="modal">
-        <div class="modal-content modal-l modal-pin">
-            <div class="modal-header">
-                <span class="modal-title">系统配置</span>
-                <button type="button" class="modal-close" aria-label="关闭" data-click="closeModal">&times;</button>
+        <div class="modal-content modal-l modal-pin tech-dialog tech-dialog--config">
+        <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#settings"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">系统配置</span></div>
+                <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeModal">&times;</button>
             </div>
             <div class="modal-body" id="config-modal-body">
                 <!-- 动态生成配置表单 -->
             </div>
-            <div id="config-modal-footer" class="modal-buttons" style="display:none;">
+            <div id="config-modal-footer" class="modal-buttons tech-dialog-actions" style="display:none;">
                 <button class="btn-xxs" data-click="closeModal">取消</button>
                 <button class="btn-xxs btn-primary" data-click="saveConfig">保存</button>
             </div>

@@ -1,32 +1,38 @@
 <div id="tool-modal" class="modal" style="display: none;">
-            <div class="modal-content modal-m">
-                <div class="modal-header">
-                    <span class="modal-title" id="tool-modal-title">添加工具</span>
-                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeToolModal">&times;</button>
+            <div class="modal-content modal-m tech-dialog tech-dialog--tool">
+        <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+                <div class="modal-header tech-dialog-header">
+                    <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#tool"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title" id="tool-modal-title">添加工具</span></div>
+                    <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeToolModal">&times;</button>
                 </div>
                 <div class="modal-body">
                     <input type="hidden" id="tool-index" value="-1" />
-                    <div class="modal-form-row">
+                    <div class="modal-form-row tech-structured-row">
+                        <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#grid"></use></svg></span>
                         <label>分类:</label>
                         <select id="tool-category" class="combo-box">
                             <!-- 分类选项将由 JavaScript 动态生成 -->
                         </select>
                     </div>
-                    <div class="modal-form-row">
+                    <div class="modal-form-row tech-structured-row">
+                        <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#edit"></use></svg></span>
                         <label>标题:</label>
                         <input type="text" id="tool-title" placeholder="例如：Google" />
                     </div>
-                    <div class="modal-form-row">
+                    <div class="modal-form-row tech-structured-row">
+                        <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#star"></use></svg></span>
                         <label>图标:</label>
                         <input type="text" id="tool-icon" placeholder="输入Emoji或图片URL" style="width: 100%;" />
                     </div>
-                    <div class="modal-form-row" id="emoji-picker-row" style="margin-bottom: 8px;">
+                    <div class="modal-form-row tech-structured-row" id="emoji-picker-row" style="margin-bottom: 8px;">
+                        <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#info"></use></svg></span>
                         <label></label>
                         <div id="emoji-picker" class="emoji-picker-grid">
                             <!-- Emoji 选项将由 JavaScript 动态生成 -->
                         </div>
                     </div>
-                    <div class="modal-form-row">
+                    <div class="modal-form-row tech-structured-row">
+                        <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#folder"></use></svg></span>
                         <label>链接:</label>
                         <input type="text" id="tool-url" placeholder="例如：https://www.google.com" data-blur="autoFetchIcon" data-r0="value" />
                     </div>
@@ -39,7 +45,7 @@
                             <img id="preview-image" src="" alt="预览" style="width: 40px; height: 40px; border-radius: 3px; border: 1px solid var(--border-color); object-fit: contain;">
                         </div>
                     </div>
-                    <div class="modal-buttons">
+                    <div class="modal-buttons tech-dialog-actions">
                         <button class="btn-xxs" data-click="closeToolModal">取消</button>
                         <button class="btn-xxs btn-primary" data-click="saveTool">保存</button>
                     </div>

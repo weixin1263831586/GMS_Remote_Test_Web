@@ -1,11 +1,12 @@
 <div id="install-guide-modal" class="modal">
-        <div class="modal-content modal-m">
-            <div class="modal-header">
-                <span class="modal-title">⚠️ usbipd 安装指南</span>
-                <button type="button" class="modal-close" aria-label="关闭" data-click="closeInstallGuide">&times;</button>
+        <div class="modal-content modal-m tech-dialog tech-dialog--install-guide">
+        <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#download"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">⚠️ usbipd 安装指南</span></div>
+                <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeInstallGuide">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="modal-info-text" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin-bottom: 15px; border-radius: 3px; color: #856404;">
+                <div class="modal-info-text" style="background: #302717; border-left: 4px solid var(--warning-color); padding: 10px; margin-bottom: 15px; border-radius: 6px; color: var(--warning-color);">
                     📋 检测到 Windows 主机缺少必要组件，需要安装 usbipd
                 </div>
 
@@ -25,12 +26,12 @@
                 <div id="install-progress" style="display: none; margin-bottom: 15px;">
                     <div style="font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">⏳ 正在自动安装...</div>
                     <div style="background: var(--border-color); border-radius: 3px; height: 6px; overflow: hidden;">
-                        <div id="install-progress-bar" style="background: var(--primary-gradient); height: 100%; width: 0%; transition: width 0.3s;"></div>
+                        <div id="install-progress-bar" style="background: var(--primary-color); height: 100%; width: 0%; transition: width 0.3s;"></div>
                     </div>
                     <div id="install-status" style="margin-top: 4px; font-size: 15px; color: var(--text-secondary);">准备安装...</div>
                 </div>
 
-                <div class="modal-buttons">
+                <div class="modal-buttons tech-dialog-actions">
                     <button class="btn-xxs" data-click="closeInstallGuide">关闭</button>
                     <button class="btn-xxs btn-primary" data-click="autoInstallUsbipd"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#play"></use></svg> 一键自动安装</button>
                 </div>
