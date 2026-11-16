@@ -432,35 +432,10 @@ async def list_gms_update_monitor_bulletins(
     offset: int = Query(0, ge=0),
 ):
     conn = _get_db()
-    where = []
-    params: list[str] = []
-    if year:
-        where.append('year = ?')
-        params.append(year)
-    if kind:
-        where.append('patch_kind = ?')
-        params.append(kind)
-    if android_version:
-        where.append("android_versions LIKE ? ESCAPE \"\\\"")
-        params.append(f"%{_like_param(android_version)}%")
-    if q:
-        like = _like_param(q)
-        where.append('(patch_id LIKE ? ESCAPE "\\" OR description LIKE ? ESCAPE "\\" OR deadline LIKE ? ESCAPE "\\")')
-        params.extend([like, like, like])
-    where_sql = f"WHERE {' AND '.join(where)}" if where else ''
     with conn:
-        total = conn.execute(f'SELECT COUNT(*) FROM gms_update_bulletin_patches {where_sql}', params).fetchone()[0]
-        rows = conn.execute(
-            f"""
-            SELECT *
-            FROM gms_update_bulletin_patches
-            {where_sql}
-            ORDER BY CAST(year AS INTEGER) DESC, patch_id DESC
-            LIMIT ? OFFSET ?
-            """,
-            [*params, limit, offset],
-        ).fetchall()
-    return {'success': True, 'data': {'items': _rows_to_dicts(rows)}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
+        result = query_bulletin_patches(conn, q=q, year=year, kind=kind, android_version=android_version,
+                                        limit=limit, offset=offset)
+    return {'success': True, 'data': result, 'meta': {'total': result['total'], 'limit': limit, 'offset': offset}}
 
 
 @router.get('/mainline')

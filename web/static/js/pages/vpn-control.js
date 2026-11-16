@@ -43,29 +43,55 @@ async function checkSshd() {
 async function checkRouting(targetHost) {
     const dialog = document.createElement('div');
     dialog.id = 'route-check-dialog';
-    dialog.className = 'route-check-dialog';
+    dialog.className = 'modal route-check-dialog';
     dialog.innerHTML = `
-        <div class="route-check-content">
-            <div class="route-check-header">
-                <h3>📡 检查路由连通性</h3>
-                <button class="route-check-close" aria-label="关闭">&times;</button>
+        <div class="modal-content modal-s">
+            <svg class="route-check-corner is-tl" viewBox="0 0 36 44" aria-hidden="true"><polyline points="35,0.6 14,0.6 0.6,20 0.6,43"/></svg>
+            <svg class="route-check-corner is-tr" viewBox="0 0 36 44" aria-hidden="true"><polyline points="1,0.6 22,0.6 35.4,20 35.4,43"/></svg>
+            <svg class="route-check-corner is-bl" viewBox="0 0 36 44" aria-hidden="true"><polyline points="0.6,1 0.6,24 14,43.4 35,43.4"/></svg>
+            <svg class="route-check-corner is-br" viewBox="0 0 36 44" aria-hidden="true"><polyline points="1,43.4 22,43.4 35.4,24 35.4,1"/></svg>
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <span class="route-check-badge" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M4.6 10.2a10 10 0 0 1 14.8 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7.5 13.2a6 6 0 0 1 9 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="17.1" r="1.35" fill="currentColor"/></svg></span>
+                    <span class="route-check-title-sep" aria-hidden="true"></span>
+                    检查路由连通性
+                </h3>
+                <span class="route-check-slashes" aria-hidden="true"></span>
+                <button type="button" class="modal-close route-check-close" aria-label="关闭">&times;</button>
             </div>
-            <div class="route-check-form">
+            <svg class="route-check-rule" viewBox="0 0 640 16" preserveAspectRatio="none" aria-hidden="true">
+                <polyline points="0,1 468,1 498,14 640,14" fill="none" stroke="currentColor" stroke-width="1.25" vector-effect="non-scaling-stroke"/>
+            </svg>
+            <div class="modal-body route-check-form">
                 <div class="form-group">
                     <label for="test-host-ip">测试主机IP:</label>
-                    <input type="text" id="test-host-ip" placeholder="例如: 192.168.1.100" />
-                    <small>从配置文件读取的ubuntu_host</small>
+                    <div class="route-check-field">
+                        <span class="route-check-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="4" width="18" height="12" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 20h8M12 16v4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+                        <input type="text" id="test-host-ip" placeholder="例如: 192.168.1.100" />
+                    </div>
+                    <small>从配置文件读取的 ubuntu_host</small>
                 </div>
                 <div class="form-group">
                     <label for="client-ip">客户端IP:</label>
-                    <input type="text" id="client-ip" placeholder="例如: 192.168.2.100" />
-                    <small>您当前浏览器的IP地址</small>
-                </div>
-                <div class="route-check-actions">
-                    <button id="ping-test-btn" class="btn-primary">🔍 测试连通性</button>
-                    <button id="close-dialog-btn" class="btn-secondary">关闭</button>
+                    <div class="route-check-field">
+                        <span class="route-check-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><rect x="5" y="5" width="14" height="9" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3 18.5h18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+                        <input type="text" id="client-ip" placeholder="例如: 192.168.2.100" />
+                    </div>
+                    <small>您当前浏览器的 IP 地址</small>
                 </div>
                 <div id="ping-result" class="ping-result"></div>
+            </div>
+            <div class="route-check-actions modal-buttons">
+                <svg class="route-check-ticks" viewBox="0 0 132 20" aria-hidden="true">
+                    <g fill="none" stroke="#d5c6ff" stroke-width="3.4" stroke-linecap="butt">
+                        <path d="M5 15 L12 5"/>
+                        <path d="M16 15 L23 5"/>
+                        <path d="M27 15 L34 5"/>
+                    </g>
+                    <path d="M40 10 H128" stroke="#b79bff" stroke-width="1.2"/>
+                </svg>
+                <button id="ping-test-btn" class="btn-xxs btn-primary" type="button"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M14.8 14.8 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>测试连通性</button>
+                <button id="close-dialog-btn" class="btn-xxs" type="button">关闭</button>
             </div>
         </div>
     `;

@@ -28,7 +28,7 @@ function createAnalysisModal(type, title, loadingMessage) {
     modal.id = modalId;
     modal.className = 'modal';
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 900px; max-height: min(90vh, calc(100dvh - 16px));">
+        <div class="modal-content modal-xl">
             <div class="modal-header">
                 <span class="modal-title"></span>
                 <button type="button" class="modal-close" aria-label="关闭">&times;</button>

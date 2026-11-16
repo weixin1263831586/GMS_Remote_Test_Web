@@ -337,52 +337,8 @@ select option {
     min-height: 40px;
 }
 
-/* ==================== Modal ==================== */
-.modal {
-    display: none;
-    position: fixed;
-    inset: 0;
-    z-index: var(--modal-z-index, 10000);
-    width: auto;
-    height: auto;
-    padding: clamp(8px, 2.5vw, 20px);
-    box-sizing: border-box;
-    background: rgba(0, 0, 0, 0.7);
-    overflow: hidden;
-    overscroll-behavior: contain;
-}
-
-.modal.show {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.modal-content {
-    background: var(--light-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    width: min(500px, 100%);
-    max-width: 500px;
-    max-height: min(80vh, calc(100dvh - 16px));
-    min-width: 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden; /* 防止整个modal-content滚动 */
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
-}
-
-/* ==================== 弹框统一尺寸档位 ==================== */
-.modal-content.modal-xs { width: min(420px, 96vw); max-width: min(420px, 96vw); min-height: 180px; }
-.modal-content.modal-s  { width: min(500px, 96vw); max-width: min(500px, 96vw); min-height: 240px; }
-.modal-content.modal-m  { width: min(620px, 96vw); max-width: min(620px, 96vw); min-height: 280px; max-height: min(620px, 85vh, calc(100dvh - 16px)); }
-.modal-content.modal-l  { width: min(760px, 96vw); max-width: min(760px, 96vw); max-height: min(85vh, calc(100dvh - 16px)); }
-
-/* 跨主机报告拷贝：异步加载和状态提示不改变弹框外框尺寸。 */
+/* 跨主机报告拷贝：异步加载和状态提示不改变弹框外框高度。宽度走 modal-l。 */
 #report-copy-modal .report-copy-modal-content {
-    width: 760px;
-    max-width: calc(100vw - 40px);
     height: 500px;
     max-height: calc(100dvh - 40px);
 }
@@ -399,12 +355,8 @@ select option {
     box-sizing: border-box;
 }
 
-/* ADB Proxy 与 USB/IP 接入/断开共用同一弹框骨架。 */
+/* ADB Proxy 与 USB/IP 接入/断开共用同一弹框骨架。外框尺寸走 modal-m modal-pin。 */
 .device-routing-modal-content {
-    width: min(620px, 100%);
-    max-width: 620px;
-    height: min(540px, 88vh, calc(100dvh - 16px));
-    max-height: min(540px, 88vh, calc(100dvh - 16px));
     resize: none;
 }
 
@@ -643,86 +595,7 @@ select option {
     }
 }
 
-/* 设备配置弹框加宽大尺寸 */
-#device-config-modal .modal-content {
-    width: 96vw;
-    max-width: 1500px;
-    height: 92vh;
-    max-height: 92vh;
-    min-height: 0;
-}
-
-.modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    min-width: 0;
-    padding: 15px 20px;
-    border-bottom: 1px solid var(--border-color);
-    flex-shrink: 0; /* 防止header被压缩 */
-    position: relative; /* 相对定位，固定在顶部 */
-    background: var(--light-bg);
-    z-index: 10;
-}
-
-.modal-title {
-    min-width: 0;
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 1.35;
-    color: var(--text-primary);
-    overflow-wrap: anywhere;
-}
-
-.modal-close {
-    /* 关闭按钮原生 <button>（a11y 契约）：重置浏览器默认外观。 */
-    background: none;
-    border: none;
-    padding: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 auto;
-    width: 32px;
-    min-width: 32px;
-    min-height: 32px;
-    font: inherit;
-    font-size: 28px;
-    font-weight: bold;
-    line-height: 1;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: color 0.2s;
-}
-
-.modal-close:hover {
-    color: var(--text-primary);
-}
-
-.modal-body {
-    padding: 20px;
-    overflow-y: auto;
-    overflow-x: hidden;
-    overscroll-behavior: contain;
-    flex: 1; /* 占据剩余空间 */
-    min-height: 0; /* 允许flex子元素正确收缩 */
-    min-width: 0;
-    overflow-wrap: anywhere;
-}
-
-.modal-body > *,
-.modal-header > *,
-.modal-buttons > * {
-    min-width: 0;
-    max-width: 100%;
-}
-
-body.modal-open {
-    overflow: hidden;
-}
-
-/* 设备配置资源查看弹框：复用 .modal-header/.modal-body，补充专用样式 */
+/* 设备配置资源查看弹框：外框走 modal-workspace，这里只补专用样式 */
 .dcfg-header {
     gap: 16px;
 }
@@ -1141,28 +1014,74 @@ body.modal-open {
     border-color: var(--primary-color);
 }
 
-/* ==================== Config Modal Sections ==================== */
-/* 系统配置弹框的卡片式分块：每块一个带边框/底色的 section，
-   块间距与内边距统一，标题行醒目，视觉边界清晰。 */
+/* ==================== Config Modal ==================== */
+/* 系统配置弹框外框。检查路由连通性单独走科技风外框。其它弹框仍走 modal.css。 */
+#config-modal .modal-content {
+    background: var(--dark-bg);
+    border: 1px solid color-mix(in srgb, var(--primary-color) 46%, var(--border-color));
+    border-radius: var(--radius-surface);
+    box-shadow:
+        var(--shadow-lg),
+        0 0 0 1px color-mix(in srgb, var(--primary-color) 18%, transparent);
+}
+
+#config-modal .modal-header {
+    background: var(--primary-gradient);
+    border-bottom: 0;
+    padding: 13px 16px 13px 20px;
+}
+
+#config-modal .modal-title {
+    margin: 0;
+    color: var(--text-on-accent);
+    font-weight: 700;
+    letter-spacing: 0.2px;
+}
+
+#config-modal .modal-close {
+    color: var(--text-on-accent);
+    background: color-mix(in srgb, #fff 16%, transparent);
+}
+
+#config-modal .modal-close:hover {
+    color: var(--text-on-accent);
+    background: color-mix(in srgb, #fff 30%, transparent);
+}
+
+#config-modal .modal-body {
+    background: var(--dark-bg);
+    padding: 16px 18px 18px;
+}
+
+#config-modal .modal-content > .modal-buttons {
+    background: var(--card-bg);
+    border-top: 1px solid color-mix(in srgb, var(--primary-color) 32%, var(--border-color));
+    padding: 12px 18px 14px;
+}
+
+/* 系统配置弹框的卡片式分块：深色底上的抬升卡片，标题带用各块 accent。 */
 .config-section {
-    background: var(--light-bg);
+    background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-left: 3px solid var(--accent, var(--primary-color));
-    border-radius: 8px;
-    margin-bottom: 16px;
-    padding: 12px 14px;
+    border-radius: var(--radius-surface);
+    margin-bottom: 14px;
+    padding: 0 14px 12px;
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
 }
 /* 收尾清零只针对弹框 body 的直接末位卡片；不能写成
    .config-section:last-child——那会误伤任何父容器的末位卡片
    （如 form 内的日志块，它后面还有 form 外的邮件卡片）。 */
 .modal-body > .config-section:last-child { margin-bottom: 0; }
 .config-section-title {
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid color-mix(in srgb, var(--accent, var(--primary-color)) 34%, var(--border-color));
+    background: color-mix(in srgb, var(--accent, var(--primary-color)) 16%, var(--light-bg));
     color: var(--text-primary);
     font-size: 13px;
-    font-weight: 600;
-    margin: -12px -14px 12px;
-    padding: 10px 14px;
+    font-weight: 700;
+    margin: 0 -14px 12px;
+    padding: 9px 14px;
 }
 .config-section-title::before {
     content: '';
@@ -1183,10 +1102,22 @@ body.modal-open {
     margin-top: 6px;
 }
 .config-section.config-section-notice {
-    background: transparent;
-    border: 0;
+    background: color-mix(in srgb, var(--warning-color) 12%, var(--card-bg));
+    border: 1px solid color-mix(in srgb, var(--warning-color) 38%, var(--border-color));
     border-left: 3px solid var(--warning-color);
-    padding: 8px 10px;
+    padding: 10px 12px;
+    box-shadow: none;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+#config-modal .config-section-notice code {
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--darker-bg);
+    color: var(--primary-light);
+    font-size: 12px;
 }
 /* 各块区分色：左边框 + 标题竖条同一 accent，扫一眼即知所处区块。 */
 .config-section-accent-deploy { --accent: var(--primary-color); }
@@ -1196,17 +1127,13 @@ body.modal-open {
 .config-section-accent-routes { --accent: #22d3ee; }
 
 .modal-form-row input.readonly {
-    background: var(--light-bg);
+    background: var(--darker-bg);
     color: var(--text-muted);
     cursor: not-allowed;
 }
 
 .modal-buttons {
-    display: flex;
-    flex-wrap: wrap;
     gap: 10px;
-    justify-content: flex-end;
-    margin-top: 20px;
 }
 
 .modal-buttons button {

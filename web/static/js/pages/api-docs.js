@@ -151,7 +151,7 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
     // <textarea> 均可被 `</textarea><img onerror=...>` 逃逸）。模板只含
     // 常量，报告数据在 DOM 构建后通过 .value 赋值。
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 700px; max-height: 85vh; overflow-y: auto;">
+        <div class="modal-content modal-l">
             <div class="modal-header">
                 <span class="modal-title">📝 Redmine回复</span>
                 <button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseModal" data-a0="${modalId}">&times;</button>

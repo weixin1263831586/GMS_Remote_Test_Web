@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="/redmine-agent/assets/daily-brief-session.css">
   <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport">
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-ui-foundations">
+<link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers">
 <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261116-tab-focus-ring">
 <script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
 </head>
@@ -59,7 +60,7 @@
 
 <!-- Reset confirmation modal -->
 <div id="resetModal" class="modal">
-  <div class="modal-content">
+  <div class="modal-content modal-xs">
     <div class="modal-header">
       <span class="modal-title">重置 Redmine 数据</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideResetModal">&times;</button>
@@ -181,7 +182,7 @@
 
 <!-- Add User Modal -->
 <div id="addUserModal" class="modal">
-  <div class="modal-content">
+  <div class="modal-content modal-xs">
     <div class="modal-header">
       <span class="modal-title">添加用户</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideAddUserModal">&times;</button>
@@ -216,7 +217,7 @@
 
 <!-- Add Department Modal -->
 <div id="addDepartmentModal" class="modal">
-  <div class="modal-content">
+  <div class="modal-content modal-xs">
     <div class="modal-header">
       <span class="modal-title">添加部门</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideAddDepartmentModal">&times;</button>
@@ -241,7 +242,7 @@
 
 <!-- Add Project Modal -->
 <div id="addProjectModal" class="modal">
-  <div class="modal-content">
+  <div class="modal-content modal-xs">
     <div class="modal-header">
       <span class="modal-title">添加项目</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideAddProjectModal">&times;</button>
@@ -265,8 +266,8 @@
 
 <!-- Settings Modal -->
 <div id="settingsModal" class="modal">
-  <div class="modal-content" style="width:min(760px,96vw);max-width:min(760px,96vw);height:min(560px,72vh)">
-    <div class="modal-header" style="background:var(--primary-gradient);padding:15px 20px">
+  <div class="modal-content modal-l modal-pin">
+    <div class="modal-header">
       <span class="modal-title">⚙️ 统计设置</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideSettingsModal">&times;</button>
     </div>
@@ -376,8 +377,8 @@
 
 <!-- Trend Start Date Modal -->
 <div id="trendStartModal" class="modal">
-  <div class="modal-content">
-    <div class="modal-header" style="background:var(--primary-gradient)">
+  <div class="modal-content modal-xs">
+    <div class="modal-header">
       <span class="modal-title" id="trendStartModalTitle">设置统计日期范围</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideTrendStartModal">&times;</button>
     </div>
@@ -400,8 +401,8 @@
   </div>
 </div>
 <div id="trendDetailModal" class="modal">
-  <div class="modal-content" style="max-width:900px">
-    <div class="modal-header" style="background:var(--primary-gradient)">
+  <div class="modal-content modal-xl">
+    <div class="modal-header">
       <span class="modal-title" id="trendDetailTitle">解决Redmine问题明细</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="trendDetailModal">&times;</button>
     </div>
@@ -427,8 +428,8 @@
 
 <!-- Batch Import Modal -->
 <div id="batchImportModal" class="modal">
-  <div class="modal-content">
-    <div class="modal-header" style="background:var(--primary-gradient)">
+  <div class="modal-content modal-xs">
+    <div class="modal-header">
       <span class="modal-title">📥 批量导入历史工单到知识库</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="batchImportModal">&times;</button>
     </div>
@@ -450,8 +451,8 @@
 
 <!-- Knowledge Case Detail / Reply Modal -->
 <div id="knowledgeModal" class="modal">
-  <div class="modal-content" style="max-width:880px">
-    <div class="modal-header" style="background:var(--primary-gradient)">
+  <div class="modal-content modal-xl">
+    <div class="modal-header">
       <span class="modal-title" id="knowledgeTitle">知识库</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="knowledgeModal">&times;</button>
     </div>
@@ -464,8 +465,8 @@
 
 <!-- Reference Output Import Modal -->
 <div id="referenceModal" class="modal">
-  <div class="modal-content">
-    <div class="modal-header" style="background:linear-gradient(135deg,#f59e0b,#ef4444)">
+  <div class="modal-content modal-xs">
+    <div class="modal-header">
       <span class="modal-title">导入参考输出(仅评测,不进自动回复)</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="referenceModal">&times;</button>
     </div>
@@ -482,8 +483,8 @@
 
 <!-- Internal Issue Confirm Modal -->
 <div id="internalCreateModal" class="modal">
-  <div class="modal-content">
-    <div class="modal-header" style="background:linear-gradient(135deg,#dc2626,#b91c1c)">
+  <div class="modal-content modal-xs">
+    <div class="modal-header">
       <span class="modal-title">⚠️ 创建内部 Redmine 工单</span>
       <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="internalCreateModal">&times;</button>
     </div>

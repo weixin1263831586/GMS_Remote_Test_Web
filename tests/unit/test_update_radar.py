@@ -384,3 +384,65 @@ def test_admin_configuration_roundtrip_and_private_recipient_masking(client, sto
     detail = client.get(f'/api/gms-update-radar/runs/{run_id}', headers={'x-test-role': 'user'})
     assert 'recipients' not in detail.text
     assert client.put('/api/gms-update-radar/settings', json={'enabled': True}, headers={'x-test-role': 'admin'}).status_code == 422
+
+
+def test_start_scan_rejected_once_shutdown_begins(store):
+    radar = service(store)
+    radar.closing.set()
+    with pytest.raises(ApiError) as raised:
+        radar.start_scan()
+    assert '停止' in raised.value.message
+
+
+def test_shutdown_cancels_running_scan_forwards_event_and_persists_interrupted(store):
+    entered, release = threading.Event(), threading.Event()
+    radar = service(store)
+    seen = {}
+
+    def scan(**kwargs):
+        seen.update(kwargs)
+        entered.set()
+        assert release.wait(5)
+        raise InterruptedError('服务停止，本组未完成扫描，保留原数据')
+
+    radar.scanner = scan
+    run_id = radar.start_scan()
+    try:
+        assert entered.wait(5)
+        # stop_radar 先置 closing（即 cancel_event），worker 以 interrupted 收尾。
+        radar.closing.set()
+    finally:
+        release.set()
+        radar.worker.join(5)
+    assert seen['cancel_event'] is radar.closing
+    assert seen['cancelled'] == radar.closing.is_set  # bound method: ==，不用 is
+    assert store.run(run_id)['status'] == 'interrupted'
+
+
+def test_change_truncation_and_run_retention(store, monkeypatch):
+    from features.system.update_radar import repository
+
+    monkeypatch.setattr(repository, 'MAX_CHANGES_PER_RUN', 2)
+    monkeypatch.setattr(repository, 'RETAINED_RUNS', 3)
+    first = store.claim('manual')
+    store.finish(first, 'completed', {**result(), 'changes_total': 3},
+                 [{'category': 'packages', 'key': str(index), 'type': 'modified',
+                   'before': {}, 'after': {}} for index in range(3)])
+    # 明细截断到阈值，真实总量与截断数保留在 summary。
+    assert store.changes(first)['total'] == 2
+    summary = store.run(first)['summary']
+    assert summary['changes_total'] == 3 and summary['changes_truncated'] == 1
+    latest = []
+    for _ in range(5):
+        run_id = store.claim('manual')
+        store.finish(run_id, 'completed', result(), [])
+        latest.append(run_id)
+    # 保留策略只留最近 3 个终态运行，孤儿明细一并清理。
+    assert store.history()['total'] == 3
+    assert sorted(item['id'] for item in store.history()['items']) == latest[-3:]
+    for run_id in latest[-3:]:
+        assert store.run(run_id)['status'] == 'completed'
+    with pytest.raises(ApiError):
+        store.run(first)
+    with pytest.raises(ApiError):
+        store.run(latest[0])

@@ -27,6 +27,12 @@ import unittest
 from pathlib import Path
 
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows does not provide POSIX flock.
+    fcntl = None
+
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "agent" / "gms-remote-test" / "runtime" / "gms-remote-test.sh"
 SCRIPT_ARG = SCRIPT.as_posix()
@@ -54,6 +60,38 @@ def _write_curl_stub(stub_dir: Path, call_log: Path) -> None:
 
 
 class CredentialLifecycleTests(unittest.TestCase):
+    @unittest.skipIf(fcntl is None, 'Requires POSIX file locking')
+    def test_bearer_request_succeeds_while_shared_cookie_lock_is_held(self):
+        jar = self.root / 'human-cookie.jar'
+        with (self.root / 'human-cookie.jar.lock').open('w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = self.run_snippet(
+                "curl() { printf 'ok\\nHTTP_STATUS:200\\n'; }\n"
+                'api_call /system/health GET',
+                extra_env={'GMS_AUTH_COOKIE_JAR': str(jar)},
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'ok')
+        self.assertFalse(jar.exists())
+        self.assertEqual(self.bearer_header_files(), [])
+
+    def test_cookie_lock_timeout_is_a_conflict_and_never_sends_unlocked_request(self):
+        self.env.pop('GMS_AUTH_TOKEN_FILE')
+        calls = self.root / 'unexpected-curl'
+        status = self.root / 'exit-status'
+        result = self.run_snippet(
+            'flock() { return 1; }\n'
+            'curl() { touch "$CURL_CALL_LOG"; }\n'
+            'api_call /system/health GET',
+            extra_env={'GMS_AUTH_COOKIE_JAR': str(self.root / 'human-cookie.jar'),
+                       'CURL_CALL_LOG': str(calls), 'GMS_RT_STATUS_FILE': str(status)},
+        )
+        self.assertEqual(result.returncode, 5, result.stderr)
+        self.assertIn('Cookie 文件锁等待超时', result.stderr)
+        self.assertNotIn('curl exit code', result.stderr)
+        self.assertFalse(calls.exists())
+        self.assertEqual(status.read_text().strip(), '5')
+
     def test_download_never_overwrites_existing_output(self):
         existing = self.root / 'keep.bin'
         existing.write_bytes(b'keep')

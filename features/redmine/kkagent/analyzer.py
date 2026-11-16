@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 # v27: 钉死截图取证行为——每个 image 附件至少一次 artifact_read 尝试，
 #      成功即引用 OCR 文本；未实际尝试不得写"截图读取失败"
 #      （#655644 夜批实测：管道已通但模型跳读，错误申报缺口）。
-PROMPT_VERSION = "redmine_daily_triage_v31"
+PROMPT_VERSION = "redmine_daily_triage_v32"
 
 # analyzer 实现版本（Ledger logical_key 组成项）：kkagent analyzer 实现
 # 升级但 prompt/model 不变时，逻辑键也必须变化（否则错误 dedupe）。以 agent 包版本为准，包描述读不到（非仓库部署）时回退
@@ -614,6 +614,9 @@ class KkAgentRedmineAnalyzer:
         if _tool_protocol_failure(trace):
             return self._failure(trace, raw)
 
+        from ..reference_recall import recover_reference_preflight
+
+        await recover_reference_preflight(entry, trace)
         if entry.get("analysis_mode") == "diagnostic":
             result = native_summary_result(trace, entry)
             if result is None:
@@ -756,6 +759,9 @@ class KkAgentRedmineAnalyzer:
                 return self._failure(merged, raw), merged
 
             if native_summary:
+                from ..reference_recall import recover_reference_preflight
+
+                await recover_reference_preflight(entry, merged)
                 indexed_entry = {
                     **entry,
                     "_controller_evidence_ids": re.findall(

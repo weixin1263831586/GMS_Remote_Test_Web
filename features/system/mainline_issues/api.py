@@ -311,37 +311,14 @@ async def list_mainline_critical_patches(
     updates_db = settings.data_root / 'gms_update_monitor.sqlite3'
     if not updates_db.exists():
         return {'success': True, 'available': False, 'total': 0, 'limit': limit, 'offset': offset, 'items': []}
-    where = []
-    params: list[str | int] = []
-    if q:
-        like = f'%{escape_like(q)}%'
-        where.append(
-            '(patch_id LIKE ? ESCAPE "\\" OR description LIKE ? ESCAPE "\\" OR '
-            'android_versions LIKE ? ESCAPE "\\" OR bulletin_month LIKE ? ESCAPE "\\" OR '
-            'deadline LIKE ? ESCAPE "\\" OR year LIKE ? ESCAPE "\\" OR patch_kind LIKE ? ESCAPE "\\" OR '
-            # 数字段与豁免表 exemption_id（Google bug ID）同空间，Python 侧交叉检索。
-            'substr(patch_id, 3) IN (SELECT ? UNION SELECT ?))'
-        )
-        params.extend([like] * 7)
-        params.extend([q, q.lstrip('AP-')])
-    where_sql = f"WHERE {' AND '.join(where)}" if where else ''
+    from ..update_monitor.repository import query_bulletin_patches
+
     conn = sqlite3.connect(str(updates_db))
     conn.row_factory = sqlite3.Row
     try:
-        total = conn.execute(
-            f'SELECT COUNT(*) FROM gms_update_bulletin_patches {where_sql}', params
-        ).fetchone()[0]
-        rows = conn.execute(
-            f"""
-            SELECT source_key, year, patch_id, patch_kind, android_versions,
-                   description, bulletin_month, deadline, bulletin_url
-            FROM gms_update_bulletin_patches
-            {where_sql}
-            ORDER BY CAST(year AS INTEGER) DESC, bulletin_month, patch_id DESC
-            LIMIT ? OFFSET ?
-            """,
-            [*params, limit, offset],
-        ).fetchall()
+        result = query_bulletin_patches(conn, q=q, limit=limit, offset=offset)
+        rows = result['items']
+        total = result['total']
     finally:
         conn.close()
 
@@ -369,6 +346,7 @@ async def list_mainline_critical_patches(
     return {
         'success': True,
         'available': True,
+        'coverage_complete': result['coverage_complete'],
         'total': total,
         'limit': limit,
         'offset': offset,

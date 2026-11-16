@@ -19,9 +19,49 @@ def command_reports_running(output: str | None) -> bool:
     return any(line.strip() == 'RUNNING' for line in (output or '').splitlines())
 
 
+def _kill_process_group(process: subprocess.Popen) -> None:
+    """Kill a Popen started with start_new_session=True, whole group included."""
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except Exception as exc:
+        logger.warning("Failed to kill command process group: %s", exc)
+    with contextlib.suppress(Exception):
+        process.communicate(timeout=1)
+
+
+class _CommandCancelledError(Exception):
+    """Internal: raised when a caller-provided cancel event fires."""
+
+
+def _communicate_cancellable(
+    process: subprocess.Popen, timeout: int, cancel_event: threading.Event,
+) -> tuple[str, str]:
+    """communicate() variant that aborts within ~1s of the cancel event firing.
+
+    Polls in short intervals so a shutdown can stop a long scan subprocess
+    (radar scans run up to timeout=3600s) instead of waiting it out. Raises
+    subprocess.TimeoutExpired once the overall timeout elapses, mirroring the
+    plain communicate(timeout=...) contract.
+    """
+    poll = 1.0
+    waited = 0.0
+    while True:
+        try:
+            return process.communicate(timeout=poll)
+        except subprocess.TimeoutExpired:
+            waited += poll
+            if cancel_event.is_set():
+                raise _CommandCancelledError from None
+            if waited >= timeout:
+                raise
+
+
 def run_local_command(
     argv: list[str], timeout: int = 30, *,
     env: dict[str, str] | None = None, cwd: str | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> CommandResult:
     """Run a local command from an argv list (no shell interpretation).
 
@@ -30,6 +70,11 @@ def run_local_command(
     via unquoted dynamic values. 与 SSH 侧 ``SSHExecutor`` 一致，统一返回
     :class:`CommandResult`，杜绝 ``(stdout, stderr, code)`` 裸 tuple 的
     位置错用。
+
+    ``cancel_event``: optional shutdown signal; when set while the command is
+    running, the process group is killed and the result reports a non-zero
+    exit with ``stderr='Command cancelled'`` so callers can persist an
+    interrupted state instead of orphaning the subprocess.
     """
     process = None
     try:
@@ -42,20 +87,20 @@ def run_local_command(
             env=env,
             cwd=cwd,
         )
-        stdout, stderr = process.communicate(timeout=timeout)
+        if cancel_event is None:
+            stdout, stderr = process.communicate(timeout=timeout)
+        else:
+            try:
+                stdout, stderr = _communicate_cancellable(process, timeout, cancel_event)
+            except _CommandCancelledError:
+                _kill_process_group(process)
+                return CommandResult(stdout="", stderr="Command cancelled", code=-1)
         return CommandResult(
             stdout=stdout, stderr=stderr, code=process.returncode,
         )
     except subprocess.TimeoutExpired:
         if process is not None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            except Exception as exc:
-                logger.warning("Failed to kill timed out command process group: %s", exc)
-            with contextlib.suppress(Exception):
-                process.communicate(timeout=1)
+            _kill_process_group(process)
         return CommandResult(stdout="", stderr="Command timed out", code=-1)
     except Exception as exc:
         return CommandResult(stdout="", stderr=redact_sensitive_text(exc), code=-1)

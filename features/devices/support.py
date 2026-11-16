@@ -30,7 +30,7 @@ LOGIN_ASSETS = '''<script src="/static/js/modal.js" defer></script>
 <script src="/static/js/pages/device-review-login.js" defer></script>'''
 
 LOGIN_PANEL = '''<div id="review-login-modal" class="modal" aria-hidden="true" aria-labelledby="review-login-title">
-<section class="modal-content" tabindex="-1">
+<section class="modal-content modal-xs" tabindex="-1">
 <h2 id="review-login-title">登录审批账号</h2>
 <p id="review-login-message">请登录发起申请的 Agent 所属平台账号后查看和批准请求。</p>
 <form id="review-login-form">

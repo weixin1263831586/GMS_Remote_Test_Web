@@ -39,12 +39,7 @@
     background: var(--light-bg);
 }
 
-.agent-access-modal-content {
-    width: 95vw;
-    max-width: min(1100px, 95vw);
-    height: 80vh;
-    max-height: 80vh;
-}
+/* 外框尺寸走 modal-xl modal-pin。 */
 
 .agent-access-modal-content > .modal-header { padding: 8px 20px; }
 .agent-access-modal-body { min-height: 0; overflow: auto; overscroll-behavior: contain; }

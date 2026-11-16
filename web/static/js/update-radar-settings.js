@@ -68,24 +68,12 @@
         field('all-tasks').addEventListener('change', () => { tasks().forEach(task => { task.checked = field('all-tasks').checked; }); syncTasks(); });
         tasks().forEach(task => task.addEventListener('change', syncTasks));
     }
-    function createEditButton() {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.textContent = '✏️';
-        button.title = '修改雷达执行时间、收件人、发送策略和监听任务';
-        button.setAttribute('aria-label', '修改');
-        button.className = 'tool-radar-edit';
-        button.style.cssText = 'flex:1;padding:3px;border:1px solid var(--border-color);border-radius:4px;background:var(--lighter-bg);color:var(--text-primary);font-size:12px;cursor:pointer';
-        button.addEventListener('click', event => {
-            event.stopPropagation();
-            open().catch(error => window.showToast?.(error.message, 'error'));
-        });
-        return button;
-    }
     const builtinTool = {icon: '📡', title: 'GMS更新雷达',
         description: '定时全量扫描所选GMS更新，记录前后差异并发送邮件汇总',
         url: '/gms-update-radar', builtin_id: 'gms-update-radar'};
-    window.GmsUpdateRadarSettings = {open, createEditButton, builtinTool};
+    // 编辑入口统一走工具页 data-tools-action="radar-edit" 委托按钮
+    //（web/static/js/shell/utility-tools.js）；此处只暴露 open/builtinTool。
+    window.GmsUpdateRadarSettings = {open, builtinTool};
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind, {once: true});
     else bind();
 })();

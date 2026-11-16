@@ -18,6 +18,11 @@ from features.assistant.route_invocation import _UNSUPPORTED_DIRECT_TOOLS
 from features.assistant.session_log import _append_message, _append_step, _format_params
 from features.assistant.tools import registry
 from features.assistant.workflow_draft import build_workflow_draft, extract_workflow_entities, summarize_draft
+from features.assistant.workflow_execution import (
+    discard_stale_pending_plan,
+    has_unsubmitted_workflow_plan,
+    workflow_plan_busy_hint,
+)
 from features.assistant.workspace import _apply_workspace_tool_params, _missing_required_params
 from foundation.redaction import redact_sensitive_data
 
@@ -332,6 +337,12 @@ async def handle_project_turn(session: dict, request, req) -> bool:
                         observations.append({"error": "缺少参数，请查询资源后用 question 补齐", "missing": missing})
                         continue
                     if tool.requires_confirm or tool.is_dangerous:
+                        # 已有未提交工作流计划时不得隐式覆盖（审核不变量，
+                        # 与规则路由同一状态机语义）；用户先处理当前计划。
+                        if has_unsubmitted_workflow_plan(session):
+                            _append_message(session, "assistant",
+                                            workflow_plan_busy_hint(tool.display_name))
+                            return True
                         plan = {"type": "generic_action", "intent": {"tool_name": tool.name, "params": params, "category": tool.category}}
                         session["pending_plan"] = plan
                         session["status"] = "planning"
@@ -370,8 +381,10 @@ async def handle_project_turn(session: dict, request, req) -> bool:
                     entry = _append_message(session, "assistant", str(decision.get("text") or "请选择所需资源"),
                                                 kind="question", data={"question": {"fields": fields}})
                     session["agent_question"] = {"id": entry["id"], "fields": fields}
-                    session["pending_plan"] = None
-                    session["status"] = "idle"
+                    # 参数补问不销毁待确认的工作流计划（审核不变量）。
+                    discard_stale_pending_plan(session)
+                    if not has_unsubmitted_workflow_plan(session):
+                        session["status"] = "idle"
                     return True
                 if kind == "workflow":
                     try:

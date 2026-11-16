@@ -97,6 +97,8 @@ async def precollect_deep_evidence(
     evidence_env = dict(getattr(analyzer, "env_extra", {}) or {})
     if not str(evidence_env.get("GMS_RT_PROFILE") or "").strip():
         return
+    entry["_reference_owner_id"] = run.owner_id
+    entry["_reference_lookup_required"] = True
     triage = entry.get("analysis_mode") == "triage"
     progress = entry.get("_progress_recorder")
     if progress is not None:

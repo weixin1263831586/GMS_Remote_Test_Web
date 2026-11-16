@@ -8,7 +8,11 @@
   <link rel="stylesheet" href="/static/css/data-table-page.css?v=20261116-head32">
   <style>
     :root { color-scheme: dark; --bg:var(--dark-bg); --card:var(--card-bg); --head:var(--light-bg); --border:var(--border-color); --text:var(--text-primary); --muted:var(--text-secondary); --primary:var(--primary-color); --ok:var(--success-color); }
-    .filters { grid-template-columns:minmax(260px,1fr) 170px 150px 100px; }
+    /* 多列定制只在桌宽生效（>600px）：手机宽度让位公共单列布局，
+       否则 390px 视口下筛选控件溢出（CI E2E）。 */
+    @media (min-width: 601px) {
+      .filters { grid-template-columns:minmax(260px,1fr) 170px 150px 100px; }
+    }
     button.secondary { background:var(--lighter-bg); }
     button:disabled { opacity:.55; cursor:not-allowed; }
     .toast { position:fixed; left:50%; bottom:46px; transform:translateX(-50%); max-width:min(720px, calc(100vw - 32px)); background:var(--lighter-bg); color:#fff; border:1px solid var(--border); border-radius:6px; padding:9px 12px; box-shadow:0 8px 24px rgba(0,0,0,.35); font-size:13px; z-index:9999; display:none; }

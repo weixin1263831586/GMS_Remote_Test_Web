@@ -286,14 +286,17 @@ function promptBuildPassword() {
     return new Promise(resolve => {
         const focusOrigin = document.activeElement;
         const backdrop = document.createElement('div');
-        backdrop.className = 'password-backdrop';
+        backdrop.className = 'modal password-backdrop show';
         backdrop.setAttribute('role', 'dialog');
         backdrop.setAttribute('aria-modal', 'true');
+        backdrop.setAttribute('aria-labelledby', 'build-password-title');
         backdrop.innerHTML = `
-            <div class="password-dialog">
-                <div class="password-title">编译服务器 SSH 密码</div>
-                <input id="build-password-input" type="password" autocomplete="current-password" placeholder="请输入密码">
-                <div class="password-actions">
+            <div class="modal-content modal-xs password-dialog">
+                <div class="modal-header"><h2 id="build-password-title" class="modal-title">编译服务器 SSH 密码</h2></div>
+                <div class="modal-body">
+                    <input id="build-password-input" type="password" autocomplete="current-password" placeholder="请输入密码">
+                </div>
+                <div class="modal-buttons">
                     <button type="button" id="build-password-cancel">取消</button>
                     <button type="button" class="primary" id="build-password-ok">确认</button>
                 </div>

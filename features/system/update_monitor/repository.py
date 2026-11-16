@@ -6,13 +6,13 @@ from __future__ import annotations
 # ruff: noqa: F403, F405, E402
 import json
 import sqlite3
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
 
 DEFAULT_DB_PATH = Path('data/gms_update_monitor.sqlite3')
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 from .models import *
@@ -74,6 +74,9 @@ def init_db(conn: sqlite3.Connection) -> None:
             bulletin_month TEXT NOT NULL,
             deadline TEXT NOT NULL,
             bulletin_url TEXT NOT NULL DEFAULT '',
+            detail_text TEXT NOT NULL DEFAULT '',
+            detail_status TEXT NOT NULL DEFAULT 'not_scanned',
+            detail_fetched_at TEXT NOT NULL DEFAULT '',
             content_hash TEXT NOT NULL,
             first_seen_at TEXT NOT NULL,
             last_seen_at TEXT NOT NULL,
@@ -114,6 +117,9 @@ def init_db(conn: sqlite3.Connection) -> None:
         ('patch_kind', "ALTER TABLE gms_update_bulletin_patches ADD COLUMN patch_kind TEXT NOT NULL DEFAULT ''"),
         ('android_versions', "ALTER TABLE gms_update_bulletin_patches ADD COLUMN android_versions TEXT NOT NULL DEFAULT ''"),
         ('bulletin_url', "ALTER TABLE gms_update_bulletin_patches ADD COLUMN bulletin_url TEXT NOT NULL DEFAULT ''"),
+        ('detail_text', "ALTER TABLE gms_update_bulletin_patches ADD COLUMN detail_text TEXT NOT NULL DEFAULT ''"),
+        ('detail_status', "ALTER TABLE gms_update_bulletin_patches ADD COLUMN detail_status TEXT NOT NULL DEFAULT 'not_scanned'"),
+        ('detail_fetched_at', "ALTER TABLE gms_update_bulletin_patches ADD COLUMN detail_fetched_at TEXT NOT NULL DEFAULT ''"),
     ):
         if column not in bulletin_columns:
             conn.execute(ddl)
@@ -241,6 +247,52 @@ def init_db(conn: sqlite3.Connection) -> None:
         'ON gms_update_requirement_version_tags(android_version, change_kind, section_title)'
     )
     conn.execute('CREATE INDEX IF NOT EXISTS idx_gms_update_changes_run ON gms_update_change_events(run_id, source_key)')
+
+
+def bulletin_detail_coverage(conn: sqlite3.Connection) -> dict:
+    """Old or partially fetched indexes cannot establish an absence of fixes."""
+    columns = {row[1] for row in conn.execute('PRAGMA table_info(gms_update_bulletin_patches)')}
+    if 'detail_status' not in columns:
+        return {'coverage_complete': False, 'reason': 'Critical Fix detail index needs synchronization'}
+    count = conn.execute(
+        "SELECT COUNT(*) FROM gms_update_bulletin_patches WHERE detail_status NOT IN ('ready','not_applicable')",
+    ).fetchone()[0]
+    return {'coverage_complete': count == 0, 'incomplete_records': count,
+            **({'reason': 'Some Critical Fix detail sections are unavailable or stale'} if count else {})}
+
+
+def query_bulletin_patches(conn: sqlite3.Connection, *, q='', year='', kind='', android_version='',
+                          limit=100, offset=0) -> dict:
+    """Shared page search over patch metadata and complete retained detail text."""
+    columns = {row[1] for row in conn.execute('PRAGMA table_info(gms_update_bulletin_patches)')}
+    coverage = bulletin_detail_coverage(conn)
+    if not columns:
+        return {'items': [], 'total': 0, **coverage}
+    where, params = [], []
+    for column, value in (('year', year), ('patch_kind', kind)):
+        if value:
+            where.append(f'{column}=?')
+            params.append(value)
+    if android_version:
+        where.append('reference_term_matches(android_versions, ?)')
+        params.append(android_version)
+    if q:
+        searchable = [column for column in ('patch_id', 'description', 'android_versions', 'bulletin_month',
+                                            'deadline', 'year', 'patch_kind', 'detail_text') if column in columns]
+        where.append('(' + ' OR '.join(f'reference_term_matches({column}, ?)' for column in searchable) + ')')
+        params.extend([q] * len(searchable))
+    conn.create_function('reference_term_matches', 2, reference_term_matches)
+    where_sql = 'WHERE ' + ' AND '.join(where) if where else ''
+    total = conn.execute(f'SELECT COUNT(*) FROM gms_update_bulletin_patches {where_sql}', params).fetchone()[0]
+    order = 'CAST(year AS INTEGER) DESC, patch_id DESC' if 'year' in columns else 'patch_id DESC'
+    rows = conn.execute(
+        f'SELECT * FROM gms_update_bulletin_patches {where_sql} ORDER BY {order} LIMIT ? OFFSET ?',
+        [*params, limit, offset],
+    ).fetchall()
+    items = [dict(row) for row in rows]
+    for item in items:
+        item['detail_excerpt'] = matched_excerpt(item.get('detail_text') or '', [q], limit=1200)
+    return {'items': items, 'total': total, **coverage}
 
 
 def dataclass_public_json(record: Any, *, exclude: tuple[str, ...] = ()) -> str:
@@ -417,11 +469,32 @@ def upsert_source(conn: sqlite3.Connection, fetched: FetchedDocument, timestamp:
 
 def sync_source(conn: sqlite3.Connection, run_id: int, fetched: FetchedDocument, *, force: bool, timestamp: str, session: Any = None) -> tuple[bool, int, ParsedSource]:
     changed = upsert_source(conn, fetched, timestamp)
-    if not changed and not force:
+    # Monthly Critical Fix detail pages can change independently of the index.
+    # Revisiting them also backfills detail text in databases created earlier.
+    if not changed and not force and fetched.source.parser != 'gms_bulletins':
         return False, 0, ParsedSource()
 
     parser = PARSERS[fetched.source.parser]
     parsed = parser(fetched, session=session)
+    if fetched.source.parser == 'gms_bulletins':
+        if not parsed.bulletin_patches:
+            raise ValueError('Critical Fix overview contains no patch records; existing records were retained')
+        previous = {row['item_key']: dict(row) for row in conn.execute(
+            'SELECT * FROM gms_update_bulletin_patches WHERE source_key=?', (fetched.source.key,),
+        )}
+        retained = []
+        for patch in parsed.bulletin_patches:
+            old = previous.get(patch.item_key)
+            if patch.detail_status != 'ready' and old and old['detail_text']:
+                patch = replace(
+                    patch, detail_text=old['detail_text'], detail_status='stale',
+                    detail_fetched_at=old['detail_fetched_at'],
+                    patch_kind=patch.patch_kind or old['patch_kind'],
+                    android_versions=patch.android_versions or old['android_versions'],
+                )
+                patch = replace(patch, content_hash=bulletin_content_hash(patch))
+            retained.append(patch)
+        parsed.bulletin_patches = retained
     changes = 0
     changes += replace_records(
         conn,
@@ -516,6 +589,9 @@ def sync_source(conn: sqlite3.Connection, run_id: int, fetched: FetchedDocument,
             'bulletin_month',
             'deadline',
             'bulletin_url',
+            'detail_text',
+            'detail_status',
+            'detail_fetched_at',
             'content_hash',
         ],
         entity_type='gms_bulletin',

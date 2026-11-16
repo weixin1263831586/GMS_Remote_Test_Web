@@ -401,7 +401,7 @@ function showDailyBriefIssueStatistics(issueId) {
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = 'modal';
-  modal.innerHTML = '<div class="modal-content daily-brief-modal daily-brief-statistics-modal">'
+  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal daily-brief-statistics-modal">'
     + '<div class="modal-header"><span class="modal-title">📊 AI 统计 · #' + esc(issueId) + '</span>'
     + '<button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
     + '<div class="modal-body daily-brief-modal-body">' + body + '</div>'
@@ -435,7 +435,7 @@ function showDailyBriefIssueFallback(issueId) {
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = 'modal daily-brief-analysis-overlay';
-  modal.innerHTML = '<div class="modal-content daily-brief-modal">'
+  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal">'
     + '<div class="modal-header"><span class="modal-title">每日晨报 · #' + esc(issueId) + '</span>'
     + '<button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
     + '<div class="modal-body daily-brief-modal-body"><div class="muted">该历史分析结果包含旧格式字段，暂无法完整呈现。重新分析此项后会生成兼容的完整结果。</div></div>'

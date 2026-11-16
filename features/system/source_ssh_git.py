@@ -186,9 +186,8 @@ def _parse_multi_output(
             header = unit[len(_REPO_SEP):]
             repo_abs, _, commit = header.partition("\t")
             commit = commit.strip()
-            # 全量分片模式在 grep 阶段只带 ``HEAD`` 占位，真实 commit 由
-            # 命中仓回查（_resolve_hit_commits）在签名前补齐。
-            if commit != _HEAD_LABEL and not _COMMIT_RE.match(commit):
+            # 分片命令在 grep 前解析真实 SHA 并随头携带（与检索绑定）。
+            if not _COMMIT_RE.match(commit):
                 raise SourceProviderError("多仓输出头格式无效", status_code=502)
             repo_rel = repo_abs.rstrip("/")
             root = strip_root.rstrip("/")
@@ -446,10 +445,12 @@ class SSHGitProvider(LocalGitProvider):
         self, query: str, path_grep: str, repos: tuple[str, ...],
         per_repo_timeout: int = 0,
     ) -> str:
-        """单分片固定模板：逐仓在 HEAD 上 grep，仓库头带 ``HEAD`` 占位。
+        """单分片固定模板：逐仓先解析 HEAD SHA，再在该 commit 上 grep。
 
-        全量模式不再逐仓 rev-parse（千仓 ×0.5s 是分钟级）；命中仓的真实
-        commit 在结果聚合后仅对命中仓批量回查（_resolve_hit_commits）。
+        rev-parse 与 grep 在同一循环体先后执行，结果头/记录引用同一个
+        SHA（审核 P1）：编译服务器在搜索期间移动 HEAD 不影响本批证据的
+        可复现性——结果绑定的就是 grep 时实际检索的 commit，而不是聚合
+        后回查得到的"现在的 HEAD"。rev-parse 失败按该仓不完整处理。
 
         ``per_repo_timeout > 0`` 时远端对每仓 grep 套 ``timeout <n>s``：
         prebuilts/clang 这类巨型仓单仓 grep 可达 90s+，没有仓级隔离时
@@ -463,11 +464,13 @@ class SSHGitProvider(LocalGitProvider):
             "in_q=" + shlex.quote(query) + "; "
             "in_f=" + (shlex.quote(path_grep) if path_grep else "''") + "; "
             + self._repos_stdin(repos)
-            + "printf '@@GMS_SDK_REPO@@%s\\tHEAD\\n' \"$r\"; "
+            + "c=$(git --no-optional-locks -C \"$r\" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) "
+            "|| { printf '@@GMS_SDK_INCOMPLETE@@\\n'; continue; }; "
+            "printf '@@GMS_SDK_REPO@@%s\\t%s\\n' \"$r\" \"$c\"; "
             f"{per_repo_guard}"
             "git --no-optional-locks -C \"$r\" grep --fixed-strings --ignore-case "
             "--no-color --no-heading --no-break --no-column --full-name "
-            "-z -n -I -e \"$in_q\" $in_f HEAD -- 2>/dev/null; "
+            "-z -n -I -e \"$in_q\" $in_f \"$c\" -- 2>/dev/null; "
             'rc=$?; if [ "$rc" -gt 1 ]; then '
             "printf '@@GMS_SDK_INCOMPLETE@@\\n'; fi; "
             "done"
@@ -556,24 +559,6 @@ class SSHGitProvider(LocalGitProvider):
                 status_code=502,
             )
         return heads
-
-    def _resolve_hit_commits(
-        self, hit_repo_rels: set[str],
-    ) -> dict[str, str]:
-        """仅对有命中的子仓批量回查 HEAD commit（通常个位数仓）。"""
-        root = self.config.repo_root.rstrip("/")
-        abs_repos = tuple(
-            rel if rel.startswith("/") else (root + "/" + rel)
-            for rel in sorted(hit_repo_rels)
-        )
-        if not abs_repos:
-            return {}
-        try:
-            heads = self._multi_heads(with_subject=False, repos=abs_repos, timeout=60)
-        except SourceProviderError:
-            # 回查失败不炸整次搜索：调用方对无 commit 的命中降级处理。
-            return {}
-        return {rel: info["commit"] for rel, info in heads.items()}
 
     # ------------------------------------------------------ revision helpers
 
@@ -759,13 +744,11 @@ class SSHGitProvider(LocalGitProvider):
     ) -> dict[str, Any]:
         """全量/多仓聚合检索：分片并行 HEAD grep，命中仓后置解析 commit。
 
-        - path_filter 两层语义：命中子仓名则下推收窄仓库集合（优化）；未命中
-          任何子仓名时（文件名或文件级路径，如 SensorPrivacyService.java、
-          frameworks/base/core/java）不能返回空——目标文件就在各子仓里，
-          回退为强相关排序全量搜索，path_filter 统一在 _parse_multi_output
-          按**完整文件路径**逐条过滤。仓库预筛选只是优化，不允许改变查询
-          结果的正确性（文件名 filter 有假阴性且
-          coverage_complete=true 风险）；
+        - path_filter 是**排序优先级**而非排除条件：仓库名命中的子仓排到
+          检索序列最前（预算内优先出结果），但全集合都参与检索；文件级
+          过滤统一在 _parse_multi_output 按**完整文件路径**逐条保证正确性
+          （旧的「命中仓名就收窄仓库集合」会漏掉其他仓内路径含过滤词的
+          命中，且 coverage_complete=true 时构成假阴性）；
         - 全量发现模式的子仓清单经 ``_repos_all()`` 自动枚举（TTL 缓存）；
         - 分片并行检索，墙钟预算在波间检查，客户端 HTTP 预算由 CLI 覆盖；
           超时分片返回部分结果 + limited=True + hint。
@@ -786,41 +769,43 @@ class SSHGitProvider(LocalGitProvider):
             )
         repos = self._repos_all()
         ranking: list[tuple[str, float, str]] = []
-        if filter_value:
-            repo_hits = tuple(
-                repo for repo in repos
-                if filter_value in self._repo_rel(repo).lower()
-            )
-            if repo_hits:
-                repos = repo_hits
-            else:
-                # path_filter 未命中任何子仓名（文件名或文件级路径）：
-                # 不能直接返回空——目标文件就在各子仓里。回退到强相关
-                # 排序全量搜索，文件级过滤在 _parse_multi_output 按
-                # 完整路径逐条判断；全搜索零命中是诚实的空结果。
-                from .source_repo_rank import (
-                    codesearch_hints_for_query,
-                    knowledge_hints_for_query,
-                    rank_repos,
-                )
+        from .source_repo_rank import (
+            codesearch_hints_for_query,
+            knowledge_hints_for_query,
+            rank_repos,
+        )
 
-                ranking = rank_repos(
-                    query, [self._repo_rel(r) for r in repos],
-                    knowledge_hints=knowledge_hints_for_query(query),
-                    codesearch_hints=codesearch_hints_for_query(query),
-                )
-                rel_to_abs = {self._repo_rel(r): r for r in repos}
-                repos = tuple(rel_to_abs[rel] for rel, _, _ in ranking)
+        if filter_value:
+            # path_filter 只是**排序优先级**，不是排除条件（审核 P1）：
+            # 旧逻辑「任一子仓名命中就只搜这些仓」会在部分匹配时漏掉
+            # 其他仓内文件路径含过滤词的命中（如 filter=base 命中
+            # frameworks/base 却丢掉 device/.../base_service）。仓库命中的
+            # 仓排到最前，全集合都参与检索；文件级过滤仍由
+            # _parse_multi_output 按完整路径逐条保证正确性。
+            repo_hit_rels = {
+                self._repo_rel(repo).lower() for repo in repos
+                if filter_value in self._repo_rel(repo).lower()
+            }
+            ranking = rank_repos(
+                query, [self._repo_rel(r) for r in repos],
+                knowledge_hints=knowledge_hints_for_query(query),
+                codesearch_hints=codesearch_hints_for_query(query),
+            )
+            rel_to_abs = {self._repo_rel(r): r for r in repos}
+            ordered = [(rel, score, reason) for rel, score, reason in ranking]
+            if repo_hit_rels:
+                hits_first = [item for item in ordered if item[0].lower() in repo_hit_rels]
+                rest = [item for item in ordered if item[0].lower() not in repo_hit_rels]
+                ordered = [
+                    *hits_first,
+                    *rest,
+                ]
+                ranking = ordered
+            repos = tuple(rel_to_abs[rel] for rel, _, _ in ordered)
         else:
             # 无 path_filter：按强相关排序（codesearch 符号落点 / knowledge
             # 锚点 / 子系统映射 / 路径词法），强相关仓集中在首批分片，
             # 预算内优先完成。
-            from .source_repo_rank import (
-                codesearch_hints_for_query,
-                knowledge_hints_for_query,
-                rank_repos,
-            )
-
             ranking = rank_repos(
                 query, [self._repo_rel(r) for r in repos],
                 knowledge_hints=knowledge_hints_for_query(query),
@@ -828,7 +813,7 @@ class SSHGitProvider(LocalGitProvider):
             )
             rel_to_abs = {self._repo_rel(r): r for r in repos}
             repos = tuple(rel_to_abs[rel] for rel, _, _ in ranking)
-        repos_total = len(repos)  # 计划检索的子仓数（path_filter 收窄后）
+        repos_total = len(repos)  # 计划检索的子仓数（全集合，path_filter 不收窄）
         shards = self._shards(repos)
         matches: list[dict[str, Any]] = []
         scanned = 0
@@ -903,16 +888,16 @@ class SSHGitProvider(LocalGitProvider):
         if not results and first_error is not None and not matches:
             raise first_error
         matches = matches[:limit]
-        # 命中仓批量回查真实 commit，逐条签名 result_id；回查失败的命中
-        # 降级丢弃（没有 commit 的 result_id 无法复现读取）。
-        commits = self._resolve_hit_commits({m["repo"] for m in matches})
+        # 命中的 commit 由分片命令在 grep 前解析并随结果头携带（与检索
+        # 同一循环绑定，审核 P1）；没有真实 commit 的记录无法复现读取，
+        # 降级丢弃并如实上报 limited。
         kept: list[dict[str, Any]] = []
         for match in matches:
-            commit = commits.get(match["repo"])
-            if not commit:
+            commit = str(match.get("commit") or "")
+            if not commit or commit == _HEAD_LABEL:
+                limited = True
                 continue
             match["source_id"] = self.config.source_id
-            match["commit"] = commit
             match["result_id"] = self._make_result_id(match["path"], commit)
             kept.append(match)
         if len(kept) < len(matches):

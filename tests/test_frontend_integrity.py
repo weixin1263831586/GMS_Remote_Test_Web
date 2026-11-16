@@ -799,7 +799,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
         self.assertIn('id="btn-copy-test-report"', main_text)
         self.assertIn('id="report-copy-modal"', main_text)
-        self.assertIn('class="modal-content report-copy-modal-content"', main_text)
+        self.assertIn('class="modal-content modal-l report-copy-modal-content"', main_text)
         self.assertIn('id="report-copy-source-worker"', main_text)
         self.assertIn('id="report-copy-source-report"', main_text)
         self.assertIn('id="report-copy-target-worker"', main_text)

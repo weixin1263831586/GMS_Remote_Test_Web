@@ -6,7 +6,7 @@ set -o pipefail
 # propagated here (GMS_RT_VERSION) by tools/scripts/agent/release.py.
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.86"
+GMS_RT_VERSION="0.22.87"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -386,6 +386,12 @@ _refresh_tls_args() {
 # Serialises cookie-jar writes across concurrent CLI processes.
 GMS_COOKIE_LOCK_FILE="${GMS_AUTH_COOKIE_JAR}.lock"
 _gms_with_cookie_lock() {
+    # Bearer requests neither read nor write the shared cookie jar. A long
+    # Agent request must not block unrelated parallel evidence calls on it.
+    if [ "${#CURL_AUTH_ARGS[@]}" -eq 0 ]; then
+        "$@"
+        return $?
+    fi
     local cookie_dir
     cookie_dir=$(dirname "$GMS_AUTH_COOKIE_JAR")
     if [ ! -d "$cookie_dir" ]; then
@@ -399,7 +405,10 @@ _gms_with_cookie_lock() {
             # process run curl anyway, which is exactly the concurrent
             # jar clobber the lock exists to prevent.  Exit non-zero from
             # the subshell so the caller sees a transport failure.
-            flock -w 10 200 || exit 99
+            flock -w 10 200 || {
+                error "认证 Cookie 文件锁等待超时，请等待占用请求完成后重试" >&2
+                exit 99
+            }
             "$@"
         ) 200>"$GMS_COOKIE_LOCK_FILE"
     else
@@ -631,7 +640,10 @@ api_call() {
     body=$(_body_from_http_response "$response")
     http_status=$(_status_from_http_response "$response")
     if [ "$curl_exit_code" -ne 0 ]; then
-        if [ "$curl_exit_code" -eq "$CURL_EXIT_CANNOT_CONNECT" ] || [ "$curl_exit_code" -eq "$CURL_EXIT_OPERATION_TIMEOUT" ]; then
+        if [ "$curl_exit_code" -eq 99 ]; then
+            _record_api_exit_code "$GMS_RT_EXIT_CONFLICT"
+            return "$GMS_RT_EXIT_CONFLICT"
+        elif [ "$curl_exit_code" -eq "$CURL_EXIT_CANNOT_CONNECT" ] || [ "$curl_exit_code" -eq "$CURL_EXIT_OPERATION_TIMEOUT" ]; then
             show_connection_error
         elif [ "$curl_exit_code" -eq "$CURL_EXIT_SSL_CERT" ]; then
             error "HTTPS证书校验失败: $SERVER_URL" >&2

@@ -309,7 +309,7 @@ async function showIssueFullSession(runId, issueId, subject) {
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = 'modal daily-brief-analysis-overlay';
-  modal.innerHTML = '<div class="modal-content daily-brief-modal">'
+  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal">'
     + '<div class="modal-header"><span class="modal-title daily-brief-modal-title"><span>🧵 kkagent 会话 · #' + esc(issueId) + '</span>'
     + (subject ? '<span class="daily-brief-modal-subject">' + esc(subject) + '</span>' : '')
     + '</span><button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'

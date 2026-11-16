@@ -2,7 +2,8 @@
 
 import json
 import sqlite3
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI, Request
@@ -226,5 +227,103 @@ def test_reference_trace_survives_native_tool_results(references):
     consume_line(trace, json.dumps({"type": "tool_result", "tool_call_id": "r1", "is_error": False,
                                    "output": json.dumps({"success": True, "data": data})}))
     assert trace.tool_calls[0].reference_lookup["sources"]["security_patches"]["count"] == 5
+
+
+async def test_recovered_issue_fetch_collects_official_references_once_without_renumbering(references):
+    _root, store, snapshot = references
+    add_text(store, snapshot, 'CVE-2026-58835')
+    entry = {'issue_id': 661620, '_reference_owner_id': 'owner-a', '_reference_lookup_required': True}
+    trace = KkAgentTrace(tool_calls=[
+        ToolTrace(tool_name='gms_rt_redmine_issue_fetch', status='failed', tool_input={'issue_id': 661620}),
+        ToolTrace(tool_name='gms_rt_redmine_issue_fetch', status='succeeded',
+                  tool_input={'issue': '661828'}, snapshot_ids=['peer-snapshot']),
+        ToolTrace(tool_name='gms_rt_redmine_issue_fetch', status='succeeded',
+                  tool_input={'issue': '661620'}, snapshot_ids=[snapshot]),
+    ])
+    original = trace.evidence_ledger()
+    await reference_recall.recover_reference_preflight(entry, trace)
+    assert trace.evidence_ledger()[:len(original)] == original
+    assert trace.evidence_ledger()[-1]['evidence_id'] == 'EV-004'
+    assert len(entry['_official_reference_context']['sources']['security_patches']['items']) == 5
+    await reference_recall.recover_reference_preflight(entry, trace)
+    assert len(trace.tool_calls) == 4
+    gate = evaluate_evidence_gate(trace, entry)
+    assert gate['official_reference_attempted']
+
+
+async def test_recovery_keeps_owner_boundary(references):
+    _root, _store, snapshot = references
+    entry = {'issue_id': 661620, '_reference_owner_id': 'owner-b'}
+    trace = KkAgentTrace(tool_calls=[ToolTrace(
+        tool_name='gms_rt_redmine_issue_fetch', status='succeeded',
+        tool_input={'issue_id': 661620}, snapshot_ids=[snapshot],
+    )])
+    await reference_recall.recover_reference_preflight(entry, trace)
+    assert entry['_official_reference_context']['status'] == 'unavailable'
+    assert trace.tool_calls[-1].status == 'failed'
+    assert not trace.tool_calls[-1].reference_lookup
+
+
+async def test_successful_native_reference_lookup_is_not_repeated(references, monkeypatch):
+    _root, store, snapshot = references
+    add_text(store, snapshot, 'CVE-2026-58835')
+    data = reference_recall.collect_snapshot_references('owner-a', snapshot)
+    trace = KkAgentTrace(tool_calls=[
+        ToolTrace(tool_name='gms_rt_redmine_issue_fetch', status='succeeded',
+                  tool_input={'issue_id': 661620}, snapshot_ids=[snapshot]),
+        ToolTrace(tool_name='gms_rt_redmine_references', status='succeeded',
+                  tool_input={'snapshot_id': snapshot}, reference_lookup=reference_recall.reference_check_summary(data)),
+    ])
+    collector = Mock(side_effect=AssertionError('lookup must not repeat'))
+    monkeypatch.setattr(reference_recall, 'collect_snapshot_references', collector)
+    await reference_recall.recover_reference_preflight({'issue_id': 661620, '_reference_owner_id': 'owner-a'}, trace)
+    collector.assert_not_called()
+    assert len(trace.tool_calls) == 2
+
+
+async def test_failed_preflight_still_requires_official_lookup_after_recovery(references, monkeypatch):
+    from features.redmine import daily_brief_service
+
+    evidence = EvidencePreflight()
+    monkeypatch.setattr(daily_brief_service, 'collect_deep_analysis_evidence', AsyncMock(return_value=evidence))
+    entry = {'issue_id': 661620}
+    await daily_brief_service.precollect_deep_evidence(
+        repository=SimpleNamespace(is_cancel_requested=lambda _run: False),
+        run=SimpleNamespace(run_id='run', owner_id='owner-a'), issue_id=661620,
+        analyzer=SimpleNamespace(env_extra={'GMS_RT_PROFILE': 'explicit-owner-profile'}), entry=entry,
+    )
+    assert entry['_reference_lookup_required'] is True
+    assert entry['_reference_owner_id'] == 'owner-a'
+
+
+async def test_analyzer_recovers_official_context_before_repair_and_review(references, monkeypatch):
+    from features.redmine.kkagent.analyzer import _StreamFallback
+    from features.redmine.kkagent.mcp_health import McpHealthProbe
+    from features.redmine.tests.kkagent.review_support import review_trace
+    from features.redmine.tests.kkagent.test_native_summary import complete_trace, final_trace
+
+    _root, store, snapshot = references
+    add_text(store, snapshot, 'CVE-2026-58835')
+    initial = complete_trace(report='尚未引用官方记录。')
+    initial.tool_calls[0].tool_input = {'issue_id': 661620}
+    initial.tool_calls[0].snapshot_ids = [snapshot]
+    initial.tool_calls[1].tool_input = {'snapshot_id': snapshot}
+    report = '官方资料列出修复，设备是否集成仍待验证（EV-006）。'
+    stream = AsyncMock(side_effect=[
+        (initial, _StreamFallback(), False),
+        (final_trace(report=report), _StreamFallback(), False),
+        (review_trace(report, refs=['EV-006']), _StreamFallback(), False),
+    ])
+    analyzer = KkAgentRedmineAnalyzer()
+    monkeypatch.setattr(analyzer, '_run_stream', stream)
+    monkeypatch.setattr('features.redmine.kkagent.analyzer.probe_kkagent_mcp_health',
+                        AsyncMock(return_value=McpHealthProbe(ok=True, skipped=True)))
+    outcome = await analyzer.analyze({
+        'issue_id': 661620, 'subject': 'BTS warning', 'analysis_mode': 'diagnostic', 'output_style': 'summary',
+        '_reference_lookup_required': True, '_reference_owner_id': 'owner-a',
+    })
+    assert outcome.ok
+    assert 'ag/40830952' in stream.await_args_list[1].args[0][-1]
+    assert len([tool for tool in outcome.trace['tools'] if 'redmine_references' in tool['tool_name']]) == 1
 
 

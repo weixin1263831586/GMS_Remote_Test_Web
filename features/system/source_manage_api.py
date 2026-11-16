@@ -865,6 +865,8 @@ def _schedule_background_verify(
     def _run(record: dict[str, Any]) -> None:
         source_id = str(record.get("source_id") or "")
         repo_root = str(record.get("repo_root") or "/invalid")
+        # 校验指纹快照（审核 P2）：校验结果只写回指纹未变的记录。
+        fingerprint = str(record.get("config_fingerprint") or "")
         try:
             if record.get("provider") == "local_git":
                 probe = _probe_local_path(repo_root)
@@ -887,7 +889,8 @@ def _schedule_background_verify(
                 )
                 verified = bool(probe["verified"])
             try:
-                store.mark_verified(source_id, ok=verified)
+                store.mark_verified(
+                    source_id, ok=verified, config_fingerprint=fingerprint)
             except UserSourceStoreError as exc:
                 logger.warning("SDK 源后台校验写入失败：%s", exc)
         except Exception:

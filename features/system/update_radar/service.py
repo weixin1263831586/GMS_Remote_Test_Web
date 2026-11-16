@@ -29,6 +29,9 @@ class RadarService:
         self._mail_lock = threading.Lock()
 
     def start_scan(self, trigger='manual', *, owner_id='', username='', now=None):
+        # 停机次序第一步：禁止领取新任务（manual 返回 409，schedule 由 watch 静默跳过）。
+        if self.closing.is_set():
+            raise ApiError.conflict('服务正在停止，本次扫描未启动')
         self.reserve()
         try:
             run_id = self.store.claim(trigger, owner_id=owner_id, username=username, now=now)
@@ -47,7 +50,8 @@ class RadarService:
         tasks = []
         try:
             tasks = self.store.run(run_id)['config']['tasks']
-            summary, changes = self.scanner(cancelled=self.closing.is_set, tasks=tasks)
+            summary, changes = self.scanner(
+                cancelled=self.closing.is_set, tasks=tasks, cancel_event=self.closing)
             summary.setdefault('tasks', tasks)
             status = 'failed' if len(summary['errors']) >= summary.get('groups_total', 2) else 'partial' if summary['errors'] else 'completed'
             if self.closing.is_set():
@@ -127,9 +131,23 @@ def start_radar():
 
 
 async def stop_radar(task):
-    get_service().closing.set()
+    """Ordered shutdown: forbid new claims, cancel, kill scanners, join, recover.
+
+    The scan worker forwards `closing` into each subprocess as cancel_event, so
+    a scanner blocked in communicate() is killed within ~1s; we still join the
+    worker with a bound before running store.recover() so the interrupted
+    status is persisted after (not racing) the worker's own finish() write.
+    """
+    service = get_service()
+    service.closing.set()
     task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         pass
+    worker = service.worker
+    if worker is not None and worker.is_alive():
+        worker.join(timeout=30)
+        if worker.is_alive():
+            logger.warning('Radar scan worker did not finish within 30s during shutdown')
+    service.store.recover()

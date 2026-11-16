@@ -11,6 +11,8 @@ from pathlib import Path
 
 from foundation.config import settings
 
+from ..update_monitor.parsing import matched_excerpt, reference_term_matches
+from ..update_monitor.repository import bulletin_detail_coverage
 from .repository import escape_like, query_security_patches_by_cve
 
 
@@ -36,17 +38,26 @@ def _lookup(path, table, columns, terms, *, kind, limit):
     if not terms:
         return {"status": "not_applicable", "items": []}
     try:
+        coverage = {}
         with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=3) as conn:
             conn.row_factory = sqlite3.Row
+            critical = kind == "critical_patch"
+            if critical:
+                available = {row[1] for row in conn.execute('PRAGMA table_info(gms_update_bulletin_patches)')}
+                columns = tuple(column for column in columns if column != 'detail_text' or column in available)
+                coverage = bulletin_detail_coverage(conn)
+                conn.create_function('reference_term_matches', 2, reference_term_matches)
             security = kind == "security_patch"
             cves = [term for term in terms if re.fullmatch(r"CVE-\d{4}-\d{4,7}", term, re.I)] if security else []
             search_terms = [term for term in terms if term not in cves]
             rows = []
             if search_terms:
                 # 列名/表名均来自本文件固定调用方，无注入面。
-                clauses = ["(" + " OR ".join(f'{column} LIKE ? ESCAPE "\\"' for column in columns) + ")"
+                clauses = ["(" + " OR ".join(
+                    f'reference_term_matches({column}, ?)' if critical else f'{column} LIKE ? ESCAPE "\\"'
+                    for column in columns) + ")"
                            for _ in search_terms]
-                params = [f"%{escape_like(term)}%" for term in search_terms for _ in columns]
+                params = [term if critical else f"%{escape_like(term)}%" for term in search_terms for _ in columns]
                 selected = "DISTINCT cve_id" if security else "*"
                 rows = [dict(row) for row in conn.execute(
                     f"SELECT {selected} FROM {table} WHERE {' OR '.join(clauses)} LIMIT ?",
@@ -63,14 +74,18 @@ def _lookup(path, table, columns, terms, *, kind, limit):
         allowed = ("id", "cve_id", "mainline_module", "version_note", "release_year", "release_label",
                    "source_url", "source_title", "first_seen_at", "last_seen_at", "issue_type",
                    "test_module", "test_case", "exemption_id", "android_versions", "issue_text",
-                   "patch_id", "patch_kind", "description", "year", "bulletin_month", "deadline", "bulletin_url")
+                   "patch_id", "patch_kind", "description", "year", "bulletin_month", "deadline", "bulletin_url",
+                   "detail_status", "detail_fetched_at")
         item = {key: row[key][:4000] if isinstance(row[key], str) else row[key] for key in allowed if key in row}
+        if row.get('detail_text'):
+            item['detail_excerpt'] = matched_excerpt(row['detail_text'], terms)
+            item['detail_content_sha256'] = hashlib.sha256(row['detail_text'].encode()).hexdigest()
         digest = hashlib.sha256(json.dumps(item, sort_keys=True).encode()).hexdigest()
-        identity = row.get("id") or digest[:16]
+        identity = row.get("id") or row.get("item_key") or digest[:16]
         item["reference"] = f"ref:mainline:{kind}:{identity}"
         item["content_sha256"] = digest
         items.append(item)
-    return {"status": "matched" if items else "no_match", "items": items,
+    return {"status": "matched" if items else "no_match", "items": items, **coverage,
             "possibly_truncated": len(items) == limit}
 
 
@@ -99,7 +114,7 @@ def recall_mainline_references(identifiers, *, data_root=None, limit=20):
                                          kind="security_patch", limit=limit),
             "exemptions": exemptions,
             "critical_patches": _lookup(root / "gms_update_monitor.sqlite3", "gms_update_bulletin_patches",
-                                        ("patch_id", "description"), list(dict.fromkeys(critical_terms))[:128],
+                                        ("patch_id", "description", "detail_text"), list(dict.fromkeys(critical_terms))[:128],
                                         kind="critical_patch", limit=limit),
         },
     }

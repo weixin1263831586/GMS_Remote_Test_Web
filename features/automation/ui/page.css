@@ -497,32 +497,7 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
 .auto-follow input { width: auto; margin: 0; }
 .build-job:hover { border-color: var(--primary); background: var(--panel-3); }
 .build-job.active { border-color: var(--primary); background: color-mix(in srgb, var(--primary-color) 14%, transparent); }
-.password-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 10000;
-    display: grid;
-    place-items: center;
-    padding: 14px;
-    overflow: hidden;
-    background: rgb(5 5 8 / 76%);
-}
-.password-dialog {
-    width: min(360px, 100%);
-    max-height: calc(100dvh - 28px);
-    min-width: 0;
-    overflow: auto;
-    overscroll-behavior: contain;
-    display: grid;
-    gap: 12px;
-    padding: 16px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: var(--panel);
-    box-shadow: 0 18px 50px rgb(0 0 0 / 35%);
-}
-.password-title { font-weight: 700; }
-.password-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .tabs { display: flex; gap: 6px; }
 .tab.active { background: color-mix(in srgb, var(--primary-color) 16%, transparent); border-color: var(--primary); color: var(--primary-hover); }
@@ -867,11 +842,6 @@ textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, SFMono
 .trace-grid .trace-val { word-break: break-word; }
 .trace-link-row { margin-top: 6px; }
 body.overlay-open { overflow: hidden; }
-
-@media (max-width: 420px) {
-    .password-actions { flex-direction: column; }
-    .password-actions button { width: 100%; }
-}
 
 /* ==================== Profile 试运行 ==================== */
 .profile-dryrun {

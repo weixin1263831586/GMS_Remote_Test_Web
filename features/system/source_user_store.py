@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import logging
 import os
@@ -307,6 +308,10 @@ class UserSourceStore:
             raise UserSourceStoreError(f"不支持的源类型：{provider}")
         if ssh_password:
             record["ssh_password_enc"] = encrypt_secret(ssh_password)
+        # 校验指纹（审核 P2）：连接目标 + 路径 + 注册时刻。同名源删除重注册
+        # 或换服务器/路径后指纹必然变化——后台校验写回前核对指纹即可防止
+        # 旧路径的校验结果污染新记录。
+        record["config_fingerprint"] = _config_fingerprint(record, now_iso)
         with self._thread_lock, self._locked():
             sources = self._load()
             if sid in sources:
@@ -333,12 +338,21 @@ class UserSourceStore:
         return dict(record)
 
     def mark_verified(
-        self, source_id: str, *, ok: bool, verified_at: str | None = None
+        self, source_id: str, *, ok: bool, verified_at: str | None = None,
+        config_fingerprint: str = "",
     ) -> None:
         with self._thread_lock, self._locked():
             sources = self._load()
             record = sources.get(source_id)
             if record is None:
+                return
+            if (
+                config_fingerprint
+                and str(record.get("config_fingerprint") or "") != config_fingerprint
+            ):
+                # 审核 P2：校验期间用户删除并重注册同名源 / 改了服务器与
+                # 路径——旧校验结果不得写进新记录，直接丢弃（下次刷新
+                # 会以新指纹重新校验）。
                 return
             record["last_verified_at"] = verified_at or _utcnow_iso()
             record["last_verified_ok"] = bool(ok)
@@ -349,6 +363,19 @@ class UserSourceStore:
 # ---------- 模块级辅助 ----------
 
 import contextlib  # noqa: E402  (置于常量后，保持单段 import 语义清晰)
+
+
+def _config_fingerprint(record: dict[str, Any], now_iso: str) -> str:
+    """校验指纹：provider + 连接目标 + 路径 + 注册时刻的 SHA-256 前缀。"""
+    material = "|".join((
+        str(record.get("provider") or ""),
+        str(record.get("repo_root") or ""),
+        str(record.get("ssh_host") or ""),
+        str(record.get("ssh_port") or ""),
+        str(record.get("ssh_username") or ""),
+        now_iso,
+    ))
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
 
 @contextlib.contextmanager

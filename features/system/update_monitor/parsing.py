@@ -37,6 +37,37 @@ def text_content(node: html.HtmlElement) -> str:
     return ' '.join(' '.join(node.xpath('.//text()')).split())
 
 
+def matched_excerpt(text: str, terms: list[str], *, limit: int = 4000) -> str:
+    """Bound prompt content while retaining matches beyond the initial window."""
+    if len(text) <= limit:
+        return text
+    lower = text.lower()
+    ranked = sorted({(not bool(re.fullmatch(r'CVE-\d{4}-\d{4,7}', term, re.I)), lower.find(term.lower()))
+                     for term in terms if term and term.lower() in lower})
+    # Prefer CVE matches when many other identifiers appear earlier in a long
+    # section, and bound the number of windows before slicing the final text.
+    positions = sorted(
+        list(dict.fromkeys(position for _priority, position in ranked))[:max(1, min(4, limit // 900))],
+    )
+    if not positions:
+        return text[:limit]
+    windows = []
+    for position in positions:
+        start, end = max(0, position - 250), min(len(text), position + 650)
+        if windows and start <= windows[-1][1]:
+            windows[-1] = (windows[-1][0], max(end, windows[-1][1]))
+        else:
+            windows.append((start, end))
+    return '\n…\n'.join(text[start:end] for start, end in windows)[:limit]
+
+
+def reference_term_matches(text: str | None, term: str) -> bool:
+    """CVE identifiers are exact tokens; other search terms are literal text."""
+    if re.fullmatch(r'CVE-\d{4}-\d{4,7}', term, re.I):
+        return bool(re.search(rf'(?<![A-Za-z0-9]){re.escape(term)}(?![A-Za-z0-9])', text or '', re.I))
+    return term.casefold() in (text or '').casefold()
+
+
 def article_node(doc: html.HtmlElement) -> html.HtmlElement:
     articles = doc.xpath('//article[contains(@class, "devsite-article")]')
     return articles[0] if articles else doc

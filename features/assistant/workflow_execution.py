@@ -63,6 +63,35 @@ def is_workflow_confirm_message(message: str) -> bool:
     return bool(_WORKFLOW_CONFIRM_RE.match((message or "").strip()))
 
 
+def has_unsubmitted_workflow_plan(session: dict[str, Any]) -> bool:
+    pending = session.get("pending_plan")
+    return bool(pending and pending.get("type") == WORKFLOW_PLAN_TYPE)
+
+
+def discard_stale_pending_plan(session: dict[str, Any]) -> bool:
+    """普通回合结束时的 pending_plan 收敛；未提交工作流计划不隐式销毁。
+
+    审核不变量（两条路由同一状态机语义）：非取消、非确认、非明确修改的
+    消息（读工具查询、参数补问、低置信度澄清等）不得销毁待确认的
+    WorkflowDraft 计划——计划保留在会话中，状态回到 planning，用户仍可
+    「重新规划 / 取消计划 / 确认执行」。返回 True 表示保留了工作流计划。
+    """
+    if has_unsubmitted_workflow_plan(session):
+        session["status"] = "planning"
+        return True
+    session["pending_plan"] = None
+    return False
+
+
+def workflow_plan_busy_hint(tool_display: str) -> str:
+    """已有未提交工作流计划时，拒绝用新的确认计划覆盖它。"""
+    return (
+        "已有待确认的工作流计划（烧写/AOA/测试）。"
+        "请先「确认执行」「取消计划」或「重新规划」；"
+        f"如需执行「{tool_display}」，请先取消当前计划。"
+    )
+
+
 # automation/ui/state.js STAGE_LABELS_ZH 的后端镜像：步骤面板的实时进展
 # 文案需要中文阶段名，与 GMS ATS 页显示保持一致。
 RUN_STAGE_LABELS_ZH = {

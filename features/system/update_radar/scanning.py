@@ -47,7 +47,7 @@ def release_scanners(error=None):
                                     returncode=1 if detail else 0, error=detail)
 
 
-def scan_group(directory, group, api, module, flags, cancelled):
+def scan_group(directory, group, api, module, flags, cancelled, cancel_event=None):
     if cancelled():
         raise InterruptedError('服务停止，本组未完成扫描，保留原数据')
     staged = Path(directory) / api.DB_PATH.name
@@ -55,9 +55,10 @@ def scan_group(directory, group, api, module, flags, cancelled):
     result = run_local_command(
         [sys.executable, '-m', module, '--db', str(staged), *flags], timeout=3600,
         cwd=str(settings.project_root), env={**os.environ, 'GMS_PARTNER_ANDROID_AUTO_LOGIN': '0'},
+        cancel_event=cancel_event,
     )
     if not result.ok:
-        raise RuntimeError(redact_sensitive_text(result.stderr[-1500:] or '扫描进程失败或超时'))
+        raise RuntimeError(redact_sensitive_text(result.stderr[-1500:] or '扫描进程失败、取消或超时'))
     if not staged.exists():
         raise RuntimeError('扫描未生成数据，本组保留原值')
     if group == 'exemptions':
@@ -82,7 +83,13 @@ def scan_group(directory, group, api, module, flags, cancelled):
     return current
 
 
-def full_scan(cancelled=lambda: False, tasks=None):
+def full_scan(cancelled=lambda: False, tasks=None, cancel_event=None):
+    """Run scan groups with staged databases and publish only complete results.
+
+    ``cancel_event`` is forwarded to each scan subprocess (killed within ~1s
+    of shutdown); ``cancelled()`` is checked between groups and around the
+    publish step so a stop never swaps in half-scanned data.
+    """
     from .models import CATEGORIES
 
     tasks = list(CATEGORIES) if tasks is None else tasks
@@ -106,7 +113,7 @@ def full_scan(cancelled=lambda: False, tasks=None):
     with TemporaryDirectory(prefix='update-radar-', dir=settings.data_root) as directory:
         for group, api, module, flags in groups:
             try:
-                current = scan_group(directory, group, api, module, flags, cancelled)
+                current = scan_group(directory, group, api, module, flags, cancelled, cancel_event)
                 for category in after:
                     if (category == 'exemptions') == (group == 'exemptions'):
                         after[category] = current[category]

@@ -18,7 +18,8 @@ TABLES = {
     'gms_update_requirement_version_tags': ('requirements', ('source_key', 'tag_key')),
     'mainline_known_issues': ('exemptions', ('product_section', 'issue_type', 'test_module', 'test_case', 'exemption_id')),
 }
-VOLATILE = {'id', 'content_hash', 'first_seen_at', 'last_seen_at', 'last_scanned_at', 'last_changed_at'}
+VOLATILE = {'id', 'content_hash', 'first_seen_at', 'last_seen_at', 'last_scanned_at', 'last_changed_at',
+            'detail_fetched_at', 'detail_status'}
 
 
 def snapshot(path: Path) -> dict:

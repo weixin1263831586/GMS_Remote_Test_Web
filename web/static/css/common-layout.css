@@ -242,140 +242,304 @@
 }
 
 
-/* ==================== Route Check Dialog ==================== */
-.route-check-dialog {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.7);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 10000;
-    backdrop-filter: blur(4px);
-}
-
-.route-check-content {
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    width: min(500px, 96vw);
-    max-width: min(500px, 96vw);
-    min-height: 240px;
-    max-height: min(80vh, calc(100dvh - 16px));
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
-    overflow: hidden;
-}
-
-.route-check-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 15px 20px;
-    border-bottom: 1px solid var(--border-color);
-    background: var(--card-bg);
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    flex-shrink: 0;
-}
-
-.route-check-header h3 {
-    color: var(--text-primary);
-    margin: 0;
-    font-size: 16px;
-    font-weight: 600;
-}
-
-.route-check-close {
+/* 检查路由连通性：冷灰底、紫色折角。宽度高度走 modal-s。 */
+#route-check-dialog .modal-content {
+    position: relative;
+    color: #f2f3f7;
     background: transparent;
-    border: none;
-    font-size: 28px;
-    color: var(--text-secondary);
-    cursor: pointer;
-    width: 32px;
-    height: 32px;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+    filter: none;
+}
+
+#route-check-dialog .modal-content::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: #1c1e2c;
+    border: 1px solid rgba(167, 139, 250, 0.72);
+    clip-path: polygon(
+        14px 0, calc(100% - 14px) 0,
+        100% 20px, 100% calc(100% - 20px),
+        calc(100% - 14px) 100%, 14px 100%,
+        0 calc(100% - 20px), 0 20px
+    );
+    z-index: 0;
+    pointer-events: none;
+    filter: drop-shadow(0 14px 28px rgba(0, 0, 0, 0.45));
+}
+
+#route-check-dialog .route-check-rule,
+#route-check-dialog .modal-body,
+#route-check-dialog .route-check-actions {
+    position: relative;
+    z-index: 1;
+}
+
+#route-check-dialog .route-check-corner {
+    position: absolute;
+    width: 36px;
+    height: 44px;
+    pointer-events: none;
+    z-index: 6;
+    overflow: visible;
+    fill: none;
+    stroke: #d8ccff;
+    stroke-width: 2.4;
+    stroke-linejoin: miter;
+    filter: drop-shadow(0 0 4px rgba(167, 139, 250, 0.95));
+}
+
+#route-check-dialog .route-check-corner.is-tl { top: 0; left: 0; }
+#route-check-dialog .route-check-corner.is-tr { top: 0; right: 0; }
+#route-check-dialog .route-check-corner.is-bl { bottom: 0; left: 0; }
+#route-check-dialog .route-check-corner.is-br { right: 0; bottom: 0; }
+
+#route-check-dialog .modal-header {
+    background: transparent;
+    border-bottom: 0;
+    padding: 18px 20px 6px 22px;
+    gap: 14px;
+}
+
+#route-check-dialog .modal-title {
     display: flex;
     align-items: center;
+    gap: 12px;
+    margin: 0;
+    flex: 1;
+    color: #f7f4ff;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+}
+
+#route-check-dialog .route-check-badge {
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
-    border-radius: 4px;
-    transition: all 0.2s ease;
-    line-height: 1;
-    padding: 0;
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    color: #efeaff;
+    border: 1px solid rgba(196, 181, 253, 0.85);
+    border-radius: 7px;
+    background: rgba(139, 116, 232, 0.18);
+    box-shadow: 0 0 12px rgba(139, 116, 232, 0.35);
+}
+
+#route-check-dialog .route-check-title-sep {
+    width: 1px;
+    height: 16px;
+    flex: 0 0 auto;
+    background: rgba(196, 181, 253, 0.8);
+}
+
+#route-check-dialog .route-check-slashes {
+    width: 22px;
+    height: 12px;
+    flex: 0 0 auto;
+    background: repeating-linear-gradient(
+        -28deg,
+        transparent 0 3px,
+        #d8ccff 3px 4.5px,
+        transparent 4.5px 7px
+    );
+}
+
+#route-check-dialog .modal-close {
+    width: 30px;
+    min-width: 30px;
+    min-height: 30px;
+    color: #f4f1ff;
+    background: transparent;
+    border: 1px solid rgba(196, 181, 253, 0.35);
+    border-radius: 6px;
+    font-size: 20px;
+}
+
+#route-check-dialog .modal-close:hover {
+    color: #fff;
+    background: rgba(139, 116, 232, 0.22);
+    border-color: #c4b5fd;
+}
+
+#route-check-dialog .route-check-rule {
+    display: block;
+    width: calc(100% - 40px);
+    height: 16px;
+    margin: 0 20px 2px;
     flex-shrink: 0;
+    color: #c4b5fd;
 }
 
-.route-check-close:hover {
-    background: var(--danger-bg, color-mix(in srgb, var(--danger-color) 15%, transparent));
-    color: var(--danger-color);
-}
-
-.route-check-close:active {
-    transform: scale(0.95);
+#route-check-dialog .modal-body {
+    background: transparent;
+    padding: 10px 28px 8px;
 }
 
 .route-check-form {
-    padding: 20px;
     overflow-y: auto;
     flex: 1;
 }
 
-.route-check-form .form-group {
-    margin-bottom: 8px;
+#route-check-dialog .route-check-form .form-group {
+    margin: 0 0 18px;
 }
 
-.route-check-form label {
-    display: block;
-    color: var(--text-secondary);
+#route-check-dialog .route-check-form .form-group:has(+ .ping-result) {
     margin-bottom: 4px;
-    font-size: 13px;
-    font-weight: 500;
 }
 
-.route-check-form input[type="text"] {
-    width: 100%;
-    padding: 8px 10px;
-    background: var(--darker-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    color: var(--text-primary);
-    font-size: 13px;
-    transition: var(--transition-fast);
-}
-
-.route-check-form input[type="text"]:focus {
-    outline: none;
-    border-color: var(--primary-color);
-}
-
-.route-check-form small {
-    display: block;
-    color: var(--text-muted);
-    font-size: 12px;
-    margin-top: 2px;
-}
-
-.route-check-actions {
+#route-check-dialog .route-check-form label {
     display: flex;
-    gap: 10px;
-    margin: 12px 0 0;
-    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    color: #f7f4ff;
+    font-size: 14px;
+    font-weight: 700;
 }
 
-.route-check-actions button {
+#route-check-dialog .route-check-form label::before {
+    content: "";
+    width: 3px;
+    height: 14px;
     flex: 0 0 auto;
-    min-width: 80px;
-    padding: 8px 16px;
-    border: none;
-    border-radius: 4px;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: var(--transition-fast);
+    border-radius: 1px;
+    background: #c4b5fd;
+    box-shadow: 0 0 8px rgba(196, 181, 253, 0.8);
+}
+
+#route-check-dialog .route-check-field {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 14px;
+    background: #141622;
+    border: 1px solid rgba(183, 155, 255, 0.78);
+    border-radius: 8px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#route-check-dialog .route-check-field:focus-within {
+    border-color: #e4dcff;
+    box-shadow: 0 0 0 1px rgba(228, 220, 255, 0.35), 0 0 16px rgba(139, 116, 232, 0.4);
+}
+
+#route-check-dialog .route-check-field-icon {
+    display: inline-flex;
+    align-items: center;
+    align-self: stretch;
+    margin-right: 12px;
+    padding-right: 12px;
+    color: #c4b5fd;
+    border-right: 1px solid rgba(196, 181, 253, 0.55);
+}
+
+#route-check-dialog .route-check-form input[type="text"] {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    padding: 10px 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    color: #f7f4ff;
+    font-size: 15px;
+    box-shadow: none;
+}
+
+#route-check-dialog .route-check-form input[type="text"]:focus {
+    outline: none;
+    border-color: transparent;
+}
+
+#route-check-dialog .route-check-form input::placeholder {
+    color: #9b93b8;
+}
+
+#route-check-dialog .route-check-form small {
+    display: block;
+    margin-top: 8px;
+    color: #a399c4;
+    font-size: 12px;
+}
+
+#route-check-dialog .route-check-actions {
+    position: relative;
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    margin-top: 8px;
+    padding: 16px 24px 22px;
+    background: transparent;
+    border-top: 1px solid rgba(183, 155, 255, 0.38);
+}
+
+#route-check-dialog .route-check-ticks {
+    position: absolute;
+    left: 22px;
+    bottom: 11px;
+    width: 132px;
+    height: 20px;
+    pointer-events: none;
+    z-index: 2;
+}
+
+#route-check-dialog .route-check-actions .btn-xxs {
+    min-width: 96px;
+    min-height: 38px;
+    padding: 0 18px;
+    gap: 6px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    transform: none;
+    box-shadow: none;
+}
+
+#route-check-dialog .route-check-actions .btn-xxs:not(.btn-primary) {
+    color: #f4f1ff;
+    background: transparent;
+    border: 1px solid rgba(196, 181, 253, 0.85);
+}
+
+#route-check-dialog .route-check-actions .btn-xxs:not(.btn-primary):hover {
+    color: #fff;
+    background: rgba(139, 116, 232, 0.16);
+    border-color: #e4dcff;
+    transform: none;
+    box-shadow: none;
+}
+
+#route-check-dialog .route-check-actions .btn-primary {
+    min-width: 138px;
+    color: #fff;
+    background: linear-gradient(180deg, #947df2 0%, #6d4de0 100%);
+    border: 1px solid #d8ccff;
+    box-shadow: 0 0 16px rgba(124, 92, 246, 0.48);
+}
+
+#route-check-dialog .route-check-actions .btn-primary:hover:not(:disabled) {
+    background: linear-gradient(180deg, #a894f6 0%, #7c5cf0 100%);
+    transform: none;
+    box-shadow: 0 0 20px rgba(167, 139, 250, 0.62);
+}
+
+#route-check-dialog .ping-result {
+    min-height: 0;
+}
+
+#route-check-dialog .ping-result:empty {
+    display: none;
+}
+
+#route-check-dialog .ping-result:not(:empty) {
+    margin-top: 14px;
 }
 
 .btn-secondary {
@@ -1202,17 +1366,7 @@
     font-size: 12px;
 }
 
-/* 报告诊断工作台。 */
-.report-diagnosis-shell {
-    width: 96vw;
-    max-width: 1500px;
-    height: 92vh;
-    max-height: 92vh;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
+/* 报告诊断工作台。外框尺寸走 modal-workspace。 */
 
 .report-diagnosis-header {
     position: sticky;
@@ -1903,11 +2057,6 @@
 }
 
 @media (max-width: 700px) {
-    .report-diagnosis-shell {
-        width: 96vw;
-        height: 92vh;
-    }
-
     .dx-meta-grid-compact {
         grid-template-columns: 1fr;
     }

@@ -101,31 +101,14 @@
     .conn-banner .conn-detail { color:var(--muted); font-size:12px; margin-top:2px; white-space:pre-line; }
     .conn-banner button { flex-shrink:0; }
     .review-badge { display:inline-block; min-width:22px; padding:1px 7px; margin-left:6px; border-radius:999px; background:var(--warn); color:#1a1206; font-size:12px; font-weight:700; line-height:1.5; }
-    .modal { display:none; position:fixed; inset:0; width:100vw; z-index:10000; background:rgba(0,0,0,.68); align-items:center; justify-content:center; padding:clamp(8px,2.5vw,20px); overflow:hidden; overscroll-behavior:contain; }
-    .modal.show { display:flex; }
-    .modal-content { width:min(760px, 96vw); max-height:min(85vh,calc(100dvh - 16px)); min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden; box-shadow:0 18px 40px rgba(0,0,0,.4); }
-    .modal-header { display:flex; justify-content:space-between; align-items:center; gap:10px; min-width:0; padding:15px 20px; background:linear-gradient(135deg,#667eea,#764ba2); border-bottom:1px solid var(--border); }
-    .modal-header h2 { margin:0; font-size:16px; font-weight:600; color:#fff; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .modal-header button.secondary { background:rgba(255,255,255,.15); color:#fff; }
-    .modal-header button.secondary:hover { background:rgba(255,255,255,.25); }
-    .modal-body { padding:16px; display:grid; gap:12px; overflow:auto; overscroll-behavior:contain; min-width:0; min-height:0; overflow-wrap:anywhere; }
-    .modal-body > *, .modal-header > *, .modal-actions > * { min-width:0; max-width:100%; }
+    .modal-body { display:grid; gap:12px; }
     #trendDetailBody { max-height:calc(85vh - 62px); }
     .form-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
     .field label { display:block; color:var(--muted); font-size:12px; margin-bottom:5px; }
     .field input, .field select, .field textarea { width:100%; min-width:0; max-width:100%; }
     .field.full { grid-column:1 / -1; }
-    .modal-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; padding:0 16px 16px; }
-    /* 路由检查弹框：复用测试界面 route-check 风格 */
-    #routeCheckModal { backdrop-filter:blur(4px); }
-    #routeCheckModal .modal-content { background:var(--panel); border:1px solid var(--border); border-radius:6px; width:min(500px,96vw); max-width:min(500px,96vw); min-height:200px; max-height:min(80vh,calc(100dvh - 16px)); box-shadow:0 18px 48px rgba(0,0,0,.42); }
-    #routeCheckModal .modal-header { background:var(--panel); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:10; }
-    #routeCheckModal .modal-header h3 { color:var(--text); margin:0; font-size:16px; font-weight:600; }
-    #routeCheckModal .modal-close { background:transparent; border:none; font-size:28px; color:var(--muted); cursor:pointer; width:32px; height:32px; display:flex; align-items:center; justify-content:center; border-radius:4px; transition:all .2s ease; line-height:1; padding:0; flex-shrink:0; }
-    #routeCheckModal .modal-close:hover { background:rgba(239,68,68,.15); color:var(--bad); }
-    #routeCheckModal .modal-close:active { transform:scale(.95); }
-    #routeCheckModal .modal-body { display:block; padding:20px; overflow-y:auto; }
-    html.modal-open, body.modal-open { overflow:hidden; }
+    #routeCheckModal .modal-body { display:block; }
+    #routeCheckModal .modal-header h3 { margin:0; font-size:16px; font-weight:600; }
     @media (max-width:800px) {  input { min-width:180px; width:100%; } .header-toolbar { flex:1 1 100%; justify-content:flex-start; flex-wrap:wrap; } .header-toolbar .filter-bar { flex-wrap:wrap; } .header-toolbar .btn-group { flex-wrap:wrap; border-left:0; padding-left:0; margin-left:0; } }
     @media (max-width:560px) { .trend-grid { grid-template-columns:minmax(0,1fr); } .form-grid { grid-template-columns:1fr; } .field.full { grid-column:auto; } .modal-actions { flex-direction:column; } .modal-actions button { width:100%; }  button { min-height:40px; } .select-add-btn { height:40px; min-width:40px; } .trend-start-btn { width:40px; min-width:40px; min-height:40px; } .modal-close { width:40px; height:40px; min-width:40px; min-height:40px; } }
     @media (max-height:560px) { .modal { align-items:stretch; } .modal-content { max-height:calc(100dvh - 16px); } }
@@ -169,16 +152,16 @@
 
 /* Gerrit 保留已有各视图/列表/对话框交互，只对齐公共视觉。 */
 
-:where(.stat-card, .trend-panel, .modal-content, .wrap, .dept-table-wrap) {
+:where(.stat-card, .trend-panel, .wrap, .dept-table-wrap) {
     background: var(--panel); border-color: var(--border); border-radius: 8px; box-shadow: none;
 }
-:where(.modal-header) { background: var(--panel); border-bottom-color: var(--border); }
 :where(table) th { background: var(--panel2); color: var(--muted); }
 :where(table) tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--panel)); }
 
 </style>
 <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport">
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-ui-foundations">
+<link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers">
 <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261116-tab-focus-ring">
 <script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
 </head>
@@ -227,7 +210,7 @@
   </section>
 </main>
 <div id="settingsModal" class="modal">
-  <div class="modal-content" style="height:min(560px,72vh)">
+  <div class="modal-content modal-l modal-pin">
     <div class="modal-header">
       <h2>Gerrit 连接设置</h2>
       <button class="secondary" data-click="hideSettings">关闭</button>
@@ -254,7 +237,7 @@
   </div>
 </div>
 <div id="addPersonalModal" class="modal">
-  <div class="modal-content">
+  <div class="modal-content modal-l">
     <div class="modal-header"><h2>添加成员</h2><button class="secondary" data-click="hideAddPersonalModal">关闭</button></div>
     <div class="modal-body">
       <div class="form-grid">
@@ -267,7 +250,7 @@
   </div>
 </div>
 <div id="addDepartmentModal" class="modal">
-  <div class="modal-content">
+  <div class="modal-content modal-l">
     <div class="modal-header"><h2>添加部门看板</h2><button class="secondary" data-click="hideAddDepartmentModal">关闭</button></div>
     <div class="modal-body">
       <div class="form-grid">
@@ -280,14 +263,14 @@
   </div>
 </div>
 <div id="addDepartmentOwnerModal" class="modal">
-  <div class="modal-content">
+  <div class="modal-content modal-l">
     <div class="modal-header"><h2>添加部门成员</h2><button class="secondary" data-click="hideAddDepartmentOwnerModal">关闭</button></div>
     <div class="modal-body"><div class="field"><label>Owner 邮箱/账号</label><input id="addDepartmentOwnerValue" placeholder="name@rock-chips.com"></div></div>
     <div class="modal-actions"><button class="secondary" data-click="hideAddDepartmentOwnerModal">取消</button><button data-click="saveDepartmentOwner">保存</button></div>
   </div>
 </div>
 <div id="trendStartModal" class="modal">
-  <div class="modal-content">
+  <div class="modal-content modal-l">
     <div class="modal-header"><h2 id="trendStartModalTitle">设置统计日期范围</h2><button class="secondary" data-click="hideTrendStartModal">关闭</button></div>
     <div class="modal-body">
       <div class="form-grid">
@@ -299,13 +282,13 @@
   </div>
 </div>
 <div id="trendDetailModal" class="modal">
-  <div class="modal-content" style="width:min(900px,100%)">
+  <div class="modal-content modal-xl">
     <div class="modal-header"><h2 id="trendDetailTitle">提交明细</h2><button class="secondary" data-click="hideModal" data-a0="trendDetailModal">关闭</button></div>
     <div class="modal-body" id="trendDetailBody"><div class="muted">加载中…</div></div>
   </div>
 </div>
 <div id="routeCheckModal" class="modal">
-  <div class="modal-content">
+  <div class="modal-content modal-s">
     <div class="modal-header"><h3>📡 检查路由连通性</h3><button class="modal-close" data-click="hideModal" data-a0="routeCheckModal">&times;</button></div>
     <div class="modal-body" id="routeCheckBody"><div class="muted">正在探测 Gerrit 服务器可达性…</div></div>
   </div>

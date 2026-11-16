@@ -239,13 +239,14 @@ class SSHGitProviderTests(unittest.TestCase):
 
 
 class SSHGitMultiRepoTests(unittest.TestCase):
-    """多仓模式：HEAD 直查分片、命中仓后置解析、按仓读取、自动发现。"""
+    """多仓模式：解析后 commit 检索、按仓读取、自动发现、分片降级。"""
 
     SDK_ROOT = "/remote/sdk"
     REPO_FB = "/remote/sdk/frameworks/base"
     REPO_KERN = "/remote/sdk/kernel-6.1"
     COMMIT_FB = "b" * 40
     COMMIT_KERN = "c" * 40
+    COMMIT_R0 = "a" * 40
 
     def setUp(self):
         self.executed: list[str] = []
@@ -314,11 +315,12 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         return out
 
     def _grep_stdout(self) -> str:
+        # 分片命令在 grep 前解析真实 SHA：结果头/记录都绑定该 commit。
         return (
-            f"{_REPO_SEP}frameworks/base\t{_HEAD_LABEL}\n"
-            + _grep_record(_HEAD_LABEL, "core/java/A.java", 7, "void run()")
-            + f"{_REPO_SEP}kernel-6.1\t{_HEAD_LABEL}\n"
-            + _grep_record(_HEAD_LABEL, "drivers/gpio.c", 3, "gpio_set()")
+            f"{_REPO_SEP}frameworks/base\t{self.COMMIT_FB}\n"
+            + _grep_record(self.COMMIT_FB, "core/java/A.java", 7, "void run()")
+            + f"{_REPO_SEP}kernel-6.1\t{self.COMMIT_KERN}\n"
+            + _grep_record(self.COMMIT_KERN, "drivers/gpio.c", 3, "gpio_set()")
         )
 
     # ---- tests -------------------------------------------------------
@@ -376,6 +378,7 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         self.assertEqual(result["repos_pending"], 0)
         first, second = result["matches"]
         self.assertEqual(first["path"], "frameworks/base/core/java/A.java")
+        # commit 来自 grep 前解析并随结果头携带的 SHA（与检索绑定）。
         self.assertEqual(first["commit"], self.COMMIT_FB)
         self.assertEqual(first["repo"], "frameworks/base")
         self.assertEqual(second["path"], "kernel-6.1/drivers/gpio.c")
@@ -409,7 +412,14 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         self.assertTrue(result["coverage_complete"])
         self.assertFalse(result["limited"])
 
-    def test_search_grep_runs_at_head_without_per_repo_revparse(self):
+    def test_search_greps_the_pre_resolved_commit(self):
+        """分片命令先 rev-parse 固定 SHA，再在该 commit 上 grep。
+
+        审核 P1：旧实现 HEAD 直查、聚合后回查 HEAD 生成证据 ID——同步
+        期间 HEAD 移动会让搜索结果与 sdk_read 内容不一致。新协议在同一
+        循环体先解析 ``$c`` 再 ``grep "$c"``，结果绑定的就是检索时的
+        commit。
+        """
         self.provider = self._provider(self._handler(
             grep_stdout=self._grep_stdout(),
             heads_stdout=self._heads_stdout(),
@@ -418,9 +428,21 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         grep_cmds = [c for c in self.executed if " grep " in c]
         self.assertTrue(grep_cmds)
         for cmd in grep_cmds:
-            # HEAD 直查：分片命令不包含逐仓 rev-parse。
-            self.assertNotIn("rev-parse", cmd)
-            self.assertIn(" HEAD -- ", cmd)
+            self.assertIn("rev-parse --verify 'HEAD^{commit}'", cmd)
+            self.assertIn('"$c"', cmd)
+            self.assertNotIn(" HEAD -- ", cmd)
+
+    def test_head_placeholder_header_is_protocol_error(self):
+        """仓库头带 HEAD 占位＝旧协议输出，直接拒绝（防回退）。"""
+
+        stale = (
+            f"{_REPO_SEP}frameworks/base\t{_HEAD_LABEL}\n"
+            + _grep_record(_HEAD_LABEL, "A.java", 1, "x")
+        )
+        provider = self._provider(self._handler(grep_stdout=stale))
+        with self.assertRaises(SourceProviderError) as ctx:
+            provider.search("", "x")
+        self.assertEqual(ctx.exception.status_code, 502)
 
     def test_multi_read_rejects_path_outside_repos(self):
         result_id = self.provider._make_result_id(
@@ -455,13 +477,11 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         from features.system import source_ssh_git as mod
 
         repos = tuple(f"/remote/sdk/r{i}" for i in range(5))
-        stdout = (f"{_REPO_SEP}/remote/sdk/r0\t{_HEAD_LABEL}\n"
-                  + _grep_record(_HEAD_LABEL, "A.java", 1, "x"))
+        stdout = (f"{_REPO_SEP}/remote/sdk/r0\t{self.COMMIT_R0}\n"
+                  + _grep_record(self.COMMIT_R0, "A.java", 1, "x"))
         provider = self._provider(self._handler(grep_stdout=stdout), repos=repos)
         with unittest.mock.patch.object(mod, "SSH_GIT_SHARD_REPOS", 2), \
-             unittest.mock.patch.object(mod, "SSH_GIT_SHARD_WAVE_SIZE", 1), \
-             unittest.mock.patch.object(provider, "_resolve_hit_commits",
-                                        return_value={"r0": "a" * 40}):
+             unittest.mock.patch.object(mod, "SSH_GIT_SHARD_WAVE_SIZE", 1):
             result = provider.search("", "x", limit=1)
         self.assertEqual(result["repos_total"], 5)
         self.assertEqual(result["repos_pending"], 3)
@@ -483,25 +503,25 @@ class SSHGitMultiRepoTests(unittest.TestCase):
                 self.assertTrue(first_finished.wait(timeout=5))
             rel = self.provider._repo_rel(shard[0])
             return CommandResult(
-                stdout=f"{_REPO_SEP}{shard[0]}\t{_HEAD_LABEL}\n"
-                       + _grep_record(_HEAD_LABEL, "A.java", 1, rel),
+                stdout=f"{_REPO_SEP}{shard[0]}\t{self.COMMIT_R0}\n"
+                       + _grep_record(self.COMMIT_R0, "A.java", 1, rel),
                 code=0,
             )
 
         with unittest.mock.patch.object(mod, "SSH_GIT_SHARD_REPOS", 1), \
-             unittest.mock.patch.object(self.provider, "_run_shard", side_effect=run_shard), \
-             unittest.mock.patch.object(self.provider, "_resolve_hit_commits", return_value={
-                 "frameworks/base": self.COMMIT_FB, "kernel-6.1": self.COMMIT_KERN,
-             }):
+             unittest.mock.patch.object(self.provider, "_run_shard", side_effect=run_shard):
             result = self.provider.search("", "x", limit=1)
         self.assertEqual(result["repos_pending"], 0)
         self.assertTrue(result["limited"])
         self.assertFalse(result["coverage_complete"])
 
-    def test_failed_commit_lookup_marks_empty_result_incomplete(self):
-        provider = self._provider(self._handler(grep_stdout=self._grep_stdout()))
-        with unittest.mock.patch.object(provider, "_resolve_hit_commits", return_value={}):
-            result = provider.search("", "run")
+    def test_incomplete_shard_marks_empty_result_incomplete(self):
+        """rev-parse 失败的仓输出 INCOMPLETE 标记：空结果 + limited。"""
+        from features.system.source_ssh_git import _TRUNCATION_MARKER
+
+        provider = self._provider(self._handler(
+            grep_stdout=_TRUNCATION_MARKER))
+        result = provider.search("", "run")
         self.assertEqual(result["total"], 0)
         self.assertTrue(result["limited"])
         self.assertFalse(result["coverage_complete"])
@@ -512,14 +532,20 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         from foundation.command_result import CommandResult
 
         command = self.provider._shard_grep_command("needle", "", (self.REPO_FB, self.REPO_KERN))
-        # 首仓模拟 timeout 的 124，末仓成功；shell 总退出码仍然是 0。
+        # 首仓 rev-parse 模拟 timeout 的 124（INCOMPLETE + continue），
+        # 末仓正常检索；shell 总退出码仍然是 0。
+        # git() 参数位序：$1=--no-optional-locks $2=-C $3=<repo> $4=<子命令>。
         script = (
             'git() { if [ "$3" = /remote/sdk/frameworks/base ]; then return 124; fi; '
-            "printf '%s\\0%s\\0%s\\n' 'HEAD:A.java' 1 needle; }; " + command
+            "if [ \"$4\" = rev-parse ]; then printf '%s\\n' "
+            f"'{self.COMMIT_KERN}'; return 0; fi; "
+            "printf '%s\\0%s\\0%s\\n' '" + self.COMMIT_KERN + ":gpio.c' 1 needle; }; "
+            + command
         )
         completed = subprocess.run(
             ["bash", "-c", script], capture_output=True, text=True, timeout=10, check=True,
         )
+        self.assertIn("@@GMS_SDK_INCOMPLETE@@", completed.stdout)
         provider = self._provider(self._handler(
             grep_stdout=completed.stdout, heads_stdout=self._heads_stdout(),
         ))
@@ -529,6 +555,7 @@ class SSHGitMultiRepoTests(unittest.TestCase):
             result = provider.search("", "needle")
         self.assertEqual(result["total"], 1)
         self.assertEqual(result["matches"][0]["repo"], "kernel-6.1")
+        self.assertEqual(result["matches"][0]["commit"], self.COMMIT_KERN)
         self.assertTrue(result["limited"])
         self.assertFalse(result["coverage_complete"])
 
@@ -578,8 +605,8 @@ class SSHGitMultiRepoTests(unittest.TestCase):
                 if "kernel-6.1" in command:
                     raise RuntimeError("Failed to get SSH connection")
                 return CommandResult(
-                    stdout=f"{_REPO_SEP}frameworks/base\t{_HEAD_LABEL}\n"
-                           + _grep_record(_HEAD_LABEL, "A.java", 1, "x"),
+                    stdout=f"{_REPO_SEP}frameworks/base\t{self.COMMIT_FB}\n"
+                           + _grep_record(self.COMMIT_FB, "A.java", 1, "x"),
                     code=0)
             if "rev-parse" in command:
                 return CommandResult(
@@ -621,8 +648,8 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         executed: list[str] = []
         repos = tuple(f"/remote/sdk/r{i:02d}" for i in range(3))
         grep_stdout = (
-            f"{_REPO_SEP}/remote/sdk/r00\t{_HEAD_LABEL}\n"
-            + _grep_record(_HEAD_LABEL, "A.java", 1, "x"))
+            f"{_REPO_SEP}/remote/sdk/r00\t{self.COMMIT_R0}\n"
+            + _grep_record(self.COMMIT_R0, "A.java", 1, "x"))
 
         def handler(command: str, timeout: int):
             executed.append(command)
@@ -633,7 +660,7 @@ class SSHGitMultiRepoTests(unittest.TestCase):
                 return CommandResult(stdout="", code=1)
             if "rev-parse" in command:
                 return CommandResult(
-                    stdout=f"{_REPO_SEP}/remote/sdk/r00\t{'a' * 40}\n",
+                    stdout=f"{_REPO_SEP}/remote/sdk/r00\t{self.COMMIT_R0}\n",
                     code=0)
             return CommandResult(stdout="", stderr="unexpected", code=3)
 
@@ -641,9 +668,6 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         with unittest.mock.patch.object(mod, "SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS", 0.05), \
              unittest.mock.patch.object(mod, "SSH_GIT_SHARD_REPOS", 1), \
              unittest.mock.patch.object(mod, "SSH_GIT_SHARD_WAVE_SIZE", 1), \
-             unittest.mock.patch.object(
-                 provider, "_resolve_hit_commits", lambda hits: {
-                     "r00": "a" * 40} if hits else {}), \
              unittest.mock.patch.object(
                  provider, "_repo_rel", lambda repo: repo.split("/")[-1]):
             # 三个分片三个波：波 1 耗尽预算后，波 2/3 不再发起。
@@ -669,17 +693,17 @@ class SSHGitMultiRepoTests(unittest.TestCase):
                 _t.sleep(0.1)
                 if "frameworks/base" in command:
                     return CommandResult(
-                        stdout=f"{_REPO_SEP}/remote/sdk/frameworks/base\t{_HEAD_LABEL}\n"
-                               + _grep_record(_HEAD_LABEL, "A.java", 1, "x"),
+                        stdout=f"{_REPO_SEP}/remote/sdk/frameworks/base\t{self.COMMIT_FB}\n"
+                               + _grep_record(self.COMMIT_FB, "A.java", 1, "x"),
                         code=0)
                 return CommandResult(
-                    stdout=f"{_REPO_SEP}/remote/sdk/kernel-6.1\t{_HEAD_LABEL}\n"
-                           + _grep_record(_HEAD_LABEL, "gpio.c", 2, "y"),
+                    stdout=f"{_REPO_SEP}/remote/sdk/kernel-6.1\t{self.COMMIT_KERN}\n"
+                           + _grep_record(self.COMMIT_KERN, "gpio.c", 2, "y"),
                     code=0)
             if "rev-parse" in command:
                 return CommandResult(
-                    stdout=f"{_REPO_SEP}/remote/sdk/frameworks/base\t{'a' * 40}\n"
-                           f"{_REPO_SEP}/remote/sdk/kernel-6.1\t{'b' * 40}\n",
+                    stdout=f"{_REPO_SEP}/remote/sdk/frameworks/base\t{self.COMMIT_FB}\n"
+                           f"{_REPO_SEP}/remote/sdk/kernel-6.1\t{self.COMMIT_KERN}\n",
                     code=0)
             return CommandResult(stdout="", stderr="unexpected", code=3)
 

@@ -5,9 +5,10 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="preload" as="script" href="/static/js/shell/shell-early-boot.js" fetchpriority="high">
         <link rel="stylesheet" href="/static/css/common.css?v=20261113-orbit-stage" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-components.css?v=20261113-orbit-stage" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-components.css?v=20261116-config-frame" data-shell-styles>
     <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-layout.css?v=20261112-primary-gradient" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-layout.css?v=20261116-route-corners" data-shell-styles>
     <link rel="stylesheet" href="/static/css/common-page.css?v=20261112-agent-head-sync" data-shell-styles>
     <link rel="stylesheet" href="/static/css/agent-access.css?v=20261113-frame-pad" data-shell-styles>
     <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-device-row" data-shell-styles>
@@ -113,7 +114,7 @@
     <script src="/static/js/pages/firmware-burn-adb-proxy.js?v=20260930-pages-split" defer></script>
     <script src="/static/js/pages/firmware-burn-usbip.js?v=20260930-pages-split" defer></script>
     <script src="/static/js/pages/auth-elevation.js?v=20261116-admin-prefill" defer></script>
-    <script src="/static/js/pages/vpn-control.js?v=20260902-vpn-per-worker" defer></script>
+    <script src="/static/js/pages/vpn-control.js?v=20261116-route-corners" defer></script>
     <script src="/static/js/pages/file-browser.js?v=20260904-gsi-worker-browse" defer></script>
     <script src="/static/js/pages/test-control.js?v=20261114-radar-outbox" defer></script>
     <script src="/static/js/pages/test-reports.js?v=20260812-stable-surfaces" defer></script>
@@ -144,7 +145,6 @@
         .cluster-mode-toggle.active .mode-switch { background: var(--primary-gradient); }
         .cluster-mode-toggle.active .mode-switch::after { transform: translateX(18px); }
         .cluster-mode-toggle .mode-text { font-size: 11px; font-weight: 600; }
-        #sidebar-visibility-modal .modal-content { width: 96vw; max-width: 1500px; height: 92vh; max-height: 92vh; }
         #sidebar-visibility-modal .modal-body { overflow: hidden; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
         .sidebar-settings-tabs { display: flex; gap: 6px; padding: 4px; border-radius: 8px; background: var(--darker-bg); flex-shrink: 0; }
         .sidebar-settings-tab { flex: 1; padding: 9px 14px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-secondary); font-weight: 600; cursor: pointer; }
@@ -306,7 +306,6 @@
         .project-guide-image-button img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; object-position: top center; }
         .project-guide-zoom-hint { position: absolute; right: 7px; bottom: 7px; padding: 4px 7px; border-radius: 4px; color: #fff; background: rgba(0,0,0,0.78); font-size: 10px; pointer-events: none; }
         #guide-image-modal { z-index: 10050; }
-        #guide-image-modal .modal-content { width: min(1580px, 97vw); max-width: 1580px; height: 94vh; max-height: 94vh; }
         #guide-image-modal .modal-header { gap: 12px; }
         .guide-image-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
         #guide-image-modal .modal-body { display: flex; flex-direction: column; gap: 8px; padding: 12px; overflow: hidden; }
@@ -316,12 +315,10 @@
         #guide-image-preview.actual-size { max-width: none; max-height: none; align-self: flex-start; cursor: zoom-out; }
         #guide-image-caption { color: var(--text-secondary); font-size: 11px; line-height: 1.5; text-align: center; flex-shrink: 0; }
         @media (max-width: 760px) {
-            #sidebar-visibility-modal .modal-content { width: calc(100vw - 20px); height: calc(100vh - 20px); max-height: none; }
             .project-guide-hero { align-items: flex-start; flex-direction: column; }
             .project-guide-url { white-space: normal; }
             .project-guide-steps, .project-guide-grid, .project-guide-gallery { grid-template-columns: 1fr; }
             .project-guide-example h5 { margin-top: 0; }
-            #guide-image-modal .modal-content { width: calc(100vw - 12px); height: calc(100vh - 12px); max-height: none; }
             #guide-image-modal .modal-header { padding: 10px 12px; }
         }
         #terminal { width: 100%; height: 100%; }
@@ -332,19 +329,6 @@
         .filter-btn { padding: 6px 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); color: var(--text-primary); font-size: 12px; cursor: pointer; transition: all 0.2s; }
         .filter-btn:hover { background: var(--darker-bg); border-color: var(--primary-color); }
         .filter-btn.active { background: var(--primary-gradient); color: white; border-color: var(--primary-color); }
-        /* 弹框居中样式 - 通用 */
-        .modal { display: none; position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: var(--modal-z-index, 10000); padding: clamp(8px, 2.5vw, 20px); box-sizing: border-box; overflow: hidden; overscroll-behavior: contain; }
-        #usage-examples-modal .modal-content { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); width: min(760px, 96vw); max-width: min(760px, 96vw); height: min(560px, 72vh); overflow: hidden; display: flex; flex-direction: column; }
-        #usage-examples-modal .modal-header { background: var(--light-bg); border-bottom: 1px solid var(--border-color); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
-        #usage-examples-modal .modal-title { color: var(--text-primary); font-size: 16px; font-weight: 600; }
-        #usage-examples-modal .modal-close { color: var(--text-secondary); font-size: 24px; cursor: pointer; line-height: 1; }
-        #usage-examples-modal .modal-close:hover { color: var(--text-primary); }
-        #usage-examples-modal .modal-body { padding: 20px; overflow-y: auto; background: var(--card-bg); }
-        #usage-examples-modal.modal.show { display: flex !important; }
-        /* 系统配置：标题栏与全站弹框同一表面 */
-        #config-modal .modal-header { background: var(--light-bg); border-bottom: 1px solid var(--border-color); }
-        #config-modal .modal-title { color: var(--text-primary); }
-        #config-modal .modal-close { color: var(--text-secondary); }
         #page-architecture .architecture-container { background: transparent; border-radius: 8px; border: 0; padding: 0; flex: 1; min-height: 0; overflow: hidden; }
         #page-architecture .architecture-container iframe { width: 100%; height: 100%; display: block; border: none; border-radius: 7px; background: var(--dark-bg); }
     </style>

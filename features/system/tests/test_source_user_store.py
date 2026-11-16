@@ -185,6 +185,34 @@ class UserSourceStoreTests(unittest.TestCase):
             self.store.get("a17")
         self.assertEqual(ctx.exception.status_code, 404)
 
+    def test_stale_fingerprint_verification_is_discarded(self):
+        """审核 P2：校验期间记录被重建（指纹变化），旧结果不得写回。
+
+        同名源删除重注册 / 换服务器与路径后 config_fingerprint 必然变化；
+        携带旧指纹的后台校验写回必须被静默丢弃，新记录保持未校验状态，
+        下次列表刷新会以新指纹重新进入校验队列。
+        """
+        old = self.store.add(
+            source_id="a17", repo_root="/sdk", ssh_host="h",
+            ssh_port=22, ssh_username="u",
+        )
+        stale_fingerprint = old["config_fingerprint"]
+        self.store.delete("a17")
+        self.store.add(
+            source_id="a17", repo_root="/sdk-new", ssh_host="h",
+            ssh_port=22, ssh_username="u",
+        )
+        self.store.mark_verified(
+            "a17", ok=True, config_fingerprint=stale_fingerprint)
+        record = self.store.get("a17")
+        self.assertNotIn("last_verified_at", record)
+        self.assertNotIn("last_verified_ok", record)
+        # 指纹一致（同一条记录的正常后台校验）仍然写回。
+        self.store.mark_verified(
+            "a17", ok=True, config_fingerprint=record["config_fingerprint"])
+        record = self.store.get("a17")
+        self.assertTrue(record["last_verified_ok"])
+
     def test_provider_config_conversion(self):
         record = self.store.add(
             source_id="a16",

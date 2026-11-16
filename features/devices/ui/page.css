@@ -60,11 +60,10 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue);box-shadow:0 0 
 .history-output{height:300px;padding:9px;color:var(--text-secondary)}.history-actions{justify-content:flex-end;margin-top:auto}
 .modal-backdrop{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(0,0,0,.7)}
 .modal-backdrop[hidden],[hidden]{display:none!important}
-.modal{width:min(520px,96vw);display:flex;flex-direction:column;gap:12px;padding:18px;border:1px solid var(--border);border-radius:11px;background:var(--panel);box-shadow:0 24px 70px rgba(0,0,0,.55)}
-.modal-head{justify-content:space-between}.modal-head button{font-size:22px;line-height:1;padding:3px 8px;border:0;background:transparent}
-.modal-hint{color:var(--muted);font-size:12px;margin-top:-6px}
-.modal label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:12px}.modal label input,.modal label textarea,.modal label select{color:var(--text)}
-.modal .switch-row{flex-direction:row;align-items:center}.switch-row input{width:auto}.modal-actions{margin-top:4px}.spacer{flex:1}
+.modal-head{justify-content:space-between}
+.modal-hint{color:var(--muted);font-size:12px;margin:0}
+#binding-form label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:12px}#binding-form label input,#binding-form label textarea,#binding-form label select{color:var(--text)}
+#binding-form .switch-row{flex-direction:row;align-items:center}.switch-row input{width:auto}.spacer{flex:1}
 @media(max-width:850px){.console-layout{grid-template-columns:1fr}.history-output{height:220px}.terminal{height:48vh}}
 @media(max-width:600px){.page-shell{padding:9px}.toolbar,.section-heading{align-items:flex-start}.toolbar-actions{flex-direction:column;align-items:flex-end}.ports-grid{grid-template-columns:1fr}.input-row{flex-wrap:wrap}.input-row input{flex-basis:100%}}
 
@@ -169,7 +168,7 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 /* 设备串口（独立 iframe）：只对齐主题，保留 xterm 字宽兜底等专用规则。 */
 .page-shell, .view-panel { color: var(--text); }
 
-:where(.panel, .port-card, .history-column, .modal) {
+:where(.panel, .port-card, .history-column) {
     border-color: var(--border); border-radius: 8px;
     background: var(--panel);
 }

@@ -321,7 +321,7 @@ function ensureSecurityAuditDetailModal() {
     modal.id = 'security-audit-detail-modal';
     modal.className = 'modal';
     modal.innerHTML = `
-        <div class="modal-content" style="width: min(980px, 92vw); max-width: min(980px, 92vw); max-height: 88vh; overflow: hidden; display: flex; flex-direction: column;">
+        <div class="modal-content modal-xl">
             <div class="modal-header">
                 <span class="modal-title">安全审计详情</span>
                 <button type="button" class="modal-close" aria-label="关闭" data-action="close-security-audit-detail">&times;</button>
@@ -564,7 +564,7 @@ function ensureOutboxDetailModal() {
     modal.id = 'outbox-detail-modal';
     modal.className = 'modal';
     modal.innerHTML = `
-        <div class="modal-content" style="width: min(760px, 92vw); max-width: min(760px, 92vw); max-height: 88vh; overflow: hidden; display: flex; flex-direction: column;">
+        <div class="modal-content modal-l">
             <div class="modal-header">
                 <span class="modal-title">历史邮件详情</span>
                 <button type="button" class="modal-close" aria-label="关闭" data-action="close-outbox-detail">&times;</button>

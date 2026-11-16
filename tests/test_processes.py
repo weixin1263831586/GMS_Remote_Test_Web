@@ -1,6 +1,8 @@
 import os
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -16,6 +18,34 @@ class ProcessHelperTests(unittest.TestCase):
             ], env={"GMS_PROCESS_FIXTURE": "isolated"}, cwd=directory)
             self.assertTrue(result.ok, result.stderr)
             self.assertEqual(result.stdout.splitlines(), [directory, "isolated", "None"])
+
+    def test_cancel_event_kills_running_process_and_reports_cancelled(self):
+        cancel = threading.Event()
+        threading.Timer(1.0, cancel.set).start()
+        started = time.monotonic()
+        result = run_local_command(
+            [sys.executable, "-c", "print('child started', flush=True); import time; time.sleep(300)"],
+            timeout=120, cancel_event=cancel,
+        )
+        elapsed = time.monotonic() - started
+        self.assertFalse(result.ok)
+        self.assertEqual(result.stderr, "Command cancelled")
+        # 取消事件触发后 ~1s 内中止，而不是等满 timeout。
+        self.assertLess(elapsed, 10)
+
+    def test_cancel_event_set_before_start_still_reports_cancelled(self):
+        # 子进程睡过首个 1s 轮询窗口，保证取消路径确定触发（Popen→killpg）。
+        cancel = threading.Event()
+        cancel.set()
+        result = run_local_command([sys.executable, "-c", "import time; time.sleep(30)"], cancel_event=cancel)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.stderr, "Command cancelled")
+
+    def test_cancel_event_unset_keeps_plain_communicate_contract(self):
+        result = run_local_command([sys.executable, "-c", "print('done')"], timeout=30,
+                                   cancel_event=threading.Event())
+        self.assertTrue(result.ok)
+        self.assertIn("done", result.stdout)
 
     def test_start_detached_process_starts_reaper_thread(self):
         process = Mock()

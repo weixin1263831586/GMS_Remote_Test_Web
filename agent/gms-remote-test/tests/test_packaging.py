@@ -94,8 +94,8 @@ def test_daily_triage_reference_matches_runtime_evidence_contract():
     reference = (
         SKILL_DIR / "references" / "redmine-daily-triage.md"
     ).read_text(encoding="utf-8")
-    # v31 对齐官方引用别名、复核上下文及独立事实修正流程。
-    assert "redmine_daily_triage_v31" in reference
+    # v32 将 Markdown 标题与正文共同复核，并恢复失败预采集后的官方检索。
+    assert "redmine_daily_triage_v32" in reference
     assert "批量晨报 = 单条深度分析" in reference
     assert "仅保留用于渲染历史持久化结果" in reference
     assert "result_format=kkagent_markdown" in reference

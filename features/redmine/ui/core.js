@@ -471,8 +471,8 @@ function openRedmineReplyModal(issueId, replyText, meta) {
   modal.id = modalId;
   modal.className = 'modal';
   modal.innerHTML = `
-    <div class="modal-content redmine-reply-modal">
-      <div class="modal-header" style="background:linear-gradient(135deg,#0ea5e9,#6366f1)">
+    <div class="modal-content modal-l redmine-reply-modal">
+      <div class="modal-header">
         <span class="modal-title">📝 Redmine回复</span>
         <button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="${modalId}">&times;</button>
       </div>

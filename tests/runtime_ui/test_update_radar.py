@@ -23,7 +23,8 @@ class RuntimeUpdateRadarTests(RuntimeUiHarness):
                 expect(page.get_by_text('GMS更新雷达', exact=True)).to_have_count(1)
                 page.evaluate("switchPage('test', null)")
             page.evaluate("switchPage('tools', null)")
-            page.locator('.tool-radar-edit').click()
+            # 编辑按钮由 tools 页 data-tools-action 委托渲染（utility-tools.js）。
+            page.locator('[data-tools-action="radar-edit"]').click()
             expect(page.locator('#radar-settings-modal')).to_be_visible()
             expect(page.locator('#radar-task-count')).to_have_text('已选择 6 / 6 项')
             page.keyboard.press('Escape')

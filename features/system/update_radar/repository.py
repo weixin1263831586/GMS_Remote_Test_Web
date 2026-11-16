@@ -10,9 +10,57 @@ from foundation.error_model import ApiError
 from .models import RadarConfig, next_scan, utc_now
 
 
+# 单次运行最多持久化的变更明细：超出部分仅在 summary 里保留计数，防止异常
+# 扫描（如全量翻页把每个条目都判定为变更）把 radar_changes 表撑爆。邮件与
+# 页面详情每页读取量远小于该阈值，截断不影响使用。
+MAX_CHANGES_PER_RUN = 2000
+# 已完成运行的保留数量：更早的运行连同其变更明细一起清理，审计所需的
+# 摘要、错误与邮件台账状态都在 radar_runs 主记录里。
+RETAINED_RUNS = 200
+
+SCHEMA = '''
+    BEGIN IMMEDIATE;
+    CREATE TABLE IF NOT EXISTS radar_settings (
+        id INTEGER PRIMARY KEY CHECK(id=1), config TEXT NOT NULL,
+        next_run_at TEXT, owner_id TEXT NOT NULL DEFAULT '',
+        username TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS radar_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, trigger TEXT NOT NULL,
+        slot TEXT UNIQUE, status TEXT NOT NULL, started_at TEXT NOT NULL,
+        finished_at TEXT, config TEXT NOT NULL, owner_id TEXT NOT NULL,
+        username TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '{}',
+        email_status TEXT NOT NULL DEFAULT 'pending',
+        email_error TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS radar_changes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL,
+        category TEXT NOT NULL, entity_key TEXT NOT NULL,
+        change_type TEXT NOT NULL, before_json TEXT, after_json TEXT
+    );
+    CREATE INDEX IF NOT EXISTS radar_changes_run ON radar_changes(run_id,id);
+'''
+
+
 class RadarStore:
     def __init__(self, path: Path):
         self.path = path
+        # Schema 初始化与默认设置写入只在每个实例首次写连接时执行一次
+        # （CREATE IF NOT EXISTS + INSERT OR IGNORE 天然幂等，多进程安全），
+        # 历史查询改走只读连接，避免每次请求都重复建表检查。
+        self._schema_ready = False
+
+    def _initialize(self, conn):
+        with conn:
+            conn.executescript(SCHEMA)
+            conn.execute('INSERT OR IGNORE INTO radar_settings(id,config) VALUES(1,?)',
+                         (json.dumps(RadarConfig().model_dump(mode='json')),))
+        self._schema_ready = True
+
+    def _ensure_initialized(self):
+        if not self._schema_ready:
+            with self.connect():
+                pass
 
     @contextmanager
     def connect(self):
@@ -20,31 +68,18 @@ class RadarStore:
         conn = sqlite3.connect(self.path, timeout=30)
         conn.row_factory = sqlite3.Row
         try:
-            with conn:
-                conn.executescript('''
-                    BEGIN IMMEDIATE;
-                    CREATE TABLE IF NOT EXISTS radar_settings (
-                        id INTEGER PRIMARY KEY CHECK(id=1), config TEXT NOT NULL,
-                        next_run_at TEXT, owner_id TEXT NOT NULL DEFAULT '',
-                        username TEXT NOT NULL DEFAULT ''
-                    );
-                    CREATE TABLE IF NOT EXISTS radar_runs (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, trigger TEXT NOT NULL,
-                        slot TEXT UNIQUE, status TEXT NOT NULL, started_at TEXT NOT NULL,
-                        finished_at TEXT, config TEXT NOT NULL, owner_id TEXT NOT NULL,
-                        username TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '{}',
-                        email_status TEXT NOT NULL DEFAULT 'pending',
-                        email_error TEXT NOT NULL DEFAULT ''
-                    );
-                    CREATE TABLE IF NOT EXISTS radar_changes (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL,
-                        category TEXT NOT NULL, entity_key TEXT NOT NULL,
-                        change_type TEXT NOT NULL, before_json TEXT, after_json TEXT
-                    );
-                    CREATE INDEX IF NOT EXISTS radar_changes_run ON radar_changes(run_id,id);
-                ''')
-                conn.execute('INSERT OR IGNORE INTO radar_settings(id,config) VALUES(1,?)',
-                             (json.dumps(RadarConfig().model_dump(mode='json')),))
+            if not self._schema_ready:
+                self._initialize(conn)
+            yield conn
+        finally:
+            conn.close()
+
+    @contextmanager
+    def connect_readonly(self):
+        self._ensure_initialized()
+        conn = sqlite3.connect(f'file:{self.path}?mode=ro', uri=True, timeout=30)
+        conn.row_factory = sqlite3.Row
+        try:
             yield conn
         finally:
             conn.close()
@@ -93,6 +128,10 @@ class RadarStore:
     def finish(self, run_id, status, summary, changes):
         with self.connect() as conn, conn:
             conn.execute('BEGIN IMMEDIATE')
+            if len(changes) > MAX_CHANGES_PER_RUN:
+                # 真实总量保留在 summary（邮件与统计以此为准），明细只落前 N 条。
+                summary = {**summary, 'changes_truncated': len(changes) - MAX_CHANGES_PER_RUN}
+                changes = changes[:MAX_CHANGES_PER_RUN]
             conn.executemany('''INSERT INTO radar_changes
                 (run_id,category,entity_key,change_type,before_json,after_json) VALUES(?,?,?,?,?,?)''',
                 [(run_id, item['category'], item['key'], item['type'],
@@ -100,6 +139,11 @@ class RadarStore:
                  for item in changes])
             conn.execute('UPDATE radar_runs SET status=?,summary=?,finished_at=? WHERE id=?',
                          (status, json.dumps(summary, ensure_ascii=False), utc_now().isoformat(), run_id))
+            # 数据保留：终态运行只留最近 RETAINED_RUNS 条，孤儿变更明细一并清理。
+            conn.execute('''DELETE FROM radar_runs WHERE status!='running' AND id NOT IN (
+                SELECT id FROM radar_runs WHERE status!='running' ORDER BY id DESC LIMIT ?)''',
+                (RETAINED_RUNS,))
+            conn.execute('DELETE FROM radar_changes WHERE run_id NOT IN (SELECT id FROM radar_runs)')
 
     def mark_email(self, run_id, status, error=''):
         with self.connect() as conn, conn:
@@ -114,14 +158,14 @@ class RadarStore:
         return result
 
     def run(self, run_id):
-        with self.connect() as conn:
+        with self.connect_readonly() as conn:
             row = conn.execute('SELECT * FROM radar_runs WHERE id=?', (run_id,)).fetchone()
             if row is None:
                 raise ApiError.not_found('扫描记录不存在')
             return self.decode(row)
 
     def history(self, limit=30, offset=0):
-        with self.connect() as conn:
+        with self.connect_readonly() as conn:
             rows = conn.execute('SELECT * FROM radar_runs ORDER BY id DESC LIMIT ? OFFSET ?',
                                 (limit, offset)).fetchall()
             total = conn.execute('SELECT COUNT(*) FROM radar_runs').fetchone()[0]
@@ -131,7 +175,7 @@ class RadarStore:
             return {'items': items, 'total': total}
 
     def changes(self, run_id, limit=100, offset=0):
-        with self.connect() as conn:
+        with self.connect_readonly() as conn:
             rows = conn.execute('SELECT * FROM radar_changes WHERE run_id=? ORDER BY id LIMIT ? OFFSET ?',
                                 (run_id, limit, offset)).fetchall()
             total = conn.execute('SELECT COUNT(*) FROM radar_changes WHERE run_id=?', (run_id,)).fetchone()[0]

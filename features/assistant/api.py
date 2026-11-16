@@ -77,6 +77,9 @@ from features.assistant.workflow_execution import (
     WORKFLOW_PLAN_TYPE as _WORKFLOW_PLAN_TYPE,
 )
 from features.assistant.workflow_execution import (
+    discard_stale_pending_plan as _discard_stale_pending_plan,
+)
+from features.assistant.workflow_execution import (
     execute_workflow_plan as _execute_workflow_plan,
 )
 from features.assistant.workflow_execution import (
@@ -357,8 +360,8 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
         )
         resp = gen_response(tool_result)
         _append_message(session, "assistant", resp.content, kind=resp.kind, data=resp.to_message_data(), private_params=params)
-        session["status"] = "monitoring" if (session.get("active_run") or {}).get("redmine_run_id") else "idle"
-        session["pending_plan"] = None
+        if not _discard_stale_pending_plan(session):
+            session["status"] = "monitoring" if (session.get("active_run") or {}).get("redmine_run_id") else "idle"
         return success_response({"session": _session_payload(session)}, "Agent updated")
 
     intent = resolve_intent(message, session)
@@ -377,11 +380,8 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
             _append_message(session, "assistant", generate_capability_overview(), data={"page": "agent"})
         # 未识别消息不再清空待确认的工作流计划：草案保留在会话中，
         # 用户仍可“重新规划/取消计划”。
-        if session.get("pending_plan", {}).get("type") == _WORKFLOW_PLAN_TYPE:
-            session["status"] = "planning"
-        else:
+        if not _discard_stale_pending_plan(session):
             session["status"] = "idle"
-            session["pending_plan"] = None
         return success_response({"session": _session_payload(session)}, "Agent updated")
 
     # --- 2b. Capabilities: special handling ---
@@ -499,8 +499,9 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     resp = gen_response(tool_result)
     _append_message(session, "assistant", resp.content, kind=resp.kind, data=resp.to_message_data(), private_params=tool_params)
 
-    session["status"] = "monitoring" if (session.get("active_run") or {}).get("redmine_run_id") else "idle"
-    session["pending_plan"] = None
+    # 普通读工具查询收敛 pending_plan：未提交工作流计划保留（审核不变量）。
+    if not _discard_stale_pending_plan(session):
+        session["status"] = "monitoring" if (session.get("active_run") or {}).get("redmine_run_id") else "idle"
     return success_response({"session": _session_payload(session)}, "Agent updated")
 
 

@@ -34,21 +34,10 @@
         .header-toolbar { flex:1 1 100%; justify-content:flex-start; }
     }
 
-    /* Modal */
-    .modal { display:none; position:fixed; inset:0; width:100vw; background:rgba(0,0,0,0.7); justify-content:center; align-items:center; z-index:10000; padding:clamp(8px,2.5vw,20px); overflow:hidden; overscroll-behavior:contain; }
-    .modal.show { display:flex; }
-    .modal-content { background:var(--panel); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.4); max-width:400px; width:100%; max-height:min(85vh,calc(100dvh - 16px)); min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
-    .modal-header { background:var(--primary-gradient); border-bottom:1px solid var(--border); padding:12px 16px; display:flex; justify-content:space-between; align-items:center; gap:10px; min-width:0; }
-    .modal-title { color:#fff; font-size:15px; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .modal-close { color:#fff; font-size:22px; cursor:pointer; line-height:1; background:none; border:none; padding:0; height:auto; }
-    .modal-close:hover { color:#ccc; }
-    .modal-body { padding:16px; display:flex; flex-direction:column; gap:10px; overflow:auto; overscroll-behavior:contain; min-width:0; min-height:0; flex:1; overflow-wrap:anywhere; }
-    .modal-body > *, .modal-header > *, .modal-buttons > *, .modal-footer > * { min-width:0; max-width:100%; }
+    /* Modal chrome lives in /static/css/modal.css. Keep field layout only. */
+    .modal-body { display:flex; flex-direction:column; gap:10px; }
     .modal-body label { font-size:13px; font-weight:600; color:var(--muted); margin-bottom:2px; display:block; }
     .modal-body input, .modal-body select, .modal-body textarea { width:100%; min-width:0; max-width:100%; padding:8px 10px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; font-size:13px; }
-    .modal-buttons { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:6px; }
-    .modal-footer { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; padding:12px 16px; border-top:1px solid var(--border); flex-shrink:0; }
-    .redmine-reply-modal { max-width:760px; }
     .redmine-reply-modal textarea { width:100%; min-height:280px; resize:vertical; padding:10px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; font-size:13px; line-height:1.5; font-family:"Courier New", monospace; }
     .redmine-reply-drop { width:100%; padding:18px 12px; text-align:center; cursor:pointer; border:2px dashed var(--border); border-radius:6px; background:var(--panel2); color:var(--muted); font-size:12px; transition:border-color .15s, background .15s; }
     .redmine-reply-drop.drag-over { border-color:#60a5fa; background:color-mix(in srgb, var(--primary-color) 12%, var(--card-bg)); color:var(--primary-light); }
@@ -307,7 +296,6 @@
     .daily-brief-toolbar .ka-btn { height:36px; padding:0 12px; white-space:nowrap; border-radius:8px; }
     .daily-brief-toolbar .ka-btn.primary:hover { background:var(--primary-gradient-hover); }
     #singleIssueAnalysisId { width:200px; height:36px; box-sizing:border-box; flex:0 0 200px; padding:0 12px; border-radius:8px; }
-    .single-issue-analysis-hint-modal { width:min(760px, 92vw); max-width:min(760px, 92vw); }
     .single-issue-analysis-hint-modal textarea { min-height:300px; height:min(52vh, 440px); resize:vertical; line-height:1.55; }
     .daily-brief-run-controls { padding-left:8px; border-left:1px solid var(--border); }
     .daily-brief-run-controls .daily-brief-status { padding:5px 10px; white-space:nowrap; }
@@ -380,18 +368,19 @@
     .daily-brief-state { color:var(--muted); font-size:12px; white-space:nowrap; }
     .daily-brief-state.failed { color:#fca5a5; }
     .daily-brief-row-actions { display:flex; align-items:center; gap:6px; }
-    .daily-brief-modal { width:min(1180px,calc(100vw - 32px)); max-width:none; height:min(860px,calc(100dvh - 32px)); max-height:calc(100dvh - 32px); border-radius:12px; }
+    .daily-brief-modal { max-width:none; }
     /* 单号 AI 报告是 Redmine 页内的主阅读面，而非小型确认弹框。它从
        Tabs 下方开始，填满当前页的剩余空间；顶部高度由打开时的实际
        header 高度写入，窄屏 Tabs 换行时也不会覆盖导航。 */
-    .daily-brief-analysis-overlay { inset:var(--daily-brief-modal-top,44px) 0 0; align-items:stretch; padding:0 8px 6px; }
-    .daily-brief-analysis-overlay .daily-brief-modal { width:100%; max-width:none; height:100%; max-height:none; border-radius:0 0 12px 12px; }
+    .modal.daily-brief-analysis-overlay { inset:var(--daily-brief-modal-top,44px) 0 0; align-items:stretch; justify-content:stretch; padding:0 8px 6px; }
+    .modal.daily-brief-analysis-overlay.show { align-items:stretch; justify-content:stretch; }
+    .daily-brief-analysis-overlay .modal-content.daily-brief-modal { width:100%; max-width:none; height:100%; max-height:none; min-height:0; border-radius:0 0 12px 12px; }
     .daily-brief-analysis-overlay .daily-brief-modal .modal-header { padding:8px 14px; }
     .daily-brief-analysis-overlay .daily-brief-modal .modal-close { font-size:14px; }
     .daily-brief-analysis-overlay .daily-brief-modal-body { padding:12px 16px 14px; }
     .daily-brief-analysis-overlay .daily-brief-modal-footer { padding:4px 14px; }
     .daily-brief-analysis-overlay .daily-brief-modal-footer button { height:26px; min-height:26px; padding:0 8px; font-size:12px; }
-    .daily-brief-modal.daily-brief-statistics-modal { width:min(1280px,calc(100vw - 32px)); height:auto; max-height:min(800px,calc(100dvh - 32px)); }
+    .daily-brief-modal.daily-brief-statistics-modal { height:auto; max-height:min(800px,calc(100dvh - 32px)); }
     .daily-brief-modal .modal-header { flex:0 0 auto; padding:14px 20px; }
     .daily-brief-modal-title { display:flex; min-width:0; align-items:center; gap:6px; line-height:1.35; white-space:nowrap; }
     .daily-brief-modal-title > span:first-child { font-size:16px; }
@@ -436,9 +425,8 @@
     .daily-brief-gate-notice { gap:8px; padding:7px 16px; }
     .daily-brief-gate-notice b { flex:none; }
     /* 分析弹窗纯黑主题:对齐终端阅读体验,仅作用于 AI 分析弹窗。 */
-    .modal-content.daily-brief-modal { background:#000; border-color:var(--lighter-bg); box-shadow:0 8px 32px #000000d9; }
-    .daily-brief-analysis-overlay .daily-brief-modal .modal-header { background:#000; border-bottom-color:var(--lighter-bg); }
-    .daily-brief-analysis-overlay .daily-brief-modal .modal-buttons { background:#000; border-top-color:var(--lighter-bg); }
+    .daily-brief-analysis-overlay .daily-brief-modal .modal-header { background:var(--light-bg); }
+    .daily-brief-analysis-overlay .daily-brief-modal .modal-buttons { background:var(--light-bg); }
     .daily-brief-analysis-overlay .analysis-doc { color:#e6edf3; }
     .daily-brief-analysis-overlay .analysis-doc h2.md-h { color:#7dd3fc; border-bottom-color:var(--lighter-bg); }
     .daily-brief-analysis-overlay .analysis-doc :is(.code-block,code) { background:#000; border-color:#20304a; }
@@ -494,13 +482,13 @@
         .daily-brief-action .ka-btn { width:100%; }
         .daily-brief-warning { align-items:flex-start; flex-wrap:wrap; }
         .daily-brief-modal { width:calc(100vw - 16px); height:calc(100dvh - 16px); max-height:calc(100dvh - 16px); }
-        .daily-brief-analysis-overlay { padding:0 4px 4px; }
+        .modal.daily-brief-analysis-overlay { padding:0 4px 4px; }
         .daily-brief-analysis-overlay .daily-brief-modal .modal-header { padding:7px 10px; }
         .daily-brief-analysis-overlay .daily-brief-modal .modal-close { font-size:13px; }
         .daily-brief-analysis-overlay .daily-brief-modal-body { padding:10px 10px 12px; }
         .daily-brief-analysis-overlay .daily-brief-modal-footer { padding:3px 10px; }
         .daily-brief-analysis-overlay .daily-brief-modal-footer button { height:24px; min-height:24px; }
-        .daily-brief-analysis-overlay .daily-brief-modal { width:100%; height:100%; max-height:none; }
+        .daily-brief-analysis-overlay .modal-content.daily-brief-modal { width:100%; max-width:none; height:100%; max-height:none; min-height:0; }
         .daily-brief-modal.daily-brief-statistics-modal { width:calc(100vw - 16px); height:auto; max-height:calc(100dvh - 16px); }
         .daily-brief-modal-body { padding:14px 12px 18px; }
         .daily-brief-modal-footer { padding:10px 12px; }

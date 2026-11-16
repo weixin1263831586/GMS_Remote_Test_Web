@@ -29,8 +29,33 @@ def test_reference_tool_contract(monkeypatch):
 
 
 def test_reference_cli_preserves_query_as_data(tmp_path):
+    """CLI 必须把 --query 作为纯数据转发（URL 编码，无 shell 拼接）。
+
+    CI Runner 没有任何已注册 profile：直接依赖零 profile 回退会让解析
+    结果随宿主机配置漂移（human 交互分支直接报「未配置 Controller」）。
+    测试在隔离的 XDG 目录里写入恰好一个临时 profile，resolve 走确定性的
+    单 profile auto-select 路径，api_call 被 shell 函数覆盖 mock，token
+    内容不参与断言。
+    """
     package = Path(__file__).resolve().parents[1]
     runtime = package / ("runtime" if (package / "runtime").is_dir() else "scripts")
+    config_home = tmp_path / "config"
+    state_home = tmp_path / "state"
+    profile_root = config_home / "gms-agent" / "profiles"
+    profile_root.mkdir(parents=True)
+    (profile_root / "ref-test.toml").write_text(
+        'profile = "ref-test"\n'
+        'client = "kkagent"\n'
+        "\n"
+        "[controller]\n"
+        'url = "https://controller.reference-test.invalid"\n'
+        "\n"
+        "[auth]\n"
+        'mode = "service-token"\n'
+        f'token_file = "{state_home / "gms-remote-test" / "ref-test.token"}"\n'
+        "\n",
+        encoding="utf-8",
+    )
     command = r'''
 reference_cli_runtime=$1
 reference_cli_snapshot=$2
@@ -40,8 +65,8 @@ api_call() { printf '%s\n' "$1"; }
 gms-rt-redmine-references "$reference_cli_snapshot" --query "$reference_cli_query"
 '''
     env = {**{key: value for key, value in os.environ.items() if not key.startswith(("GMS_", "ATS_"))},
-           "HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / "config"),
-           "XDG_STATE_HOME": str(tmp_path / "state")}
+           "HOME": str(tmp_path), "XDG_CONFIG_HOME": str(config_home),
+           "XDG_STATE_HOME": str(state_home)}
     result = subprocess.run(["bash", "-c", command, "reference-cli", str(runtime / "gms-remote-test.sh"),
                              "ev_1", "CVE-2026-58835;$(id)"], env=env,
                             text=True, capture_output=True, timeout=10)

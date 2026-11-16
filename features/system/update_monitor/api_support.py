@@ -15,7 +15,7 @@ from foundation.config import settings
 from foundation.sqlite_schema import ensure_schema
 
 from .models import SOURCES
-from .repository import init_db
+from .repository import init_db, query_bulletin_patches
 
 
 router = APIRouter(prefix='/api/gms-update-monitor')
@@ -54,6 +54,7 @@ __all__ = [
     "_sync_lock",
     "_sync_status",
     "page_router",
+    "query_bulletin_patches",
     "router",
 ]
 

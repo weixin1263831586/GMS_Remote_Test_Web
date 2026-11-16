@@ -66,6 +66,13 @@
           <td><a href="${esc(item.source_url)}" target="_blank">打开</a></td>
         </tr>`);
     }
+    function criticalDescription(item) {
+      const excerpt = item.detail_excerpt
+        ? `<details><summary>详情正文摘录</summary><div class="wrap">${esc(item.detail_excerpt)}</div></details>` : '';
+      const pending = ['not_scanned', 'unavailable', 'stale'].includes(item.detail_status)
+        ? '<div class="muted">详情未完整同步，请更新资料后核实。</div>' : '';
+      return `${esc(item.description)}${excerpt}${pending}`;
+    }
     function criticalRows(items) {
       return items.map(item => {
         const exLinks = (item.exemptions || []).map(e =>
@@ -76,7 +83,7 @@
           <td><code>${esc(item.patch_id)}</code></td>
           <td>${esc(item.patch_kind)}</td>
           <td>${esc(item.android_versions)}</td>
-          <td>${esc(item.description)}</td>
+          <td>${criticalDescription(item)}</td>
           <td>${esc(item.release_month || item.bulletin_month || '')}</td>
           <td>${esc(item.deadline)}</td>
           <td>${exLinks}</td>
@@ -136,7 +143,7 @@
       if (kind === 'patch') {
         return `<tr><td>安全补丁 (CVE)</td><td><code>${esc(x.cve_id)}</code></td><td class="wrap">${esc(x.mainline_module)} · ${esc(x.version_note)}</td><td>${releaseCell({...x, release_month: x.release_month || releaseMonthOf(x.source_url)})}</td><td><a href="${esc(x.source_url)}" target="_blank">打开</a></td></tr>`;
       }
-      return `<tr><td>Critical_Patch</td><td><code>${esc(x.patch_id)}</code> · ${esc(x.patch_kind)} · ${esc(x.android_versions)}</td><td class="wrap">${esc(x.description)}${x.deadline ? '（期限 ' + esc(x.deadline) + '）' : ''}</td><td>${esc(x.release_month || x.bulletin_month || '')}</td><td><a href="${esc(x.bulletin_url)}" target="_blank">打开</a></td></tr>`;
+      return `<tr><td>Critical_Patch</td><td><code>${esc(x.patch_id)}</code> · ${esc(x.patch_kind)} · ${esc(x.android_versions)}</td><td class="wrap">${criticalDescription(x)}${x.deadline ? '（期限 ' + esc(x.deadline) + '）' : ''}</td><td>${esc(x.release_month || x.bulletin_month || '')}</td><td><a href="${esc(x.bulletin_url)}" target="_blank">打开</a></td></tr>`;
     }
     async function searchAll(q) {
       const section = document.getElementById('product_section').value;
@@ -145,16 +152,17 @@
         if (src.key === 'exemptions' && section) params.set('product_section', section);
         try {
           const data = await fetchJson(src.endpoint + '?' + params.toString());
-          return {src, items: data.items || [], total: data.total || 0, available: data.available !== false};
+          return {src, items: data.items || [], total: data.total || 0, available: data.available !== false,
+                  complete: data.coverage_complete !== false};
         } catch (_) {
-          return {src, items: [], total: 0, available: true};
+          return {src, items: [], total: 0, available: false, complete: false};
         }
       }));
       const rows = [];
       const counts = [];
       let totalAll = 0;
-      results.forEach(({src, items, total: srcTotal, available}) => {
-        counts.push(`${src.label} ${srcTotal}`);
+      results.forEach(({src, items, total: srcTotal, available, complete}) => {
+        counts.push(`${src.label} ${available ? srcTotal : '查询不可用'}${available && !complete ? '（详情未完整同步）' : ''}`);
         totalAll += srcTotal;
         if (!available || !items.length) return;
         rows.push(`<tr class="group-row"><td colspan="5">${esc(src.label)} · 命中 ${srcTotal} 条${items.length < srcTotal ? `（显示前 ${items.length} 条）` : ''}</td></tr>`);
@@ -196,7 +204,7 @@
         const data = await fetchJson('/api/mainline-known-issues/critical-patches?' + params.toString());
         total = data.total;
         sections = tableHtml(CRITICAL_HEADERS, criticalRows(data.items), '无记录', CRITICAL_WIDTHS);
-        badge = data.available ? `Critical_Patch · 共 ${total} 条` : 'Critical_Patch · 数据源未扫描（GMS Update Monitor 中执行 Critical_Patch 扫描后可用）';
+        badge = data.available ? `Critical_Patch · 共 ${total} 条${data.coverage_complete === false ? ' · 详情未完整同步' : ''}` : 'Critical_Patch · 数据源未扫描（GMS Update Monitor 中执行 Critical_Patch 扫描后可用）';
       } else {
         const type = document.getElementById('issue_type').value;
         if (type) params.set('issue_type', type);

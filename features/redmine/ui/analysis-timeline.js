@@ -326,7 +326,7 @@ function showAnalysisTimelineModal(runId, issueId, options) {
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = 'modal daily-brief-analysis-overlay';
-  modal.innerHTML = '<div class="modal-content daily-brief-modal">'
+  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal">'
     + '<div class="modal-header"><span class="modal-title daily-brief-modal-title">'
     + '<span id="' + modalId + '-title"><span>'
     + (state.history ? '🕐 执行过程 · #' : analysisTimelineLiveTitlePrefix(state.runStatus)) + esc(state.issueId) + '</span>'

@@ -88,6 +88,7 @@
 | `gms-rt-redmine-issue-fetch` | Create/refresh a full Redmine evidence snapshot (raw JSON, journals, attachments) | gms-rt-redmine-issue-fetch <issue_id_or_url> [--download none\|analyzable\|all] [--refresh\|--no-refresh] [--wait] [--max-wait SECONDS] [--dry-run] |
 | `gms-rt-redmine-issue-show` | Show snapshot completeness plus issue fields and description head; accepts snapshot_id or issue_id (resolves the latest snapshot) | gms-rt-redmine-issue-show <snapshot_id \| issue_id> [--issue\|--snapshot] |
 | `gms-rt-redmine-journals` | Read full (untruncated) issue journals with cursor pagination | gms-rt-redmine-journals <snapshot_id> [--limit N] [--cursor C] |
+| `gms-rt-redmine-references` | Recall official Mainline CVE fixes, test exemptions and Critical Fix bulletins from an owner-scoped evidence snapshot (read-only) | gms-rt-redmine-references <snapshot_id> [--query IDENTIFIERS] |
 | `gms-rt-redmine-triage` | List today's pending Redmine issues (waiting_my_reply + no_reply_3_days, deduped; read-only) | gms-rt-redmine-triage [--stale-days N] [--list-limit N] [--refresh] |
 | `gms-rt-reports-analyze` | Analyze a local report file or a uniquely resolved saved report | gms-rt-reports-analyze <local_report.zip\|test_result.xml\|report_timestamp\|keyword> |
 | `gms-rt-reports-delete` | Delete one saved report by timestamp | gms-rt-reports-delete <report_timestamp> |

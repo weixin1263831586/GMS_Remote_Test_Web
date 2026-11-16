@@ -131,6 +131,7 @@
       "build-password-cancel",
       "build-password-input",
       "build-password-ok",
+      "build-password-title",
       "build-server",
       "build-template",
       "build-template-hint",

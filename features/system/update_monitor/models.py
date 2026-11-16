@@ -10,7 +10,7 @@ from lxml import html
 
 
 DEFAULT_DB_PATH = Path('data/gms_update_monitor.sqlite3')
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -103,6 +103,9 @@ class BulletinPatchRecord:
     deadline: str
     bulletin_url: str
     content_hash: str
+    detail_text: str = ''
+    detail_status: str = 'not_scanned'
+    detail_fetched_at: str = ''
 
 
 @dataclass(frozen=True)

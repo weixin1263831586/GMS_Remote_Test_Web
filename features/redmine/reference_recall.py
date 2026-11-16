@@ -123,6 +123,8 @@ async def append_reference_preflight(owner_id, entry, preflight, progress=None):
                       snapshot_ids=[preflight.snapshot_id])
     try:
         data = await asyncio.to_thread(collect_snapshot_references, owner_id, preflight.snapshot_id)
+        if entry.get("issue_id") and str(data["issue_id"]) != str(entry["issue_id"]):
+            raise ApiError.not_found("当前工单的证据快照不存在。")
         trace.status = "succeeded"
         trace.reference_lookup = reference_check_summary(data)
         trace.evidence_issue_ids = [data["issue_id"]]
@@ -141,6 +143,30 @@ async def append_reference_preflight(owner_id, entry, preflight, progress=None):
         progress.tool_finished(tool, None, ok=trace.succeeded, stage="preflight")
 
 
+async def recover_reference_preflight(entry, trace):
+    """Fill the baseline if native fetching recovered after an initial outage."""
+    owner = entry.get("_reference_owner_id")
+    if not owner or not entry.get("issue_id") or entry.get("_official_reference_context"):
+        return
+    target = str(entry.get("issue_id") or "")
+    snapshots = [snapshot for call in trace.tool_calls
+                 if call.succeeded and "redmine_issue_fetch" in call.tool_name
+                 and target in {str(call.tool_input.get(key) or "") for key in ("issue", "issue_id")}
+                 for snapshot in call.snapshot_ids]
+    if not snapshots or any(
+        call.succeeded and call.reference_lookup
+        and (call.tool_input.get("snapshot_id") in snapshots or set(call.snapshot_ids) & set(snapshots))
+        for call in trace.tool_calls if "redmine_references" in call.tool_name
+    ):
+        return
+    from .kkagent.evidence_preflight import EvidencePreflight
+
+    preflight = EvidencePreflight(snapshot_id=snapshots[-1])
+    await append_reference_preflight(owner, entry, preflight, entry.get("_progress_recorder"))
+    # Append without renumbering evidence IDs already shown to the model.
+    trace.tool_calls.extend(preflight.traces)
+
+
 def reference_check_summary(data):
     """trace 只保留来源/计数，不落整份上游文档。"""
     sources = data.get("sources") or {}
@@ -149,6 +175,7 @@ def reference_check_summary(data):
         "identifiers": data.get("identifiers") or [],
         "queried_at": data.get("queried_at") or "",
         "sources": {name: {"status": value.get("status"), "count": len(value.get("items") or []),
+                           "coverage_complete": value.get("coverage_complete"),
                            "references": [str(item[key]) for item in value.get("items") or []
                                           for key in ("reference", "source_url", "bulletin_url") if item.get(key)]}
                     for name, value in sources.items()},

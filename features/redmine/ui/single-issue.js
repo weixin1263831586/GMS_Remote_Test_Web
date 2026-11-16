@@ -33,7 +33,7 @@ function openSingleIssueAnalysisHint() {
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = 'modal';
-  modal.innerHTML = '<div class="modal-content single-issue-analysis-hint-modal">'
+  modal.innerHTML = '<div class="modal-content modal-l single-issue-analysis-hint-modal">'
     + '<div class="modal-header"><span class="modal-title">🤖 辅助分析说明</span>'
     + '<button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
     + '<div class="modal-body"><label for="' + modalId + '-text">提供已观察的现象、复现结果或希望重点核查的实际值；kkagent 会将其作为待验证线索。</label>'
@@ -356,7 +356,7 @@ function openSingleIssueReportModal(item, statisticsOnly) {
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = statisticsOnly ? 'modal' : 'modal daily-brief-analysis-overlay';
-  modal.innerHTML = '<div class="modal-content daily-brief-modal' + (statisticsOnly ? ' daily-brief-statistics-modal' : '') + '">'
+  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal' + (statisticsOnly ? ' daily-brief-statistics-modal' : '') + '">'
     + '<div class="modal-header"><span class="modal-title daily-brief-modal-title"><span>'
     + (statisticsOnly ? '📊 AI 统计' : '🤖 AI 分析') + ' · #' + esc(issue.issue_id)
     + (statusText ? ' · ' + esc(statusText) : '') + '</span>'

@@ -1,0 +1,229 @@
+/* Shared modal skin for the shell and standalone pages.
+   Visibility stays with each document's controller (ModalManager,
+   EmbeddedModalController, or the cluster hidden-attribute controller).
+   Widths: xs 420, s 500, m 620, l 760, xl 1100, workspace min(1500px, 96vw) x 92vh.
+   modal-pin freezes height for dialogs whose body loads asynchronously. */
+
+.modal,
+.modal-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    /* 100vw/100dvh 覆盖含滚动条的完整视觉视口：inset:0 只到布局视口
+       （body 有纵向滚动条时窄一个滚动条宽度），backdrop 会在滚动条一侧
+       露出页面，弹框也偏离视口几何中心（E2E centered 契约）。 */
+    width: 100vw;
+    height: 100dvh;
+    z-index: var(--modal-z-index, 10000);
+    padding: clamp(8px, 2.5vw, 20px);
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.72);
+    overflow: hidden;
+    overscroll-behavior: contain;
+}
+
+.modal-backdrop {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-backdrop[hidden] {
+    display: none !important;
+}
+
+.modal.show {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-content {
+    background: var(--light-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    width: min(500px, 96vw);
+    max-width: min(500px, 96vw);
+    max-height: min(80vh, calc(100dvh - 16px));
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+}
+
+.modal-content.modal-xs {
+    width: min(420px, 96vw);
+    max-width: min(420px, 96vw);
+    min-height: 180px;
+}
+
+.modal-content.modal-s {
+    width: min(500px, 96vw);
+    max-width: min(500px, 96vw);
+    min-height: 240px;
+}
+
+.modal-content.modal-m {
+    width: min(620px, 96vw);
+    max-width: min(620px, 96vw);
+    min-height: 280px;
+    max-height: min(620px, 85vh, calc(100dvh - 16px));
+}
+
+.modal-content.modal-l {
+    width: min(760px, 96vw);
+    max-width: min(760px, 96vw);
+    max-height: min(85vh, calc(100dvh - 16px));
+}
+
+.modal-content.modal-xl {
+    width: min(1100px, 96vw);
+    max-width: min(1100px, 96vw);
+    max-height: min(88vh, calc(100dvh - 16px));
+}
+
+.modal-content.modal-workspace {
+    width: min(1500px, 96vw);
+    max-width: min(1500px, 96vw);
+    height: min(92vh, calc(100dvh - 16px));
+    max-height: min(92vh, calc(100dvh - 16px));
+    min-height: 0;
+}
+
+.modal-content.modal-pin {
+    height: min(560px, 72vh);
+    max-height: min(560px, 72vh);
+}
+
+.modal-content.modal-m.modal-pin {
+    height: min(540px, 85vh, calc(100dvh - 16px));
+    max-height: min(540px, 85vh, calc(100dvh - 16px));
+    min-height: 0;
+}
+
+.modal-content.modal-xl.modal-pin {
+    height: min(80vh, calc(100dvh - 16px));
+    max-height: min(80vh, calc(100dvh - 16px));
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+    position: relative;
+    background: var(--light-bg);
+    z-index: 10;
+}
+
+.modal-title {
+    min-width: 0;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.modal-close:hover {
+    color: var(--text-primary);
+    background: var(--lighter-bg);
+}
+
+.modal-close:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+.modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.modal-body > *,
+.modal-header > *,
+.modal-buttons > *,
+.modal-footer > *,
+.modal-actions > * {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.modal-buttons,
+.modal-footer,
+.modal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+    flex-shrink: 0;
+    margin-top: 16px;
+}
+
+.modal-content > .modal-buttons,
+.modal-content > .modal-footer,
+.modal-content > .modal-actions {
+    margin-top: 0;
+    padding: 12px 20px 16px;
+    border-top: 1px solid var(--border-color);
+    background: var(--light-bg);
+}
+
+html.modal-open,
+body.modal-open {
+    overflow: hidden;
+}
+
+@media (max-width: 700px) {
+    .modal-content.modal-workspace {
+        width: calc(100vw - 16px);
+        max-width: calc(100vw - 16px);
+        height: calc(100dvh - 16px);
+        max-height: calc(100dvh - 16px);
+    }
+}
+
+@media (max-height: 560px) {
+    .modal,
+    .modal-backdrop {
+        align-items: stretch;
+    }
+
+    .modal-content {
+        max-height: calc(100dvh - 16px);
+    }
+}

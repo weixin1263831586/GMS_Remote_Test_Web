@@ -106,5 +106,9 @@ def _request_missing_params(session: dict[str, Any], missing: list[dict[str, Any
         "assistant",
         "还缺少必要参数：" + "、".join(labels) + "。请补充后再执行。",
     )
-    session["status"] = "idle"
-    session["pending_plan"] = None
+    # 参数缺失收敛 pending_plan：未提交工作流计划保留（审核不变量）。
+    # 函数内导入避免 workspace → workflow_execution 循环依赖。
+    from features.assistant.workflow_execution import discard_stale_pending_plan
+
+    if not discard_stale_pending_plan(session):
+        session["status"] = "idle"

@@ -8,8 +8,5 @@
     border-color: var(--border); border-radius: 6px;
     background: var(--panel2); color: var(--text);
 }
-.modal-header {
-    background: var(--panel); border-bottom: 1px solid var(--border);
-}
 :where(table) th { position: sticky; top: 0; z-index: 1; background: var(--panel2); }
 :where(table) tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--panel)); }

@@ -650,6 +650,14 @@ def _bulletin_section_versions(nodes: list, title_versions: list[str]) -> list[s
     return _sort_bulletin_versions(versions | set(title_versions))
 
 
+def bulletin_content_hash(record: BulletinPatchRecord) -> str:
+    """Track content changes without counting fetch timestamps as new fixes."""
+    return stable_hash({key: getattr(record, key) for key in (
+        'source_key', 'year', 'patch_id', 'description', 'bulletin_month', 'deadline',
+        'bulletin_url', 'patch_kind', 'android_versions', 'detail_text',
+    )})
+
+
 def parse_gms_bulletins(fetched: FetchedDocument, session=None, *, timeout: float = 30.0) -> ParsedSource:
     """Parse Critical Fix Supplementary Bulletin tables (per-year sections).
 
@@ -657,7 +665,7 @@ def parse_gms_bulletins(fetched: FetchedDocument, session=None, *, timeout: floa
     (``/partners/releases/cf/<month>-<year>#<patch_id>``); each detail page
     groups patches under "Mandatory" vs "Strongly recommended" headings and
     annotates the affected Android versions. We store the link plus the
-    kind/versions so the table stays clickable and filterable.
+    kind/versions and per-patch detail text for full-content recall.
     """
     patches: list[BulletinPatchRecord] = []
     article = fetched.doc.xpath('//article[contains(@class, "devsite-article")]')
@@ -724,6 +732,7 @@ def parse_gms_bulletins(fetched: FetchedDocument, session=None, *, timeout: floa
     detail_cache: dict[str, tuple[object, list[str]]] = {}
     patch_kinds: dict[str, str] = {}
     patch_versions: dict[str, str] = {}
+    patch_details: dict[str, str] = {}
     for patch in patches:
         detail_url = patch.bulletin_url.split('#', 1)[0]
         if not detail_url or not session:
@@ -764,7 +773,7 @@ def parse_gms_bulletins(fetched: FetchedDocument, session=None, *, timeout: floa
                 if heading.tag != 'h3':
                     continue
                 heading_text = text_content(heading)
-                if patch.patch_id not in heading_text:
+                if not re.search(rf'(?<![A-Za-z0-9-]){re.escape(patch.patch_id)}(?![A-Za-z0-9-])', heading_text):
                     continue
                 patch_kind = section_kind
                 section_nodes = []
@@ -773,6 +782,13 @@ def parse_gms_bulletins(fetched: FetchedDocument, session=None, *, timeout: floa
                         break
                     section_nodes.append(node)
                 android_versions = _bulletin_section_versions(section_nodes, page_title_versions)
+                # Keep only this patch's section: indexing the whole monthly
+                # page under every patch would attribute neighbouring CVEs to it.
+                texts = [heading_text]
+                for node in section_nodes:
+                    texts.append(text_content(node))
+                    texts.extend(link.url for link in node_links(node, detail_url))
+                patch_details[patch.item_key] = '\n'.join(text for text in texts if text)
                 break
             if patch_kind:
                 break
@@ -780,30 +796,17 @@ def parse_gms_bulletins(fetched: FetchedDocument, session=None, *, timeout: floa
             patch_kinds[patch.item_key] = patch_kind
             patch_versions[patch.item_key] = ', '.join(f'Android {v}' for v in android_versions)
 
-    if patch_kinds or patch_versions:
-        def _payload(record) -> dict:
-            return {
-                'source_key': record.source_key,
-                'year': record.year,
-                'patch_id': record.patch_id,
-                'description': record.description,
-                'bulletin_month': record.bulletin_month,
-                'deadline': record.deadline,
-            }
-
-        patches = [
-            replace(
-                patch,
-                patch_kind=patch_kinds.get(patch.item_key, ''),
-                android_versions=patch_versions.get(patch.item_key, ''),
-                content_hash=stable_hash({
-                    **_payload(patch),
-                    'kind': patch_kinds.get(patch.item_key, ''),
-                    'versions': patch_versions.get(patch.item_key, ''),
-                }),
-            )
-            for patch in patches
-        ]
+    enriched = []
+    for patch in patches:
+        detail = patch_details.get(patch.item_key, '')
+        patch = replace(
+            patch, patch_kind=patch_kinds.get(patch.item_key, ''),
+            android_versions=patch_versions.get(patch.item_key, ''), detail_text=detail,
+            detail_status='ready' if detail else 'unavailable' if patch.bulletin_url else 'not_applicable',
+            detail_fetched_at=utc_now() if detail else '',
+        )
+        enriched.append(replace(patch, content_hash=bulletin_content_hash(patch)))
+    patches = enriched
 
     return ParsedSource(bulletin_patches=patches)
 

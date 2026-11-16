@@ -293,6 +293,24 @@ def _auto_login_display_environment():
     return env
 
 
+def _auto_login_url_allowed(url: str) -> bool:
+    """Only ever auto-open the authenticated Partner/Google doc hosts.
+
+    The launch is opt-in but runs unattended, so the URL must not be able to
+    drift into arbitrary commands or phishing hosts: https only, host must be
+    an exact or subdomain match of the cookie allowlist suffixes that this
+    module already trusts for the docs session.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme != 'https' or not parsed.hostname:
+        return False
+    host = parsed.hostname.lower()
+    return any(host == suffix.lstrip('.') or host.endswith(suffix) for suffix in COOKIE_HOST_SUFFIXES)
+
+
 def launch_login_browser(url: str = DEFAULT_URL, *, reason: str = '', verbose: bool = False) -> bool:
     """Open `url` in the host desktop Firefox to restore the Google session.
 
@@ -301,8 +319,13 @@ def launch_login_browser(url: str = DEFAULT_URL, *, reason: str = '', verbose: b
     clicks without any credential handling in code. Off by default — callers
     must surface manual sign-in guidance in their error text; opt in with
     GMS_PARTNER_ANDROID_AUTO_LOGIN=1. Debounced via a marker file so
-    repeated failures in one scan launch at most one window.
+    repeated failures in one scan launch at most one window. The URL is
+    constrained to https on the Android/Google doc hosts (_auto_login_url_allowed).
     """
+    if not _auto_login_url_allowed(url):
+        if verbose:
+            print(f'auto-login launch rejected: URL outside trusted Partner hosts: {url}', file=sys.stderr)
+        return False
     if not _auto_login_enabled():
         if verbose:
             print(f'auto-login launch disabled ({AUTO_LOGIN_ENV}=1 to enable)', file=sys.stderr)
@@ -322,8 +345,12 @@ def launch_login_browser(url: str = DEFAULT_URL, *, reason: str = '', verbose: b
             print('auto-login launch unavailable: firefox binary or X display missing', file=sys.stderr)
         return False
     try:
+        # 审计过的豁免边界：url 已在函数入口经 _auto_login_url_allowed 白名单
+        # 校验（https + COOKIE_HOST_SUFFIXES 精确/后缀匹配），taint 传播到此的
+        # 只有操作员配置的 Partner 文档地址；argv 数组形式、无 shell。Semgrep
+        # taint 模式无法把自定义白名单识别为 sanitizer，按仓库约定在 sink 行豁免。
         subprocess.Popen(
-            [firefox, url],
+            [firefox, url],  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

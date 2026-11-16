@@ -1816,7 +1816,8 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
     `;
 
     let html = `
-        <div style="background: var(--bg-color); border-radius: 12px; padding: 24px; max-width: 900px; max-height: 85vh; overflow-y: auto; width: 90%; box-shadow: 0 10px 40px rgba(0,0,0,0.3); margin: auto;">
+        <div class="modal-content modal-xl">
+            <div class="modal-body">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2 style="margin: 0; font-size: 18px; font-weight: 600;">🤖 报错分析</h2>
                 <div style="display: flex; align-items: center; gap: 10px;">
@@ -1901,9 +1902,10 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
 
 
     html += `
-            <div style="display: flex; gap: 10px; margin-top: 20px;">
+            <div class="modal-buttons">
                 <button data-click="closeAIAnalysisModal" data-a0="${modalId}" class="btn-xs">关闭</button>
                 <button data-click="copyAIAnalysis" data-a0="${modalId}" class="btn-xs" style="background: var(--success-color);">📋 复制分析报告</button>
+            </div>
             </div>
         </div>
     `;
