@@ -258,6 +258,11 @@
 
 
 
+:is(.modal, .modal-backdrop) .tech-dialog .tech-title-group .modal-title::before {
+  content: none !important;
+  display: none !important;
+}
+
 /*
  * Tailscale reference calibration (source artwork 1672x941):
  * modal x≈176..1476 (78vw), y≈50..870 (87dvh); header≈104,

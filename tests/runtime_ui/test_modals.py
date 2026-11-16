@@ -590,6 +590,52 @@ class RuntimeModalsTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_tailscale_reference_proportions_and_brand_icons(self):
+        """Use the approved 1672x941 reference ratio, not a 1000x640 preset."""
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.set_viewport_size({"width": 1672, "height": 941})
+            page.evaluate("() => ModalManager.open('tailscale-info-modal')")
+            metrics = page.locator("#tailscale-info-modal").evaluate(
+                """modal => {
+                    const panel = modal.querySelector('.modal-content');
+                    const rect = panel.getBoundingClientRect();
+                    const header = modal.querySelector('.tech-dialog-header');
+                    const footer = modal.querySelector('.tech-dialog-footer');
+                    const rows = [...modal.querySelectorAll('.tech-tailscale-row')];
+                    const firstButton = rows[0].querySelector('.tech-row-action');
+                    return {
+                        width: rect.width, height: rect.height,
+                        centered: Math.abs((rect.left + rect.right) / 2 - innerWidth / 2),
+                        headerHeight: header.getBoundingClientRect().height,
+                        footerHeight: footer.getBoundingClientRect().height,
+                        rowHeights: rows.map(row => row.getBoundingClientRect().height),
+                        buttonWidth: firstButton.getBoundingClientRect().width,
+                        brandIcons: modal.querySelectorAll('.tech-brand-icon').length,
+                        extraTitleRail: getComputedStyle(
+                            modal.querySelector('.tech-title-group .modal-title'),
+                            '::before'
+                        ).display,
+                        buttonBg: getComputedStyle(firstButton).backgroundImage,
+                    };
+                }"""
+            )
+            self.assertAlmostEqual(metrics["width"], 1672 * 0.78, delta=4)
+            self.assertAlmostEqual(metrics["height"], 941 * 0.87, delta=4)
+            self.assertLess(metrics["centered"], 2)
+            self.assertAlmostEqual(metrics["headerHeight"], 104, delta=2)
+            self.assertAlmostEqual(metrics["footerHeight"], 136, delta=2)
+            self.assertEqual(len(metrics["rowHeights"]), 5)
+            for height in metrics["rowHeights"]:
+                self.assertGreaterEqual(height, 90)
+            self.assertAlmostEqual(metrics["buttonWidth"], 150, delta=2)
+            self.assertEqual(metrics["brandIcons"], 4)
+            self.assertEqual(metrics["extraTitleRail"], "none")
+            self.assertEqual(metrics["buttonBg"], "none")
+        finally:
+            page.close()
+
     def test_main_shell_modals_fit_supported_viewports_and_stack_in_order(self):
         page = self.new_page()
         page_errors = []
