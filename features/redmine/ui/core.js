@@ -471,22 +471,22 @@ function openRedmineReplyModal(issueId, replyText, meta) {
   modal.id = modalId;
   modal.className = 'modal';
   modal.innerHTML = `
-    <div class="modal-content modal-l redmine-reply-modal">
+    <div class="modal-content modal-l redmine-reply-modal tech-dialog tech-dialog--dynamic-redmine-core-reply"><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
       <div class="modal-header">
         <span class="modal-title">📝 Redmine回复</span>
         <button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="${modalId}">&times;</button>
       </div>
-      <div class="modal-body">
+      <div class="modal-body tech-dynamic-reply-body">
         ${meta.summaryHtml ? `<div class="muted">${meta.summaryHtml}</div>` : (meta.summary ? `<div class="muted">${esc(meta.summary)}</div>` : '')}
-        <div>
+        <section class="tech-reply-issue-card">
           <label>Redmine Issue ID</label>
           <input type="text" id="${issueInputId}" data-redmine-issue-input value="${esc(issueId)}" placeholder="输入 Redmine Issue ID">
-        </div>
-        <div>
+        </section>
+        <section class="tech-reply-text-card">
           <label>回复内容</label>
           <textarea id="${replyTextId}" data-redmine-reply-text rows="14" placeholder="输入回复内容...">${esc(replyText || '')}</textarea>
-        </div>
-        <div>
+        </section>
+        <section class="tech-reply-attachments">
           <label>📎 附件</label>
           <input type="file" id="${fileInputId}" data-redmine-files multiple style="display:none" data-change="updateRedmineReplyFileList" data-a0="${fileInputId}" data-a1="${fileListId}">
           <div id="${fileInputId}-drop" class="redmine-reply-drop" data-click="_actClickById" data-a0="${fileInputId}">拖拽文件到此处，或点击选择文件</div>

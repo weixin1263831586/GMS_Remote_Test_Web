@@ -33,13 +33,13 @@ function openSingleIssueAnalysisHint() {
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = 'modal';
-  modal.innerHTML = '<div class="modal-content modal-l single-issue-analysis-hint-modal">'
+  modal.innerHTML = '<div class="modal-content modal-l single-issue-analysis-hint-modal tech-dialog tech-dialog--dynamic-single-hint"><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>'
     + '<div class="modal-header"><span class="modal-title">🤖 辅助分析说明</span>'
     + '<button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
-    + '<div class="modal-body"><label for="' + modalId + '-text">提供已观察的现象、复现结果或希望重点核查的实际值；kkagent 会将其作为待验证线索。</label>'
+    + '<div class="modal-body tech-single-hint-workflow"><label for="' + modalId + '-text">提供已观察的现象、复现结果或希望重点核查的实际值；kkagent 会将其作为待验证线索。</label>'
     + '<textarea id="' + modalId + '-text" maxlength="4000" placeholder="例如：经验证补丁无效，需要查看设备上的实际值 notification_custom_view_max_image_width。">' + esc(singleIssueAnalysisHint) + '</textarea>'
     + '<div class="muted">最多 4000 个字符。</div></div>'
-    + '<div class="modal-footer"><button type="button" class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">取消</button>'
+    + '<div class="modal-footer tech-dialog-actions"><button type="button" class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">取消</button>'
     + '<button type="button" class="ka-btn primary" data-single-issue-save-hint>保存</button></div></div>';
   document.body.appendChild(modal);
   modal.querySelector('[data-single-issue-save-hint]').addEventListener('click', function () {
@@ -356,14 +356,14 @@ function openSingleIssueReportModal(item, statisticsOnly) {
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = statisticsOnly ? 'modal' : 'modal daily-brief-analysis-overlay';
-  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal' + (statisticsOnly ? ' daily-brief-statistics-modal' : '') + '">'
+  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal' + (statisticsOnly ? ' daily-brief-statistics-modal' : '') + ' tech-dialog tech-dialog--dynamic-single-analysis"><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>'
     + '<div class="modal-header"><span class="modal-title daily-brief-modal-title"><span>'
     + (statisticsOnly ? '📊 AI 统计' : '🤖 AI 分析') + ' · #' + esc(issue.issue_id)
     + (statusText ? ' · ' + esc(statusText) : '') + '</span>'
     + (subject ? '<span class="daily-brief-modal-subject">' + esc(subject) + '</span>' : '')
     + '</span><button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
-    + '<div class="modal-body daily-brief-modal-body">' + body + '</div>'
-    + '<div class="modal-buttons daily-brief-modal-footer">'
+    + '<div class="modal-body daily-brief-modal-body tech-daily-analysis-workbench">' + body + '</div>'
+    + '<div class="modal-buttons daily-brief-modal-footer tech-dialog-actions">'
     + (statisticsOnly ? '' : '<button class="secondary" data-click="openSingleIssueAnalysisTimeline" data-a0="' + esc(issue.issue_id) + '"'
       + (hasHistory ? '' : ' disabled title="' + esc(singleIssueAnalysisHistoryDisabledHint(item.run, issue)) + '"') + '>执行过程</button>')
     + (hasSession

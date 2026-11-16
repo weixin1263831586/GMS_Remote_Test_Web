@@ -326,7 +326,7 @@ function showAnalysisTimelineModal(runId, issueId, options) {
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = 'modal daily-brief-analysis-overlay';
-  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal">'
+  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal tech-dialog tech-dialog--dynamic-execution-timeline"><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>'
     + '<div class="modal-header"><span class="modal-title daily-brief-modal-title">'
     + '<span id="' + modalId + '-title"><span>'
     + (state.history ? '🕐 执行过程 · #' : analysisTimelineLiveTitlePrefix(state.runStatus)) + esc(state.issueId) + '</span>'
@@ -334,9 +334,9 @@ function showAnalysisTimelineModal(runId, issueId, options) {
     + '</span>'
     + (subject ? '<span class="daily-brief-modal-subject">' + esc(subject) + '</span>' : '')
     + '</span><button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '" data-analysis-timeline-close>&times;</button></div>'
-    + '<div class="modal-body daily-brief-modal-body"><div class="analysis-timeline" id="' + modalId + '-timeline">'
+    + '<div class="modal-body daily-brief-modal-body tech-execution-timeline-workbench"><div class="analysis-timeline" id="' + modalId + '-timeline">'
     + renderAnalysisTimelineBody() + '</div></div>'
-    + '<div class="modal-buttons daily-brief-modal-footer"><div class="analysis-timeline-meta" id="' + modalId + '-meta">'
+    + '<div class="modal-buttons daily-brief-modal-footer tech-dialog-actions"><div class="analysis-timeline-meta" id="' + modalId + '-meta">'
     + analysisTimelineMetaHtml(state.history ? '' : 'pending') + '</div>'
     + (state.history ? '' : '<button class="ka-btn" data-analysis-timeline-stop data-a0="' + esc(state.runId) + '">停止分析</button>')
     + '<button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '" data-analysis-timeline-close>关闭</button></div></div>';

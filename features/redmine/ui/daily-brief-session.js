@@ -309,15 +309,15 @@ async function showIssueFullSession(runId, issueId, subject) {
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = 'modal daily-brief-analysis-overlay';
-  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal">'
+  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal tech-dialog tech-dialog--dynamic-agent-session"><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>'
     + '<div class="modal-header"><span class="modal-title daily-brief-modal-title"><span>🧵 kkagent 会话 · #' + esc(issueId) + '</span>'
     + (subject ? '<span class="daily-brief-modal-subject">' + esc(subject) + '</span>' : '')
     + '</span><button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
-    + '<div class="modal-body daily-brief-modal-body"><div id="' + modalId + '-note" class="issue-session-note">按原始消息回合聚合；页面预览会裁剪，工具结果已回挂到对应调用。</div>'
+    + '<div class="modal-body daily-brief-modal-body tech-agent-session-workbench"><div id="' + modalId + '-note" class="issue-session-note">按原始消息回合聚合；页面预览会裁剪，工具结果已回挂到对应调用。</div>'
     + '<div id="' + modalId + '-stream" class="issue-session-stream">'
     + '<div class="muted">⏳ 正在加载会话…</div></div>'
     + '<div id="' + modalId + '-raw" class="issue-session-raw-stream" hidden></div></div>'
-    + '<div class="modal-buttons daily-brief-modal-footer">'
+    + '<div class="modal-buttons daily-brief-modal-footer tech-dialog-actions">'
     + '<button class="secondary" id="' + modalId + '-view-toggle" data-click="toggleIssueSessionView" data-a0="' + modalId + '">查看未裁剪原文</button>'
     + '<button class="secondary" id="' + modalId + '-more" data-click="loadMoreIssueSession" data-a0="' + modalId + '" disabled>加载更多</button>'
     + '<button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">'
