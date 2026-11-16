@@ -151,23 +151,25 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
     // <textarea> 均可被 `</textarea><img onerror=...>` 逃逸）。模板只含
     // 常量，报告数据在 DOM 构建后通过 .value 赋值。
     modal.innerHTML = `
-        <div class="modal-content modal-l">
-            <div class="modal-header">
-                <span class="modal-title">📝 Redmine回复</span>
+        <div class="modal-content modal-l tech-dialog tech-dialog--dynamic-redmine-reply">
+            <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph"><svg class="ui-icon"><use href="/static/icons/ui.svg#edit"></use></svg></span><span class="tech-title-divider"></span><span class="modal-title">Redmine 回复</span></div>
                 <button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseModal" data-a0="${modalId}">&times;</button>
             </div>
-            <div class="modal-body">
-                <div style="margin-bottom: 16px;">
+            <div class="modal-body tech-dynamic-reply-body">
+                <p class="tech-workflow-lede">确认工单编号、正文与附件后提交回复</p>
+                <div class="tech-reply-issue-card" style="margin-bottom: 16px;">
                     <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">Redmine Issue ID</label>
                     <input type="text" id="${issueInputId}" data-redmine-issue-input placeholder="输入 Redmine Issue ID"
                            style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 14px; font-family: 'Courier New', monospace;">
                 </div>
-                <div style="margin-bottom: 16px;">
+                <div class="tech-reply-text-card" style="margin-bottom: 16px;">
                     <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">回复内容</label>
                     <textarea id="${replyTextId}" data-redmine-reply-text rows="10" placeholder="输入回复内容..."
                               style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 13px; font-family: 'Courier New', monospace; white-space: pre-wrap; resize: vertical;"></textarea>
                 </div>
-                <div style="margin-bottom: 16px;">
+                <div class="tech-reply-attachments" style="margin-bottom: 16px;">
                     <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">📎 附件</label>
                     <input type="file" id="${fileInputId}" data-redmine-files multiple
                            style="display: none;"
@@ -179,7 +181,7 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
                     </div>
                     <div id="${fileListId}" style="margin-top: 8px;"></div>
                 </div>
-                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <div class="tech-reply-actions" style="display: flex; gap: 10px; justify-content: flex-end;">
                     <button data-click="_actCloseModal" data-a0="${modalId}"
                             style="padding: 8px 16px; background: var(--secondary-bg); color: var(--text-primary); border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">取消</button>
                     <button data-click="confirmAndSendRedmineReply" data-a0="${modalId}"

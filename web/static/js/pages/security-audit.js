@@ -321,12 +321,13 @@ function ensureSecurityAuditDetailModal() {
     modal.id = 'security-audit-detail-modal';
     modal.className = 'modal';
     modal.innerHTML = `
-        <div class="modal-content modal-xl">
-            <div class="modal-header">
-                <span class="modal-title">安全审计详情</span>
+        <div class="modal-content modal-xl tech-dialog tech-dialog--dynamic-security-detail">
+            <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph"><svg class="ui-icon"><use href="/static/icons/ui.svg#shield"></use></svg></span><span class="tech-title-divider"></span><span class="modal-title">安全审计详情</span></div>
                 <button type="button" class="modal-close" aria-label="关闭" data-action="close-security-audit-detail">&times;</button>
             </div>
-            <div class="modal-body" id="security-audit-detail-body" style="overflow: auto; padding-right: 4px;">
+            <div class="modal-body tech-dynamic-security-body" id="security-audit-detail-body" style="overflow: auto; padding-right: 4px;">
                 加载中...
             </div>
         </div>
@@ -564,12 +565,13 @@ function ensureOutboxDetailModal() {
     modal.id = 'outbox-detail-modal';
     modal.className = 'modal';
     modal.innerHTML = `
-        <div class="modal-content modal-l">
-            <div class="modal-header">
-                <span class="modal-title">历史邮件详情</span>
+        <div class="modal-content modal-l tech-dialog tech-dialog--dynamic-mail-detail">
+            <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph"><svg class="ui-icon"><use href="/static/icons/ui.svg#mail"></use></svg></span><span class="tech-title-divider"></span><span class="modal-title">历史邮件详情</span></div>
                 <button type="button" class="modal-close" aria-label="关闭" data-action="close-outbox-detail">&times;</button>
             </div>
-            <div class="modal-body" id="outbox-detail-body" style="overflow: auto; padding-right: 4px;">
+            <div class="modal-body tech-dynamic-mail-body" id="outbox-detail-body" style="overflow: auto; padding-right: 4px;">
                 加载中...
             </div>
         </div>

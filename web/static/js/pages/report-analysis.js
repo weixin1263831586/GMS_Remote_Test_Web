@@ -13,13 +13,16 @@ function selectReportSource() {
     modal.className = 'modal';
     modal.style.cssText = 'z-index: 10000;';
     modal.innerHTML = `
-        <div class="modal-content modal-xs">
-            <div class="modal-header">
-                <span class="modal-title">选择上传方式</span>
+        <div class="modal-content modal-xs tech-dialog tech-dialog--dynamic-report-source">
+            <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span>
+            <span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph"><svg class="ui-icon"><use href="/static/icons/ui.svg#upload"></use></svg></span><span class="tech-title-divider"></span><span class="modal-title">选择上传方式</span></div>
                 <button type="button" class="modal-close" aria-label="关闭" data-click="closeReportSourceModal">&times;</button>
             </div>
-            <div class="modal-body" style="padding: 20px;">
-                <div style="display: flex; flex-direction: column; gap: 12px;">
+            <div class="modal-body tech-dynamic-report-source-body" style="padding: 20px;">
+                <p class="tech-workflow-lede">选择文件或文件夹，继续现有报告上传流程</p>
+                <div class="tech-report-source-choices" style="display: flex; flex-direction: column; gap: 12px;">
                     <button class="btn-md" data-click="selectReportFile" style="width: 100%; justify-content: center;">
                         📄 上传文件
                     </button>
@@ -430,14 +433,16 @@ function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill,
     modal.className = 'modal';
     modal.style.cssText = 'z-index: 10000;';
     modal.innerHTML = `
-        <div class="modal-content modal-xs">
-            <div class="modal-header">
-                <span class="modal-title">🔐 Redmine 认证</span>
+        <div class="modal-content modal-xs tech-dialog tech-dialog--dynamic-redmine-auth">
+            <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span>
+            <span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph"><svg class="ui-icon"><use href="/static/icons/ui.svg#lock"></use></svg></span><span class="tech-title-divider"></span><span class="modal-title">Redmine 认证</span></div>
                 <button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseRedmineAuthModal">&times;</button>
             </div>
             <div class="modal-body">
-                <p style="margin-bottom: 15px;">请输入 Redmine 账号密码以自动下载附件：</p>
-                <form data-submit="submitRedmineAuth" data-a0="${escapedUrl}" data-prevent autocomplete="off">
+                <p class="tech-workflow-lede">输入 Redmine 凭据以授权附件下载</p>
+                <form class="tech-dynamic-auth-form" data-submit="submitRedmineAuth" data-a0="${escapedUrl}" data-prevent autocomplete="off">
                 <div class="modal-form-row">
                     <label>用户名</label>
                     <input type="text" id="redmine-username" placeholder="输入 Redmine 用户名" autocomplete="username">
@@ -1809,16 +1814,18 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
         left: 0 !important;
         width: 100% !important;
         height: 100% !important;
-        background: rgba(0, 0, 0, 0.7) !important;
+        /* Backdrop uses the common 40% violet overlay, not an extra 70% black. */
         justify-content: center !important;
         align-items: center !important;
         z-index: 10000 !important;
     `;
 
     let html = `
-        <div class="modal-content modal-xl">
-            <div class="modal-body">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div class="modal-content modal-xl tech-dialog tech-dialog--dynamic-ai-analysis">
+            <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span>
+            <span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-body tech-ai-analysis-body">
+            <div class="tech-ai-analysis-bar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2 style="margin: 0; font-size: 18px; font-weight: 600;">🤖 报错分析</h2>
                 <div style="display: flex; align-items: center; gap: 10px;">
                     ${data.source_code_fetched ? '<span style="font-size: 10px; background: var(--primary-gradient); color: var(--text-on-accent); padding: 3px 10px; border-radius: 4px;">✓ 源码已获取</span>' : ''}
@@ -1902,7 +1909,7 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
 
 
     html += `
-            <div class="modal-buttons">
+            <div class="modal-buttons tech-dialog-actions tech-ai-analysis-actions">
                 <button data-click="closeAIAnalysisModal" data-a0="${modalId}" class="btn-xs">关闭</button>
                 <button data-click="copyAIAnalysis" data-a0="${modalId}" class="btn-xs" style="background: var(--success-color);">📋 复制分析报告</button>
             </div>
