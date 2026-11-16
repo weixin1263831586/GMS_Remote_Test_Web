@@ -880,3 +880,117 @@
  #mainline-sync-modal .tech-mainline-choice-grid {grid-template-columns:1fr}
  #mainline-sync-modal .tech-mainline-option {padding:11px}
 }
+
+
+/* JavaScript-generated dialogs own their own markup, not a generic skin.
+   The same color language applies, but layout follows actual data/functions. */
+:is(.modal,.modal-backdrop) .modal-content[class*="tech-dialog--dynamic-"] {
+  border:1px solid #9874ba;
+  background:#1c1828;
+  border-radius:8px;
+  max-height:calc(100dvh - 24px);
+  overflow:hidden;
+}
+.tech-dialog--dynamic-report-source .tech-report-source-choices {
+  display:grid !important;grid-template-columns:1fr 1fr;
+  gap:12px !important;
+}
+.tech-dialog--dynamic-report-source .tech-report-source-choices > button {
+  display:flex;align-items:center;justify-content:center;
+  min-height:90px;min-width:0;
+  border:1px solid #8b65af;
+  border-radius:9px;
+  background:#2e2240 !important;
+  color:#efddff;
+  font-size:14px;font-weight:650;
+}
+.tech-dialog--dynamic-report-source .tech-report-source-choices > button:hover {
+  border-color:#d0a2f5;background:#453059 !important;
+}
+.tech-dialog--dynamic-report-source .tech-report-source-choices > div {
+  color:#c0adce;font-size:11px;line-height:1.5;
+}
+.tech-dialog--dynamic-redmine-auth .tech-dynamic-auth-form {
+  display:flex;flex-direction:column;gap:10px;
+  background:#261e32;padding:12px;
+  border:1px solid #594171;border-radius:8px;
+}
+.tech-dialog--dynamic-redmine-auth .tech-dynamic-auth-form .modal-form-row {
+  display:grid;grid-template-columns:75px minmax(0,1fr);
+  gap:9px;align-items:center;
+  margin:0;padding:7px;
+  background:#1c1726;border:1px solid #524064;border-radius:6px;
+}
+.tech-dialog--dynamic-redmine-auth .tech-dynamic-auth-form :is(input,select) {
+  min-width:0;border:1px solid #896ca7;border-radius:5px;
+  background:#15121c;height:37px;
+}
+.tech-dialog--dynamic-ai-analysis .tech-ai-analysis-body {
+  padding:18px 22px;overflow-y:auto;background:#1b1725;
+}
+.tech-dialog--dynamic-ai-analysis .tech-ai-analysis-bar {
+  position:relative;
+  padding:13px;
+  border:1px solid #654e7e;
+  border-radius:8px;
+  background:#251d32;
+  flex-wrap:wrap;
+  gap:9px;
+}
+.tech-dialog--dynamic-ai-analysis .tech-ai-analysis-bar h2 {
+  font-size:16px !important;color:#f1e4ff;
+}
+.tech-dialog--dynamic-ai-analysis .tech-ai-analysis-body > div[style*="border-left"] {
+  background:#241d30 !important;
+  border-radius:7px;
+  border:1px solid #624b7b;
+  border-left:3px solid #b783ed;
+}
+.tech-dialog--dynamic-ai-analysis .tech-ai-analysis-actions {
+  border-top:1px solid #70548a;padding-top:13px;
+}
+.tech-dialog--dynamic-ai-analysis .tech-ai-analysis-actions > button {
+  border:1px solid #916bb7 !important;
+  border-radius:5px !important;
+}
+.tech-dialog--dynamic-security-detail .tech-dynamic-security-body,
+.tech-dialog--dynamic-mail-detail .tech-dynamic-mail-body {
+  background:#191522;
+  border-top:1px solid #5e4477;
+  padding:15px !important;
+  overflow:auto;
+}
+.tech-dialog--dynamic-security-detail .tech-dynamic-security-body :is(pre,code),
+.tech-dialog--dynamic-mail-detail .tech-dynamic-mail-body :is(pre,code) {
+  background:#13111c;color:#ddc3f2;
+}
+.tech-dialog--dynamic-redmine-reply .tech-dynamic-reply-body {
+  background:#1b1826;overflow-y:auto;padding:17px 21px;
+}
+.tech-dialog--dynamic-redmine-reply :is(.tech-reply-issue-card,.tech-reply-text-card,.tech-reply-attachments) {
+  min-width:0;
+  border:1px solid #634b7e;
+  border-radius:8px;
+  background:#251d30;
+  padding:12px 14px;
+}
+.tech-dialog--dynamic-redmine-reply .tech-reply-attachments .redmine-drop-zone {
+  background:#2d213c !important;
+  border:2px dashed #a173cf !important;
+  border-radius:8px !important;
+  color:#e5cff8 !important;
+}
+.tech-dialog--dynamic-redmine-reply .tech-reply-actions {
+  border-top:1px solid #634d7a;
+  padding-top:13px;
+}
+.tech-dialog--dynamic-redmine-reply .tech-reply-actions > button:last-child {
+  background:#7845b1 !important;
+  border:1px solid #b985e8 !important;
+  color:#fff;
+}
+@media(max-width:600px){
+  .tech-dialog--dynamic-report-source .tech-report-source-choices {grid-template-columns:1fr}
+  .tech-dialog--dynamic-redmine-auth .tech-dynamic-auth-form .modal-form-row {grid-template-columns:1fr}
+  .tech-dialog--dynamic-ai-analysis .tech-ai-analysis-body {padding:10px}
+}
