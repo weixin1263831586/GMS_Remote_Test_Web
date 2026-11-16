@@ -54,6 +54,15 @@ def capture() -> int:
         page = context.new_page()
         page.goto(args.url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_function("typeof ModalManager !== 'undefined'", timeout=15000)
+        # 页面加载时可能自动弹出对话框（如客户端用户名识别），先全部关闭，
+        # 避免它们叠在后续截图下面造成"背景有另一个弹框"的误判。
+        page.wait_for_timeout(800)
+        page.evaluate(
+            """() => document.querySelectorAll('.modal.show[id]').forEach(el => {
+                   try { ModalManager.close(el.id) } catch (e) {}
+               })"""
+        )
+        page.wait_for_timeout(200)
         if args.ids:
             ids = [part.strip() for part in args.ids.split(",") if part.strip()]
         else:

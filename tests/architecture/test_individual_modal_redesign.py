@@ -54,7 +54,7 @@ def test_tailscale_has_five_dedicated_icon_rows_with_original_callbacks() -> Non
     ):
         assert hook in source
     styles = (ROOT / SOURCE_FILES[0]).read_text(encoding="utf-8")
-    assert "1250px" in styles
+    assert "1000px" in styles
     assert ".tech-tailscale-row" in styles
     assert "clip-path: polygon(" in styles
 

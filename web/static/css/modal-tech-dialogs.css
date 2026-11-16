@@ -198,48 +198,48 @@
 }
 /* Tailscale is a full-sized reference dialog, not modal-l's 760px compact form. */
 :is(.modal,.modal-backdrop) .modal-content.tech-dialog--tailscale {
-  width:min(1250px,calc(100vw - 64px));max-width:min(1250px,calc(100vw - 64px));
-  height:min(812px,calc(100dvh - 45px));max-height:calc(100dvh - 24px);
+  width:min(1000px,calc(100vw - 48px));max-width:min(1000px,calc(100vw - 48px));
+  height:min(640px,calc(100dvh - 45px));max-height:calc(100dvh - 24px);
 }
 .tech-dialog--tailscale .tech-tailscale-body {
   display:flex;flex-direction:column;justify-content:center;
-  gap:22px;padding:26px 34px !important;
+  gap:16px;padding:20px 26px !important;
   overflow-y:auto;
 }
-.tech-dialog--tailscale .tech-tailscale-rows {display:flex;flex-direction:column;gap:8px}
+.tech-dialog--tailscale .tech-tailscale-rows {display:flex;flex-direction:column;gap:6px}
 .tech-dialog--tailscale .tech-tailscale-row {
-  display:grid;grid-template-columns:56px minmax(150px,195px) minmax(0,1fr) 122px;
-  align-items:center;gap:14px;min-height:72px;margin:0;
-  padding:10px 16px;background:#211d2c;
-  border:1px solid #413451;border-radius:9px;
+  display:grid;grid-template-columns:44px minmax(130px,175px) minmax(0,1fr) 110px;
+  align-items:center;gap:12px;min-height:56px;margin:0;
+  padding:8px 14px;background:#211d2c;
+  border:1px solid #413451;border-radius:8px;
 }
 .tech-dialog--tailscale .tech-tailscale-row > label {
-  display:flex;align-items:center;gap:15px;
-  font-size:17px;font-weight:650;color:#f5f0ff;white-space:nowrap;
+  display:flex;align-items:center;gap:12px;
+  font-size:15px;font-weight:650;color:#f5f0ff;white-space:nowrap;
 }
 .tech-dialog--tailscale .tech-tailscale-row > label::before {
-  content:"";flex:none;height:30px;width:2px;background:var(--tech-edge);
+  content:"";flex:none;height:24px;width:2px;background:var(--tech-edge);
 }
 .tech-dialog--tailscale .tech-tailscale-row > input {
-  margin:0;width:100%;min-width:0;height:51px;
-  padding:10px 16px;font-size:17px;
+  margin:0;width:100%;min-width:0;height:42px;
+  padding:8px 14px;font-size:15px;
   border:1px solid #7c6a9b;
 }
 .tech-dialog--tailscale .tech-tailscale-row > input:focus {box-shadow:none}
 .tech-dialog--tailscale .tech-tailscale-row .tech-row-action {
-  display:flex;align-items:center;justify-content:center;gap:10px;
-  width:122px;height:52px;padding:0 12px;border:1px solid var(--tech-edge);
-  font-size:17px;white-space:nowrap;background:#282034;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  width:110px;height:42px;padding:0 10px;border:1px solid var(--tech-edge);
+  font-size:14px;white-space:nowrap;background:#282034;
 }
-.tech-dialog--tailscale .tech-row-action .ui-icon {width:22px;height:22px}
+.tech-dialog--tailscale .tech-row-action .ui-icon {width:18px;height:18px}
 .tech-dialog--tailscale .tech-tailscale-help {
-  display:flex;align-items:center;gap:12px;flex:none;
-  min-height:49px;margin:0;padding:10px 14px;
-  font-size:14px;color:#c3b8d4;border-left:0;background:transparent;
+  display:flex;align-items:center;gap:10px;flex:none;
+  min-height:40px;margin:0;padding:8px 12px;
+  font-size:13px;color:#c3b8d4;border-left:0;background:transparent;
 }
 .tech-dialog--tailscale .tech-hint-icon {display:inline-flex;color:var(--tech-bright);flex:none}
-.tech-dialog--tailscale .tech-hint-icon .ui-icon {width:22px;height:22px}
-.tech-dialog--tailscale .tech-dialog-footer {min-height:106px}
+.tech-dialog--tailscale .tech-hint-icon .ui-icon {width:18px;height:18px}
+.tech-dialog--tailscale .tech-dialog-footer {min-height:78px}
 @media (max-width:900px) {
   :is(.modal,.modal-backdrop) .modal-content.tech-dialog--tailscale {
     width:calc(100vw - 24px);max-width:calc(100vw - 24px);
@@ -336,30 +336,30 @@
 }
 
 
-/* Screenshot reference calibration (1672×941 reference, ~1300×820 dialog):
-   spacious 5-row module, 94px title rail and 116px action baseline. */
+/* Desktop sizing: compact 5-row module that fits a 1280px laptop without
+   dominating the viewport (user feedback: 1300×820 was oversized). */
 :is(.modal,.modal-backdrop) .modal-content.tech-dialog--tailscale {
-  width:min(1300px,calc(100vw - 64px));
-  max-width:min(1300px,calc(100vw - 64px));
-  height:min(820px,calc(100dvh - 45px));
+  width:min(1000px,calc(100vw - 48px));
+  max-width:min(1000px,calc(100vw - 48px));
+  height:min(640px,calc(100dvh - 45px));
 }
 .tech-dialog--tailscale .tech-dialog-header {
-  min-height:94px;
-  padding:19px 42px;
+  min-height:64px;
+  padding:12px 28px;
 }
 .tech-dialog--tailscale .tech-title-glyph {
-  width:58px;
-  height:58px;
+  width:38px;
+  height:38px;
 }
-.tech-dialog--tailscale .tech-title-glyph .ui-icon {width:41px;height:41px}
+.tech-dialog--tailscale .tech-title-glyph .ui-icon {width:26px;height:26px}
 :is(.modal,.modal-backdrop) .tech-dialog--tailscale .tech-title-group .modal-title {
-  font-size:30px;
+  font-size:20px;
 }
-.tech-dialog--tailscale .tech-tailscale-row {min-height:84px}
-.tech-dialog--tailscale .tech-field-glyph {width:54px;height:54px}
-.tech-dialog--tailscale .tech-tailscale-row > input {height:55px}
-.tech-dialog--tailscale .tech-tailscale-row > label {font-size:19px}
-.tech-dialog--tailscale .tech-dialog-footer {min-height:116px}
+.tech-dialog--tailscale .tech-tailscale-row {min-height:56px}
+.tech-dialog--tailscale .tech-field-glyph {width:38px;height:38px}
+.tech-dialog--tailscale .tech-tailscale-row > input {height:42px}
+.tech-dialog--tailscale .tech-tailscale-row > label {font-size:15px}
+.tech-dialog--tailscale .tech-dialog-footer {min-height:78px}
 @media(max-width:900px) {
   .tech-dialog--tailscale .tech-dialog-header {min-height:71px;padding:12px 20px}
   .tech-dialog--tailscale .tech-title-glyph {width:42px;height:42px}
