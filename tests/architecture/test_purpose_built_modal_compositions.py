@@ -8,6 +8,7 @@ from __future__ import annotations
 from html.parser import HTMLParser
 from pathlib import Path
 
+
 ROOT = Path(__file__).resolve().parents[2]
 DIALOGS = ROOT / "web/shell/dialogs"
 EMBEDDED_VARIANTS = {
