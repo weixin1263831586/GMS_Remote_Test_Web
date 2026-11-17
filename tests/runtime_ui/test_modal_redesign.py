@@ -34,6 +34,22 @@ LAYOUT = """content => {
   return {
     bounds: {left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom},
     frame: !!content.querySelector('.tech-frame'),
+    cutSurface: (() => {
+      const frame = content.querySelector(':scope > .tech-frame');
+      return !frame || getComputedStyle(content).clipPath !== 'none';
+    })(),
+    headerSingleOwner: (() => {
+      const header = [...content.children].find(el =>
+        el.matches('.modal-header,.modal-head,.section-head') && el.querySelector(':scope > .tech-header-rule'));
+      if (!header) return true;
+      const rule = header.querySelector(':scope > .tech-header-rule');
+      const rail = rule.querySelector('path');
+      const highlight = rule.querySelector('.tech-rule-highlight');
+      return getComputedStyle(header).borderBottomWidth === '0px'
+        && getComputedStyle(header, '::after').content === 'none'
+        && !!highlight && !!rail && highlight.getTotalLength() > 0
+        && rail.isPointInStroke(highlight.getPointAtLength(highlight.getTotalLength() / 2));
+    })(),
     alignedCorners: (() => {
       const frame = content.querySelector('.tech-frame');
       const edge = frame?.querySelector('path');
@@ -87,6 +103,8 @@ class ModalRedesignTests(RuntimeUiHarness):
         self.assertLessEqual(bounds["bottom"], viewport["height"] + 1, report)
         self.assertTrue(report["frame"], report)
         self.assertTrue(report["alignedCorners"], report)
+        self.assertTrue(report["cutSurface"], report)
+        self.assertTrue(report["headerSingleOwner"], report)
         self.assertFalse(report["ticksOverlapClose"], report)
         self.assertEqual(report["leaks"], [], report)
         self.assertEqual(report["clipped"], [], report)
