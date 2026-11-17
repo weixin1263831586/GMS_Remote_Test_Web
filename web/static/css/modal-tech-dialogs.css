@@ -350,13 +350,3 @@
    the buttons and cannot cover fields or controls. */
 .tech-dialog .tech-footer-decoration { z-index: 0; }
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.tech-dialog-footer) > button { position: relative; z-index: 1; }
-@media (max-width: 480px) {
-  :is(.modal,.modal-backdrop) .modal-content.tech-dialog:has(> .tech-frame) {
-    --tech-corner-cut: 12px;
-  }
-  /* Keep one 16px cut geometry at every viewport size: the ResizeObserver
-     SVG uses 16px; clip must match it, including on small screens. */
-  :is(.modal,.modal-backdrop) .modal-content.tech-dialog:has(> .tech-frame) {
-    --tech-corner-cut: 16px;
-  }
-}
