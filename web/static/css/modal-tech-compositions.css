@@ -1241,3 +1241,101 @@
     padding:10px 12px !important;
   }
 }
+
+
+/* Reference fidelity pass (2026-11-17).
+   Preserve purpose-built content and business behavior. These rules improve
+   visual hierarchy and layout, rather than adding unimplemented controls. */
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog {
+  border-color: #b78ae3 !important;
+  box-shadow: 0 22px 60px rgb(0 0 0 / 46%),
+              0 0 0 1px rgb(181 117 233 / 17%),
+              0 0 22px rgb(159 90 217 / 12%);
+}
+:is(.modal,.modal-backdrop) .tech-dialog > .tech-dialog-header {
+  min-height: 66px;
+}
+:is(.modal,.modal-backdrop) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) {
+  font-size: 18px !important;
+  font-weight: 700;
+  letter-spacing: .15px;
+}
+.tech-dialog .tech-title-glyph {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+}
+.tech-dialog .tech-title-glyph .ui-icon {
+  width: 22px;
+  height: 22px;
+}
+.tech-dialog .tech-header-ticks::before {
+  content: "////";
+  color: #b978f0;
+}
+.tech-dialog .modal-form-row.tech-structured-row {
+  border-color: #654b82;
+  background: #252032;
+}
+.tech-dialog .tech-field-glyph {
+  width: 35px;
+  height: 35px;
+  border-color: #76549e;
+}
+.tech-dialog :is(.modal-form-row,.tech-tailscale-row) :is(input:not([type=checkbox]):not([type=radio]),select,textarea) {
+  min-height: 40px;
+  font-size: 14px;
+  border-color: #817296;
+}
+.tech-dialog .tech-workflow-lede {
+  font-size: 14px;
+  line-height: 1.65;
+}
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions) > button:not(.modal-close) {
+  min-height: 39px;
+  padding: 8px 18px;
+  font-size: 14px;
+}
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions) > .btn-primary:not(:disabled) {
+  background: #8246c4 !important;
+  border-color: #cb95ff !important;
+  box-shadow: 0 0 0 1px rgb(203 149 255 / 20%), 0 0 13px rgb(154 69 227 / 24%);
+}
+.tech-dialog .tech-dialog-actions {
+  padding: 13px 22px 20px;
+  justify-content: flex-end;
+}
+/* SSH: a true footer rather than controls trapped inside the form body. */
+#username-detect-modal .modal-body.tech-ssh-composition {
+  padding-bottom: 16px;
+}
+#username-detect-modal > .modal-content > .tech-dialog-actions {
+  margin-top: 0;
+  border-top: 1px solid #654b82;
+}
+#username-detect-modal .tech-ssh-form .tech-structured-row {
+  min-height: 64px;
+}
+#username-detect-modal .tech-ssh-form .tech-structured-row > label {
+  font-size: 14px;
+}
+/* The diagnosis workbench must not crowd the close control with header actions. */
+#report-diagnosis-modal .report-diagnosis-header .report-diagnosis-actions {
+  min-width: 0;
+  justify-content: flex-end;
+}
+@media (max-width: 670px) {
+  :is(.modal,.modal-backdrop) .tech-dialog > .tech-dialog-header {
+    min-height: 56px;
+    padding: 10px 14px;
+  }
+  :is(.modal,.modal-backdrop) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) {
+    font-size: 16px !important;
+  }
+  .tech-dialog .tech-dialog-actions {
+    padding: 12px 12px 20px;
+  }
+  #username-detect-modal .tech-ssh-form .tech-structured-row {
+    min-height: 0;
+  }
+}
