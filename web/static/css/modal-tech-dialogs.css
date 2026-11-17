@@ -298,3 +298,65 @@
 :is(.modal,.modal-backdrop) .modal-content.tech-dialog:has(> .tech-frame) {
   border-color: transparent !important;
 }
+
+
+/*
+ * Single-line ownership for SVG-framed dialogs:
+ * - CSS clips the actual surface to the same 16px corner cut as the SVG path.
+ * - SVG owns the perimeter and header rail; no competing rectangular border.
+ * - Non-SVG dialogs keep their CSS outline and conventional header divider.
+ */
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog:has(> .tech-frame) {
+  --tech-corner-cut: 16px;
+  clip-path: polygon(
+    var(--tech-corner-cut) 0,
+    calc(100% - var(--tech-corner-cut)) 0,
+    100% var(--tech-corner-cut),
+    100% calc(100% - var(--tech-corner-cut)),
+    calc(100% - var(--tech-corner-cut)) 100%,
+    var(--tech-corner-cut) 100%,
+    0 calc(100% - var(--tech-corner-cut)),
+    0 var(--tech-corner-cut)
+  );
+  border: 0 !important;
+}
+/* The pixel-aligned SVG perimeter must sit above the content without swallowing
+   clicks; SVG visual decorations are not interactive controls. */
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog > .tech-frame {
+  z-index: 12;
+  pointer-events: none;
+}
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog > :is(.modal-header,.modal-head,.section-head):has(> .tech-header-rule) {
+  border-bottom: 0 !important;
+}
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog > :is(.modal-header,.modal-head,.section-head):has(> .tech-header-rule)::before,
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog > :is(.modal-header,.modal-head,.section-head):has(> .tech-header-rule)::after {
+  content: none !important;
+  display: none !important;
+}
+.tech-dialog .tech-header-rule { z-index: 1; overflow: visible; }
+.tech-dialog .tech-header-rule > path { stroke-linejoin: miter; stroke-linecap: butt; }
+.tech-dialog .tech-rule-highlight {
+  stroke: #d39aff;
+  stroke-width: 3;
+  filter: drop-shadow(0 0 3px rgb(195 100 255 / 55%));
+}
+.tech-dialog .tech-rule-ticks { stroke-linecap: butt; }
+:is(.modal,.modal-backdrop) .tech-dialog > :is(.modal-header,.modal-head,.section-head) > :is(.tech-title-group,.modal-close,.report-diagnosis-actions) {
+  position: relative;
+  z-index: 2;
+}
+/* Footer is a single straight separator. Its short decorative trace is below
+   the buttons and cannot cover fields or controls. */
+.tech-dialog .tech-footer-decoration { z-index: 0; }
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.tech-dialog-footer) > button { position: relative; z-index: 1; }
+@media (max-width: 480px) {
+  :is(.modal,.modal-backdrop) .modal-content.tech-dialog:has(> .tech-frame) {
+    --tech-corner-cut: 12px;
+  }
+  /* Keep one 16px cut geometry at every viewport size: the ResizeObserver
+     SVG uses 16px; clip must match it, including on small screens. */
+  :is(.modal,.modal-backdrop) .modal-content.tech-dialog:has(> .tech-frame) {
+    --tech-corner-cut: 16px;
+  }
+}
