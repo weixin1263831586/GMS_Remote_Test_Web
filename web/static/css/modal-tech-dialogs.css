@@ -286,3 +286,15 @@
 @media (prefers-reduced-motion: reduce) {
   .tech-dialog .tech-frame-accent { filter: none; }
 }
+
+
+/* Runtime-generated tech dialogs do not all contain an SVG frame.
+   Keep a visible border for those cases, without drawing an extra rectangle
+   around SVG-framed cut corners. */
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog:not(:has(> .tech-frame)) {
+  border: 1px solid #9867bd !important;
+  border-radius: 9px !important;
+}
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog:has(> .tech-frame) {
+  border-color: transparent !important;
+}
