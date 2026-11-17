@@ -3,8 +3,8 @@
 Reference style: one continuous SVG perimeter, with its corner accents on
 the same path, and a title rail/highlight sharing the same SVG baseline.
 """
-from pathlib import Path
 import re
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DIALOGS = ROOT / "web/shell/dialogs"
