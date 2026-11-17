@@ -6,6 +6,7 @@ the same path, and a title rail/highlight sharing the same SVG baseline.
 import re
 from pathlib import Path
 
+
 ROOT = Path(__file__).resolve().parents[2]
 DIALOGS = ROOT / "web/shell/dialogs"
 CSS = ROOT / "web/static/css/modal-tech-dialogs.css"
