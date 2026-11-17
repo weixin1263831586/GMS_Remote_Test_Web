@@ -1,0 +1,177 @@
+name: GMS manual live modal audit
+
+# Public repository: do not trigger this runner from PRs, forks or pushes.
+on:
+  workflow_dispatch:
+    inputs:
+      publish_corners:
+        description: "Publish ONLY 64px corner crops to PUBLIC GitHub artifacts"
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gms-modal-live-audit
+  cancel-in-progress: false
+
+jobs:
+  read-only-audit:
+    if: >-
+      github.repository == 'weixin1263831586/GMS_Remote_Test_Web' &&
+      github.actor == 'weixin1263831586' &&
+      github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 15
+    env:
+      PUBLISH_CORNERS: ${{ inputs.publish_corners }}
+    steps:
+      - name: Chromium DOM preview (no checkout; no backend writes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import io
+          import json
+          import os
+          import re
+          from pathlib import Path
+          from urllib.parse import urlsplit
+
+          from playwright.sync_api import sync_playwright
+
+          try:
+              from PIL import Image
+          except ImportError:
+              Image = None
+
+          hostname = '172.16.14.233'
+          url = 'https://172.16.14.233:5001/#test'
+          output = Path(os.environ['RUNNER_TEMP']) / 'gms-modal-audit'
+          (output / 'corners').mkdir(parents=True, exist_ok=True)
+          publish = os.environ.get('PUBLISH_CORNERS', '').lower() == 'true'
+          records = []
+          blocked = [0]
+
+          def readonly(route):
+              if route.request.method not in ('GET', 'HEAD'):
+                  blocked[0] += 1
+                  return route.abort()
+              if urlsplit(route.request.url).hostname != hostname:
+                  return route.abort()
+              return route.continue_()
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True)
+              for width, height in ((1672, 941), (390, 844)):
+                  context = browser.new_context(
+                      viewport={'width': width, 'height': height},
+                      device_scale_factor=1,
+                      ignore_https_errors=True,
+                  )
+                  context.route('**/*', readonly)
+                  page = context.new_page()
+                  page.on('dialog', lambda prompt: prompt.dismiss())
+                  try:
+                      response = page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                      if response is None or response.status != 200:
+                          raise RuntimeError('site not reachable')
+                      page.wait_for_timeout(800)
+                      ids = page.locator('.modal[id],.modal-backdrop[id]').evaluate_all(
+                          'nodes => nodes.map(el => el.id).filter(Boolean)'
+                      )
+                      for modal_id in ids[:80]:
+                          if not re.fullmatch(r'[A-Za-z0-9_-]{1,90}', modal_id):
+                              continue
+                          try:
+                              page.evaluate("""id => {
+                                for (const el of document.querySelectorAll('.modal,.modal-backdrop')) {
+                                  el.hidden = true;
+                                  el.classList.remove('show');
+                                  el.style.setProperty('display', 'none', 'important');
+                                }
+                                const el = document.getElementById(id);
+                                el.hidden = false;
+                                el.classList.add('show');
+                                el.style.setProperty('display', 'flex', 'important');
+                              }""", modal_id)
+                              page.wait_for_timeout(150)
+                              modal = page.locator(f'#{modal_id} > .modal-content')
+                              if modal.count() != 1 or not modal.is_visible():
+                                  continue
+                              geometry = modal.evaluate("""el => {
+                                const frame = el.querySelector(':scope > .tech-frame');
+                                const header = [...el.children].find(e => e.matches('.modal-header,.modal-head,.section-head'));
+                                const rail = header?.querySelector(':scope > .tech-header-rule');
+                                const rect = el.getBoundingClientRect();
+                                const vb = frame?.viewBox.baseVal;
+                                return {
+                                  width: Math.round(rect.width), height: Math.round(rect.height),
+                                  frame: !!frame, clipped: getComputedStyle(el).clipPath.startsWith('polygon('),
+                                  frame_aligned: !!vb && Math.abs(vb.width-rect.width)<2 && Math.abs(vb.height-rect.height)<2,
+                                  header_svg: !!rail,
+                                  header_border: header ? getComputedStyle(header).borderBottomWidth : '',
+                                  header_extra_line: !!rail && getComputedStyle(header, '::after').content !== 'none',
+                                  header_highlight: !!rail?.querySelector('.tech-rule-highlight')
+                                };
+                              }""")
+                              issues = []
+                              if geometry['frame'] and not geometry['clipped']:
+                                  issues.append('missing_corner_clip')
+                              if geometry['frame'] and not geometry['frame_aligned']:
+                                  issues.append('frame_geometry_mismatch')
+                              if geometry['header_svg'] and geometry['header_border'] != '0px':
+                                  issues.append('duplicate_header_border')
+                              if geometry['header_extra_line']:
+                                  issues.append('duplicate_header_pseudo')
+                              if geometry['header_svg'] and not geometry['header_highlight']:
+                                  issues.append('header_highlight_missing')
+                              records.append({'id': modal_id, 'viewport': width, 'geometry': geometry, 'issues': issues})
+                              if publish and Image is not None:
+                                  img = Image.open(io.BytesIO(modal.screenshot(animations='disabled'))).convert('RGB')
+                                  w, h = img.size
+                                  n = min(64, w//4, h//4)
+                                  if n >= 12:
+                                      crops = [(0,0,n,n),(w-n,0,w,n),(0,h-n,n,h),(w-n,h-n,w,h)]
+                                      strip = Image.new('RGB', (4*n,n), '#11101a')
+                                      for i, crop in enumerate(crops):
+                                          strip.paste(img.crop(crop), (i*n,0))
+                                      strip.save(output/'corners'/f'{modal_id}-{width}.png')
+                          except Exception as error:
+                              # Never serialize the exception text or a live URL into public artifacts.
+                              records.append({'id': modal_id, 'viewport': width, 'issues': ['preview_error'],
+                                              'error_type': type(error).__name__})
+                  finally:
+                      context.close()
+              browser.close()
+          summary = {
+              'mode': 'read-only static DOM previews; no button clicks',
+              'blocked_mutations': blocked[0], 'count': len(records),
+              'finding_count': sum(bool(x['issues']) for x in records),
+              'records': records,
+          }
+          (output/'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2))
+          print('Inspected:', len(records), 'Findings:', summary['finding_count'])
+          if not records:
+              raise SystemExit('No dialogs available; check authentication')
+          PY
+
+      - name: Upload geometry-only audit (no screenshots or page text)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gms-modal-geometry
+          path: ${{ runner.temp }}/gms-modal-audit/summary.json
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Optional corner fragments (PUBLIC; no complete screenshots)
+        if: ${{ inputs.publish_corners }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gms-modal-corners
+          path: ${{ runner.temp }}/gms-modal-audit/corners/*.png
+          if-no-files-found: warn
+          retention-days: 1
