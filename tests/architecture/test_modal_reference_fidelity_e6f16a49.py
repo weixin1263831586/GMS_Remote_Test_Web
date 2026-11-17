@@ -6,6 +6,7 @@ not pixel equality. The latter requires the Chromium screenshot gallery.
 from html.parser import HTMLParser
 from pathlib import Path
 
+
 ROOT = Path(__file__).resolve().parents[2]
 DIALOGS = ROOT / "web" / "shell" / "dialogs"
 CSS = ROOT / "web" / "static" / "css"
