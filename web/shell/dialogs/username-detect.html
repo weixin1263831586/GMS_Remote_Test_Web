@@ -6,9 +6,9 @@
                 <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeUsernameDetectModal">&times;</button>
             <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
             <div class="modal-body">
-<p class="tech-intro">确认客户端身份；SSH 可达时将验证用户名与连接凭据。</p>
+<p class="tech-intro">检测客户端 SSH 用户名与连接凭据，确认可用的远程访问身份。</p>
                 <form id="username-detect-form" data-submit="submitUsernameDetect" data-prevent autocomplete="off">
-                <section class="tech-form-section tech-form-section--username-detect" aria-label="SSH 连接信息"><h3 class="tech-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#terminal"></use></svg>SSH 连接信息</h3><div class="modal-form-row tech-structured-row tech-field-card">
+                <section class="tech-form-section tech-form-section--username-detect" aria-label="SSH 连接信息"><div class="modal-form-row tech-structured-row tech-field-card">
                     <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#network"></use></svg></span>
                     <label for="username-detect-ip">客户端IP:</label>
                     <input type="text" id="username-detect-ip" readonly />
@@ -25,7 +25,7 @@
                 </div></section>
                 </form>
                 <div class="modal-ssh-info">
-                    <small>SSH可达时会验证用户名；通过 Tailscale 等远程访问时可留空密码直接保存。</small>
+                    <small>SSH 可达时将校验用户名；使用密钥或 Tailscale 等免密方式时，可留空密码直接保存。</small>
                 </div>
 
             </div>
