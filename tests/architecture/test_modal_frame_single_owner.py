@@ -17,10 +17,12 @@ def test_every_shell_dialog_uses_one_svg_perimeter_and_one_header_rule():
     assert len(templates) >= 40
     for file in templates:
         markup = file.read_text(encoding="utf-8")
-        assert len(re.findall(r'class="tech-frame"', markup)) == 1, file.name
-        assert len(re.findall(r'class="tech-header-rule"', markup)) == 1, file.name
-        assert markup.count('class="modal-close"') >= 1, file.name
-        assert re.search(r'<div[^>]+class="[^"]*\btech-dialog\b[^"]*"', markup), file.name
+        shells = re.findall(r'<div[^>]+class="[^"]*\\bmodal-content\\b[^"]*\\btech-dialog\\b[^"]*"', markup)
+        assert shells, file.name
+        # Some templates (for example Agent enrollment) contain several dialogs.
+        assert len(re.findall(r'class="tech-frame"', markup)) == len(shells), file.name
+        assert len(re.findall(r'class="tech-header-rule"', markup)) == len(shells), file.name
+        assert markup.count('class="modal-close"') >= len(shells), file.name
 
 
 def test_no_second_rectangular_border_over_svg_cut_corners():
