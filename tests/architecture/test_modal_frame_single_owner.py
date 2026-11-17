@@ -17,7 +17,7 @@ def test_every_shell_dialog_uses_one_svg_perimeter_and_one_header_rule():
     assert len(templates) >= 40
     for file in templates:
         markup = file.read_text(encoding="utf-8")
-        shells = re.findall(r'<div[^>]+class="[^"]*\\bmodal-content\\b[^"]*\\btech-dialog\\b[^"]*"', markup)
+        shells = re.findall(r'<div[^>]+class="[^"]*\bmodal-content\b[^"]*\btech-dialog\b[^"]*"', markup)
         assert shells, file.name
         # Some templates (for example Agent enrollment) contain several dialogs.
         assert len(re.findall(r'class="tech-frame"', markup)) == len(shells), file.name
