@@ -1,5 +1,6 @@
 """Scheduling, durable comparisons, and notification failures without external IO."""
 
+import asyncio
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -417,6 +418,30 @@ def test_shutdown_cancels_running_scan_forwards_event_and_persists_interrupted(s
     assert seen['cancel_event'] is radar.closing
     assert seen['cancelled'] == radar.closing.is_set  # bound method: ==，不用 is
     assert store.run(run_id)['status'] == 'interrupted'
+
+
+@pytest.mark.asyncio
+async def test_shutdown_joins_worker_off_event_loop_before_recovering(monkeypatch):
+    from features.system.update_radar import service as radar_module
+
+    loop_thread = threading.get_ident()
+    closing = threading.Event()
+    events = []
+
+    def join(timeout):
+        assert timeout == 30
+        assert closing.is_set()
+        assert threading.get_ident() != loop_thread
+        events.append('joined')
+
+    worker = SimpleNamespace(is_alive=Mock(side_effect=[True, False]), join=join)
+    radar = SimpleNamespace(closing=closing, worker=worker,
+                            store=SimpleNamespace(recover=lambda: events.append('recovered')))
+    monkeypatch.setattr(radar_module, 'get_service', lambda: radar)
+    task = asyncio.create_task(asyncio.sleep(60))
+    await radar_module.stop_radar(task)
+    assert task.cancelled()
+    assert events == ['joined', 'recovered']
 
 
 def test_change_truncation_and_run_retention(store, monkeypatch):

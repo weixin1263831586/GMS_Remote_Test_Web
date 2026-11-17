@@ -3642,12 +3642,6 @@
     "methods": [
       "GET"
     ],
-    "path": "/redmine-agent/{asset_name}"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
     "path": "/redoc"
   },
   {

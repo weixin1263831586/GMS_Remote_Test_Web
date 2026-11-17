@@ -26,6 +26,30 @@ from .executor_formatting import json_body as _json_body
 
 logger = logging.getLogger(__name__)
 
+# 已装配 FastAPI app 的展开路由表缓存（模块回退用；惰性填充避免导入期循环）。
+_global_app_routes: list | None = None
+
+
+def _get_global_app_routes() -> list | None:
+    """Return flattened routes of the assembled FastAPI app (cached, may be None).
+
+    提供无 ``request.app`` 上下文（executor 假 request / 内部调用）时的
+    守卫匹配源：薄包装 executor_ref 的 api_path 与真实路由一一对应。
+    """
+    global _global_app_routes
+    if _global_app_routes is None:
+        try:
+            from app import app as _assembled_app
+            from foundation.routing_introspection import flatten_app_routes
+
+            _global_app_routes = flatten_app_routes(_assembled_app)
+        except Exception:
+            # app 未装配（纯单测环境）时保持 None：调用方继续走模块级
+            # router 回退，全部未命中仍按 fail-closed 拒绝。
+            return None
+    return _global_app_routes
+
+
 _TOOL_PAGES = {
     "devices": "devices",
     "test": "test",
@@ -60,28 +84,116 @@ _UNSUPPORTED_DIRECT_TOOLS = {
 }
 
 
-async def enforce_route_dependencies(module: Any, func: Any, request: Any) -> None:
+async def _run_route_dependencies(route: Any, request: Any) -> None:
+    for dependency_parameter in getattr(route, "dependencies", ()):
+        if request is None:
+            raise HTTPException(status_code=401, detail="Route authorization context is required")
+        dependency = getattr(dependency_parameter, "dependency", None)
+        if not callable(dependency):
+            raise HTTPException(status_code=403, detail="Unsupported route authorization dependency")
+        resolved = dependency(request)
+        if inspect.isawaitable(resolved):
+            await resolved
+
+
+async def enforce_route_dependencies(
+    module: Any, func: Any, request: Any, *, api_path: str = "", method: str = ""
+) -> None:
+    """Run route-level guards for a dynamically invoked endpoint.
+
+    Fail-closed: if no registered route can be matched, the invocation is
+    rejected instead of silently skipping authorization (an unmatched
+    function has not gone through route registration review).
+
+    Matching order:
+    1. ``api_path`` + ``method`` against the live FastAPI application route
+       table — the authoritative registry (``AgentTool.api_path`` mirrors
+       the HTTP route the tool stands in for, which also covers modules
+       that re-export or thin-wrap an endpoint implemented elsewhere).
+    2. Endpoint identity against the live route table (fastapi 0.141+
+       requires ``foundation.routing_introspection.flatten_app_routes``
+       to unwrap the lazy ``_IncludedRouter`` entries).
+    3. The assembled application's routes when ``request.app`` is absent.
+    4. Module-level ``APIRouter`` attributes of `module` — fallback when
+       no application route table is available.
+    """
+    from foundation.routing_introspection import flatten_app_routes
+
+    if request is not None:
+        app = getattr(request, "app", None)
+        if app is not None:
+            routes = flatten_app_routes(app)
+            if api_path:
+                wanted_method = (method or "GET").upper()
+                for route in routes:
+                    if getattr(route, "path", "") != api_path:
+                        continue
+                    methods = getattr(route, "methods", None) or set()
+                    if wanted_method not in methods:
+                        continue
+                    await _run_route_dependencies(route, request)
+                    return
+            for route in routes:
+                if getattr(route, "endpoint", None) is not func:
+                    continue
+                if method and method.upper() != "WEBSOCKET" and method.upper() not in (
+                    getattr(route, "methods", None) or set()
+                ):
+                    continue
+                await _run_route_dependencies(route, request)
+                return
+            # An active app is authoritative: an unmounted module router must
+            # never supply a weaker fallback authorization context.
+            raise HTTPException(status_code=404, detail="No registered route guards matched; refusing dynamic invocation")
+    # 薄包装 executor_ref（如 features.system:list_sdk_sources 转发
+    # source_api.list_sdk_sources）本身不在任何路由上；api_path 给出时，
+    # 无 app 上下文也可用全局装配 app 做"该路径注册的端点守卫"匹配——
+    # 路径+方法唯一确定路由，包装函数与实现函数共享同一 HTTP 守卫。
+    if api_path and (request is None or getattr(request, "app", None) is None):
+        global_routes = _get_global_app_routes()
+        if global_routes is not None:
+            wanted_method = (method or "GET").upper()
+            for route in global_routes:
+                if getattr(route, "path", "") != api_path:
+                    continue
+                if wanted_method not in (getattr(route, "methods", None) or set()):
+                    continue
+                await _run_route_dependencies(route, request)
+                return
+            for route in global_routes:
+                if getattr(route, "endpoint", None) is not func:
+                    continue
+                if method and method.upper() != "WEBSOCKET" and method.upper() not in (
+                    getattr(route, "methods", None) or set()
+                ):
+                    continue
+                await _run_route_dependencies(route, request)
+                return
+            raise HTTPException(status_code=404, detail="No registered route guards matched; refusing dynamic invocation")
     routers = [value for value in vars(module).values() if value.__class__.__name__ == "APIRouter"]
     for router in routers:
-        for route in router.routes:
+        # fastapi 0.141 把 include_router 表示为惰性包装，模块级 router
+        # 的 routes 同样需要展开后才能做端点身份匹配。
+        for route in flatten_app_routes(router):
             if getattr(route, "endpoint", None) is not func:
                 continue
-            for dependency_parameter in getattr(route, "dependencies", ()):
-                if request is None:
-                    raise HTTPException(status_code=401, detail="Route authorization context is required")
-                dependency = getattr(dependency_parameter, "dependency", None)
-                if not callable(dependency):
-                    raise HTTPException(status_code=403, detail="Unsupported route authorization dependency")
-                resolved = dependency(request)
-                if inspect.isawaitable(resolved):
-                    await resolved
+            if method and method.upper() != "WEBSOCKET" and method.upper() not in (
+                getattr(route, "methods", None) or set()
+            ):
+                continue
+            await _run_route_dependencies(route, request)
             return
+    raise HTTPException(status_code=404, detail="No registered route guards matched; refusing dynamic invocation")
 
 
 async def call_router_function(
     tool: AgentTool, session: Any, request: Any, params: dict[str, Any]
 ) -> ToolResult:
     """通过 executor_ref 调用 router 函数。"""
+    guard_path = getattr(tool, "api_path", "") or ""
+    guard_method = getattr(tool, "method", "") or "GET"
+    if guard_path and guard_method.upper() == "WEBSOCKET":
+        guard_path = ""
     if tool.name in _UNSUPPORTED_DIRECT_TOOLS:
         page = _TOOL_PAGES.get(tool.category, "api-docs")
         return ToolResult(
@@ -101,14 +213,20 @@ async def call_router_function(
     try:
         module = importlib.import_module(module_path)
         func = getattr(module, func_name)
-    except (ImportError, AttributeError) as e:
-        return ToolResult(success=False, tool_name=tool.name, error=f"Cannot resolve {ref}: {e}")
+    except (ImportError, AttributeError):
+        # 配置错误属于服务端问题：模块名/符号名不外显给 Agent，
+        # 保留 request_id 契约（traceback 已随 logger 落服务端日志）。
+        result = internal_error_result(tool.name, "调用")
+        logger.error("[Agent] unresolved executor_ref %s: %s", ref, result.error, exc_info=True)
+        return result
 
     try:
         # Calling an endpoint object directly bypasses FastAPI's route
         # dependency graph.  Resolve route-level guards (notably
         # human-only policies) explicitly before binding any caller data.
-        await enforce_route_dependencies(module, func, request)
+        await enforce_route_dependencies(
+            module, func, request, api_path=guard_path, method=guard_method
+        )
         call_kwargs = build_call_kwargs(func, tool, request, params)
         if asyncio.iscoroutinefunction(func):
             response = await func(**call_kwargs)

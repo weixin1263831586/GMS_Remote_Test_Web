@@ -199,9 +199,14 @@ class RuntimeDashboardsTests(RuntimeUiHarness):
                 "document.querySelector('#cluster-frame').closest("
                 "'.embedded-frame-shell').dataset.frameState === 'ready'"
             )
-            cluster = self.frame_for(page, "#cluster-frame")
-            cluster.wait_for_timeout(1200)
-            cluster_layout = cluster.evaluate(
+            frame = self.frame_for(page, "#cluster-frame")
+            # 首轮 /api/cluster/suites 需扫描套件根目录，冷启动远超固定
+            # 时长；等 aria-busy 翻转而不是猜一个 sleep，再断言面板终态。
+            frame.wait_for_function(
+                "document.querySelector('#dashboard-stats').getAttribute('aria-busy') === 'false'",
+                timeout=15000,
+            )
+            cluster_layout = frame.evaluate(
                 """() => ({
                   score: (window.__initialLayoutShifts || [])
                     .reduce((sum, value) => sum + value, 0),

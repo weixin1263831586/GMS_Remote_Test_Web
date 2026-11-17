@@ -147,7 +147,8 @@ async def stop_radar(task):
         pass
     worker = service.worker
     if worker is not None and worker.is_alive():
-        worker.join(timeout=30)
+        # async 函数内不得同步 join（最长阻塞事件循环 30s）；放入线程等待。
+        await asyncio.to_thread(worker.join, 30)
         if worker.is_alive():
             logger.warning('Radar scan worker did not finish within 30s during shutdown')
     service.store.recover()

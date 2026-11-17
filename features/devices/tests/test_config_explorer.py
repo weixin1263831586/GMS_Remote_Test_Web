@@ -1,4 +1,3 @@
-import shlex
 import subprocess
 import tempfile
 import unittest
@@ -46,13 +45,13 @@ resource 0x01040000 bool/config_example
         pulls = []
 
         def run_command(command, timeout):
-            if "getprop ro.build.fingerprint" in command:
+            if command[-3:] == ["shell", "getprop", "ro.build.fingerprint"]:
                 fingerprint = "build-a" if "device-a" in command else "build-b"
                 return CommandResult(stdout=fingerprint, stderr="", code=0)
-            if "shell stat" in command:
+            if command[3:5] == ["shell", "stat"]:
                 return CommandResult(stdout="4096:1700000000", stderr="", code=0)
-            if " pull " in command:
-                destination = shlex.split(command)[-1]
+            if "pull" in command:
+                destination = command[-1]
                 Path(destination).write_bytes(b"apk")
                 pulls.append(command)
                 return CommandResult(stdout="pulled", stderr="", code=0)
@@ -61,7 +60,7 @@ resource 0x01040000 bool/config_example
         with tempfile.TemporaryDirectory() as directory, patch.object(
             config_explorer, "_APK_CACHE_DIR", directory
         ), patch.object(config_explorer, "_adb_path", return_value="adb"), patch.object(
-            config_explorer, "run_local_shell_command", side_effect=run_command
+            config_explorer, "run_local_command", side_effect=run_command
         ):
             first = config_explorer._pull_apk(
                 "device-a", "/system/framework/framework-res.apk", "android"
@@ -82,13 +81,13 @@ resource 0x01040000 bool/config_example
 
         def run_command(command, timeout):
             nonlocal attempts
-            if "getprop ro.build.fingerprint" in command:
+            if command[-3:] == ["shell", "getprop", "ro.build.fingerprint"]:
                 return CommandResult(stdout="build-a", stderr="", code=0)
-            if "shell stat" in command:
+            if command[3:5] == ["shell", "stat"]:
                 return CommandResult(stdout="4096:1700000000", stderr="", code=0)
-            if " pull " in command:
+            if "pull" in command:
                 attempts += 1
-                destination = shlex.split(command)[-1]
+                destination = command[-1]
                 Path(destination).write_bytes(
                     b"partial" if attempts == 1 else b"complete-apk"
                 )
@@ -101,7 +100,7 @@ resource 0x01040000 bool/config_example
         with tempfile.TemporaryDirectory() as directory, patch.object(
             config_explorer, "_APK_CACHE_DIR", directory
         ), patch.object(config_explorer, "_adb_path", return_value="adb"), patch.object(
-            config_explorer, "run_local_shell_command", side_effect=run_command
+            config_explorer, "run_local_command", side_effect=run_command
         ):
             with self.assertRaisesRegex(RuntimeError, "transfer interrupted"):
                 config_explorer._pull_apk(
@@ -128,7 +127,7 @@ com.android.phone
 """
 
         with patch.object(config_explorer, "_adb_path", return_value="adb"), patch.object(
-            config_explorer, "run_local_shell_command",
+            config_explorer, "run_local_command",
             return_value=CommandResult(stdout=overlay_output, stderr="", code=0),
         ):
             grouped = config_explorer._enabled_overlays_by_target(None)
@@ -141,6 +140,34 @@ com.android.phone
                 "com.android.phone": ["com.android.phone.auto_generated_characteristics_rro"],
             },
         )
+
+    def test_pull_keeps_paths_and_serial_as_literal_argv_elements(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = str(Path(directory) / 'download folder' / 'target.apk')
+            remote = "/sdcard/file name';&literal.apk"
+
+            def pull(argv, timeout):
+                Path(argv[-1]).write_bytes(b'complete-apk')
+                return CommandResult(stdout='pulled', stderr='', code=0)
+
+            with patch.object(config_explorer, '_adb_path', return_value='/opt/android sdk/adb'), patch.object(
+                config_explorer, 'run_local_command', side_effect=pull,
+            ) as run:
+                config_explorer.pull_device_file('serial with spaces', remote, destination, timeout=10)
+
+            run.assert_called_once_with([
+                '/opt/android sdk/adb', '-s', 'serial with spaces', 'pull', remote, destination,
+            ], timeout=10)
+
+    def test_file_size_preserves_device_shell_quoting(self):
+        remote = "/sdcard/file name';literal.apk"
+        with patch.object(config_explorer, '_adb_path', return_value='adb'), patch.object(
+            config_explorer, 'run_local_command', return_value=CommandResult(stdout='123', stderr='', code=0),
+        ) as run:
+            self.assertEqual(config_explorer.device_file_size('serial', remote), 123)
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[:7], ['adb', '-s', 'serial', 'shell', 'stat', '-c', '%s'])
+        self.assertEqual(argv[-1], "'/sdcard/file name'\\'';literal.apk'")
 
 
 if __name__ == "__main__":

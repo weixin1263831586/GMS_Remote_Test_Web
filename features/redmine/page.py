@@ -30,10 +30,6 @@ _ASSET_TYPES = {
     "case-library.css": "text/css",
     "rework-chrome.css": "text/css",
 }
-_LEGACY_ASSETS = frozenset({
-    "page.js", "daily-brief-diagnosis.js",
-    "daily-brief-session.js", "daily-brief-session.css", "daily-brief-timeline.js",
-})
 
 
 @page_router.get("/redmine-agent", response_class=HTMLResponse)
@@ -60,22 +56,4 @@ def _asset_response(asset_name: str) -> Response:
 @page_router.get("/redmine-agent/assets/{asset_name}", include_in_schema=False)
 def redmine_agent_asset(asset_name: str):
     """Serve only named JS/CSS assets; never expose directories or other sources."""
-    return _asset_response(asset_name)
-
-
-@page_router.get("/redmine-agent/{asset_name}", include_in_schema=False)
-def redmine_agent_legacy_asset(asset_name: str):
-    """Compatibility for previously served resource URLs."""
-    if asset_name not in _LEGACY_ASSETS:
-        raise ApiError.not_found("UI asset not found")
-    if asset_name == "page.js":
-        # Old documents load one page.js. Keep its complete dependency bundle.
-        body = "\n;\n".join(
-            (_UI_DIR / name).read_text(encoding="utf-8") for name in PAGE_SCRIPTS
-            if name == "page.js" or name not in _LEGACY_ASSETS
-        )
-        return Response(
-            body, media_type="application/javascript",
-            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
-        )
     return _asset_response(asset_name)

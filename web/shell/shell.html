@@ -2,56 +2,85 @@
 <html lang="zh-CN">
 {% include 'components/head.html' %}
 <body class="workspace-scope-pending">
-    <div id="auth-gate" class="auth-gate" style="display: none;">
-        <form class="auth-panel" data-submit="submitAuthForm" data-prevent autocomplete="on">
-            <span class="auth-close" id="auth-close" title="关闭" data-click="closeAuthGate" style="display: none;">&times;</span>
-            <div class="auth-title" id="auth-title">登录</div>
-            <div class="auth-row">
-                <label for="auth-username">账号</label>
-                <input id="auth-username" name="username" type="text" autocomplete="username" placeholder="管理员账号，或正在读取客户端身份…" aria-describedby="auth-username-help" required>
-                <div class="auth-help" id="auth-username-help">管理员账号，或 用户名@客户端IP（SSH 账号）。</div>
-            </div>
-            <div class="auth-row">
-                <label for="auth-password">密码</label>
-                <div class="password-input-wrap">
-                    <input id="auth-password" name="password" type="password" autocomplete="current-password" placeholder="密码" aria-describedby="auth-password-help" required>
-                    <button type="button" class="password-visibility-toggle" data-click="togglePasswordVisibility" data-r0="el" aria-label="显示密码" title="显示密码"></button>
+    <div id="auth-gate" class="auth-gate" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+        <form class="auth-panel modal-content tech-dialog tech-dialog--auth" data-submit="submitAuthForm" data-prevent autocomplete="on">
+            <svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group">
+                    <span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#shield"></use></svg></span>
+                    <span class="tech-title-divider" aria-hidden="true"></span>
+                    <h2 class="modal-title auth-title" id="auth-title">登录</h2>
                 </div>
-                <div class="auth-help" id="auth-password-help">管理员用平台密码；客户端用 SSH 密码。</div>
+                <button type="button" class="auth-close modal-close" id="auth-close" title="关闭" aria-label="关闭登录窗口" data-click="closeAuthGate" style="display: none;">&times;</button>
+                <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg>
             </div>
-            <div class="auth-row" id="auth-display-name-row" style="display: none;">
-                <label for="auth-display-name">显示名</label>
-                <input id="auth-display-name" name="display_name" type="text" autocomplete="name">
-            </div>
-            <div class="auth-row" id="auth-bootstrap-token-row" style="display: none;">
-                <label for="auth-bootstrap-token">初始化令牌</label>
-                <input id="auth-bootstrap-token" name="bootstrap_token" type="password" autocomplete="off" aria-describedby="auth-bootstrap-token-help">
-                <div class="auth-help" id="auth-bootstrap-token-help">
-                    一键安装会自动生成令牌，保存在 Controller 安装目录的 <code>configs/secrets/environment.json</code> 中，字段名为 <code>GMS_BOOTSTRAP_TOKEN</code>；仅用于创建首个管理员。
-                    <details>
-                        <summary>如何获取初始化令牌</summary>
-                        在 Controller 服务器上，以服务运行用户或管理员身份进入实际安装目录，执行：
-                        <code style="display: block; overflow-wrap: anywhere; margin: 6px 0;">python3 -c 'import json; print(json.load(open("configs/secrets/environment.json"))["GMS_BOOTSTRAP_TOKEN"])'</code>
-                        将输出粘贴到上方。默认安装目录为 <code>/opt/gms-remote-test/web_app</code>。手动部署请使用为 Controller 配置的同名环境变量；配置统一保存在 <code>configs/local/environment.json</code>。
-                    </details>
+            <div class="modal-body auth-body">
+                <div class="auth-row auth-field">
+                    <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#user"></use></svg></span>
+                    <label for="auth-username">账号</label>
+                    <input id="auth-username" name="username" type="text" autocomplete="username" placeholder="管理员账号，或正在读取客户端身份…" aria-describedby="auth-username-help" required>
+                    <div class="auth-help" id="auth-username-help">管理员账号，或 用户名@客户端IP（SSH 账号）。</div>
+                </div>
+                <div class="auth-row auth-field">
+                    <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg></span>
+                    <label for="auth-password">密码</label>
+                    <div class="password-input-wrap">
+                        <input id="auth-password" name="password" type="password" autocomplete="current-password" placeholder="密码" aria-describedby="auth-password-help" required>
+                        <button type="button" class="password-visibility-toggle" data-click="togglePasswordVisibility" data-r0="el" aria-label="显示密码" title="显示密码"></button>
+                    </div>
+                    <div class="auth-help" id="auth-password-help">管理员用平台密码；客户端用 SSH 密码。</div>
+                </div>
+                <div class="auth-row auth-field" id="auth-display-name-row" style="display: none;">
+                    <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#edit"></use></svg></span>
+                    <label for="auth-display-name">显示名</label>
+                    <input id="auth-display-name" name="display_name" type="text" autocomplete="name">
+                </div>
+                <div class="auth-row auth-field auth-bootstrap-field" id="auth-bootstrap-token-row" style="display: none;">
+                    <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#unlock"></use></svg></span>
+                    <label for="auth-bootstrap-token">初始化令牌</label>
+                    <input id="auth-bootstrap-token" name="bootstrap_token" type="password" autocomplete="off" aria-describedby="auth-bootstrap-token-help">
+                    <div class="auth-help" id="auth-bootstrap-token-help">
+                        一键安装会自动生成令牌，保存在 Controller 安装目录的 <code>configs/secrets/environment.json</code> 中，字段名为 <code>GMS_BOOTSTRAP_TOKEN</code>；仅用于创建首个管理员。
+                        <details>
+                            <summary>如何获取初始化令牌</summary>
+                            在 Controller 服务器上，以服务运行用户或管理员身份进入实际安装目录，执行：
+                            <code style="display: block; overflow-wrap: anywhere; margin: 6px 0;">python3 -c 'import json; print(json.load(open("configs/secrets/environment.json"))["GMS_BOOTSTRAP_TOKEN"])'</code>
+                            将输出粘贴到上方。默认安装目录为 <code>/opt/gms-remote-test/web_app</code>。手动部署请使用为 Controller 配置的同名环境变量；配置统一保存在 <code>configs/local/environment.json</code>。
+                        </details>
+                    </div>
+                </div>
+                <div class="auth-message" id="auth-message" role="status" aria-live="polite"></div>
+                <!-- SSH 提示与安装指引继续由认证流程控制。 -->
+                <div class="auth-ssh-warning" id="auth-ssh-warning" style="display:none" role="alert">
+                    <span id="auth-ssh-warning-text"></span>
+                    <button type="button" id="auth-ssh-warning-link" class="btn-primary">查看 SSHD 安装步骤</button>
                 </div>
             </div>
-            <div class="auth-message" id="auth-message"></div>
-            <!-- 登录层打开时主动探测本机 SSH 端口；未装 SSHD 时提前提示安装 -->
-            <div class="auth-ssh-warning" id="auth-ssh-warning" style="display:none" role="alert">
-                <span id="auth-ssh-warning-text"></span>
-                <button type="button" id="auth-ssh-warning-link" class="btn-primary" style="width:100%;height:28px;margin-top:8px;">查看 SSHD 安装步骤</button>
+            <div class="modal-buttons tech-dialog-actions auth-actions">
+                <span class="tech-footer-decoration" aria-hidden="true"></span>
+                <button id="auth-submit" class="btn-primary auth-submit" type="submit">登录</button>
             </div>
-            <button id="auth-submit" class="btn-primary auth-submit" type="submit">登录</button>
         </form>
-        <!-- 客户端 SSH 不可达（未安装 SSHD 等）时的安装指南视图：登录验证依赖
-             回连客户端的 SSH 服务，此处直接给出指引，避免用户被困在登录层。 -->
-        <div id="auth-sshd-guide" class="auth-panel" style="display:none;width:min(560px,100%);max-height:min(92vh,720px);overflow:auto;" aria-hidden="true">
-            <div class="auth-title">客户端未开启 SSH 服务</div>
-            <div class="auth-help" id="auth-sshd-guide-reason"></div>
-            <pre id="auth-sshd-guide-content" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:46vh;overflow:auto;font-size:11px;line-height:1.5;color:var(--text-secondary);background:var(--darker-bg);border:1px solid var(--border-color);border-radius:4px;padding:10px;margin:10px 0;"></pre>
-            <button type="button" class="btn-primary auth-submit" data-click="closeAuthSshdGuide">返回登录</button>
-        </div>
+        <section id="auth-sshd-guide" class="auth-panel modal-content tech-dialog tech-dialog--auth-guide" style="display:none;" aria-hidden="true" aria-label="客户端 SSH 安装指引">
+            <svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group">
+                    <span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#terminal"></use></svg></span>
+                    <span class="tech-title-divider" aria-hidden="true"></span>
+                    <h2 class="modal-title">客户端未开启 SSH 服务</h2>
+                </div>
+                <button type="button" class="modal-close" aria-label="返回登录" data-click="closeAuthSshdGuide">&times;</button>
+                <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg>
+            </div>
+            <div class="modal-body auth-guide-body">
+                <p class="auth-help" id="auth-sshd-guide-reason"></p>
+                <pre id="auth-sshd-guide-content"></pre>
+            </div>
+            <div class="modal-buttons tech-dialog-actions auth-actions">
+                <span class="tech-footer-decoration" aria-hidden="true"></span>
+                <button type="button" class="btn-primary" data-click="closeAuthSshdGuide">返回登录</button>
+            </div>
+        </section>
     </div>
     <div class="main-container">
         {% include 'components/sidebar.html' %}

@@ -12,7 +12,6 @@ import hashlib
 import logging
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import uuid
@@ -20,8 +19,9 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
+from foundation.command_result import CommandResult
 from foundation.config import settings
-from foundation.processes import run_local_shell_command
+from foundation.processes import run_local_command
 from foundation.security import quote_device_shell_arg
 
 
@@ -114,13 +114,28 @@ def _require_safe_package(package: str) -> str:
     return package
 
 
+def _adb_argv(
+    device_id: str | None, *device_command: str, timeout: int = 30
+) -> CommandResult:
+    """Run one adb command from an argv list (no host shell interpretation).
+
+    ``device_command`` fragments are passed as separate argv elements; adb
+    joins them into one line that the device shell re-parses (unchanged
+    device-side semantics). Free-form device values must still be escaped
+    for the device shell via :func:`quote_device_shell_arg`.
+    """
+    argv = [_adb_path()]
+    if device_id:
+        argv += ["-s", device_id]
+    argv += list(device_command)
+    return run_local_command(argv, timeout=timeout)
+
+
 def _resolve_package_apk(device_id: str | None, package: str) -> str:
     """Return the on-device APK path for ``package`` (first split if multiple)."""
-    adb = _adb_path()
     _require_safe_package(package)
-    serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    pm_path_result = run_local_shell_command(
-        f"{adb} {serial}shell pm path {quote_device_shell_arg(package)}", timeout=20
+    pm_path_result = _adb_argv(
+        device_id, "shell", "pm", "path", quote_device_shell_arg(package), timeout=20
     )
     if not pm_path_result.ok or not pm_path_result.stdout.strip():
         raise RuntimeError(
@@ -143,14 +158,12 @@ def _pull_apk(device_id: str | None, on_device_path: str, package: str) -> str:
     return another device's framework resources in mixed-build labs.
     """
     os.makedirs(_APK_CACHE_DIR, exist_ok=True)
-    adb = _adb_path()
-    serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    fingerprint_result = run_local_shell_command(
-        f"{adb} {serial}shell getprop ro.build.fingerprint", timeout=10
+    fingerprint_result = _adb_argv(
+        device_id, "shell", "getprop", "ro.build.fingerprint", timeout=10
     )
-    metadata_result = run_local_shell_command(
-        # on_device_path 源自 pm path 输出（设备侧数据），按设备端 shell 语法转义。
-        f"{adb} {serial}shell stat -c %s:%Y {quote_device_shell_arg(on_device_path)}",
+    metadata_result = _adb_argv(
+        device_id,
+        "shell", "stat", "-c", "%s:%Y", quote_device_shell_arg(on_device_path),
         timeout=10,
     )
     fingerprint, fingerprint_code = (
@@ -177,8 +190,9 @@ def _pull_apk(device_id: str | None, on_device_path: str, package: str) -> str:
         _APK_CACHE_DIR, f".{cache_key}.{uuid.uuid4().hex}.part"
     )
     try:
-        pull_result = run_local_shell_command(
-            f"{adb} {serial}pull {shlex.quote(on_device_path)} {shlex.quote(temp_path)}",
+        pull_result = _adb_argv(
+            device_id,
+            "pull", on_device_path, temp_path,
             timeout=120,
         )
         if (
@@ -299,10 +313,8 @@ def _enabled_overlays_by_target(device_id: str | None) -> dict[str, list[str]] |
     per-resource lookups when the current target package has no enabled RROs,
     even if other packages on the device do.
     """
-    adb = _adb_path()
-    serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    overlay_list_result = run_local_shell_command(
-        f"{adb} {serial}shell cmd overlay list", timeout=15
+    overlay_list_result = _adb_argv(
+        device_id, "shell", "cmd", "overlay", "list", timeout=15
     )
     if not overlay_list_result.ok:
         return None
@@ -335,14 +347,13 @@ def _lookup_effective(
     source equals the target package (e.g. ``android``), the resource was NOT
     overlaid.
     """
-    adb = _adb_path()
     _require_safe_package(package)
-    serial = f"-s {shlex.quote(device_id)} " if device_id else ""
     resource = f"{package}:{entry.type}/{entry.resname}"
     # 有效值写入 stdout，错误写入 stderr 并返回非零状态。
-    lookup_result = run_local_shell_command(
-        f"{adb} {serial}shell cmd overlay lookup --verbose "
-        f"{quote_device_shell_arg(package)} {quote_device_shell_arg(resource)}",
+    lookup_result = _adb_argv(
+        device_id,
+        "shell", "cmd", "overlay", "lookup", "--verbose",
+        quote_device_shell_arg(package), quote_device_shell_arg(resource),
         timeout=15,
     )
     if not lookup_result.ok:
@@ -480,12 +491,10 @@ def list_packages(device_id: str | None = None) -> list[str]:
         "com.android.deskclock",
         "com.android.camera",
     ]
-    adb = _adb_path()
-    serial = f"-s {shlex.quote(device_id)} " if device_id else ""
     valid: list[str] = []
     for pkg in candidates:
-        pm_result = run_local_shell_command(
-            f"{adb} {serial}shell pm path {shlex.quote(pkg)}", timeout=10
+        pm_result = _adb_argv(
+            device_id, "shell", "pm", "path", quote_device_shell_arg(pkg), timeout=10
         )
         if pm_result.ok and pm_result.stdout.strip().startswith("package:"):
             valid.append(pkg)
@@ -498,10 +507,8 @@ def list_all_packages(device_id: str | None = None) -> list[str]:
     Used to populate a complete, type-ahead package picker in the UI (the
     curated ``list_packages`` only covers known config-bearing packages).
     """
-    adb = _adb_path()
-    serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    pkgs_result = run_local_shell_command(
-        f"{adb} {serial}shell pm list packages", timeout=30
+    pkgs_result = _adb_argv(
+        device_id, "shell", "pm", "list", "packages", timeout=30
     )
     if not pkgs_result.ok:
         return []
@@ -521,11 +528,9 @@ def device_file_size(
 
     Used to bound ``pull_device_file`` transfers before any bytes move.
     """
-    adb = _adb_path()
-    serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    stat_result = run_local_shell_command(
-        # on_device_path 来自请求参数（设备文件浏览），按设备端 shell 语法转义。
-        f"{adb} {serial}shell stat -c %s {quote_device_shell_arg(on_device_path)}",
+    stat_result = _adb_argv(
+        device_id,
+        "shell", "stat", "-c", "%s", quote_device_shell_arg(on_device_path),
         timeout=timeout,
     )
     size = stat_result.stdout.strip() if stat_result.ok else ""
@@ -546,11 +551,8 @@ def pull_device_file(
     failure.
     """
     os.makedirs(os.path.dirname(os.path.abspath(local_path)), exist_ok=True)
-    adb = _adb_path()
-    serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    pull_result = run_local_shell_command(
-        f"{adb} {serial}pull {shlex.quote(on_device_path)} {shlex.quote(local_path)}",
-        timeout=timeout,
+    pull_result = _adb_argv(
+        device_id, "pull", on_device_path, local_path, timeout=timeout,
     )
     if not pull_result.ok or not os.path.exists(local_path):
         raise RuntimeError(
@@ -561,8 +563,7 @@ def pull_device_file(
 
 def list_devices() -> list[dict[str, str]]:
     """Return currently attached adb devices as [{serial, state}]."""
-    adb = _adb_path()
-    devices_result = run_local_shell_command(f"{adb} devices", timeout=10)
+    devices_result = _adb_argv(None, "devices", timeout=10)
     devices: list[dict[str, str]] = []
     if not devices_result.ok:
         return devices
@@ -579,10 +580,8 @@ def list_devices() -> list[dict[str, str]]:
 
 def _pm_list(device_id: str | None, args: str, timeout: int = 60) -> str:
     """Run ``adb shell pm list <args>`` and return raw stdout."""
-    adb = _adb_path()
-    serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    pm_result = run_local_shell_command(
-        f"{adb} {serial}shell pm list {args}", timeout=timeout
+    pm_result = _adb_argv(
+        device_id, "shell", "pm", "list", *args.split(), timeout=timeout
     )
     if not pm_result.ok:
         raise RuntimeError(
@@ -634,11 +633,7 @@ def list_props(device_id: str | None = None) -> list[dict[str, str]]:
     Each getprop line looks like ``[ro.build.version.release]: [14]``. We strip
     the brackets and skip empty values.
     """
-    adb = _adb_path()
-    serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    getprop_result = run_local_shell_command(
-        f"{adb} {serial}shell getprop", timeout=30
-    )
+    getprop_result = _adb_argv(device_id, "shell", "getprop", timeout=30)
     if not getprop_result.ok:
         raise RuntimeError(
             f"getprop 失败: "

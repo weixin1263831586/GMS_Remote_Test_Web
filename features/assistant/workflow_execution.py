@@ -207,8 +207,10 @@ def workflow_preflight_lookups(
 
         try:
             rows = get_cluster_service().repository.list_devices()
-        except Exception as exc:
-            return {"ok": False, "reason": f"集群设备库存不可用: {exc}"}
+        except Exception:
+            # 预检 reason 会回显给 Agent：异常细节（含 DB 路径等）只进日志。
+            logger.warning("[Agent] device inventory unavailable during preflight", exc_info=True)
+            return {"ok": False, "reason": "集群设备库存暂不可用，请稍后重试"}
         serial_rows = [
             row for row in rows if str(row.get("serial") or "") == serial
         ]
@@ -258,8 +260,10 @@ def workflow_preflight_lookups(
 
         try:
             profiles = profile_store().list_profiles(owner_id, include_all=False)
-        except Exception as exc:
-            return {"ok": False, "reason": f"AOA 配置读取失败: {exc}"}
+        except Exception:
+            # 预检 reason 会回显给 Agent：异常细节只进日志。
+            logger.warning("[Agent] AOA profile store unavailable during preflight", exc_info=True)
+            return {"ok": False, "reason": "AOA 配置读取暂不可用，请稍后重试"}
         if any(p.get("name") == profile or p.get("id") == profile for p in profiles):
             return {"ok": True, "detail": f"AOA 配置 {profile} 存在于当前账号"}
         return {"ok": False, "reason": f"AOA 配置 {profile} 不存在或不属于当前账号"}
@@ -271,11 +275,12 @@ def workflow_preflight_lookups(
             context["scope_mode"] = "cluster" if not is_local_worker_id(worker_id) else "single"
         try:
             suites = _list_suites(context)
-        except Exception as exc:  # SSH/网络/超时等基础设施异常
-            # 套件查询涉及远程访问（审核 P1）：失败只把 test 阶段标记为
+        except Exception:  # SSH/网络/超时等基础设施异常
+            # 套件查询涉及远程访问：失败只把 test 阶段标记为
             # 阻塞，不得让异常中断整个对话预检（权限等其余检查仍正常展示）。
-            logger.warning("[Agent] suite lookup failed during preflight: %s", exc)
-            return {"ok": False, "reason": f"测试套件查询暂不可用（远程访问失败）：{exc}"}
+            # 预检 reason 会回显给 Agent：SSH/网络细节只进日志。
+            logger.warning("[Agent] suite lookup failed during preflight", exc_info=True)
+            return {"ok": False, "reason": "测试套件查询暂不可用（远程访问失败）"}
         matched = [
             suite for suite in suites
             if str(suite.get("test_type") or suite.get("suite_type") or "").upper() == test_type
@@ -362,11 +367,17 @@ def workflow_execution_readiness_block(
         )
     except ValueError as exc:
         return {"stage": "execution", "ok": False, "reason": str(exc)}
-    except Exception as exc:  # 基础设施异常：按依赖不可用阻塞，而非崩溃
+    except Exception:  # 基础设施异常：按依赖不可用阻塞，而非崩溃
+        # 与 executor/route_invocation 同一脱敏契约：exc 细节不外显。
+        request_id = uuid.uuid4().hex[:12]
+        logger.error(
+            "[Agent] workflow preflight dependency failure (request_id=%s)",
+            request_id, exc_info=True,
+        )
         return {
             "stage": "execution",
             "ok": False,
-            "reason": f"执行预检暂不可用（依赖服务异常）：{exc}",
+            "reason": f"执行预检暂不可用（依赖服务异常，request_id={request_id}）",
         }
     return None
 

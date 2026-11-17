@@ -21,6 +21,7 @@
 | 场景 | 内容结构 |
 | --- | --- |
 | 认证、Wi-Fi、SN、分类 | 图标表单行、说明、独立底部操作 |
+| 登录与管理员初始化 | 凭据图标行、账号与密码说明、可滚动的初始化指引、独立提交区 |
 | 固件烧写 | 设备与固件来源并列、AOA 恢复配置、清除数据警告、提交操作 |
 | 报告拷贝 | 来源与目标分别成区，保留真实 Worker / 套件选择 |
 | 报告导入 | 文件和文件夹两种真实选择入口，保留原有上传链路 |
@@ -36,6 +37,8 @@
 背景、输入、边框与主按钮复用 `theme.css` 的中性灰和冷紫色变量；内部分隔线用灰色，外框仅混入少量主题紫色。保留危险和警告语义、40% 中性深色遮罩及 3px 背景模糊。
 
 Shell 生命周期仍由 `ModalManager` 管理。独立文档沿用各自控制器。
+登录层沿用 `api.js` 的认证生命周期，表单与 SSH 安装指引共享外框几何和主题；
+`auth-dialog.css` 单独组织凭据行、提示和操作区，不把登录层加入普通弹框栈。
 `dialog-prompts.js` 把知识库输入、邮件收件人与独立页面确认改为异步内容表单；
 存在控制器时复用控制器，无控制器的独立页面使用浏览器原生 `<dialog>` 焦点管理。
 取消、ESC 和遮罩关闭均返回取消结果；确认前不执行后续请求。
@@ -55,6 +58,9 @@ python -m pytest tests/architecture/test_modal_tech_style.py \
 
 GMS_MODAL_GALLERY_OUT=artifacts/modal-redesign \
   python -m pytest tests/runtime_ui/test_modal_redesign.py -q
+
+GMS_AUTH_GALLERY_OUT=artifacts/auth-dialog \
+  python -m pytest tests/runtime_ui/test_auth_dialog.py -q
 
 python -m pytest tests/runtime_ui/test_modals.py \
   tests/runtime_ui/test_firmware_aoa.py tests/runtime_ui/test_report_copy.py \

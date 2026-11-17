@@ -454,7 +454,7 @@ function showAuthSshdGuide(reason, guide) {
     if (reasonEl) reasonEl.textContent = reason;
     if (guideEl) guideEl.textContent = guide || '未获取到安装指南，请在 Windows 上以管理员身份安装 OpenSSH Server 并启动 sshd 服务。';
     form.style.display = 'none';
-    panel.style.display = 'block';
+    panel.style.display = 'flex';
     panel.setAttribute('aria-hidden', 'false');
 }
 

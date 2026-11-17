@@ -24,8 +24,9 @@ from features.redmine import (
     norm_name,
 )
 from foundation.config import config_manager
+from foundation.redaction import redact_sensitive_text
 
-from .execution_result import ToolResult, http_error_result
+from .execution_result import ToolResult, http_error_result, internal_error_result
 from .executor_formatting import (
     json_body as _json_body,
 )
@@ -168,6 +169,8 @@ class ActionExecutor:
         tool_name_for_error: str = "",
         *,
         request: Any | None = None,
+        api_path: str = "",
+        method: str = "",
         **kwargs,
     ) -> tuple:
         """Import and call an async router function, returning (error_result | None, payload_dict).
@@ -178,7 +181,9 @@ class ActionExecutor:
         try:
             module = importlib.import_module(module_path)
             func = getattr(module, func_name)
-            await enforce_route_dependencies(module, func, request)
+            await enforce_route_dependencies(
+                module, func, request, api_path=api_path, method=method
+            )
             signature = cached_signature(func)
             if "request" in signature.parameters:
                 if request is None:
@@ -229,22 +234,30 @@ class ActionExecutor:
                     or (detail.get("message") if isinstance(detail, dict) else detail)
                     or "Request failed"
                 )
+                # 业务响应错误本身是面向用户的语义文案，但仍过
+                # redact_sensitive_text，防止上游把敏感值拼进 message。
+                safe_error = redact_sensitive_text(str(error))
                 label = tool_name_for_error or func_name
                 return ToolResult(
                     success=False,
                     tool_name=label,
-                    error=str(error),
-                    formatted_text=f"查询失败: {error}",
+                    error=safe_error,
+                    formatted_text=f"查询失败: {safe_error}",
                 ), {}
             return None, payload
         except HTTPException as exc:
             return http_error_result(tool_name_for_error or func_name, exc), {}
-        except Exception as e:
+        except Exception:
+            # 与 route_invocation.call_router_function 同一脱敏契约：
+            # str(e) 可能内嵌路径/配置片段，不外显——traceback 只进日志，
+            # Agent 拿统一错误 + request_id 回查。
             label = tool_name_for_error or func_name
-            return ToolResult(
-                success=False, tool_name=label,
-                error=str(e), formatted_text=f"查询失败: {e}",
-            ), {}
+            result = internal_error_result(label, "查询")
+            logger.error(
+                "[Agent] router fetch %s failed: %s", label, result.error,
+                exc_info=True,
+            )
+            return result, {}
 
     # ==================== Query Handlers ====================
 

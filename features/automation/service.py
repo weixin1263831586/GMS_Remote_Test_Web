@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import uuid
 from collections.abc import Awaitable, Callable
@@ -31,6 +32,8 @@ from features.automation.repository import AutomationStore
 from foundation.secrets import decrypt_secret, encrypt_secret
 from foundation.test_execution_options import matches_device_selector, validate_execution_options
 
+
+logger = logging.getLogger(__name__)
 
 GerritQuery = Callable[[str, str, int], Awaitable[list[dict[str, Any]]]]
 
@@ -262,8 +265,11 @@ class AutomationService:
             return {'runtime_checked': False}
         try:
             cluster = self._cluster_provider()
-        except Exception as exc:
-            raise ValueError(f'Cluster service is unavailable: {exc}') from exc
+        except Exception:
+            # ValueError 文案会经 API/Agent 回显给调用方：内部异常细节
+            # （DB 路径、驱动错误等）只进日志，不拼进面向用户的文案。
+            logger.warning("[ATS] cluster provider unavailable during prepare", exc_info=True)
+            raise ValueError('Cluster service is unavailable') from None
         if not cluster.effective_enabled:
             raise ValueError('Cluster mode must be enabled for durable ATS execution')
 

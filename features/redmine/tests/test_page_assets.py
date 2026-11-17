@@ -22,7 +22,11 @@ def client():
 def test_page_declares_all_scripts_once_in_dependency_order(client):
     html = client.get("/redmine-agent")
     assert html.status_code == 200
-    scripts = re.findall(r'<script src="/redmine-agent/assets/([^"]+)"', html.text)
+    # 脚本 URL 允许带 ?v= 缓存戳（弹框重构后引入）；剥掉后比对清单。
+    scripts = [
+        name.split("?v=", 1)[0]
+        for name in re.findall(r'<script src="/redmine-agent/assets/([^"]+)"', html.text)
+    ]
     assert tuple(scripts) == PAGE_SCRIPTS
     assert len(scripts) == len(set(scripts))
     assert scripts[-1] == "page.js"
@@ -45,19 +49,13 @@ def test_resources_are_not_business_openapi_operations(client):
     assert "/redmine-agent/{asset_name}" not in paths
 
 
-def test_legacy_urls_work_without_loading_helpers_twice(client):
-    legacy = client.get("/redmine-agent/page.js")
-    assert legacy.status_code == 200
-    assert "function loadStatistics" in legacy.text
-    assert "function startDailyBriefRun" in legacy.text
-    # markdown-table.js 已并入 core.js；其余 legacy 助手仍按原 URL 提供。
-    for name in ("daily-brief-session.js", "daily-brief-diagnosis.js"):
-        helper = client.get(f"/redmine-agent/{name}")
-        assert helper.status_code == 200
-        assert helper.text == client.get(f"/redmine-agent/assets/{name}").text
-        assert helper.text not in legacy.text
-    assert client.get("/redmine-agent/markdown-table.js").status_code == 404
-    assert client.get("/redmine-agent/core.js").status_code == 404
+def test_legacy_asset_route_is_retired(client):
+    """旧版无 assets/ 前缀的资源 URL 不再提供，未知资源保持 404。"""
+    for name in ("page.js", "daily-brief-session.js", "daily-brief-diagnosis.js"):
+        response = client.get(f"/redmine-agent/{name}")
+        assert response.status_code == 404
+    # 未登记文件依旧不得经 assets/ 路由泄漏。
+    assert client.get("/redmine-agent/assets/markdown-table.js").status_code == 404
 
 
 def test_merged_markdown_table_helper_serves_from_core_js(client):
