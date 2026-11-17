@@ -47,7 +47,9 @@ class AuthDialogTests(RuntimeUiHarness):
         self.assertEqual(report['clipped'], [], report)
         for footer in report['footer']:
             self.assertLessEqual(footer['bottom'], bounds['bottom'], report)
-        expect(panel).to_have_css('background-color', 'rgb(32, 32, 39)')
+        self.assertTrue(report['cutSurface'], report)
+        self.assertTrue(report['headerSingleOwner'], report)
+        expect(panel).to_have_css('background-color', 'rgb(28, 25, 41)')
 
     def test_login_setup_and_ssh_guide_fit_their_content(self):
         page = self.login_page()

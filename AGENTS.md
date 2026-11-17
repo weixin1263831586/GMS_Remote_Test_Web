@@ -62,8 +62,10 @@
 - Shell out only through the audited helpers covered by
   `tests/architecture/test_shell_execution_boundary.py`; never build
   commands by f-string interpolation of untrusted input.
-- UI/Modal policy: modal visibility has ONE owner (ModalManager); never
-  double-write `style.display` beside it; assistant resources stay under
+- UI/Modal policy: each modal has exactly one visibility owner:
+  `ModalManager` for Shell dialogs, its embedded controller for standalone
+  workspaces, and the browser for native `<dialog>` prompts. Never double-write
+  `style.display` beside the relevant controller. Assistant resources stay under
   `/gms-assistant/...` (root-level proxy paths are deprecation shims).
 - Docs policy: source comments must not reference review-round or audit
   numbers that do not exist as documents; cite real ADRs under

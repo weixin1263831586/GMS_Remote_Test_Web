@@ -50,7 +50,7 @@ function updateFirmwareFileMeta() {
     if (!meta) return;
     const path = document.getElementById('firmware-path').value.trim();
     if (!path) {
-        // 占位行常驻（高度恒定）但空文本不显示，避免选中固件后弹框跳动。
+        // 空状态保留标记，由紧凑弹框样式收起元信息占位。
         meta.classList.add('is-empty');
         meta.textContent = '';
         return;

@@ -16,12 +16,12 @@
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-ui-foundations">
 <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers">
 <link rel="stylesheet" href="/static/css/modal-tech.css?v=20261116-aligned-corner-path">
-<link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261116-aligned-corner-path">
-<link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261116-aligned-corner-path">
+<link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261117-compact-dialogs">
+<link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261117-compact-dialogs">
 <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261116-tab-focus-ring">
 <script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
 <script src="/static/js/dialog-prompts.js?v=20261116-aligned-corner-path"></script>
-<script src="/static/js/dialog-frame.js?v=20261116-aligned-corner-path"></script>
+<script src="/static/js/dialog-frame.js?v=20261117-compact-dialogs"></script>
 </head>
 <body>
 <header class="workspace-header">
@@ -508,10 +508,10 @@
     <div class="modal-body">
       <div class="muted" style="margin-bottom:8px">该操作会在 Redmine 上真实创建工单,请确认信息无误。</div>
       <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><label for="internalProjectId">项目标识</label><input type="text" id="internalProjectId" value="fae"></div>
-      <div style="display:flex;gap:8px">
-        <div style="flex:1" class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><label for="internalTrackerId">Tracker ID</label><input type="number" id="internalTrackerId" value="1"></div>
-        <div style="flex:1" class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><label for="internalPriorityId">优先级 ID</label><input type="number" id="internalPriorityId" value="2"></div>
-        <div style="flex:1" class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><label for="internalAssignedId">指派人 ID</label><input type="number" id="internalAssignedId" placeholder="可选"></div>
+      <div class="redmine-internal-create-meta-grid">
+        <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><label for="internalTrackerId">Tracker ID</label><input type="number" id="internalTrackerId" value="1"></div>
+        <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><label for="internalPriorityId">优先级 ID</label><input type="number" id="internalPriorityId" value="2"></div>
+        <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><label for="internalAssignedId">指派人 ID</label><input type="number" id="internalAssignedId" placeholder="可选"></div>
       </div>
 
     </div>

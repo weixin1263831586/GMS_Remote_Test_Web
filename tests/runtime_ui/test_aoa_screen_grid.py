@@ -147,9 +147,26 @@ class RuntimeAoaScreenGridTests(RuntimeUiHarness):
             assert page.locator('#aoa-toggle-live').get_attribute('data-live') == 'on'
             page.locator('#aoa-toggle-live').click()
             expect(page.locator('#aoa-toggle-live')).to_have_text('▶ 实时投屏')
+            # 停止真实投屏会释放 frame、隐藏 canvas；此处之前在点击
+            # “停止”后仍要求旧网格可见，依赖并发设备刷新恰好保留了旧
+            # fixture，导致 GitHub hosted CI 偶发 Locator not visible。
+            # 先测试开关文字/状态，再重新注入独立的静态帧验证坐标。
+            page.evaluate("""() => {
+                const canvas = document.getElementById('aoa-screen-canvas');
+                canvas.width = 720;
+                canvas.height = 1280;
+                canvas.hidden = false;
+                canvas.dataset.aoaFrameReady = '1';
+                document.getElementById('aoa-screen-image').hidden = true;
+                document.getElementById('aoa-screen-empty').hidden = true;
+                window.dispatchEvent(new Event('resize'));
+            }""")
             # 默认已开启（prepare 清空本地偏好）；确保状态为开。
             if page.evaluate("aoaScreenGridState().enabled") is not True:
                 page.locator('#aoa-grid-toggle').click()
+            page.wait_for_function(
+                "() => aoaScreenGridState().media && !aoaScreenGridState().overlayHidden"
+            )
             expect(page.locator('#aoa-screen-grid')).to_be_visible()
             box = page.locator('#aoa-screen-canvas').bounding_box()
             # 内容框中心 = AOA (180, 320)。悬停 25% 处应读出 (90, 160)。

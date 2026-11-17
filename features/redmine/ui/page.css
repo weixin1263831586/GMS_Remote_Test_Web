@@ -64,6 +64,20 @@
     /* 统计设置弹框：标题字号与其他页面统一 */
     #settingsModal .modal-title { font-size:16px; }
 
+    /* A tall settings form lives inside a bounded, scrolling modal body.
+       Never flex-shrink individual cards: doing so makes input fields overlap
+       the following card in both desktop and mobile Chromium. */
+    #settingsModal .tech-dialog--redmine-settings > .modal-body {
+        overflow-y:auto;
+        overflow-x:hidden;
+        align-items:stretch;
+        min-height:0;
+    }
+    #settingsModal .tech-dialog--redmine-settings > .modal-body > * {
+        flex:0 0 auto;
+    }
+
+
     /* Panels */
     .tab-content { display:none; padding:16px; }
     .tab-content.active { display:block; }
@@ -530,3 +544,18 @@
 :where(th) { color: var(--muted); font-weight: 600; }
 :where(td) { border-color: var(--border); }
 ::selection { background: rgba(139,116,232,.25); color: var(--text); }
+
+/* Internal Redmine issue creation: at modal-xs width, a three-column
+   row compressed Chinese labels and "Tracker ID" into vertical text.
+   Each metadata field owns a full-width grid row and remains readable. */
+.tech-dialog--redmine-internal-create .redmine-internal-create-meta-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    min-width: 0;
+}
+.tech-dialog--redmine-internal-create .redmine-internal-create-meta-grid > .tech-field-card {
+    min-width: 0;
+    width: 100%;
+    margin: 0;
+}

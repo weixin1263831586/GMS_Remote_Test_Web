@@ -199,7 +199,8 @@ class RuntimeModalsTests(RuntimeUiHarness):
             self.assertTrue(result["hasUbuntuForm"])
             source_box = page.locator("#adb-proxy-source-host").bounding_box()
             target_box = page.locator("#adb-proxy-target-host").bounding_box()
-            self.assertGreater(target_box["y"], source_box["y"] + source_box["height"])
+            self.assertAlmostEqual(target_box["y"], source_box["y"], delta=1)
+            self.assertGreaterEqual(target_box["x"], source_box["x"] + source_box["width"])
             modal_height = page.locator(
                 "#adb-proxy-modal .adb-proxy-modal-content"
             ).bounding_box()["height"]
@@ -621,10 +622,10 @@ class RuntimeModalsTests(RuntimeUiHarness):
             )
             self.assertAlmostEqual(report["width"], 820, delta=2)
             self.assertLess(report["height"], 800)
-            self.assertEqual(report["border"], "1px")
-            self.assertEqual(report["clip"], "none")
+            self.assertEqual(report["border"], "0px")
+            self.assertTrue(report["clip"].startswith("polygon("), report)
             for key, value in (
-                ("fontTitle", "17px"),
+                ("fontTitle", "16px"),
                 ("fontLabel", "13px"),
                 ("fontInput", "13px"),
                 ("fontButton", "13px"),
@@ -654,8 +655,8 @@ class RuntimeModalsTests(RuntimeUiHarness):
             )
             self.assertAlmostEqual(metrics["width"], 820, delta=2)
             self.assertLess(metrics["height"], 920)
-            self.assertEqual(metrics["border"], "1px")
-            self.assertEqual(metrics["clip"], "none")
+            self.assertEqual(metrics["border"], "0px")
+            self.assertTrue(metrics["clip"].startswith("polygon("), metrics)
             page.evaluate("() => ModalManager.close('firmware-modal')")
         finally:
             page.close()

@@ -51,7 +51,7 @@ def _static_example_shape_source() -> dict:
             config_manager.config_fallback_path, configs / "config.json"
         )
         isolated = ConfigManager(project_root=project_root)
-        return isolated._load_static_config()
+        return isolated.load_config(force_reload=True)
 
 
 if __name__ == '__main__':

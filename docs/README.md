@@ -25,6 +25,7 @@
 - [AOA 原理与实现](aoa-mechanism-and-architecture.md)：协议、坐标、持久化、接口与刷机接续。
 - [AI 治理与诊断质量](architecture/ai-governance.md)：执行账本、证据、失败身份、质量门禁。
 - [平台安全模型](security.md)与[开发指南](development.md)。
+- [弹框视觉与布局契约](ui/purple-tech-modal-style.md)：共享切角框架、内容级验收及缓存版本同步。
 
 ## 维护规则
 

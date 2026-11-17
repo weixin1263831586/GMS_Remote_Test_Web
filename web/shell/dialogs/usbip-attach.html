@@ -1,5 +1,5 @@
 <div id="usbip-attach-modal" class="modal">
-        <div class="modal-content modal-m modal-pin device-routing-modal-content adb-proxy-modal-content tech-dialog tech-dialog--usbip-attach"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg>
+        <div class="modal-content modal-m device-routing-modal-content adb-proxy-modal-content tech-dialog tech-dialog--usbip-attach"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg>
         <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
             <div class="modal-header tech-dialog-header">
                 <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#plug"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">USB/IP设备接入</span></div>
@@ -11,7 +11,7 @@
                         <div class="adb-proxy-section-title">新建接入</div>
                         <button class="btn-xxs" type="button" style="min-width: 0; padding: 4px 8px;" data-click="refreshUsbipSourceDevices"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
                     </div>
-                    <div class="device-routing-fields">
+                    <div class="device-routing-fields" aria-label="设备来源与接入主机">
                         <div class="modal-form-row tech-field-card"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#device"></use></svg></span>
                             <label for="usbip-source-host">设备来源</label>
                             <select id="usbip-source-host" data-change="refreshUsbipSourceLists"></select>
@@ -21,13 +21,14 @@
                             <select id="usbip-target-worker"></select>
                         </div>
                     </div>
-                    <div class="modal-form-row device-routing-device-row tech-field-card"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#device"></use></svg></span>
+                    <div class="modal-form-row device-routing-device-row tech-field-card device-routing-inventory"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#device"></use></svg></span>
                         <label for="usbip-source-device">USB设备</label>
-                        <select id="usbip-source-device" class="usbip-device-select" multiple size="4">
+                        <select id="usbip-source-device" class="usbip-device-select" multiple size="5">
                             <option value="">请选择设备来源以加载USB设备</option>
                         </select>
                     </div>
                 </form>
+                <section class="device-routing-current" aria-label="当前接入">
                 <div class="adb-proxy-section-head">
                     <div class="adb-proxy-section-title">当前接入</div>
                     <div style="display: flex; align-items: center; gap: 8px;">
@@ -41,6 +42,7 @@
                 <div id="usbip-assignments" class="adb-proxy-assignments">
                     正在读取接入状态...
                 </div>
+                </section>
                 <div id="usbip-attach-message" class="modal-info-text">
                     可多选USB设备；同一设备同一时间只能接入一台主机。来源支持 Windows（usbipd-win）或 Ubuntu/Linux（用户态 usbipd）+ SSH，目标需 Linux USB/IP；网络中断可使分配进入待确认/待清理。
                 </div>

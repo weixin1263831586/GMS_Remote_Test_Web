@@ -6,8 +6,10 @@
 ## 尺寸与排版
 
 - 普通表单沿用 `modal-xs/s/m/l` 档位，使用自然高度，不为短表单设置工作台高度。
-- 标题 17px，表单 13px，输入与常用操作约 34–36px 高；手机标题 16px。
-- 路由检测最大 600px，用户名检测最大 620px，Tailscale / 固件最大 820px。
+- 弹框统一使用标题 16px、正文/标签/输入/按钮 13px、辅助说明 12px；常用按钮与单行输入默认 32px 高，桌面与手机沿用相同的字号层级。
+- 路由检测保持紧凑；用户名检测最大 740px，Tailscale / 固件最大 820px，避免固件对话框被后置覆盖扩展为 1080px。
+- ADB 与 USB/IP 接入的设备来源、接入主机同排显示；设备列表和当前接入分别成区，短内容自然高度，长列表内部滚动。
+- 固件目标和文件卡片按实际内容定高；空文件信息折叠，AOA 说明不占用空白预留行。
 - 报告拷贝最大 760px，状态消息出现时自然增高，操作区不随正文滚走。
 - 固件分享最大 960px、自然高度；分享列表超过 340px 后在列表内滚动。
 - 报告诊断、设备配置、周报和长篇分析保留工作台空间，正文或分栏内滚动。
@@ -33,8 +35,8 @@
 | 安装 / 使用指导 | 原有步骤、命令和说明分区，统一标题与操作区 |
 
 `modal-tech-dialogs.css` 负责框架、图标行和控件；`modal-tech-cases.css` 负责各任务的内容布局。
-`dialog-frame.js` 按实际 CSS 像素描绘连续细切角与粗亮角标；粗细描边共用完全相同的中心线与切角坐标，标题斜线限制在下划线区域，避开关闭按钮。装饰不裁剪根容器，也不承接点击或键盘事件。
-背景、输入、边框与主按钮复用 `theme.css` 的中性灰和冷紫色变量；内部分隔线用灰色，外框仅混入少量主题紫色。保留危险和警告语义、40% 中性深色遮罩及 3px 背景模糊。
+`dialog-frame.js` 按实际 CSS 像素描绘连续细切角与粗亮角标；粗细描边共用完全相同的中心线与切角坐标。带 SVG 框的弹框由 CSS 的 `polygon` 裁切 16px 四角，SVG 独占外框与标题折线（矩形 CSS 边框关闭），避免重影；装饰层不承接点击或键盘事件。
+参考设计使用深紫色主面板（`#1c1929`）、紫色边框与高亮主按钮；危险和警告色仍按语义独立显示。遮罩保留 40% 中性深色与约 3px 模糊，而非纯黑背景。
 
 Shell 生命周期仍由 `ModalManager` 管理。独立文档沿用各自控制器。
 登录层沿用 `api.js` 的认证生命周期，表单与 SSH 安装指引共享外框几何和主题；
@@ -48,11 +50,25 @@ Shell 生命周期仍由 `ModalManager` 管理。独立文档沿用各自控制�
 参考图中的租约时长、烧写模式、日志预览等不存在的业务能力未伪造为可点击控件。
 外部第三方网站和跨源 iframe 的界面不属于本仓库的弹框实现。
 
+## 特殊场景的内容级验收
+
+- 系统配置使用 `showConfig()` 在测试隔离环境内生成真实配置表单；仅开启空模板不算验收。邮件、凭据与路由读取统一用无敏感内容的 GET fixture，避免管理员认证层覆盖截图。
+- 图片预览需提供合成图片来源、说明文字与缩放区域，禁止把一整块黑色占位当作已渲染通过。
+- 测试结果、审计日志详情与历史邮件详情分别构造真实结构的测试数据，检查表格、分栏、长文本以及滚动区域。
+- Redmine 统计设置采用不收缩的纵向字段卡片和内部滚动，防止下一个字段的标题覆盖上一个输入框；内部工单创建的三个 ID 字段改为独立行，禁止手机上出现逐字换行。
+- 只运行隔离 Uvicorn + Chromium 测试，不向真实 Worker/设备执行刷机、删除、邮件发送及其他变更操作。独立功能性的安全性和权限仍由专项测试把关。
+
+## 静态资源版本与浏览器缓存
+
+弹框框架样式与描边脚本由 Shell、Redmine、Gerrit、设备控制台、自动化、主机集群和 GMS 更新雷达共用。更新 `modal-tech-dialogs.css`、`modal-tech-cases.css` 或 `dialog-frame.js` 后，应同步更新七处 HTML 入口的 `?v=` 版本号，使已部署浏览器不会沿用旧资源。不要只修改 Shell 的引用，造成同一弹框在不同工作区显示不一致。
+`tests/architecture/test_modal_asset_versions.py` 会要求各入口的这三份资源版本一致。
+
 ## 核验与截图
 
 ```bash
 python -m pytest tests/architecture/test_modal_tech_style.py \
-  tests/architecture/test_individual_modal_redesign.py \
+  tests/architecture/test_modal_frame_single_owner.py \
+  tests/architecture/test_modal_reference_fidelity_e6f16a49.py \
   tests/architecture/test_shell_script_loading.py \
   tests/architecture/test_frontend_size_rules.py -q
 
@@ -67,9 +83,9 @@ python -m pytest tests/runtime_ui/test_modals.py \
   tests/runtime_ui/test_navigation.py tests/runtime_ui/test_ui_foundations.py -q
 ```
 
-图库位于 `artifacts/modal-redesign/index.html`，附 `results.json` 和真实 Chromium 截图。
+图库位于 `artifacts/modal-redesign/index.html`，附 `results.json` 和 Chromium 截图；临时验收分支的 Self-hosted Runner 上传 3 天有效的合成数据截图工件（每次 78 场景 × 桌面/手机各一张，另有 16 张认证状态截图）。
 图库使用隔离环境与明确标记的渲染测试数据，不执行烧写、设备接入或邮件发送。
-桌面与手机检查控件越界、按钮截断、底栏可达性、角标中心线与外框重合、标题斜线不与关闭按钮相交；原有回归还覆盖 768px 与横屏、
+桌面与手机检查控件越界、按钮截断、字段卡片重叠、底栏可达性、角标中心线与外框重合、标题斜线不与关闭按钮相交；原有回归还覆盖 768px 与横屏、
 ESC、焦点归还、嵌套弹框、重复导航、AOA 提交和初始化无写请求。
 
 视觉验收需要查看实际截图，不能用模板类名或通过测试代替视觉判断。

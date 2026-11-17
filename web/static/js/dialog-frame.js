@@ -29,8 +29,13 @@
 
         } else {
             const step = Math.max(60, Math.round(width * .49));
-            const end = width - 104;
-            svg.querySelector('path').setAttribute('d', `M0 15H${step}L${step + 14} 1H${end}`);
+            const end = Math.max(step + 20, width - 104);
+            const baseline = 15;
+            svg.querySelector('path').setAttribute('d', `M0 ${baseline}H${step}L${step + 14} 1H${end}`);
+            // The active underline is exactly coincident with the first segment
+            // of the path, not a separate CSS border with a different Y origin.
+            path(svg, 'tech-rule-highlight').setAttribute('d',
+                `M18 ${baseline}H${Math.min(102, step)}`);
             path(svg, 'tech-rule-ticks').setAttribute('d',
                 [0, 8, 16, 24].map(offset => `M${end + 10 + offset} 10l7 -7`).join(''));
         }

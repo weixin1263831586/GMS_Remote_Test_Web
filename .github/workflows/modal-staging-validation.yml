@@ -1,0 +1,96 @@
+name: GMS modal staging validation (isolated Playwright)
+
+# Intentionally temporary: push only on this verification branch.
+# Never accept pull_request, pull_request_target, or fork events on this runner.
+on:
+  push:
+    branches:
+      - verify/modal-main-9ba691-20261117
+    paths:
+      - '.github/workflows/modal-staging-validation.yml'
+      - 'tests/**'
+      - 'web/**'
+      - 'features/**/ui/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gms-modal-validation-temp
+  cancel-in-progress: true
+
+jobs:
+  modal-ui:
+    if: >-
+      github.repository == 'weixin1263831586/GMS_Remote_Test_Web' &&
+      github.ref == 'refs/heads/verify/modal-main-9ba691-20261117' &&
+      github.event_name == 'push' &&
+      github.actor == 'weixin1263831586'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 45
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout verification commit into Runner _work only
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify exact verification branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "Runner checkout: $(git rev-parse --short HEAD)"
+          echo "Runner workspace: $GITHUB_WORKSPACE"
+          mkdir -p "$RUNNER_TEMP/gms-modal-validation"
+
+      - name: Create isolated Python environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/gms-modal-validation/venv"
+          "$RUNNER_TEMP/gms-modal-validation/venv/bin/python" -m pip install \
+            --disable-pip-version-check -r requirements-dev.txt
+          "$RUNNER_TEMP/gms-modal-validation/venv/bin/python" -m playwright install chromium
+
+      - name: Static and architectural tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/gms-modal-validation/venv/bin/python" -m pytest \
+            tests/architecture/test_modal_tech_style.py \
+            tests/architecture/test_modal_asset_versions.py \
+            tests/architecture/test_modal_frame_single_owner.py \
+            tests/architecture/test_modal_reference_fidelity_e6f16a49.py \
+            -q --junitxml="$RUNNER_TEMP/gms-modal-validation/architecture.xml"
+
+      - name: Isolated browser gallery and modal regressions
+        shell: bash
+        env:
+          GMS_MODAL_GALLERY_OUT: ${{ runner.temp }}/gms-modal-validation/gallery
+          GMS_AUTH_GALLERY_OUT: ${{ runner.temp }}/gms-modal-validation/auth-gallery
+        run: |
+          set -euo pipefail
+          # RuntimeUiHarness starts a disposable 127.0.0.1 Uvicorn server with
+          # isolated temporary data, no production device or Worker operations.
+          "$RUNNER_TEMP/gms-modal-validation/venv/bin/python" -m pytest \
+            tests/runtime_ui/test_modal_redesign.py \
+            tests/runtime_ui/test_modals.py \
+            tests/runtime_ui/test_modal_compact_layout.py \
+            tests/runtime_ui/test_auth_dialog.py \
+            -q --junitxml="$RUNNER_TEMP/gms-modal-validation/browser.xml"
+
+      - name: Upload synthetic-fixture UI screenshots and test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gms-modal-staged-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/gms-modal-validation/architecture.xml
+            ${{ runner.temp }}/gms-modal-validation/browser.xml
+            ${{ runner.temp }}/gms-modal-validation/gallery/
+            ${{ runner.temp }}/gms-modal-validation/auth-gallery/
+          if-no-files-found: warn
+          retention-days: 3

@@ -31,7 +31,7 @@
 
 #auth-gate .auth-field {
     --auth-label-width: 52px;
-    --auth-field-indent: calc(30px + var(--auth-label-width) + 20px);
+    --auth-field-indent: calc(var(--tech-field-glyph-size) + var(--auth-label-width) + 20px);
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;

@@ -74,8 +74,15 @@ class DocsLinkTests(unittest.TestCase):
 
     def test_relative_doc_links_resolve(self):
         offenders = []
-        doc_files = list(DOCS.rglob('*.md'))
-        self.assertTrue(doc_files, 'docs/ 扫描到 0 个文件，检查器可能失效')
+        # Top-level onboarding and developer guides are user-facing too;
+        # do not leave broken links in README while docs/ remains green.
+        doc_files = [
+            *DOCS.rglob('*.md'),
+            ROOT / 'README.md',
+            ROOT / 'AGENTS.md',
+            ROOT / 'tools' / 'README.md',
+        ]
+        self.assertTrue(doc_files, '文档扫描到 0 个文件，检查器可能失效')
         for doc in doc_files:
             text = doc.read_text(encoding='utf-8', errors='replace')
             for match in self._LINK_RE.finditer(text):
