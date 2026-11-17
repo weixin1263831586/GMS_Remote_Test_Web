@@ -20,7 +20,7 @@ def test_every_shell_dialog_uses_one_svg_perimeter_and_one_header_rule():
         assert len(re.findall(r'class="tech-frame"', markup)) == 1, file.name
         assert len(re.findall(r'class="tech-header-rule"', markup)) == 1, file.name
         assert markup.count('class="modal-close"') >= 1, file.name
-        assert 'class="tech-dialog' in markup, file.name
+        assert re.search(r'<div[^>]+class="[^"]*\btech-dialog\b[^"]*"', markup), file.name
 
 
 def test_no_second_rectangular_border_over_svg_cut_corners():
