@@ -5,7 +5,7 @@
                 <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#link"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">共享固件</span></div>
                 <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeFirmwareShareModal">&times;</button>
             <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
-            <div class="modal-body">
+            <div class="modal-body firmware-share-body">
 <p class="tech-intro">选择远端固件并设置共享名称和有效期。</p>
                 <div class="firmware-share-form-grid">
                     <div class="modal-form-row tech-field-card" style="margin-bottom: 0;"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
@@ -29,27 +29,27 @@
                     <label for="firmware-share-name">显示名称:</label>
                     <input type="text" id="firmware-share-name" placeholder="可选，默认使用文件名" />
                 </div></section>
-                <div id="firmware-share-validation" class="modal-info-text" style="min-height: 20px;"></div>
+                <div id="firmware-share-validation" class="modal-info-text" role="status" aria-live="polite"></div>
 
-                <div style="margin-top: 12px; border: 1px solid var(--border-color); border-radius: 8px; overflow: auto; max-height: calc(92vh - 238px);">
-                    <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
-                        <thead style="position: sticky; top: 0; z-index: 1;">
-                            <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color);">
-                                <th style="padding: 8px; text-align: left; width: 22%;">名称</th>
-                                <th style="padding: 8px; text-align: left; width: 40%;">远端路径</th>
-                                <th style="padding: 8px; text-align: right; width: 10%;">大小</th>
-                                <th style="padding: 8px; text-align: center; width: 10%;">下载</th>
-                                <th style="padding: 8px; text-align: center; width: 13%;">操作</th>
+                <section class="firmware-share-table-scroll" role="region" aria-label="已共享固件列表，可水平及垂直滚动" tabindex="0">
+                    <table class="firmware-share-table">
+                        <thead>
+                            <tr>
+                                <th class="firmware-share-col-name" scope="col">名称</th>
+                                <th class="firmware-share-col-path" scope="col">远端路径</th>
+                                <th class="firmware-share-col-size" scope="col">大小</th>
+                                <th class="firmware-share-col-downloads" scope="col">下载次数</th>
+                                <th class="firmware-share-col-actions" scope="col">操作</th>
                             </tr>
                         </thead>
                         <tbody id="firmware-share-list">
                             <tr><td colspan="5" style="padding: 14px; color: var(--text-secondary); text-align: center;">暂无共享固件</td></tr>
                         </tbody>
                     </table>
-                </div>
+                </section>
             </div>
 
-<div class="modal-buttons tech-dialog-actions" style="justify-content: flex-start; margin-top: 8px;"><span class="tech-footer-decoration" aria-hidden="true"></span>
+<div class="modal-buttons tech-dialog-actions firmware-share-footer"><span class="tech-footer-decoration" aria-hidden="true"></span>
                     <button class="btn-xxs" data-click="validateFirmwareShare">校验</button>
                     <button class="btn-xxs btn-primary" data-click="createFirmwareShare">创建分享</button>
                     <button class="btn-xxs" data-click="loadFirmwareShares">刷新列表</button>

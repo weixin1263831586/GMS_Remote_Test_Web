@@ -307,8 +307,80 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 #route-check-dialog .route-probe-results .tech-section-title { margin-bottom: 6px; padding-bottom: 6px; font-size: var(--tech-font-body); }
 #route-check-dialog .tech-notice { margin: 0; padding: 6px 2px; border: 0; background: transparent; font-size: var(--tech-font-caption); }
 .firmware-share-form-grid { display: grid; grid-template-columns: minmax(0,1fr) 200px; gap: 12px; align-items: start; }
-#firmware-share-modal > .modal-content { width: min(960px,calc(100vw - 32px)); max-width: min(960px,calc(100vw - 32px)); height: auto; max-height: calc(100dvh - 32px); }
-#firmware-share-modal .modal-body > div:has(> table) { max-height: 340px !important; }
+/* The shared-firmware list is a data grid: allocate real viewport height,
+   scroll the grid on both axes, and never scroll the fixed action footer. */
+#firmware-share-modal > .modal-content.tech-dialog--firmware-share {
+  width: min(1040px,calc(100vw - 32px));
+  max-width: min(1040px,calc(100vw - 32px));
+  height: min(840px,calc(100dvh - 40px));
+  max-height: calc(100dvh - 40px);
+  min-height: 0;
+}
+#firmware-share-modal .firmware-share-body {
+  display: flex; flex-direction: column; flex: 1 1 auto;
+  min-width: 0; min-height: 0; gap: 10px;
+  overflow-y: auto; overflow-x: hidden;
+}
+#firmware-share-modal .firmware-share-body .tech-intro { margin: 0; }
+#firmware-share-modal .firmware-share-body .firmware-share-form-grid,
+#firmware-share-modal .firmware-share-body .tech-form-section { flex: none; min-width: 0; }
+#firmware-share-modal .firmware-share-table-scroll {
+  flex: 1 1 auto; min-height: 170px; min-width: 0; max-width: 100%;
+  overflow-x: auto; overflow-y: auto;
+  border: 1px solid var(--tech-edge-soft); border-radius: 8px;
+  background: var(--tech-input);
+  scrollbar-gutter: stable;
+}
+#firmware-share-modal .firmware-share-table-scroll:focus-visible {
+  outline: 2px solid var(--tech-bright); outline-offset: -2px;
+}
+#firmware-share-modal .firmware-share-table {
+  width: max-content; min-width: 1080px; max-width: none;
+  border-collapse: separate; border-spacing: 0; table-layout: auto;
+}
+#firmware-share-modal .firmware-share-table :is(th,td) {
+  padding: 9px 10px; white-space: nowrap; vertical-align: middle;
+  border-bottom: 1px solid var(--tech-edge-soft);
+}
+#firmware-share-modal .firmware-share-table thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--tech-panel); font-weight: 600; color: var(--text-primary);
+  text-align: left;
+}
+#firmware-share-modal .firmware-share-col-name { min-width: 220px; }
+#firmware-share-modal .firmware-share-col-path { min-width: 470px; }
+#firmware-share-modal .firmware-share-col-size { min-width: 100px; }
+#firmware-share-modal .firmware-share-col-downloads { min-width: 90px; }
+#firmware-share-modal .firmware-share-col-actions { min-width: 200px; }
+#firmware-share-modal .firmware-share-path {
+  font-family: ui-monospace,monospace; font-size: var(--tech-font-caption);
+  max-width: none; overflow: visible; text-overflow: clip;
+}
+#firmware-share-modal .firmware-share-name {
+  max-width: none; overflow: visible; text-overflow: clip;
+}
+#firmware-share-modal .firmware-share-table .firmware-share-number { text-align: right; font-variant-numeric: tabular-nums; }
+#firmware-share-modal .firmware-share-table .firmware-share-downloads { text-align: center; }
+#firmware-share-modal .firmware-share-table .firmware-share-actions { text-align: center; }
+#firmware-share-modal .firmware-share-footer { justify-content: flex-end; margin-top: 0; }
+@media (max-width: 700px) {
+  #firmware-share-modal > .modal-content.tech-dialog--firmware-share {
+    width: calc(100vw - 16px); max-width: calc(100vw - 16px);
+    height: calc(100dvh - 16px); max-height: calc(100dvh - 16px);
+  }
+  #firmware-share-modal .firmware-share-table-scroll { min-height: 150px; }
+}
+@media (max-height: 560px) {
+  #firmware-share-modal > .modal-content.tech-dialog--firmware-share {
+    height: calc(100dvh - 40px); max-height: calc(100dvh - 40px);
+  }
+  #firmware-share-modal .firmware-share-table-scroll { min-height: 130px; }
+  @media (max-width: 700px) {
+    #firmware-share-modal > .modal-content.tech-dialog--firmware-share {
+      height: calc(100dvh - 16px); max-height: calc(100dvh - 16px);
+    }
+  }
+}
 .tech-dialog--file-browser .modal-buttons > div { flex-wrap: wrap; }
 .tech-dialog--device-config > .dcfg-tabs { display: flex; flex-wrap: wrap; flex-shrink: 0; gap: 6px; margin: 10px 18px 0; padding: 6px; }
 .tech-dialog--device-config .dcfg-tabs .dcfg-tabbtn { flex: 0 0 auto; min-width: 0; }
@@ -464,3 +536,89 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 #firmware-modal .firmware-target-chip { white-space: normal; overflow-wrap: anywhere; }
 #firmware-modal #firmware-aoa-hint { min-height: 0; margin: 6px 0; font-size: var(--tech-font-caption); }
 #firmware-modal .tech-notice { margin-top: 10px; }
+
+/* Shared header geometry for VPN route probing; one SVG perimeter + one rail. */
+#route-check-dialog .modal-content.tech-dialog--route-check > .modal-header { min-height: 56px; padding: 11px 18px 15px; gap: 10px; }
+#route-check-dialog .modal-content.tech-dialog--route-check .modal-title { display: block; flex: none; font-size: var(--tech-font-title) !important; font-weight: 650; letter-spacing: .2px; }
+#route-check-dialog .modal-content.tech-dialog--route-check .modal-body { padding: 12px 16px; }
+#route-check-dialog .modal-content.tech-dialog--route-check .route-check-form .form-group { margin-bottom: 10px; }
+#route-check-dialog .modal-content.tech-dialog--route-check .route-check-form label { gap: 6px; margin-bottom: 4px; font-size: var(--tech-font-body) !important; }
+#route-check-dialog .modal-content.tech-dialog--route-check .route-check-field { min-height: var(--tech-control-height); padding: 0 8px; }
+#route-check-dialog .modal-content.tech-dialog--route-check .route-check-form input[type="text"] { padding: 5px 0; font-size: var(--tech-font-body) !important; }
+#route-check-dialog .modal-content.tech-dialog--route-check .route-check-actions { min-height: 58px; padding: 8px 16px 18px; margin: 0; gap: 9px; }
+#route-check-dialog .modal-content.tech-dialog--route-check .route-check-actions .btn-xxs { min-width: 68px; min-height: var(--tech-control-height); padding: 5px 12px; font-size: var(--tech-font-body) !important; letter-spacing: 0; }
+/* UI inspection: remove blank fixed-height workspace, scroll the long list inside. */
+.tech-dialog--ui-control .ui-control-body { display: flex; flex-direction: column; gap: 8px; }
+.tech-dialog--ui-control .ui-control-body > * { flex: none; }
+.tech-dialog--ui-control .ui-control-header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }
+.tech-dialog--ui-control .ui-control-serial { min-width: 0; max-width: 32%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--tech-font-caption); color: var(--text-secondary); }
+.tech-dialog--ui-control .ui-control-workspace { display: grid; grid-template-columns: minmax(0,.9fr) minmax(0,1.1fr); align-items: start; gap: 12px; min-height: 0; }
+.tech-dialog--ui-control :is(.ui-control-screen-panel,.ui-control-elements-panel) { min-width: 0; overflow: hidden; padding: 10px; }
+.tech-dialog--ui-control .ui-control-panel-title { margin: 0 0 8px; font-size: var(--tech-font-body); font-weight: 600; color: var(--text-secondary); line-height: 1.5; }
+.tech-dialog--ui-control #ui-control-screenshot { display: block; width: auto; max-width: 100%; max-height: min(55dvh, 580px); object-fit: contain; border: 1px solid var(--tech-edge-soft); border-radius: 7px; }
+.tech-dialog--ui-control #ui-control-screenshot:not([src]) { display: none; }
+.tech-dialog--ui-control .ui-control-filter-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.tech-dialog--ui-control .ui-control-filter-row > input { flex: 1 1 auto; min-width: 0; }
+.tech-dialog--ui-control .ui-control-filter-check { white-space: nowrap; flex: none; }
+.tech-dialog--ui-control #ui-control-elements { min-height: 64px; max-height: min(55dvh, 580px); overflow: auto; border: 1px solid var(--tech-edge-soft); border-radius: 7px; }
+.tech-dialog--ui-control .ui-control-empty { padding: 14px; text-align: center; color: var(--text-secondary); }
+@media (max-width: 800px) {
+  .tech-dialog--ui-control .ui-control-workspace { grid-template-columns: minmax(0,1fr); }
+  .tech-dialog--ui-control .ui-control-serial { max-width: 22%; }
+  #route-check-dialog .modal-content.tech-dialog--route-check > .modal-header { min-height: 50px; padding: 8px 14px 13px; }
+}
+@media (max-width: 480px) {
+  .tech-dialog--ui-control .ui-control-header-actions { gap: 4px; }
+  .tech-dialog--ui-control .ui-control-serial { display: none; }
+}
+
+/* Device UI hierarchy rows: no inline style or duplicate class attributes. */
+.tech-dialog--ui-control .ui-ctrl-el {
+  padding: 8px 10px; border-bottom: 1px solid var(--tech-edge-soft);
+  font-size: var(--tech-font-body); overflow-wrap: anywhere;
+}
+.tech-dialog--ui-control .ui-ctrl-el[role="button"] { cursor: pointer; }
+.tech-dialog--ui-control .ui-ctrl-el.is-inert { opacity: .75; }
+.tech-dialog--ui-control .ui-ctrl-el:focus-visible {
+  outline: 2px solid var(--tech-bright); outline-offset: -2px;
+}
+.tech-dialog--ui-control .ui-ctrl-el-main { display: flex; align-items: flex-start; gap: 6px; }
+.tech-dialog--ui-control .ui-ctrl-el-main > .ui-icon {
+  flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--tech-bright);
+}
+.tech-dialog--ui-control .ui-ctrl-el-coordinates {
+  color: var(--text-secondary); margin-left: auto; white-space: nowrap;
+}
+.tech-dialog--ui-control .ui-ctrl-el-meta { color: var(--text-secondary); font-size: var(--tech-font-caption); margin-top: 2px; }
+
+/* Directory navigation belongs next to the file list, not split across the
+   modal footer. The fixed footer only contains cancel / select actions. */
+.tech-dialog--file-browser .file-browser-nav-actions {
+  display: flex; flex: none; flex-wrap: wrap; gap: 6px;
+  align-items: center; justify-content: flex-start;
+  margin: 0 0 8px;
+}
+.tech-dialog--file-browser .file-browser-nav-actions > button {
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.tech-dialog--file-browser .file-browser-nav-actions .ui-icon {
+  width: 16px; height: 16px; flex: none;
+}
+#sidebar-visibility-modal .sidebar-settings-footer[hidden] { display: none !important; }
+
+/* Short landscape windows must keep file inventory reachable.
+   The body scrolls as a unit only when vertical space cannot fit both
+   location controls and a usable file-list viewport. */
+@media (max-height: 560px) {
+  #file-browser-modal .modal-body {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    overscroll-behavior: contain;
+  }
+  #file-browser-modal .file-browser-list {
+    flex: 0 0 auto !important;
+    min-height: 128px !important;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+}

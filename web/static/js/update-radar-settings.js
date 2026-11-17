@@ -23,6 +23,9 @@
         field('task-count').textContent = `已选择 ${count} / 6 项`;
     }
     async function open() {
+        // The submit button is in a persistent footer, outside the disabled
+        // fieldset; keep it locked until settings load successfully.
+        field('settings-save').disabled = true;
         const config = await request('GET');
         field('enabled').checked = config.enabled;
         field('time').value = config.scan_time;
@@ -35,6 +38,7 @@
         syncTasks();
         field('settings-feedback').textContent = '';
         field('settings-fields').disabled = false;
+        field('settings-save').disabled = false;
         owner().open(id);
         try {
             const response = await fetch('/api/email/smtp');

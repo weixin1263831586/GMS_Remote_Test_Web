@@ -46,22 +46,11 @@ async function checkRouting(targetHost) {
     dialog.className = 'modal route-check-dialog';
     dialog.innerHTML = `
         <div class="modal-content modal-s tech-dialog tech-dialog--route-check"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
-            <svg class="route-check-corner is-tl" viewBox="0 0 36 44" aria-hidden="true"><polyline points="35,0.6 14,0.6 0.6,20 0.6,43"/></svg>
-            <svg class="route-check-corner is-tr" viewBox="0 0 36 44" aria-hidden="true"><polyline points="1,0.6 22,0.6 35.4,20 35.4,43"/></svg>
-            <svg class="route-check-corner is-bl" viewBox="0 0 36 44" aria-hidden="true"><polyline points="0.6,1 0.6,24 14,43.4 35,43.4"/></svg>
-            <svg class="route-check-corner is-br" viewBox="0 0 36 44" aria-hidden="true"><polyline points="1,43.4 22,43.4 35.4,24 35.4,1"/></svg>
-            <div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg>
-                <h3 class="modal-title">
-                    <span class="route-check-badge" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M4.6 10.2a10 10 0 0 1 14.8 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7.5 13.2a6 6 0 0 1 9 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="17.1" r="1.35" fill="currentColor"/></svg></span>
-                    <span class="route-check-title-sep" aria-hidden="true"></span>
-                    检查路由连通性
-                </h3>
-                <span class="route-check-slashes" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#wifi"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><h3 class="modal-title">检查路由连通性</h3></div>
                 <button type="button" class="modal-close route-check-close" aria-label="关闭">&times;</button>
+                <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg>
             </div>
-            <svg class="route-check-rule" viewBox="0 0 640 16" preserveAspectRatio="none" aria-hidden="true">
-                <polyline points="0,1 468,1 498,14 640,14" fill="none" stroke="currentColor" stroke-width="1.25" vector-effect="non-scaling-stroke"/>
-            </svg>
             <div class="modal-body route-check-form">
                 <div class="form-group route-probe-row">
                     <label for="test-host-ip">测试主机IP:</label>
@@ -82,14 +71,6 @@ async function checkRouting(targetHost) {
                 <section class="tech-section route-probe-results"><h3 class="tech-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#network"></use></svg>探测结果</h3><div id="ping-result" class="ping-result" role="status" aria-live="polite">填写两端 IP 后开始检测。</div></section><div class="tech-notice"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg>检测两端网络可达性，结果来自实际检测响应。</div>
             </div>
             <div class="route-check-actions modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
-                <svg class="route-check-ticks" viewBox="0 0 132 20" aria-hidden="true">
-                    <g fill="none" stroke="#d5c6ff" stroke-width="3.4" stroke-linecap="butt">
-                        <path d="M5 15 L12 5"/>
-                        <path d="M16 15 L23 5"/>
-                        <path d="M27 15 L34 5"/>
-                    </g>
-                    <path d="M40 10 H128" stroke="#b79bff" stroke-width="1.2"/>
-                </svg>
                 <button id="ping-test-btn" class="btn-xxs btn-primary" type="button"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M14.8 14.8 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>测试连通性</button>
                 <button id="close-dialog-btn" class="btn-xxs" type="button">关闭</button>
             </div>

@@ -12,7 +12,7 @@ name: CI
 on:
   push:
     # 临时全仓库验收分支也走与 main 完全相同的门禁；合并前移除临时名称。
-    branches: [main, verify/modal-main-9ba691-20261117]
+    branches: [main, verify/modal-global-audit-d97380-20261117]
   pull_request:
     branches: [main]
 
@@ -198,11 +198,13 @@ jobs:
           # requirements-dev.txt 包含 requirements.txt + pytest/httpx
           # （TestClient 硬依赖）等测试专用依赖，生产部署不装它。
           pip install -r requirements-dev.txt
+      # Browser suites run in browser-e2e with Chromium installed; do not
+      # duplicate them on this unit runner without browser dependencies.
       - name: Foundation / bootstrap / top-level tests
         run: |
           mkdir -p artifacts
           pytest tests foundation bootstrap conftest.py \
-            --ignore=tests/e2e --ignore=tests/architecture --ignore=tests/soak \
+            --ignore=tests/e2e --ignore=tests/runtime_ui --ignore=tests/architecture --ignore=tests/soak \
             -q --junitxml=artifacts/unit-foundation.xml --durations=30
       - name: Upload JUnit report
         if: always()

@@ -361,3 +361,12 @@
 .tech-dialog :is(label,input,select,textarea,button:not(.modal-close)) {
   font-size: var(--tech-font-body) !important;
 }
+
+/* Bottom modal actions always align right, regardless of feature defaults.
+   The scrolling body remains a separate flex child; do not use sticky footers. */
+:is(.modal,.modal-backdrop,.auth-gate) .tech-dialog > :is(.modal-buttons,.modal-footer,.modal-actions,.tech-dialog-footer) {
+  justify-content: flex-end;
+}
+
+/* [hidden] must win over the base flex button-bar display for tabbed dialogs. */
+.tech-dialog > :is(.modal-buttons,.modal-footer,.modal-actions)[hidden] { display: none !important; }

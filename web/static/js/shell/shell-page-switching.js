@@ -169,6 +169,10 @@
             document.querySelectorAll('[data-sidebar-settings-panel]').forEach(panel => {
                 panel.hidden = panel.dataset.sidebarSettingsPanel !== target;
             });
+            // The navigation-settings action bar lives outside the scrollable
+            // panel, so hide it when the read-only project guide is selected.
+            const footer = document.querySelector('#sidebar-visibility-modal .sidebar-settings-footer');
+            if (footer) footer.hidden = target !== 'visibility';
         }
 
         function setGuideImageZoom(actualSize) {

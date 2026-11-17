@@ -13,6 +13,11 @@
                 </div>
                     <div class="file-browser-path" id="file-browser-current-path" style="margin-bottom: 10px;"></div>
                 </section>
+                <div class="file-browser-nav-actions" role="toolbar" aria-label="文件目录导航">
+                    <button type="button" class="btn-xxs" data-click="navigateToRoot" title="根目录"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#home"></use></svg> 根目录</button>
+                    <button type="button" class="btn-xxs" data-click="navigateToParent" title="返回上级"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#back"></use></svg> 返回上级</button>
+                    <button type="button" class="btn-xxs" data-click="refreshCurrentDirectory" title="刷新"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                </div>
                 <div class="file-browser-header">
                     <span class="file-browser-icon"></span>
                     <span>名称</span>
@@ -25,16 +30,9 @@
 
             </div>
 
-<div class="modal-buttons tech-dialog-actions" style="justify-content: space-between;"><span class="tech-footer-decoration" aria-hidden="true"></span>
-                    <div style="display: flex; gap: 5px;">
-                        <button class="btn-xxs" data-click="navigateToRoot" title="根目录">🏠 根目录</button>
-                        <button class="btn-xxs" data-click="navigateToParent" title="返回上级">🔙 返回上级</button>
-                        <button class="btn-xxs" data-click="refreshCurrentDirectory" title="刷新"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
-                    </div>
-                    <div style="display: flex; gap: 5px;">
-                        <button class="btn-xxs" data-click="closeFileBrowserModal">取消</button>
-                        <button class="btn-xxs btn-primary" data-click="confirmFileSelection">选择</button>
-                    </div>
+<div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
+                    <button class="btn-xxs" data-click="closeFileBrowserModal">取消</button>
+                    <button class="btn-xxs btn-primary" data-click="confirmFileSelection">选择</button>
                 </div>
 </div>
     </div>

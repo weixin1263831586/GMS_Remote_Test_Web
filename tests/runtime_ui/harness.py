@@ -2,6 +2,7 @@ import os
 import re
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -52,8 +53,10 @@ class RuntimeUiHarness(unittest.TestCase):
         # _LOCAL_HOSTS，终端服务进入 local PTY 模式，与主机环境无关。
         env["UBUNTU_HOST"] = "127.0.0.1"
         env["UBUNTU_USER"] = "ui-smoke"
+        # Use the current test interpreter: CI may invoke pytest from a venv
+        # without exporting its bin directory into the subprocess PATH.
         cls.server = subprocess.Popen(
-            ["python", "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(cls.port)],
+            [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(cls.port)],
             cwd=REPO_ROOT,
             env=env,
             stdout=subprocess.PIPE,

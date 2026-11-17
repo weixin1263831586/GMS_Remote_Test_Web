@@ -28,9 +28,9 @@
           <label>发送策略<select id="radar-notify"><option value="changes">仅有变更或扫描失败时发</option><option value="always">每次扫描都发汇总，无更新也发</option></select></label>
           <label>邮件中的雷达页面地址<input id="radar-url" type="url" placeholder="https://controller.example.com/gms-update-radar"><small>填写收件人可访问的平台地址。</small></label>
           <p id="radar-settings-feedback" role="status" aria-live="polite"></p>
-          <div class="modal-buttons tech-dialog-actions radar-settings-actions"><span class="tech-footer-decoration" aria-hidden="true"></span><button id="radar-settings-cancel" type="button" class="btn-xxs">取消</button><button id="radar-settings-save" type="submit" class="btn-xxs btn-primary">保存修改</button></div>
         </fieldset>
       </form>
     </div>
+    <div class="modal-buttons tech-dialog-actions radar-settings-actions"><span class="tech-footer-decoration" aria-hidden="true"></span><button id="radar-settings-cancel" type="button" class="btn-xxs">取消</button><button id="radar-settings-save" type="submit" form="radar-settings-form" class="btn-xxs btn-primary" disabled>保存修改</button></div>
   </div>
 </div>

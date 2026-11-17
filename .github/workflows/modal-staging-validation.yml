@@ -1,11 +1,12 @@
 name: GMS modal staging validation (isolated Playwright)
 
 # Intentionally temporary: push only on this verification branch.
+# Run synthetic browser fixtures on a GitHub-hosted Runner (no physical devices).
 # Never accept pull_request, pull_request_target, or fork events on this runner.
 on:
   push:
     branches:
-      - verify/modal-main-9ba691-20261117
+      - verify/modal-global-audit-d97380-20261117
     paths:
       - '.github/workflows/modal-staging-validation.yml'
       - 'tests/**'
@@ -23,10 +24,10 @@ jobs:
   modal-ui:
     if: >-
       github.repository == 'weixin1263831586/GMS_Remote_Test_Web' &&
-      github.ref == 'refs/heads/verify/modal-main-9ba691-20261117' &&
+      github.ref == 'refs/heads/verify/modal-global-audit-d97380-20261117' &&
       github.event_name == 'push' &&
       github.actor == 'weixin1263831586'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       PYTHONDONTWRITEBYTECODE: '1'
@@ -37,6 +38,11 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Select supported Python runtime
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+
       - name: Verify exact verification branch
         shell: bash
         run: |
@@ -46,6 +52,12 @@ jobs:
           echo "Runner workspace: $GITHUB_WORKSPACE"
           mkdir -p "$RUNNER_TEMP/gms-modal-validation"
 
+      - name: Install CJK and emoji fonts for accurate UI screenshots
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-noto-cjk fonts-noto-color-emoji
+          fc-list :lang=zh-cn family | grep -qi 'Noto Sans CJK'
       - name: Create isolated Python environment
         shell: bash
         run: |
@@ -64,6 +76,7 @@ jobs:
             tests/architecture/test_modal_asset_versions.py \
             tests/architecture/test_modal_frame_single_owner.py \
             tests/architecture/test_modal_reference_fidelity_e6f16a49.py \
+            tests/architecture/test_modal_template_contracts.py \
             -q --junitxml="$RUNNER_TEMP/gms-modal-validation/architecture.xml"
 
       - name: Isolated browser gallery and modal regressions
@@ -79,6 +92,7 @@ jobs:
             tests/runtime_ui/test_modal_redesign.py \
             tests/runtime_ui/test_modals.py \
             tests/runtime_ui/test_modal_compact_layout.py \
+            tests/runtime_ui/test_modal_consistency.py \
             tests/runtime_ui/test_auth_dialog.py \
             -q --junitxml="$RUNNER_TEMP/gms-modal-validation/browser.xml"
 
@@ -94,3 +108,58 @@ jobs:
             ${{ runner.temp }}/gms-modal-validation/auth-gallery/
           if-no-files-found: warn
           retention-days: 3
+
+  modal-inventory:
+    if: >-
+      github.repository == 'weixin1263831586/GMS_Remote_Test_Web' &&
+      github.ref == 'refs/heads/verify/modal-global-audit-d97380-20261117' &&
+      github.event_name == 'push' &&
+      github.actor == 'weixin1263831586'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout exact audited commit
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Setup Python 3.11
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+      - name: Install CJK and emoji fonts for accurate UI screenshots
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-noto-cjk fonts-noto-color-emoji
+          fc-list :lang=zh-cn family | grep -qi 'Noto Sans CJK'
+      - name: Setup isolated Chromium and test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+          python -m playwright install chromium
+      - name: Run every discovered modal independently on three viewports
+        env:
+          GMS_MODAL_MATRIX_OUT: ${{ runner.temp }}/gms-modal-inventory/cases
+        run: |
+          python -m pytest tests/runtime_ui/test_modal_inventory_runner.py -q \
+            --junitxml="${{ runner.temp }}/gms-modal-inventory/cases.xml"
+      - name: Build complete modal-by-modal evidence ledger
+        if: always()
+        env:
+          GMS_MODAL_MATRIX_OUT: ${{ runner.temp }}/gms-modal-inventory/cases
+        run: |
+          python -m tests.runtime_ui.modal_matrix_report "$GMS_MODAL_MATRIX_OUT" --fail-incomplete
+      - name: Publish all screenshots, verdicts and JUnit data
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gms-modal-full-inventory-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/gms-modal-inventory/cases/
+            ${{ runner.temp }}/gms-modal-inventory/cases.xml
+          if-no-files-found: error
+          retention-days: 7

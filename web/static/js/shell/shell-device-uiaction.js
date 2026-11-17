@@ -150,7 +150,8 @@
             const imgEl = document.getElementById('ui-control-screenshot');
             const listEl = document.getElementById('ui-control-elements');
             if (statusEl) statusEl.textContent = '正在截图并解析布局...';
-            if (listEl) listEl.innerHTML = '<div style="padding:20px;color:var(--text-secondary);text-align:center;">加载中...</div>';
+            if (imgEl) imgEl.removeAttribute('src'); // Never show a stale screenshot from another device.
+            if (listEl) listEl.innerHTML = '<div class="ui-control-empty">加载中...</div>';
             // 截图和布局独立结算：其中一项失败时，另一项仍正常展示。
             // accepted 异步结果统一由 executeClusterCommandAndWait 轮询。
             const pollAlive = () => refreshId === uiControlRefreshId && serial === uiControlSerial;
@@ -205,32 +206,65 @@
                     .some(value => String(value || '').toLowerCase().includes(query));
             });
             if (!elements.length) {
-                listEl.innerHTML = '<div style="padding:20px;color:var(--text-secondary);text-align:center;">没有符合条件的 UI 元素，可取消“仅可操作”或修改搜索词</div>';
+                const empty = document.createElement('div');
+                empty.className = 'ui-control-empty';
+                empty.textContent = '没有符合条件的 UI 元素，可取消“仅可操作”或修改搜索词';
+                listEl.replaceChildren(empty);
                 return;
             }
-            // 可点击的排前面，便于操作。
-            const sorted = [...elements].sort((a, b) => {
-                const ac = (a.interactions || []).includes('clickable') ? 0 : 1;
-                const bc = (b.interactions || []).includes('clickable') ? 0 : 1;
-                return ac - bc;
-            });
-            listEl.innerHTML = sorted.map((el, idx) => {
-                const label = el.text || el.resource_id || '(无文本)';
-                const c = el.center ? `${el.center[0]},${el.center[1]}` : '-';
-                const actionable = isUiControlActionable(el);
-                const tag = actionable ? '👆' : '•';
+            // All device-provided strings and coordinates are untrusted. Build
+            // the DOM via textContent/dataset, never interpolated HTML attributes.
+            const fragment = document.createDocumentFragment();
+            const sorted = [...elements].sort((a, b) =>
+                Number(!(a.interactions || []).includes('clickable')) -
+                Number(!(b.interactions || []).includes('clickable')));
+            sorted.forEach(el => {
+                const row = document.createElement('div');
+                row.className = 'ui-ctrl-el hover-soft';
+                const center = Array.isArray(el.center) ? el.center : [];
+                const hasPoint = center.length >= 2 && center[0] !== null && center[1] !== null
+                    && center[0] !== '' && center[1] !== ''
+                    && Number.isFinite(Number(center[0])) && Number.isFinite(Number(center[1]));
+                const x = hasPoint ? Number(center[0]) : null;
+                const y = hasPoint ? Number(center[1]) : null;
+                const label = String(el.text || el.resource_id || '(无文本)').slice(0, 80);
+                if (hasPoint) {
+                    row.dataset.x = String(x);
+                    row.dataset.y = String(y);
+                    row.setAttribute('role', 'button');
+                    row.setAttribute('tabindex', '0');
+                    row.setAttribute('aria-label', '点按 UI 元素：' + label);
+                    row.addEventListener('click', () => uiControlTap(x, y));
+                    row.addEventListener('keydown', event => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            uiControlTap(x, y);
+                        }
+                    });
+                } else {
+                    row.classList.add('is-inert');
+                }
+                const line = document.createElement('div');
+                line.className = 'ui-ctrl-el-main';
+                const symbol = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                symbol.setAttribute('class', 'ui-icon');
+                symbol.setAttribute('aria-hidden', 'true');
+                const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+                use.setAttribute('href', '/static/icons/ui.svg#'
+                    + (isUiControlActionable(el) ? 'target' : 'layout'));
+                symbol.append(use);
+                const coordinates = document.createElement('span');
+                coordinates.className = 'ui-ctrl-el-coordinates';
+                coordinates.textContent = '[' + (hasPoint ? x + ',' + y : '-') + ']';
+                line.append(symbol, document.createTextNode(label), coordinates);
+                const meta = document.createElement('div');
+                meta.className = 'ui-ctrl-el-meta';
                 const type = String(el.class_name || '').split('.').pop();
-                return `<div class="ui-ctrl-el" data-x="${el.center ? el.center[0] : ''}" data-y="${el.center ? el.center[1] : ''}" style="padding:8px 10px;border-bottom:1px solid var(--border-color);cursor:${el.center ? 'pointer' : 'default'};font-size:12px;" class="hover-soft">
-                    <div>${tag} ${escapeHtml(String(label)).slice(0, 80)} <span style="color:var(--text-secondary);">[${escapeHtml(c)}]</span></div>
-                    <div style="color:var(--text-secondary);font-size:11px;margin-top:2px;">${escapeHtml(type)}${el.resource_id ? ` · ${escapeHtml(el.resource_id)}` : ''}</div>
-                </div>`;
-            }).join('');
-            // 绑定点按：仅有点击有坐标的行。
-            listEl.querySelectorAll('.ui-ctrl-el').forEach(row => {
-                const x = row.dataset.x, y = row.dataset.y;
-                if (x === '' || y === '') return;
-                row.addEventListener('click', () => uiControlTap(Number(x), Number(y)));
+                meta.textContent = type + (el.resource_id ? ' · ' + String(el.resource_id) : '');
+                row.append(line, meta);
+                fragment.append(row);
             });
+            listEl.replaceChildren(fragment);
         }
 
         async function uiControlTap(x, y) {

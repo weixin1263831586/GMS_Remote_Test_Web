@@ -16,9 +16,9 @@
     <link rel="stylesheet" href="/static/css/workspace-panels.css?v=20261114-agent-chat-align" data-shell-styles>
     <link rel="stylesheet" href="/static/css/other-workspaces.css?v=20261113-upload-state-frame" data-shell-styles>
     <link rel="stylesheet" href="/static/css/modal-tech.css?v=20261116-aligned-corner-path" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261117-compact-dialogs" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261117-right-footers" data-shell-styles>
     <link rel="stylesheet" href="/static/css/auth-dialog.css?v=20261117-compact-dialogs" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261117-compact-dialogs" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261117-landscape-list-scroll" data-shell-styles>
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <link rel="stylesheet" href="/static/css/shell-extra.css?v=20260930-shell-extra">
     <link rel="stylesheet" href="/static/css/aoa-workbench.css?v=20261112-primary-gradient">
@@ -47,7 +47,7 @@
     <script src="/static/js/shell/shell-user-management.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-management.js?v=20261112-primary-gradient" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-groups.js?v=20261112-primary-gradient" defer data-shell-runtime></script>
-    <script src="/static/js/shell/shell-device-uiaction.js?v=20260930-shell-split" defer data-shell-runtime></script>
+    <script src="/static/js/shell/shell-device-uiaction.js?v=20261117-safe-ui-hierarchy" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-config-viewer.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-override.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-page-switching.js?v=20261114-orbit-viewport" defer data-shell-runtime></script>
@@ -85,8 +85,8 @@
     <script src="/static/js/dialog-frame.js?v=20261117-compact-dialogs" defer></script>
     <script src="/static/js/dialog-prompts.js?v=20261116-aligned-corner-path" defer></script>
     <script src="/static/js/modal.js?v=20261116-aligned-corner-path" defer></script>
-    <link rel="stylesheet" href="/static/css/update-radar-settings.css?v=20261116-radar-modal-h430">
-    <script src="/static/js/update-radar-settings.js?v=20261116-radar-modal-m" defer></script>
+    <link rel="stylesheet" href="/static/css/update-radar-settings.css?v=20261117-radar-fixed-footer">
+    <script src="/static/js/update-radar-settings.js?v=20261117-radar-fixed-footer" defer></script>
     <!-- 加载API调用工具 - 通知中心与页面脚本依赖，须先于其执行 -->
     <script src="/static/js/api.js?v=20261117-auth-dialog" defer></script>
     <script src="/static/js/shell/websocket-manager.js?v=20261105-aoa-device-refresh" defer></script>
@@ -114,13 +114,13 @@
     <script src="/static/js/pages/test-suite-browser-devices.js?v=20261110-factory-reset" defer></script>
     <script src="/static/js/pages/firmware-aoa-preflight.js?v=20261105-preflight-v1" defer></script>
     <script src="/static/js/pages/firmware-burn.js?v=20261117-compact-dialogs" defer></script>
-    <script src="/static/js/pages/firmware-burn-share.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/firmware-burn-share.js?v=20261117-table-scroll" defer></script>
     <script src="/static/js/pages/firmware-burn-gsi.js?v=20260930-pages-split" defer></script>
     <script src="/static/js/pages/firmware-burn-vnc.js?v=20260930-pages-split" defer></script>
     <script src="/static/js/pages/firmware-burn-adb-proxy.js?v=20260930-pages-split" defer></script>
     <script src="/static/js/pages/firmware-burn-usbip.js?v=20260930-pages-split" defer></script>
     <script src="/static/js/pages/auth-elevation.js?v=20261116-admin-prefill" defer></script>
-    <script src="/static/js/pages/vpn-control.js?v=20261116-aligned-corner-path" defer></script>
+    <script src="/static/js/pages/vpn-control.js?v=20261117-shared-wifi-glyph" defer></script>
     <script src="/static/js/pages/file-browser.js?v=20260904-gsi-worker-browse" defer></script>
     <script src="/static/js/pages/test-control.js?v=20261114-radar-outbox" defer></script>
     <script src="/static/js/pages/test-reports.js?v=20260812-stable-surfaces" defer></script>

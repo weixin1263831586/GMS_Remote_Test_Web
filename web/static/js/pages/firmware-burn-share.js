@@ -267,12 +267,12 @@ async function loadFirmwareShares() {
             const id = escapeHtml(record.id);
             const title = escapeHtml(`${firmwareShareRemoteText(record)}\n创建: ${firmwareShareDate(record.created_at)}\n修改: ${firmwareShareDate(record.mtime)}`);
             return `
-                <tr style="border-bottom: 1px solid var(--border-color);">
-                    <td style="padding: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${name}">${name}</td>
-                    <td style="padding: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 12px;" title="${title}">${remote}</td>
-                    <td style="padding: 8px; text-align: right;">${formatBytes(record.size || 0, true) || '-'}</td>
-                    <td style="padding: 8px; text-align: center;">${record.downloads || 0}</td>
-                    <td style="padding: 8px; text-align: center; white-space: nowrap;" class="firmware-share-actions">
+                <tr>
+                    <td class="firmware-share-name" title="${name}">${name}</td>
+                    <td class="firmware-share-path" title="${title}">${remote}</td>
+                    <td class="firmware-share-number">${formatBytes(record.size || 0, true) || '-'}</td>
+                    <td class="firmware-share-downloads">${Number.isFinite(Number(record.downloads)) ? Math.max(0, Math.trunc(Number(record.downloads))) : 0}</td>
+                    <td class="firmware-share-actions">
                         <button class="btn-xxs" type="button" data-action="copy-share-link" data-id="${id}">分享</button>
                         <button class="btn-xxs" type="button" data-action="download-share" data-id="${id}">下载</button>
                         <button class="btn-xxs" type="button" data-action="delete-share" data-id="${id}">删除</button>
