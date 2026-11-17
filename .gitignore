@@ -42,3 +42,6 @@ __pycache__/
 !/tools/jadx/bin/
 !/tools/jadx/lib/
 !/tools/jadx/jadx.provenance.json
+
+# 本机 GitHub Actions Runner 安装包与工作目录，禁止纳入仓库。
+/actions-runner/
