@@ -302,3 +302,89 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 
 .tech-dialog--firmware .firmware-aoa-options #firmware-aoa-boot-wait { width: 72px; min-width: 72px; flex: 0 0 72px; }
 #route-check-dialog .route-check-slashes { right: 64px; bottom: 14px; }
+
+
+/* Reference composition refinements — preserve real controls and API behaviors. */
+#username-detect-modal > .modal-content.tech-dialog { width: min(740px,calc(100vw - 32px)); max-width: min(740px,calc(100vw - 32px)); }
+#username-detect-modal .modal-body { padding: 20px 22px 12px; }
+#username-detect-modal .tech-form-section--username-detect {
+  display: grid; gap: 8px; padding: 10px;
+  border: 1px solid #503c69; border-radius: 10px; background: #211c2c;
+}
+#username-detect-modal .tech-form-section--username-detect .tech-field-card {
+  margin: 0; gap: 12px; min-height: 65px; background: #252033;
+}
+#username-detect-modal .tech-form-section--username-detect .tech-field-card > label {
+  width: 156px; min-width: 156px; font-size: 14px;
+}
+#username-detect-modal .tech-form-section--username-detect .tech-field-card > input {
+  min-width: 0; flex: 1; width: 100%;
+}
+#username-detect-modal .modal-ssh-info {
+  padding: 12px 13px; margin-top: 12px; font-size: 13px;
+  border: 1px solid #55406f; border-left: 3px solid #b278ee;
+  border-radius: 7px; background: #282137; color: #d2c3e4;
+}
+#tailscale-info-modal .tech-tailscale-row {
+  border-color: #5b4475; background: #241e32; border-radius: 9px;
+}
+#tailscale-info-modal .tech-tailscale-row > label { font-size: 14px; }
+#tailscale-info-modal .tech-tailscale-row > input { font-size: 14px; }
+#firmware-modal > .modal-content.tech-dialog--firmware {
+  width: min(1080px,calc(100vw - 32px)); max-width: min(1080px,calc(100vw - 32px));
+}
+#firmware-modal .firmware-preflight-grid { grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 14px; }
+#firmware-modal .firmware-preflight-grid > .tech-section,
+#firmware-modal .firmware-preflight-grid > .firmware-recovery-card {
+  border: 1px solid #61487e; border-radius: 10px; background: #252032; padding: 16px;
+}
+#firmware-modal .tech-dialog--firmware .firmware-target-list {
+  min-height: 48px; background: #181522; border-color: #775899;
+}
+#firmware-modal .tech-dialog--firmware .firmware-artifact-card .tech-field-card {
+  display: flex; flex-wrap: wrap; gap: 8px; border: none; padding: 0; background: transparent;
+}
+#firmware-modal .tech-dialog--firmware .input-with-btn { width: 100%; }
+#firmware-modal .firmware-recovery-card .modal-hint-text {
+  border-left: 3px solid #9d6adc; background: #2b2338; padding: 9px 12px;
+}
+#firmware-modal .modal-info-text.tech-notice {
+  background: #38281f; border-color: #e3a64d; color: #f7d09a;
+}
+#report-copy-modal .report-transfer-panel {
+  border: 1px solid #624b7e; border-radius: 9px; background: #251f33;
+}
+#report-copy-modal .tech-dialog--report-copy .tech-field-card {
+  background: #211a2e; border: 1px solid #54406b; padding: 9px;
+}
+#report-diagnosis-modal .report-diagnosis-body {
+  grid-template-columns: minmax(240px,27%) minmax(0,1fr);
+  align-items: stretch; gap: 15px; padding: 18px;
+}
+#report-diagnosis-modal .report-diagnosis-body > :is(.report-diagnosis-summary,.report-diagnosis-result) {
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  padding: 0; border: 1px solid #664b86; border-radius: 10px; background: #211c30;
+}
+#report-diagnosis-modal .tech-diagnosis-panel-title {
+  flex-shrink: 0; margin: 0; padding: 12px 16px; font-size: 15px;
+  font-weight: 700; color: #f1dcff; border-bottom: 1px solid #634b81;
+  background: #302340;
+}
+#report-diagnosis-modal .tech-diagnosis-scroll {
+  flex: 1; min-height: 0; overflow: auto; padding: 14px;
+}
+#report-diagnosis-modal .report-diagnosis-result > .tech-diagnosis-scroll { background: #1c1828; }
+@media (max-width: 800px) {
+  #firmware-modal .firmware-preflight-grid { grid-template-columns: 1fr; }
+  #report-diagnosis-modal .report-diagnosis-body { grid-template-columns: 1fr; overflow: auto; }
+  #report-diagnosis-modal .report-diagnosis-body > :is(.report-diagnosis-summary,.report-diagnosis-result) { overflow: visible; min-height: 140px; }
+  #report-diagnosis-modal .tech-diagnosis-scroll { overflow: visible; }
+}
+@media (max-width: 600px) {
+  #username-detect-modal .modal-body { padding: 12px; }
+  #username-detect-modal .tech-form-section--username-detect { padding: 6px; }
+  #username-detect-modal .tech-form-section--username-detect .tech-field-card { flex-wrap: wrap; gap: 8px; }
+  #username-detect-modal .tech-form-section--username-detect .tech-field-card > label { flex: 1; width: auto; min-width: 0; }
+  #username-detect-modal .tech-form-section--username-detect .tech-field-card > input { flex-basis: 100%; }
+  #firmware-modal .firmware-preflight-grid > .tech-section { padding: 10px; }
+}
