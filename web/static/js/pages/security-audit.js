@@ -321,9 +321,9 @@ function ensureSecurityAuditDetailModal() {
     modal.id = 'security-audit-detail-modal';
     modal.className = 'modal';
     modal.innerHTML = `
-        <div class="modal-content modal-xl">
-            <div class="modal-header">
-                <span class="modal-title">安全审计详情</span>
+        <div class="modal-content modal-xl tech-dialog tech-dialog--audit-detail"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg>
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#shield"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">安全审计详情</span></div>
                 <button type="button" class="modal-close" aria-label="关闭" data-action="close-security-audit-detail">&times;</button>
             </div>
             <div class="modal-body" id="security-audit-detail-body" style="overflow: auto; padding-right: 4px;">
@@ -564,9 +564,9 @@ function ensureOutboxDetailModal() {
     modal.id = 'outbox-detail-modal';
     modal.className = 'modal';
     modal.innerHTML = `
-        <div class="modal-content modal-l">
-            <div class="modal-header">
-                <span class="modal-title">历史邮件详情</span>
+        <div class="modal-content modal-l tech-dialog tech-dialog--outbox-detail"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg>
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#shield"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">历史邮件详情</span></div>
                 <button type="button" class="modal-close" aria-label="关闭" data-action="close-outbox-detail">&times;</button>
             </div>
             <div class="modal-body" id="outbox-detail-body" style="overflow: auto; padding-right: 4px;">

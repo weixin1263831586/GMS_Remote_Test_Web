@@ -1,0 +1,292 @@
+/*
+ * Purple Tech Modal System — shared visual layer for Shell and embedded pages.
+ *
+ * The actual modal lifecycle (show/hidden, focus, ESC, inert, stack/z-index)
+ * belongs to ModalManager / EmbeddedModalController / ClusterModalController.
+ * This stylesheet must not modify visibility or size-tier geometry.
+ *
+ * Palette comes from theme.css. Solid fills ONLY: no gradient backgrounds.
+ */
+:root {
+    --tech-modal-accent: var(--primary-color, #8b74e8);
+    --tech-modal-highlight: var(--primary-light, #c4b5fd);
+    --tech-modal-surface: var(--light-bg);
+    --tech-modal-field: var(--darker-bg);
+    --tech-modal-border: color-mix(in srgb, var(--tech-modal-accent) 28%, var(--border-color));
+}
+
+/* Backdrop and shell. Keep .show/[hidden] visibility owned by controllers. */
+:is(.modal, .modal-backdrop) {
+    /* Keep the GMS dashboard legible behind one active dialog.
+       Flat purple-black, with restrained blur; no compounded blackening. */
+    background-color: rgb(18 18 24 / 40%);
+    backdrop-filter: blur(3px) saturate(100%);
+    -webkit-backdrop-filter: blur(3px) saturate(100%);
+}
+:is(.modal, .modal-backdrop) .modal-content {
+    position: relative;
+    background: var(--tech-modal-surface);
+    color: var(--text-primary);
+    border: 1px solid var(--tech-modal-border);
+    border-radius: 8px;
+    box-shadow: 0 18px 50px rgb(0 0 0 / 50%),
+                0 0 0 1px color-mix(in srgb, var(--tech-modal-accent) 12%, transparent);
+    /* Do not set width/height/overflow: modal-xs/s/m/l/xl/workspace/pin own them. */
+}
+
+/* Minimal angled hardware-corner cues without clipping form content. */
+:is(.modal, .modal-backdrop) .modal-content::before,
+:is(.modal, .modal-backdrop) .modal-content::after {
+    content: "";
+    position: absolute;
+    z-index: 11;
+    width: 15px;
+    height: 15px;
+    pointer-events: none;
+    border-color: var(--tech-modal-highlight);
+    border-style: solid;
+}
+:is(.modal, .modal-backdrop) .modal-content::before {
+    top: 0;
+    left: 0;
+    border-width: 2px 0 0 2px;
+    border-radius: 7px 0 0 0;
+}
+:is(.modal, .modal-backdrop) .modal-content::after {
+    bottom: 0;
+    right: 0;
+    border-width: 0 2px 2px 0;
+    border-radius: 0 0 7px 0;
+}
+
+/* Header: solid charcoal, title rail and short angled purple accent. */
+:is(.modal, .modal-backdrop) .modal-content > .modal-header,
+:is(.modal, .modal-backdrop) .modal-content > .modal-head,
+.modal-backdrop > .modal-content > .section-head {
+    position: relative;
+    flex-shrink: 0;
+    background: var(--tech-modal-surface);
+    color: var(--text-primary);
+    border-bottom: 1px solid color-mix(in srgb, var(--tech-modal-accent) 44%, var(--border-color));
+}
+:is(.modal, .modal-backdrop) .modal-content > .modal-header::after,
+:is(.modal, .modal-backdrop) .modal-content > .modal-head::after,
+.modal-backdrop > .modal-content > .section-head::after {
+    content: "";
+    position: absolute;
+    left: 20px;
+    bottom: -1px;
+    width: 106px;
+    height: 3px;
+    background: var(--tech-modal-highlight);
+    clip-path: polygon(0 0, 100% 0, 94% 100%, 0 100%);
+    pointer-events: none;
+}
+:is(.modal, .modal-backdrop) .modal-content :is(.modal-title, .modal-header > h2, .modal-header > h3, .modal-head > h2, .section-head h2) {
+    color: var(--text-primary);
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: .2px;
+    line-height: 1.4;
+}
+:is(.modal, .modal-backdrop):not(#route-check-dialog) .modal-title {
+    position: relative;
+    padding-left: 13px;
+}
+:is(.modal, .modal-backdrop):not(#route-check-dialog) .modal-title::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 3px;
+    height: 16px;
+    transform: translateY(-50%);
+    border-radius: 1px;
+    background: var(--tech-modal-highlight);
+}
+
+/* Close affordances: never alter click target, focus trap or modal owner. */
+:is(.modal, .modal-backdrop) .modal-content .modal-close {
+    color: var(--text-secondary);
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: 6px;
+}
+:is(.modal, .modal-backdrop) .modal-content .modal-close:hover {
+    color: var(--text-primary);
+    border-color: var(--tech-modal-border);
+    background: color-mix(in srgb, var(--tech-modal-accent) 14%, var(--tech-modal-surface));
+}
+:is(.modal, .modal-backdrop) .modal-content .modal-close:focus-visible,
+:is(.modal, .modal-backdrop) .modal-content :is(button, input, select, textarea, a):focus-visible {
+    outline: 2px solid var(--tech-modal-highlight);
+    outline-offset: 2px;
+}
+
+/* Fields: neutral charcoal surfaces; active form control is violet. */
+:is(.modal, .modal-backdrop) .modal-content :is(
+    input[type="text"], input[type="password"], input[type="search"],
+    input[type="number"], input[type="url"], input[type="email"],
+    input[type="date"], input[type="time"], select, textarea
+) {
+    min-width: 0;
+    background: var(--tech-modal-field);
+    color: var(--text-primary);
+    border-color: var(--border-light);
+    border-radius: 6px;
+    box-shadow: none;
+}
+:is(.modal, .modal-backdrop) .modal-content :is(
+    input[type="text"], input[type="password"], input[type="search"],
+    input[type="number"], input[type="url"], input[type="email"],
+    input[type="date"], input[type="time"], select, textarea
+):focus:not(:disabled) {
+    border-color: var(--tech-modal-accent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--tech-modal-accent) 34%, transparent);
+}
+:is(.modal, .modal-backdrop) .modal-content :is(input, textarea)::placeholder {
+    color: var(--text-muted);
+    opacity: 1;
+}
+:is(.modal, .modal-backdrop) .modal-content :is(input[type="checkbox"], input[type="radio"]) {
+    accent-color: var(--tech-modal-accent);
+}
+:is(.modal, .modal-backdrop) .modal-content :is(.modal-fieldset, fieldset) {
+    border-color: var(--border-color);
+    border-radius: 7px;
+}
+:is(.modal, .modal-backdrop) .modal-content :is(.modal-hint-text, .modal-ssh-info) {
+    color: var(--text-secondary);
+    background: color-mix(in srgb, var(--tech-modal-accent) 8%, var(--tech-modal-surface));
+    border-left-color: var(--tech-modal-accent);
+}
+
+/* Footer and actions: matching solid buttons, not site-wide gradients. */
+/* Prevent legacy standalone-page defaults from leaking a gradient into
+   secondary/modal-only actions. Explicit .btn-primary/.primary below wins. */
+:is(.modal, .modal-backdrop) .modal-content button:not(.modal-close):not(.btn-danger):not(.danger):not(.warn) {
+    background: var(--lighter-bg);
+}
+
+:is(.modal, .modal-backdrop) .modal-content > :is(.modal-buttons, .modal-footer, .modal-actions),
+:is(.modal, .modal-backdrop) .modal-content > .modal-body > :is(.modal-buttons, .modal-footer, .modal-actions) {
+    border-top-color: color-mix(in srgb, var(--tech-modal-accent) 28%, var(--border-color));
+}
+:is(.modal, .modal-backdrop) .modal-content :is(button.btn-xxs, button.btn-xs, button.btn-small, button.secondary, .modal-actions > button, .modal-footer > button, .modal-buttons > button) {
+    border: 1px solid var(--border-light);
+    border-radius: 7px;
+    background: var(--lighter-bg);
+    color: var(--text-primary);
+    box-shadow: none;
+    transform: none;
+}
+:is(.modal, .modal-backdrop) .modal-content :is(
+    button.btn-primary, button.primary, button[type="submit"],
+    .modal-actions > button[data-click^="save"],
+    .modal-footer > button[data-click^="save"],
+    .modal-buttons > button[data-click^="submit"]
+) {
+    color: var(--text-on-accent, #fff);
+    border-color: var(--tech-modal-highlight);
+    background: var(--tech-modal-accent);
+}
+:is(.modal, .modal-backdrop) .modal-content :is(
+    button.btn-primary, button.primary, button[type="submit"],
+    .modal-actions > button[data-click^="save"],
+    .modal-footer > button[data-click^="save"],
+    .modal-buttons > button[data-click^="submit"]
+):hover:not(:disabled) {
+    background: var(--primary-strong);
+    border-color: var(--tech-modal-highlight);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--tech-modal-accent) 16%, transparent);
+}
+:is(.modal, .modal-backdrop) .modal-content :is(button.btn-danger, button.danger, button.warn) {
+    /* Preserve semantic danger/warning colors and destructive confirmation. */
+    border-color: color-mix(in srgb, var(--danger-color) 55%, var(--border-color));
+    background: color-mix(in srgb, var(--danger-color) 12%, var(--tech-modal-surface));
+    color: var(--danger-color);
+}
+:is(.modal, .modal-backdrop) .modal-content button:disabled {
+    cursor: not-allowed;
+    opacity: .55;
+}
+
+/* Two reference dialogs: keep original IDs, handlers, values and control order. */
+#tailscale-info-modal .modal-form-row,
+#username-detect-modal .modal-form-row {
+    gap: 9px;
+    padding: 9px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    background: var(--card-bg);
+}
+#tailscale-info-modal .modal-form-row label {
+    min-width: 102px !important;
+    color: var(--text-primary);
+    font-weight: 600;
+}
+#tailscale-info-modal .modal-form-row > input { flex: 1; min-width: 0; }
+#tailscale-info-modal .modal-form-row > button { flex: 0 0 auto; }
+#username-detect-modal .modal-form-row label {
+    min-width: 86px;
+    color: var(--text-primary);
+    font-weight: 600;
+}
+/* This variant already owns four clipped corners and a custom body. */
+#route-check-dialog .route-check-actions .btn-primary {
+    background: var(--tech-modal-accent);
+    border-color: var(--tech-modal-highlight);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--tech-modal-accent) 18%, transparent);
+}
+#route-check-dialog .route-check-actions .btn-primary:hover:not(:disabled) {
+    background: var(--primary-strong);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--tech-modal-accent) 25%, transparent);
+}
+#route-check-dialog .route-check-slashes {
+    background: var(--tech-modal-highlight);
+    width: 2px;
+    height: 11px;
+    transform: skewX(-25deg);
+    box-shadow: 6px 0 0 var(--tech-modal-highlight),
+                12px 0 0 var(--tech-modal-highlight),
+                18px 0 0 var(--tech-modal-highlight);
+}
+#config-modal .modal-header {
+    background: var(--tech-modal-surface);
+    border-bottom: 1px solid var(--tech-modal-border);
+}
+#config-modal .modal-title,
+#config-modal .modal-close { color: var(--text-primary); }
+#config-modal .modal-close { background: transparent; }
+#config-modal .modal-close:hover { background: var(--lighter-bg); }
+#radar-settings-save { background: var(--tech-modal-accent) !important; }
+
+/* Cluster section-header modals should look like standard header modals. */
+.modal-backdrop > .onboarding-modal.modal-content > .section-head {
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+}
+
+/* Responsive and accessibility: preserve width-tier and scrolling contract. */
+@media (max-width: 600px) {
+    #tailscale-info-modal .modal-form-row {
+        flex-wrap: wrap;
+    }
+    #tailscale-info-modal .modal-form-row label {
+        flex: 1 0 100%;
+    }
+    #tailscale-info-modal .modal-form-row input {
+        flex: 1 1 150px;
+    }
+    :is(.modal, .modal-backdrop) .modal-content > .modal-header::after {
+        width: 72px;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    :is(.modal, .modal-backdrop) .modal-content *,
+    :is(.modal, .modal-backdrop) .modal-content *::before,
+    :is(.modal, .modal-backdrop) .modal-content *::after {
+        animation-duration: .01ms !important;
+        transition-duration: .01ms !important;
+    }
+}

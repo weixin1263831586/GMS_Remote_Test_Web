@@ -1,20 +1,22 @@
 <div id="firmware-share-modal" class="modal" style="z-index: 10040;">
-        <div class="modal-content modal-workspace">
-            <div class="modal-header">
-                <span class="modal-title">共享固件</span>
-                <button type="button" class="modal-close" aria-label="关闭" data-click="closeFirmwareShareModal">&times;</button>
-            </div>
+        <div class="modal-content modal-workspace tech-dialog tech-dialog--firmware-share"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg>
+        <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#link"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">共享固件</span></div>
+                <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeFirmwareShareModal">&times;</button>
+            <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
             <div class="modal-body">
-                <div style="display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 12px; align-items: end;">
-                    <div class="modal-form-row" style="margin-bottom: 0;">
-                        <label>远端固件:</label>
+<p class="tech-intro">选择远端固件并设置共享名称和有效期。</p>
+                <div class="firmware-share-form-grid">
+                    <div class="modal-form-row tech-field-card" style="margin-bottom: 0;"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
+                        <label for="firmware-share-remote">远端固件:</label>
                         <div class="input-with-btn">
                             <input type="text" id="firmware-share-remote" placeholder="user@host:/absolute/path" />
                             <button class="btn-small" data-click="browseRemoteFileForFirmwareShare">编译服务器</button>
                         </div>
                     </div>
-                    <div class="modal-form-row" style="margin-bottom: 0;">
-                        <label>有效期:</label>
+                    <div class="modal-form-row tech-field-card tech-field-stack" style="margin-bottom: 0;"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span>
+                        <label for="firmware-share-expire-days">有效期:</label>
                         <select id="firmware-share-expire-days" style="height: 36px; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
                             <option value="0">长期有效</option>
                             <option value="1">1 天</option>
@@ -23,16 +25,12 @@
                         </select>
                     </div>
                 </div>
-                <div class="modal-form-row" style="margin-top: 10px;">
-                    <label>显示名称:</label>
+                <section class="tech-form-section tech-form-section--firmware-share" aria-label="共享固件"><div class="modal-form-row tech-field-card" style="margin-top: 10px;"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#user"></use></svg></span>
+                    <label for="firmware-share-name">显示名称:</label>
                     <input type="text" id="firmware-share-name" placeholder="可选，默认使用文件名" />
-                </div>
+                </div></section>
                 <div id="firmware-share-validation" class="modal-info-text" style="min-height: 20px;"></div>
-                <div class="modal-buttons" style="justify-content: flex-start; margin-top: 8px;">
-                    <button class="btn-xxs" data-click="validateFirmwareShare">校验</button>
-                    <button class="btn-xxs btn-primary" data-click="createFirmwareShare">创建分享</button>
-                    <button class="btn-xxs" data-click="loadFirmwareShares">刷新列表</button>
-                </div>
+
                 <div style="margin-top: 12px; border: 1px solid var(--border-color); border-radius: 8px; overflow: auto; max-height: calc(92vh - 238px);">
                     <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                         <thead style="position: sticky; top: 0; z-index: 1;">
@@ -50,5 +48,11 @@
                     </table>
                 </div>
             </div>
-        </div>
+
+<div class="modal-buttons tech-dialog-actions" style="justify-content: flex-start; margin-top: 8px;"><span class="tech-footer-decoration" aria-hidden="true"></span>
+                    <button class="btn-xxs" data-click="validateFirmwareShare">校验</button>
+                    <button class="btn-xxs btn-primary" data-click="createFirmwareShare">创建分享</button>
+                    <button class="btn-xxs" data-click="loadFirmwareShares">刷新列表</button>
+                </div>
+</div>
     </div>

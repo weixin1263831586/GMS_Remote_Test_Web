@@ -1,39 +1,35 @@
 <div id="firmware-modal" class="modal">
-        <div class="modal-content modal-s">
-            <div class="modal-header">
-                <span class="modal-title">烧写固件</span>
-                <button type="button" class="modal-close" aria-label="关闭" data-click="closeFirmwareModal">&times;</button>
-            </div>
+        <div class="modal-content modal-s tech-dialog tech-dialog--firmware"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg>
+        <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#chip"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">固件烧写</span></div>
+                <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeFirmwareModal">&times;</button>
+            <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
             <div class="modal-body">
-                <div class="modal-fieldset">
-                    <div class="modal-form-row">
+                <div class="firmware-preflight-grid"><section class="tech-section firmware-target-card"><h3 class="tech-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#device"></use></svg>设备目标</h3><div class="modal-form-row">
                         <label>目标设备:</label>
                         <div class="firmware-target-list" id="firmware-target-devices">未选择</div>
-                    </div>
-                    <div class="modal-form-row">
-                        <label>固件文件:</label>
+                    </div></section><section class="tech-section firmware-artifact-card"><h3 class="tech-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg>固件文件</h3><div class="modal-form-row tech-field-card"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg></span>
+                        <label for="firmware-path">固件文件:</label>
                         <div class="input-with-btn">
                             <input type="text" id="firmware-path" placeholder="选择本机文件或输入服务器固件路径" />
                             <button class="btn-small" data-click="browseLocalFileForFirmware">本机</button>
                             <button class="btn-small" data-click="browseRemoteFileForFirmware">服务器</button>
                         </div>
-                    </div>
-                    <div class="firmware-file-meta is-empty" id="firmware-file-meta"></div>
-                </div>
-                <div class="modal-fieldset">
-                    <div class="modal-fieldset-title">烧写后恢复（AOA）</div>
+                    </div><div class="firmware-file-meta is-empty" id="firmware-file-meta"></div></section><div class="modal-fieldset tech-section firmware-recovery-card">
+                    <h3 class="tech-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg>烧写后恢复（AOA）</h3>
                     <div class="modal-form-row">
                         <label><input type="checkbox" id="firmware-aoa-enabled" data-change="toggleFirmwareAoa" />
                             自动完成开机向导并开启 USB 调试</label>
                     </div>
                     <div class="firmware-aoa-options is-disabled" id="firmware-aoa-options">
-                        <div class="modal-form-row">
+                        <div class="modal-form-row tech-field-card"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
                             <label for="firmware-aoa-profile">AOA 配置:</label>
                             <select id="firmware-aoa-profile" disabled aria-describedby="firmware-aoa-hint">
                                 <option value="">正在加载配置…</option>
                             </select>
                         </div>
-                        <div class="modal-form-row">
+                        <div class="modal-form-row tech-field-card"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span>
                             <label for="firmware-aoa-boot-wait">启动等待(秒):</label>
                             <input id="firmware-aoa-boot-wait" type="number" min="0" max="600" step="1" value="60" disabled />
                         </div>
@@ -42,14 +38,16 @@
                         一次一台本地 USB 设备；开机后自动回放并验证 ADB。
                     </div>
                     <button class="btn-xxs" type="button" data-click="openFirmwareAoaProfile">查看所选 AOA 配置 / 补齐固件声明</button>
-                </div>
-                <div class="modal-info-text">
+                </div></div>
+                <div class="modal-info-text tech-notice">
                     ⚠️ 烧写将重启设备进入刷机模式并清除数据，请确认目标设备。
                 </div>
-                <div class="modal-buttons">
+
+            </div>
+
+<div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
                     <button class="btn-xxs" data-click="closeFirmwareModal">取消</button>
                     <button class="btn-xxs btn-primary" data-click="submitFirmwareBurn">开始烧写</button>
                 </div>
-            </div>
-        </div>
+</div>
     </div>

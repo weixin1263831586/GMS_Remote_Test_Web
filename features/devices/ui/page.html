@@ -9,8 +9,13 @@
     <style>{{CONSOLE_CSS}}</style>
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-ui-foundations">
 <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers">
+<link rel="stylesheet" href="/static/css/modal-tech.css?v=20261116-aligned-corner-path">
+<link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261116-aligned-corner-path">
+<link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261116-aligned-corner-path">
 <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261116-tab-focus-ring">
 <script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
+<script src="/static/js/dialog-prompts.js?v=20261116-aligned-corner-path"></script>
+<script src="/static/js/dialog-frame.js?v=20261116-aligned-corner-path"></script>
 </head>
 <body>
 <main class="page-shell">
@@ -46,8 +51,8 @@
 </main>
 
 <div id="binding-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="binding-title">
-    <form id="binding-form" class="modal-content modal-s" autocomplete="off">
-        <div class="modal-head modal-header"><h2 id="binding-title" class="modal-title">串口绑定</h2><button id="close-binding" class="modal-close" type="button" aria-label="关闭">×</button></div>
+    <form id="binding-form" class="modal-content modal-s tech-dialog tech-dialog--serial-binding" autocomplete="off"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+        <div class="modal-head modal-header tech-dialog-header"><div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#plug"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><h2 id="binding-title" class="modal-title">串口绑定</h2></div><span class="tech-header-ticks" aria-hidden="true"></span><button id="close-binding" class="modal-close" type="button" aria-label="关闭">×</button><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
         <div class="modal-body">
         <p id="binding-port" class="mono"></p>
         <label>绑定设备<select id="binding-label"><option value="">正在加载本机设备…</option></select></label>
@@ -58,7 +63,7 @@
         <label>回车发送<select id="binding-newline"><option value="cr">CR (\r)</option><option value="lf">LF (\n)</option><option value="crlf">CRLF</option><option value="none">不追加</option></select></label>
         <label class="switch-row"><input id="binding-capture" type="checkbox"><span>开启常驻日志采集</span></label>
         </div>
-        <div class="modal-actions">
+        <div class="modal-actions tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
             <button id="delete-binding" class="danger" type="button">删除绑定</button>
             <span class="spacer"></span>
             <button id="cancel-binding" type="button">取消</button>
@@ -71,6 +76,6 @@
 <script src="/static/js/shell/ui-primitives.js?v=20261112-ui-foundations"></script>
 <script src="/static/vendor/xterm/xterm.min.js"></script>
 <script src="/static/vendor/xterm/xterm-addon-fit.min.js"></script>
-<script src="/devices-console/page.js?v=20261112-purple-surfaces"></script>
+<script src="/devices-console/page.js?v=20261116-aligned-corner-path"></script>
 </body>
 </html>

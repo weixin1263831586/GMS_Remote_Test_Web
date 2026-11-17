@@ -221,7 +221,8 @@
         }
 
         async function kbNewSpace() {
-            const name = prompt('知识库名称');
+            const result = await GmsDialogs.form('知识库名称', [{name: 'value', label: '知识库名称', required: true}]);
+            const name = result?.value;
             if (!name || !name.trim()) return;
             const sp = await kbFetch('/api/knowledge/spaces', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name.trim()})});
             kbState.currentSpace = sp.space_id;
@@ -229,7 +230,8 @@
         }
 
         async function kbNewFolder() {
-            const title = prompt('目录名称');
+            const result = await GmsDialogs.form('目录名称', [{name: 'value', label: '目录名称', required: true}]);
+            const title = result?.value;
             if (!title || !title.trim()) return;
             await kbFetch('/api/knowledge/folders', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({space_id:kbState.currentSpace, parent_id:kbState.currentParent, title:title.trim()})});
             await kbLoadTree();
@@ -332,7 +334,8 @@
         }
 
         async function kbAsk() {
-            const question = prompt('全库提问');
+            const result = await GmsDialogs.form('全库提问', [{name: 'value', label: '全库提问', required: true, multiline: true}]);
+            const question = result?.value;
             if (!question || !question.trim()) return;
             const data = await kbFetch('/api/knowledge/ask', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:question.trim(), space_id:kbState.currentSpace})});
             const info = document.getElementById('kb-side-info');

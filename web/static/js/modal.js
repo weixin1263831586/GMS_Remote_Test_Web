@@ -28,14 +28,21 @@ function createAnalysisModal(type, title, loadingMessage) {
     modal.id = modalId;
     modal.className = 'modal';
     modal.innerHTML = `
-        <div class="modal-content modal-xl">
-            <div class="modal-header">
-                <span class="modal-title"></span>
+        <div class="modal-content modal-m tech-dialog tech-dialog--dynamic-analysis"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg>
+            <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span>
+            <span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg>
+                <div class="tech-title-group">
+                    <span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#search"></use></svg></span>
+                    <span class="tech-title-divider" aria-hidden="true"></span>
+                    <span class="modal-title"></span>
+                </div>
+                <span class="tech-header-ticks" aria-hidden="true"></span>
                 <button type="button" class="modal-close" aria-label="关闭">&times;</button>
             </div>
             <div class="modal-body">
-                <div style="text-align: center; padding: 40px;">
-                    <div style="font-size: 48px; margin-bottom: 20px;">🔍</div>
+                <div class="tech-analysis-state">
+                    <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#search"></use></svg>
                     <div class="modal-loading-message" style="color: var(--text-secondary); margin-bottom: 12px;"></div>
                 </div>
             </div>

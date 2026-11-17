@@ -118,7 +118,7 @@ async function createRun() {
         ].join('\n');
         const confirmed = typeof window.parent?.showConfirmDialog === 'function'
             ? await window.parent.showConfirmDialog('启动 GMS ATS 流水线', message)
-            : window.confirm(message);
+            : await GmsDialogs.confirm('启动 GMS ATS 流水线', message);
         if (!confirmed) {
             toast('已取消启动，预检结果仍然有效');
             return;

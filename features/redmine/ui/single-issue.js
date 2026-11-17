@@ -33,13 +33,13 @@ function openSingleIssueAnalysisHint() {
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = 'modal';
-  modal.innerHTML = '<div class="modal-content modal-l single-issue-analysis-hint-modal">'
-    + '<div class="modal-header"><span class="modal-title">🤖 辅助分析说明</span>'
+  modal.innerHTML = '<div class="modal-content modal-m single-issue-analysis-hint-modal tech-dialog tech-dialog--analysis-hint"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>'
+    + '<div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg><div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">辅助分析说明</span></div>'
     + '<button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
     + '<div class="modal-body"><label for="' + modalId + '-text">提供已观察的现象、复现结果或希望重点核查的实际值；kkagent 会将其作为待验证线索。</label>'
     + '<textarea id="' + modalId + '-text" maxlength="4000" placeholder="例如：经验证补丁无效，需要查看设备上的实际值 notification_custom_view_max_image_width。">' + esc(singleIssueAnalysisHint) + '</textarea>'
     + '<div class="muted">最多 4000 个字符。</div></div>'
-    + '<div class="modal-footer"><button type="button" class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">取消</button>'
+    + '<div class="modal-footer tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span><button type="button" class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">取消</button>'
     + '<button type="button" class="ka-btn primary" data-single-issue-save-hint>保存</button></div></div>';
   document.body.appendChild(modal);
   modal.querySelector('[data-single-issue-save-hint]').addEventListener('click', function () {
@@ -328,7 +328,7 @@ function showSingleIssueAnalysis(runId, statisticsOnly) {
 }
 
 // 「查看分析」弹框统一构建：单号分析历史条目与每日晨报条目共用同一布局
-// （item = {run, issues: [issue]}；标题「🤖 AI 分析 · #id · 状态」+ 纯
+// （item = {run, issues: [issue]}；标题「AI 分析 · #id · 状态」+ 纯
 // Markdown 报告正文 + 底部「执行过程 / 关闭」）。AI 统计、重新分析入口
 // 都在行级按钮上，弹框内不再重复。
 function openSingleIssueReportModal(item, statisticsOnly) {
@@ -356,12 +356,12 @@ function openSingleIssueReportModal(item, statisticsOnly) {
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = statisticsOnly ? 'modal' : 'modal daily-brief-analysis-overlay';
-  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal' + (statisticsOnly ? ' daily-brief-statistics-modal' : '') + '">'
-    + '<div class="modal-header"><span class="modal-title daily-brief-modal-title"><span>'
-    + (statisticsOnly ? '📊 AI 统计' : '🤖 AI 分析') + ' · #' + esc(issue.issue_id)
+  modal.innerHTML = '<div class="modal-content ' + (statisticsOnly ? 'modal-l' : 'modal-workspace') + ' daily-brief-modal' + (statisticsOnly ? ' daily-brief-statistics-modal' : '') + ' tech-dialog tech-dialog--single-issue"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>'
+    + '<div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg><div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title daily-brief-modal-title"><span>'
+    + (statisticsOnly ? 'AI 统计' : 'AI 分析') + ' · #' + esc(issue.issue_id)
     + (statusText ? ' · ' + esc(statusText) : '') + '</span>'
     + (subject ? '<span class="daily-brief-modal-subject">' + esc(subject) + '</span>' : '')
-    + '</span><button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
+    + '</span></div><button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
     + '<div class="modal-body daily-brief-modal-body">' + body + '</div>'
     + '<div class="modal-buttons daily-brief-modal-footer">'
     + (statisticsOnly ? '' : '<button class="secondary" data-click="openSingleIssueAnalysisTimeline" data-a0="' + esc(issue.issue_id) + '"'

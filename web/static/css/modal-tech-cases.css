@@ -1,0 +1,304 @@
+/* Task-specific composition. Each selector corresponds to a real dialog body. */
+.tech-form-section { min-width: 0; }
+.tech-form-section > .tech-section-title { color: var(--text-secondary); font-size: 14px; }
+/* Identity: connection summary first, then editable credentials. */
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog--username-detect { width: min(620px,calc(100vw - 32px)); max-width: min(620px,calc(100vw - 32px)); }
+.tech-dialog--username-detect .tech-field-card { min-height: 54px; }
+.tech-dialog--username-detect .modal-ssh-info { margin-top: 18px; color: var(--text-secondary); padding: 12px 0 0; border: 0; background: transparent; font-size: 14px; }
+.tech-dialog--username-detect .tech-field-card:has(#username-detect-ip) { background: var(--tech-panel); border-color: var(--tech-edge-soft); }
+.tech-dialog--device-password #device-host-display,
+.tech-dialog--firmware-share-password #firmware-share-password-host { font-family: ui-monospace,monospace; color: var(--primary-light); }
+.tech-dialog--elevate #elevate-action-label { border-color: #997148; background: #2a2226; }
+.tech-dialog--vpn-credential .tech-field-card { min-height: 60px; }
+.tech-dialog--wifi .tech-form-section { display: grid; gap: 4px; }
+.tech-dialog--sn .tech-field-card { margin-top: 18px; }
+.tech-dialog--gms-assistant-config .tech-field-card > label { min-width: 100px; }
+/* Creation forms: paired metadata in tool editors; simple categories stay stacked. */
+.tech-dialog--category .tech-field-card,
+.tech-dialog--ut-category .tech-field-card { min-height: 54px; }
+.tech-dialog--tool .tech-form-section,
+.tech-dialog--ut-tool .tech-form-section { display: block; }
+.tech-dialog--tool .tech-section-title,
+.tech-dialog--ut-tool .tech-section-title { grid-column: 1 / -1; margin-bottom: 0; }
+.tech-dialog--tool .tech-field-card,
+.tech-dialog--ut-tool .tech-field-card { flex-wrap: nowrap; margin-bottom: 8px; }
+.tech-dialog--tool .tech-field-card > :is(input,select),
+.tech-dialog--ut-tool .tech-field-card > :is(input,textarea,select,.input-with-btn) { width: auto; flex: 1 1 0; min-width: 0; }
+.tech-dialog--tool .tech-field-card:has(#tool-url),
+.tech-dialog--ut-tool .tech-field-card:has(#ut-tool-filepath),
+.tech-dialog--ut-tool .tech-field-card:has(#ut-tool-desc) { grid-column: 1 / -1; }
+.tech-dialog--device-group .tech-field-card:has(.group-picklist) { display: grid; grid-template-columns: 38px minmax(0,1fr); }
+.tech-dialog--device-group .group-picklist { grid-column: 1 / -1; width: 100%; box-sizing: border-box; padding: 12px; background: var(--tech-input); border: 1px solid var(--tech-edge-soft); border-radius: 7px; }
+.tech-dialog--client-account-switch .modal-body > div:not(.tech-intro) { border-radius: 9px; }
+.tech-dialog--add-local-suite .tech-field-card { flex-wrap: wrap; }
+.tech-dialog--add-local-suite .tech-field-card > input { width: 100%; flex-basis: 100%; }
+.tech-dialog--extract-suite .tech-field-card { margin-bottom: 12px; }
+.tech-dialog--extract-suite .tech-field-card > label { min-width: 120px; }
+/* Firmware: source and targets across the top; AOA configuration spans the width. */
+#firmware-modal > .modal-content.tech-dialog--firmware { width: min(820px,calc(100vw - 32px)); max-width: min(820px,calc(100vw - 32px)); height: auto; }
+.firmware-preflight-grid { display: grid; grid-template-columns: minmax(0,.85fr) minmax(0,1.15fr); gap: 12px; }
+.firmware-preflight-grid .modal-fieldset { margin: 0; }
+.firmware-preflight-grid .firmware-recovery-card { grid-column: 1 / -1; }
+.tech-dialog--firmware .firmware-target-card .modal-form-row { display: block; }
+.tech-dialog--firmware .firmware-target-card .modal-form-row > label,
+.tech-dialog--firmware .firmware-artifact-card .tech-field-glyph,
+.tech-dialog--firmware .firmware-artifact-card .modal-form-row > label { display: none; }
+.tech-dialog--firmware .firmware-target-list { padding: 14px; border: 1px solid var(--tech-edge-soft); background: var(--tech-control); border-radius: 7px; color: var(--primary-light); min-height: 40px; overflow-wrap: anywhere; }
+.tech-dialog--firmware .firmware-artifact-card .tech-field-card { display: block; padding: 0; border: 0; background: transparent; }
+.tech-dialog--firmware .input-with-btn { display: flex; flex-wrap: nowrap; gap: 6px; }
+.tech-dialog--firmware #firmware-path { flex: 1 1 0; width: 0; }
+.tech-dialog--firmware .firmware-file-meta { margin-top: 10px; color: var(--text-secondary); }
+.tech-dialog--firmware .firmware-aoa-options { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px 18px; align-items: center; padding: 10px 0; }
+.tech-dialog--firmware .firmware-aoa-options .tech-field-card { display: flex; align-items: center; flex-wrap: nowrap; gap: 8px; padding: 0; margin: 0; border: 0; background: transparent; }
+.tech-dialog--firmware .firmware-aoa-options .tech-field-card > label { flex: none; min-width: 0; padding: 0; border: 0; white-space: nowrap; }
+.tech-dialog--firmware .firmware-aoa-options .tech-field-glyph { display: none; }
+.tech-dialog--firmware .firmware-aoa-options select { width: auto; flex: 1 1 0; }
+.tech-dialog--firmware .firmware-aoa-options input { width: 72px; flex: 0 0 72px; }
+.tech-dialog--firmware .modal-info-text { color: #e6be70; background: #352923; border-color: #efc45c; }
+.tech-dialog--gsi .tech-field-card { flex-wrap: wrap; }
+.tech-dialog--gsi .input-with-btn { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 8px; }
+.tech-dialog--gsi .input-with-btn > input { flex: 1 1 240px; }
+/* Report transfer has a directional center rail, each side owns three fields. */
+.tech-dialog--report-copy .report-transfer-grid { display: grid; grid-template-columns: minmax(0,1fr) 30px minmax(0,1fr); gap: 10px; align-items: stretch; }
+.tech-dialog--report-copy .report-transfer-panel { padding: 14px; }
+.tech-dialog--report-copy .tech-field-card { margin-bottom: 8px; padding: 8px; }
+.tech-dialog--report-copy .tech-field-glyph { display: none; }
+.tech-dialog--report-copy .tech-field-card > label { padding-left: 10px; }
+.tech-dialog--report-copy .tech-section-title { margin-bottom: 10px; }
+.tech-dialog--report-copy .modal-body > .modal-info-text { margin-top: 0; padding: 10px 14px; font-size: 12px; }
+/* Device routing: source/destination separate from live assignment inventory. */
+.tech-dialog--adb-proxy .device-routing-fields,
+.tech-dialog--usbip-attach .device-routing-fields { display: grid; grid-template-columns: 1fr; gap: 10px; padding: 12px; border: 1px solid var(--tech-edge-soft); border-radius: 9px; background: var(--tech-panel); }
+.tech-dialog--adb-proxy .device-routing-fields .tech-field-card,
+.tech-dialog--usbip-attach .device-routing-fields .tech-field-card { display: grid; grid-template-columns: 30px minmax(0,1fr); padding: 0; border: 0; background: transparent; }
+.tech-dialog--adb-proxy .device-routing-fields .tech-field-card > select,
+.tech-dialog--usbip-attach .device-routing-fields .tech-field-card > select { grid-column: 1 / -1; width: 100%; }
+.tech-dialog--adb-proxy .adb-proxy-section-head,
+.tech-dialog--usbip-attach .adb-proxy-section-head { padding: 10px 2px; border-bottom: 1px solid var(--tech-edge-soft); margin-bottom: 12px; }
+.tech-dialog--adb-proxy .adb-proxy-assignments,
+.tech-dialog--usbip-attach .adb-proxy-assignments { margin-top: 10px; border: 1px solid var(--tech-edge-soft); background: var(--tech-input); border-radius: 8px; }
+.tech-dialog--usbip-attach .device-routing-device-row { display: grid; grid-template-columns: 38px minmax(0,1fr); margin-top: 14px; }
+.tech-dialog--usbip-attach .usbip-device-select { grid-column: 1 / -1; width: 100%; }
+/* Diagnosis: summary sidebar and independently scrolling evidence pane. */
+.tech-dialog--report-diagnosis .report-diagnosis-body { display: grid; grid-template-columns: minmax(240px,300px) minmax(0,1fr); gap: 12px; overflow: hidden; padding: 20px; }
+.tech-dialog--report-diagnosis .report-diagnosis-summary { display: block; overflow-y: auto; margin: 0; padding: 16px; border: 1px solid var(--tech-edge-soft); border-radius: 11px; background: var(--tech-panel); }
+.tech-dialog--report-diagnosis .report-diagnosis-result { overflow-y: auto; align-content: start; border: 1px solid var(--tech-edge-soft); border-radius: 11px; padding: 16px; }
+.tech-dialog--report-diagnosis .dx-hero { background: var(--tech-panel); padding: 14px; }
+.tech-dialog--report-diagnosis .dx-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.tech-dialog--report-diagnosis .dx-card { background: var(--tech-panel); border-color: var(--tech-edge-soft); border-radius: 10px; }
+.tech-dialog--report-diagnosis .dx-section-head { padding-bottom: 10px; border-bottom: 1px solid var(--tech-edge-soft); }
+.tech-dialog--report-diagnosis .dx-hero-head { display: block; }
+.tech-dialog--device-config .dcfg-tabs { margin: 12px 18px 0; padding: 6px; border: 1px solid var(--tech-edge-soft); border-radius: 8px; background: var(--tech-panel); }
+.tech-dialog--device-config .dcfg-body { background: var(--tech-input); }
+.tech-dialog--device-config :is(.dcfg-tree,.dcfg-section,.dcfg-panel) { border-color: var(--tech-edge-soft); }
+.tech-dialog--weekly-report .modal-body > div: first-of-type { padding: 14px; border: 1px solid var(--tech-edge-soft); border-radius: 9px; background: var(--tech-panel); }
+.tech-dialog--weekly-report #weekly-report-content { margin-top: 8px; border: 1px solid var(--tech-edge-soft); border-radius: 9px; padding: 20px !important; background: var(--tech-input); }
+.tech-dialog--test-results #test-results-list { margin-bottom: 20px; border-color: var(--tech-edge-soft) !important; background: var(--tech-input); }
+.tech-dialog--sidebar-visibility .sidebar-settings-tabs { padding: 6px; border: 1px solid var(--tech-edge-soft); border-radius: 9px; background: var(--tech-panel); }
+.tech-dialog--sidebar-visibility .sidebar-visibility-list { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; padding-top: 16px; }
+.tech-dialog--ui-control .modal-body { background: var(--tech-input); }
+.tech-dialog--usage-examples .modal-body { line-height: 1.85; }
+.tech-dialog--guide-image .modal-body { background: var(--tech-input); }
+.tech-dialog--file-browser .modal-body { display: flex; flex-direction: column; gap: 12px; }
+.tech-dialog--firmware-share table { background: var(--tech-input); }
+/* Upload is a real drop target, never a decorative image of one. */
+.tech-dialog--kb-upload #kb-upload-drop-zone { padding: 48px 20px !important; border: 1px dashed var(--primary-light) !important; background: var(--tech-panel); border-radius: 12px !important; }
+.tech-dialog--kb-upload #kb-upload-drop-zone:focus-visible { outline: 2px solid var(--tech-bright); outline-offset: 3px; }
+.tech-dialog--kb-upload #kb-upload-status:empty { display: none; }
+.tech-dialog--kb-upload .upload-emblem { width: 56px; height: 56px; margin: 0 auto 14px; color: var(--primary-light); }
+.tech-dialog--mainline-sync .modal-body .modal-info-text { padding: 20px; border: 1px solid var(--tech-edge-soft); border-radius: 10px; }
+.tech-dialog--install-guide :is(pre,code),
+.tech-dialog--sshd-install-guide :is(pre,code),
+.tech-dialog--usage-examples :is(pre,code) { background: var(--tech-input); color: var(--primary-light); border-color: var(--tech-edge-soft); }
+.tech-dialog--confirm #confirm-message { margin: 0 !important; padding: 20px; background: var(--tech-panel) !important; border: 1px solid #985367; border-left: 3px solid #df8b9c; color: #f3c3cd; border-radius: 9px; }
+.tech-dialog--confirm #confirm-ok-btn { background: #9c3653 !important; border-color: #de8ca3 !important; box-shadow: none; }
+/* Agent enrollment separates identity, permissions, and Worker/device limits. */
+.tech-dialog--agent-enrollment :is(.agent-access-scope-fieldset,.agent-access-target-details) { margin-top: 18px; border-color: var(--tech-edge-soft); background: var(--tech-panel); border-radius: 10px; }
+.tech-dialog--sdk-source .sdk-source-section { margin-bottom: 16px; }
+.tech-dialog--sdk-source .agent-access-form-grid { margin: 0; }
+.tech-dialog--sdk-source .agent-sdk-path-list { background: var(--tech-input); border-color: var(--tech-edge-soft); }
+.tech-dialog--agent-scopes .modal-body { display: grid; gap: 10px; }
+.tech-dialog--config #config-modal-body :is(fieldset,.config-section) { border-color: var(--tech-edge-soft); background: var(--tech-panel); }
+.tech-dialog--update-radar-settings .radar-task-fieldset { background: var(--tech-panel); border-color: var(--tech-edge-soft); border-radius: 9px; }
+/* Embedded workspaces: metadata cards, connection form, date-range pair, detail table. */
+.tech-dialog:is([class*='tech-dialog--redmine-'],[class*='tech-dialog--gerrit-']) .form-grid { gap: 14px; }
+.tech-dialog--redmine-user .modal-body,
+.tech-dialog--redmine-project .modal-body { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; align-content: start; }
+.tech-dialog--redmine-department .tech-field-card { margin-bottom: 12px; }
+.tech-dialog--redmine-reset .modal-info-text { border-left-color: #ed8799; background: #32232b; }
+.tech-dialog--redmine-settings .tech-field-card,
+.tech-dialog--gerrit-settings .tech-field-card { margin-bottom: 12px; }
+.tech-dialog--redmine-trend-range .modal-body,
+.tech-dialog--gerrit-trend-range .form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
+.tech-dialog--redmine-trend-detail .modal-body,
+.tech-dialog--gerrit-trend-detail .modal-body { background: var(--tech-input); }
+.tech-dialog--redmine-batch-import textarea { min-height: 160px; }
+.tech-dialog--redmine-knowledge .modal-body { background: var(--tech-input); }
+.tech-dialog--redmine-reference .tech-field-card { margin-bottom: 12px; }
+.tech-dialog--redmine-internal-create .tech-field-card { margin-bottom: 12px; }
+.tech-dialog--gerrit-personal .tech-field-card,
+.tech-dialog--gerrit-department .tech-field-card,
+.tech-dialog--gerrit-owner .tech-field-card { min-height: 54px; }
+.tech-dialog--gerrit-route .form-group { padding: 14px; border: 1px solid var(--tech-edge-soft); border-radius: 9px; margin-bottom: 12px; }
+.tech-dialog--cluster-onboarding .onboarding-grid { gap: 12px; }
+.tech-dialog--cluster-onboarding .onboarding-grid > label,
+.tech-dialog--cluster-worker-config .onboarding-grid > label { padding: 14px; border: 1px solid var(--tech-edge-soft); background: var(--tech-panel); border-radius: 9px; }
+.tech-dialog--cluster-onboarding .command-box { margin-top: 18px; border-color: var(--tech-edge-soft); background: var(--tech-input); }
+.tech-dialog--cluster-worker-config .actions { padding: 12px 0; justify-content: flex-end; }
+.tech-dialog--serial-binding .modal-body > label:not(.switch-row) { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; margin: 0 0 12px; border: 1px solid var(--tech-edge-soft); border-radius: 9px; background: var(--tech-panel); }
+@media(max-width: 800px) {
+  .firmware-preflight-grid { grid-template-columns: 1fr; }
+  .tech-dialog--report-diagnosis .report-diagnosis-body { grid-template-columns: 1fr; overflow-y: auto; }
+  .tech-dialog--report-diagnosis :is(.report-diagnosis-summary,.report-diagnosis-result) { overflow: visible; }
+  .tech-dialog--sidebar-visibility .sidebar-visibility-list { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media(max-width: 520px) {
+  .tech-dialog--tool .tech-form-section,
+  .tech-dialog--ut-tool .tech-form-section,
+
+  .tech-dialog--report-copy .report-transfer-grid,
+  .tech-dialog--adb-proxy .device-routing-fields,
+  .tech-dialog--usbip-attach .device-routing-fields,
+  .tech-dialog--redmine-user .modal-body,
+  .tech-dialog--redmine-project .modal-body,
+  .tech-dialog--redmine-trend-range .modal-body,
+  .tech-dialog--gerrit-trend-range .form-grid,
+  .tech-dialog--sidebar-visibility .sidebar-visibility-list { grid-template-columns: 1fr; }
+  .tech-dialog--report-copy .report-transfer-grid > div[aria-hidden] { padding: 0 !important; transform: rotate(90deg); }
+  .tech-dialog--report-copy .report-transfer-panel { padding: 12px; }
+  .tech-dialog--report-copy .tech-field-stack { display: grid !important; }
+  .tech-dialog--report-diagnosis .modal-header { flex-wrap: wrap; }
+}
+/* Runtime-created dialogs have their own content composition. */
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog--report-source { width: min(680px,calc(100vw - 32px)); max-width: min(680px,calc(100vw - 32px)); }
+.report-import-choices { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
+.report-import-choice { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 14px; min-height: 160px; padding: 20px 16px; border: 1px dashed var(--primary-light); border-radius: 12px; background: var(--tech-panel); color: var(--text-primary); cursor: pointer; }
+.report-import-choice:hover { background: var(--tech-control); border-color: var(--primary-light); }
+.report-import-choice > .ui-icon { width: 38px; height: 38px; color: var(--primary-light); }
+.report-import-choice > strong { font-size: 16px; }
+.report-import-choice > span { color: var(--text-secondary); font-size: 13px; }
+.tech-dialog--redmine-auth .modal-form-row { gap: 12px; padding: 12px; background: var(--tech-panel); border: 1px solid var(--tech-edge-soft); border-radius: 9px; }
+.tech-dialog--redmine-auth .modal-form-row > label { min-width: 72px; color: var(--primary-light); }
+.tech-dialog--report-reply .modal-body,
+.tech-dialog--redmine-reply .modal-body { display: grid; grid-template-columns: minmax(0,1fr) minmax(200px,.6fr); gap: 12px; align-content: start; }
+.tech-dialog--report-reply .modal-body > div:has(textarea),
+.tech-dialog--redmine-reply .modal-body > div:has(textarea) { grid-column: 1; grid-row: 2 / span 2; }
+.tech-dialog--report-reply .modal-body > div:has([type=file]),
+.tech-dialog--redmine-reply .modal-body > div:has([type=file]) { grid-column: 2; grid-row: 2; }
+.tech-dialog--report-reply .modal-body > div:has(button[data-click*='Send']),
+.tech-dialog--redmine-reply .modal-body > .modal-buttons { grid-column: 1 / -1; }
+.tech-upload-zone { min-height: 150px; display: grid; place-content: center; border: 1px dashed var(--primary-light) !important; border-radius: 9px; background: var(--tech-panel) !important; color: var(--text-secondary) !important; padding: 20px; text-align: center; }
+.tech-dialog--audit-detail .modal-body,
+.tech-dialog--outbox-detail .modal-body { padding: 16px 18px !important; }
+.tech-dialog--audit-detail .modal-body > div,
+.tech-dialog--outbox-detail .modal-body > div { border-color: var(--tech-edge-soft) !important; background: var(--tech-panel) !important; border-radius: 9px !important; }
+.tech-dialog--build-password #build-password-input { width: 100%; }
+.tech-dialog--build-password .modal-body { padding: 28px; }
+.tech-dialog--brief-statistics .daily-brief-modal-body { background: var(--tech-input); }
+.tech-dialog--brief-history .daily-brief-modal-body { padding: 16px; }
+.tech-dialog--analysis-timeline .daily-brief-modal-body { background: var(--tech-input); }
+.tech-dialog--analysis-hint textarea { width: 100%; min-height: 220px; margin: 14px 0; }
+.tech-dialog--single-issue .daily-brief-modal-body,
+.tech-dialog--brief-session .daily-brief-modal-body { background: var(--tech-input); }
+/* Routing probe has two aligned IP rows and a dedicated live result panel. */
+#route-check-dialog .modal-content.tech-dialog--route-check { width: min(600px,calc(100vw - 32px)); max-width: min(600px,calc(100vw - 32px)); }
+#route-check-dialog :is(.route-check-corner,.route-check-rule,.route-check-ticks,.route-check-slashes) { display: none; }
+#route-check-dialog .modal-header { min-height: 54px; padding: 10px 18px 14px; border-bottom: 1px solid var(--tech-edge-soft); }
+#route-check-dialog .modal-title { font-size: 17px; letter-spacing: 0; }
+#route-check-dialog .route-check-badge { width: 28px; height: 28px; background: var(--tech-accent-soft); box-shadow: none; }
+#route-check-dialog .route-check-title-sep { height: 22px; }
+#route-check-dialog .modal-body { padding: 14px 18px; gap: 12px; display: flex; flex-direction: column; }
+#route-check-dialog .route-check-form .form-group { display: grid; grid-template-columns: 108px minmax(0,1fr); gap: 4px 12px; margin: 0; padding: 12px 14px; background: var(--tech-panel); border: 1px solid var(--tech-edge-soft); border-radius: 9px; }
+#route-check-dialog .route-check-form label { align-self: center; font-size: 14px; margin: 0; }
+#route-check-dialog .route-check-form .route-check-field { background: var(--tech-input); border-color: var(--tech-edge-soft); min-height: 36px; }
+#route-check-dialog .route-check-form input[type=text] { font-size: 13px; background: transparent; padding: 8px 12px; }
+#route-check-dialog .route-check-form small { grid-column: 2; margin: 0; font-size: 11px; }
+#route-check-dialog .route-probe-results { margin-top: 6px; }
+#route-check-dialog .ping-result { margin: 0; padding: 8px 0; border: 0; background: transparent; }
+#route-check-dialog .route-check-actions { margin: 0; min-height: 62px; padding: 10px 18px 22px; }
+#route-check-dialog .route-check-actions .btn-xxs { min-height: 34px; padding: 7px 12px; font-size: 13px; }
+@media(max-width: 700px) {
+ .report-import-choices { grid-template-columns: 1fr; gap: 14px; }
+ .report-import-choice { min-height: 150px; }
+ .tech-dialog--report-reply .modal-body,
+ .tech-dialog--redmine-reply .modal-body { display: block; }
+ #route-check-dialog .modal-title { font-size: 16px; }
+ #route-check-dialog .modal-body { padding: 18px; }
+ #route-check-dialog .route-check-form .form-group { grid-template-columns: 1fr; }
+ #route-check-dialog .route-check-form small { grid-column: 1; }
+ #route-check-dialog .route-check-actions { padding: 14px 18px 26px; }
+}
+/* Content-sized information and transfer dialogs must reveal all primary fields. */
+#username-detect-modal > .modal-content.tech-dialog { width: min(620px,calc(100vw - 32px)); max-width: min(620px,calc(100vw - 32px)); }
+#username-detect-modal .modal-ssh-info { background: transparent; padding: 12px 0 0; font-size: 14px; }
+#report-copy-modal > .report-copy-modal-content { width: min(760px,calc(100vw - 32px)); max-width: min(760px,calc(100vw - 32px)); height: auto; max-height: calc(100dvh - 32px); }
+#tailscale-info-modal [data-modal-initial-focus]:focus { outline: none; }
+.tech-dialog--firmware .btn-small { min-height: 34px; padding: 7px 12px; border-color: var(--tech-edge-soft); background: var(--tech-control); }
+.tech-dialog--firmware .firmware-artifact-card .tech-section-title .ui-icon { display: block; }
+@media(max-width: 520px) {
+ #report-copy-modal > .report-copy-modal-content { max-height: calc(100dvh - 16px); }
+}
+/* Native top-layer fallback for standalone pages without a modal stack owner. */
+dialog.gms-native-dialog { margin: 0; padding: 16px; border: 0; max-width: none; max-height: none; background: transparent; }
+dialog.gms-native-dialog:not([open]) { display: none; }
+dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-filter: blur(3px); }
+.tech-dialog--input .tech-field-stack { display: grid; }
+.tech-dialog--input .tech-field-stack > :is(input,textarea) { width: 100%; }
+.tech-dialog--input textarea { min-height: 160px; resize: vertical; }
+.gms-danger-prompt .tech-intro { padding: 18px; background: #33232e; color: #f2c0cf; border: 1px solid #a15c73; border-radius: 9px; }
+.gms-danger-prompt button[type=submit] { background: #93314e !important; border-color: #ed9bb1 !important; }
+.dx-summary-cards { display: grid; gap: 12px; margin-bottom: 18px; }
+.dx-summary-card { display: grid; grid-template-columns: 34px minmax(0,1fr); gap: 2px 12px; align-items: center; padding: 10px; border: 1px solid var(--tech-edge-soft); border-radius: 9px; background: var(--tech-panel); }
+.dx-summary-card > .ui-icon { grid-row: 1 / span 2; width: 28px; height: 28px; color: var(--primary-light); }
+.dx-summary-card > span { font-size: 12px; color: var(--text-secondary); }
+.dx-summary-card > strong { font-size: 16px; color: var(--text-primary); overflow-wrap: anywhere; }
+.dx-summary-card.success { background: #203332; border-color: #38625b; }
+.dx-summary-card.success > :is(strong,.ui-icon) { color: #69d4a1; }
+.dx-summary-card.danger { background: #37202e; border-color: #874357; }
+.dx-summary-card.danger > :is(strong,.ui-icon) { color: #ed8299; }
+.tech-dialog--report-diagnosis .dx-hero { font-size: 12px; border-color: var(--tech-edge-soft); }
+.tech-dialog--report-diagnosis .dx-workflow-step { padding: 16px; border: 1px solid var(--tech-edge-soft); border-radius: 10px; background: var(--tech-panel); }
+.tech-dialog--report-diagnosis .dx-section { background: var(--tech-input); border-color: var(--tech-edge-soft); }
+@media(max-width: 800px) {
+ .dx-summary-cards { grid-template-columns: repeat(auto-fit,minmax(130px,1fr)); }
+}
+/* Small tasks retain their original size tiers; these variants need modest room. */
+:is(.modal,.modal-backdrop) .modal-content:is(.tech-dialog--gerrit-personal,.tech-dialog--gerrit-department,.tech-dialog--gerrit-owner) { width: min(520px,calc(100vw - 24px)); max-width: min(520px,calc(100vw - 24px)); }
+:is(.modal,.modal-backdrop) .modal-content:is(.tech-dialog--gerrit-trend-range,.tech-dialog--redmine-user) { width: min(620px,calc(100vw - 24px)); max-width: min(620px,calc(100vw - 24px)); }
+#report-copy-modal select.combo-box { min-height: 36px; }
+#route-check-dialog .route-probe-results { padding: 10px 12px; }
+#route-check-dialog .route-probe-results .tech-section-title { margin-bottom: 6px; padding-bottom: 6px; font-size: 13px; }
+#route-check-dialog .tech-notice { margin: 0; padding: 6px 2px; border: 0; background: transparent; font-size: 12px; }
+.firmware-share-form-grid { display: grid; grid-template-columns: minmax(0,1fr) 200px; gap: 12px; align-items: start; }
+#firmware-share-modal > .modal-content { width: min(960px,calc(100vw - 32px)); max-width: min(960px,calc(100vw - 32px)); height: auto; max-height: calc(100dvh - 32px); }
+#firmware-share-modal .modal-body > div:has(> table) { max-height: 340px !important; }
+.tech-dialog--file-browser .modal-buttons > div { flex-wrap: wrap; }
+.tech-dialog--device-config > .dcfg-tabs { display: flex; flex-wrap: wrap; flex-shrink: 0; gap: 6px; margin: 10px 18px 0; padding: 6px; }
+.tech-dialog--device-config .dcfg-tabs .dcfg-tabbtn { flex: 0 0 auto; min-width: 0; }
+@media(max-width: 700px) {
+ .firmware-share-form-grid { grid-template-columns: 1fr; }
+ .tech-dialog--device-config .dcfg-header { flex-wrap: wrap; }
+ .tech-dialog--file-browser .modal-buttons { gap: 10px; }
+}
+.tech-analysis-state { display: flex; align-items: center; gap: 16px; padding: 14px; border: 1px solid var(--tech-edge-soft); border-radius: 8px; background: var(--tech-panel); }
+.tech-analysis-state > .ui-icon { flex: none; width: 28px; height: 28px; color: var(--primary-light); }
+.tech-analysis-state .modal-loading-message { margin: 0 !important; }
+
+@media(max-width: 700px) {
+ .tech-dialog--firmware .firmware-aoa-options { grid-template-columns: 1fr; }
+ .tech-dialog--firmware .firmware-aoa-options .tech-field-card > :is(select,input) { flex-basis: auto; }
+ .tech-dialog--firmware .firmware-aoa-options input { flex: 0 0 72px; }
+}
+
+.tech-dialog--tool #emoji-picker-row { grid-column: 1 / -1; display: block; min-width: 0; }
+.tech-dialog--tool #emoji-picker-row > .tech-field-glyph { display: none; }
+.tech-dialog--tool #emoji-picker-row > label { display: block; min-width: 0; margin: 0 0 6px; font-size: 12px; color: var(--text-secondary); }
+.tech-dialog--tool #emoji-picker { width: 100%; box-sizing: border-box; grid-template-columns: repeat(auto-fill,minmax(28px,1fr)) !important; max-height: 88px; overflow-y: auto; }
+.tech-dialog--firmware-share .tech-field-card:has(#firmware-share-expire-days) { display: flex; flex-wrap: nowrap; gap: 8px; }
+.tech-dialog--firmware-share .tech-field-card:has(#firmware-share-expire-days) > .tech-field-glyph { display: none; }
+.tech-dialog--firmware-share .tech-field-card:has(#firmware-share-expire-days) > label { min-width: 0; padding: 0; border: 0; white-space: nowrap; }
+.tech-dialog--firmware-share #firmware-share-expire-days { width: auto; flex: 1 1 0; }
+.tech-dialog--firmware-share #firmware-share-validation:empty { display: none; }
+
+.tech-dialog--firmware .firmware-aoa-options #firmware-aoa-boot-wait { width: 72px; min-width: 72px; flex: 0 0 72px; }
+#route-check-dialog .route-check-slashes { right: 64px; bottom: 14px; }

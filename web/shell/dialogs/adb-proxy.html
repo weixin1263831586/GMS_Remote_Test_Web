@@ -1,9 +1,10 @@
 <div id="adb-proxy-modal" class="modal">
-        <div class="modal-content modal-m modal-pin device-routing-modal-content adb-proxy-modal-content">
-            <div class="modal-header">
-                <span class="modal-title">🔌 ADB设备接入</span>
-                <button type="button" class="modal-close" aria-label="关闭" data-click="closeAdbProxyModal">&times;</button>
-            </div>
+        <div class="modal-content modal-m modal-pin device-routing-modal-content adb-proxy-modal-content tech-dialog tech-dialog--adb-proxy"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg>
+        <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#plug"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">ADB设备接入</span></div>
+                <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeAdbProxyModal">&times;</button>
+            <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
             <div class="modal-body">
                 <form id="adb-proxy-form" data-submit="submitAdbProxyConnect" data-prevent autocomplete="off">
                     <div class="adb-proxy-section-head">
@@ -15,11 +16,11 @@
                     </div>
                     <div id="adb-proxy-ubuntu-source-panel" class="adb-proxy-ubuntu-source-panel" hidden>
                         <div class="adb-proxy-host-grid">
-                            <div class="modal-form-row">
+                            <div class="modal-form-row tech-field-card"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#server"></use></svg></span>
                                 <label for="adb-proxy-ubuntu-host">SSH主机</label>
                                 <input id="adb-proxy-ubuntu-host" type="text" placeholder="用户名@IP 或 用户名@[IPv6]:端口" autocomplete="off">
                             </div>
-                            <div class="modal-form-row">
+                            <div class="modal-form-row tech-field-card"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg></span>
                                 <label for="adb-proxy-ubuntu-password">SSH密码</label>
                                 <input id="adb-proxy-ubuntu-password" type="password" placeholder="仅用于本次安装" autocomplete="new-password">
                             </div>
@@ -30,16 +31,16 @@
                         </div>
                     </div>
                     <div class="device-routing-fields">
-                        <div class="modal-form-row">
+                        <div class="modal-form-row tech-field-card"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#device"></use></svg></span>
                             <label for="adb-proxy-source-host">设备来源</label>
                             <select id="adb-proxy-source-host" data-change="renderAdbProxySourceDevices"></select>
                         </div>
-                        <div class="modal-form-row">
+                        <div class="modal-form-row tech-field-card"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#server"></use></svg></span>
                             <label for="adb-proxy-target-host">接入主机</label>
                             <select id="adb-proxy-target-host"></select>
                         </div>
                     </div>
-                    <div class="modal-form-row device-routing-device-row">
+                    <div class="modal-form-row device-routing-device-row tech-field-card"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#device"></use></svg></span>
                         <label for="adb-proxy-source-devices">ADB设备</label>
                         <select id="adb-proxy-source-devices" class="usbip-device-select" multiple size="3">
                             <option value="">请选择设备来源</option>
@@ -60,7 +61,7 @@
                     single-user 仅表示每台 Worker 共用一个 Linux 运行账号，不限制平台多用户并发。
                 </div>
             </div>
-            <div class="modal-buttons device-routing-modal-buttons">
+            <div class="modal-buttons tech-dialog-actions device-routing-modal-buttons"><span class="tech-footer-decoration" aria-hidden="true"></span>
                 <button class="btn-xxs" type="button" data-click="closeAdbProxyModal">关闭</button>
                 <button class="btn-xxs btn-primary" id="adb-proxy-connect-submit" type="button" data-click="submitAdbProxyConnect">接入</button>
             </div>

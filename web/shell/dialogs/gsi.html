@@ -1,40 +1,44 @@
 <div id="gsi-modal" class="modal">
-        <div class="modal-content modal-s">
-            <div class="modal-header">
-                <span class="modal-title">烧写GSI镜像</span>
-                <button type="button" class="modal-close" aria-label="关闭" data-click="closeGsiModal">&times;</button>
-            </div>
+        <div class="modal-content modal-s tech-dialog tech-dialog--gsi"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg>
+        <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#package"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">烧写GSI镜像</span></div>
+                <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeGsiModal">&times;</button>
+            <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
             <div class="modal-body">
-                <div class="modal-form-row">
-                    <label>GSI烧写脚本:</label>
+<p class="tech-intro">确认烧写脚本、System 镜像与可选的 Vendor Boot 镜像。</p>
+                <section class="tech-form-section tech-form-section--gsi" aria-label="镜像与脚本"><h3 class="tech-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chip"></use></svg>镜像与脚本</h3><div class="modal-form-row tech-field-card"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
+                    <label for="gsi-script">GSI烧写脚本:</label>
                     <div class="input-with-btn">
                         <input type="text" id="gsi-script" placeholder="请选择GSI烧写脚本" />
                         <button class="btn-small" data-click="browseLocalFileForGsiScript" aria-label="操作"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#folder"></use></svg></button>
                     </div>
                 </div>
-                <div class="modal-form-row">
-                    <label>System 镜像:</label>
+                <div class="modal-form-row tech-field-card"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
+                    <label for="gsi-system">System 镜像:</label>
                     <div class="input-with-btn">
                         <input type="text" id="gsi-system" placeholder="请选择System镜像" />
                         <button class="btn-small" data-click="browseLocalFileForGsiSystem" aria-label="操作"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#folder"></use></svg></button>
                         <button class="btn-small" data-click="pickLocalGsiSystemFile">本机</button>
                     </div>
                 </div>
-                <div class="modal-form-row">
-                    <label>Vendor Boot 镜像:</label>
+                <div class="modal-form-row tech-field-card"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
+                    <label for="gsi-vendor">Vendor Boot 镜像:</label>
                     <div class="input-with-btn">
                         <input type="text" id="gsi-vendor" placeholder="选择本机文件或输入服务器Vendor Boot路径(可选)" />
                         <button class="btn-small" data-click="browseLocalFileForGsiVendor">本机</button>
                         <button class="btn-small" data-click="browseRemoteFileForGsiVendor">服务器</button>
                     </div>
-                </div>
+                </div></section>
                 <div class="modal-info-text">
                     ⚠️ GSI烧写会在需要时自动解锁 Bootloader（通常会清除设备数据），并自动处理分区删除、镜像烧写和设备重启。
                 </div>
-                <div class="modal-buttons">
+
+            </div>
+
+<div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
                     <button class="btn-xxs" data-click="closeGsiModal">取消</button>
                     <button class="btn-xxs btn-primary" data-click="submitGsiBurn">开始烧写</button>
                 </div>
-            </div>
-        </div>
+</div>
     </div>

@@ -30,7 +30,7 @@ async function retryRun(runId) {
         const message = '将使用原配置重新执行整条流水线，包含已配置的构建、烧写和测试。新运行会保留来源记录。是否继续？';
         const confirmed = typeof window.parent.showConfirmDialog === 'function'
             ? await window.parent.showConfirmDialog('重跑流水线', message)
-            : window.confirm(message);
+            : await GmsDialogs.confirm('重跑流水线', message);
         if (!confirmed) return;
         const run = await api(`/api/automation/runs/${encodeURIComponent(runId)}/retry`, {method: 'POST'});
         resetRunHistoryPage('runs');

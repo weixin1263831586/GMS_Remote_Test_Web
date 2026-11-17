@@ -112,20 +112,13 @@ class RuntimeAutomationHistoryTests(RuntimeUiHarness):
         calls = self.mock_history(page)
         try:
             self.open_history(page)
-            messages = []
-
-            def dismiss(dialog):
-                messages.append(dialog.message)
-                dialog.dismiss()
-
-            page.on('dialog', dismiss)
             page.get_by_role('button', name='重跑流水线', exact=True).click()
-            self.assertIn('构建、烧写和测试', messages[0])
+            expect(page.locator('dialog[open]')).to_contain_text('构建、烧写和测试')
+            page.locator('dialog[open] [data-cancel]').click()
             self.assertFalse([call for call in calls if call[0] == 'POST'])
-            page.remove_listener('dialog', dismiss)
-            page.once('dialog', lambda dialog: dialog.accept())
+            page.get_by_role('button', name='重跑流水线', exact=True).click()
             with page.expect_request(lambda r: r.method == 'POST' and r.url.endswith('/run-new/retry')):
-                page.get_by_role('button', name='重跑流水线', exact=True).click()
+                page.locator('dialog[open] button[type=submit]').click()
             expect(page.locator('#workflow-pane-events')).to_have_attribute('aria-hidden', 'false')
             posts = [call for call in calls if call[0] == 'POST']
             self.assertEqual(len(posts), 1)

@@ -13,26 +13,24 @@ function selectReportSource() {
     modal.className = 'modal';
     modal.style.cssText = 'z-index: 10000;';
     modal.innerHTML = `
-        <div class="modal-content modal-xs">
-            <div class="modal-header">
-                <span class="modal-title">选择上传方式</span>
+        <div class="modal-content modal-xs tech-dialog tech-dialog--report-source"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg>
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">选择上传方式</span></div>
                 <button type="button" class="modal-close" aria-label="关闭" data-click="closeReportSourceModal">&times;</button>
             </div>
-            <div class="modal-body" style="padding: 20px;">
-                <div style="display: flex; flex-direction: column; gap: 12px;">
-                    <button class="btn-md" data-click="selectReportFile" style="width: 100%; justify-content: center;">
-                        📄 上传文件
+            <div class="modal-body">
+                <p class="tech-intro">导入 Tradefed 测试结果，解析后进入报告分析。</p>
+                <div class="report-import-choices">
+                    <button type="button" class="report-import-choice" data-click="selectReportFile">
+                        <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg><strong>上传报告文件</strong>
+                        <span>选择 XML 或 ZIP / RAR / TAR.GZ 压缩包</span>
                     </button>
-                    <div style="font-size: 10px; color: var(--text-secondary); text-align: center;">
-                        支持 .xml, .zip, .rar, .tar.gz
-                    </div>
-                    <button class="btn-md" data-click="selectReportFolder" style="width: 100%; justify-content: center;">
-                        📁 上传文件夹
+                    <button type="button" class="report-import-choice" data-click="selectReportFolder">
+                        <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#folder"></use></svg><strong>上传报告文件夹</strong>
+                        <span>选择包含 test_result.xml 的结果目录</span>
                     </button>
-                    <div style="font-size: 10px; color: var(--text-secondary); text-align: center;">
-                        选择包含 test_result.xml 的文件夹
-                    </div>
                 </div>
+                <div class="tech-notice"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg>保留原始报告结构，系统自动识别测试类型和用例结果。</div>
             </div>
         </div>
     `;
@@ -430,9 +428,9 @@ function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill,
     modal.className = 'modal';
     modal.style.cssText = 'z-index: 10000;';
     modal.innerHTML = `
-        <div class="modal-content modal-xs">
-            <div class="modal-header">
-                <span class="modal-title">🔐 Redmine 认证</span>
+        <div class="modal-content modal-xs tech-dialog tech-dialog--redmine-auth"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg>
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">Redmine 认证</span></div>
                 <button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseRedmineAuthModal">&times;</button>
             </div>
             <div class="modal-body">
@@ -448,7 +446,7 @@ function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill,
                            data-keypress="submitRedmineAuth" data-a0="${escapedUrl}" data-key="Enter" data-prevent>
                 </div>
                 </form>
-                <div class="modal-buttons">
+                <div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
                     <button class="btn-xs" data-click="_actCloseRedmineAuthModal">取消</button>
                     <button class="btn-xs btn-primary" data-click="submitRedmineAuth" data-a0="${escapedUrl}">确定</button>
                 </div>
@@ -1321,8 +1319,23 @@ function renderReportDiagnosis(data) {
         patchDraft
     };
 
+    const reportSummary = window.currentReportAnalysisData?.summary || {};
+    const summaryCards = [
+        ['package', '测试类型', suiteTarget.test_type || data.test_type || '—', ''],
+        ['archive', '套件版本', suiteTarget.suite_version || data.suite_version || '—', ''],
+        ['check', '通过用例', reportSummary.pass ?? '—', 'success'],
+        ['error', '失败用例', reportSummary.fail ?? '—', 'danger'],
+        ['grid', '总用例数', reportSummary.total ?? '—', '']
+    ].map(([icon, label, value, tone]) => `
+        <div class="dx-summary-card ${tone}">
+            <svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#${icon}"></use></svg>
+            <span>${label}</span><strong>${escapeHtml(String(value))}</strong>
+        </div>`).join('');
+
     if (diagnosticSummary) {
         diagnosticSummary.innerHTML = `
+            <h3 class="tech-section-title"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#chart"></use></svg>报告摘要</h3>
+            <div class="dx-summary-cards">${summaryCards}</div>
             <div class="dx-hero">
                 <div class="dx-title-row">
                     <div class="dx-title-main">${escapeHtml(data.test_name || data.report_name || '诊断工作台')}</div>
@@ -1803,30 +1816,20 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
     modal.className = 'modal';
     // 显示/隐藏由 ModalManager（registerDynamic → open）统一接管，
     // 这里不得写 style.display 覆盖其所有权。
-    modal.style.cssText = `
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100% !important;
-        height: 100% !important;
-        background: rgba(0, 0, 0, 0.7) !important;
-        justify-content: center !important;
-        align-items: center !important;
-        z-index: 10000 !important;
-    `;
+
 
     let html = `
-        <div class="modal-content modal-xl">
-            <div class="modal-body">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; font-size: 18px; font-weight: 600;">🤖 报错分析</h2>
+        <div class="modal-content modal-xl tech-dialog tech-dialog--report-ai"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg>
+                <div class="tech-title-group"><span class="tech-title-glyph"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><h2 class="modal-title">报错分析</h2></div>
                 <div style="display: flex; align-items: center; gap: 10px;">
                     ${data.source_code_fetched ? '<span style="font-size: 10px; background: var(--primary-gradient); color: var(--text-on-accent); padding: 3px 10px; border-radius: 4px;">✓ 源码已获取</span>' : ''}
                     ${data.ai_enabled === false ? '<span style="font-size: 10px; background: var(--warning-color); color: var(--text-on-accent); padding: 2px 8px; border-radius: 4px;">规则分析</span>' : '<span style="font-size: 10px; background: var(--skill-accent); color: var(--text-on-accent); padding: 2px 8px; border-radius: 4px;">AI增强</span>'}
                     ${data.ai_model ? `<span style="font-size: 10px; background: var(--success-color); color: white; padding: 2px 8px; border-radius: 4px;">${escapeHtml(data.ai_model)}</span>` : ''}
-                    <button data-click="closeAIAnalysisModal" data-a0="${modalId}" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);">×</button>
+                    <button type="button" class="modal-close" aria-label="关闭" data-click="closeAIAnalysisModal" data-a0="${modalId}">×</button>
                 </div>
             </div>
+            <div class="modal-body">
     `;
 
     if (data.source_code_fetched && data.source_url) {
@@ -1902,9 +1905,9 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
 
 
     html += `
-            <div class="modal-buttons">
-                <button data-click="closeAIAnalysisModal" data-a0="${modalId}" class="btn-xs">关闭</button>
-                <button data-click="copyAIAnalysis" data-a0="${modalId}" class="btn-xs" style="background: var(--success-color);">📋 复制分析报告</button>
+            <div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
+                <button type="button" class="btn-xs" data-click="closeAIAnalysisModal" data-a0="${modalId}">关闭</button>
+                <button data-click="copyAIAnalysis" data-a0="${modalId}" class="btn-xs">📋 复制分析报告</button>
             </div>
             </div>
         </div>
@@ -1937,6 +1940,10 @@ function closeAIAnalysisModal(modalId) {
 function copyAIAnalysis(modalId) {
     const modal = document.getElementById(modalId);
     if (!modal) return;
+    if (!navigator.clipboard) {
+        showToast('当前环境不支持自动复制', 'error');
+        return;
+    }
 
     const textElements = modal.querySelectorAll('div[style*="font-size"]');
     let text = 'CTS测试失败AI分析报告\n';

@@ -690,9 +690,12 @@ async function sendWeeklyReportEmail() {
     if (!weeklyReportMarkdown) { showToast('请先生成周报', 'warning'); return; }
     const d = window.__weeklyReportData || {};
     const r = d.range || {};
-    const to = prompt('收件人邮箱（多个用逗号或分号分隔）：', '');
-    if (!to || !to.trim()) return;
-    const cc = (prompt('抄送（可留空，多个用逗号或分号分隔）：', '') || '').trim();
+    const recipients = await GmsDialogs.form('发送邮件', [
+        {name: 'to', label: '收件人邮箱', required: true, placeholder: '多个地址用逗号或分号分隔'},
+        {name: 'cc', label: '抄送（可选）', placeholder: '多个地址用逗号或分号分隔'}
+    ], {submitLabel: '发送邮件'});
+    if (!recipients) return;
+    const {to, cc} = recipients;
     const subject = `周报 - ${d.name || ''} ${r.start || ''}~${r.end || ''}`.trim();
     const status = document.getElementById('weekly-report-status');
     if (status) status.textContent = '正在发送邮件...';

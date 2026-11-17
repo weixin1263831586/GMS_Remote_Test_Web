@@ -151,9 +151,9 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
     // <textarea> 均可被 `</textarea><img onerror=...>` 逃逸）。模板只含
     // 常量，报告数据在 DOM 构建后通过 .value 赋值。
     modal.innerHTML = `
-        <div class="modal-content modal-l">
-            <div class="modal-header">
-                <span class="modal-title">📝 Redmine回复</span>
+        <div class="modal-content modal-l tech-dialog tech-dialog--report-reply"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg>
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#edit"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">Redmine回复</span></div>
                 <button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseModal" data-a0="${modalId}">&times;</button>
             </div>
             <div class="modal-body">
@@ -172,7 +172,7 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
                     <input type="file" id="${fileInputId}" data-redmine-files multiple
                            style="display: none;"
                            data-change="updateRedmineFileList" data-a0="${fileInputId}" data-a1="${fileListId}">
-                    <div id="${fileInputId}-drop" class="redmine-drop-zone" data-redmine-drop
+                    <div id="${fileInputId}-drop" class="redmine-drop-zone tech-upload-zone" role="button" tabindex="0" data-keydown="_actClickById" data-key="13,32" data-prevent data-redmine-drop
                          data-click="_actClickById" data-a0="${fileInputId}"
                          style="padding: 20px 14px; background: var(--secondary-bg); color: var(--text-muted); border: 2px dashed var(--border-color); border-radius: 6px; cursor: pointer; font-size: 12px; width: 100%; text-align: center; transition: all 0.2s; user-select: none;">
                         📎 拖拽文件到此处，或点击选择文件
@@ -360,9 +360,12 @@ async function sendReportAnalysisEmail() {
         showToast('请先生成报告分析结果', 'warning');
         return;
     }
-    const to = prompt('收件人邮箱（多个用逗号或分号分隔）：', '');
-    if (!to || !to.trim()) return;
-    const cc = (prompt('抄送（可留空，多个用逗号或分号分隔）：', '') || '').trim();
+    const recipients = await GmsDialogs.form('发送邮件', [
+        {name: 'to', label: '收件人邮箱', required: true, placeholder: '多个地址用逗号或分号分隔'},
+        {name: 'cc', label: '抄送（可选）', placeholder: '多个地址用逗号或分号分隔'}
+    ], {submitLabel: '发送邮件'});
+    if (!recipients) return;
+    const {to, cc} = recipients;
 
     const esc = escapeHtml;
 

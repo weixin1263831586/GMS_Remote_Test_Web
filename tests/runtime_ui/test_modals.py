@@ -419,14 +419,14 @@ class RuntimeModalsTests(RuntimeUiHarness):
             initial_box = modal.bounding_box()
             self.assertIsNotNone(initial_box)
             self.assertAlmostEqual(initial_box["width"], 760, delta=0.5)
-            self.assertAlmostEqual(initial_box["height"], 500, delta=0.5)
+            self.assertLess(initial_box["height"], 640)
             page.evaluate(
-                "setReportCopyStatus('状态内容出现后，弹框外框尺寸仍然保持固定。', 'info')"
+                "setReportCopyStatus('状态内容出现后，弹框适应内容并保持操作区可见。', 'info')"
             )
             status_box = modal.bounding_box()
             self.assertIsNotNone(status_box)
             self.assertAlmostEqual(status_box["width"], initial_box["width"], delta=0.5)
-            self.assertAlmostEqual(status_box["height"], initial_box["height"], delta=0.5)
+            self.assertLess(status_box["height"], 720)
 
             select_metrics = page.locator("#report-copy-target-suite").evaluate(
                 """select => {
@@ -440,6 +440,7 @@ class RuntimeModalsTests(RuntimeUiHarness):
                     };
                 }"""
             )
+            # 报告拷贝的专属紧凑表单继续沿用原有 36px 高度。
             self.assertAlmostEqual(select_metrics["height"], 36, delta=0.5)
             self.assertLessEqual(
                 select_metrics["fontSize"]
@@ -585,6 +586,77 @@ class RuntimeModalsTests(RuntimeUiHarness):
             page.wait_for_function(
                 "() => document.getElementById('worker-config-modal').hidden")
             self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_tailscale_reference_geometry_and_typography(self):
+        """Reference-sized platform rows retain an intact frame and natural height."""
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.set_viewport_size({"width": 1672, "height": 941})
+            page.evaluate("() => ModalManager.open('tailscale-info-modal')")
+            report = page.locator("#tailscale-info-modal").evaluate(
+                """modal => {
+                    const content = modal.querySelector('.modal-content');
+                    const box = content.getBoundingClientRect();
+                    const title = modal.querySelector('.modal-title');
+                    const label = modal.querySelector('.tech-tailscale-row label');
+                    const input = modal.querySelector('.tech-tailscale-row input');
+                    const btn = modal.querySelector('.tech-tailscale-row button');
+                    return {
+                        width: box.width,
+                        height: box.height,
+                        border: getComputedStyle(content).borderTopWidth,
+                        clip: getComputedStyle(content).clipPath,
+                        fontTitle: getComputedStyle(title).fontSize,
+                        fontLabel: getComputedStyle(label).fontSize,
+                        fontInput: getComputedStyle(input).fontSize,
+                        fontButton: getComputedStyle(btn).fontSize,
+                        brands: modal.querySelectorAll('.tech-brand-icon').length,
+                        backdropColor: getComputedStyle(modal).backgroundColor,
+                        backdropBlur: getComputedStyle(modal).backdropFilter,
+                    };
+                }"""
+            )
+            self.assertAlmostEqual(report["width"], 820, delta=2)
+            self.assertLess(report["height"], 800)
+            self.assertEqual(report["border"], "1px")
+            self.assertEqual(report["clip"], "none")
+            for key, value in (
+                ("fontTitle", "17px"),
+                ("fontLabel", "13px"),
+                ("fontInput", "13px"),
+                ("fontButton", "13px"),
+            ):
+                self.assertEqual(report[key], value, report)
+            self.assertEqual(report["brands"], 4)
+            self.assertEqual(report["backdropColor"], "rgba(18, 18, 24, 0.4)")
+            self.assertIn("blur(3px)", report["backdropBlur"])
+        finally:
+            page.close()
+
+    def test_firmware_and_route_modals_keep_full_borders(self):
+        """Two formerly clipped/oversized panels remain bounded and readable."""
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.set_viewport_size({"width": 1440, "height": 960})
+            page.evaluate("() => ModalManager.open('firmware-modal')")
+            firmware = page.locator("#firmware-modal .modal-content")
+            metrics = firmware.evaluate(
+                """el => {
+                    const rect = el.getBoundingClientRect();
+                    return {width: rect.width, height: rect.height,
+                            border: getComputedStyle(el).borderTopWidth,
+                            clip: getComputedStyle(el).clipPath};
+                }"""
+            )
+            self.assertAlmostEqual(metrics["width"], 820, delta=2)
+            self.assertLess(metrics["height"], 920)
+            self.assertEqual(metrics["border"], "1px")
+            self.assertEqual(metrics["clip"], "none")
+            page.evaluate("() => ModalManager.close('firmware-modal')")
         finally:
             page.close()
 

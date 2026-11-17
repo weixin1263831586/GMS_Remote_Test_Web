@@ -8,7 +8,7 @@ let opsEventsCache = [];
 
 function opsConfirm(title, message) {
     return typeof window.parent?.showConfirmDialog === 'function'
-        ? window.parent.showConfirmDialog(title, message) : window.confirm(message);
+        ? window.parent.showConfirmDialog(title, message) : GmsDialogs.confirm(title, message);
 }
 
 // 受阻横幅：排队/等设备/烧写前的运行依赖平台健康度。自动化 Worker 停止

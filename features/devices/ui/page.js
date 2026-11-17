@@ -373,7 +373,7 @@
 
     async function deleteBinding() {
         const key = state.editingKey;
-        if (!key || !window.confirm('删除此串口绑定？历史日志不会自动删除。')) return;
+        if (!key || !await GmsDialogs.confirm('删除串口绑定', '删除此串口绑定？历史日志不会自动删除。')) return;
         try {
             await api(`/api/devices/console/bindings/${encodeURIComponent(key)}`, {method: 'DELETE'});
             closeBinding();
@@ -657,7 +657,7 @@
 
     async function clearLogs(session) {
         if (!session || session.closed) return;
-        if (!window.confirm(`清空控制台${session.id}（${session.title}）的全部历史日志？此操作不可恢复。`)) return;
+        if (!await GmsDialogs.confirm('清空串口日志', `清空控制台${session.id}（${session.title}）的全部历史日志？此操作不可恢复。`)) return;
         try {
             await api(`/api/devices/console/ports/${encodeURIComponent(session.portKey)}/logs`, {method: 'DELETE'});
             notice('串口日志已清空', 'success');

@@ -15,8 +15,13 @@
   <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport">
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261112-ui-foundations">
 <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers">
+<link rel="stylesheet" href="/static/css/modal-tech.css?v=20261116-aligned-corner-path">
+<link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261116-aligned-corner-path">
+<link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261116-aligned-corner-path">
 <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261116-tab-focus-ring">
 <script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
+<script src="/static/js/dialog-prompts.js?v=20261116-aligned-corner-path"></script>
+<script src="/static/js/dialog-frame.js?v=20261116-aligned-corner-path"></script>
 </head>
 <body>
 <header class="workspace-header">
@@ -60,18 +65,18 @@
 
 <!-- Reset confirmation modal -->
 <div id="resetModal" class="modal">
-  <div class="modal-content modal-xs">
-    <div class="modal-header">
-      <span class="modal-title">重置 Redmine 数据</span>
-      <button type="button" class="modal-close" aria-label="关闭" data-click="hideResetModal">&times;</button>
-    </div>
+  <div class="modal-content modal-xs tech-dialog tech-dialog--redmine-reset"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header">
+      <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#warning"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">重置 Redmine 数据</span></div>
+      <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="hideResetModal">&times;</button>
+    <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
     <div class="modal-body">
       <p class="warning" style="color:#c00">此操作将删除当前用户在本系统内的所有 Redmine 扫描数据、知识库、附件缓存和文档缓存，且不可恢复。确认继续？</p>
       <label>
         <input type="checkbox" id="resetConfirm"> 我确认删除所有数据
       </label>
     </div>
-    <div class="modal-footer">
+    <div class="modal-footer tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
       <button class="secondary" data-click="hideResetModal">取消</button>
       <button class="danger" data-click="confirmReset">确认重置</button>
     </div>
@@ -182,119 +187,125 @@
 
 <!-- Add User Modal -->
 <div id="addUserModal" class="modal">
-  <div class="modal-content modal-xs">
-    <div class="modal-header">
-      <span class="modal-title">添加用户</span>
-      <button type="button" class="modal-close" aria-label="关闭" data-click="hideAddUserModal">&times;</button>
-    </div>
+  <div class="modal-content modal-xs tech-dialog tech-dialog--redmine-user"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header">
+      <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#user"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">添加用户</span></div>
+      <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="hideAddUserModal">&times;</button>
+    <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
     <div class="modal-body">
-      <div>
-        <label>Redmine 用户 ID</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
+        <label for="addUserId">Redmine 用户 ID</label>
         <input type="number" id="addUserId" placeholder="例如：8912">
       </div>
-      <div>
-        <label>用户姓名</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#user"></use></svg></span>
+        <label for="addUserName">用户姓名</label>
         <input type="text" id="addUserName" placeholder="例如：张三">
       </div>
-      <div>
-        <label>邮箱</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#mail"></use></svg></span>
+        <label for="addUserEmail">邮箱</label>
         <input type="email" id="addUserEmail" placeholder="例如：zhangsan@example.com">
       </div>
-      <div>
-        <label>所属部门</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
+        <label for="addUserDepartment">所属部门</label>
         <div class="select-with-add" style="width:100%">
           <select id="addUserDepartment" style="width:100%"></select>
           <button class="select-add-btn" type="button" data-click="showAddDepartmentModal" data-a0="addUserDepartment" title="添加部门">＋</button>
         </div>
       </div>
-      <div class="modal-buttons">
+
+    </div>
+
+<div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
         <button class="secondary" data-click="hideAddUserModal">取消</button>
         <button data-click="submitAddUser">确定</button>
       </div>
-    </div>
-  </div>
+</div>
 </div>
 
 <!-- Add Department Modal -->
 <div id="addDepartmentModal" class="modal">
-  <div class="modal-content modal-xs">
-    <div class="modal-header">
-      <span class="modal-title">添加部门</span>
-      <button type="button" class="modal-close" aria-label="关闭" data-click="hideAddDepartmentModal">&times;</button>
-    </div>
+  <div class="modal-content modal-xs tech-dialog tech-dialog--redmine-department"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header">
+      <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#users"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">添加部门</span></div>
+      <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="hideAddDepartmentModal">&times;</button>
+    <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
     <div class="modal-body">
-      <div>
-        <label>部门名称</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#user"></use></svg></span>
+        <label for="addDepartmentName">部门名称</label>
         <input type="text" id="addDepartmentName" placeholder="例如：系统三部">
       </div>
-      <div>
-        <label>部门 ID</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
+        <label for="addDepartmentId">部门 ID</label>
         <input type="text" id="addDepartmentId" placeholder="可选，例如：system-3">
         <div style="font-size:11px;color:var(--muted);margin-top:2px">留空时自动生成 dept-N</div>
       </div>
-      <div class="modal-buttons">
+
+    </div>
+
+<div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
         <button class="secondary" data-click="hideAddDepartmentModal">取消</button>
         <button data-click="submitAddDepartment">确定</button>
       </div>
-    </div>
-  </div>
+</div>
 </div>
 
 <!-- Add Project Modal -->
 <div id="addProjectModal" class="modal">
-  <div class="modal-content modal-xs">
-    <div class="modal-header">
-      <span class="modal-title">添加项目</span>
-      <button type="button" class="modal-close" aria-label="关闭" data-click="hideAddProjectModal">&times;</button>
-    </div>
+  <div class="modal-content modal-xs tech-dialog tech-dialog--redmine-project"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header">
+      <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#folder"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">添加项目</span></div>
+      <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="hideAddProjectModal">&times;</button>
+    <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
     <div class="modal-body">
-      <div>
-        <label>项目名称</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#user"></use></svg></span>
+        <label for="addProjectName">项目名称</label>
         <input type="text" id="addProjectName" placeholder="例如：RK3572 Android 16 SDK">
       </div>
-      <div>
-        <label>项目标识或 URL</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
+        <label for="addProjectId">项目标识或 URL</label>
         <input type="text" id="addProjectId" placeholder="例如：config.json 中 Redmine 地址下的项目 URL">
       </div>
-      <div class="modal-buttons">
+
+    </div>
+
+<div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
         <button class="secondary" data-click="hideAddProjectModal">取消</button>
         <button data-click="submitAddProject">确定</button>
       </div>
-    </div>
-  </div>
+</div>
 </div>
 
 <!-- Settings Modal -->
 <div id="settingsModal" class="modal">
-  <div class="modal-content modal-l modal-pin">
-    <div class="modal-header">
-      <span class="modal-title">⚙️ 统计设置</span>
-      <button type="button" class="modal-close" aria-label="关闭" data-click="hideSettingsModal">&times;</button>
-    </div>
+  <div class="modal-content modal-l modal-pin tech-dialog tech-dialog--redmine-settings"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header">
+      <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">统计设置</span></div>
+      <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="hideSettingsModal">&times;</button>
+    <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
     <div class="modal-body">
-      <div>
-        <label>未回复天数阈值 (stale_days)</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
+        <label for="settingStaleDays">未回复天数阈值 (stale_days)</label>
         <input type="number" id="settingStaleDays" min="1" max="30" placeholder="默认 20">
         <div style="font-size:11px;color:var(--muted);margin-top:2px">超过/达到此天数未回复的工单标记为过期</div>
       </div>
-      <div>
-        <label>统计时间窗口 (window_days)</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span>
+        <label for="settingWindowDays">统计时间窗口 (window_days)</label>
         <input type="number" id="settingWindowDays" min="0" max="365" placeholder="0 = 不限制">
         <div style="font-size:11px;color:var(--muted);margin-top:2px">只统计最近 N 天内有活动的工单，0 表示不限制</div>
       </div>
-      <div>
-        <label>缓存有效期 (秒)</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span>
+        <label for="settingCacheTtl">缓存有效期 (秒)</label>
         <input type="number" id="settingCacheTtl" min="0" max="3600" placeholder="600">
         <div style="font-size:11px;color:var(--muted);margin-top:2px">统计数据缓存时间，期间内重复访问直接返回缓存</div>
       </div>
-      <div>
-        <label>趋势实时拉新窗口 (freshness_days)</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
+        <label for="settingFreshnessDays">趋势实时拉新窗口 (freshness_days)</label>
         <input type="number" id="settingFreshnessDays" min="1" max="3650" placeholder="默认 180">
         <div style="font-size:11px;color:var(--muted);margin-top:2px">近 N 天的已解决趋势每次实时拉取；更早的趋势走 7 天长期缓存，加快首屏。设大（如 3650）即全部实时</div>
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
-      <div>
-        <label>个人身份绑定（我是谁）</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
+        <label for="settingSelfBinding">个人身份绑定（我是谁）</label>
         <div class="select-with-add" style="width:100%">
           <select id="settingSelfBinding" style="width:100%"></select>
         </div>
@@ -302,22 +313,22 @@
         <button class="secondary" style="margin-top:6px" type="button" data-click="submitSelfBinding">保存绑定</button>
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
-      <div>
-        <label>Redmine 地址</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#server"></use></svg></span>
+        <label for="settingRedmineBaseUrl">Redmine 地址</label>
         <input type="url" id="settingRedmineBaseUrl" placeholder="例如：https://redmine.example.com">
         <div style="font-size:11px;color:var(--muted);margin-top:2px">请输入包含协议的完整地址，不要填写 /issues 等路径</div>
       </div>
-      <div>
-        <label>Redmine 账号</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#user"></use></svg></span>
+        <label for="settingRedmineUser">Redmine 账号</label>
         <input type="text" id="settingRedmineUser" placeholder="Redmine 登录用户名">
         <div style="font-size:11px;color:var(--muted);margin-top:2px">凭据按当前登录账号隔离保存；每日晨报和该账号绑定的 Agent 读取同一份凭据</div>
       </div>
-      <div>
-        <label>Redmine 密码</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg></span>
+        <label for="settingRedminePass">Redmine 密码</label>
         <input type="password" id="settingRedminePass" placeholder="留空则不修改">
       </div>
-      <div>
-        <label>Redmine API Key（可选）</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
+        <label for="settingRedmineApiKey">Redmine API Key（可选）</label>
         <input type="password" id="settingRedmineApiKey" placeholder="可替代账号密码；留空则不修改">
         <div class="setting-help" id="settingRedmineCredentialStatus">正在检查当前账号的 Redmine 凭据状态…</div>
       </div>
@@ -327,7 +338,7 @@
         <input type="checkbox" data-daily-brief-setting="enabled">
         <span>启用每日晨报</span>
       </label>
-      <div>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span>
         <label>触发时间</label>
         <input type="time" data-daily-brief-setting="trigger_time" value="00:00" required aria-describedby="dailyBriefTriggerTimeHelp">
         <div class="setting-help" id="dailyBriefTriggerTimeHelp">按 Controller 服务器本地时间每天触发；默认凌晨 00:00。</div>
@@ -336,12 +347,12 @@
         <input type="checkbox" data-daily-brief-setting="delta_enabled">
         <span>启用晨报增量刷新</span>
       </label>
-      <div>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span>
         <label>增量刷新时间</label>
         <input type="time" data-daily-brief-setting="delta_trigger_time" value="06:00" required aria-describedby="dailyBriefDeltaTriggerTimeHelp">
         <div class="setting-help" id="dailyBriefDeltaTriggerTimeHelp">仅分析凌晨晨报之后有变化的事项；按 Controller 服务器本地时间每天触发，默认 06:00。</div>
       </div>
-      <div>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
         <label>取证 Agent Profile</label>
         <select data-daily-brief-setting="agent_profile" aria-describedby="dailyBriefProfileHelp">
           <option value="">正在读取本机 kkagent Profile…</option>
@@ -349,14 +360,14 @@
         <div class="setting-help" id="dailyBriefProfileHelp">仅列出 gms-agent profile list 中的 kkagent Profile；多个 Profile 必须明确选择。</div>
       </div>
       <div class="setting-inline-grid">
-        <div>
+        <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
           <label>分析模型</label>
           <select data-daily-brief-setting="model" aria-describedby="dailyBriefModelHelp">
             <option value="">正在读取系统模型…</option>
           </select>
           <div class="setting-help" id="dailyBriefModelHelp">自动列出系统中已启用且可供 kkagent 使用的模型；保存后每日晨报会将所选模型传给 kkagent。</div>
         </div>
-        <div>
+        <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
           <label>并发分析数</label>
           <input type="number" min="1" max="4" data-daily-brief-setting="max_parallel_issues" value="1">
         </div>
@@ -368,7 +379,7 @@
         <div class="setting-help">发送方账号是系统级配置（管理员在「系统配置」弹框维护）；这里只决定提醒发给谁——部门逾期提醒按组织架构中各用户的邮箱逐人发送。</div>
       </div>
     </div>
-    <div class="modal-footer">
+    <div class="modal-footer tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
       <button class="secondary" data-click="hideSettingsModal">取消</button>
       <button data-click="saveSettings">保存并刷新</button>
     </div>
@@ -377,35 +388,37 @@
 
 <!-- Trend Start Date Modal -->
 <div id="trendStartModal" class="modal">
-  <div class="modal-content modal-xs">
-    <div class="modal-header">
-      <span class="modal-title" id="trendStartModalTitle">设置统计日期范围</span>
-      <button type="button" class="modal-close" aria-label="关闭" data-click="hideTrendStartModal">&times;</button>
-    </div>
+  <div class="modal-content modal-xs tech-dialog tech-dialog--redmine-trend-range"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header">
+      <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title" id="trendStartModalTitle">设置统计日期范围</span></div>
+      <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="hideTrendStartModal">&times;</button>
+    <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
     <div class="modal-body">
-      <div>
-        <label>起始日期</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span>
+        <label for="trendStartDateInput">起始日期</label>
         <input type="date" id="trendStartDateInput">
       </div>
-      <div>
-        <label>结束日期</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span>
+        <label for="trendEndDateInput">结束日期</label>
         <input type="date" id="trendEndDateInput">
         <div style="font-size:11px;color:var(--muted);margin-top:2px">清空后表示不限；仅填一侧日期也可以</div>
       </div>
-      <div class="modal-buttons">
+
+    </div>
+
+<div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
         <button class="secondary" data-click="clearTrendStartDate">不限</button>
         <button class="secondary" data-click="hideTrendStartModal">取消</button>
         <button data-click="saveTrendStartDate">保存并刷新</button>
       </div>
-    </div>
-  </div>
+</div>
 </div>
 <div id="trendDetailModal" class="modal">
-  <div class="modal-content modal-xl">
-    <div class="modal-header">
-      <span class="modal-title" id="trendDetailTitle">解决Redmine问题明细</span>
-      <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="trendDetailModal">&times;</button>
-    </div>
+  <div class="modal-content modal-xl tech-dialog tech-dialog--redmine-trend-detail"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header">
+      <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title" id="trendDetailTitle">解决Redmine问题明细</span></div>
+      <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="trendDetailModal">&times;</button>
+    <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
     <div class="modal-body" id="trendDetailBody"><div class="muted">加载中…</div></div>
   </div>
 </div>
@@ -413,26 +426,26 @@
 <script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script>
 <script src="/static/js/embedded-workspace.js?v=20260917-arrow-forward-v2"></script>
 <script src="/static/js/embedded-ui/modal-controller.js?v=20260916-modal-controller"></script>
-<script src="/redmine-agent/assets/core.js"></script>
+<script src="/redmine-agent/assets/core.js?v=20261116-aligned-corner-path"></script>
 <script src="/redmine-agent/assets/settings.js"></script>
 <script src="/redmine-agent/assets/issues.js"></script>
 <script src="/redmine-agent/assets/statistics.js"></script>
 <script src="/redmine-agent/assets/knowledge.js"></script>
 <script src="/redmine-agent/assets/daily-brief-diagnosis.js"></script>
-<script src="/redmine-agent/assets/daily-brief-session.js"></script>
+<script src="/redmine-agent/assets/daily-brief-session.js?v=20261116-aligned-corner-path"></script>
 <script src="/redmine-agent/assets/daily-brief-timeline.js"></script>
-<script src="/redmine-agent/assets/analysis-timeline.js"></script>
-<script src="/redmine-agent/assets/single-issue.js"></script>
-<script src="/redmine-agent/assets/daily-brief.js"></script>
-<script src="/redmine-agent/assets/page.js"></script>
+<script src="/redmine-agent/assets/analysis-timeline.js?v=20261116-aligned-corner-path"></script>
+<script src="/redmine-agent/assets/single-issue.js?v=20261116-aligned-corner-path"></script>
+<script src="/redmine-agent/assets/daily-brief.js?v=20261116-aligned-corner-path"></script>
+<script src="/redmine-agent/assets/page.js?v=20261116-aligned-corner-path"></script>
 
 <!-- Batch Import Modal -->
 <div id="batchImportModal" class="modal">
-  <div class="modal-content modal-xs">
-    <div class="modal-header">
-      <span class="modal-title">📥 批量导入历史工单到知识库</span>
-      <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="batchImportModal">&times;</button>
-    </div>
+  <div class="modal-content modal-xs tech-dialog tech-dialog--redmine-batch-import"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header">
+      <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">批量导入历史工单到知识库</span></div>
+      <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="batchImportModal">&times;</button>
+    <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
     <div class="modal-body">
       <div class="muted" style="font-size:11px;margin-bottom:8px">粘贴工单号(每行一个,可带#号),或直接导入你名下最近的工单。</div>
       <textarea id="batchImportIds" rows="6" placeholder="633454&#10;635211&#10;636612" style="width:100%;font-family:monospace"></textarea>
@@ -440,24 +453,26 @@
         <label><input type="checkbox" id="batchReanalyze" checked> 重新分析(忽略已缓存)</label>
       </div>
       <div id="batchImportResult" class="muted" style="margin-top:8px;font-size:12px"></div>
-      <div class="modal-buttons">
+
+    </div>
+
+<div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
         <button class="secondary" data-click="hideModal" data-a0="batchImportModal">取消</button>
         <button class="secondary" data-click="submitImportRecent" data-a0="20"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 导入最近20个(我的指派)</button>
         <button data-click="submitBatchImport">按工单号导入</button>
       </div>
-    </div>
-  </div>
+</div>
 </div>
 
 <!-- Knowledge Case Detail / Reply Modal -->
 <div id="knowledgeModal" class="modal">
-  <div class="modal-content modal-xl">
-    <div class="modal-header">
-      <span class="modal-title" id="knowledgeTitle">知识库</span>
-      <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="knowledgeModal">&times;</button>
-    </div>
+  <div class="modal-content modal-xl tech-dialog tech-dialog--redmine-knowledge"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header">
+      <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#book"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title" id="knowledgeTitle">知识库</span></div>
+      <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="knowledgeModal">&times;</button>
+    <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
     <div class="modal-body" id="knowledgeBody"><div class="muted">加载中…</div></div>
-    <div class="modal-buttons" id="knowledgeFooter" style="display:none">
+    <div class="modal-buttons tech-dialog-actions" id="knowledgeFooter" style="display:none"><span class="tech-footer-decoration" aria-hidden="true"></span>
       <button class="secondary" data-click="hideModal" data-a0="knowledgeModal">关闭</button>
     </div>
   </div>
@@ -465,40 +480,44 @@
 
 <!-- Reference Output Import Modal -->
 <div id="referenceModal" class="modal">
-  <div class="modal-content modal-xs">
-    <div class="modal-header">
-      <span class="modal-title">导入参考输出(仅评测,不进自动回复)</span>
-      <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="referenceModal">&times;</button>
-    </div>
+  <div class="modal-content modal-xs tech-dialog tech-dialog--redmine-reference"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header">
+      <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#link"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">导入参考输出(仅评测,不进自动回复)</span></div>
+      <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="referenceModal">&times;</button>
+    <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
     <div class="modal-body">
-      <div><label>来源</label>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><label for="referenceSource">来源</label>
         <select id="referenceSource"><option value="gms_assistant">gms_assistant</option><option value="manual">manual</option><option value="imported">imported</option></select>
       </div>
-      <div><label>标题</label><input type="text" id="referenceTitle" placeholder="参考案例标题"></div>
-      <div><label>Markdown 正文</label><textarea id="referenceMarkdown" rows="6" style="width:100%"></textarea></div>
-      <div class="modal-buttons"><button class="secondary" data-click="hideModal" data-a0="referenceModal">取消</button><button data-click="submitReference">导入并评测</button></div>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><label for="referenceTitle">标题</label><input type="text" id="referenceTitle" placeholder="参考案例标题"></div>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><label for="referenceMarkdown">Markdown 正文</label><textarea id="referenceMarkdown" rows="6" style="width:100%"></textarea></div>
+
     </div>
-  </div>
+
+<div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span><button class="secondary" data-click="hideModal" data-a0="referenceModal">取消</button><button data-click="submitReference">导入并评测</button></div>
+</div>
 </div>
 
 <!-- Internal Issue Confirm Modal -->
 <div id="internalCreateModal" class="modal">
-  <div class="modal-content modal-xs">
-    <div class="modal-header">
-      <span class="modal-title">⚠️ 创建内部 Redmine 工单</span>
-      <button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="internalCreateModal">&times;</button>
-    </div>
+  <div class="modal-content modal-xs tech-dialog tech-dialog--redmine-internal-create"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+    <div class="modal-header tech-dialog-header">
+      <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#plus"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">创建内部 Redmine 工单</span></div>
+      <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="internalCreateModal">&times;</button>
+    <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
     <div class="modal-body">
       <div class="muted" style="margin-bottom:8px">该操作会在 Redmine 上真实创建工单,请确认信息无误。</div>
-      <div><label>项目标识</label><input type="text" id="internalProjectId" value="fae"></div>
+      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><label for="internalProjectId">项目标识</label><input type="text" id="internalProjectId" value="fae"></div>
       <div style="display:flex;gap:8px">
-        <div style="flex:1"><label>Tracker ID</label><input type="number" id="internalTrackerId" value="1"></div>
-        <div style="flex:1"><label>优先级 ID</label><input type="number" id="internalPriorityId" value="2"></div>
-        <div style="flex:1"><label>指派人 ID</label><input type="number" id="internalAssignedId" placeholder="可选"></div>
+        <div style="flex:1" class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><label for="internalTrackerId">Tracker ID</label><input type="number" id="internalTrackerId" value="1"></div>
+        <div style="flex:1" class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><label for="internalPriorityId">优先级 ID</label><input type="number" id="internalPriorityId" value="2"></div>
+        <div style="flex:1" class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><label for="internalAssignedId">指派人 ID</label><input type="number" id="internalAssignedId" placeholder="可选"></div>
       </div>
-      <div class="modal-buttons"><button class="secondary" data-click="hideModal" data-a0="internalCreateModal">取消</button><button id="internalConfirmBtn" data-click="confirmInternalCreate">确认创建</button></div>
+
     </div>
-  </div>
+
+<div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span><button class="secondary" data-click="hideModal" data-a0="internalCreateModal">取消</button><button id="internalConfirmBtn" data-click="confirmInternalCreate">确认创建</button></div>
+</div>
 </div>
 </body>
 </html>

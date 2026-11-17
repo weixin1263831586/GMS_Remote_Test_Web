@@ -665,11 +665,12 @@ class RuntimeReportsAndArtifactsTests(RuntimeUiHarness):
             )
 
             page.evaluate("switchPage('report-analysis', null)")
-            answers = iter(["qa@example.test", ""])
-            page.on("dialog", lambda dialog: dialog.accept(next(answers)))
             page.get_by_role("button", name="发送邮件").evaluate(
                 "button => button.click()"
             )
+            recipients = page.locator('.tech-dialog--input')
+            recipients.locator('input[name=to]').fill('qa@example.test')
+            recipients.locator('button[type=submit]').click()
             page.wait_for_function("() => window.currentReportAnalysisData !== null")
             page.wait_for_timeout(100)
             self.assertEqual(len(email_requests), 1)

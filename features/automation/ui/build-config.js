@@ -291,12 +291,12 @@ function promptBuildPassword() {
         backdrop.setAttribute('aria-modal', 'true');
         backdrop.setAttribute('aria-labelledby', 'build-password-title');
         backdrop.innerHTML = `
-            <div class="modal-content modal-xs password-dialog">
-                <div class="modal-header"><h2 id="build-password-title" class="modal-title">编译服务器 SSH 密码</h2></div>
+            <div class="modal-content modal-xs password-dialog tech-dialog tech-dialog--build-password"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+                <div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg><div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><h2 id="build-password-title" class="modal-title">编译服务器 SSH 密码</h2></div></div>
                 <div class="modal-body">
                     <input id="build-password-input" type="password" autocomplete="current-password" placeholder="请输入密码">
                 </div>
-                <div class="modal-buttons">
+                <div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
                     <button type="button" id="build-password-cancel">取消</button>
                     <button type="button" class="primary" id="build-password-ok">确认</button>
                 </div>

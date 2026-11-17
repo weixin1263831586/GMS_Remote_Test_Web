@@ -22,7 +22,7 @@ async function deleteBuildJob(jobId) {
             '删除构建任务',
             `确定删除历史构建任务 ${jobId}？\n此操作只删除平台记录，不删除远端源码和构建产物。`
         )
-        : window.confirm(`确定删除历史构建任务 ${jobId}？`);
+        : await GmsDialogs.confirm('删除构建任务', `确定删除历史构建任务 ${jobId}？`);
     if (!confirmed) return;
     try {
         await api(`/api/build/jobs/${encodeURIComponent(jobId)}`, {method: 'DELETE'});

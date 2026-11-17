@@ -1,0 +1,196 @@
+/* Reference dialog geometry. Controllers retain focus, stacking and visibility. */
+:root {
+  --tech-deep: var(--light-bg, #202027);
+  --tech-panel: var(--card-bg, #1b1b23);
+  --tech-input: var(--darker-bg, #101015);
+  --tech-control: var(--lighter-bg, #2a2a34);
+  --tech-edge: color-mix(in srgb, var(--primary-color, #8b74e8) 32%, var(--border-light, #4a4a58));
+  --tech-edge-soft: var(--border-color, #353540);
+  --tech-bright: var(--primary-light, #c4b5fd);
+  --tech-accent-soft: color-mix(in srgb, var(--primary-color) 15%, var(--lighter-bg));
+}
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog {
+  position: relative;
+  isolation: isolate;
+  background: var(--tech-deep) !important;
+  border: 1px solid transparent !important;
+  border-radius: 16px 16px 16px 16px !important;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 42%);
+  font-size: 13px;
+  line-height: 1.5;
+  max-height: calc(100dvh - 32px);
+  min-height: 0;
+}
+/* A single SVG draws the entire perimeter; no overlapping pseudo-element fills. */
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog::before,
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog::after { content: none !important; }
+.tech-dialog .tech-frame {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  fill: none; stroke: var(--tech-edge); stroke-width: 1;
+  pointer-events: none; z-index: 12;
+}
+.tech-dialog .tech-corner-mark { display: none; }
+.tech-dialog .tech-frame-accent { stroke: var(--primary-light); stroke-width: 3; stroke-linejoin: miter; }
+.tech-dialog .tech-rule-ticks { stroke: var(--primary-light); stroke-width: 2.5; }
+:is(.modal,.modal-backdrop) .tech-dialog > :is(.modal-header,.modal-head,.section-head) {
+  position: relative; min-height: 56px; padding: 11px 18px 15px; gap: 10px;
+  border-bottom: 1px solid var(--tech-edge-soft); background: transparent !important;
+  box-shadow: none; flex-shrink: 0;
+}
+:is(.modal,.modal-backdrop) .tech-dialog > :is(.modal-header,.modal-head,.section-head)::before { content: none !important; }
+:is(.modal,.modal-backdrop) .tech-dialog > :is(.modal-header,.modal-head,.section-head)::after {
+  content: ''; position: absolute; left: 18px; bottom: -1px;
+  width: 62px; height: 2px; background: var(--tech-bright);
+  box-shadow: 0 0 9px color-mix(in srgb, var(--primary-color) 12%, transparent); border: 0; clip-path: none;
+}
+.tech-dialog .tech-header-rule {
+  position: absolute; left: 0; bottom: -1px; width: 100%; height: 16px;
+  fill: none; stroke: var(--tech-edge); stroke-width: 1; pointer-events: none;
+}
+.tech-dialog .tech-title-group { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.tech-dialog .tech-title-glyph {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 28px; height: 28px; color: var(--tech-bright);
+}
+.tech-dialog .tech-title-glyph :is(.ui-icon,.tech-brand-icon) { width: 24px; height: 24px; }
+.tech-dialog .tech-title-divider { width: 1px; height: 22px; background: var(--tech-edge); flex: none; }
+:is(.modal,.modal-backdrop) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) {
+  font-size: 17px !important; font-weight: 650; line-height: 1.35;
+  color: var(--text-primary); margin: 0; padding: 0; letter-spacing: .2px;
+}
+:is(.modal,.modal-backdrop) .tech-dialog .modal-title::before { content: none !important; }
+.tech-dialog .tech-header-ticks { display: none; }
+:is(.modal,.modal-backdrop) .tech-dialog .modal-close {
+  flex: none; width: 30px; min-width: 30px; height: 30px; min-height: 30px;
+  border: 1px solid transparent; border-radius: 6px; padding: 0;
+  background: transparent; color: var(--text-primary); font-size: 24px; font-weight: 300;
+}
+:is(.modal,.modal-backdrop) .tech-dialog .modal-close:hover { background: var(--tech-accent-soft); border-color: var(--tech-edge); }
+:is(.modal,.modal-backdrop) .tech-dialog .modal-body {
+  min-width: 0; min-height: 0; padding: 16px 18px; background: transparent; font-size: 13px;
+}
+.tech-dialog .tech-intro { margin: 0 0 14px; color: var(--text-secondary); font-size: 13px; line-height: 1.65; }
+.tech-dialog .tech-section {
+  min-width: 0; padding: 12px 14px; border: 1px solid var(--tech-edge-soft);
+  border-radius: 12px; background: var(--tech-panel);
+}
+.tech-dialog .tech-section-title {
+  display: flex; align-items: center; gap: 10px; margin: 0 0 12px;
+  padding: 0 0 9px; border-bottom: 1px solid var(--tech-edge-soft); font-size: 13px; font-weight: 600; color: var(--text-primary);
+}
+.tech-section-title > .ui-icon { color: var(--tech-bright); width: 20px; height: 20px; }
+.tech-dialog .tech-form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; align-items: start; }
+.tech-dialog .tech-field-card {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  padding: 9px 10px; margin-bottom: 8px;
+  border: 1px solid var(--tech-edge-soft); border-radius: 9px; background: var(--tech-panel);
+}
+.tech-dialog .tech-field-card > label:not(:has(input)) {
+  margin: 0; padding: 0 0 0 10px; min-width: 90px; width: auto;
+  border-left: 1px solid var(--tech-edge); color: var(--text-primary); font-size: 13px; font-weight: 600;
+}
+.tech-dialog .tech-field-card > label::before { content: none !important; }
+.tech-dialog .tech-field-glyph {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: none; width: 30px; height: 30px; color: var(--primary-light);
+  background: var(--tech-accent-soft); border-radius: 9px; border: 1px solid var(--tech-edge-soft);
+}
+.tech-dialog .tech-field-glyph :is(.ui-icon,.tech-brand-icon) { width: 20px; height: 20px; }
+.tech-dialog .tech-field-stack {
+  display: grid; grid-template-columns: 30px minmax(0,1fr); gap: 8px 10px; align-items: center;
+}
+.tech-dialog .tech-field-stack > .tech-field-glyph { width: 30px; height: 30px; border-radius: 6px; }
+.tech-dialog .tech-field-stack > .tech-field-glyph .ui-icon { width: 20px; height: 20px; }
+.tech-dialog .tech-field-stack > :not(label):not(.tech-field-glyph) { grid-column: 1 / -1; width: 100%; min-width: 0; }
+.tech-dialog .tech-field-stack > label { min-width: 0 !important; font-size: 14px; }
+.tech-dialog :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=hidden]),select,textarea) {
+  min-width: 0; max-width: 100%; box-sizing: border-box;
+  padding: 7px 10px; min-height: 36px;
+  color: var(--text-primary); background: var(--tech-input); border: 1px solid var(--border-light);
+  border-radius: 6px; font-size: 13px; line-height: 1.5; box-shadow: none;
+}
+.tech-dialog :is(input,select,textarea)::placeholder { color: var(--text-secondary); opacity: 1; }
+.tech-dialog :is(input,select,textarea):disabled { opacity: .5; }
+.tech-dialog :is(input,select,textarea):focus-visible,
+.tech-dialog button:focus-visible { outline: 2px solid var(--tech-bright); outline-offset: 3px; }
+.tech-dialog input:is([type=checkbox],[type=radio]) { accent-color: var(--primary-color); width: 17px; height: 17px; flex-shrink: 0; }
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.tech-dialog-footer,.agent-access-form-actions) {
+  position: relative; flex-shrink: 0; margin: 0; padding: 12px 18px 22px;
+  min-height: 68px; gap: 9px; flex-direction: row; background: transparent !important; border-top: 1px solid var(--tech-edge-soft);
+}
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions)::before,
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions)::after { content: none !important; }
+.tech-dialog .tech-footer-decoration {
+  position: absolute; left: 18px; bottom: 8px; width: 46%; height: 15px; pointer-events: none;
+  background: url('/static/icons/modal-footer-trace.svg?v=20261116-shell-palette') left bottom / 100% 20px no-repeat;
+}
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close),
+.tech-dialog .tech-row-action {
+  width: auto; min-height: 34px; height: auto; min-width: 76px; padding: 7px 14px;
+  font-size: 13px; font-weight: 600; line-height: 1.4;
+  color: var(--text-primary); border: 1px solid var(--border-light) !important; border-radius: 7px !important;
+  background: var(--tech-panel) !important; box-shadow: inset 0 0 12px color-mix(in srgb, var(--primary-color) 12%, transparent);
+}
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:hover:not(:disabled),
+.tech-dialog .tech-row-action:hover:not(:disabled) { background: var(--tech-control) !important; border-color: var(--primary-light) !important; }
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:is(.btn-primary,.primary,[type=submit]) {
+  background: var(--primary-color) !important; border-color: var(--primary-light) !important; color: #fff;
+  box-shadow: inset 0 1px 8px color-mix(in srgb, var(--primary-color) 12%, transparent), 0 0 14px color-mix(in srgb, var(--primary-color) 12%, transparent);
+}
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:is(.btn-primary,.primary,[type=submit]):hover:not(:disabled) { background: var(--primary-strong) !important; }
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions) :is(.danger,.btn-danger,[style*='var(--danger-color)']) {
+  background: #8b3045 !important; border-color: #e7899b !important; box-shadow: none;
+}
+.tech-dialog .modal-info-text { padding: 12px 16px; border-radius: 7px; font-size: 13px; line-height: 1.7; }
+.tech-dialog .tech-notice { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding: 12px 16px; background: #332a29; border-left: 3px solid #e9b94f; border-radius: 7px; color: #e1cba6; font-size: 13px; }
+.tech-dialog .tech-notice .ui-icon { flex: none; width: 20px; height: 20px; color: var(--tech-bright); }
+/* Reference Tailscale: five dedicated platform rows with a fixed action column. */
+#tailscale-info-modal .modal-content.tech-dialog--tailscale { width: min(820px,calc(100vw - 40px)); max-width: min(820px,calc(100vw - 40px)); height: auto; }
+#tailscale-info-modal .tech-tailscale-body { padding: 14px 18px !important; }
+#tailscale-info-modal .tech-tailscale-rows { display: grid; gap: 6px; }
+#tailscale-info-modal .tech-tailscale-row {
+  display: grid; grid-template-columns: 32px 136px minmax(0,1fr) 76px;
+  align-items: center; gap: 10px; min-height: 55px; margin: 0;
+  padding: 8px 10px; border: 1px solid var(--tech-edge-soft); border-radius: 12px; background: var(--tech-panel);
+}
+#tailscale-info-modal .tech-field-glyph { width: 32px; height: 32px; }
+#tailscale-info-modal .tech-field-glyph :is(.ui-icon,.tech-brand-icon) { width: 20px; height: 20px; }
+#tailscale-info-modal .tech-tailscale-row > label { display: flex; align-items: center; min-width: 0 !important; gap: 12px; margin: 0; font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; }
+#tailscale-info-modal .tech-tailscale-row > label::before { content: ''; width: 1px; height: 20px; background: var(--tech-edge); flex: none; }
+#tailscale-info-modal .tech-tailscale-row > input { width: 100%; height: 36px; min-height: 36px; font-size: 13px; }
+#tailscale-info-modal .tech-row-action { display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; padding: 6px 8px; height: 36px; font-size: 13px; }
+#tailscale-info-modal .tech-row-action .ui-icon { width: 20px; height: 20px; }
+#tailscale-info-modal .tech-tailscale-help { display: flex; align-items: center; gap: 12px; padding: 10px 6px !important; margin: 14px 0 0 !important; background: transparent !important; border: 0 !important; color: var(--text-secondary); font-size: 12px !important; }
+#tailscale-info-modal .tech-hint-icon { color: var(--tech-bright); flex: none; }
+#tailscale-info-modal .tech-hint-icon .ui-icon { width: 22px; height: 22px; }
+#tailscale-info-modal .tech-dialog-footer { padding: 12px 18px 22px !important; min-height: 68px; }
+#tailscale-info-modal .tech-dialog-footer > button { min-width: 82px; min-height: 36px; font-size: 13px; }
+#tailscale-info-modal :is(.tech-footer-ticks,.tech-footer-trace) { display: none; }
+@media(max-width: 800px) {
+  :is(.modal,.modal-backdrop) .tech-dialog > :is(.modal-header,.modal-head,.section-head) { min-height: 54px; padding: 10px 14px 14px; }
+  :is(.modal,.modal-backdrop) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) { font-size: 16px !important; }
+  .tech-dialog .tech-title-group { gap: 10px; }
+  .tech-dialog .tech-title-glyph { width: 30px; height: 30px; }
+  .tech-dialog .tech-title-glyph :is(.ui-icon,.tech-brand-icon) { width: 26px; height: 26px; }
+  :is(.modal,.modal-backdrop) .tech-dialog .modal-body { padding: 18px; }
+  .tech-dialog .tech-form-grid { grid-template-columns: 1fr; }
+  .tech-dialog .tech-field-card { flex-wrap: wrap; gap: 10px; }
+  .tech-dialog .tech-field-card > :is(input:not([type=hidden]),select,textarea,.input-with-btn,.group-picklist) { flex: 1 1 100%; width: 100%; }
+  .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) { padding: 14px 18px 26px; }
+  #tailscale-info-modal .tech-tailscale-body { padding: 18px !important; }
+  #tailscale-info-modal .tech-tailscale-row { grid-template-columns: 34px minmax(0,1fr) 88px; grid-template-areas: 'icon label label' 'input input action'; gap: 10px; padding: 12px; }
+  #tailscale-info-modal .tech-field-glyph { grid-area: icon; width: 34px; height: 34px; }
+  #tailscale-info-modal .tech-tailscale-row > label { grid-area: label; font-size: 15px; }
+  #tailscale-info-modal .tech-tailscale-row > input { grid-area: input; font-size: 13px; }
+  #tailscale-info-modal .tech-row-action { grid-area: action; font-size: 14px; }
+}
+@media(max-width: 480px), (max-height:560px) {
+  :is(.modal,.modal-backdrop) .modal-content.tech-dialog { max-height: calc(100dvh - 16px); }
+  .tech-dialog .tech-field-card > label:not(:has(input)) { min-width: 0; }
+  .tech-dialog .tech-section { padding: 14px; }
+  .tech-dialog .tech-header-ticks { right: 70px; }
+  .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close) { min-width: 72px; min-height: 38px; padding: 8px 12px; font-size: 13px; }
+  .tech-dialog .tech-footer-decoration { left: 18px; width: 38%; }
+  #tailscale-info-modal .modal-content.tech-dialog--tailscale { width: calc(100vw - 16px); max-width: calc(100vw - 16px); }
+}

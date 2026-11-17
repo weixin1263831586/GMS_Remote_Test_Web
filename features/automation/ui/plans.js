@@ -98,7 +98,7 @@ async function loadTestPlans() {
 
 async function confirmTestPlanAction(title, message) {
     return typeof window.parent?.showConfirmDialog === 'function'
-        ? window.parent.showConfirmDialog(title, message) : window.confirm(message);
+        ? window.parent.showConfirmDialog(title, message) : GmsDialogs.confirm(title, message);
 }
 
 async function saveTestPlan() {

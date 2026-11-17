@@ -141,7 +141,7 @@ async function confirmUserAction(title, message) {
   if (typeof window.parent?.showConfirmDialog === 'function') {
     return window.parent.showConfirmDialog(title, message);
   }
-  return window.confirm(message);
+  return GmsDialogs.confirm(title, message);
 }
 function saveGerritProfileState() {
   try {

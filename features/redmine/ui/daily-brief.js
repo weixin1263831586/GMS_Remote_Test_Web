@@ -401,8 +401,8 @@ function showDailyBriefIssueStatistics(issueId) {
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = 'modal';
-  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal daily-brief-statistics-modal">'
-    + '<div class="modal-header"><span class="modal-title">📊 AI 统计 · #' + esc(issueId) + '</span>'
+  modal.innerHTML = '<div class="modal-content modal-l daily-brief-modal daily-brief-statistics-modal tech-dialog tech-dialog--brief-statistics"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>'
+    + '<div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg><div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">AI 统计 · #' + esc(issueId) + '</span></div>'
     + '<button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
     + '<div class="modal-body daily-brief-modal-body">' + body + '</div>'
     + '<div class="modal-buttons daily-brief-modal-footer"><button class="secondary" data-click="removeDynamicModal" data-a0="' + modalId + '">关闭</button></div></div>';
@@ -434,9 +434,9 @@ function showDailyBriefIssueFallback(issueId) {
   var modalId = 'dailyBriefIssueModal-' + Date.now();
   var modal = document.createElement('div');
   modal.id = modalId;
-  modal.className = 'modal daily-brief-analysis-overlay';
-  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal">'
-    + '<div class="modal-header"><span class="modal-title">每日晨报 · #' + esc(issueId) + '</span>'
+  modal.className = 'modal';
+  modal.innerHTML = '<div class="modal-content modal-m daily-brief-modal tech-dialog tech-dialog--brief-history"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>'
+    + '<div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg><div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">每日晨报 · #' + esc(issueId) + '</span></div>'
     + '<button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
     + '<div class="modal-body daily-brief-modal-body"><div class="muted">该历史分析结果包含旧格式字段，暂无法完整呈现。重新分析此项后会生成兼容的完整结果。</div></div>'
     + '<div class="modal-buttons daily-brief-modal-footer"><button data-daily-brief-reanalyze="' + esc(issueId) + '">深度分析此项</button>'

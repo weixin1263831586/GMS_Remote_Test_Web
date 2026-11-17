@@ -372,7 +372,7 @@
     /* 单号 AI 报告是 Redmine 页内的主阅读面，而非小型确认弹框。它从
        Tabs 下方开始，填满当前页的剩余空间；顶部高度由打开时的实际
        header 高度写入，窄屏 Tabs 换行时也不会覆盖导航。 */
-    .modal.daily-brief-analysis-overlay { inset:var(--daily-brief-modal-top,44px) 0 0; align-items:stretch; justify-content:stretch; padding:0 8px 6px; }
+    .modal.daily-brief-analysis-overlay { inset:var(--daily-brief-modal-top,44px) 0 0; height:calc(100dvh - var(--daily-brief-modal-top,44px)); align-items:stretch; justify-content:stretch; padding:0 8px 6px; }
     .modal.daily-brief-analysis-overlay.show { align-items:stretch; justify-content:stretch; }
     .daily-brief-analysis-overlay .modal-content.daily-brief-modal { width:100%; max-width:none; height:100%; max-height:none; min-height:0; border-radius:0 0 12px 12px; }
     .daily-brief-analysis-overlay .daily-brief-modal .modal-header { padding:8px 14px; }

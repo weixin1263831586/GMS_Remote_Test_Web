@@ -1,18 +1,22 @@
 <div id="mainline-sync-modal" class="modal">
-        <div class="modal-content modal-s">
-            <div class="modal-header">
-                <span class="modal-title">选择扫描方式</span>
-                <button type="button" class="modal-close" aria-label="关闭" data-click="ut_closeMainlineSyncModal">&times;</button>
-            </div>
+        <div class="modal-content modal-s tech-dialog tech-dialog--mainline-sync"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg>
+        <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+            <div class="modal-header tech-dialog-header">
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#refresh"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">选择扫描方式</span></div>
+                <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="ut_closeMainlineSyncModal">&times;</button>
+            <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
             <div class="modal-body">
+<p class="tech-intro">根据本次需要选择增量扫描或全量扫描。</p>
                 <div class="modal-info-text" style="margin-bottom: 14px;">
                     增量扫描只检查未记录的新页面；全量扫描会重新解析左侧导航栏所有页面并刷新数据库。
                 </div>
-                <div class="modal-buttons" style="margin-top: 18px;">
+
+            </div>
+
+<div class="modal-buttons tech-dialog-actions" style="margin-top: 18px;"><span class="tech-footer-decoration" aria-hidden="true"></span>
                     <button class="btn-xxs" data-click="ut_closeMainlineSyncModal">取消</button>
                     <button class="btn-xxs btn-primary" data-click="ut_confirmMainlineKnownIssuesSync" data-a0="incremental">增量扫描</button>
                     <button class="btn-xxs btn-primary" data-click="ut_confirmMainlineKnownIssuesSync" data-a0="full">全量扫描</button>
                 </div>
-            </div>
-        </div>
+</div>
     </div>

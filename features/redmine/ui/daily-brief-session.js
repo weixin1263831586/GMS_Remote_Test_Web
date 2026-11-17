@@ -309,10 +309,10 @@ async function showIssueFullSession(runId, issueId, subject) {
   var modal = document.createElement('div');
   modal.id = modalId;
   modal.className = 'modal daily-brief-analysis-overlay';
-  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal">'
-    + '<div class="modal-header"><span class="modal-title daily-brief-modal-title"><span>🧵 kkagent 会话 · #' + esc(issueId) + '</span>'
+  modal.innerHTML = '<div class="modal-content modal-workspace daily-brief-modal tech-dialog tech-dialog--brief-session"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>'
+    + '<div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg><div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title daily-brief-modal-title"><span>kkagent 会话 · #' + esc(issueId) + '</span>'
     + (subject ? '<span class="daily-brief-modal-subject">' + esc(subject) + '</span>' : '')
-    + '</span><button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
+    + '</span></div><button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '">&times;</button></div>'
     + '<div class="modal-body daily-brief-modal-body"><div id="' + modalId + '-note" class="issue-session-note">按原始消息回合聚合；页面预览会裁剪，工具结果已回挂到对应调用。</div>'
     + '<div id="' + modalId + '-stream" class="issue-session-stream">'
     + '<div class="muted">⏳ 正在加载会话…</div></div>'

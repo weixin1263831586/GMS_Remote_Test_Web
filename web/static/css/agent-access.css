@@ -39,7 +39,30 @@
     background: var(--light-bg);
 }
 
-/* 外框尺寸走 modal-xl modal-pin。 */
+/* SDK 来源注册是表单而不是全高工作台：根据字段自然定高。
+   保留 modal-xl/modal-pin 类及所有 ModalManager 行为，不影响同类固定工作区。
+   当发现目录变多时只滚动 modal-body，底部按钮始终可见。 */
+#agent-sdk-add-modal > .agent-access-modal-content {
+    width: min(900px, calc(100vw - 24px));
+    max-width: min(900px, calc(100vw - 24px));
+    height: auto;
+    min-height: 0;
+    max-height: min(86dvh, calc(100dvh - 24px));
+    overflow: hidden;
+}
+#agent-sdk-add-modal > .agent-access-modal-content > .agent-access-modal-body {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+@media (max-width: 700px) {
+    #agent-sdk-add-modal > .agent-access-modal-content {
+        width: calc(100vw - 16px);
+        max-width: calc(100vw - 16px);
+        max-height: calc(100dvh - 16px);
+    }
+}
+
 
 .agent-access-modal-content > .modal-header { padding: 8px 20px; }
 .agent-access-modal-body { min-height: 0; overflow: auto; overscroll-behavior: contain; }

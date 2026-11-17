@@ -26834,7 +26834,7 @@
     },
     "/templates/architecture.html": {
       "get": {
-        "description": "获取系统架构图（平台总览 / USB/IP / AOA / 固件烧写视图）",
+        "description": "获取系统架构页，使用规范 Mermaid 源渲染六个架构与流程视图。",
         "responses": {
           "200": {
             "content": {

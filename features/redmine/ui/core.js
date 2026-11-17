@@ -456,7 +456,7 @@ async function confirmUserAction(title, message) {
   if (typeof window.parent?.showConfirmDialog === 'function') {
     return window.parent.showConfirmDialog(title, message);
   }
-  return window.confirm(message);
+  return GmsDialogs.confirm(title, message);
 }
 
 function openRedmineReplyModal(issueId, replyText, meta) {
@@ -471,9 +471,9 @@ function openRedmineReplyModal(issueId, replyText, meta) {
   modal.id = modalId;
   modal.className = 'modal';
   modal.innerHTML = `
-    <div class="modal-content modal-l redmine-reply-modal">
-      <div class="modal-header">
-        <span class="modal-title">📝 Redmine回复</span>
+    <div class="modal-content modal-l redmine-reply-modal tech-dialog tech-dialog--redmine-reply"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
+      <div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg>
+        <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">Redmine回复</span></div>
         <button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="${modalId}">&times;</button>
       </div>
       <div class="modal-body">
@@ -489,10 +489,10 @@ function openRedmineReplyModal(issueId, replyText, meta) {
         <div>
           <label>📎 附件</label>
           <input type="file" id="${fileInputId}" data-redmine-files multiple style="display:none" data-change="updateRedmineReplyFileList" data-a0="${fileInputId}" data-a1="${fileListId}">
-          <div id="${fileInputId}-drop" class="redmine-reply-drop" data-click="_actClickById" data-a0="${fileInputId}">拖拽文件到此处，或点击选择文件</div>
+          <div id="${fileInputId}-drop" class="redmine-reply-drop tech-upload-zone" role="button" tabindex="0" data-keydown="_actClickById" data-key="13,32" data-prevent data-click="_actClickById" data-a0="${fileInputId}">拖拽文件到此处，或点击选择文件</div>
           <div id="${fileListId}" class="redmine-reply-file-list"></div>
         </div>
-        <div class="modal-buttons">
+        <div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
           <button class="secondary" data-click="removeDynamicModal" data-a0="${modalId}">取消</button>
           <button data-click="confirmAndSendRedmineReply" data-a0="${modalId}">确认并发送</button>
         </div>
