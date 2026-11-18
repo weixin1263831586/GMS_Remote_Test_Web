@@ -1,0 +1,63 @@
+name: Diagnose deployed vpn-proxy and GMS tools page
+
+on:
+  push:
+    branches: [verify/vpn-proxy-master-0066c998-20261118]
+    paths: [.github/workflows/diagnose-vpn-proxy-and-gms-tools-20261118.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-host-inspection:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 12
+    steps:
+      - name: Read-only local code and runtime diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '===== HOST ====='
+          hostname
+          test -f /home/hcq/GMS_Remote_Test_Web/actions-runner/.runner
+          echo '===== VPN SOURCE ====='
+          cd /home/hcq/vpn-proxy
+          git status -sb
+          git log -1 --format='%H %s'
+          git remote -v | head -2
+          echo '===== GMS SOURCE ====='
+          cd /home/hcq/GMS_Remote_Test_Web
+          git status -sb
+          git log -1 --format='%H %s'
+          git rev-parse --verify origin/main || :
+          echo '===== GMS CODE REFS ====='
+          rg -l 'rk-vpn-proxy-client-control|client-stats.sh|vpn.proxy|vpn_proxy|vpn-proxy' features frontend apps services tools 2>/dev/null | head -45 || true
+          echo '===== GMS LOCAL FRONTEND CANDIDATES ====='
+          find . -maxdepth 3 -type f \( -name 'index.html' -o -name 'vite.config.*' -o -name 'webpack.config.*' \) -not -path '*node_modules*' -not -path '*actions-runner*' -not -path '*/.git/*' | head -45
+          echo '===== GMS RUNNING SERVICE NAMES ====='
+          systemctl list-units --no-pager --type=service --state=running | grep -Ei 'gms|remote|gunicorn|nginx|uvicorn' || :
+          echo '===== GMS PAGE RESPONSES ====='
+          for url in 'https://127.0.0.1:5001/' 'https://172.16.14.233:5001/' 'https://172.16.14.233:5001/#tools'; do
+            printf '%s ' "$url"
+            curl --noproxy '*' -ksS -L -o /dev/null --connect-timeout 2 --max-time 8 -w '%{http_code} %{content_type} final=%{url_effective}\n' "$url" || :
+          done
+          echo '===== GMS PAGE NONSECRET ASSET PATHS ====='
+          curl --noproxy '*' -ksSL --connect-timeout 2 --max-time 8 https://172.16.14.233:5001/ |
+            grep -Eo '(src|href)="[^"?]+\.(js|css)(\?[^" ]+)?"' | head -30 || :
+          echo '===== VPN HEALTH AND ERROR CODES ====='
+          for unit in rk-vpn-proxy.service rk-vpn-proxy-firewall.service rk-vpn-proxy-installer.service rk-vpn-proxy-stats.service rk-vpn-proxy-health.timer; do
+            echo "$unit $(systemctl is-active "$unit" || :)"
+          done
+          echo '===== URL CHECK BY TWO PORTS ====='
+          for port in 7897 17897; do
+            for host in github.com www.google.com; do
+              echo "port=$port host=$host"
+              curl --noproxy '' --proxy "http://127.0.0.1:$port" --connect-timeout 5 --max-time 12 -sS -I -o /dev/null -w 'connect=%{http_connect} http=%{http_code} verify=%{ssl_verify_result} time=%{time_total}\n' "https://$host/" || :
+            done
+          done
+          echo '===== STATS ENDPOINT ====='
+          curl --noproxy '*' -fsS http://127.0.0.1:17898/api/stats | python3 -c 'import json,sys; d=json.load(sys.stdin); print({"port": d.get("proxy_port"),"sources":d.get("sources"),"connected":len(d.get("connected",[]))})' || :
+          echo '===== READ-ONLY UNIT FILE REFS ====='
+          for u in rk-vpn-proxy.service rk-vpn-proxy-firewall.service; do
+            systemctl show "$u" -p FragmentPath -p ActiveState -p MainPID
+          done
