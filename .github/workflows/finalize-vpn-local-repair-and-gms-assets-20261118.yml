@@ -1,0 +1,122 @@
+name: Finalize local vpn-proxy fix and compare deployed GMS assets
+
+on:
+  push:
+    branches: [verify/vpn-proxy-master-0066c998-20261118]
+    paths: [.github/workflows/finalize-vpn-local-repair-and-gms-assets-20261118.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vpn-proxy-local-repair
+  cancel-in-progress: false
+
+jobs:
+  local-source-repair:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: /home/hcq/vpn-proxy
+        shell: bash
+    steps:
+      - name: Correct test-source indentation from prior interrupted repair
+        run: |
+          set -euo pipefail
+          test -f /home/hcq/GMS_Remote_Test_Web/actions-runner/.runner
+          test "$(git rev-parse HEAD)" = 0066c998c856a0cef86ffa7184e2e46cf3fa83b7
+          test "$(git branch --show-current)" = master
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tests/test_client_checks.py')
+          t=p.read_text()
+          start=t.index('    def test_local_versus_remote_default_proxy_and_explicit_override(self):')
+          end=t.index('\n\nif __name__ == "__main__":',start)
+          fixed="\n    def test_default_proxy_selection_and_explicit_override(self):\n        import json\n        cases = (\n            (\"server\", \"local\", None, \"http://127.0.0.1:17897\"),\n            (\"remote\", \"remote\", None, \"http://192.0.2.100:7897\"),\n            (\"override\", \"local\", \"http://explicit.invalid:8888\", \"http://explicit.invalid:8888\"),\n        )\n        for label, route, override, expected in cases:\n            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:\n                root = Path(directory)\n                config = json.loads((ROOT / \"config.json\").read_text())\n                config.update(listen_host=\"192.0.2.100\", advertise_host=\"192.0.2.100\",\n                              health_port=17897)\n                conf = root / \"config.json\"\n                conf.write_text(json.dumps(config))\n                ip = root / \"ip\"\n                ip.write_text('#!/bin/bash\\nif [[ \"$ROUTE_KIND\" == local ]]; then '\n                              \"echo 'local 192.0.2.100 dev lo src 192.0.2.100'; \"\n                              \"else echo '192.0.2.100 via 192.0.2.1 dev eth0'; fi\\n\")\n                ip.chmod(0o755)\n                curl = root / \"curl\"\n                curl.write_text('#!/bin/bash\\nprintf \"%s\\\\n\" \"$*\" >> \"$REQUEST_LOG\"\\n'\n                                'if [[ \"$*\" == *api.ipify.org* ]]; then echo 198.51.100.42; '\n                                \"else echo '200 200 0'; fi\\n\")\n                curl.chmod(0o755)\n                env = dict(os.environ, PATH=f\"{root}:{os.environ['PATH']}\",\n                           ROUTE_KIND=route, REQUEST_LOG=str(root / \"requests\"),\n                           RK_VPN_PROXY_CONFIG=str(conf), RK_VPN_PROXY_URL=\"\",\n                           RK_VPN_CHECK_RETRIES=\"1\")\n                command = [\"bash\", str(ROOT / \"check-client.sh\")]\n                if override:\n                    command.append(override)\n                result = subprocess.run(command, env=env, capture_output=True, text=True)\n                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)\n                requests = (root / \"requests\").read_text().splitlines()\n                self.assertEqual(len(requests), 6)\n                self.assertTrue(all(\"--proxy \" + expected in request for request in requests))\n\n    def test_network_timeout_is_retried_once(self):\n        with tempfile.TemporaryDirectory() as directory:\n            root = Path(directory)\n            curl = root / \"curl\"\n            curl.write_text('#!/bin/bash\\nprintf \"request\\\\n\" >> \"$REQUEST_LOG\"\\n'\n                            'if [[ \"$*\" == *\"www.google.com\"* && ! -f \"$RETRY_FLAG\" ]]; then '\n                            'touch \"$RETRY_FLAG\"; exit 28; fi\\n'\n                            'if [[ \"$*\" == *api.ipify.org* ]]; then echo 198.51.100.42; '\n                            \"else echo '200 200 0'; fi\\n\")\n            curl.chmod(0o755)\n            env = dict(os.environ, PATH=f\"{root}:{os.environ['PATH']}\",\n                       REQUEST_LOG=str(root / \"requests\"), RETRY_FLAG=str(root / \"retry\"),\n                       RK_VPN_CHECK_RETRIES=\"2\")\n            result = subprocess.run([\"bash\", str(ROOT / \"check-client.sh\"),\n                                     \"http://test.invalid:7897\"], env=env,\n                                    capture_output=True, text=True)\n            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)\n            self.assertIn(\"WARN:\", result.stderr)\n            self.assertEqual(len((root / \"requests\").read_text().splitlines()), 7)\n"
+          t=t[:start]+fixed.rstrip()+t[end:]
+          p.write_text(t)
+          print('Replaced malformed test with properly indented cases')
+          PY
+          python3 -m py_compile tests/test_client_checks.py
+          bash -n check-client.sh
+          bash -n scripts/firewall.sh
+          git diff --check
+
+      - name: Full Python regressions with warnings promoted
+        run: |
+          set -euo pipefail
+          PYTHONWARNINGS=error::ResourceWarning python3 -B -m unittest discover -s tests -v
+
+      - name: Policy routing stub and real kernel namespace regressions
+        run: |
+          set -euo pipefail
+          bash tests/test_policy_routing.sh
+          bash tests/test_policy_routing_kernel.sh
+
+      - name: Commit regression-tested changes locally without pushing
+        run: |
+          set -euo pipefail
+          expected=$(printf '%s\n' README.md check-client.sh scripts/firewall.sh tests/test_client_checks.py tests/test_client_stats.py | sort)
+          actual=$(git diff --name-only | sort)
+          test "$actual" = "$expected"
+          git add -- README.md check-client.sh scripts/firewall.sh tests/test_client_checks.py tests/test_client_stats.py
+          git -c user.name='VPN Proxy Local Repair' -c user.email='vpn-proxy-local@users.noreply.github.com' commit -m 'fix: select loopback proxy for local checks and harden routing tests'
+          git status -sb
+          test -z "$(git status --porcelain)"
+
+      - name: Test patched default local HTTPS proxy end-to-end
+        run: |
+          set -euo pipefail
+          bash check-client.sh
+          git status -sb
+
+      - name: Compare live GMS static assets to local filesystem
+        if: always()
+        working-directory: /home/hcq/GMS_Remote_Test_Web
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,os,re,ssl,urllib.request
+          from pathlib import Path
+          root=Path("/home/hcq/GMS_Remote_Test_Web")
+          base="https://172.16.14.233:5001"
+          context=ssl._create_unverified_context()
+          def get(path):
+              return urllib.request.urlopen(base+path, timeout=10, context=context).read()
+          html=get("/")
+          paths=list(dict.fromkeys(re.findall(rb'(?:src|href)="(/static/[^"?]+\.(?:js|css))(?:\?[^"]*)?"',html)))
+          candidates=[]
+          for directory,dirs,files in os.walk(root):
+              dirs[:]=[d for d in dirs if d not in {'.git','actions-runner','node_modules','.venv','venv','__pycache__','tools','logs','tmp','data'}]
+              if 'shell-early-boot.js' in files:
+                  p=Path(directory)/'shell-early-boot.js'
+                  if '/static/' in str(p): candidates.append(Path(str(p).split('/static/')[0])/'static')
+          print('GMS branch/HEAD:')
+          os.system("git status -sb | head -2; git rev-parse HEAD")
+          print('Live index HTTP 200, JS/CSS references:',len(paths))
+          print('Local static directory candidates:',*[str(p) for p in candidates],sep='\n  ')
+          if not candidates:
+              raise SystemExit('No local static root identified; cannot attest UI freshness')
+          static_root=candidates[0]
+          matched=0;mismatched=[];missing=[]
+          for bpath in paths:
+              url=bpath.decode()
+              local=static_root/url.removeprefix('/static/')
+              if not local.exists():
+                  missing.append(url);continue
+              try:
+                  remote=get(url)
+              except Exception as exc:
+                  mismatched.append((url,'fetch error '+str(exc)));continue
+              if hashlib.sha256(remote).digest()!=hashlib.sha256(local.read_bytes()).digest():
+                  mismatched.append((url,'hash mismatch'))
+              else: matched+=1
+          print('GMS asset verification: matched=',matched,'mismatched=',len(mismatched),'missing_local=',len(missing))
+          for name,reason in mismatched[:20]: print('MISMATCH:',name,reason)
+          for name in missing[:15]: print('MISSING LOCAL:',name)
+          if mismatched or missing:
+              raise SystemExit('LIVE_GMS_ASSETS_OUT_OF_SYNC')
+          print('PASS: all referenced GMS static JS/CSS byte-identical to local source')
+          PY
+          systemctl show gms-web-app.service -p ActiveState -p WorkingDirectory -p ExecMainStartTimestamp
