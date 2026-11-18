@@ -189,3 +189,35 @@ def test_endpoint_empty_heartbeat_falls_back_to_live_probes(cluster, monkeypatch
     payload = json.loads(asyncio.run(management_api.devices_management(request)).body)
     assert payload['source'] == 'local'
     assert [item['device_id'] for item in payload['devices']] == ['ADB001']
+
+
+def test_no_device_probe_marks_fallback_inventory_stale(monkeypatch):
+    principal = CurrentUser(id="alice", username="alice", role="user")
+    request = Request({
+        "type": "http", "method": "GET", "path": "/api/devices/management",
+        "headers": [], "client": ("127.0.0.1", 1),
+    })
+    request.state.current_user = principal
+    monkeypatch.setattr(management_api, "require_authenticated_user_when_auth_required", lambda _: principal)
+    monkeypatch.setattr(management_api, "is_local_host", lambda _: True)
+    monkeypatch.setattr(management_api, "local_management_inventory", lambda: None)
+    monkeypatch.setattr(management_api, "has_blocked_adb_process", lambda: False)
+    monkeypatch.setattr(management_api.device_manager, "get_fastboot_devices", lambda: [])
+    runtime = management_api.runtime.get_runtime()
+    monkeypatch.setattr(runtime, "config_manager", SimpleNamespace(
+        load_config=lambda: {}, get_ubuntu_host=lambda _: "127.0.0.1",
+    ))
+    monkeypatch.setattr(runtime, "get_client_id_from_request", lambda _: "alice")
+    monkeypatch.setattr(runtime, "run_local_shell_command", lambda *_: CommandResult(
+        stdout="List of devices attached\n", stderr="", code=0,
+    ))
+    monkeypatch.setattr(management_api, "_cached_management_payload", lambda _: {
+        "success": True, "source": "cache",
+        "devices": [{"device_id": "old-dut", "status": "online", "protocol": "adb"}],
+    })
+    response = asyncio.run(management_api.devices_management(request))
+    data = json.loads(response.body)
+    assert response.status_code == 200
+    assert data["stale"] is True
+    assert data["devices"][0]["device_id"] == "old-dut"
+    assert "cached" in data["warning"]

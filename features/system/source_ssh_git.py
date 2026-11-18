@@ -60,7 +60,8 @@ SSH_GIT_GREP_TIMEOUT_SECONDS = 120
 # execute 超时共用该值。实际最坏墙钟 ≈ deadline + 最后一波（≤100s）+
 # 命中仓回查 60s ≈ 260s；冷缓存（首次子仓发现 +180s）可达 ~440s。
 # 客户端 HTTP 预算由 GMS_SDK_CURL_TIMEOUT（CLI 默认 480s）覆盖，
-# 全仓超时返回 limited 结果 + hint（agent 会用 path_filter 收窄重试）。
+# 全仓超时返回 limited 结果 + hint（path_filter 过滤命中路径并优先相关仓，
+# 不减少检索仓库集合；需要限制仓库数时应注册明确的子仓源）。
 SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS = 100
 # 全量发现模式：并行 SSH 分片参数（每分片一条独立连接、一条串行循环命令）。
 # - 每片 32 仓按实测吞吐校准（远端 0.7-1.5s/仓 → 每片 25-50s，100s 内）；
@@ -621,8 +622,12 @@ class SSHGitProvider(LocalGitProvider):
                 return {
                     "source_id": self.config.source_id,
                     "revision": label,
+                    # No per-repo HEADs were resolved; never claim this SDK
+                    # checkout can be reproduced from a directory listing.
                     "commit": "",
-                    "reproducible": True,
+                    "reproducible": False,
+                    "coverage_complete": False,
+                    "repos_resolved": 0,
                     "multi_repo": True,
                     "revision_is_head": True,
                     "discovered": self.config.discover_repos,
@@ -630,17 +635,21 @@ class SSHGitProvider(LocalGitProvider):
                     "repos": {self._repo_rel(r): {} for r in repos},
                 }
             heads = self._multi_heads(with_subject=True, repos=repos)
-            first = next(iter(heads))
+            complete = len(heads) == len(repos)
             return {
                 "source_id": self.config.source_id,
                 "revision": label,
-                "commit": heads[first]["commit"],
-                "commit_subject": heads[first]["subject"],
-                "reproducible": True,
+                # A multi-repository checkout has no single global commit.
+                # Only repos[relative_path].commit identifies specific code.
+                "commit": "",
+                "commit_subject": "",
+                "reproducible": complete,
+                "coverage_complete": complete,
+                "repos_resolved": len(heads),
                 "multi_repo": True,
                 "revision_is_head": True,
                 "discovered": self.config.discover_repos,
-                "repo_count": len(heads),
+                "repo_count": len(repos),
                 "repos": heads,
             }
         commit = self.resolve_commit(revision)
@@ -913,8 +922,10 @@ class SSHGitProvider(LocalGitProvider):
             ]
         if limited and not filter_value:
             payload["hint"] = (
-                "全库检索超时/截断：请用 path_filter 缩小子仓范围"
-                "（如 frameworks/base、kernel-6.1）后重试"
+                "全库检索超时/截断：path_filter（如 frameworks/base、"
+                "kernel-6.1）可优先检索相关仓并过滤命中路径，"
+                "但不会减少检索仓库总数；需要严格限制仓库范围，"
+                "请注册指定子仓的 SDK 源后重试"
             )
         return payload
 

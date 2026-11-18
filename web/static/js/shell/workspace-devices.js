@@ -892,7 +892,7 @@ async function refreshTestSuites() {
     if (button?.disabled) return;
     if (button) {
         button.disabled = true;
-        button.textContent = '刷新中…';
+        button.innerHTML = GmsUi.testEmoji('🔄') + ' 刷新中…';
         button.setAttribute('aria-busy', 'true');
     }
     showToast('正在刷新测试套件...', 'info');
@@ -901,7 +901,7 @@ async function refreshTestSuites() {
     } finally {
         if (button) {
             button.disabled = false;
-            button.textContent = '↻ 刷新套件';
+            button.innerHTML = GmsUi.testEmoji('🔄') + ' 刷新套件';
             button.removeAttribute('aria-busy');
         }
     }

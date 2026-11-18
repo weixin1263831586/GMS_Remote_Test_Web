@@ -511,6 +511,13 @@ async def devices_management(request: Request):
                         adb_result.stderr if not adb_result.ok else ""
                     )
                 )
+                if cached:
+                    # A no-device probe cannot prove cached USB identities are
+                    # still connected. Keep UI context but mark it stale.
+                    cached.update({
+                        "stale": True,
+                        "warning": warning or "ADB/Fastboot returned no devices; showing cached inventory",
+                    })
                 return response(cached or {
                     "devices": [], "success": True, "source": "local",
                     "warning": warning,
@@ -568,7 +575,13 @@ async def devices_management(request: Request):
                 fastboot_devices,
             )
             if not device_ids:
-                return response(_cached_management_payload(client_id) or {"devices": []})
+                cached = _cached_management_payload(client_id)
+                if cached:
+                    cached.update({
+                        "stale": True,
+                        "warning": "Remote ADB/Fastboot returned no devices; showing cached inventory",
+                    })
+                return response(cached or {"devices": [], "source": "ssh"})
             props_output = ""
             if adb_devices:
                 props_result = await asyncio.to_thread(

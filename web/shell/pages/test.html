@@ -43,13 +43,13 @@
                                     <select id="test-suite" class="combo-box" data-test-config-control>
                                         <option value="" disabled selected></option>
                                     </select>
-                                    <button id="refresh-suites-btn" class="btn-xxs ui-refresh-action" data-click="refreshTestSuites"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新套件</button>
+                                    <button id="refresh-suites-btn" class="btn-xxs ui-refresh-action" data-click="refreshTestSuites"><span class="test-action-icon" aria-hidden="true">🔄</span> 刷新套件</button>
                                 </div>
                                 <div class="form-row">
                                     <label>测试报告:</label>
                                     <div class="input-with-btn">
                                         <input type="text" id="retry-result" class="entry-field" data-test-config-control />
-                                        <button class="btn-small" data-click="browseRemoteFile" data-a0="retry" data-test-config-control><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#folder"></use></svg> 选择报告</button>
+                                        <button class="btn-small" data-click="browseRemoteFile" data-a0="retry" data-test-config-control><span class="test-action-icon" aria-hidden="true">📁</span> 选择报告</button>
                                     </div>
                                 </div>
                             </div>
@@ -97,27 +97,27 @@
                     </div>
                     <!-- ADB 控制按钮 -->
                     <div class="adb-button-frame" data-operation-log-tab="system">
-                        <button id="refresh-devices-btn" class="btn-xxs ui-refresh-action" data-click="refreshDevices">↻ 刷新设备</button>
-                        <button class="btn-xxs" data-click="selectAllDevices">✅ 全选设备</button>
-                        <button class="btn-xxs" data-click="rebootDevices">⏻ 重启设备</button>
-                        <button id="btn-remount-devices" class="btn-xxs" data-click="remountDevices">⏻ Remount</button>
-                        <button class="btn-xxs" data-click="factoryResetDevices">🧹 恢复出厂</button>
-                        <button class="btn-xxs" data-click="connectWifi">🛜 连接Wifi</button>
-                        <button id="btn-lock-device" class="btn-xxs" data-click="lockSelectedDevices" data-a0="lock">🔒 锁定设备</button>
-                        <button id="btn-unlock-device" class="btn-xxs" data-click="lockSelectedDevices" data-a0="unlock">🔓 解锁设备</button>
-                        <button id="btn-check-lock-status" class="btn-xxs" data-click="checkDeviceLockStatus">🔐 锁定状态</button>
-                        <button id="btn-device-info" class="btn-xxs" data-click="collectDeviceInfo">📋 设备信息</button>
+                        <button id="refresh-devices-btn" class="btn-xxs ui-refresh-action" data-click="refreshDevices"><span class="test-action-icon" aria-hidden="true">🔄</span> 刷新设备</button>
+                        <button class="btn-xxs" data-click="selectAllDevices"><span class="test-action-icon" aria-hidden="true">✅</span> 全选设备</button>
+                        <button class="btn-xxs" data-click="rebootDevices"><span class="reboot-icon" aria-hidden="true">⏻</span> 重启设备</button>
+                        <button id="btn-remount-devices" class="btn-xxs" data-click="remountDevices" title="对选中设备执行 adb remount，重新挂载可写分区"><span class="test-action-icon" aria-hidden="true">⚡</span> Remount</button>
+                        <button class="btn-xxs" data-click="factoryResetDevices"><span class="test-action-icon" aria-hidden="true">🧹</span> 恢复出厂</button>
+                        <button class="btn-xxs" data-click="connectWifi"><span class="test-action-icon" aria-hidden="true">🛜</span> 连接 Wi-Fi</button>
+                        <button id="btn-lock-device" class="btn-xxs" data-click="lockSelectedDevices" data-a0="lock"><span class="test-action-icon" aria-hidden="true">🔒</span> 锁定设备</button>
+                        <button id="btn-unlock-device" class="btn-xxs" data-click="lockSelectedDevices" data-a0="unlock"><span class="test-action-icon" aria-hidden="true">🔓</span> 解锁设备</button>
+                        <button id="btn-check-lock-status" class="btn-xxs" data-click="checkDeviceLockStatus"><span class="test-action-icon" aria-hidden="true">🔐</span> 锁定状态</button>
+                        <button id="btn-device-info" class="btn-xxs" data-click="collectDeviceInfo"><span class="test-action-icon" aria-hidden="true">📋</span> 设备信息</button>
                     </div>
                     <!-- VNC 控制按钮 -->
                     <div class="vnc-button-frame" data-operation-log-tab="system">
-                        <button id="btn-burn-firmware" class="btn-xxs" data-click="burnFirmware">🔥 烧写固件</button>
-                        <button id="btn-burn-gsi" class="btn-xxs" data-click="burnGsiImage">🔥 烧写GSI</button>
-                        <button class="btn-xxs" disabled title="该功能尚未开放">🔥 烧写SN</button>
-                        <button class="btn-xxs" id="start-vnc-btn" data-click="initAndStartVnc">🚀 启动VNC</button>
-                        <button class="btn-xxs" data-click="initAndStartVnc" data-a0="true" title="重启主机 VNC；会短暂断开当前 noVNC 连接">🔄 重启VNC</button>
-                        <button class="btn-xxs" data-click="showDeviceScreen">📺 设备投屏</button>
-                        <button class="btn-xxs" id="adb-forward-btn" data-click="setupAdbPortForward">🔌 ADB接入</button>
-                        <button class="btn-xxs" id="usbip-btn" data-click="setupUsbipForward">📱 本地设备</button>
+                        <button id="btn-burn-firmware" class="btn-xxs" data-click="burnFirmware"><span class="test-action-icon" aria-hidden="true">🔥</span> 烧写固件</button>
+                        <button id="btn-burn-gsi" class="btn-xxs" data-click="burnGsiImage"><span class="test-action-icon" aria-hidden="true">🔥</span> 烧写 GSI</button>
+                        <button class="btn-xxs" disabled title="该功能尚未开放"><span class="test-action-icon" aria-hidden="true">🏷️</span> 烧写 SN</button>
+                        <button class="btn-xxs" id="start-vnc-btn" data-click="initAndStartVnc"><span class="test-action-icon" aria-hidden="true">🚀</span> 启动 VNC</button>
+                        <button class="btn-xxs" data-click="initAndStartVnc" data-a0="true" title="重启主机 VNC；会短暂断开当前 noVNC 连接"><span class="test-action-icon" aria-hidden="true">🔄</span> 重启 VNC</button>
+                        <button class="btn-xxs" data-click="showDeviceScreen"><span class="test-action-icon" aria-hidden="true">📺</span> 设备投屏</button>
+                        <button class="btn-xxs" id="adb-forward-btn" data-click="setupAdbPortForward"><span class="test-action-icon" aria-hidden="true">🔌</span> ADB 接入</button>
+                        <button class="btn-xxs" id="usbip-btn" data-click="setupUsbipForward"><span class="test-action-icon" aria-hidden="true">📱</span> USB/IP 接入</button>
                     </div>
                 </div>
 
@@ -126,11 +126,11 @@
                     <div class="section-title">操作控制</div>
                     <!-- VPN 控制按钮 -->
                     <div class="vpn-btn-frame" data-operation-log-tab="system">
-                        <button class="btn-xxs" data-click="copyDeployCommand"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg> 签名发布包部署</button>
-                        <button class="btn-xxs" data-click="showTailscaleInfoModal"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#globe"></use></svg> Tailscale组网</button>
-                        <button class="btn-xxs" id="check-sshd-btn" data-click="checkSshd"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#network"></use></svg> 检查SSHD</button>
-                        <button class="btn-xxs" id="check-routing-btn" data-click="checkRouting"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#network"></use></svg> 检查路由</button>
-                        <button class="btn-xxs" id="vpn-connect-btn" data-click="connectVpn"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#plug"></use></svg> 连接VPN</button>
+                        <button class="btn-xxs" data-click="copyDeployCommand"><span class="test-action-icon" aria-hidden="true">📋</span> 复制部署命令</button>
+                        <button class="btn-xxs" data-click="showTailscaleInfoModal"><span class="test-action-icon" aria-hidden="true">🌐</span> Tailscale 组网</button>
+                        <button class="btn-xxs" id="check-sshd-btn" data-click="checkSshd"><span class="test-action-icon" aria-hidden="true">🖥️</span> 检查 SSHD</button>
+                        <button class="btn-xxs" id="check-routing-btn" data-click="checkRouting"><span class="test-action-icon" aria-hidden="true">🧭</span> 检查路由</button>
+                        <button class="btn-xxs" id="vpn-connect-btn" data-click="connectVpn"><span class="test-action-icon" aria-hidden="true">🔌</span> 连接 VPN</button>
                         <span id="vpn-status-label" class="vpn-status-label">状态: 未知</span>
 
                     </div>
@@ -140,7 +140,7 @@
                          "两眼一抹黑"看不到入口。 -->
                     <div class="upload-frame" data-operation-log-tab="system">
                         <div class="form-row">
-                            <label>📁 本地文件:</label>
+                            <label><span class="test-action-icon" aria-hidden="true">📁</span> 本地文件:</label>
                             <div id="drop-zone" class="drop-zone">
                                 <input type="file" id="local-file" class="file-input" style="display: none;" />
                                 <div class="drop-zone-text" id="drop-zone-text">
@@ -148,7 +148,7 @@
                                 </div>
                                 <div class="drop-zone-filename" id="drop-zone-filename"></div>
                             </div>
-                            <button class="btn-xs" id="upload-test-host-btn" data-click="handleUploadFile"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg> 上传到测试主机</button>
+                            <button class="btn-xs" id="upload-test-host-btn" data-click="handleUploadFile"><span class="test-action-icon" aria-hidden="true">📤</span> 上传到测试主机</button>
                         </div>
                         <!-- 上传进度 -->
                         <div class="progress-container">
@@ -160,10 +160,10 @@
                     </div>
                     <!-- 测试按钮 -->
                     <div class="test-btn-frame">
-                        <button class="btn-primary btn-lg" id="test-toggle-btn" data-click="toggleTest"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#play"></use></svg> 开始测试</button>
-                        <button class="btn-xxs" data-click="downloadTestLog"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 保存日志</button>
-                        <button class="btn-xxs" data-click="cleanTest"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#trash"></use></svg> 清除日志</button>
-                        <button class="btn-xxs" data-click="showConfig"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg> 配置</button>
+                        <button class="btn-primary btn-lg" id="test-toggle-btn" data-click="toggleTest">开始测试</button>
+                        <button class="btn-xxs" data-click="downloadTestLog"><span class="test-action-icon" aria-hidden="true">💾</span> 保存日志</button>
+                        <button class="btn-xxs" data-click="cleanTest"><span class="test-action-icon" aria-hidden="true">🗑️</span> 清除日志</button>
+                        <button class="btn-xxs" data-click="showConfig"><span class="test-action-icon" aria-hidden="true">⚙️</span> 配置</button>
                     </div>
                 </div>
             </div>

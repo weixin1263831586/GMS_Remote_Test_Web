@@ -519,3 +519,28 @@ def test_open_build_artifact_public_surface_routes_through_active_service(monkey
     ) as (stream, size):
         assert stream == "stream:build_1:out/update.img"
         assert size == 7
+
+
+def test_build_job_list_applies_owner_filter_before_limit(tmp_path):
+    store = BuildStore(tmp_path / "build.sqlite3")
+    # An older owner-A task must remain visible even when newer tasks from
+    # other users saturate the requested LIMIT.
+    for index, (owner, status) in enumerate((
+        ("owner-a", "completed"), ("owner-b", "completed"),
+        ("owner-b", "running"), ("owner-b", "failed"),
+        ("owner-a", "running"), ("owner-b", "running"),
+    )):
+        store.create_job({
+            "id": f"job-{index}", "owner": owner, "status": status,
+            "created_at": f"2026-11-17T00:00:{index:02d}Z",
+        })
+    assert [job["id"] for job in store.list_jobs(limit=1, owner="owner-a")] == ["job-4"]
+    assert [job["id"] for job in store.list_jobs(limit=2, owner="owner-a")] == [
+        "job-4", "job-0"
+    ]
+    assert [job["id"] for job in store.list_jobs(limit=1, owner="owner-b")] == ["job-5"]
+    assert [job["id"] for job in store.list_jobs(limit=2, owner="owner-a", status="completed")] == [
+        "job-0"
+    ]
+    assert store.list_jobs(limit=2, owner="owner-missing") == []
+    assert [job["id"] for job in store.list_jobs(limit=1, owner=None)] == ["job-5"]

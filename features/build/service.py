@@ -74,8 +74,13 @@ class BuildService:
             raise BuildNotFoundError("Build job not found")
         return self._decorate_job(job)
 
-    def list_jobs(self, status: str = "", limit: int = 50) -> list[dict[str, Any]]:
-        return [self._decorate_job(item) for item in self.store.list_jobs(status=status, limit=limit)]
+    def list_jobs(
+        self, status: str = "", limit: int = 50, *, owner: str | None = None
+    ) -> list[dict[str, Any]]:
+        return [
+            self._decorate_job(item)
+            for item in self.store.list_jobs(status=status, limit=limit, owner=owner)
+        ]
 
     def delete_job(self, job_id: str) -> None:
         job = self.store.get_job(job_id)

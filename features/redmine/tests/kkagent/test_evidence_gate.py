@@ -311,6 +311,17 @@ class TestFailureSourceEvidenceGateTests(unittest.TestCase):
         ))
         self.assertFalse(is_test_failure_subject({}))
 
+    def test_suite_gate_ignores_incidental_english_substrings(self):
+        for subject in ("UNITS and VISITS summary", "robot monitor logits", "units test"):
+            with self.subTest(subject=subject):
+                self.assertFalse(is_test_failure_subject({"subject": subject}))
+
+    def test_suite_gate_recognizes_android_test_classes_and_modules(self):
+        for subject in ("CtsSecurityTestCases failed", "vts_ltp_test_arm_64 fail",
+                        "GTS failed", "ITS_camera", "CTSFailure on RK3576"):
+            with self.subTest(subject=subject):
+                self.assertTrue(is_test_failure_subject({"subject": subject}))
+
     def test_test_failure_without_source_evidence_fails_gate(self):
         trace = _full_trace()
         gate = evaluate_evidence_gate(trace, self._entry())

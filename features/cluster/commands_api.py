@@ -50,14 +50,16 @@ def _require_command_access(request: Request, command: dict[str, Any]) -> None:
         return
     if user.role == "admin" or is_elevated(request):
         return
-    payload = command.get("payload") or {}
-    owner_id = str(payload.get("owner_id") or "")
-    job = None
     job_id = str(command.get("job_id") or "")
-    if job_id or not owner_id:
-        job = service().repository.get_job(job_id) if job_id else None
-        owner_id = owner_id or str((job or {}).get("owner_id") or "")
-    if owner_id != user.resource_owner_id:
+    if job_id:
+        # Commands carrying a job_id are owned by the authoritative job row.
+        # Never trust payload.owner_id to override that owner, even if the
+        # payload was populated by a different executor or an older version.
+        job = service().repository.get_job(job_id)
+        owner_id = str((job or {}).get("owner_id") or "")
+    else:
+        owner_id = str((command.get("payload") or {}).get("owner_id") or "")
+    if not owner_id or owner_id != user.resource_owner_id:
         raise HTTPException(404, "command not found")
 
 

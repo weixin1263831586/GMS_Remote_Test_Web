@@ -3,9 +3,10 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from features.cluster import commands_api
@@ -131,6 +132,43 @@ class CommandEventsRepositoryTests(unittest.TestCase):
                     "SELECT COUNT(*) FROM cluster_command_events"
                 ).fetchone()[0]
             self.assertEqual(remaining, 0)
+
+
+class CommandAccessOwnerTests(unittest.TestCase):
+    def test_job_owner_is_authoritative_even_when_payload_spoofs_other_owner(self):
+        repository = mock.Mock()
+        repository.get_job.return_value = {"owner_id": "owner-A"}
+        fake_service = SimpleNamespace(repository=repository)
+        command = {"job_id": "job-one", "payload": {"owner_id": "owner-B"}}
+        browser = SimpleNamespace(role="user", resource_owner_id="owner-B")
+        request = object()
+
+        with mock.patch.object(commands_api, "get_authenticated_user", return_value=browser), \
+             mock.patch.object(commands_api, "is_elevated", return_value=False), \
+             mock.patch.object(commands_api, "service", return_value=fake_service):
+            with self.assertRaises(HTTPException) as rejected:
+                commands_api._require_command_access(request, command)
+            self.assertEqual(rejected.exception.status_code, 404)
+            repository.get_job.assert_called_with("job-one")
+
+            browser.resource_owner_id = "owner-A"
+            commands_api._require_command_access(request, command)
+
+            # A deleted or inaccessible job cannot delegate access to its
+            # stale command payload.
+            repository.get_job.return_value = None
+            with self.assertRaises(HTTPException) as missing:
+                commands_api._require_command_access(request, command)
+            self.assertEqual(missing.exception.status_code, 404)
+
+    def test_jobless_command_still_uses_payload_owner(self):
+        command = {"job_id": "", "payload": {"owner_id": "owner-A"}}
+        browser = SimpleNamespace(role="user", resource_owner_id="owner-A")
+        with mock.patch.object(commands_api, "get_authenticated_user", return_value=browser), \
+             mock.patch.object(commands_api, "is_elevated", return_value=False), \
+             mock.patch.object(commands_api, "service") as service_mock:
+            commands_api._require_command_access(object(), command)
+            service_mock.assert_not_called()
 
 
 class CommandEventsApiTests(unittest.TestCase):

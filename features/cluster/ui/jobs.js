@@ -1,72 +1,22 @@
 // Cluster job lifecycle chunk (form/workspace/vpn/refresh/reports); loaded by page.html in dependency order.
-function clusterDeviceId(workerId,value){const text=String(value||'');return !text||workerId==='auto'||text.startsWith(`${workerId}:`)?text:`${workerId}:${text}`}
-// Test admission comes from the Controller; command targets also serve suite deployment.
-function jobWorkers(){return commandWorkers().filter(worker=>!worker.admission_blocked)}
-let clusterJobWorkerDraft=null;
-let creatingClusterJob=false;
-let pendingClusterJobRequest=null;
-let clusterJobRequestRestored=false;
-function clusterJobRequestKey(){return Array.from(crypto.getRandomValues(new Uint8Array(16)),value=>value.toString(16).padStart(2,'0')).join('')}
-function clusterJobStorageKey(owner){return `gms.cluster.pending-job.v1:${owner}`}
-async function clusterJobRequestOwner(){
- const status=await api('/api/auth/status');
- if(status.needs_authentication)throw new Error('请先登录后创建任务');
- return status.user?.resource_owner_id||status.user?.id||'anonymous';
-}
-function readPendingClusterJob(owner){
- const raw=sessionStorage.getItem(clusterJobStorageKey(owner));if(!raw)return null;
- try{const value=JSON.parse(raw),body=JSON.parse(value.body);return value.owner===owner&&/^[a-f0-9]{32}$/.test(value.key)&&typeof body.worker_id==='string'&&typeof body.suite_key==='string'&&Array.isArray(body.devices)?value:null}catch{return null}
-}
-function clusterJobFormBody(){const device=document.querySelector('#job-device').value;return {worker_id:document.querySelector('#job-worker').value,suite_key:document.querySelector('#job-suite').value,devices:device?[device]:[],device_count:1}}
-async function restorePendingClusterJob(){
- const owner=await clusterJobRequestOwner();pendingClusterJobRequest=readPendingClusterJob(owner);clusterJobRequestRestored=true;
- if(!pendingClusterJobRequest)return;
- const body=JSON.parse(pendingClusterJobRequest.body),worker=document.querySelector('#job-worker');
- if(!Array.from(worker.options).some(option=>option.value===body.worker_id))worker.add(new Option(body.worker_id,body.worker_id));
- worker.value=body.worker_id;clusterJobWorkerDraft=body.worker_id;updateJobOptions();
- document.querySelector('#job-suite').value=body.suite_key;document.querySelector('#job-device').value=body.devices[0]||'';updateJobOptions();
-}
-function renderJobForm(){
- const worker=document.querySelector('#job-worker'),suite=document.querySelector('#job-suite'),device=document.querySelector('#job-device');if(!worker||!suite||!device)return;
- const previousWorker=worker.value||clusterJobWorkerDraft||((clusterWorkspace.scope_mode==='cluster'&&clusterWorkspace.worker_id)||'auto');
- const workers=commandWorkers(),localIndex=workers.findIndex(item=>item.id===localWorkerId()),workerOptions=workers.map(w=>`<option value="${esc(w.id)}"${w.admission_blocked?' disabled':''}>${esc((w.name||w.id)+(w.admission_blocked?' · 已阻止派发'+admissionReasonSuffix(w):''))}</option>`);
- worker.innerHTML=localIndex>=0?workerOptions[localIndex]+'<option value="auto">自动选择</option>'+workerOptions.filter((_,index)=>index!==localIndex).join(''):'<option value="auto">自动选择</option>'+workerOptions.join('');
- worker.value=Array.from(worker.options).some(o=>o.value===previousWorker)?previousWorker:'auto';
- updateJobOptions();
-}
-function updateJobOptions(){
- const wid=document.querySelector('#job-worker').value,suite=document.querySelector('#job-suite'),device=document.querySelector('#job-device');
- const previousSuite=suite.value||clusterWorkspace.suite_key||'',previousDevice=device.value||(clusterWorkspace.device_ids||[])[0]||'';
- const eligibleIds=new Set(jobWorkers().map(worker=>worker.id));
- const selectedEligible=wid==='auto'?eligibleIds.size>0:eligibleIds.has(wid);
- const availableSuites=state.suites.filter(s=>eligibleIds.has(s.worker_id)&&(wid==='auto'||s.worker_id===wid)&&s.available);
- suite.innerHTML=[...new Map(availableSuites.map(s=>[s.suite_key,s])).values()].map(s=>`<option value="${esc(s.suite_key)}">${esc(s.suite_type)} ${esc(s.suite_version)}</option>`).join('');
- if(Array.from(suite.options).some(o=>o.value===previousSuite))suite.value=previousSuite;
- device.innerHTML=wid==='auto'||!selectedEligible?'<option value="">自动选择设备</option>':'<option value="">自动选择设备</option>'+state.devices.filter(d=>d.worker_id===wid&&d.state==='available').map(d=>`<option value="${esc(d.id)}">${esc(d.serial)}</option>`).join('');
- const normalized=clusterDeviceId(wid,previousDevice);if(Array.from(device.options).some(o=>o.value===normalized))device.value=normalized;
- const pending=pendingClusterJobRequest?JSON.parse(pendingClusterJobRequest.body):null;
- if(pending?.worker_id===wid){
-  if(!Array.from(suite.options).some(o=>o.value===pending.suite_key))suite.add(new Option(pending.suite_key+' · 待确认',pending.suite_key));
-  const savedDevice=pending.devices[0]||'';if(savedDevice&&!Array.from(device.options).some(o=>o.value===savedDevice))device.add(new Option(savedDevice+' · 待确认',savedDevice));
-  if(previousSuite===pending.suite_key)suite.value=previousSuite;if(previousDevice===savedDevice)device.value=savedDevice;
- }
- const retry=pendingClusterJobRequest?.body===JSON.stringify(clusterJobFormBody());
- const create=document.querySelector('#create-job');if(create){create.disabled=creatingClusterJob||(!retry&&(!selectedEligible||!suite.value));create.title=creatingClusterJob?'正在创建任务':retry?'确认上次提交结果':create.disabled?'没有满足准入条件的 Worker 和套件':''}
-}
-function syncClusterWorkspace(extra={}){
- if(applyingClusterWorkspace)return;const worker=document.querySelector('#job-worker')?.value||'auto',device=document.querySelector('#job-device')?.value||'',suite=document.querySelector('#job-suite')?.value||'';
- // An automatic draft has no concrete Worker until the Controller assigns it.
- if(worker==='auto'&&!extra.worker_id)return;
- const patch={scope_mode:'cluster',worker_id:worker,device_ids:device?[device]:[],suite_key:suite,origin_page:'cluster',...extra};
- clusterWorkspace={...clusterWorkspace,...patch};
+// Cluster only monitors jobs; the Test and ATS pages own submission.
+// Preserve cross-workspace navigation without invisible draft controls.
+function syncClusterWorkspace(extra={}) {
+ if(applyingClusterWorkspace)return;
+ const patch={scope_mode:'cluster',origin_page:'cluster',...extra};
+ const merged={...clusterWorkspace,...patch};
+ if(!merged.worker_id||merged.worker_id==='auto')return;
+ clusterWorkspace=merged;
  window.GmsEmbeddedWorkspace?.update(patch);
 }
-async function applyClusterWorkspace(next,navigate=false){
- const workerChanged=next?.worker_id&&next.worker_id!==clusterWorkspace.worker_id;
- const chooseWorkspaceWorker=navigate||workerChanged||clusterJobWorkerDraft===null;
- if(chooseWorkspaceWorker)clusterJobWorkerDraft=next?.worker_id||clusterJobWorkerDraft;
- clusterWorkspace={...clusterWorkspace,...(next||{})};applyingClusterWorkspace=true;
- try{renderModeStatus();renderJobForm();const worker=document.querySelector('#job-worker');if(chooseWorkspaceWorker&&clusterJobWorkerDraft&&Array.from(worker.options).some(o=>o.value===clusterJobWorkerDraft)){worker.value=clusterJobWorkerDraft;updateJobOptions()}const suite=document.querySelector('#job-suite'),device=document.querySelector('#job-device');if(chooseWorkspaceWorker&&clusterWorkspace.suite_key&&Array.from(suite.options).some(o=>o.value===clusterWorkspace.suite_key))suite.value=clusterWorkspace.suite_key;const wanted=clusterDeviceId(worker.value,(clusterWorkspace.device_ids||[])[0]);if(wanted&&Array.from(device.options).some(o=>o.value===wanted))device.value=wanted;if(navigate&&clusterWorkspace.cluster_job_id&&state.jobs.some(j=>j.id===clusterWorkspace.cluster_job_id))await showJob(clusterWorkspace.cluster_job_id,false)}finally{applyingClusterWorkspace=false}
+async function applyClusterWorkspace(next,navigate=false) {
+ clusterWorkspace={...clusterWorkspace,...(next||{})};
+ applyingClusterWorkspace=true;
+ try {
+  renderModeStatus();
+  if(navigate&&clusterWorkspace.cluster_job_id&&state.jobs.some(job=>job.id===clusterWorkspace.cluster_job_id))
+   await showJob(clusterWorkspace.cluster_job_id,false);
+ } finally {applyingClusterWorkspace=false}
 }
 async function checkLocalVpn(){try{const d=await api('/api/vpn/status');localVpnConnected=Boolean(d.connected)}catch(e){localVpnConnected=null}}
 let vpnElevationPromptAt=0;
@@ -107,34 +57,12 @@ async function refresh(showBusy=false){
    clusterInitialRefreshSettled=true;
    checkLocalVpn().catch(()=>{});checkWorkerVpn().then(render).catch(()=>{});render();
    await applyClusterWorkspace(clusterWorkspace);
-   if(!clusterJobRequestRestored)await restorePendingClusterJob();
    if(errors.length)toast(`部分数据刷新失败：${errors.join('；')}`);
   })().finally(()=>{refreshPromise=null});
   return await refreshPromise;
  }finally{
   if(showBusy)setClusterRefreshBusy(false);
  }
-}
-async function createJob(){
- if(creatingClusterJob)return;
- creatingClusterJob=true;updateJobOptions();
- try{
-  const body=clusterJobFormBody();
-  const serialized=JSON.stringify(body);
-  const owner=await clusterJobRequestOwner();pendingClusterJobRequest=readPendingClusterJob(owner);
-  const retry=pendingClusterJobRequest?.body===serialized;
-  if(!retry&&!jobWorkers().some(worker=>body.worker_id==='auto'||worker.id===body.worker_id))throw new Error('没有满足准入条件的 Worker');
-  if(!body.worker_id||!body.suite_key)throw new Error('请选择 Worker 和套件');
-  if(!retry)pendingClusterJobRequest={owner,body:serialized,key:clusterJobRequestKey()};
-  sessionStorage.setItem(clusterJobStorageKey(owner),JSON.stringify(pendingClusterJobRequest));
-  const d=await api('/api/cluster/jobs',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':pendingClusterJobRequest.key},body:serialized});
-  sessionStorage.removeItem(clusterJobStorageKey(owner));
-  pendingClusterJobRequest=null;
-  toast(`任务已创建 ${d.job.id}`);
-  clusterJobWorkerDraft=d.job.assigned_worker_id||body.worker_id;
-  syncClusterWorkspace({cluster_job_id:d.job.id,attempt_id:d.job.current_attempt_id||'',worker_id:clusterJobWorkerDraft,device_ids:(d.job.leases||[]).map(x=>x.device_id),suite_key:d.job.suite_key||body.suite_key});
-  await refresh();await showJob(d.job.id);
- }catch(e){toast(e.message)}finally{creatingClusterJob=false;updateJobOptions()}
 }
 function displayJobData(job){
  const client=String(job?.client_display_id||job?.owner_id||'unknown');

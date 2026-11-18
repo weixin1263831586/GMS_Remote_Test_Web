@@ -89,6 +89,37 @@ class AutomationOrchestratorTests(unittest.TestCase):
 
             self.assertEqual(result["status"], RUN_STATUS_CANCELLED)
 
+    def test_expired_claim_cannot_advance_or_fail_after_another_worker_recovers(self):
+        from features.automation.executors import StubAutomationExecutor
+        from features.automation.models import AutomationRunCreateRequest
+        from features.automation.orchestrator import AutomationOrchestrator
+        from features.automation.repository import AutomationStore
+
+        with TemporaryDirectory() as tmp:
+            store = AutomationStore(Path(tmp) / "automation.sqlite3")
+            store.create_run(AutomationRunCreateRequest().to_run_dict("run_handoff"))
+            stale_owner = AutomationOrchestrator(store, StubAutomationExecutor())
+            new_owner = AutomationOrchestrator(store, StubAutomationExecutor())
+
+            self.assertTrue(store.claim_run("run_handoff", stale_owner.claim_owner))
+            stale = store.get_run("run_handoff")
+            # Simulate a long-running worker missing its lease renewals.
+            store.update_run("run_handoff", lease_expires_at="2000-01-01T00:00:00Z")
+            self.assertTrue(store.claim_run("run_handoff", new_owner.claim_owner))
+            recovered = store.get_run("run_handoff")
+
+            self.assertEqual(
+                stale_owner._transition(stale, "waiting_device", "late completion")["status"],
+                "queued",
+            )
+            stale_owner._stay(stale, "late poll", {"running": True})
+            stale_owner._fail(stale, "failed", "late failure")
+            current = store.get_run("run_handoff")
+            self.assertEqual(current["status"], "queued")
+            self.assertEqual(current["state_version"], recovered["state_version"])
+            self.assertEqual(current["updated_at"], recovered["updated_at"])
+            self.assertEqual(current["lease_owner"], new_owner.claim_owner)
+
     def test_real_style_test_start_waits_for_poll_before_collecting_report(self):
         from features.automation.executors import StubAutomationExecutor
         from features.automation.models import (

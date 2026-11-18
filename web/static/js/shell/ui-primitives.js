@@ -7,9 +7,11 @@ window.GmsUi = (() => {
         const key = /^[a-z-]+$/.test(name) ? name : 'info';
         return `<svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#${key}"></use></svg>`;
     };
+    // Stable, escaped colored emoji for test-workspace controls and their dynamic states.
+    const testEmoji = glyph => `<span class="test-action-icon" aria-hidden="true">${escape(glyph)}</span>`;
     const badge = (tone, name, label) => {
         const safeTone = /^(success|warning|danger|info|accent|neutral)$/.test(tone) ? tone : 'neutral';
         return `<span class="ui-status is-${safeTone}">${icon(name)}<span>${escape(label)}</span></span>`;
     };
-    return Object.freeze({icon, badge, escape});
+    return Object.freeze({icon, testEmoji, badge, escape});
 })();

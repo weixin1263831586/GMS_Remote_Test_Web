@@ -101,15 +101,69 @@
 #page-test.page-ui-rework .input-table td:last-child { padding-right: 0; }
 #page-test.page-ui-rework .middle-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 10px; margin-bottom: 10px;
+    gap: 10px; margin-bottom: 6px;
 }
-#page-test.page-ui-rework :is(.adb-frame, .control-frame, .log-frame) { padding: 10px; }
-#page-test.page-ui-rework :is(.adb-frame, .control-frame) > .section-title,
+#page-test.page-ui-rework :is(.adb-frame, .control-frame, .log-frame) { padding: 7px 9px; }
+/* Compact title bars while keeping the follow filter and log tabs fully visible. */
+#page-test.page-ui-rework .adb-frame > .page-title-row {
+    min-height: 24px;
+}
+#page-test.page-ui-rework .control-frame > .section-title {
+    min-height: 24px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+/* The log content already has a top border. Don't draw a second divider
+   under the log title/tabs: it looked like two horizontal lines. */
 #page-test.page-ui-rework .log-frame-header {
-    min-height: 35px; border-bottom: 1px solid var(--border-color);
+    min-height: 26px;
+    border-bottom: 0;
+    padding-bottom: 0;
+    margin-bottom: 2px;
 }
 #page-test.page-ui-rework :is(.device-canvas, .log-text) {
     background: var(--darker-bg); border-color: var(--border-color);
+}
+/* Show exactly three complete 28px rows at rest, without the top of row 4:
+   row 3 ends at 1px border + 5px top padding + 3×28px + 2×4px = 98px.
+   row 4 begins at 102px; a 100px outer viewport keeps it fully clipped
+   while retaining a small bottom clearance (scroll inside .device-column).
+   The former 104px size exposed a 2px sliver of row 4. */
+#page-test.page-ui-rework .adb-frame > .device-list-container {
+    height: 100px;
+    min-height: 100px;
+    flex: 0 0 100px;
+}
+#page-test.page-ui-rework .device-canvas {
+    box-sizing: border-box;
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    overflow: hidden;
+}
+#page-test.page-ui-rework .device-canvas > .device-column {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+}
+#page-test.page-ui-rework .device-canvas > .device-column.device-grid {
+    grid-auto-rows: minmax(28px, max-content);
+    align-content: start;
+}
+#page-test.page-ui-rework :is(.adb-button-frame, .vnc-button-frame) {
+    margin-top: 4px;
+}
+#page-test.page-ui-rework .control-frame {
+    gap: 6px;
+}
+#page-test.page-ui-rework .control-frame .upload-frame {
+    gap: 4px;
+}
+/* The shared progress bar has display:flex!important; avoid an empty 20px
+   reserved row while idle, but reveal it as soon as progress text is updated. */
+#page-test.page-ui-rework .upload-frame .progress-container:has(#progress-info:empty) {
+    display: none !important;
 }
 #page-test.page-ui-rework :is(.adb-button-frame, .vnc-button-frame, .vpn-btn-frame) { gap: 5px; }
 #page-test.page-ui-rework :is(.adb-button-frame, .vnc-button-frame, .vpn-btn-frame) .btn-xxs {
@@ -117,11 +171,23 @@
 }
 #page-test.page-ui-rework .test-btn-frame {
     display: flex; flex-wrap: wrap; align-items: center;
-    gap: 8px; padding-top: 10px; border-top: 1px solid var(--border-color);
+    gap: 8px; margin-top: 0; padding-top: 6px; border-top: 1px solid var(--border-color);
 }
-#page-test.page-ui-rework .test-btn-frame .btn-lg { min-height: 34px; }
+/* The start/stop control is text-only in all states. Its hit target follows
+   the label width (no former SVG slot or oversized 20px side padding). */
+#page-test.page-ui-rework .test-btn-frame #test-toggle-btn {
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    width: auto;
+    min-width: 0;
+    min-height: 34px;
+    padding: 6px 14px;
+    white-space: nowrap;
+    font-size: 13px;
+    line-height: 20px;
+}
 #page-test.page-ui-rework .log-tab-btn {
-    min-height: 28px; border-radius: 6px; font-size: 11px;
+    min-height: 26px; border-radius: 6px; font-size: 11px;
 }
 #page-test.page-ui-rework .log-tab-btn.active {
     color: var(--primary-light); border-color: var(--primary-color);

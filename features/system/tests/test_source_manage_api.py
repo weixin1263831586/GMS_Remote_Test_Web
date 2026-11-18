@@ -125,6 +125,18 @@ class _ManageApiHarness(unittest.TestCase):
 
 
 class ManageApiGuardTests(_ManageApiHarness):
+    def test_human_server_list_omits_private_auth_environment_name(self):
+        response = self.client.get("/api/sdk/manage/servers")
+        self.assertEqual(response.status_code, 200, response.text)
+        servers = response.json()["data"]["servers"]
+        self.assertEqual(len(servers), 1)
+        self.assertEqual(servers[0]["auth_type"], "env_password")
+        self.assertEqual(servers[0]["host"], "10.10.10.206")
+        self.assertNotIn("auth_env", servers[0])
+        self.assertNotIn("TEST_SDK_SSH_PW", response.text)
+        # Internal helpers still receive the credential locator for SSH auth.
+        self.assertEqual(self.manage._get_server("build-206")["auth_env"], "TEST_SDK_SSH_PW")
+
     def test_agent_token_cannot_read_servers(self):
         response = self.client.get(
             "/api/sdk/manage/servers",
@@ -519,6 +531,28 @@ class ManageListLiveTests(_ManageApiHarness):
         sources = response.json()["data"]["sources"]
         self.assertTrue(sources[0]["live"]["verified"])
         self.assertTrue(self.store.get("local-fb")["last_verified_ok"])
+
+    def test_sync_verify_does_not_mark_re_registered_source(self):
+        """A synchronous verify result must not update a replaced SDK source."""
+        root = self._make_temp_git_repo("before-replace")
+        self.store.add(source_id="same-id", provider="local_git", repo_root=str(root))
+        replacement = self._make_temp_git_repo("after-replace")
+        original_probe = self.manage._probe_local_path
+
+        def replace_while_verifying(path):
+            self.store.delete("same-id")
+            self.store.add(
+                source_id="same-id", provider="local_git", repo_root=str(replacement),
+            )
+            return original_probe(path)
+
+        with mock.patch.object(self.manage, "_probe_local_path", side_effect=replace_while_verifying):
+            response = self.client.get("/api/sdk/manage/sources?verify=sync")
+        self.assertEqual(response.status_code, 200, response.text)
+        current = self.store.get("same-id")
+        self.assertEqual(current["repo_root"], str(replacement))
+        self.assertNotIn("last_verified_at", current)
+        self.assertNotIn("last_verified_ok", current)
 
     def test_local_git_missing_path_marked(self):
 

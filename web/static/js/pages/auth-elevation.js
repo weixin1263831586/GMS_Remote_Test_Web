@@ -461,7 +461,7 @@ async function submitDevicePassword() {
         if (btn) {
             state.usbipConnected = true;
             pendingUsbipDeviceHost = result.device_host || deviceHost || pendingUsbipDeviceHost;
-            btn.textContent = '📱 断开设备';
+            btn.innerHTML = GmsUi.testEmoji('📱') + ' 断开设备';
             btn.disabled = false;
         }
     } catch (error) {
@@ -470,7 +470,7 @@ async function submitDevicePassword() {
 
         const btn = $('usbip-btn');
         if (btn) {
-            btn.textContent = '📱 本地设备';
+            btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP 接入';
             btn.disabled = false;
         }
     }

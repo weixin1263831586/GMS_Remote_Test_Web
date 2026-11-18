@@ -16,6 +16,7 @@ from features.auth import (
     require_authenticated_user_when_auth_required,
     require_role_when_auth_required,
 )
+from foundation.process_sync import release_sync_lock, sync_lock_held, try_acquire_sync_lock
 
 from .api_support import *
 
@@ -71,6 +72,16 @@ async def gms_update_monitor_sources():
     return {'success': True, 'data': {'configured': configured, 'scanned': scanned}}
 
 
+_SYNC_FILE_LOCK = DB_PATH.with_suffix('.sync.lock')
+
+
+def _run_locked_sync_job(mode: str, source: list[str], descriptor: int) -> None:
+    try:
+        _run_sync_job(mode, source)
+    finally:
+        release_sync_lock(descriptor)
+
+
 @router.post('/sync')
 async def start_gms_update_monitor_sync(
     mode: str = Query('incremental', pattern='^(full|incremental)$'),
@@ -82,10 +93,16 @@ async def start_gms_update_monitor_sync(
     if unknown:
         return JSONResponse(status_code=400, content={'success': False, 'error': f'unknown source: {", ".join(unknown)}'})
     with _sync_lock:
-        if _sync_status['running']:
+        if _sync_status['running'] or sync_lock_held(_SYNC_FILE_LOCK):
             return JSONResponse(
                 status_code=409,
                 content={'success': False, 'error': 'sync already running', 'status': dict(_sync_status)},
+            )
+        descriptor = try_acquire_sync_lock(_SYNC_FILE_LOCK)
+        if descriptor is None:
+            return JSONResponse(
+                status_code=409,
+                content={'success': False, 'error': 'sync already running'},
             )
         _sync_status.update(
             {
@@ -100,8 +117,13 @@ async def start_gms_update_monitor_sync(
                 'error': None,
             }
         )
-        thread = threading.Thread(target=_run_sync_job, args=(mode, source), daemon=True)
-        thread.start()
+        thread = threading.Thread(target=_run_locked_sync_job, args=(mode, source, descriptor), daemon=True)
+        try:
+            thread.start()
+        except Exception:
+            _sync_status['running'] = False
+            release_sync_lock(descriptor)
+            raise
         status = dict(_sync_status)
     return {'success': True, 'data': {'status': status}}
 
@@ -115,6 +137,9 @@ async def gms_update_monitor_sync_status(
     with _sync_lock:
         status = dict(_sync_status)
     status['db_exists'] = DB_PATH.exists()
+    if not status['running'] and sync_lock_held(_SYNC_FILE_LOCK):
+        status['running'] = True
+        status['remote_process'] = True
     return {'success': True, 'data': {'status': status}}
 
 

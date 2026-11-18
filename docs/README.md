@@ -14,7 +14,7 @@
 | USB/IP 与固件 | [接入选型](usbip/overview.md) | [ADB Proxy 对比](usbip/adb-proxy-vs-usbip.md)、[烧写](usbip/firmware-flashing.md)、[故障处理](usbip/troubleshooting.md) |
 | Bootloader | [OEM 命令与恢复](devices/bootloader-oem-commands.md) | 版本判据、执行路径及失败边界 |
 | Redmine 晨报 | [每日晨报](redmine-daily-brief.md) | 账号配置、后台 Worker、诊断、进度和取消 |
-| Agent | [概览](agent/overview.md) | [安装](agent/installation.md)、[profile](agent/profiles.md)、[安全边界](agent/security-model.md)、[排障](agent/troubleshooting.md) |
+| GMS Agent 日常闭环诊断 | [Redmine → APK/SDK → 构建与设备](agent/redmine-to-device-diagnosis.md) | 证据链、CodeSearch/Wiki、受控编译/部署、串口与复测 |\n| Agent | [概览](agent/overview.md) | [安装](agent/installation.md)、[profile](agent/profiles.md)、[安全边界](agent/security-model.md)、[排障](agent/troubleshooting.md) |
 | CLI | [约定与示例](cli/examples.md) | [生成的命令参考](cli/command-reference.md) |
 | API 变更 | [废弃/移除 API 迁移说明](api-deprecations.md) | 外部脚本的迁移指引：被删接口、替代路径与 curl 对照 |
 | 支持环境 | [Python / Ubuntu 矩阵](platform-support-matrix.md) | 当前 CI 基线、OCR 限制及迁移条件 |
@@ -26,6 +26,7 @@
 - [AI 治理与诊断质量](architecture/ai-governance.md)：执行账本、证据、失败身份、质量门禁。
 - [平台安全模型](security.md)与[开发指南](development.md)。
 - [弹框视觉与布局契约](ui/purple-tech-modal-style.md)：共享切角框架、内容级验收及缓存版本同步。
+- [全局图标和操作文案规范](ui/icon-semantics.md)：图标颜色、操作语义、状态和测试界面约定。
 
 ## 维护规则
 

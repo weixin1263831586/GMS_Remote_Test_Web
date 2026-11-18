@@ -14,6 +14,100 @@
     stroke-linejoin: round;
     pointer-events: none;
 }
+/* One color system for shared outline symbols. Color follows action semantics,
+   not arbitrary page styles. Brand favicons remain unmodified. */
+:root {
+  --ui-icon-blue: #7cbaff; --ui-icon-cyan: #69d3e3;
+  --ui-icon-violet: #b9a2ff; --ui-icon-green: #67d5aa;
+  --ui-icon-amber: #f2c36d; --ui-icon-red: #f28f9a;
+}
+/* Unrecognized icons keep the original currentColor fallback. */
+:is(body, .page-ui-rework, .tech-dialog) svg.ui-icon:has(> use:is([href$="#refresh"], [href$="#wifi"], [href$="#network"], [href$="#globe"], [href$="#server"], [href$="#device"], [href$="#plug"], [href$="#monitor"], [href$="#terminal"], [href$="#info"], [href$="#search"], [href$="#home"], [href$="#eye"], [href$="#link"], [href$="#compass"], [href$="#user"], [href$="#users"], [href$="#clock"])) { color: var(--ui-icon-blue); }
+:is(body, .page-ui-rework, .tech-dialog) svg.ui-icon:has(> use:is([href$="#copy"], [href$="#download"], [href$="#upload"], [href$="#folder"], [href$="#package"], [href$="#archive"], [href$="#mail"], [href$="#branch"], [href$="#external"], [href$="#message"])) { color: var(--ui-icon-cyan); }
+:is(body, .page-ui-rework, .tech-dialog) svg.ui-icon:has(> use:is([href$="#test"], [href$="#chart"], [href$="#trend"], [href$="#tool"], [href$="#settings"], [href$="#layout"], [href$="#bot"], [href$="#workflow"], [href$="#chip"], [href$="#grid"], [href$="#book"], [href$="#edit"], [href$="#filter"], [href$="#target"], [href$="#more"])) { color: var(--ui-icon-violet); }
+:is(body, .page-ui-rework, .tech-dialog) svg.ui-icon:has(> use:is([href$="#play"], [href$="#check"], [href$="#check-square"], [href$="#save"], [href$="#unlock"], [href$="#shield"])) { color: var(--ui-icon-green); }
+:is(body, .page-ui-rework, .tech-dialog) svg.ui-icon:has(> use:is([href$="#warning"], [href$="#star"], [href$="#bell"], [href$="#battery"], [href$="#bolt"], [href$="#power"], [href$="#mount"], [href$="#pause"])) { color: var(--ui-icon-amber); }
+:is(body, .page-ui-rework, .tech-dialog) svg.ui-icon:has(> use:is([href$="#trash"], [href$="#stop"], [href$="#error"], [href$="#eraser"], [href$="#lock"])) { color: var(--ui-icon-red); }
+/* Primary/danger fills must retain readable white icons; disabled is muted. */
+:is(body, .page-ui-rework, .tech-dialog) :is(.btn-primary, .btn-danger) > svg.ui-icon { color: var(--text-on-accent, #fff); }
+:is(body, .page-ui-rework, .tech-dialog) button:disabled > svg.ui-icon { color: var(--text-muted, #878796); }
+#page-test :is(.adb-button-frame, .vnc-button-frame, .vpn-btn-frame) button > svg.ui-icon {
+  box-sizing: content-box; padding: 2px; border-radius: 5px;
+  background: color-mix(in srgb, currentColor 11%, transparent);
+}
+/* Color emoji retain the old test-console visual hierarchy while native SVG
+   stays available for actions whose symbol is more semantically precise. */
+#page-test .test-action-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25em;
+  height: 1.25em;
+  margin-right: 4px;
+  vertical-align: -0.16em;
+  font-size: 1.1em;
+  line-height: 1;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+}
+#page-test button:disabled > .test-action-icon { opacity: .55; }
+/* Original text power glyph stays unchanged; only its color is highlighted.
+   Use the theme danger token instead of recoloring the whole reboot button. */
+#page-test .adb-button-frame .reboot-icon {
+  display: inline-block;
+  color: var(--danger-color, #f06b78);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  margin-right: 2px;
+}
+/* Fixed 75px device-action buttons clipped longer semantic labels such as
+   'USB/IP 接入' once icon artwork and its inset were added. Size from content
+   and wrap at the existing flex container boundary, not inside the button. */
+#page-test :is(.adb-button-frame, .vnc-button-frame) .btn-xxs {
+  width: auto;
+  min-width: 75px;
+  max-width: 100%;
+  flex: 0 0 auto;
+  padding-inline: 8px;
+}
+/* On the test console, all ten ADB actions belong to ONE toolbar row.
+   Emoji plus the original 75px minimum used to push the final item onto
+   a second line at the 1792px reference viewport. Preserve the colored
+   glyphs and labels; reclaim only excess button/icon spacing instead.
+   When the column is truly too narrow, scroll horizontally (not wrap or
+   truncate action labels). The extra .middle-row specificity must beat
+   the later other-workspaces.css shared button padding/gap declarations. */
+#page-test.page-ui-rework .middle-row .adb-button-frame {
+  flex-wrap: nowrap;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  overscroll-behavior-x: contain;
+}
+#page-test.page-ui-rework .middle-row .adb-button-frame .btn-xxs {
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+#page-test.page-ui-rework .adb-button-frame .test-action-icon {
+  width: 1.15em;
+  height: 1.15em;
+  margin-right: 2px;
+  font-size: 1.08em;
+}
+#page-test.page-ui-rework .adb-button-frame button > svg.ui-icon {
+  width: 1.08em;
+  height: 1.08em;
+  padding: 1px;
+  margin-right: 3px;
+}
 .page-title-icon { display: inline-flex; align-items: center; justify-content: center; width: 20px; flex: none; margin-right: 4px; font-size: 18px; line-height: 1; }
 /* 图片版标题图标（如 APK 分析的 jadx logo）：与 emoji 同盒 20px、
    字形同高 18px，跟随 page-title-icon 的垂直几何。 */

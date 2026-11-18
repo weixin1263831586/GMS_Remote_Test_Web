@@ -265,8 +265,10 @@ class ActionExecutor:
         query = str(params.get("query") or "").strip().lower()
         details = await self._load_device_summaries(request)
         for device in details:
-            status = str(device.get("status") or "online").lower()
-            protocol = str(device.get("protocol") or "adb").lower()
+            # Missing/unknown transport state is not evidence of a usable DUT.
+            # Do not turn a stale inventory row into "available" by assumption.
+            status = str(device.get("status") or "unknown").lower()
+            protocol = str(device.get("protocol") or "unknown").lower()
             device["available"] = (not device.get("locked") and not device.get("stale")
                                    and status in {"online", "device", "fastboot", "loader", "rockusb"}
                                    and protocol in {"adb", "fastboot", "loader", "rockusb"})
@@ -327,9 +329,17 @@ class ActionExecutor:
         )
         if result is not None:
             raise PermissionError(result.error or "Unable to load devices")
-        items = list(payload.get("devices") or [])
+        # A management response can intentionally expose cached devices after
+        # an SSH / ADB outage. Carry the response-level stale flag onto each
+        # row before calculating availability in _query_devices.
+        cached_stale = bool(payload.get("stale"))
+        items = [dict(item) for item in payload.get("devices") or []]
         for item in items:
-            item["locked"] = bool(item.get("locked_by"))
+            item["stale"] = cached_stale or bool(item.get("stale"))
+            item["locked"] = bool(
+                item.get("locked_by") or item.get("locked_client_id")
+                or item.get("lease_id") or item.get("locked")
+            )
         return items
 
     async def _connect_wifi(self, session, request, params) -> ToolResult:
@@ -382,8 +392,18 @@ class ActionExecutor:
         return result
 
     async def _query_locked_devices(self, session, request, params) -> ToolResult:
-        locks = device_lock_manager.get_all_locks()
-        lines = [f"- {did}: {info.get('locked_by', 'unknown')}" for did, info in locks.items()]
+        # Reuse the management API's owner-aware redaction instead of exposing
+        # raw lock records (which contain other users' lease capabilities).
+        devices = await self._load_device_summaries(request)
+        locks = {
+            str(device["device_id"]): {
+                "locked_by": device.get("locked_by") or "occupied",
+                "locked_by_self": bool(device.get("locked_by_self")),
+            }
+            for device in devices
+            if device.get("locked") and device.get("device_id")
+        }
+        lines = [f"- {did}: {info['locked_by']}" for did, info in locks.items()]
         text = f"当前锁定设备 {len(locks)} 台。\n" + ("\n".join(lines) if lines else "- 无锁定设备")
         return ToolResult(
             success=True, tool_name="devices_user_locked",
@@ -584,10 +604,17 @@ class ActionExecutor:
         )
 
     async def _query_vpn_status(self, session, request, params) -> ToolResult:
-        result, payload = await self._fetch_router_json("features.system.integrations", "get_vpn_status")
+        # Preserve the browser principal to enforce the same human-only
+        # route dependencies as GET /api/vpn/status.
+        result, payload = await self._fetch_router_json(
+            "features.system.integrations", "get_vpn_status",
+            tool_name_for_error="vpn_status", request=request,
+            api_path="/api/vpn/status", method="GET",
+        )
         if result is not None:
             return result
-        text = f"VPN 状态：{payload.get('status', 'unknown')}"
+        state = "已连接" if payload.get("connected") else "未连接"
+        text = f"VPN 状态：{state}（来源：{payload.get('source', 'unknown')}）"
         return ToolResult(
             success=True, tool_name="vpn_status",
             data=payload, formatted_text=text, kind="status",

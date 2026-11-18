@@ -71,6 +71,21 @@ def test_timezone_dst_preserves_local_0400():
     assert next_scan(cfg, instant('2026-11-01T03:00:00+00:00')) == '2026-11-01T09:00:00+00:00'
 
 
+def test_timezone_dst_fallback_schedules_only_once_per_local_date():
+    cfg = config(enabled=True, timezone='America/New_York', scan_time='01:30')
+    # First 01:30 is EDT (05:30 UTC); second 01:30 is EST (06:30 UTC).
+    assert next_scan(cfg, instant('2026-11-01T05:20:00+00:00')) == '2026-11-01T05:30:00+00:00'
+    # After the first occurrence, do not return a past instant or schedule
+    # a second scan for the same local calendar day.
+    assert next_scan(cfg, instant('2026-11-01T06:00:00+00:00')) == '2026-11-02T06:30:00+00:00'
+
+
+def test_timezone_dst_nonexistent_wall_time_rolls_forward():
+    cfg = config(enabled=True, timezone='America/New_York', scan_time='02:30')
+    # Spring-forward date has no 02:30; its first forward mapping is 03:30.
+    assert next_scan(cfg, instant('2026-03-08T06:00:00+00:00')) == '2026-03-08T07:30:00+00:00'
+
+
 def test_schedule_claim_is_atomic_and_survives_restart(store):
     store.save_settings(config(enabled=True), now=instant('2026-11-13T19:00:00+00:00'))
     due = instant('2026-11-13T20:00:00+00:00')
@@ -301,6 +316,45 @@ def test_notification_policies_include_scan_errors(store, notify, summary, expec
     run_id = store.claim('manual')
     radar.execute(run_id)
     assert store.run(run_id)['email_status'] == expected
+
+
+def test_late_worker_finish_cannot_overwrite_recovered_interrupted_scan(store):
+    run_id = store.claim('manual')
+    store.recover()
+    assert store.run(run_id)['status'] == 'interrupted'
+    store.finish(run_id, 'completed', result(changes=1), [
+        {'category': 'packages', 'key': 'late', 'type': 'modified',
+         'before': {}, 'after': {'file_name': 'late.zip'}}
+    ])
+    assert store.run(run_id)['status'] == 'interrupted'
+    assert store.changes(run_id)['total'] == 0
+    # Neither a duplicated callback nor a conflicting terminal result can
+    # append evidence to a scan that has already been recovered.
+    store.finish(run_id, 'failed', result(), [])
+    assert store.run(run_id)['status'] == 'interrupted'
+
+
+def test_mail_summary_generation_failure_is_recorded_without_sending(store, monkeypatch):
+    from features.system.update_radar import service as radar_module
+
+    # A scan freezes its notification config on claim. Configure recipients
+    # before the claim so this tests rendering failures, not unconfigured mail.
+    store.save_settings(config(notify='always'))
+    run_id = store.claim('manual')
+    store.finish(run_id, 'completed', result(changes=1), [])
+    mailer = Mock(return_value={'sent': True})
+
+    def fail_preview(*_args):
+        raise ValueError('mail summary data invalid')
+
+    monkeypatch.setattr(radar_module, 'build_email', fail_preview)
+    radar_module.RadarService(
+        store, scanner=lambda **_: (result(), []),
+        mailer=mailer, reserve=lambda: None, release=lambda _=None: None,
+    ).notify(run_id)
+    assert store.run(run_id)['email_status'] == 'failed'
+    assert 'mail summary data invalid' in store.run(run_id)['email_error']
+    mailer.assert_not_called()
 
 
 def test_restart_preserves_completed_scan_and_marks_uncertain_delivery(store):

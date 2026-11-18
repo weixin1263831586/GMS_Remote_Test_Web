@@ -50,7 +50,7 @@ keep-alive         = 120s
 limit_concurrency  = 500
 ```
 
-生产环境默认关闭 Uvicorn access log，并在应用启动阶段执行 fail-closed 安全配置检查。
+使用 `python app.py` 启动时，生产环境默认关闭 Uvicorn access log，并在应用启动阶段执行 fail-closed 安全配置检查。安装器创建的 systemd 服务使用 `python -m bootstrap.server`，其 `--access-log` 显式开启访问日志、并采用 `--limit-concurrency 512`（不同于 `app.py` 的 500）。`restart_services.sh` 无 systemd 回退也采用 512 并显式开启访问日志。排查吞吐与日志时，以实际启动入口和启动参数为准。
 
 ## systemd 服务
 
@@ -153,3 +153,9 @@ GMS_SECURE_COOKIES=true
 - [配置体系](configuration.md)
 - [Worker 部署](worker.md)
 - [常见部署问题](troubleshooting.md)
+
+### Controller 单进程约束
+
+GMS 更新监控与 Mainline 同步采用进程内互斥及状态。
+生产必须保持 `--workers 1`；如增加 Uvicorn Worker，会引起重复同步或进程间状态不一致。
+多 Controller 部署必须先迁移到持久化任务队列和跨进程租约。

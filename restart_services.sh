@@ -158,7 +158,15 @@ ensure_https_cert() {
         return 0
     fi
 
-    local san_list="DNS:localhost,DNS:127.0.0.1,IP:127.0.0.1,IP:${SERVER_HOSTNAME}"
+    # An IP SAN accepts only an IP literal. A configured DNS/SSH hostname
+    # must be emitted as DNS, otherwise OpenSSL rejects the first cert build.
+    local server_san_type="DNS"
+    if "${PYTHON_BIN}" -c \
+        'import ipaddress, sys; ipaddress.ip_address(sys.argv[1])' \
+        "${SERVER_HOSTNAME}" >/dev/null 2>&1; then
+        server_san_type="IP"
+    fi
+    local san_list="DNS:localhost,IP:127.0.0.1,${server_san_type}:${SERVER_HOSTNAME}"
     if command -v hostname >/dev/null 2>&1; then
         local host_ips
         host_ips="$(hostname -I 2>/dev/null || true)"

@@ -8,7 +8,26 @@
     let offset = 0;
     const limit = 100;
     let total = 0;
+    let queryGeneration = 0;
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    // External bulletin / suite URLs originate in indexed upstream documents.
+    // HTML escaping does not prevent javascript: or data: navigation.
+    const safeExternalHref = value => {
+      const raw = String(value ?? '').trim();
+      if (!raw) return '';
+      try {
+        const url = new URL(raw, window.location.href);
+        if (url.protocol === 'https:' || (url.protocol === 'http:' && url.origin === window.location.origin)) {
+          return url.href;
+        }
+      } catch (_) {}
+      return '';
+    };
+    const link = (rawUrl, label='打开') => {
+      const href = safeExternalHref(rawUrl);
+      return href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`
+        : '<span class="muted">—</span>';
+    };
     const releaseMonthOf = url => {
       const m = String(url || '').match(/release-notes\/\d{4}\/([a-z-]+?)(?:\/|$)/);
       return m ? m[1].charAt(0).toUpperCase() + m[1].slice(1) : '';
@@ -53,7 +72,7 @@
           <td><code>${esc(item.exemption_id)}</code></td>
           <td><code>${esc(item.test_module)}</code></td>
           <td><code>${esc(item.test_case)}</code></td>
-          <td><a href="${esc(item.source_url)}" target="_blank">打开</a></td>
+          <td>${link(item.source_url)}</td>
         </tr>`);
     }
     function patchRows(items) {
@@ -63,7 +82,7 @@
           <td>${esc(item.mainline_module)}</td>
           <td>${esc(item.version_note)}</td>
           <td>${releaseCell({...item, release_month: item.release_month || releaseMonthOf(item.source_url)})}</td>
-          <td><a href="${esc(item.source_url)}" target="_blank">打开</a></td>
+          <td>${link(item.source_url)}</td>
         </tr>`);
     }
     function criticalDescription(item) {
@@ -87,7 +106,7 @@
           <td>${esc(item.release_month || item.bulletin_month || '')}</td>
           <td>${esc(item.deadline)}</td>
           <td>${exLinks}</td>
-          <td><a href="${esc(item.bulletin_url)}" target="_blank">打开</a></td>
+          <td>${link(item.bulletin_url)}</td>
         </tr>`;
       });
     }
@@ -138,14 +157,15 @@
     ];
     function globalRow(kind, x) {
       if (kind === 'exemptions') {
-        return `<tr><td>豁免条目</td><td>${esc(x.issue_type)} · ${esc(x.product_section)} · <code>${esc(x.exemption_id)}</code></td><td class="wrap"><code>${esc(x.test_module)}</code> / <code>${esc(x.test_case)}</code> · ${esc(x.category)} · ${esc(x.android_versions)}</td><td>${releaseCell({...x, release_month: x.release_month || releaseMonthOf(x.source_url)})}</td><td><a href="${esc(x.source_url)}" target="_blank">打开</a></td></tr>`;
+        return `<tr><td>豁免条目</td><td>${esc(x.issue_type)} · ${esc(x.product_section)} · <code>${esc(x.exemption_id)}</code></td><td class="wrap"><code>${esc(x.test_module)}</code> / <code>${esc(x.test_case)}</code> · ${esc(x.category)} · ${esc(x.android_versions)}</td><td>${releaseCell({...x, release_month: x.release_month || releaseMonthOf(x.source_url)})}</td><td>${link(x.source_url)}</td></tr>`;
       }
       if (kind === 'patch') {
-        return `<tr><td>安全补丁 (CVE)</td><td><code>${esc(x.cve_id)}</code></td><td class="wrap">${esc(x.mainline_module)} · ${esc(x.version_note)}</td><td>${releaseCell({...x, release_month: x.release_month || releaseMonthOf(x.source_url)})}</td><td><a href="${esc(x.source_url)}" target="_blank">打开</a></td></tr>`;
+        return `<tr><td>安全补丁 (CVE)</td><td><code>${esc(x.cve_id)}</code></td><td class="wrap">${esc(x.mainline_module)} · ${esc(x.version_note)}</td><td>${releaseCell({...x, release_month: x.release_month || releaseMonthOf(x.source_url)})}</td><td>${link(x.source_url)}</td></tr>`;
       }
-      return `<tr><td>Critical_Patch</td><td><code>${esc(x.patch_id)}</code> · ${esc(x.patch_kind)} · ${esc(x.android_versions)}</td><td class="wrap">${criticalDescription(x)}${x.deadline ? '（期限 ' + esc(x.deadline) + '）' : ''}</td><td>${esc(x.release_month || x.bulletin_month || '')}</td><td><a href="${esc(x.bulletin_url)}" target="_blank">打开</a></td></tr>`;
+      return `<tr><td>Critical_Patch</td><td><code>${esc(x.patch_id)}</code> · ${esc(x.patch_kind)} · ${esc(x.android_versions)}</td><td class="wrap">${criticalDescription(x)}${x.deadline ? '（期限 ' + esc(x.deadline) + '）' : ''}</td><td>${esc(x.release_month || x.bulletin_month || '')}</td><td>${link(x.bulletin_url)}</td></tr>`;
     }
     async function searchAll(q) {
+      const generation = ++queryGeneration;
       const section = document.getElementById('product_section').value;
       const results = await Promise.all(GLOBAL_SEARCH_SOURCES.map(async src => {
         const params = new URLSearchParams({q, limit, offset: 0});
@@ -158,10 +178,13 @@
           return {src, items: [], total: 0, available: false, complete: false};
         }
       }));
+      if (generation !== queryGeneration || document.getElementById('q').value.trim() !== q) return;
       const rows = [];
       const counts = [];
+      const unavailable = [];
       let totalAll = 0;
       results.forEach(({src, items, total: srcTotal, available, complete}) => {
+        if (!available) unavailable.push(src.label);
         counts.push(`${src.label} ${available ? srcTotal : '查询不可用'}${available && !complete ? '（详情未完整同步）' : ''}`);
         totalAll += srcTotal;
         if (!available || !items.length) return;
@@ -170,8 +193,10 @@
       });
       document.getElementById('tables-area').innerHTML = rows.length
         ? tableHtml(GLOBAL_HEADERS, rows, '无记录', GLOBAL_WIDTHS)
-        : `<span class="muted">无匹配「${esc(q)}」的结果</span>`;
-      sectionBadgeText(`全局搜索「${q}」共 ${totalAll} 条`);
+        : unavailable.length
+          ? `<span class="muted">部分来源查询不可用（${esc(unavailable.join('、'))}），其余来源无匹配结果</span>`
+          : `<span class="muted">无匹配「${esc(q)}」的结果</span>`;
+      sectionBadgeText(`全局搜索「${q}」共 ${totalAll} 条${unavailable.length ? '（部分来源不可用）' : ''}`);
       document.querySelector('.pager').style.display = 'none';
       document.getElementById('pageinfo').textContent = `全局搜索「${q}」共 ${totalAll} 条（${counts.join(' · ')}）`;
     }
@@ -189,6 +214,7 @@
       if (reset) offset = 0;
       const q = document.getElementById('q').value.trim();
       if (q) { await searchAll(q); return; }
+      const generation = ++queryGeneration;
       document.querySelector('.pager').style.display = '';
       const params = new URLSearchParams({limit, offset});
       if (q) params.set('q', q);
@@ -197,18 +223,25 @@
       let badge = '';
       if (tab === 'patch') {
         const data = await fetchJson('/api/mainline-known-issues/security-patches?' + params.toString());
+        if (generation !== queryGeneration || document.getElementById('q').value.trim()) return;
         total = data.total;
         sections = tableHtml(PATCH_HEADERS, patchRows(data.items), '无记录', PATCH_WIDTHS);
         badge = `安全补丁 (CVE) · 共 ${total} 条`;
       } else if (tab === 'critical') {
         const data = await fetchJson('/api/mainline-known-issues/critical-patches?' + params.toString());
+        if (generation !== queryGeneration || document.getElementById('q').value.trim()) return;
         total = data.total;
         sections = tableHtml(CRITICAL_HEADERS, criticalRows(data.items), '无记录', CRITICAL_WIDTHS);
         badge = data.available ? `Critical_Patch · 共 ${total} 条${data.coverage_complete === false ? ' · 详情未完整同步' : ''}` : 'Critical_Patch · 数据源未扫描（GMS Update Monitor 中执行 Critical_Patch 扫描后可用）';
       } else {
         const type = document.getElementById('issue_type').value;
+        const section = document.getElementById('product_section').value;
+        const exemption = document.getElementById('exemption_id').value.trim();
         if (type) params.set('issue_type', type);
+        if (section) params.set('product_section', section);
+        if (exemption) params.set('exemption_id', exemption);
         const data = await fetchJson('/api/mainline-known-issues?' + params.toString());
+        if (generation !== queryGeneration || document.getElementById('q').value.trim()) return;
         total = data.total;
         sections = tableHtml(EXEMPTION_HEADERS, exemptionRows(data.items), '无记录', EXEMPTION_WIDTHS);
         badge = `${type ? `豁免条目（${esc(type)}）` : '豁免条目'} · 共 ${total} 条`;

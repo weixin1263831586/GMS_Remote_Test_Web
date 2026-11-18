@@ -30,6 +30,15 @@ MIN_HISTORY_SEARCHES = 2
 TEST_FAILURE_SUBJECT_KEYWORDS = (
     "CTS", "VTS", "GTS", "STS", "LTP", "ITS", "MTBF",
 )
+# Match suite tokens or Android-style test classes, not "UNITS"/"VISITS".
+_TEST_SUITE_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:CTS|VTS|GTS|STS|LTP|ITS|MTBF)(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+_TEST_SUITE_CLASS_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:Cts|Vts|Gts|Sts|Ltp|Its)[A-Z][A-Za-z0-9_]*"
+    r"|(?<![A-Za-z0-9])(?:CTS|VTS|GTS|STS|LTP|ITS|MTBF)(?=[A-Z][a-z])",
+)
 
 EVIDENCE_GATE_JSON_KEY = "evidence_gate"
 
@@ -54,8 +63,8 @@ def result_analysis_mode(result: Any) -> str:
 
 def is_test_failure_subject(entry: dict[str, Any]) -> bool:
     """快照 subject 是否命中测试套件类失败（决定源码取证门禁是否生效）。"""
-    subject = str(entry.get("subject") or "").upper()
-    return any(keyword in subject for keyword in TEST_FAILURE_SUBJECT_KEYWORDS)
+    subject = str(entry.get("subject") or "")
+    return bool(_TEST_SUITE_TOKEN_RE.search(subject) or _TEST_SUITE_CLASS_RE.search(subject))
 
 
 def bind_claims(

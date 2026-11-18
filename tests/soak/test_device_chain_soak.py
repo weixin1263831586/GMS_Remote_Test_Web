@@ -41,6 +41,11 @@ SESSION_TOKEN = os.getenv("GMS_SOAK_SESSION_TOKEN", os.getenv("GMS_SOAK_TOKEN", 
 USERNAME = os.getenv("GMS_SOAK_USERNAME", "")
 PASSWORD = os.getenv("GMS_SOAK_PASSWORD", "")
 DEVICE_HOST = os.getenv("GMS_SOAK_DEVICE_HOST", "")
+DEVICE_SERIAL = os.getenv("GMS_SOAK_DEVICE_SERIAL", "")
+DEVICE_BUSIDS = [
+    item.strip() for item in os.getenv("GMS_SOAK_BUSIDS", "").split(",")
+    if item.strip()
+]
 WORKER_ID = os.getenv("GMS_SOAK_WORKER_ID", "")
 SUITE_KEY = os.getenv("GMS_SOAK_SUITE_KEY", "CTS")
 MODULE = os.getenv("GMS_SOAK_MODULE", "CtsSecurityTestCases")
@@ -65,6 +70,7 @@ class SoakFoundation(unittest.TestCase):
         cls.base = BASE_URL
         cls._log: list[str] = []
         cls.attached_by_soak = False
+        cls.attached_serial = ""
         if SESSION_TOKEN:
             cls.session.cookies.set("gms_session", SESSION_TOKEN)
         elif USERNAME and PASSWORD:
@@ -128,55 +134,108 @@ class SoakFoundation(unittest.TestCase):
 
 
 class TestDeviceChainSoak(SoakFoundation):
-    """attach → job → detach → full recovery."""
+    """Operate only the explicitly selected USB/IP port and verify its DUT."""
+
+    def _worker_devices(self) -> list[dict]:
+        response = self._api(
+            "GET", "/api/cluster/devices", params={"worker_id": WORKER_ID},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertTrue(payload.get("success"), payload)
+        return payload["devices"]
+
+    @staticmethod
+    def _adb_ready_serials(devices: list[dict]) -> set[str]:
+        return {
+            str(device.get("serial") or "")
+            for device in devices
+            if device.get("state") in {"available", "online"}
+            and str(device.get("serial") or "")
+        }
 
     def test_01_health_and_worker_online(self):
-        response = self._api("GET", "/api/system/health")
-        if response.status_code == 404:
-            self.skipTest("controller has no /api/system/health; check worker API instead")
-        health = response.json()
-        self.assertTrue(health.get("success", True), health)
-
-        workers = self._api("GET", "/api/cluster/workers").json()
-        worker_ids = [w.get("worker_id") for w in workers.get("workers", [])]
-        if WORKER_ID:
-            self.assertIn(WORKER_ID, worker_ids, workers)
+        self.assertTrue(DEVICE_HOST, "GMS_SOAK_DEVICE_HOST 必须配置，禁止跳过真机")
+        self.assertTrue(WORKER_ID, "GMS_SOAK_WORKER_ID 必须配置，禁止跳过真机")
+        self.assertTrue(DEVICE_BUSIDS, "GMS_SOAK_BUSIDS 必须指定测试设备的 USB/IP BUSID")
+        health = self._api("GET", "/api/system/health")
+        self.assertEqual(health.status_code, 200, health.text)
+        self.assertEqual(health.json().get("status"), "alive")
+        workers = self._api("GET", "/api/cluster/workers")
+        self.assertEqual(workers.status_code, 200, workers.text)
+        directory = workers.json()
+        matching = [worker for worker in directory.get("workers", [])
+                    if worker.get("id") == WORKER_ID]
+        self.assertEqual(len(matching), 1, directory)
+        self.assertIn(matching[0].get("status"), {"online", "busy"}, directory)
 
     def test_02_usbip_attach_and_adb_visible(self):
-        if not DEVICE_HOST:
-            self.skipTest("GMS_SOAK_DEVICE_HOST 未设置，跳过 USB/IP 链路")
+        self.assertTrue(DEVICE_HOST and WORKER_ID and DEVICE_BUSIDS)
+        baseline = self._adb_ready_serials(self._worker_devices())
         response = self._api(
-            "POST", "/api/usbip/connect", json_body={"device_host": DEVICE_HOST},
+            "POST", "/api/usbip/connect",
+            json_body={
+                "device_host": DEVICE_HOST, "worker_id": WORKER_ID,
+                "busids": DEVICE_BUSIDS, "manual_connect": True,
+            },
             timeout=300,
         )
+        self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
-        self.assertTrue(
-            payload.get("success", False), payload,
-        )
+        self.assertTrue(payload.get("success", False), payload)
         type(self).attached_by_soak = True
-        # 等待设备出现在 ADB 列表（attach 后 worker 侧需要几秒枚举）。
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
-            devices = self._api(
-                "GET", "/api/devices/list", params={"force_refresh": "true"}
-            ).json()
-            if devices:
+            available = self._adb_ready_serials(self._worker_devices())
+            new_devices = available - baseline
+            if DEVICE_SERIAL and DEVICE_SERIAL in new_devices:
+                type(self).attached_serial = DEVICE_SERIAL
+                return
+            if not DEVICE_SERIAL and len(new_devices) == 1:
+                type(self).attached_serial = next(iter(new_devices))
                 return
             time.sleep(5)
-        self.fail("USB/IP attach 后 120s 内未见任何 ADB 设备")
+        self.fail(
+            "USB/IP attach 后未在指定 Worker 上发现唯一的新设备；"
+            "请检查 BUSID/序列号及目标 Worker 的 ADB 心跳。"
+        )
 
     def test_03_short_module_job_completes_and_leases_released(self):
-        """Create a real short-module job and verify lease/worker recovery."""
-        if not WORKER_ID:
-            self.skipTest("GMS_SOAK_WORKER_ID 未设置，跳过真实套件执行")
+        serial = type(self).attached_serial
+        self.assertTrue(serial, "未确认新接入的真机序列号，禁止执行测试")
+        devices = self._worker_devices()
+        candidates = [
+            d for d in devices
+            if d.get("worker_id") == WORKER_ID and d.get("serial") == serial
+            and d.get("state") == "available"
+        ]
+        self.assertEqual(len(candidates), 1, devices)
+        suites_response = self._api(
+            "GET", "/api/cluster/suites", params={"worker_id": WORKER_ID},
+        )
+        self.assertEqual(suites_response.status_code, 200, suites_response.text)
+        suites = suites_response.json().get("suites", [])
+        usable = [
+            item for item in suites if item.get("available")
+            and item.get("worker_id") == WORKER_ID
+            and (str(item.get("suite_key") or "") == SUITE_KEY
+                 or str(item.get("suite_type") or "").upper() == SUITE_KEY.upper())
+            and item.get("tools_path")
+        ]
+        self.assertTrue(usable, f"Worker {WORKER_ID} 没有可执行的 {SUITE_KEY} 套件")
+        suite = usable[0]
+        suite_path = suite["tools_path"]
         created = self._api(
-            "POST",
-            "/api/cluster/jobs",
+            "POST", "/api/cluster/jobs",
             json_body={
                 "worker_id": WORKER_ID,
-                "suite_key": SUITE_KEY,
+                "suite_key": suite["suite_key"],
+                "suite_path": suite_path,
+                "devices": [candidates[0]["id"]],
+                "device_count": 1,
                 "execution_spec": {
-                    "test_type": SUITE_KEY.lower(),
+                    "suite_path": suite_path,
+                    "test_type": str(suite["suite_type"]).lower(),
                     "module": MODULE,
                 },
             },
@@ -193,47 +252,56 @@ class TestDeviceChainSoak(SoakFoundation):
             final["status"], "completed",
             f"job ended as {final['status']}: {str(final.get('error'))[:300]}",
         )
-
-        # 任务终态后，所有租约必须已释放，设备回到可用状态。
-        for lease in final.get("leases") or []:
-            self.assertIn(
-                lease.get("status"), {"released", ""}, f"lease not released: {lease}"
-            )
-
-        # 终态后再查一次列表，确认 controller 状态一致（无 worker_lost 残留）。
+        leases = final.get("leases") or []
+        self.assertTrue(leases, f"真机任务 {job_id} 无设备租约")
+        for lease in leases:
+            self.assertEqual(lease.get("status"), "released", lease)
         detail = self._api("GET", f"/api/cluster/jobs/{job_id}").json()["job"]
         self.assertEqual(detail["status"], "completed")
-        self.assertNotEqual(detail["status"], "worker_lost")
 
     def test_04_usbip_detach_and_state_recovery(self):
-        if not DEVICE_HOST:
-            self.skipTest("GMS_SOAK_DEVICE_HOST 未设置，跳过 USB/IP 断开链路")
-        if not type(self).attached_by_soak:
-            self.skipTest("本轮 soak 未成功 attach，不断开既有 USB/IP 会话")
+        self.assertTrue(type(self).attached_by_soak, "未接入 USB/IP，不能验证断开")
+        self.assertTrue(type(self).attached_serial, "未记录真机序列号")
         response = self._api(
-            "POST",
-            "/api/usbip/disconnect",
-            json_body={"device_host": DEVICE_HOST},
+            "POST", "/api/usbip/disconnect",
+            json_body={
+                "device_host": DEVICE_HOST, "worker_id": WORKER_ID,
+                "busids": DEVICE_BUSIDS,
+            },
             timeout=300,
         )
-        payload = response.json()
-        self.assertTrue(payload.get("success", False), payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json().get("success", False), response.text)
         type(self).attached_by_soak = False
-
-        # 断开后 worker 应不再报告该设备为 available。
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
-            workers = self._api("GET", "/api/cluster/workers").json()
-            found_busy = any(
-                device.get("state") == "available"
-                for worker in workers.get("workers", [])
-                if WORKER_ID and worker.get("worker_id") == WORKER_ID
-                for device in worker.get("devices", [])
-            )
-            if not found_busy:
+            available = self._adb_ready_serials(self._worker_devices())
+            if type(self).attached_serial not in available:
                 return
             time.sleep(5)
-        self.fail("USB/IP detach 后 120s 内设备仍被报告为 available")
+        self.fail("USB/IP detach 后目标设备仍在 Worker 可用池")
+
+    @classmethod
+    def tearDownClass(cls):
+        # Failure after attach must not strand a lab USB/IP session. Scope
+        # cleanup to the busids owned by this invocation, never all devices.
+        try:
+            if cls.attached_by_soak:
+                response = cls.session.post(
+                    f"{cls.base}/api/usbip/disconnect",
+                    json={
+                        "device_host": DEVICE_HOST, "worker_id": WORKER_ID,
+                        "busids": DEVICE_BUSIDS,
+                    },
+                    timeout=300,
+                )
+                if response.status_code != 200 or not response.json().get("success"):
+                    raise AssertionError(
+                        f"真机回收失败: HTTP {response.status_code} "
+                        f"{response.text[:250]}"
+                    )
+        finally:
+            cls.session.close()
 
 
 if __name__ == "__main__":

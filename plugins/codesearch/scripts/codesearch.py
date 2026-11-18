@@ -32,6 +32,7 @@ DEFAULT_LIMIT = 15
 MAX_MATCHES_PER_FILE = 8
 MAX_PARALLEL_REQUESTS = 8
 MAX_FILES_PER_REQUEST = 200
+MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 # Backend caps hits per file during collection; keep headroom above the
 # display cap so definition-line classification still sees the key lines.
 MAX_HITS_PER_FILE = 20
@@ -92,6 +93,13 @@ def parse_default_limit(value):
     return limit if limit > 0 else DEFAULT_LIMIT
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Never forward the private bearer token to a redirected URL."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def request(path, params=None, accept="application/json"):
     cfg = load_config()
     if not cfg["token"]:
@@ -105,8 +113,14 @@ def request(path, params=None, accept="application/json"):
     req.add_header("Authorization", f"Bearer {cfg['token']}")
     req.add_header("Accept", accept)
     req.add_header("User-Agent", "remote-run-plugin/rk_codesearch")
-    with urllib.request.urlopen(req, timeout=60) as response:
-        return response.read().decode("utf-8", errors="replace")
+    # urllib's default redirect handler can forward Authorization headers
+    # to another host. A source index should never redirect token-bearing calls.
+    opener = urllib.request.build_opener(_NoRedirectHandler())
+    with opener.open(req, timeout=60) as response:
+        raw = response.read(MAX_RESPONSE_BYTES + 1)
+        if len(raw) > MAX_RESPONSE_BYTES:
+            raise ValueError("CodeSearch response exceeds 32 MiB; narrow project/path")
+        return raw.decode("utf-8", errors="replace")
 
 
 def list_projects():

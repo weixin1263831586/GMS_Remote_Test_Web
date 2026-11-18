@@ -88,7 +88,14 @@ class RadarService:
                 self.store.mark_email(run_id, 'unconfigured', '尚未设置收件人；请在雷达设置中填写后重发')
                 return
             run['config'] = config
-            subject, body = build_email(run, self.store.changes(run_id, limit=50)['items'])
+            try:
+                subject, body = build_email(run, self.store.changes(run_id, limit=50)['items'])
+            except Exception as exc:
+                logger.exception('Radar email preview %s failed', run_id)
+                self.store.mark_email(run_id, 'failed', redact_sensitive_text(
+                    getattr(exc, 'message', None) or str(exc) or '邮件摘要生成失败'
+                ))
+                return
             self.store.mark_email(run_id, 'sending')
             try:
                 result = self.mailer(config['recipients'], subject, body, channel='update_radar',

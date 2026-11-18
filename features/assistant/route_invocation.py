@@ -234,7 +234,7 @@ async def call_router_function(
             response = await asyncio.to_thread(func, **call_kwargs)
 
         # 解析 JSONResponse
-        payload = _json_body(response) if hasattr(response, "body") else {"success": True, "data": response}
+        payload = _json_body(response)
         if payload.get("success") is False:
             rejected = http_error_result(tool.name, HTTPException(
                 status_code=getattr(response, "status_code", 400),

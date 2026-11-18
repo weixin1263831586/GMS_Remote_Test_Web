@@ -13,7 +13,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def run_restart(tmp_path, layout, service_case, *, legacy_unit=False, clean_cache=False):
+def run_restart(
+    tmp_path, layout, service_case, *, legacy_unit=False, clean_cache=False,
+    fresh_certificate=False, server_hostname=None,
+):
     project = tmp_path / "project"
     project.mkdir()
     # Exercise the actual environment/path loaders, without importing deployment
@@ -51,8 +54,9 @@ vnc_manager = _VNCManager()
     )
     certificate_dir = project / ("configs/certs" if layout == "legacy" else "configs/secrets/certs")
     certificate_dir.mkdir(parents=True)
-    for name in ("gms-local.crt", "gms-local.key"):
-        (certificate_dir / name).write_text("fixture certificate", encoding="utf-8")
+    if not fresh_certificate:
+        for name in ("gms-local.crt", "gms-local.key"):
+            (certificate_dir / name).write_text("fixture certificate", encoding="utf-8")
     if layout != "process_only":
         relative = "configs/runtime.json" if layout == "legacy" else "configs/local/environment.json"
         environment_file = project / relative
@@ -152,6 +156,8 @@ fi
     environment.pop("RESTART_SECRET_FIXTURE", None)
     if layout == "process_only":
         environment["RESTART_FIXTURE"] = "loaded"
+    if server_hostname:
+        environment["GMS_SERVER_HOSTNAME"] = server_hostname
     result = subprocess.run(
         ["bash", "-c", harness, "restart-test", str(ROOT / "restart_services.sh"), layout,
          *(["--clean-cache"] if clean_cache else [])],
@@ -290,3 +296,25 @@ def test_systemd_protocol_update_preserves_explicit_options(tmp_path):
     assert applied.returncode == 0, applied.stderr
     assert unit.read_text() == original.replace("-m uvicorn", "-m bootstrap.server")
     assert subprocess.run(command, capture_output=True, timeout=10).returncode == 0
+
+
+@pytest.mark.parametrize(
+    ("hostname", "expected_san"),
+    [("ats-worker-244", "DNS:ats-worker-244"),
+     ("172.16.14.233", "IP Address:172.16.14.233")],
+)
+def test_restart_first_boot_certificate_uses_correct_san_type(tmp_path, hostname, expected_san):
+    if shutil.which("openssl") is None:
+        pytest.skip("openssl is required for certificate integration test")
+    result, _calls, project = run_restart(
+        tmp_path, "structured", "success",
+        fresh_certificate=True, server_hostname=hostname,
+    )
+    assert result.returncode == 0, result.stderr
+    certificate = project / "configs/secrets/certs/gms-local.crt"
+    assert certificate.is_file()
+    san = subprocess.run(
+        ["openssl", "x509", "-in", str(certificate), "-noout", "-ext", "subjectAltName"],
+        check=True, capture_output=True, text=True, timeout=10,
+    ).stdout
+    assert expected_san in san

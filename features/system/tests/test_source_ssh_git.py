@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import contextlib
 import shlex
+import tempfile
 import unittest
 import unittest.mock
+from pathlib import Path
 
 from features.system.source_provider import (
     SourceProviderError,
@@ -250,6 +252,9 @@ class SSHGitMultiRepoTests(unittest.TestCase):
 
     def setUp(self):
         self.executed: list[str] = []
+        # Discovery cache must not leak between fake SDK fixtures or CI runs.
+        self._cache_temp = tempfile.TemporaryDirectory(prefix="ssh-git-test-")
+        self.addCleanup(self._cache_temp.cleanup)
         self.provider = self._provider(self._handler())
         self.provider._ssh = self.provider._new_shard_manager()
 
@@ -302,16 +307,20 @@ class SSHGitMultiRepoTests(unittest.TestCase):
             ),
             b"test-secret",
         )
+        provider._cache_path = lambda: Path(self._cache_temp.name) / "discovered.json"
         provider._new_shard_manager = lambda: self._FakeShardManager(
             handler, self.executed)
         provider._ssh = provider._new_shard_manager()
         return provider
 
     def _heads_stdout(self, with_subject: bool = False) -> str:
-        out = (f"{_REPO_SEP}frameworks/base\t{self.COMMIT_FB}\n"
-               f"{_REPO_SEP}kernel-6.1\t{self.COMMIT_KERN}\n")
+        # _multi_heads_command writes each subject immediately after its repo.
+        out = f"{_REPO_SEP}frameworks/base\t{self.COMMIT_FB}\n"
         if with_subject:
-            out += f"{_SUBJ_SEP}Fix fb\n{_SUBJ_SEP}Fix kernel\n"
+            out += f"{_SUBJ_SEP}Fix fb\n"
+        out += f"{_REPO_SEP}kernel-6.1\t{self.COMMIT_KERN}\n"
+        if with_subject:
+            out += f"{_SUBJ_SEP}Fix kernel\n"
         return out
 
     def _grep_stdout(self) -> str:
@@ -331,8 +340,36 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         meta = self.provider.revision_metadata("")
         self.assertTrue(meta["multi_repo"])
         self.assertEqual(meta["repo_count"], 2)
-        self.assertEqual(meta["commit"], self.COMMIT_FB)
+        self.assertEqual(meta["repos_resolved"], 2)
+        self.assertEqual(meta["commit"], "")
+        self.assertTrue(meta["coverage_complete"])
+        self.assertTrue(meta["reproducible"])
+        self.assertEqual(meta["repos"]["frameworks/base"]["commit"], self.COMMIT_FB)
+        self.assertEqual(meta["repos"]["frameworks/base"]["subject"], "Fix fb")
         self.assertEqual(meta["repos"]["kernel-6.1"]["subject"], "Fix kernel")
+
+    def test_multi_metadata_is_not_reproducible_when_repo_heads_missing(self):
+        partial = f"{_REPO_SEP}frameworks/base\t{self.COMMIT_FB}\n"
+        self.provider = self._provider(self._handler(heads_stdout=partial))
+        meta = self.provider.revision_metadata("")
+        self.assertEqual(meta["repo_count"], 2)
+        self.assertEqual(meta["repos_resolved"], 1)
+        self.assertFalse(meta["coverage_complete"])
+        self.assertFalse(meta["reproducible"])
+        self.assertEqual(meta["commit"], "")
+
+    def test_multi_discovery_metadata_without_sha_cannot_claim_reproducibility(self):
+        from features.system import source_ssh_git as mod
+
+        self.provider = self._provider(self._handler(heads_stdout=""))
+        with unittest.mock.patch.object(mod, "SSH_GIT_HEADS_MAX_REPOS", 1):
+            meta = self.provider.revision_metadata("")
+        self.assertEqual(meta["repo_count"], 2)
+        self.assertEqual(meta["repos_resolved"], 0)
+        self.assertFalse(meta["coverage_complete"])
+        self.assertFalse(meta["reproducible"])
+        self.assertEqual(meta["commit"], "")
+        self.assertTrue(all(not value for value in meta["repos"].values()))
 
     def test_multi_search_rejects_non_head_revision(self):
         """多仓模式显式 revision（分支/tag/commit）必须 422 拒绝。
@@ -563,7 +600,7 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         def handler(command: str, timeout: int):
             from foundation.command_result import CommandResult
 
-            if " find " in command:
+            if command.lstrip().startswith("find "):
                 # 模拟远端输出（发现模板已剪除 .repo，这里只返回干净清单）。
                 return CommandResult(
                     stdout="/remote/sdk/frameworks/base\n"
@@ -578,16 +615,16 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         self.assertEqual(meta["repo_count"], 2)
         self.assertIn("frameworks/base", meta["repos"])
         # 二次调用走进程内缓存：不再触发 find。
-        find_count = sum(1 for c in self.executed if " find " in c)
+        find_count = sum(1 for c in self.executed if c.lstrip().startswith("find "))
         provider.revision_metadata("")
         self.assertEqual(
-            sum(1 for c in self.executed if " find " in c), find_count)
+            sum(1 for c in self.executed if c.lstrip().startswith("find ")), find_count)
 
     def test_discover_zero_repos_maps_502(self):
         from foundation.command_result import CommandResult
 
         def handler(command: str, timeout: int):
-            if " find " in command:
+            if command.lstrip().startswith("find "):
                 return CommandResult(stdout="", code=0)
             return CommandResult(stdout="", stderr="unexpected", code=3)
 

@@ -87,10 +87,10 @@ def _like_param(value: str) -> str:
 
 def _artifact_release_number(item: dict) -> str:
     for value in (item.get('release_name', ''), item.get('android_version', ''), item.get('file_name', '')):
-        match = re.search(r'(?:CTS|VTS|GTS)?[-_ ]?(1[4-7](?:\.\d+)?)', value, flags=re.IGNORECASE)
+        match = re.search(r'(?:CTS|VTS|GTS)?[-_ ]?(1[3-7](?:\.\d+)?)', value, flags=re.IGNORECASE)
         if match:
             return match.group(1)
-        match = re.search(r'Android\s+(1[4-7])(?:\s+QPR2)?', value, flags=re.IGNORECASE)
+        match = re.search(r'Android\s+(1[3-7])(?:\s+QPR2)?', value, flags=re.IGNORECASE)
         if match:
             return match.group(1)
     return ''
@@ -111,11 +111,8 @@ def _artifact_api_level(item: dict, release: str = '') -> str:
         release = _artifact_release_number(item)
     if not release:
         return ''
-    major_text, _, minor = release.partition('.')
-    api = _VERSION_TO_API.get(major_text)
-    if not api:
-        return ''
-    return f'{api}.{minor}' if minor else api
+    # A suite release decimal is not a platform API level.
+    return _VERSION_TO_API.get(release.partition('.')[0], '')
 
 
 def _artifact_section_url(item: dict, release: str = '') -> str:
@@ -123,10 +120,10 @@ def _artifact_section_url(item: dict, release: str = '') -> str:
     if not release:
         release = _artifact_release_number(item)
     if source_key == 'cts_downloads' and release:
-        anchor = 'android-' + release.replace('.', '-')
+        anchor = 'android-' + release.partition('.')[0]
         return f'https://source.android.com/docs/compatibility/cts/downloads#{anchor}'
     if source_key == 'vts_downloads' and release:
-        anchor = 'android-' + release.replace('.', '-')
+        anchor = 'android-' + release.partition('.')[0]
         return f'https://docs.partner.android.com/gms/testing/vts#{anchor}'
     if source_key == 'gts_downloads':
         return 'https://docs.partner.android.com/gms/testing/gts#download-gts'

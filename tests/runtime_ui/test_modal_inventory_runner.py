@@ -108,6 +108,7 @@ GEOMETRY = r"""content => {
     close:!!header?.querySelector('.modal-close'),
     glyph:!!glyph, glyphHref:use?.getAttribute('href') || '',
     glyphCustom:!!glyph?.querySelector('svg path, svg circle, svg ellipse, img'),
+    glyphEmoji: ['🔌'].includes(glyph?.textContent?.trim()),
     header:header ? rect(header) : null,
     body:body ? rect(body) : null,
     bodyScroll:body ? {height:body.clientHeight,content:body.scrollHeight,
@@ -266,7 +267,7 @@ class ModalInventoryRunnerTests(RuntimeUiHarness):
                 self.assertTrue(metrics["close"], key)
                 self.assertTrue(
                     metrics["glyphHref"].startswith("/static/icons/ui.svg#")
-                    or metrics["glyphCustom"], key)
+                    or metrics["glyphCustom"] or metrics["glyphEmoji"], key)
             self.assertEqual(metrics["leaked"], [], key)
             self.assertEqual(metrics["nestedActions"], [], key)
             footer = metrics["footer"]

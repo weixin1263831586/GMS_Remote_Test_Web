@@ -96,3 +96,24 @@ async def test_unregistered_function_fails_closed_without_importing_global_app(m
         await enforce_route_dependencies(SimpleNamespace(), lambda: None, None)
     assert rejected.value.status_code == 404
     global_routes.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_vpn_status_handler_forwards_request_to_human_only_route(monkeypatch):
+    from features.assistant.executor import ActionExecutor
+
+    calls = []
+
+    async def fetch(*args, **kwargs):
+        calls.append((args, kwargs))
+        return None, {"success": True, "connected": True, "source": "local"}
+
+    monkeypatch.setattr(ActionExecutor, "_fetch_router_json", staticmethod(fetch))
+    request = SimpleNamespace(actor="browser-user")
+    result = await ActionExecutor()._query_vpn_status({}, request, {})
+    assert result.success
+    assert "已连接" in result.formatted_text
+    assert len(calls) == 1
+    assert calls[0][0] == ("features.system.integrations", "get_vpn_status")
+    assert calls[0][1]["request"] is request
+    assert calls[0][1]["api_path"] == "/api/vpn/status"
+    assert calls[0][1]["method"] == "GET"

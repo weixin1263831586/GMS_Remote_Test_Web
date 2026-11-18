@@ -150,8 +150,14 @@ async def list_build_jobs(
     status: str = Query(""),
     limit: int = Query(50, ge=1, le=500),
 ):
-    jobs = build_service.list_jobs(status=status, limit=limit)
     owner, see_all = _request_owner(request)
+    # Filter owner in SQL before LIMIT. A post-limit Python filter can
+    # hide every one of this account's jobs when other accounts are busy.
+    jobs = build_service.list_jobs(
+        status=status, limit=limit, owner=None if see_all else owner
+    )
+    # Defense in depth: the HTTP authorization boundary still filters results
+    # even if an injected service or future repository adapter ignores owner.
     if not see_all:
         jobs = [job for job in jobs if job.get("owner") == owner]
     return {"success": True, "data": {"items": jobs}}

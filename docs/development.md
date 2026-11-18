@@ -171,7 +171,7 @@ python tools/scripts/agent/sync_package.py .
 通过真实页面的加载函数读取演示接口，保存前验证可用状态，避免异步覆盖。
 
 架构拓扑的节点与连线以 `docs/architecture/*-topology.mmd` 为准，展示布局在
-`features/system/topology_view.py`；节点统一 16 px，连线标签统一 12 px，
+`features/system/topology_view.py`；节点统一 14 px，连线标签统一 12 px，
 标签沿连线排列，反向斜线保持文字可读。SVG 按原始尺寸显示，窄视口在图内
 滚动，避免四个视图因缩放比例不同导致字号不一致。修改后运行拓扑契约测试
 与 `tests/runtime_ui/test_architecture_views.py`，检查边方向、文字边界、标签

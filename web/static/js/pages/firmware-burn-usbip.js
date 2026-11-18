@@ -290,7 +290,7 @@ async function performUsbipDisconnect(selections) {
     operationKeys.forEach(key => usbipPendingAssignmentKeys.add(key));
     updateUsbipAssignmentOperationButtons();
     try {
-        btn.textContent = '📱 断开中...';
+        btn.innerHTML = GmsUi.testEmoji('📱') + ' 断开中...';
         btn.disabled = true;
         usbipManualDisconnectUntil = Date.now() + USBIP_MANUAL_DISCONNECT_SUPPRESS_MS;
         if (usbipReconnectTimer) {
@@ -365,7 +365,7 @@ async function performUsbipDisconnect(selections) {
             }
         }, 500);
     } catch (error) {
-        btn.textContent = '📱 断开设备';
+        btn.innerHTML = GmsUi.testEmoji('📱') + ' 断开设备';
         btn.disabled = false;
         addLogEntry('停止 USB/IP 失败: ' + error.message, 'error');
     } finally {
@@ -822,7 +822,7 @@ async function connectUsbipDeviceHost(deviceHost, workerId, busids) {
     activeUsbipSelection = {device_host: deviceHost, worker_id: workerId, busids};
     debugLog('[USB/IP] Connecting source:', deviceHost);
     try {
-        btn.textContent = '📱 连接中...';
+        btn.innerHTML = GmsUi.testEmoji('📱') + ' 连接中...';
         btn.disabled = true;
         usbipManualDisconnectUntil = 0;
         let targetSerialsBefore = new Set();
@@ -847,7 +847,7 @@ async function connectUsbipDeviceHost(deviceHost, workerId, busids) {
             activeUsbipSelection.device_serials = (
                 result.device_serials || result.new_devices || result.device_list || []
             );
-            btn.textContent = '📱 断开设备';
+            btn.innerHTML = GmsUi.testEmoji('📱') + ' 断开设备';
             btn.disabled = false;
             addLogEntry(result.message || 'USB/IP 连接已启动', 'success');
             if (['warning', 'poor'].includes(result.network_quality?.rating)) {
@@ -871,7 +871,7 @@ async function connectUsbipDeviceHost(deviceHost, workerId, busids) {
             );
             return;
         }
-        btn.textContent = '📱 本地设备';
+        btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP 接入';
         btn.disabled = false;
         if (result.need_password && result.device_host) {
             showDevicePasswordModal(result.device_host);
@@ -892,7 +892,7 @@ async function connectUsbipDeviceHost(deviceHost, workerId, busids) {
             );
         }
     } catch (error) {
-        btn.textContent = '📱 本地设备';
+        btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP 接入';
         btn.disabled = false;
         if (error.needPassword && error.deviceHost) {
             showDevicePasswordModal(error.deviceHost);
@@ -972,7 +972,7 @@ function scheduleUsbipReconnect(reason) {
     usbipReconnectAttempts = 0;
     const btn = $('usbip-btn');
     if (btn) {
-        btn.textContent = '📱 等待重连...';
+        btn.innerHTML = GmsUi.testEmoji('📱') + ' 等待重连...';
         btn.disabled = false;
     }
     addLogEntry((reason || '检测到 USB/IP 设备断开') + '，等待后端自动重连...', 'warning');
@@ -995,7 +995,7 @@ async function attemptUsbipReconnect() {
         usbipReconnectTimer = null;
         usbipReconnectWaiting = false;
         const btn = $('usbip-btn');
-        if (btn) { btn.textContent = '📱 本地设备'; btn.disabled = false; }
+        if (btn) { btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP 接入'; btn.disabled = false; }
         addLogEntry('已手动断开 USB/IP，停止自动重连', 'info');
         return;
     }
@@ -1016,7 +1016,7 @@ async function attemptUsbipReconnect() {
             usbipReconnectWaiting = false;
             pendingUsbipDeviceHost = status.device_host || pendingUsbipDeviceHost || '';
             if (btn) {
-                btn.textContent = '📱 断开设备';
+                btn.innerHTML = GmsUi.testEmoji('📱') + ' 断开设备';
                 btn.disabled = false;
             }
             const protocolMode = status.protocol_status && status.protocol_status.mode;
@@ -1030,7 +1030,7 @@ async function attemptUsbipReconnect() {
         if (Date.now() <= usbipManualDisconnectUntil) {
             usbipReconnectTimer = null;
             usbipReconnectWaiting = false;
-            if (btn) { btn.textContent = '📱 本地设备'; btn.disabled = false; }
+            if (btn) { btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP 接入'; btn.disabled = false; }
             addLogEntry('已手动断开 USB/IP，停止自动重连', 'info');
             return;
         }
@@ -1040,7 +1040,7 @@ async function attemptUsbipReconnect() {
             return;
         }
         if (btn) {
-            btn.textContent = '📱 本地设备';
+            btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP 接入';
             btn.disabled = false;
         }
         state.usbipConnected = false;

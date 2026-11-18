@@ -375,19 +375,19 @@ function updateVpnStatus(connected) {
         label.className = 'vpn-status-label disconnected';
         // 状态未知时按钮回到"连接"文案，与 connectVpn() 对 null 状态
         // 弹出连接框的行为保持一致。
-        if (btn) btn.textContent = '🔌 连接VPN';
+        if (btn) btn.innerHTML = GmsUi.testEmoji('🔌') + ' 连接 VPN';
         state.vpnConnected = null;
         return;
     }
     if (connected) {
         label.textContent = '状态: 已连接';
         label.className = 'vpn-status-label connected';
-        btn.textContent = '📡 检查VPN';
+        btn.innerHTML = GmsUi.testEmoji('📡') + ' 检查 VPN';
         state.vpnConnected = true;
     } else {
         label.textContent = '状态: 未连接';
         label.className = 'vpn-status-label disconnected';
-        btn.textContent = '🔌 连接VPN';
+        btn.innerHTML = GmsUi.testEmoji('🔌') + ' 连接 VPN';
         state.vpnConnected = false;
     }
 
@@ -529,11 +529,11 @@ function updateUsbipButtonStatus(connected) {
     if (!btn) return;
 
     if (connected) {
-        btn.textContent = '📱 断开设备';
+        btn.innerHTML = GmsUi.testEmoji('📱') + ' 断开设备';
         state.usbipConnected = true;
         usbipReconnectWaiting = false;
     } else {
-        btn.textContent = usbipReconnectWaiting ? '📱 等待重连...' : '📱 本地设备';
+        btn.innerHTML = GmsUi.testEmoji('📱') + (usbipReconnectWaiting ? ' 等待重连...' : ' USB/IP 接入');
         state.usbipConnected = false;
     }
 }

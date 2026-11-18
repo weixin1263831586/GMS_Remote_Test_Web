@@ -18,9 +18,10 @@
     }
     function syncTasks() {
         const count = tasks().filter(task => task.checked).length;
-        field('all-tasks').checked = count === 6;
-        field('all-tasks').indeterminate = count > 0 && count < 6;
-        field('task-count').textContent = `已选择 ${count} / 6 项`;
+        const total = tasks().length;
+        field('all-tasks').checked = count === total && total > 0;
+        field('all-tasks').indeterminate = count > 0 && count < total;
+        field('task-count').textContent = `已选择 ${count} / ${total} 项`;
     }
     async function open() {
         // The submit button is in a persistent footer, outside the disabled

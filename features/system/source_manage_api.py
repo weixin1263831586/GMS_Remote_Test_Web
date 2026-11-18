@@ -43,6 +43,7 @@ from features.auth import (
 )
 from foundation.config import settings
 from foundation.config_paths import build_servers_path
+from foundation.error_model import API_ERROR_CODES, ApiError
 from foundation.errors import handle_api_errors
 
 from .source_provider import reload_source_runtime, user_source_store
@@ -89,15 +90,21 @@ _VERIFY_EXECUTOR: ThreadPoolExecutor | None = None
 
 
 def _error_response(exc: Exception) -> JSONResponse:
-    status = getattr(exc, "status_code", 500)
-    return JSONResponse(
-        status_code=status, content={"success": False, "error": str(exc)}
-    )
+    if isinstance(exc, UserSourceStoreError):
+        code = next((name for name, status in API_ERROR_CODES.items()
+                     if status == exc.status_code), None)
+        if code:
+            message = str(exc) if exc.status_code < 500 else "SDK 源远端服务暂不可用。"
+            if exc.status_code == 502 and "已自动重试仍超时" in str(exc):
+                message = "SSH 命令执行失败；已自动重试仍超时，请稍后重试或检查服务器负载。"
+            return JSONResponse(status_code=exc.status_code, content={
+                "success": False, "error": message, "code": code,
+            })
+    logger.error("SDK source management failed (%s)", type(exc).__name__, exc_info=True)
+    return ApiError.internal("SDK 源服务发生内部错误，请查看服务端日志。").to_response()
 
 
 # ---------- 远端只读探测（ADR 0004 层） ----------
-
-
 # probe 子仓探测深度：maxdepth 2 命中即停（秒级，编译高峰也不拖）。
 # 精确子仓计数已弃用——检索链路（source_ssh_git discover_repos +
 # source_repo_rank）运行时自己全量枚举排序，probe 的 count 只是
@@ -709,12 +716,18 @@ def _unique_source_id(store: Any, repo_root: str) -> str:
 
 # ---------- 路由 ----------
 
-
 @router.get("/servers")
 @handle_api_errors
 def list_manage_servers(request: Request):
     require_human_principal_when_auth_required(request)
-    return {"success": True, "data": {"servers": _load_build_servers()}}
+    # The internal server record needs auth_env for password resolution, but
+    # the browser only needs connection metadata and auth_type. Do not expose
+    # names of private deployment environment variables in this read API.
+    servers = [
+        {key: value for key, value in server.items() if key != "auth_env"}
+        for server in _load_build_servers()
+    ]
+    return {"success": True, "data": {"servers": servers}}
 
 
 @router.get("/sources")
@@ -789,7 +802,13 @@ def list_user_sdk_sources(request: Request, verify: str = "auto"):
             )
             live = {"verified": probe["verified"], "reason": probe["reason"]}
         try:
-            store.mark_verified(source_id, ok=live["verified"])
+            # The synchronous SSH/local check can outlive a delete/re-register
+            # of this source ID. Only update the exact config snapshot read at
+            # request start, as already enforced by background verification.
+            store.mark_verified(
+                source_id, ok=live["verified"],
+                config_fingerprint=str(record.get("config_fingerprint") or ""),
+            )
         except UserSourceStoreError as exc:  # 写失败不阻断展示
             logger.warning("SDK 源校验状态写入失败：%s", exc)
         return live

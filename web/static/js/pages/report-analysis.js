@@ -26,7 +26,7 @@ function selectReportSource() {
                         <span>选择 XML 或 ZIP / RAR / TAR.GZ 压缩包</span>
                     </button>
                     <button type="button" class="report-import-choice" data-click="selectReportFolder">
-                        <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#folder"></use></svg><strong>上传报告文件夹</strong>
+                        <span class="report-choice-folder-icon" aria-hidden="true">📁</span><strong>上传报告文件夹</strong>
                         <span>选择包含 test_result.xml 的结果目录</span>
                     </button>
                 </div>

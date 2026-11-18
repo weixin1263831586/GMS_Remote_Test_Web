@@ -89,19 +89,31 @@ class BuildStore:
             row = conn.execute("SELECT * FROM build_jobs WHERE id = ?", (job_id,)).fetchone()
         return self._row_to_dict(row)
 
-    def list_jobs(self, status: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    def list_jobs(
+        self, status: str = "", limit: int = 50, *, owner: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Apply owner/status filters before LIMIT so other accounts never
+        hide a user's builds from their own recent-job listing.
+
+        owner=None is an explicit privileged all-owner query; owner="" is
+        an owner filter, not a request to list everything.
+        """
         limit = max(1, min(int(limit or 50), 500))
+        conditions = []
+        params: list[Any] = []
+        if owner is not None:
+            conditions.append("owner = ?")
+            params.append(owner)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
         with self._connect() as conn:
-            if status:
-                rows = conn.execute(
-                    "SELECT * FROM build_jobs WHERE status = ? ORDER BY created_at DESC LIMIT ?",
-                    (status, limit),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM build_jobs ORDER BY created_at DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM build_jobs" + where
+                + " ORDER BY created_at DESC, id DESC LIMIT ?",
+                (*params, limit),
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def update_job(self, job_id: str, **updates: Any) -> dict[str, Any]:

@@ -7,12 +7,32 @@
     }
     let tab = updateMonitorTabs.includes(initialTab) ? initialTab : 'changes';
     let globalSearchActive = false;
+    let queryGeneration = 0;
     let offset = 0;
     const limit = 100;
     let total = 0;
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    const link = (url, text='下载') => url ? `<a href="${esc(url)}" target="_blank">${esc(text)}</a>` : '';
-    const suiteDownloadLink = url => url ? `<a href="#" class="suite-download-link" data-url="${esc(url)}">下载</a>` : '';
+    // External bulletin / suite URLs originate in indexed upstream documents.
+    // HTML escaping does not prevent javascript: or data: navigation.
+    const safeExternalHref = value => {
+      const raw = String(value ?? '').trim();
+      if (!raw) return '';
+      try {
+        const url = new URL(raw, window.location.href);
+        if (url.protocol === 'https:' || (url.protocol === 'http:' && url.origin === window.location.origin)) {
+          return url.href;
+        }
+      } catch (_) {}
+      return '';
+    };
+    const link = (url, text='下载') => {
+      const href = safeExternalHref(url);
+      return href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>` : '';
+    };
+    const suiteDownloadLink = url => {
+      const href = safeExternalHref(url);
+      return href ? `<a href="#" class="suite-download-link" data-url="${esc(href)}">下载</a>` : '';
+    };
     // 统一表格模板：表头表格常驻滚动区外，表体在 .table-scroll 内滚动，
     // 两表共用同一 colgroup 保证列对齐。
     function tableHtml(headers, rows, emptyText, widths) {
@@ -119,23 +139,33 @@
       return `<tr><td>GMS要求</td><td>${esc(x.android_version)} · ${esc(x.change_kind)}</td><td class="wrap">${esc(x.section_title || '')} ${esc(x.requirement_ids || '')}：${esc(x.text_excerpt || '').slice(0, 300)}</td><td></td><td></td></tr>`;
     }
     async function searchAll() {
+      const generation = ++queryGeneration;
       const q = document.getElementById('q').value.trim();
       if (!q) { globalSearchActive = false; reload(true); return; }
       const params = new URLSearchParams({q, limit: 100, offset: 0});
       const results = await Promise.all(GLOBAL_SEARCH_SOURCES.map(async src => {
         try {
           const r = await fetch(src.endpoint + '?' + params.toString());
+          if (!r.ok) throw new Error('HTTP ' + r.status);
           const data = await r.json();
-          return {src, items: data.success ? data.data.items : [], total: data.success ? data.meta.total : 0};
+          if (!data.success || !Array.isArray(data.data?.items)) throw new Error('invalid search response');
+          return {src, items: data.data.items, total: Number(data.meta?.total ?? data.data.items.length), available: true};
         } catch (_) {
-          return {src, items: [], total: 0};
+          return {src, items: [], total: 0, available: false};
         }
       }));
+      if (generation !== queryGeneration || document.getElementById('q').value.trim() !== q) return;
       globalSearchActive = true;
       const rows = [];
       const counts = [];
       let totalAll = 0;
-      results.forEach(({src, items, total}) => {
+      const unavailable = [];
+      results.forEach(({src, items, total, available}) => {
+        if (!available) {
+          unavailable.push(src.label);
+          counts.push(src.label + ' 查询不可用');
+          return;
+        }
         counts.push(`${src.label} ${total}`);
         totalAll += total;
         if (!items.length) return;
@@ -144,8 +174,10 @@
       });
       document.getElementById('tables-area').innerHTML = rows.length
         ? tableHtml(GLOBAL_HEADERS, rows, '无记录', GLOBAL_WIDTHS)
-        : `<span class="muted">无匹配「${esc(q)}」的结果</span>`;
-      sectionBadgeText(`全局搜索「${q}」共 ${totalAll} 条`);
+        : unavailable.length
+          ? `<span class="muted">部分来源查询不可用（${esc(unavailable.join('、'))}），其余来源无匹配结果</span>`
+          : `<span class="muted">无匹配「${esc(q)}」的结果</span>`;
+      sectionBadgeText(`全局搜索「${q}」共 ${totalAll} 条${unavailable.length ? '（部分来源不可用）' : ''}`);
       document.getElementById('pageinfo').textContent = `全局搜索「${q}」共 ${totalAll} 条（${counts.join(' · ')}）`;
       document.querySelector('.pager').style.display = 'none';
     }
@@ -175,7 +207,8 @@
       document.getElementById('summary').textContent = parts.join(' | ') || '暂无扫描数据';
     }
     function startSuiteDownload(url) {
-      if (!url) return;
+      const safeUrl = safeExternalHref(url);
+      if (!safeUrl) { showToast('下载地址不安全：仅允许 HTTPS 或本机来源', 'error'); return; }
       let frame = document.getElementById('suite-direct-download-frame');
       if (!frame) {
         frame = document.createElement('iframe');
@@ -184,7 +217,7 @@
         frame.style.display = 'none';
         document.body.appendChild(frame);
       }
-      frame.src = url;
+      frame.src = safeUrl;
       showToast('已开始下载套件');
       notifyUser('GMS套件下载已开始', '浏览器已开始下载套件', 'info');
     }
@@ -232,6 +265,7 @@
       return {params, type};
     }
     async function reload(reset=false) {
+      const generation = ++queryGeneration;
       if (reset) offset = 0;
       document.querySelector('.pager').style.display = '';
       const {params, type} = paramsBase();
@@ -256,8 +290,10 @@
         params.set('entity_type', type);
       }
       const r = await fetch(endpoint + '?' + params.toString());
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
       if (!data.success) throw new Error(data.error || 'query failed');
+      if (generation !== queryGeneration || document.getElementById('q').value.trim() !== (params.get('q') || '')) return;
       total = data.meta.total;
       renderTable(data.data.items);
       document.getElementById('pageinfo').textContent = `${total ? offset + 1 : 0}-${Math.min(offset + limit, total)} / ${total}`;
@@ -275,7 +311,13 @@
       if (next < 0 || next >= total) return;
       offset = next; reload(false);
     }
-    function loadAll() { loadSummary().catch(e => document.getElementById('summary').textContent = e.message); reload(false).catch(e => document.getElementById('tables-area').innerHTML = `<span class="muted">${esc(e.message)}</span>`); }
+    function loadAll() {
+      loadSummary().catch(e => document.getElementById('summary').textContent = e.message);
+      const query = document.getElementById('q').value.trim();
+      (query ? searchAll() : reload(false)).catch(e => {
+        document.getElementById('tables-area').innerHTML = `<span class="muted">${esc(e.message)}</span>`;
+      });
+    }
     document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') runQuery(); });
     document.getElementById('type_filter').addEventListener('keydown', e => { if (e.key === 'Enter') { globalSearchActive = false; reload(true); } });
     document.getElementById('tables-area').addEventListener('click', e => {

@@ -66,7 +66,9 @@ def _snapshot_fresh(snapshot: dict[str, Any], ttl_seconds: int) -> bool:
         fetched = datetime.fromisoformat(fetched_at)
     except ValueError:
         return False
-    return datetime.now() - fetched < timedelta(seconds=ttl_seconds)
+    # Accept both legacy naive timestamps and aware imported timestamps.
+    age = datetime.now(fetched.tzinfo) - fetched
+    return timedelta(0) <= age < timedelta(seconds=ttl_seconds)
 
 
 def _owner(request: Request) -> str:

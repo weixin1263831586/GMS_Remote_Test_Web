@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from features.auth import CurrentUser, require_authenticated_user_when_auth_required, require_role_when_auth_required
 from foundation.config import settings
+from foundation.process_sync import release_sync_lock, sync_lock_held, try_acquire_sync_lock
 from foundation.sqlite_schema import ensure_schema
 
 from .repository import escape_like, init_db
@@ -21,6 +22,7 @@ from .repository import escape_like, init_db
 router = APIRouter()
 DB_PATH = settings.data_root / 'mainline_known_issues.sqlite3'
 _sync_lock = threading.Lock()
+_SYNC_FILE_LOCK = DB_PATH.with_suffix('.sync.lock')
 
 
 def _initial_sync_status(**overrides):
@@ -94,22 +96,40 @@ def _run_sync_job(mode: str):
             ))
 
 
+def _run_locked_sync_job(mode: str, descriptor: int) -> None:
+    try:
+        _run_sync_job(mode)
+    finally:
+        release_sync_lock(descriptor)
+
+
 @router.post('/api/mainline-known-issues/sync')
 async def start_mainline_known_issues_sync(
     mode: str = Query('incremental', pattern='^(full|incremental)$'),
     _admin: CurrentUser | None = Depends(require_role_when_auth_required("admin")),
 ):
     with _sync_lock:
-        if _sync_status['running']:
+        if _sync_status['running'] or sync_lock_held(_SYNC_FILE_LOCK):
             return JSONResponse(
                 status_code=409,
                 content={'success': False, 'error': 'sync already running', 'status': dict(_sync_status)},
             )
+        descriptor = try_acquire_sync_lock(_SYNC_FILE_LOCK)
+        if descriptor is None:
+            return JSONResponse(
+                status_code=409,
+                content={'success': False, 'error': 'sync already running'},
+            )
         _sync_status.update(_initial_sync_status(
             running=True, mode=mode, started_at=datetime.now().isoformat(),
         ))
-        thread = threading.Thread(target=_run_sync_job, args=(mode,), daemon=True)
-        thread.start()
+        thread = threading.Thread(target=_run_locked_sync_job, args=(mode, descriptor), daemon=True)
+        try:
+            thread.start()
+        except Exception:
+            _sync_status['running'] = False
+            release_sync_lock(descriptor)
+            raise
         status = dict(_sync_status)
     return {'success': True, 'status': status}
 
@@ -121,6 +141,9 @@ async def mainline_known_issues_sync_status(
     with _sync_lock:
         status = dict(_sync_status)
     status['db_exists'] = DB_PATH.exists()
+    if not status['running'] and sync_lock_held(_SYNC_FILE_LOCK):
+        status['running'] = True
+        status['remote_process'] = True
     return {'success': True, 'status': status}
 
 
@@ -366,5 +389,6 @@ def mainline_known_issues_page_js():
     page_path = Path(__file__).with_name('ui') / 'page.html'
     js = page_path.parent / 'page.js'
     return Response(
-        js.read_text(encoding='utf-8'), media_type='application/javascript'
+        js.read_text(encoding='utf-8'), media_type='application/javascript',
+        headers={'Cache-Control': 'no-cache'},
     )

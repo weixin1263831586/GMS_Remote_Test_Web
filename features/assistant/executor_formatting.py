@@ -83,7 +83,7 @@ def format_payload(tool: AgentTool, payload: dict[str, Any]) -> str:
         devices = first_list("devices")
         if devices:
             return f"查询到 {len(devices)} 台设备。"
-        if tool.name == "sdk_sources":
+        if tool.name in {"sdk_sources", "sdk_sources_list"}:
             return _format_sdk_sources(data)
         items = first_list("items", "jobs", "workers", "docs")
         if items:

@@ -128,6 +128,14 @@ class RadarStore:
     def finish(self, run_id, status, summary, changes):
         with self.connect() as conn, conn:
             conn.execute('BEGIN IMMEDIATE')
+            # Shutdown recovery and late scan-worker callbacks compete for this
+            # row. Terminal states are immutable: a stale worker must not
+            # resurrect an interrupted scan or duplicate its evidence rows.
+            row = conn.execute('SELECT status FROM radar_runs WHERE id=?', (run_id,)).fetchone()
+            if row is None:
+                raise ApiError.not_found('扫描记录不存在')
+            if row['status'] != 'running':
+                return
             if len(changes) > MAX_CHANGES_PER_RUN:
                 # 真实总量保留在 summary（邮件与统计以此为准），明细只落前 N 条。
                 summary = {**summary, 'changes_truncated': len(changes) - MAX_CHANGES_PER_RUN}

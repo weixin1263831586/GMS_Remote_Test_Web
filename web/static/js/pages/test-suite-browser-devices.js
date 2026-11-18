@@ -281,7 +281,7 @@ async function refreshDevices() {
     if (button?.disabled) return;
     if (button) {
         button.disabled = true;
-        button.textContent = '刷新中…';
+        button.innerHTML = GmsUi.testEmoji('🔄') + ' 刷新中…';
         button.setAttribute('aria-busy', 'true');
     }
     showToast('正在刷新设备列表...', 'info');
@@ -321,7 +321,7 @@ async function refreshDevices() {
     } finally {
         if (button) {
             button.disabled = false;
-            button.textContent = '↻ 刷新设备';
+            button.innerHTML = GmsUi.testEmoji('🔄') + ' 刷新设备';
             button.removeAttribute('aria-busy');
         }
     }

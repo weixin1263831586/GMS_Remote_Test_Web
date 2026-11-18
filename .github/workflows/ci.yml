@@ -11,8 +11,8 @@ name: CI
 #   browser-e2e ─┘
 on:
   push:
-    # 临时全仓库验收分支也走与 main 完全相同的门禁；合并前移除临时名称。
-    branches: [main, verify/modal-global-audit-d97380-20261117]
+    # 全仓库校验分支使用与 main 相同门禁；结束后移除分支规则。
+    branches: [main, audit/global-current-0acf952-20261117]
   pull_request:
     branches: [main]
 
@@ -46,7 +46,7 @@ jobs:
       # 不再需要豁免;如新增豁免必须在注释中给出理由与退出条件。
       # requirements.txt 按 python_version 分流 Pillow：3.11 解析出安全
       # 修复版 13.0.0（本腿零豁免、零告警）；3.10 只能解析出 12.3.0
-      # （13.0.0 requires-python>=3.11，无可用修复版本），其 37 个已知
+      # （13.0.0 requires-python>=3.11，无可用修复版本），其清单内已知
       # 告警按 .github/pip-audit-py310-waivers.txt 逐 ID 显式豁免——
       # 显式接受风险而不是换解释器绕开审计；清单之外的新告警仍失败。
       - name: Audit runtime dependencies
@@ -103,9 +103,7 @@ jobs:
           python-version: "3.10"
           cache: pip
       - name: Reject unresolved merge conflict markers
-        # 7dbf641 曾把 <<<<<<< Updated upstream 块直接提交进 shell.html 与
-        # shell-main.js（9b470c2 才清理）。Agent 批量改码的开发模式下这条
-        # 门禁成本极低、收益极高，放在所有 lint 之前最先执行。
+        # 在 lint 前拒绝未解决的合并冲突标记，避免将无效源码提交到主线。
         run: python tools/scripts/maintenance/check_conflict_markers.py
       - name: Install dependencies
         run: |

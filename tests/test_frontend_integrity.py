@@ -422,7 +422,8 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("if(document.querySelector('.dash-tab.active')?.dataset.dashTab==='dashboard')dashTrendLastFetch=0;refresh(true)", script)
         self.assertIn("scheduleDashboardChartsResize", script)
         self.assertIn("state.status.enabled&&clusterWorkspace.scope_mode==='cluster'", script)
-        self.assertIn("renderModeStatus();renderJobForm()", script)
+        self.assertIn("renderModeStatus();", script)
+        self.assertNotIn("renderJobForm()", script)
         self.assertNotIn('集群模式已启用 · 本机', script)
         self.assertNotIn('集群能力已启用', script)
         self.assertIn('>测试终端日志 (${Math.max(0,Number(stdout.size_bytes)||0)} bytes)</a>', script)
@@ -823,7 +824,8 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn('id="refresh-suites-btn" class="btn-xxs ui-refresh-action"', main_text)
         self.assertIn('data-click="refreshTestSuites"', main_text)
         self.assertIn("await loadTestSuites(true)", navigation_text)
-        self.assertIn("button.textContent = '刷新中…'", navigation_text)
+        self.assertIn("button.innerHTML = GmsUi.testEmoji('🔄') + ' 刷新中…'", navigation_text)
+        self.assertIn("button.innerHTML = GmsUi.testEmoji('🔄') + ' 刷新套件'", navigation_text)
         self.assertIn("if (forceRefresh) return loadTestSuites(true)", navigation_text)
 
     def test_single_mode_hides_multi_host_controls_and_sidebar_has_descriptions(self):

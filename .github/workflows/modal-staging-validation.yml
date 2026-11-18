@@ -1,12 +1,12 @@
 name: GMS modal staging validation (isolated Playwright)
 
-# Intentionally temporary: push only on this verification branch.
+# Isolated read-only UI validation on this branch; no production device access.
 # Run synthetic browser fixtures on a GitHub-hosted Runner (no physical devices).
 # Never accept pull_request, pull_request_target, or fork events on this runner.
 on:
   push:
     branches:
-      - verify/modal-global-audit-d97380-20261117
+      - audit/global-current-0acf952-20261117
     paths:
       - '.github/workflows/modal-staging-validation.yml'
       - 'tests/**'
@@ -17,14 +17,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: gms-modal-validation-temp
+  group: gms-modal-current-0acf952
   cancel-in-progress: true
 
 jobs:
   modal-ui:
     if: >-
       github.repository == 'weixin1263831586/GMS_Remote_Test_Web' &&
-      github.ref == 'refs/heads/verify/modal-global-audit-d97380-20261117' &&
+      github.ref == 'refs/heads/audit/global-current-0acf952-20261117' &&
       github.event_name == 'push' &&
       github.actor == 'weixin1263831586'
     runs-on: ubuntu-24.04
@@ -112,7 +112,7 @@ jobs:
   modal-inventory:
     if: >-
       github.repository == 'weixin1263831586/GMS_Remote_Test_Web' &&
-      github.ref == 'refs/heads/verify/modal-global-audit-d97380-20261117' &&
+      github.ref == 'refs/heads/audit/global-current-0acf952-20261117' &&
       github.event_name == 'push' &&
       github.actor == 'weixin1263831586'
     runs-on: ubuntu-24.04

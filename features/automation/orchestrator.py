@@ -461,7 +461,8 @@ class AutomationOrchestrator:
         if run["started_at"] == "" and status != RUN_STATUS_QUEUED:
             update_payload["started_at"] = utc_now_iso()
         updated, applied = self.store.update_run_if_status(
-            run["id"], run["status"], **update_payload
+            run["id"], run["status"],
+            expected_lease_owner=self.claim_owner, **update_payload
         )
         if not applied:
             return updated
@@ -489,7 +490,8 @@ class AutomationOrchestrator:
         payload: dict[str, Any] | None = None, **updates: Any,
     ) -> dict[str, Any]:
         updated, applied = self.store.update_run_if_status(
-            run["id"], run["status"], **updates
+            run["id"], run["status"],
+            expected_lease_owner=self.claim_owner, **updates
         )
         if applied:
             self.store.append_event(
@@ -503,7 +505,13 @@ class AutomationOrchestrator:
 
     def _fail(self, run: dict[str, Any], status: str, error: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         current = self.store.get_run(run["id"])
-        if current and current["status"] in TERMINAL_STATUSES:
+        if current and (
+            current["status"] in TERMINAL_STATUSES
+            or current.get("lease_owner") != self.claim_owner
+        ):
+            # A different Controller may have recovered this lease after a
+            # long operation. It now owns both failure state and cleanup;
+            # the stale worker must not release its reserved resources.
             return current
         release = getattr(self.executor, "release_resources", None)
         if callable(release) and not (payload or {}).get("reconcile_required"):
@@ -522,6 +530,7 @@ class AutomationOrchestrator:
                 logger.warning("Failed to report terminal ATS failure %s", run["id"], exc_info=True)
         updated, applied = self.store.update_run_if_status(
             run["id"], run["status"],
+            expected_lease_owner=self.claim_owner,
             status=status,
             current_stage=status,
             error=error,

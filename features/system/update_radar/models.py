@@ -68,9 +68,34 @@ def next_scan(config: dict, now: datetime) -> str | None:
     if not config['enabled']:
         return None
     zone = ZoneInfo(config['timezone'])
-    local = now.astimezone(zone)
+    now_utc = now.astimezone(UTC)
+    local_date = now_utc.astimezone(zone).date()
     hour, minute = map(int, config['scan_time'].split(':'))
-    candidate = datetime.combine(local.date(), time(hour, minute), zone)
-    if candidate <= local:
-        candidate += timedelta(days=1)
-    return candidate.astimezone(UTC).isoformat()
+    # Compare actual instants, not datetimes with the same ZoneInfo object:
+    # wall-time comparison silently ignores fold during a DST fallback.
+    for days_ahead in range(3):
+        day = local_date + timedelta(days=days_ahead)
+        wall_time = datetime.combine(day, time(hour, minute))
+        candidates = [
+            wall_time.replace(tzinfo=zone, fold=fold).astimezone(UTC)
+            for fold in (0, 1)
+        ]
+        valid = [
+            instant for instant in candidates
+            if instant.astimezone(zone).replace(tzinfo=None) == wall_time
+        ]
+        if valid:
+            # A repeated hour appears twice; choose its first occurrence so
+            # a daily schedule is never enqueued twice on the same local date.
+            scheduled = min(valid)
+        else:
+            # A spring-forward gap has no such wall time. Resolve it to the
+            # first forward-mapped time (e.g. 02:30 -> 03:30).
+            future = [
+                instant for instant in candidates
+                if instant.astimezone(zone).replace(tzinfo=None) > wall_time
+            ]
+            scheduled = min(future) if future else max(candidates)
+        if scheduled > now_utc:
+            return scheduled.isoformat()
+    raise RuntimeError('无法计算下一个每日执行时间')

@@ -9,9 +9,6 @@ stdout/stderr is captured and returned as MCP tool content.
 
 from __future__ import annotations
 
-import contextlib
-import importlib.util
-import io
 import json
 import os
 import subprocess
@@ -21,7 +18,7 @@ from typing import Any
 
 
 SERVER_NAME = "codesearch"
-SERVER_VERSION = "0.8.1"
+SERVER_VERSION = "0.8.2"
 DEFAULT_TIMEOUT_SECONDS = 75
 MAX_OUTPUT_BYTES = 1024 * 1024
 
@@ -48,69 +45,14 @@ def bounded_text(data) -> str:
     )
 
 
-_CLIENT_MODULE: Any = None
-
-
-def load_client_module():
-    """Import the bundled client once and reuse it across tool calls."""
-    global _CLIENT_MODULE
-    if _CLIENT_MODULE is None:
-        script = codesearch_script()
-        spec = importlib.util.spec_from_file_location("codesearch_client", script)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"cannot load codesearch client: {script}")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        _CLIENT_MODULE = module
-    return _CLIENT_MODULE
-
-
-def run_codesearch_inprocess(arguments: list[str]) -> tuple[str, bool] | None:
-    """Run the bundled client in-process (no per-call interpreter startup).
-
-    Returns None when in-process mode is unusable so the caller can fall
-    back to the isolated subprocess path.
-    """
-    try:
-        module = load_client_module()
-    except Exception as error:
-        print(f"codesearch MCP adapter: cannot load client in-process, using subprocess: {error}", file=sys.stderr)
-        return None
-
-    out_buf, err_buf = io.StringIO(), io.StringIO()
-    old_argv = sys.argv
-    sys.argv = [str(codesearch_script()), *arguments]
-    try:
-        with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
-            module.main()
-    except SystemExit as exc:
-        # argparse errors (exit code 2) and client exits land here.
-        code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
-        if code != 0:
-            detail = err_buf.getvalue().strip() or out_buf.getvalue().strip() or f"codesearch.py exited with {code}"
-            return f"search failed: {bounded_text(detail)}", True
-    except ValueError as error:
-        # Client-side argument validation must stay loud, not fall back silently.
-        return f"search failed: {error}", True
-    except Exception as error:
-        print(f"codesearch MCP adapter: in-process run failed, falling back to subprocess: {error}", file=sys.stderr)
-        return None
-    finally:
-        sys.argv = old_argv
-
-    stdout = bounded_text(out_buf.getvalue()).strip()
-    stderr = bounded_text(err_buf.getvalue()).strip()
-    if stderr:
-        # Keep warnings (e.g. per-request degradations) visible without failing the call.
-        return (stdout or "No results") + (f"\n[stderr] {stderr}" if stderr else ""), False
-    return stdout or "No results", False
-
-
 def run_codesearch(arguments: list[str]) -> tuple[str, bool]:
-    result = run_codesearch_inprocess(arguments)
-    if result is not None:
-        return result
+    """Isolate each OpenGrok request with a hard wall-clock timeout.
 
+    In-process module.main() could block indefinitely on a slow index and
+    stall the entire single-threaded MCP server, including ping and projects.
+    Subprocess isolation also prevents each call from mutating sys.argv or
+    module globals belonging to the JSON-RPC process.
+    """
     command = [sys.executable, str(codesearch_script()), *arguments]
     try:
         completed = subprocess.run(

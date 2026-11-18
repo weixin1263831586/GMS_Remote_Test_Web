@@ -1373,12 +1373,12 @@ class RuntimeDevicesTests(RuntimeUiHarness):
             )
             button = page.locator("#refresh-devices-btn")
             expect(button).to_be_disabled()
-            expect(button).to_have_text("刷新中…")
+            expect(button).to_contain_text("刷新中…")
             self.assertEqual(button.get_attribute("aria-busy"), "true")
 
             page.evaluate("window.__resolveManualDeviceRefresh([])")
             expect(button).to_be_enabled()
-            expect(button).to_have_text("↻ 刷新设备")
+            expect(button).to_contain_text("刷新设备")
             self.assertIsNone(button.get_attribute("aria-busy"))
         finally:
             page.evaluate(

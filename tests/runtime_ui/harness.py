@@ -206,7 +206,16 @@ class RuntimeUiHarness(unittest.TestCase):
                 for _ in range(5):
                     if not page.locator(".modal.show").count():
                         break
-                    page.keyboard.press("Escape")
+                    # Embedded workspaces can retain keyboard focus inside an
+                    # iframe from the previous viewport.  A physical keyboard
+                    # event would then target that child document, while the
+                    # shell's ModalManager listens on the parent document.
+                    # Dispatch Escape to the shell (still through its normal
+                    # modal lifecycle) instead of forcibly hiding the modal.
+                    page.evaluate(
+                        "() => document.dispatchEvent(new KeyboardEvent("
+                        "'keydown', {key: 'Escape', bubbles: true}))"
+                    )
                     page.wait_for_timeout(150)
                 expect(page.locator(".modal.show")).to_have_count(0)
                 return

@@ -300,13 +300,15 @@ class RuntimeTestExecutionTests(RuntimeUiHarness):
             )
             button = page.locator("#refresh-suites-btn")
             expect(button).to_be_disabled()
-            expect(button).to_have_text("刷新中…")
+            expect(button).to_contain_text("刷新中…")
+            self.assertEqual(button.locator('.test-action-icon').inner_text(), '🔄')
             self.assertEqual(button.get_attribute("aria-busy"), "true")
             self.assertTrue(page.evaluate("window.__suiteRefreshForce"))
 
             page.evaluate("window.__resolveManualSuiteRefresh([])")
             expect(button).to_be_enabled()
-            expect(button).to_have_text("↻ 刷新套件")
+            expect(button).to_contain_text("刷新套件")
+            self.assertEqual(button.locator('.test-action-icon').inner_text(), '🔄')
             self.assertIsNone(button.get_attribute("aria-busy"))
         finally:
             page.evaluate(
