@@ -66,3 +66,63 @@ class FirmwareShareHostBrowserTests(RuntimeUiHarness):
             expect(page.locator("#file-browser-modal")).to_be_hidden()
         finally:
             page.close()
+
+    def test_compact_browser_displays_more_files_without_hiding_navigation(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("""() => {
+                state.fileBrowser.mode = 'firmware-share';
+                state.fileBrowser.currentPath =
+                    '/home/hcq/7_Android17_1017/IMAGE/RK3588_A17_USERDEBUG_RK3588-EVB1-LP4-V10_RKR3_20261028.1731/IMAGES';
+                state.fileBrowser.selectedFile = null;
+                document.getElementById('file-browser-worker-row').style.display = 'none';
+                document.getElementById('file-browser-title').textContent = '选择共享固件';
+                ModalManager.open('file-browser-modal');
+                renderFileList(Array.from({length: 32}, (_, index) => ({
+                    name: 'firmware-' + String(index).padStart(2, '0') + '.img',
+                    type: 'file', size: 4096, modified: 1790000000
+                })));
+            }""")
+            expect(page.locator('#file-browser-modal')).to_be_visible()
+            self.assertEqual(
+                page.locator('#file-browser-modal .file-browser-nav-actions button').count(), 3
+            )
+            for label in ('根目录', '返回上级', '刷新'):
+                expect(page.locator('#file-browser-modal').get_by_role(
+                    'button', name=label
+                )).to_be_visible()
+            self.assertTrue(page.locator('#file-browser-current-path').get_attribute(
+                'title'
+            ).endswith('/IMAGES'))
+            for width, height in ((1440, 856), (390, 740)):
+                with self.subTest(width=width):
+                    page.set_viewport_size({'width': width, 'height': height})
+                    dims = page.locator('#file-browser-modal').evaluate("""modal => {
+                        const rect = selector => modal.querySelector(selector).getBoundingClientRect();
+                        const wrapper = rect('.modal-content');
+                        const location = rect('.file-browser-location-toolbar');
+                        const path = rect('.file-browser-path');
+                        const list = modal.querySelector('.file-browser-list');
+                        const listRect = list.getBoundingClientRect();
+                        const footer = rect('.modal-buttons');
+                        return {
+                            dialogTop: wrapper.top, dialogBottom: wrapper.bottom,
+                            locationHeight: location.height, pathHeight: path.height,
+                            listHeight: listRect.height, listScroll: list.scrollHeight,
+                            listClient: list.clientHeight, footerBottom: footer.bottom,
+                            horizontalOverflow: document.documentElement.scrollWidth - innerWidth,
+                        };
+                    }""")
+                    self.assertGreaterEqual(dims['dialogTop'], -1, dims)
+                    self.assertLessEqual(dims['dialogBottom'], height + 1, dims)
+                    self.assertLessEqual(dims['footerBottom'], height + 1, dims)
+                    self.assertLessEqual(dims['locationHeight'], 40, dims)
+                    self.assertLessEqual(dims['pathHeight'], 35, dims)
+                    self.assertGreater(dims['listHeight'], 250, dims)
+                    self.assertGreater(dims['listScroll'], dims['listClient'], dims)
+                    self.assertLessEqual(dims['horizontalOverflow'], 1, dims)
+            page.locator('#file-browser-modal').get_by_role('button', name='取消').click()
+            expect(page.locator('#file-browser-modal')).to_be_hidden()
+        finally:
+            page.close()

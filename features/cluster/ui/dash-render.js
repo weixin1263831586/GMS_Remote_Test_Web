@@ -24,23 +24,23 @@ function renderDashboard(){
  const jobsCompleted=state.jobs.filter(j=>j.status==='completed').length;
  const jobsFailed=state.jobs.filter(j=>j.status==='failed').length;
  const suitesAvailable=state.suites.filter(s=>s.available).length;
+
+ const makeStat=(item)=>`<div class="dash-stat-card"><span class="stat-icon"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#${item.icon}"></use></svg></span><span class="stat-text"><span class="label">${item.label}</span><span class="num">${item.num}</span><span class="sub">${item.sub}</span></span></div>`;
  statsEl.innerHTML=[
-  {num:workersOnline,label:'主机',sub:workersOffline?`<span class="bad">${workersOffline} 离线</span>`:`${state.workers.length} 总计`},
-  {num:`${devAvailable}/${dashboardDevices.length}`,label:'设备可用/总',sub:`<span class="warn">${devBusy} 占用</span>`},
-  {num:allActivity.external+allActivity.managed,label:'测试运行',sub:`<span class="warn">${allActivity.external} 外部</span> · ${allActivity.managed} 平台`},
-  {num:jobsActive,label:'任务运行',sub:`${jobsCompleted} 完成${jobsFailed?` · <span class="bad">${jobsFailed} 失败</span>`:''}`},
-  {num:suitesAvailable,label:'可用套件',sub:`${new Set(state.suites.filter(s=>s.available).map(s=>s.suite_type)).size} 种类型`},
- ].map(c=>`<div class="dash-stat-card"><div class="num-label"><span class="num">${c.num}</span><span class="label">${c.label}</span></div><div class="sub">${c.sub}</div></div>`).join('');
+  {icon:'server',num:state.workers.length,label:'主机总数',sub:`${workersOnline} 在线${workersOffline?` · <span class="bad">${workersOffline} 离线</span>`:''}`},
+  {icon:'device',num:`${devAvailable} / ${dashboardDevices.length}`,label:'设备可用 / 总量',sub:`<span class="warn">${devBusy} 已占用</span>`},
+  {icon:'test',num:allActivity.external+allActivity.managed,label:'测试运行',sub:`${allActivity.external} 外部 · ${allActivity.managed} 平台`},
+  {icon:'play',num:jobsActive,label:'任务运行',sub:`${jobsCompleted} 完成${jobsFailed?` · <span class="bad">${jobsFailed} 失败</span>`:''}`},
+  {icon:'package',num:suitesAvailable,label:'可用套件',sub:`${new Set(state.suites.filter(s=>s.available).map(s=>s.suite_type)).size} 种类型`},
+ ].map(makeStat).join('');
  statsEl.setAttribute('aria-busy','false');
  // 2-4. ECharts: init DOM once, then only update data
- if(hasECharts){
-  initDashChartContainers();
-  updateDashGauges();
-  updateDashDevicePie();
-  updateDashTrend();
- }else{
-  renderDashboardFallback();
- }
+ // 实时主机/设备面板不依赖图表库；ECharts 仅负责历史趋势。
+ initDashChartContainers();
+ updateDashGauges();
+ updateDashDevicePie();
+ if(hasECharts)updateDashTrend();
+ else renderDashboardFallback();
  const updateEl=document.querySelector('#dash-last-update');
  if(updateEl)updateEl.textContent='更新于 '+new Date().toLocaleTimeString('zh-CN',{hour12:false});
  // 5. Active tests across all workers, grouped by host
@@ -51,13 +51,13 @@ function renderDashboard(){
   const byWorker={};
   tests.forEach(t=>{const wid=t.worker_id||'-';(byWorker[wid]=byWorker[wid]||[]).push(t)});
   const sortedWorkers=Object.keys(byWorker).sort((a,b)=>(a===localId?-1:b===localId?1:String(a).localeCompare(String(b),undefined,{numeric:true})));
-  let html=`<div class="dash-panel-title">当前测试执行 (${tests.length})</div><div style="flex:1;min-height:0;overflow:auto">`;
+  let html=`<div class="dash-panel-title"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#test"></use></svg>当前测试执行 (${tests.length})</div><div class="dash-tests-list">`;
   if(!tests.length){html+='<div class="dash-empty">当前无运行中的测试</div>'}
   else{
    sortedWorkers.forEach(wid=>{
     const worker=state.workers.find(w=>w.id===wid);
     html+=`<div class="dash-test-group"><div class="dash-test-group-title">${esc(worker?.name||wid)}</div>`;
-    byWorker[wid].forEach(t=>{const ext=t.source==='external';html+=`<div class="dash-test-row"><span class="badge-mini ${ext?'ext':'mgd'}">${ext?'外部':'平台'}</span><strong>${esc(t.suite_type||'XTS')}</strong><span class="dev">${esc((t.devices||[]).join(', ')||'未识别')}</span><span class="dur">${compactDuration(t.elapsed_seconds)}</span></div>`});
+    byWorker[wid].forEach(t=>{const ext=t.source==='external';html+=`<div class="dash-test-row"><span class="badge-mini ${ext?'ext':'mgd'}">${ext?'外部':'平台'}</span><strong>${esc(t.suite_type||'XTS')} · ${esc((t.devices||[]).join(', ')||'未识别设备')}</strong><span class="dev">${esc(worker?.name||wid)} · ${ext?'外部执行':'平台执行'}</span><span class="dur">${compactDuration(t.elapsed_seconds)}</span></div>`});
     html+='</div>';
    });
   }
@@ -67,15 +67,8 @@ function renderDashboard(){
  scheduleDashboardChartsResize();
 }
 function renderDashboardFallback(){
- // echarts 仍在加载时保持骨架占位，避免先闪现降级布局再被图表替换；
- // 仅在 echarts 确认加载失败（本地 vendor 不可用）后才渲染降级内容。
+ // 资源表和设备分布始终可用；只有 ECharts 的 24 小时趋势需要降级。
  if(window.dashEchartsStatus!=='failed')return;
- const workers=state.workers.filter(w=>w.status!=='offline');
- const metric=(label,value)=>{const numeric=Math.max(0,Math.min(100,Number(value)||0));return `<div style="display:grid;grid-template-columns:42px 1fr 42px;gap:6px;align-items:center;margin:7px 0"><span>${label}</span><span style="height:7px;background:#303642;border-radius:5px;overflow:hidden"><span style="display:block;width:${numeric}%;height:100%;background:${numeric>=85?dashColor.red:numeric>=70?dashColor.yellow:dashColor.green}"></span></span><strong>${Math.round(numeric)}%</strong></div>`};
- const gauges=document.querySelector('#dash-gauges');
- if(gauges){gauges.innerHTML='<div class="dash-panel-title">CPU / 内存实时利用率</div>'+(workers.map(w=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)"><strong>${esc(w.name||w.id)}</strong>${metric('CPU',w.cpu_percent)}${metric('内存',w.memory_percent)}</div>`).join('')||'<div class="dash-empty">暂无在线 Worker</div>')}
- const devices=document.querySelector('#dash-device-pie');
- if(devices){const activeDevices=state.devices.filter(d=>d.state!=='offline');devices.innerHTML=`<div class="dash-panel-title">设备状态分布 (${activeDevices.length})</div>`+Object.entries(dashStateNames).map(([key,name])=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)"><span>${esc(name)}</span><strong style="color:${dashStateColors[key]}">${activeDevices.filter(d=>d.state===key).length}</strong></div>`).join('')}
- const trend=document.querySelector('#dash-trend');
- if(trend){trend.innerHTML='<div class="dash-panel-title">资源趋势</div><div class="dash-empty">图表组件未加载；当前资源数据已在上方按 Worker 展示。</div>'}
+ const chart=document.querySelector('#dash-trend-chart');
+ if(chart)chart.innerHTML='<div class="dash-empty">历史趋势图暂不可用；实时资源与设备状态仍可正常查看。</div>';
 }

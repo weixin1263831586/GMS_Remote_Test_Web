@@ -164,6 +164,58 @@ class ModalRedesignTests(RuntimeUiHarness):
             self.assertLessEqual(footer["bottom"], bounds["bottom"] + 1, report)
         return report
 
+    def test_results_header_minimize_is_aligned_and_clear_of_frame(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            self.close_initial_modals(page)
+            for viewport in (
+                {"width": 1672, "height": 941},
+                {"width": 920, "height": 680},
+                {"width": 390, "height": 844},
+            ):
+                with self.subTest(viewport=viewport):
+                    page.set_viewport_size(viewport)
+                    page.evaluate("ModalManager.open('test-results-modal')")
+                    header = page.locator(
+                        "#test-results-modal .tech-dialog--test-results > .modal-header"
+                    )
+                    expect(header).to_be_visible()
+                    bounds = header.evaluate("""header => {
+                        const box = el => el.getBoundingClientRect();
+                        const outer = box(header.closest('.modal-content'));
+                        const rail = box(header);
+                        const min = box(header.querySelector('.test-results-minimize'));
+                        const close = box(header.querySelector('.test-results-header-actions > .modal-close'));
+                        return {
+                            topInset: min.top - outer.top,
+                            bottomInset: rail.bottom - min.bottom,
+                            rightInset: outer.right - close.right,
+                            minCloseGap: close.left - min.right,
+                            centerDelta: Math.abs((min.top + min.bottom) / 2 -
+                                (close.top + close.bottom) / 2),
+                            closeInside: close.bottom <= rail.bottom - 8 &&
+                                close.top >= rail.top + 8,
+                        };
+                    }""")
+                    self.assertGreaterEqual(bounds["topInset"], 10, bounds)
+                    self.assertGreaterEqual(bounds["bottomInset"], 9, bounds)
+                    self.assertGreaterEqual(bounds["rightInset"], 12, bounds)
+                    self.assertGreaterEqual(bounds["minCloseGap"], 6, bounds)
+                    self.assertLessEqual(bounds["centerDelta"], 1.5, bounds)
+                    self.assertTrue(bounds["closeInside"], bounds)
+                    page.evaluate("ModalManager.close('test-results-modal')")
+
+            page.evaluate("ModalManager.open('test-results-modal')")
+            page.evaluate("minimizeTestResultsModal()")
+            expect(page.locator("#test-results-modal")).to_be_hidden()
+            expect(page.locator("#test-results-minimized")).to_be_visible()
+            page.evaluate("restoreTestResultsModal()")
+            expect(page.locator("#test-results-modal")).to_be_visible()
+            expect(page.locator("#test-results-minimized")).to_be_hidden()
+        finally:
+            page.close()
+
     def test_static_and_dynamic_dialog_gallery(self):
         page = self.new_page()
         errors = []

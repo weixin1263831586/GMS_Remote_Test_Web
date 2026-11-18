@@ -37,5 +37,11 @@ class RuntimeAoaMappingSaveTests(RuntimeUiHarness):
             failures[0] = False
             page.evaluate("aoaExecuteRecorderInput({action:'calibrate'}, {refresh:false})")
             expect(page.locator('#aoa-calibration-status')).to_contain_text('已保存 saved-record')
+            self.assertEqual(
+                page.evaluate("""() => JSON.parse(
+                    localStorage.getItem('gms-aoa-calibration:w:REC') || 'null'
+                )?.record_id"""),
+                'saved-record',
+            )
         finally:
             page.close()

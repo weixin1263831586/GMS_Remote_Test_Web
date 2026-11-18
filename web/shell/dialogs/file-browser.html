@@ -6,17 +6,20 @@
                 <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeFileBrowserModal">&times;</button>
             <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
             <div class="modal-body" style="overflow: hidden; display: flex; flex-direction: column;">
-<p class="tech-intro">在所选主机中浏览目录并选择文件。</p>
-                <section class="tech-form-section tech-form-section--file-browser" aria-label="文件位置"><h3 class="tech-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#folder"></use></svg>文件位置</h3><div id="file-browser-worker-row" style="display:none; align-items:center; gap:8px; margin-bottom:8px;" class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#server"></use></svg></span>
-                    <label style="font-size:12px; color: var(--text-secondary); white-space:nowrap;" for="file-browser-worker-select">Worker 主机:</label>
-                    <select id="file-browser-worker-select" data-change="onFileBrowserWorkerChange" style="flex:1; min-width:0; padding:4px 6px;"></select>
+                <!-- Worker switching stays available for GSI Worker browsing. -->
+                <div id="file-browser-worker-row" class="file-browser-worker-row tech-field-card tech-field-stack" style="display:none;">
+                    <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#server"></use></svg></span>
+                    <label for="file-browser-worker-select">Worker 主机:</label>
+                    <select id="file-browser-worker-select" data-change="onFileBrowserWorkerChange"></select>
                 </div>
-                    <div class="file-browser-path" id="file-browser-current-path" style="margin-bottom: 10px;"></div>
-                </section>
-                <div class="file-browser-nav-actions" role="toolbar" aria-label="文件目录导航">
-                    <button type="button" class="btn-xxs" data-click="navigateToRoot" title="根目录"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#home"></use></svg> 根目录</button>
-                    <button type="button" class="btn-xxs" data-click="navigateToParent" title="返回上级"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#back"></use></svg> 返回上级</button>
-                    <button type="button" class="btn-xxs" data-click="refreshCurrentDirectory" title="刷新"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                <div class="file-browser-location-toolbar" aria-label="文件位置与目录导航">
+                    <span class="file-browser-location-label">路径</span>
+                    <div class="file-browser-path" id="file-browser-current-path" aria-label="当前目录"></div>
+                    <div class="file-browser-nav-actions" role="toolbar" aria-label="文件目录导航">
+                        <button type="button" class="btn-xxs" data-click="navigateToRoot" title="根目录" aria-label="根目录"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#home"></use></svg></button>
+                        <button type="button" class="btn-xxs" data-click="navigateToParent" title="返回上级" aria-label="返回上级"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#back"></use></svg></button>
+                        <button type="button" class="btn-xxs" data-click="refreshCurrentDirectory" title="刷新" aria-label="刷新"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg></button>
+                    </div>
                 </div>
                 <div class="file-browser-header">
                     <span class="file-browser-icon"></span>

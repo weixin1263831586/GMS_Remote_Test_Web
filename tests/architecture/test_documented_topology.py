@@ -32,38 +32,32 @@ def test_markdown_topologies_match_canonical_definition():
 
 
 def test_web_architecture_covers_canonical_roles_and_flows():
-    content = (ROOT / 'web/templates/architecture.html').read_text(encoding='utf-8')
-    for label in (
-        'FastAPI Controller',
-        'Agent Runtime',
-        'Linux Worker A',
-        'Linux Worker B',
-        'Windows USB Source',
-        'Linux USB Source',
-        'Heartbeat / Poll / ACK',
-        '命令随 Poll 响应返回',
-        'USB/IP 接入示例',
-        '生产入口为 HTTPS',
-    ):
-        assert label in content
-    assert 'http://&lt;test_host&gt;:5001' not in content
-    assert '{{PLATFORM_TOPOLOGY}}' in content
-
+    page = (ROOT / 'web/templates/architecture.html').read_text(encoding='utf-8')
+    data = (ROOT / 'web/static/js/pages/architecture-scene-data.js').read_text(encoding='utf-8')
+    assert 'architecture-scene-data.js' in page
+    assert 'architecture-scenes.js' in page
+    for term in ('Controller', 'Linux Worker A', 'Windows Source', 'Linux Source',
+                 'USB/IP', 'Redmine', 'Gerrit', 'Claim / Lease', 'AOAv2',
+                 'Tradefed', 'run_id'):
+        assert term in data, term
+    assert '<details' not in page
+    assert '{{' not in page
+    assert 'http://&lt;test_host&gt;:5001' not in page
 
 ARCHITECTURE_VIEWS = {
-    '{{PLATFORM_TOPOLOGY}}': 'platform-topology.mmd',
-    '{{USBIP_TOPOLOGY}}': 'usbip-topology.mmd',
-    '{{AOA_TOPOLOGY}}': 'aoa-topology.mmd',
-    '{{FIRMWARE_TOPOLOGY}}': 'firmware-topology.mmd',
-    '{{TEST_FLOW_TOPOLOGY}}': 'test-flow-topology.mmd',
-    '{{AGENT_ANALYSIS_TOPOLOGY}}': 'agent-analysis-topology.mmd',
+    'platform': 'platform-topology.mmd',
+    'usbip': 'usbip-topology.mmd',
+    'aoa': 'aoa-topology.mmd',
+    'firmware': 'firmware-topology.mmd',
+    'test-flow': 'test-flow-topology.mmd',
+    'agent-analysis': 'agent-analysis-topology.mmd',
 }
 
 
 def test_architecture_views_cover_module_topologies():
     content = (ROOT / 'web/templates/architecture.html').read_text(encoding='utf-8')
-    for placeholder, source_name in ARCHITECTURE_VIEWS.items():
-        assert placeholder in content, f'missing placeholder {placeholder}'
+    for view_id, source_name in ARCHITECTURE_VIEWS.items():
+        assert f'data-arch-pane="{view_id}"' in content
         source = (ROOT / 'docs/architecture' / source_name).read_text(encoding='utf-8')
         assert parse_topology(source), f'{source_name} must define nodes and edges'
 
@@ -83,7 +77,8 @@ def test_business_flows_show_real_ownership_and_monitoring_boundaries():
 
     assert ('Ctrl', 'WinSrc', 'SSH / bind', '-.->') in usb_edges
     assert ('Ctrl', 'LinuxSrc', 'SSH / bind', '-.->') in usb_edges
-    assert ('Ctrl', 'Worker', 'Poll / attach', '-.->') in usb_edges
+    assert ('Ctrl', 'Worker', 'Poll 响应 / attach', '-.->') in usb_edges
+    assert ('Worker', 'Ctrl', 'Poll / ACK', '-->') in usb_edges
     _, test_edges = parse_topology((sources / 'test-flow-topology.mmd').read_text(encoding='utf-8'))
     assert ('Worker', 'Job', '事件 / ACK', '-->') in test_edges
     _, agent_edges = parse_topology((sources / 'agent-analysis-topology.mmd').read_text(encoding='utf-8'))
@@ -95,7 +90,8 @@ def test_business_flows_show_real_ownership_and_monitoring_boundaries():
     for name in ('platform', 'usbip', 'aoa', 'firmware', 'test-flow', 'agent-analysis'):
         assert f'id="arch-tab-{name}"' in page
         assert f'data-arch-pane="{name}"' in page
-    assert 'run_id' in page and 'Linux USB Source' in page
+    data = (ROOT / 'web/static/js/pages/architecture-scene-data.js').read_text(encoding='utf-8')
+    assert 'run_id' in data and 'Linux Source' in data
 
 
 def test_architecture_views_render_as_local_svg():
@@ -267,3 +263,98 @@ def _assert_graph_preserved(source_name):
         for group in groups
         if 'data-source' in group.attrib
     } == expected_markers
+
+def test_six_views_use_one_visual_scene_without_duplicate_expanders():
+    page = (ROOT / 'web/templates/architecture.html').read_text(encoding='utf-8')
+    renderer = (ROOT / 'web/static/js/pages/architecture-scenes.js').read_text(encoding='utf-8')
+    data = (ROOT / 'web/static/js/pages/architecture-scene-data.js').read_text(encoding='utf-8')
+    css = (ROOT / 'web/static/css/architecture-scenes.css').read_text(encoding='utf-8')
+    assert '<body class="architecture-v2">' in page
+    assert 'workspace-tabs.css' in page
+    assert 'architecture-scenes.css' in page
+    assert 'architecture-scene-data.js' in page
+    assert 'architecture-scenes.js' in page
+    assert page.count('data-arch-pane=') == 6
+    assert page.count('arch-v2-flow-bottom') == 5
+    assert '<details' not in page and '{{' not in page
+    for view in ARCHITECTURE_VIEWS:
+        assert (f"'{view}':" in data or f'{view}:' in data), view
+    assert '<p class="lead">' not in page
+    assert 'arch-v2-heading' not in page
+    assert 'arch-v2-intro' not in page
+    assert '逻辑架构示意 · 不代表实时健康状态' not in page
+    assert 'function fitScenes()' in renderer
+    assert "canvas.style.zoom" in renderer
+    assert 'arch-scene-controller-emblem' in renderer
+    assert 'const blocked=graph.nodes.some' in renderer
+    assert '.workspace-tab{' not in css and '.workspace-tabs{' not in css
+
+
+def test_scene_data_respects_poll_and_worker_source_boundaries():
+    data = (ROOT / 'web/static/js/pages/architecture-scene-data.js').read_text(encoding='utf-8')
+    for token in ('Poll / 命令', 'Poll / attach', '二选一接入',
+                  '本地 Worker / Windows Source', 'Redmine 后台执行',
+                  '设备执行 Worker', '按需登记 / 分析'):
+        assert token in data, token
+    assert "'M698 314 H552','report','Poll / ACK'" in data
+
+
+def test_scene_labels_do_not_overlap_one_another_and_marker_starts_reverse():
+    js = (ROOT / 'web/static/js/pages/architecture-scenes.js').read_text(encoding='utf-8')
+    css = (ROOT / 'web/static/css/architecture-scenes.css').read_text(encoding='utf-8')
+    assert 'labelBounds.some' in js
+    assert 'auto-start-reverse' in js
+    assert 'arch-scene-chip .arch-scene-icon' in css
+    assert 'data-scene-view="platform"' in css
+
+def test_agent_runtime_is_not_embedded_in_controller_scene():
+    data = (ROOT / 'web/static/js/pages/architecture-scene-data.js').read_text(encoding='utf-8')
+    for token in ('Controller / 工具网关', 'kkagent / CLI', 'Service Token',
+                  '权限与审计', 'Redmine 后台执行', '设备执行 Worker'):
+        assert token in data, token
+
+def test_architecture_routes_have_fixed_size_arrowheads_and_soft_elbows():
+    js = (ROOT / 'web/static/js/pages/architecture-scenes.js').read_text(encoding='utf-8')
+    css = (ROOT / 'web/static/css/architecture-scenes.css').read_text(encoding='utf-8')
+    assert 'markerUnits="userSpaceOnUse"' in js
+    assert 'function roundedRoute(value)' in js
+    assert "d+=' L'+fmt(x1)" in js
+    assert 'arch-scene-path-halo--command' not in css
+    assert 'arch-scene-path-halo--report' not in css
+    assert 'arch-scene-ground' not in css
+    assert 'arch-scene-path-halo' not in js
+    assert 'arch-scene-ground' not in js
+    assert 'stroke-width:1.9;filter:none' in css
+
+
+def test_scene_edges_leave_minimum_arrow_clearance():
+    """Compact nodes must still leave readable links between ports.
+
+    The authored M/H/V source paths are axis-aligned and use scene-space
+    coordinates. The renderer adds 5px endpoint insets and smooth elbows.
+    """
+    data = (ROOT / 'web/static/js/pages/architecture-scene-data.js').read_text(encoding='utf-8')
+    routes = re.findall(r"\['(M\d+ \d+(?: [HV]\d+)*)','(?:data|command|report|both)'", data)
+    assert len(routes) >= 55, 'expected all six scenes, not a partial extraction'
+    for route in routes:
+        values = re.findall(r'[MHV]|\d+', route)
+        assert values[0] == 'M'
+        x, y = int(values[1]), int(values[2])
+        total = 0
+        for op, value in zip(values[3::2], values[4::2]):
+            target = int(value)
+            if op == 'H':
+                total += abs(target - x)
+                x = target
+            else:
+                assert op == 'V', f'unexpected diagonal route: {route}'
+                total += abs(target - y)
+                y = target
+        assert total >= 55, f'arrow too short ({total}px): {route}'
+
+
+def test_report_receives_centered_direct_arrow_from_worker_results():
+    data = (ROOT / 'web/static/js/pages/architecture-scene-data.js').read_text(encoding='utf-8')
+    assert "['logs','Worker 原生结果','results / logs','chart','channel',839,340,237,165" in data
+    assert "['report','报告浏览 / 登记','按需汇总与分析','book','control',839,564,237,104" in data
+    assert "['M958 505 V564','report','结果索引'" in data

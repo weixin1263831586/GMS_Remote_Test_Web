@@ -1,0 +1,438 @@
+/* Architecture scenes: high-fidelity node / connector visual language.
+   Shared workspace-tabs.css owns all tab height/selected/hover states. */
+.architecture-v2 {
+  --arch-scene-violet:#b287ff;
+  --arch-scene-blue:#51bcff;
+  --arch-scene-green:#36dcae;
+  --arch-scene-gold:#ffca61;
+  --arch-scene-border:#3b3a54;
+}
+.architecture-v2 .arch-scene-panel{
+  border:1px solid #494267;
+  background:radial-gradient(ellipse at 48% 0%,rgba(58,47,102,.18),transparent 60%),
+             linear-gradient(160deg,#1b1c2e,#151522);
+}
+.architecture-v2 .arch-scene-layout{
+  display:grid;grid-template-columns:minmax(0,1fr) 206px;gap:12px;
+  align-items:stretch;padding:12px;min-width:0;
+}
+.architecture-v2 .arch-scene-scroll{
+  min-width:0;overflow-x:auto;overflow-y:hidden;overscroll-behavior-inline:contain;
+  border-radius:11px;border:1px solid #3d3b64;
+  background:radial-gradient(ellipse at 50% 80%,rgba(76,49,163,.13),transparent 64%),#131522;
+  scrollbar-color:#68568e #181725;scrollbar-width:thin;
+}
+.architecture-v2 .arch-scene-scroll:focus-visible{outline:2px solid #a892ff;outline-offset:2px}
+.architecture-v2 .arch-scene-canvas{
+  position:relative;width:1120px;min-height:535px;margin:auto;isolation:isolate;
+  background-image:linear-gradient(rgba(90,93,151,.032) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(90,93,151,.032) 1px,transparent 1px);
+  background-size:35px 35px;
+}
+.architecture-v2 .arch-scene-wires{position:absolute;inset:0;z-index:1;overflow:visible;pointer-events:none}
+.architecture-v2 .arch-scene-path{
+  fill:none;stroke-linejoin:round;stroke-linecap:round;stroke-width:2.3;
+  vector-effect:non-scaling-stroke;
+}
+.architecture-v2 .arch-scene-path--data{stroke:#57caff;filter:none}
+.architecture-v2 .arch-scene-path--command{stroke:#bf98ff;stroke-dasharray:7 5;filter:none}
+.architecture-v2 .arch-scene-path--report{stroke:#3ce3b7;filter:none}
+.architecture-v2 .arch-scene-path--both{stroke:#78b7ff;stroke-dasharray:4 3}
+.architecture-v2 .arch-scene-marker--data{fill:#57caff}
+.architecture-v2 .arch-scene-marker--command{fill:#bf98ff}
+.architecture-v2 .arch-scene-marker--report{fill:#3ce3b7}
+.architecture-v2 .arch-scene-marker--both{fill:#78b7ff}
+.architecture-v2 .arch-scene-edge-pill{
+  fill:#171728;stroke:#554b78;stroke-width:1;
+  filter:drop-shadow(0 0 4px rgba(40,40,80,.30));
+}
+.architecture-v2 .arch-scene-edge-pill--data{stroke:#3e8ab9}
+.architecture-v2 .arch-scene-edge-pill--command{stroke:#8b69d5}
+.architecture-v2 .arch-scene-edge-pill--report{stroke:#358e81}
+.architecture-v2 .arch-scene-edge-label{
+  fill:#dbd1f3;font-size:11px;font-weight:650;
+  text-anchor:middle;paint-order:stroke;stroke:#151624;stroke-width:6px;
+  stroke-linejoin:round;letter-spacing:.05px;
+}
+.architecture-v2 .arch-scene-node{
+  --node-color:#a985f7;
+  --node-surface:#28203d;
+  --node-border:#a77eea;
+  position:absolute;z-index:2;box-sizing:border-box;
+  display:flex;flex-direction:column;padding:11px 11px 12px;
+  border:1.5px solid var(--node-border);border-radius:13px;
+  background:linear-gradient(152deg,color-mix(in srgb,var(--node-surface) 90%,#313455),#171928 88%);
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--node-border) 13%,transparent),
+             0 0 16px color-mix(in srgb,var(--node-color) 27%,transparent),
+             0 12px 18px rgba(0,0,0,.28),
+             inset 0 1px 0 rgba(255,255,255,.08);
+  color:#eae6f4;
+}
+.architecture-v2 .arch-scene-node::before{
+  content:"";position:absolute;inset:-1px -1px auto; height:22px;
+  border-radius:12px 12px 0 0;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--node-color) 9%,transparent),transparent);
+  pointer-events:none;
+}
+.architecture-v2 .arch-scene-node--access{--node-color:#b287ff;--node-border:#a676f5;--node-surface:#302044}
+.architecture-v2 .arch-scene-node--control{--node-color:#7d82ff;--node-border:#5e9dff;--node-surface:#243360}
+.architecture-v2 .arch-scene-node--worker{--node-color:#ffca61;--node-border:#dca93c;--node-surface:#40311f}
+.architecture-v2 .arch-scene-node--resource{--node-color:#42e5ba;--node-border:#2acfa0;--node-surface:#183c36}
+.architecture-v2 .arch-scene-node--channel{--node-color:#53bbff;--node-border:#51b9fd;--node-surface:#1d3650}
+.architecture-v2 .arch-scene-node--teal{--node-color:#46e1d9;--node-border:#36c9c3;--node-surface:#1b3e3f}
+.architecture-v2 .arch-scene-node--external{--node-color:#b58bff;--node-border:#9274ce;--node-surface:#2d2444}
+.architecture-v2 .arch-scene-canvas--platform .arch-scene-node--worker,
+.architecture-v2 .arch-scene-canvas--agent-analysis .arch-scene-node--worker{
+  --node-color:#64c1ff;--node-border:#42b7ff;--node-surface:#1a3b56;
+}
+.architecture-v2 .arch-scene-canvas--firmware .arch-scene-node--worker,
+.architecture-v2 .arch-scene-canvas--test-flow .arch-scene-node--worker{
+  --node-color:#53bdff;--node-border:#43b4f9;--node-surface:#1a3653;
+}
+.architecture-v2 .arch-scene-node--control[data-scene-node="controller"],
+.architecture-v2 .arch-scene-node--control[data-scene-node="control"]{
+  box-shadow:0 0 0 1px rgba(133,150,255,.3),0 0 24px rgba(65,117,255,.39),
+             0 0 42px rgba(83,57,202,.18),0 16px 24px #0005,inset 0 1px 0 #ffffff22;
+}
+.architecture-v2 .arch-scene-node header{
+  display:flex;align-items:center;justify-content:center;gap:9px;
+  flex:0 0 auto;margin:0 0 10px;padding:2px 0 4px;border:0;
+  line-height:1.15;text-align:center;
+}
+.architecture-v2 .arch-scene-node-icon{
+  display:flex;align-items:center;justify-content:center;flex:0 0 auto;
+  width:27px;height:28px;color:var(--node-color);
+  filter:drop-shadow(0 0 6px color-mix(in srgb,var(--node-color) 43%,transparent));
+}
+.architecture-v2 .arch-scene-icon{display:inline-block;width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8}
+.architecture-v2 .arch-scene-node-icon .arch-scene-icon{width:26px;height:26px;stroke-width:2}
+.architecture-v2 .arch-scene-title{display:flex;flex-direction:column;align-items:center;min-width:0;gap:4px}
+.architecture-v2 .arch-scene-title strong{font-size:14px;font-weight:750;color:#f7f4ff}
+.architecture-v2 .arch-scene-title small{font-size:10px;font-weight:500;color:#c4bdd8}
+.architecture-v2 .arch-scene-node--control[data-scene-node="controller"] .arch-scene-title strong,
+.architecture-v2 .arch-scene-node--control[data-scene-node="control"] .arch-scene-title strong{
+  font-size:19px;letter-spacing:.15px;
+}
+.architecture-v2 .arch-scene-chips{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+  align-content:start;gap:6px;flex:1;min-height:0;
+}
+.architecture-v2 .arch-scene-chip{
+  display:flex;align-items:center;justify-content:center;min-width:0;
+  padding:5px 3px;border-radius:6px;min-height:25px;
+  border:1px solid color-mix(in srgb,var(--node-border) 58%,#373852);
+  background:linear-gradient(180deg,rgba(52,54,94,.39),rgba(23,24,42,.9));
+  color:#e9e6f4;font-size:10px;font-weight:560;
+  line-height:1.32;text-align:center;overflow-wrap:anywhere;
+}
+.architecture-v2 .arch-scene-chip:last-child:nth-child(odd){grid-column:1/-1}
+.architecture-v2 .arch-scene-node--control .arch-scene-chip{
+  background:linear-gradient(180deg,rgba(61,69,125,.45),rgba(26,29,62,.91));
+}
+.architecture-v2 .arch-scene-sidebar{
+  display:flex;flex-direction:column;min-width:0;align-self:stretch;gap:10px;
+}
+.architecture-v2 .arch-scene-sidecard{
+  margin:0;flex:1;min-width:0;padding:11px 11px 12px;border-radius:9px;
+  border:1px solid #47415f;
+  background:linear-gradient(155deg,#24213a,#1e1e2d);
+}
+.architecture-v2 .arch-scene-sidecard h3{
+  display:flex;align-items:center;gap:7px;margin:0 0 12px;
+  font-size:12px;font-weight:750;color:#e8e2f4;
+}
+.architecture-v2 .arch-scene-sidecard h3 .arch-scene-icon{color:#bd92ff}
+.architecture-v2 .arch-scene-legend{
+  list-style:none;padding:0;margin:0 0 10px;
+  display:flex;flex-direction:column;gap:12px;
+}
+.architecture-v2 .arch-scene-legend li{
+  display:flex;align-items:center;gap:8px;font-size:10px;
+  color:#c7bedb;line-height:1.25;
+}
+.architecture-v2 .arch-scene-swatch{
+  --swatch:#ae83f4;
+  width:24px;height:12px;flex:none;
+  border:1px solid var(--swatch);border-radius:4px;
+  box-shadow:inset 0 0 7px color-mix(in srgb,var(--swatch) 20%,transparent),0 0 5px color-mix(in srgb,var(--swatch) 30%,transparent);
+  background:color-mix(in srgb,var(--swatch) 16%,#242034);
+}
+.architecture-v2 .arch-scene-swatch--access{--swatch:#ad80f7}
+.architecture-v2 .arch-scene-swatch--control{--swatch:#67acff}
+.architecture-v2 .arch-scene-swatch--worker{--swatch:#efb948}
+.architecture-v2 .arch-scene-swatch--resource{--swatch:#35dca9}
+.architecture-v2 .arch-scene-swatch--channel{--swatch:#56c3ff}
+.architecture-v2 .arch-scene-swatch--external{--swatch:#9d7adc}
+.architecture-v2 .arch-scene-edge-key{
+  display:flex;align-items:center;gap:8px;margin:11px 0 0;
+  color:#bcb2d3;font-size:10px;
+}
+.architecture-v2 .arch-scene-line{width:27px;flex:none;border-top:2px solid #64c8ff}
+.architecture-v2 .arch-scene-line--command{border-color:#bd91fa;border-top-style:dashed}
+.architecture-v2 .arch-scene-boundaries{
+  padding-left:16px;margin:0;display:grid;gap:12px;
+  color:#c2bbd0;font-size:10px;line-height:1.65;
+}
+.architecture-v2 .arch-scene-boundaries li::marker{color:#af8bf3}
+.architecture-v2 .arch-scene-panel .arch-v2-intro{
+  font-size:11px;line-height:1.5;color:#bcb5d0;padding:9px 15px;
+}
+.architecture-v2 .arch-scene-bottom-card{
+  border-top:2px solid var(--card-accent);
+  background:linear-gradient(150deg,#1e1c2c,#171724 85%);
+}
+.architecture-v2 .arch-scene-bottom-card--access{--card-accent:#a680f8}
+.architecture-v2 .arch-scene-bottom-card--worker{--card-accent:#4bbfff}
+.architecture-v2 .arch-scene-bottom-card--risk{--card-accent:#eac45c}
+.architecture-v2 .arch-scene-bottom-card h2{
+  display:flex;align-items:center;gap:8px;
+  min-height:42px;font-size:12px;letter-spacing:.1px;
+}
+.architecture-v2 .arch-scene-bottom-card h2 .arch-scene-icon{
+  color:var(--card-accent);width:17px;height:17px;
+}
+.architecture-v2 .arch-scene-tablewrap{
+  overflow:auto;max-height:295px;scrollbar-width:thin;
+  scrollbar-color:#514767 transparent;
+}
+.architecture-v2 .arch-scene-bottom-card table{
+  min-width:0;width:100%;table-layout:fixed;border-collapse:collapse;
+  font-size:11px;line-height:1.48;
+}
+.architecture-v2 .arch-scene-bottom-card td,
+.architecture-v2 .arch-scene-bottom-card th{
+  height:34px;padding:7px 9px;border-bottom:1px solid #363247;
+  text-align:left;font-size:10px;vertical-align:top;
+}
+.architecture-v2 .arch-scene-bottom-card th{
+  background:rgba(60,48,88,.18);color:#d4c6f6;
+  width:35%;font-weight:650;white-space:normal;
+}
+.architecture-v2 .arch-scene-bottom-card td{
+  color:#bcb6c9;overflow-wrap:anywhere;
+}
+.architecture-v2 .arch-scene-bottom-card tr:last-child :is(th,td){border-bottom:0}
+.architecture-v2 .arch-scene-platform-bottom .arch-v2-info-panel{background:linear-gradient(145deg,#202035,#171925)}
+.architecture-v2 .arch-scene-platform-bottom .arch-v2-info-panel h2{border-bottom-color:#51446f}
+.architecture-v2 .arch-scene-canonical{margin-top:12px}
+.architecture-v2 .arch-scene-canonical>.arch-v2-svg-frame{
+  margin:12px;max-width:calc(100% - 24px);
+}
+.architecture-v2 .arch-scene-canonical:not([open])>.arch-v2-svg-frame{display:none}
+.architecture-v2 .arch-scene-canonical[open] .topology-viewport{overflow-x:auto}
+@media(max-width:1380px){
+  .architecture-v2 .arch-scene-layout{grid-template-columns:minmax(0,1fr)}
+  .architecture-v2 .arch-scene-sidebar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:1120px){
+  .architecture-v2 .arch-scene-bottom-card td,
+  .architecture-v2 .arch-scene-bottom-card th{padding:7px 8px}
+}
+@media(max-width:760px){
+  .architecture-v2 .arch-scene-layout{padding:8px}
+  .architecture-v2 .arch-scene-sidebar{grid-template-columns:1fr}
+  .architecture-v2 .arch-scene-legend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+  .architecture-v2 .arch-scene-boundaries{gap:6px}
+}
+@media(prefers-reduced-motion:reduce){
+  .architecture-v2 .arch-scene-node{transition:none;animation:none}
+}
+
+
+/* v3 polish: dimensional focal nodes and legible non-overlapping flow routes. */
+.architecture-v2 .arch-scene-controller-emblem{
+  position:absolute;top:-40px;left:50%;z-index:4;
+  width:67px;height:51px;transform:translateX(-50%);
+  pointer-events:none;filter:drop-shadow(0 0 12px #635dff88);
+}
+.architecture-v2 .arch-scene-controller-emblem::before{
+  content:"";position:absolute;left:5px;top:36px;width:58px;height:14px;
+  background:radial-gradient(ellipse,#8581ff99,transparent 68%);
+  filter:blur(5px);border-radius:50%;
+}
+.architecture-v2 .arch-scene-controller-emblem i{
+  display:block;position:absolute;left:13px;width:43px;height:25px;
+  border:1px solid #b6bbff;border-radius:4px;
+  background:linear-gradient(145deg,#b8b5ff,#6c72f7 43%,#373986 80%);
+  box-shadow:inset 0 1px 4px #ffffff55,0 3px 2px #171a61,0 0 8px #6b6ffc;
+  transform:skewY(-10deg) rotate(-3deg);
+}
+.architecture-v2 .arch-scene-controller-emblem i:nth-child(1){top:21px}
+.architecture-v2 .arch-scene-controller-emblem i:nth-child(2){top:12px;left:11px}
+.architecture-v2 .arch-scene-controller-emblem i:nth-child(3){top:3px;left:9px;
+  background:linear-gradient(155deg,#e2dcff,#aaa8ff 32%,#565bdc 82%);
+}
+.architecture-v2 .arch-scene-node--control[data-scene-node="controller"],
+.architecture-v2 .arch-scene-node--control[data-scene-node="control"]{
+  background:
+    radial-gradient(ellipse at 50% 0%,rgba(117,111,255,.25),transparent 74%),
+    linear-gradient(150deg,#263b78,#171d43 90%);
+  border-color:#6ca8ff;
+}
+.architecture-v2 .arch-scene-node--control[data-scene-node="controller"]::before,
+.architecture-v2 .arch-scene-node--control[data-scene-node="control"]::before{
+  height:42px;background:linear-gradient(180deg,#7b7bfa20,transparent);
+}
+.architecture-v2 .arch-scene-node--control[data-scene-node="controller"] .arch-scene-node-icon,
+.architecture-v2 .arch-scene-node--control[data-scene-node="control"] .arch-scene-node-icon{
+  color:#b9b9ff;
+}
+.architecture-v2 .arch-scene-node--resource{
+  background:radial-gradient(ellipse at top,#258c6c22,transparent 70%),linear-gradient(160deg,#143e36,#101f27);
+}
+.architecture-v2 .arch-scene-node--worker{
+  background:radial-gradient(ellipse at top,#75a7ff19,transparent 70%),linear-gradient(160deg,#183657,#151a2b);
+}
+.architecture-v2 .arch-scene-node--access{
+  background:radial-gradient(ellipse at top,#9b67e926,transparent 70%),linear-gradient(160deg,#302043,#191928);
+}
+.architecture-v2 .arch-scene-canvas::before{
+  content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(ellipse 44% 35% at 55% 55%,rgba(67,58,178,.13),transparent),
+    radial-gradient(ellipse 42% 23% at 47% 93%,rgba(65,86,255,.12),transparent);
+}
+.architecture-v2 .arch-scene-path--data{stroke:#56caff;stroke-width:1.9;filter:none}
+.architecture-v2 .arch-scene-path--report{stroke:#40e2bb;stroke-width:1.9;filter:none}
+.architecture-v2 .arch-scene-path--command{stroke:#c39dff;stroke-width:1.9;filter:none}
+.architecture-v2 .arch-scene-edge-pill{stroke-width:1.2;filter:none}
+.architecture-v2 .arch-scene-sidecard{
+  border-color:#574c7e;background:linear-gradient(150deg,#27233d,#1a1c2f);
+  box-shadow:inset 0 1px 0 #ffffff0b,0 0 12px #6e50db12;
+}
+.architecture-v2 .arch-scene-bottom-card{
+  border-left:1px solid color-mix(in srgb,var(--card-accent) 45%,#37364c);
+  border-right:1px solid color-mix(in srgb,var(--card-accent) 25%,#37364c);
+  box-shadow:0 0 14px color-mix(in srgb,var(--card-accent) 8%,transparent);
+}
+.architecture-v2 .arch-scene-canvas--agent-analysis .arch-scene-controller-emblem{
+  top:-31px;
+}
+@media(max-width:1190px){
+  .architecture-v2 .arch-scene-layout{grid-template-columns:minmax(0,1fr)}
+  .architecture-v2 .arch-scene-sidebar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
+
+/* Viewport-fit architecture scenes: no redundant title rows or page-level scroll
+   on sufficiently sized desktop viewports. Never alter shared workspace tabs. */
+.architecture-v2 main{padding:6px 10px 10px}
+.architecture-v2 .arch-scene-layout{padding:7px;gap:8px;grid-template-columns:minmax(0,1fr) 206px}
+.architecture-v2 .arch-scene-scroll{overflow-y:hidden}
+.architecture-v2 .arch-v2-bottom{margin-top:8px;gap:9px}
+.architecture-v2 .arch-scene-platform-bottom .arch-v2-info-panel h2,
+.architecture-v2 .arch-scene-bottom-card h2{
+  min-height:31px;padding:7px 10px;font-size:11px;line-height:1.3
+}
+.architecture-v2 .arch-scene-bottom-card :is(th,td){height:auto;padding:5px 8px;font-size:10px;line-height:1.4}
+.architecture-v2 .arch-scene-bottom-card th{width:32%}
+.architecture-v2 .arch-scene-tablewrap{max-height:none;overflow-x:hidden;overflow-y:visible}
+.architecture-v2 .arch-scene-platform-bottom .arch-v2-info-panel :is(th,td){padding:5px 8px;font-size:10px;line-height:1.3}
+.architecture-v2 .arch-v2-timeline{padding:3px 10px}
+.architecture-v2 .arch-v2-timeline li{padding:4px 2px;font-size:10px;line-height:1.35}
+.architecture-v2 .arch-v2-timeline li::before{min-width:23px;padding:2px 4px}
+.architecture-v2 .arch-scene-sidecard{padding:8px 9px;min-height:0}
+.architecture-v2 .arch-scene-sidecard h3{margin-bottom:8px}
+.architecture-v2 .arch-scene-legend{gap:8px;margin-bottom:7px}
+.architecture-v2 .arch-scene-edge-key{margin-top:7px}
+.architecture-v2 .arch-scene-boundaries{gap:6px;line-height:1.45}
+@media(max-width:1190px){
+  .architecture-v2 .arch-scene-layout{grid-template-columns:minmax(0,1fr)}
+  .architecture-v2 .arch-scene-sidebar{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:760px){
+  .architecture-v2 main{padding:7px}
+  .architecture-v2 .arch-scene-sidebar{grid-template-columns:1fr}
+  .architecture-v2 .arch-scene-bottom-card :is(th,td){padding:7px 8px}
+}
+
+
+/* Scene v3: improve hierarchy, legibility, physical channel distinctions. */
+.architecture-v2 .arch-scene-canvas{
+  background-image:
+    radial-gradient(ellipse 68% 45% at 54% 68%,rgba(65,89,172,.095),transparent 75%),
+    linear-gradient(rgba(90,93,151,.025) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(90,93,151,.025) 1px,transparent 1px);
+  background-size:auto,35px 35px,35px 35px;
+}
+.architecture-v2 .arch-scene-node{
+  border-width:1.7px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb,var(--node-color) 13%,transparent),
+    0 0 24px color-mix(in srgb,var(--node-color) 32%,transparent),
+    0 13px 24px rgba(0,0,0,.32),
+    inset 0 1px 0 rgba(255,255,255,.11),
+    inset 0 0 12px color-mix(in srgb,var(--node-color) 6%,transparent);
+}
+.architecture-v2 .arch-scene-node header{margin-bottom:7px;gap:7px}
+.architecture-v2 .arch-scene-title strong{font-size:15px;line-height:1.3}
+.architecture-v2 .arch-scene-title small{font-size:10.5px;line-height:1.3}
+.architecture-v2 .arch-scene-chips{align-content:center;gap:6px}
+.architecture-v2 .arch-scene-chip{
+  font-size:10.7px;line-height:1.35;font-weight:600;min-height:27px;padding:4px 4px;
+  background:linear-gradient(180deg,rgba(71,72,129,.23),rgba(24,26,47,.93));
+}
+.architecture-v2 .arch-scene-chip .arch-scene-icon{width:13px;height:13px}
+.architecture-v2 .arch-scene-sidecard h3{font-size:12.5px}
+.architecture-v2 .arch-scene-legend li{font-size:11px}
+.architecture-v2 .arch-scene-boundaries{font-size:10.8px}
+.architecture-v2 .arch-scene-edge-key{font-size:10.6px}
+/* Worker boxes are blue in these three scenes: their legend must be blue too. */
+.architecture-v2 .arch-scene-layout:is(
+ [data-scene-view="platform"],[data-scene-view="firmware"],
+ [data-scene-view="test-flow"],[data-scene-view="agent-analysis"]
+) .arch-scene-swatch--worker{--swatch:#4abfff}
+/* Do not let a gold execution legend identify a blue device-worker node. */
+.architecture-v2 .arch-scene-layout[data-scene-view="agent-analysis"] .arch-scene-swatch--resource{--swatch:#3cddaf}
+@media(max-width:760px){
+  .architecture-v2 .arch-scene-legend li{font-size:10.5px}
+}
+
+
+/* Allocate a more useful legend column on wide screens; the scene scales inside
+   its own scroll region and the shared Tab geometry remains untouched. */
+@media(min-width:1191px){
+  .architecture-v2 .arch-scene-layout{
+    grid-template-columns:minmax(0,1fr) 252px;
+  }
+}
+
+/* Keep visual legend semantics in sync with data / ACK / command line colors. */
+.architecture-v2 .arch-scene-line--report{border-top-color:#3ce3b7}
+
+
+/* Crisp orthogonal routes without blurred underlays. */
+.architecture-v2 .arch-scene-path{
+  stroke-linecap:round;stroke-linejoin:round;filter:none;
+}
+.architecture-v2 .arch-scene-path--both{stroke-dasharray:none;stroke-width:1.9}
+.architecture-v2 .arch-scene-edge-pill{
+  fill:rgba(20,22,42,.98);stroke-width:1.15;
+}
+.architecture-v2 .arch-scene-wires{overflow:visible}
+.architecture-v2 .arch-scene-controller-emblem{top:-49px}
+.architecture-v2 .arch-scene-canvas--test-flow .arch-scene-controller-emblem{top:-44px}
+.architecture-v2 .arch-scene-canvas--agent-analysis .arch-scene-controller-emblem{top:-31px}
+
+
+/* Topology labels are short semantic names. Keep them on one line, and
+   preserve the full text in each chip's accessible title attribute. */
+.architecture-v2 .arch-scene-chip{
+  gap:3px;
+  white-space:nowrap;
+  overflow:hidden;
+  padding-inline:3px;
+  font-size:10px;
+}
+.architecture-v2 .arch-scene-chip > span{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  overflow-wrap:normal;
+}
+.architecture-v2 .arch-scene-chip .arch-scene-icon{
+  width:11px;
+  height:11px;
+  flex-shrink:0;
+}

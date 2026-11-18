@@ -869,52 +869,39 @@ class RuntimeDashboardsTests(RuntimeUiHarness):
         finally:
             page.close()
 
-    def test_cluster_initial_loading_orbit_keeps_viewport_origin(self):
-        """首屏加载以 iframe 视口为基准，不随 Worker 区或滚动条移动。"""
+    def test_cluster_initial_loading_skeleton_stays_in_panel(self):
+        """The management loading skeleton must not overflow its viewport."""
         page = self.new_page()
         try:
             page.route("**/api/cluster/**", lambda route: None)
             self.goto_shell(page)
             page.evaluate("switchPage('cluster', null)")
-
-            frame = None
-            for _ in range(60):
-                try:
-                    frame = self.frame_for(page, "#cluster-frame")
-                except AssertionError:
-                    frame = None
-                if frame and frame.query_selector("#workers .loading-orbit-bar"):
-                    break
-                page.wait_for_timeout(100)
-            self.assertIsNotNone(frame, "iframe 文档未出现 Worker 区加载动画")
-
+            frame = self.frame_for(page, "#cluster-frame")
+            frame.wait_for_selector("#workers .cluster-loading-message", state="attached")
             geometry = frame.evaluate(
                 """() => {
                     const pane = document.getElementById('tab-management');
-                    if (pane && pane.hidden && typeof selectClusterDashboardTab === 'function') {
+                    if (pane.hidden && typeof selectClusterDashboardTab === 'function') {
                         selectClusterDashboardTab('management', {persist: false});
                     }
                     const workers = document.getElementById('workers').getBoundingClientRect();
-                    const bar = document.querySelector('#workers .loading-orbit-bar')
-                        .getBoundingClientRect();
-                    const orbit = document.querySelector('#workers > .loading-orbit')
+                    const label = document.querySelector('#workers .cluster-loading-message')
                         .getBoundingClientRect();
                     return {
                         viewportWidth: window.innerWidth,
-                        orbitWidth: orbit.width,
+                        workersLeft: workers.left,
+                        workersRight: workers.right,
                         workersWidth: workers.width,
-                        barCenterX: bar.x + bar.width / 2,
+                        labelHeight: label.height,
+                        bodyOverflow: document.documentElement.scrollWidth - window.innerWidth,
                     };
                 }"""
             )
-            self.assertGreater(geometry["orbitWidth"], 0, geometry)
-            self.assertAlmostEqual(
-                geometry["orbitWidth"], geometry["viewportWidth"], delta=1,
-                msg=f"首屏加载舞台未锚定视口: {geometry}",
-            )
-            self.assertAlmostEqual(
-                geometry["barCenterX"], geometry["viewportWidth"] / 2, delta=1,
-                msg=f"加载动画未与容器同心: {geometry}",
-            )
+            self.assertGreater(geometry["workersWidth"], 0, geometry)
+            self.assertGreater(geometry["labelHeight"], 0, geometry)
+            self.assertGreaterEqual(geometry["workersLeft"], -1, geometry)
+            self.assertLessEqual(geometry["workersRight"], geometry["viewportWidth"] + 1, geometry)
+            self.assertLessEqual(geometry["bodyOverflow"], 1, geometry)
         finally:
             page.close()
+

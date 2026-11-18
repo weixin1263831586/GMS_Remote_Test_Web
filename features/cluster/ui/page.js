@@ -2,8 +2,7 @@
 document.addEventListener('click',event=>{
  const button=event.target.closest('button[data-action]');if(!button)return;
  const action=button.dataset.action,workerId=button.dataset.workerId||'',jobId=button.dataset.jobId||'';
- if(action==='toggle-worker-menu'){event.stopPropagation();button.nextElementSibling?.classList.toggle('open')}
- else if(action==='worker-config')openWorkerConfig(workerId);
+ if(action==='worker-config')openWorkerConfig(workerId);
  else if(action==='restart-vnc')restartWorkerVnc(workerId);
  else if(action==='local-software')reconfigureLocalSoftware(button);
  else if(action==='redeploy-worker')redeployWorker(workerId,button.dataset.sshHost||'');
@@ -16,12 +15,18 @@ document.addEventListener('click',event=>{
  else if(action==='download-job-report')downloadClusterJobReport(selectedClusterJob,button.dataset.artifactId||'');
 });
 document.querySelector('#cluster-search')?.addEventListener('input',render);
+document.querySelector('#workers')?.addEventListener('toggle',event=>{
+ if(event.target.matches('.worker-meta-details')&&event.target.open)positionOpenWorkerDetails();
+},true);
+document.querySelector('#workers')?.addEventListener('scroll',()=>{
+ document.querySelectorAll('#workers .worker-meta-details[open]').forEach(details=>{details.open=false;});
+},{passive:true});
 document.querySelector('#job-status-filter')?.addEventListener('change',render);
 window.addEventListener('gms:embedded-workspace',event=>applyClusterWorkspace(event.detail?.context||{},event.detail?.type==='workspace-context-navigate').catch(e=>toast(e.message)));
-window.showJob=showJob;window.cancelJob=cancelJob;window.deployArchive=deployArchive;window.restartWorkerVnc=restartWorkerVnc;window.redeployWorker=redeployWorker;window.openWorkerConfig=openWorkerConfig;window.saveWorkerConfig=saveWorkerConfig;window.deleteWorker=deleteWorker;window.updateDashGauges=updateDashGauges;window.updateDashTrend=updateDashTrend;window.renderDashPieDetail=renderDashPieDetail;window.renderDashboard=renderDashboard;document.querySelector('#refresh').onclick=()=>{if(document.querySelector('.dash-tab.active')?.dataset.dashTab==='dashboard')dashTrendLastFetch=0;refresh(true)};document.querySelector('#reload-library').onclick=loadLibrary;document.querySelector('#job-open-test').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('test',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#job-open-report').onclick=()=>openClusterJobReport();document.querySelector('#job-open-ats').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('automation',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#show-onboarding').onclick=()=>{const idEl=document.querySelector('#new-worker-id');if(idEl){idEl.readOnly=false;idEl.style.opacity='';idEl.value=''}document.querySelector('#onboarding').hidden=false;updateDeployCommand()};document.querySelector('#close-onboarding').onclick=()=>document.querySelector('#onboarding').hidden=true;['new-worker-id','new-worker-host','controller-url','suite-root'].forEach(id=>document.querySelector(`#${id}`).oninput=updateDeployCommand);document.querySelector('#controller-url').value=location.origin;document.querySelector('#copy-deploy').onclick=()=>navigator.clipboard.writeText(document.querySelector('#deploy-command').textContent).then(()=>toast('命令已复制'));document.querySelector('#auto-deploy').onclick=autoDeployWorker;document.querySelector('#close-config-modal')&&(document.querySelector('#close-config-modal').onclick=()=>{document.querySelector('#worker-config-modal').hidden=true});document.querySelector('#save-worker-config')&&(document.querySelector('#save-worker-config').onclick=saveWorkerConfig);document.addEventListener('click',e=>{if(!e.target.closest('.worker-menu-wrap'))document.querySelectorAll('.worker-menu.open').forEach(m=>m.classList.remove('open'))});
-// Tab switching. 与外层 gms_current_page 的刷新恢复保持一致；使用
-// sessionStorage 可在当前浏览器标签页刷新后恢复，同时不会让另一个标签页
-// 的集群视图互相覆盖。
+window.showJob=showJob;window.cancelJob=cancelJob;window.deployArchive=deployArchive;window.restartWorkerVnc=restartWorkerVnc;window.redeployWorker=redeployWorker;window.openWorkerConfig=openWorkerConfig;window.saveWorkerConfig=saveWorkerConfig;window.deleteWorker=deleteWorker;window.updateDashGauges=updateDashGauges;window.updateDashTrend=updateDashTrend;window.renderDashPieDetail=renderDashPieDetail;window.renderDashboard=renderDashboard;document.querySelector('#refresh').onclick=()=>{if(document.querySelector('.dash-tab.active')?.dataset.dashTab==='dashboard')dashTrendLastFetch=0;refresh(true)};document.querySelector('#reload-library').onclick=loadLibrary;document.querySelector('#job-open-test').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('test',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#job-open-report').onclick=()=>openClusterJobReport();document.querySelector('#job-open-ats').onclick=()=>selectedClusterJob&&window.GmsEmbeddedWorkspace?.navigate('automation',{scope_mode:'cluster',worker_id:selectedClusterJob.assigned_worker_id,device_ids:(selectedClusterJob.leases||[]).map(x=>x.device_id),suite_key:selectedClusterJob.suite_key||'',cluster_job_id:selectedClusterJob.id,attempt_id:selectedClusterJob.current_attempt_id||''});document.querySelector('#show-onboarding').onclick=()=>{const idEl=document.querySelector('#new-worker-id');if(idEl){idEl.readOnly=false;idEl.style.opacity='';idEl.value=''}document.querySelector('#onboarding').hidden=false;updateDeployCommand()};document.querySelector('#close-onboarding').onclick=()=>document.querySelector('#onboarding').hidden=true;['new-worker-id','new-worker-host','controller-url','suite-root'].forEach(id=>document.querySelector(`#${id}`).oninput=updateDeployCommand);document.querySelector('#controller-url').value=location.origin;document.querySelector('#copy-deploy').onclick=()=>navigator.clipboard.writeText(document.querySelector('#deploy-command').textContent).then(()=>toast('命令已复制'));document.querySelector('#auto-deploy').onclick=autoDeployWorker;document.querySelector('#close-config-modal')&&(document.querySelector('#close-config-modal').onclick=()=>{document.querySelector('#worker-config-modal').hidden=true});document.querySelector('#save-worker-config')&&(document.querySelector('#save-worker-config').onclick=saveWorkerConfig);document.querySelector('#close-job-detail')?.addEventListener('click',()=>{document.querySelector('#detail').hidden=true;});
+// Match the shell-wide reload policy: ordinary F5/Ctrl+R and toolbar refresh
+// preserve the active tab; Ctrl+Shift+R and interceptable Ctrl+F5 reset to
+// Dashboard. tab-boot.js selects the remembered pane before first paint.
 function selectClusterDashboardTab(tab,{persist=true}={}){
  const target=CLUSTER_DASHBOARD_TABS.has(tab)?tab:'dashboard';
  document.querySelectorAll('.dash-tab').forEach(button=>{
@@ -72,20 +77,28 @@ document.querySelector('.dash-tabs')?.addEventListener('wheel',event=>{
  const scroller=layers.find(node=>node.scrollHeight>node.clientHeight+1&&['auto','scroll'].includes(getComputedStyle(node).overflowY));
  if(scroller)scroller.scrollTop+=delta;
 },{passive:true});
-let initialClusterDashboardTab=new URLSearchParams(window.location.search).get('tab')||'';
+let initialClusterDashboardTab=window.__clusterInitialTab||'';
 if(!CLUSTER_DASHBOARD_TABS.has(initialClusterDashboardTab)){
- try{initialClusterDashboardTab=window.sessionStorage.getItem(CLUSTER_DASHBOARD_TAB_STORAGE_KEY)||''}catch(_error){}
+ initialClusterDashboardTab=new URLSearchParams(window.location.search).get('tab')||'';
+ if(!CLUSTER_DASHBOARD_TABS.has(initialClusterDashboardTab)){
+  try{initialClusterDashboardTab=window.sessionStorage.getItem(CLUSTER_DASHBOARD_TAB_STORAGE_KEY)||''}catch(_error){}
+ }
 }
 selectClusterDashboardTab(initialClusterDashboardTab,{persist:false});
-// 首屏占位：Worker 管理区渲染超新星动画，首轮 refresh 完成后被覆盖。
-document.querySelector('#workers')&&(document.querySelector('#workers').innerHTML=loadingOrbitHtml('正在加载主机列表...',true));
+// The active pane, underline and actions are now set together. Remove the
+// early CSS override only after that synchronous update.
+delete document.documentElement.dataset.clusterInitialTab;
+// 管理区的初始表格占位已在 HTML 中渲染，首轮请求期间不再
+// 注入固定定位、跨越整个 iframe 的星轨动画。
 window.addEventListener('resize',scheduleDashboardChartsResize,{passive:true});
+window.addEventListener('resize',positionOpenWorkerDetails,{passive:true});
 if(typeof ResizeObserver!=='undefined'){
  dashResizeObserver=new ResizeObserver(scheduleDashboardChartsResize);
  const dashboard=document.querySelector('#dashboard');if(dashboard)dashResizeObserver.observe(dashboard);
 }
-// 保底通知：state.js 开头已尽早调用 markReady()，
-// 这里重复调用是幂等的（surfaceReadySent 守卫），确保万无一失。
+// Reveal the iframe only after the initial Tab, actions and handlers are
+// configured. The data refresh below remains asynchronous, so even slow
+// Worker APIs do not hold the shell loading surface open.
 window.GmsEmbeddedWorkspace?.markReady();
 function syncClusterAutoRefresh(event){
  const visible=event?.detail?.visible??window.GmsEmbeddedWorkspace?.isVisible?.()??true;

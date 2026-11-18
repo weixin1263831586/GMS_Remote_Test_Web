@@ -31,6 +31,21 @@ _INLINE_GRID_ON_TOOLS_GRID = re.compile(
 _JS_OR_HTML_SUFFIXES = {".js", ".html"}
 
 
+def test_vpn_proxy_card_uses_existing_builtin_link_contract():
+    js = (WEB / "static" / "js" / "shell" / "utility-tools.js").read_text(
+        encoding="utf-8"
+    )
+    assert "'常用工具': [" in js
+    assert "title: 'vpn-proxy'" in js
+    assert "icon: '🌐'" in js
+    assert "action: 'openVpnProxyPanel'" in js
+    assert "url: 'https://github.com/weixin1263831586/vpn-proxy'" not in js
+    assert "builtin_id: 'builtin-vpn-proxy'" in js
+    # The card invokes the GMS management modal, not a GitHub URL opener.
+    assert "'openWeeklyReport', 'shareFirmware', 'openVpnProxyPanel'" in js
+    assert "data-builtin-action=" in js
+
+
 def test_tools_grid_columns_have_single_source_of_truth():
     css = _CSS.read_text(encoding="utf-8")
     match = re.search(
@@ -57,3 +72,46 @@ def test_no_inline_grid_styles_on_tools_grid_elements():
         "tools-grid 禁止内联 grid 样式（列数只由 .tools-grid 类控制）: "
         + ", ".join(offenders)
     )
+
+
+
+def test_shared_tools_and_websites_cards_keep_original_square_dimensions():
+    renderer = (WEB / "static" / "js" / "shell" / "tools-render.js").read_text(
+        encoding="utf-8"
+    )
+    # Both pages use the same persistent bottom action, outside the grid scroll.
+    page_body = (WEB / "shell" / "components" / "tools-page-body.html").read_text(
+        encoding="utf-8"
+    )
+    for page in ("tools.html", "websites.html"):
+        source = (WEB / "shell" / "pages" / page).read_text(encoding="utf-8")
+        assert "tools-header-add" not in source
+        assert "tools-page-body.html" in source
+    assert 'class="tools-footer"' in page_body
+    assert 'data-tools-add' in page_body
+    assert "min-height: 118px;" in renderer
+    assert "width: 40px; height: 40px;" in renderer
+
+
+def test_proxy_windows_icon_matches_tailscale_brand_svg():
+    tailscale = (WEB / "shell" / "dialogs" / "tailscale-info.html").read_text(
+        encoding="utf-8"
+    )
+    proxy = (WEB / "shell" / "dialogs" / "vpn-proxy.html").read_text(
+        encoding="utf-8"
+    )
+    windows_path = "M3 6.5 14.1 5v10H3zM16 4.7 29 3v12H16z"
+    assert windows_path in tailscale
+    assert windows_path in proxy
+    assert "🪟" not in proxy
+
+
+def test_deleted_builtin_categories_are_not_recreated_automatically():
+    js = (WEB / "static" / "js" / "shell" / "utility-tools.js").read_text(
+        encoding="utf-8"
+    )
+    assert "gms_utility_tools_hidden_categories" in js
+    assert "if (hiddenCategories.has(category)) return;" in js
+    assert "ut_setCategoryHidden(cat, true)" in js
+    assert "ut_setCategoryHidden(name, false)" in js
+    assert "if (wasHidden) ut_ensureBuiltInTools()" in js

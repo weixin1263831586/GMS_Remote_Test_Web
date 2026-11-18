@@ -341,6 +341,41 @@ class ReportFilesApiTests(unittest.TestCase):
         self.assertEqual(payload["reports"][0]["display_client_id"], "hcq")
         self.assertNotIn("owner_id", payload["reports"][0])
 
+    def test_report_id_notification_lookup_stays_owner_scoped(self):
+        request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
+        calls = []
+        records = {
+            "report-a": {"report_id": "report-a", "timestamp": "t-a",
+                         "owner_id": CURRENT_USER.resource_owner_id},
+            "report-b": {"report_id": "report-b", "timestamp": "t-b",
+                         "owner_id": "another-account"},
+        }
+
+        class FakeDb:
+            def get_report(self, report_id, *, owner_id=None, include_all=False):
+                calls.append((report_id, owner_id, include_all))
+                record = records.get(report_id)
+                return record if record and (include_all or record["owner_id"] == owner_id) else None
+
+        with patch("features.reports.files_api.test_report_db", FakeDb()), patch(
+            "features.reports.access.get_authenticated_user", return_value=CURRENT_USER
+        ), patch(
+            "features.reports.files_api.require_authenticated_user",
+            return_value=CURRENT_USER,
+        ):
+            own = asyncio.run(list_reports(request, report_id="report-a"))
+            other = asyncio.run(list_reports(request, report_id="report-b"))
+
+        own_data = json.loads(own.body.decode("utf-8"))
+        other_data = json.loads(other.body.decode("utf-8"))
+        self.assertEqual([r["report_id"] for r in own_data["reports"]], ["report-a"])
+        self.assertNotIn("owner_id", own_data["reports"][0])
+        self.assertEqual(other_data["reports"], [])
+        self.assertEqual(calls, [
+            ("report-a", CURRENT_USER.resource_owner_id, False),
+            ("report-b", CURRENT_USER.resource_owner_id, False),
+        ])
+
     def test_report_display_client_uses_current_principal_display(self):
         report = _decorate_report_for_client(
             {"owner_id": "NqWo58sh1jr5c6ZiyxxPtQ"}, "hcq"

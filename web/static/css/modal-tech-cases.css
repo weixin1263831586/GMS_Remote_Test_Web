@@ -138,6 +138,60 @@
 .tech-dialog--weekly-report .modal-body > div:first-of-type { padding: 14px; border: 1px solid var(--tech-edge-soft); border-radius: 9px; background: var(--tech-panel); }
 .tech-dialog--weekly-report #weekly-report-content { margin-top: 8px; border: 1px solid var(--tech-edge-soft); border-radius: 9px; padding: 20px !important; background: var(--tech-input); }
 .tech-dialog--test-results #test-results-list { margin-bottom: 20px; border-color: var(--tech-edge-soft) !important; background: var(--tech-input); }
+/* Results-list header controls: reserve safe distance from the angled SVG
+   perimeter and align the minimize action with the close button. Unlike the
+   old anonymous wrapper these bounds are explicitly covered by browser tests. */
+#test-results-modal .tech-dialog--test-results > .modal-header {
+  min-height: 58px;
+  box-sizing: border-box;
+  padding: 12px 20px 12px 18px;
+  align-items: center;
+}
+#test-results-modal .test-results-header-actions {
+  position: relative;
+  z-index: 3;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  margin-left: auto;
+}
+#test-results-modal .test-results-minimize {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: 0 0 48px;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  min-width: 48px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 8px;
+  margin: 0;
+  line-height: 1;
+  border-radius: 6px;
+  box-shadow: none;
+  transform: none;
+}
+#test-results-modal .test-results-header-actions > .modal-close {
+  flex: 0 0 30px;
+  margin: 0;
+  align-self: center;
+}
+@media (max-width: 480px) {
+  #test-results-modal .tech-dialog--test-results > .modal-header {
+    padding: 12px 14px;
+  }
+  #test-results-modal .test-results-header-actions { gap: 6px; }
+  #test-results-modal .test-results-minimize {
+    flex-basis: 42px;
+    min-width: 42px;
+    width: 42px;
+  }
+}
+
 .tech-dialog--sidebar-visibility .sidebar-settings-tabs { padding: 6px; border: 1px solid var(--tech-edge-soft); border-radius: 9px; background: var(--tech-panel); }
 .tech-dialog--sidebar-visibility .sidebar-visibility-list { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; padding-top: 16px; }
 .tech-dialog--ui-control .modal-body { background: var(--tech-input); }
@@ -347,8 +401,8 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
   outline: 2px solid var(--tech-bright); outline-offset: -2px;
 }
 #firmware-share-modal .firmware-share-table {
-  width: max-content; min-width: 1080px; max-width: none;
-  border-collapse: separate; border-spacing: 0; table-layout: auto;
+  width: 100%; min-width: 0; max-width: 100%;
+  border-collapse: separate; border-spacing: 0; table-layout: fixed;
 }
 #firmware-share-modal .firmware-share-table :is(th,td) {
   padding: 9px 10px; white-space: nowrap; vertical-align: middle;
@@ -359,17 +413,21 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
   background: var(--tech-panel); font-weight: 600; color: var(--text-primary);
   text-align: left;
 }
-#firmware-share-modal .firmware-share-col-name { min-width: 220px; }
-#firmware-share-modal .firmware-share-col-path { min-width: 470px; }
-#firmware-share-modal .firmware-share-col-size { min-width: 100px; }
-#firmware-share-modal .firmware-share-col-downloads { min-width: 90px; }
-#firmware-share-modal .firmware-share-col-actions { min-width: 200px; }
+/* Desktop: all five fields remain visible. Full paths and names stay available in title tooltips. */
+#firmware-share-modal .firmware-share-col-name { width: 19%; min-width: 0; }
+#firmware-share-modal .firmware-share-col-path { width: 35%; min-width: 0; }
+#firmware-share-modal .firmware-share-col-size { width: 11%; min-width: 0; }
+#firmware-share-modal .firmware-share-col-downloads { width: 12%; min-width: 0; }
+#firmware-share-modal .firmware-share-col-actions { width: 23%; min-width: 0; }
+#firmware-share-modal .firmware-share-table :is(.firmware-share-name,.firmware-share-path) {
+  max-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
 #firmware-share-modal .firmware-share-path {
   font-family: ui-monospace,monospace; font-size: var(--tech-font-caption);
-  max-width: none; overflow: visible; text-overflow: clip;
 }
-#firmware-share-modal .firmware-share-name {
-  max-width: none; overflow: visible; text-overflow: clip;
+#firmware-share-modal .firmware-share-actions { overflow: visible; white-space: nowrap; }
+@media (max-width: 920px) {
+  #firmware-share-modal .firmware-share-table { width: 800px; min-width: 800px; max-width: none; }
 }
 #firmware-share-modal .firmware-share-table .firmware-share-number { text-align: right; font-variant-numeric: tabular-nums; }
 #firmware-share-modal .firmware-share-table .firmware-share-downloads { text-align: center; }
@@ -603,24 +661,117 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 }
 .tech-dialog--ui-control .ui-ctrl-el-meta { color: var(--text-secondary); font-size: var(--tech-font-caption); margin-top: 2px; }
 
-/* Directory navigation belongs next to the file list, not split across the
-   modal footer. The fixed footer only contains cancel / select actions. */
-.tech-dialog--file-browser .file-browser-nav-actions {
-  display: flex; flex: none; flex-wrap: wrap; gap: 6px;
-  align-items: center; justify-content: flex-start;
-  margin: 0 0 8px;
+/* The file inventory is the primary content. Keep directory actions compact
+   and let the file list claim all height not used by the modal chrome. */
+#file-browser-modal > .modal-content.tech-dialog--file-browser {
+  height: min(700px, 82dvh, calc(100dvh - 24px));
+  max-height: min(700px, 82dvh, calc(100dvh - 24px));
 }
-.tech-dialog--file-browser .file-browser-nav-actions > button {
-  display: inline-flex; align-items: center; gap: 5px;
+#file-browser-modal .tech-dialog--file-browser .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 10px;
+  overflow: hidden;
 }
-.tech-dialog--file-browser .file-browser-nav-actions .ui-icon {
-  width: 16px; height: 16px; flex: none;
+#file-browser-modal .file-browser-location-toolbar {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 7px;
+  min-width: 0;
+}
+#file-browser-modal .file-browser-location-label {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+#file-browser-modal .file-browser-path {
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 0;
+  height: 34px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 7px 9px;
+  line-height: 18px;
+  font-size: 11px;
+  white-space: nowrap;
+  word-break: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+#file-browser-modal .file-browser-nav-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin: 0;
+}
+#file-browser-modal .file-browser-nav-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+}
+#file-browser-modal .file-browser-nav-actions .ui-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+#file-browser-modal .file-browser-worker-row {
+  flex: none;
+  min-height: 38px;
+  margin: 0;
+  padding: 6px 8px;
+}
+#file-browser-modal .file-browser-worker-row > label {
+  min-width: 0;
+  white-space: nowrap;
+  font-size: 12px;
+}
+#file-browser-modal .file-browser-worker-row > select {
+  flex: 1;
+  min-width: 0;
+}
+#file-browser-modal .file-browser-header {
+  flex: none;
+  padding: 5px 9px;
+}
+#file-browser-modal .file-browser-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  padding: 3px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+#file-browser-modal .file-browser-item {
+  padding: 6px 8px;
+}
+@media (max-width: 480px) {
+  #file-browser-modal .file-browser-location-label { display: none; }
+  #file-browser-modal .file-browser-location-toolbar { gap: 5px; }
+  #file-browser-modal .file-browser-nav-actions { gap: 3px; }
+  #file-browser-modal .file-browser-nav-actions > button {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    min-height: 32px;
+  }
 }
 #sidebar-visibility-modal .sidebar-settings-footer[hidden] { display: none !important; }
 
-/* Short landscape windows must keep file inventory reachable.
-   The body scrolls as a unit only when vertical space cannot fit both
-   location controls and a usable file-list viewport. */
+/* In unusually short landscape windows, scroll the body if the navigation,
+   Worker selector and the file list cannot all fit without clipping. */
 @media (max-height: 560px) {
   #file-browser-modal .modal-body {
     overflow-y: auto !important;

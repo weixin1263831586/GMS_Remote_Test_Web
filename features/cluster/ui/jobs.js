@@ -14,8 +14,11 @@ async function applyClusterWorkspace(next,navigate=false) {
  applyingClusterWorkspace=true;
  try {
   renderModeStatus();
-  if(navigate&&clusterWorkspace.cluster_job_id&&state.jobs.some(job=>job.id===clusterWorkspace.cluster_job_id))
-   await showJob(clusterWorkspace.cluster_job_id,false);
+  if(navigate&&(clusterWorkspace.cluster_job_id||clusterWorkspace.worker_id)){
+   selectClusterDashboardTab('management');
+   // History is paginated: fetch Job by ID, not via the current list.
+   if(clusterWorkspace.cluster_job_id)await showJob(clusterWorkspace.cluster_job_id,false);
+  }
  } finally {applyingClusterWorkspace=false}
 }
 async function checkLocalVpn(){try{const d=await api('/api/vpn/status');localVpnConnected=Boolean(d.connected)}catch(e){localVpnConnected=null}}
@@ -41,7 +44,7 @@ async function checkWorkerVpn(){
  await Promise.all(promises);
 }
 function setClusterRefreshBusy(busy){
- // 只切 disabled/aria-busy，不重写 textContent（重写会吞掉按钮里的 SVG 图标）。
+ // 仅更新 disabled/aria-busy，始终保留「刷新」文字和按钮宽度。
  const button=document.querySelector('#refresh');if(!button)return;
  button.disabled=busy;
  button.setAttribute('aria-busy',busy?'true':'false');
@@ -53,7 +56,17 @@ async function refresh(showBusy=false){
   refreshPromise=(async()=>{
    const requests=[['workers','/api/cluster/workers','workers'],['devices','/api/cluster/devices','devices'],['suites','/api/cluster/suites','suites'],['jobs','/api/cluster/jobs?include_active=true','jobs'],['tests','/api/cluster/worker-tests','tests'],['library','/api/cluster/suite-library','archives'],['status','/api/cluster/status',null]];
    const results=await Promise.allSettled(requests.map(([,path])=>api(path))),errors=[];
-   results.forEach((result,index)=>{const [stateKey,,payloadKey]=requests[index];if(result.status==='fulfilled')state[stateKey]=payloadKey?(result.value[payloadKey]||[]):result.value;else errors.push(`${stateKey}: ${result.reason.message}`)});
+   results.forEach((result,index)=>{
+    const [stateKey,,payloadKey]=requests[index];
+    if(result.status==='fulfilled'){
+     state[stateKey]=payloadKey?(result.value[payloadKey]||[]):result.value;
+     clusterLoadedResources.add(stateKey);
+     delete clusterLoadErrors[stateKey];
+    }else{
+     clusterLoadErrors[stateKey]=result.reason.message;
+     errors.push(`${stateKey}: ${result.reason.message}`);
+    }
+   });
    clusterInitialRefreshSettled=true;
    checkLocalVpn().catch(()=>{});checkWorkerVpn().then(render).catch(()=>{});render();
    await applyClusterWorkspace(clusterWorkspace);
@@ -155,7 +168,11 @@ async function showJob(id,scroll=true){
   document.querySelector('#artifacts').innerHTML=renderJobArtifacts(j.job,a.artifacts,selectedClusterReport);
   const reportArtifact=(a.artifacts||[]).find(item=>String(item.artifact_type||'').startsWith('report'));
   syncClusterWorkspace({...clusterReportContext(j.job,reportArtifact?.id||a.artifacts[0]?.id||''),device_ids:(j.job.leases||[]).map(x=>x.device_id),suite_key:j.job.suite_key||''});
-  if(scroll)document.querySelector('#detail').scrollIntoView({behavior:'smooth'});
+  // The detail panel overlays the inventory instead of extending page height.
+  // Focusing it must not move the outer viewport.
+  const detail=document.querySelector('#detail');
+  detail.scrollTop=0;
+  if(scroll)detail.focus({preventScroll:true});
  }catch(e){toast(e.message)}
 }
 async function cancelJob(id){try{await api(`/api/cluster/jobs/${id}/cancel`,{method:'POST'});toast('停止命令已下发');await refresh()}catch(e){toast(e.message)}}

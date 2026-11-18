@@ -749,22 +749,31 @@ function ensureReportAnalysisResultStructure() {
     const resultDiv = $('report-analysis-result');
     if (!resultDiv) return null;
 
-    if (!$('report-summary') || !$('report-details') || !$('report-failures') || !$('report-failure-list')) {
+    if (!$('report-summary') || !$('report-details') || !$('report-failures') ||
+        !$('report-failure-list') || !$('report-failure-header-actions')) {
         resultDiv.innerHTML = `
-            <div class="report-result-card">
-                <div class="report-section-head">
-                    <div class="report-section-title">📊 分析结果</div>
-                    <button class="btn-xs" data-click="resetReportAnalysis">清除</button>
+            <section class="report-result-card report-overview">
+                <div class="report-overview-line">
+                    <div id="report-summary" class="report-summary-grid"></div>
+                    <div class="report-overview-actions" role="group" aria-label="报告操作">
+                        <button class="btn-xs" data-click="sendReportAnalysisEmail" aria-label="发送邮件" title="发送报告分析邮件"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#mail"></use></svg></button>
+                        <button class="btn-xs" data-click="resetReportAnalysis" aria-label="清除" title="清除当前报告"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#close"></use></svg></button>
+                    </div>
                 </div>
-                <div id="report-summary" class="report-summary-grid"></div>
                 <div id="report-details" class="report-details"></div>
-            </div>
-            <div id="report-failures" class="report-result-card" style="display: none;">
-                <div class="report-section-head">
-                    <div id="report-failures-title">❌ 失败用例</div>
+            </section>
+            <section id="report-failures" class="report-result-card report-failure-workspace" style="display:none">
+                <div class="report-section-head report-failure-heading">
+                    <div id="report-failures-title">失败用例</div>
+                    <div id="report-failure-header-actions" class="report-failure-header-actions" role="group" aria-label="选中失败用例操作"></div>
                 </div>
-                <div id="report-failure-list" class="report-failure-list"></div>
-            </div>
+                <div class="report-failure-layout">
+                    <div id="report-failure-list" class="report-failure-list"></div>
+                    <section id="report-failure-detail" class="report-failure-detail" hidden>
+                        <div id="report-failure-detail-content"></div>
+                    </section>
+                </div>
+            </section>
         `;
     }
 
@@ -827,7 +836,15 @@ function displayReportAnalysis(data) {
         return;
     }
 
-    resultDiv.style.display = 'block';
+    resultDiv.style.display = 'flex';
+    const reportActiveFile = $('report-active-file');
+    const reportActiveName = $('report-active-name');
+    const displayName = data.report_name || data.test_result?.test_name || '测试报告';
+    if (reportActiveName) {
+        reportActiveName.textContent = displayName;
+        reportActiveName.title = displayName;
+    }
+    if (reportActiveFile) reportActiveFile.hidden = false;
 
     if (summaryDiv && data.summary) {
         const summary = data.summary;
@@ -880,6 +897,22 @@ function displayReportAnalysis(data) {
         `;
 
         summaryDiv.innerHTML = summaryHTML;
+        // Compact stats first, provenance and build metadata second. The
+        // underlying fields remain the same as the parsed report contract.
+        const stats = document.createElement('div');
+        stats.className = 'report-summary-stats';
+        const context = document.createElement('div');
+        context.className = 'report-summary-context';
+        const statLabels = new Set(['总用例数：', '通过：', '失败：', '通过率：']);
+        [...summaryDiv.children].forEach(field => {
+            const label = field.querySelector('.summary-label')?.textContent?.trim();
+            if (label === '测试报告：') {
+                field.classList.add('report-summary-report');
+                field.title = field.querySelector('.summary-value')?.textContent || '';
+            }
+            (statLabels.has(label) ? stats : context).appendChild(field);
+        });
+        summaryDiv.replaceChildren(stats, context);
     } else {
         console.error('[displayReportAnalysis] Summary not generated. summaryDiv:', summaryDiv, 'data.summary:', data.summary);
     }
@@ -892,85 +925,83 @@ function displayReportAnalysis(data) {
             ['Redmine', provenance.redmine_issue_id]
         ].filter(([, value]) => value);
         detailsDiv.innerHTML = fields.length ? `
-            <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;border-top:1px solid var(--border-color);padding-top:10px;">
-                ${fields.map(([label, value]) => `<span style="padding:3px 7px;border:1px solid var(--border-color);border-radius:10px;"><b>${escapeHtml(label)}</b> ${escapeHtml(value)}</span>`).join('')}
-                ${provenance.cluster_job_id ? '<button class="btn-xs" data-provenance-page="cluster">打开集群任务</button>' : ''}
-                ${provenance.automation_run_id ? '<button class="btn-xs" data-provenance-page="automation">打开 ATS</button>' : ''}
-                ${provenance.gerrit_change_id ? '<button class="btn-xs" data-provenance-page="gerrit-dashboard">打开 Gerrit</button>' : ''}
-                ${provenance.redmine_issue_id ? '<button class="btn-xs" data-provenance-page="redmine-agent">打开 Redmine</button>' : ''}
+            <div class="report-provenance">
+                ${fields.map(([label, value]) => `<span class="report-provenance-chip" title="${escapeHtml(String(value))}"><b>${escapeHtml(label)}</b> ${escapeHtml(value)}</span>`).join('')}
+                ${provenance.cluster_job_id ? '<button class="btn-xs report-provenance-link" data-provenance-page="cluster">打开集群任务</button>' : ''}
+                ${provenance.automation_run_id ? '<button class="btn-xs report-provenance-link" data-provenance-page="automation">打开 ATS</button>' : ''}
+                ${provenance.gerrit_change_id ? '<button class="btn-xs report-provenance-link" data-provenance-page="gerrit-dashboard">打开 Gerrit</button>' : ''}
+                ${provenance.redmine_issue_id ? '<button class="btn-xs report-provenance-link" data-provenance-page="redmine-agent">打开 Redmine</button>' : ''}
             </div>` : '';
         detailsDiv.querySelectorAll('[data-provenance-page]').forEach(button => {
             button.addEventListener('click', () => window.GmsWorkspace?.navigate(button.dataset.provenancePage));
         });
     }
 
-    if (failuresDiv && failureList && data.failures && data.failures.length > 0) {
-        failuresDiv.style.display = 'block';
-        if (failuresTitle) failuresTitle.textContent = '❌ 失败用例';
-
-        // 测试类型在循环外提取（每份报告固定不变）
-        const reportTestType = escapeJsAttr((data.details && data.details.test_type) || '');
-
-        const failuresHTML = data.failures.map((failure, idx) => {
-            const reasonText = failure.reason || '无失败原因';
-
-            const moduleName = failure.module || '未知模块';
-
-            const testCaseName = failure.name || '未知用例';
-
-            // 格式化完整堆栈信息，保留换行和缩进
-            const formattedStackTrace = (reasonText || '无失败原因')
-                .split('\n')
-                .map(line => '&nbsp;&nbsp;&nbsp;&nbsp;' + line
-                    .replace(/&/g, '&amp;')
-                    .replace(/</g, '&lt;')
-                    .replace(/>/g, '&gt;')
-                )
-                .join('<br>');
-
-            const reportName = window.currentReportName || '';
-            const redmineIssueMatch = reportName.match(/^Redmine-(\d+)-/);
-            const issueIdFromReport = redmineIssueMatch ? redmineIssueMatch[1] : '';
-
-            // 转义用于 data-a* 委托属性的参数
-            const escModuleName = escapeJsAttr(moduleName);
-            const escTestCaseName = escapeJsAttr(testCaseName);
-
-            return `
-                <div class="report-failure-card">
-                    <div class="report-failure-card-head">
-                        <div class="report-failure-title">
-                            <div>测试模块: <span>${escapeHtml(moduleName)}</span></div>
-                            <div>测试用例: <code>${escapeHtml(testCaseName)}</code></div>
-                        </div>
-                        <div class="report-failure-actions">
-                            ${issueIdFromReport ? `<button class="report-failure-action reply" data-click="openRedmineReplyModal" data-a0="${escModuleName}" data-a1="${escTestCaseName}" data-a2="${idx}" data-a3="${issueIdFromReport}" data-reason="${encodeURIComponent(reasonText)}">Redmine回复</button>` : ''}
-                            <button class="report-failure-action test" data-click="goToTestCase" data-a0="${reportTestType}" data-a1="${escModuleName}" data-a2="${escTestCaseName}">单测用例</button>
-                            <button class="report-failure-action diagnose" data-click="openReportDiagnosisModal" data-a0="${idx}">报错诊断</button>
-                        </div>
-                    </div>
-                    <div>
-                        <div class="report-failure-reason-label">报错信息</div>
-                        <div class="failure-reason" id="failure-reason-${idx}" style="font-size: 11px; font-family: 'Courier New', monospace; white-space: pre-wrap; word-wrap: break-word;">${formattedStackTrace}</div>
-                        <div class="failure-reason-raw" id="failure-reason-raw-${idx}" style="display: none;">${escapeHtml(reasonText)}</div>
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-        failureList.innerHTML = failuresHTML;
-    } else if (failuresDiv) {
-        failuresDiv.style.display = 'block';
-        if (failuresTitle) failuresTitle.textContent = '✅ 测试结果';
-        if (failureList) {
-            const passRate = (data.summary && data.summary.pass_rate) || '';
-            failureList.innerHTML = `
-                <div class="report-empty-success">
-                    <b>✅ 全部通过</b>
-                    <span>这份报告${passRate ? `通过率 ${escapeHtml(passRate)}` : '没有失败用例'}，无需诊断失败项，可以清除后继续分析下一份报告。</span>
-                </div>
-            `;
+    const failureDetail = $('report-failure-detail');
+    const failureDetailContent = $('report-failure-detail-content');
+    const headerActions = $('report-failure-header-actions');
+    if (headerActions) headerActions.replaceChildren();
+    if (failureDetail) failureDetail.hidden = true;
+    if (failureDetailContent) failureDetailContent.replaceChildren();
+    if (failuresDiv && failureList && Array.isArray(data.failures) && data.failures.length) {
+        failuresDiv.style.display = 'flex';
+        if (failuresTitle) failuresTitle.textContent = '失败用例 (' + data.failures.length + ')';
+        const fragment = document.createDocumentFragment();
+        data.failures.forEach((failure, idx) => {
+            const card = document.createElement('div');
+            card.className = 'report-failure-card';
+            const select = document.createElement('button');
+            select.type = 'button';
+            select.className = 'report-failure-select';
+            select.dataset.reportFailureIndex = String(idx);
+            select.setAttribute('aria-label', '查看失败用例 ' + (failure.name || '未知用例'));
+            const top = document.createElement('span');
+            top.className = 'report-failure-item-top';
+            const moduleName = document.createElement('span');
+            moduleName.className = 'report-failure-module';
+            moduleName.textContent = failure.module || '未知模块';
+            moduleName.title = moduleName.textContent;
+            const failed = document.createElement('span');
+            failed.className = 'report-failure-status';
+            failed.textContent = '失败';
+            top.append(moduleName, failed);
+            const testName = document.createElement('span');
+            testName.className = 'report-failure-case';
+            testName.textContent = failure.name || '未知用例';
+            testName.title = testName.textContent;
+            const preview = document.createElement('span');
+            preview.className = 'report-failure-preview';
+            preview.textContent = String(failure.reason || '无失败原因').split(/\r?\n/, 1)[0];
+            preview.title = preview.textContent.slice(0, 300);
+            select.append(top, testName, preview);
+            card.appendChild(select);
+            fragment.appendChild(card);
+        });
+        failureList.replaceChildren(fragment);
+        if (!failureList.dataset.reportFailureBound) {
+            failureList.dataset.reportFailureBound = 'true';
+            failureList.addEventListener('click', event => {
+                const button = event.target.closest('[data-report-failure-index]');
+                if (button && failureList.contains(button)) {
+                    selectReportFailure(Number(button.dataset.reportFailureIndex));
+                }
+            });
         }
+        selectReportFailure(0);
+    } else if (failuresDiv && failureList) {
+        failuresDiv.style.display = 'flex';
+        if (failuresTitle) failuresTitle.textContent = '✅ 测试结果';
+        const success = document.createElement('div');
+        success.className = 'report-empty-success';
+        const heading = document.createElement('b');
+        heading.textContent = '✅ 全部通过';
+        const copy = document.createElement('span');
+        const passRate = data.summary?.pass_rate || '';
+        copy.textContent = passRate
+            ? '这份报告通过率 ' + passRate + '，没有失败用例。'
+            : '这份报告没有失败用例，可以清除后继续分析下一份报告。';
+        success.append(heading, copy);
+        failureList.replaceChildren(success);
     }
 }
 

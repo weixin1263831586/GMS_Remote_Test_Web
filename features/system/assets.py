@@ -35,6 +35,7 @@ from .utility_tools_api import (
 from .utility_tools_api import (
     router as utility_tools_router,
 )
+from .vpn_proxy_api import router as vpn_proxy_router
 
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 router.include_router(utility_tools_router)
 router.include_router(tools_data_router)
+router.include_router(vpn_proxy_router)
 
 
 def _remote_list_command(path: str) -> str:

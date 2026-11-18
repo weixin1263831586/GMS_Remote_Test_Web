@@ -110,6 +110,48 @@ class DiskHygieneTests(unittest.TestCase):
         self.assertTrue(fresh_chunk.exists())
         self.assertFalse(stale.exists())
 
+    def test_cleanup_never_traverses_symlinked_upload_owner(self):
+        data_root = self._with_fake_data_root()
+        external_owner = data_root / "outside-uploads"
+        external_session = external_owner / "old-session"
+        external_session.mkdir(parents=True)
+        payload = external_session / "keep.bin"
+        payload.write_bytes(b"important")
+        old = time.time() - 30 * 86400
+        os.utime(payload, (old, old))
+        os.utime(external_session, (old, old))
+        os.utime(external_owner, (old, old))
+        upload_root = data_root / "uploads" / "gms_uploads"
+        upload_root.mkdir(parents=True)
+        (upload_root / "linked-owner").symlink_to(
+            external_owner, target_is_directory=True
+        )
+
+        with mock.patch.dict("os.environ", {"GMS_UPLOAD_DIR": str(data_root / "uploads")}):
+            disk_hygiene.run_cleanup(dry_run=False, include_stage=False)
+
+        self.assertEqual(payload.read_bytes(), b"important")
+        self.assertTrue(external_session.exists())
+
+    def test_stage_cleanup_never_deletes_through_symlinked_run(self):
+        data_root = self._with_fake_data_root()
+        outside = data_root / "outside-stage"
+        outside.mkdir()
+        payload = outside / "critical.img"
+        payload.write_bytes(b"do-not-delete")
+        old = time.time() - 30 * 86400
+        os.utime(payload, (old, old))
+        stage_root = data_root / "automation" / "artifact-stage"
+        stage_root.mkdir(parents=True)
+        (stage_root / "linked-run").symlink_to(outside, target_is_directory=True)
+        self._register_active_runs(set())
+
+        preview = disk_hygiene.preview_cleanup(stage_max_age_days=7)
+        disk_hygiene.run_cleanup(dry_run=False, include_stage=True)
+
+        self.assertEqual(preview["candidate_count"], 0)
+        self.assertEqual(payload.read_bytes(), b"do-not-delete")
+
     def test_admin_stage_pass_skips_runs_that_are_not_terminal(self):
         # 暂存固件清理必须核对运行状态，非终态 run 引用的
         # 镜像 fail-closed 跳过。

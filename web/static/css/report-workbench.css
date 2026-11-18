@@ -1,0 +1,629 @@
+/* Report analysis / muted-dark workbench.
+   Match the APK workbench dimensions without introducing global overrides. */
+#page-report-analysis {
+    --report-accent: #a49acb;
+    --report-accent-line: #7c709f;
+    --report-accent-wash: rgba(138, 126, 182, .11);
+    --report-stage: var(--analysis-workbench-stage);
+    --report-surface: var(--analysis-workbench-surface);
+    --report-raised: var(--light-bg);
+    --report-hover: #292933;
+    --report-edge: var(--border-color);
+    --report-muted: var(--text-secondary);
+}
+#page-report-analysis .page-header-row > .section-title { font-size: 15px; font-weight: 650; }
+#page-report-analysis.page-ui-rework .report-workbench-upload {
+    box-sizing: border-box;
+    display: flex;
+    flex: 0 0 auto;
+    gap: var(--analysis-pane-gap);
+    align-items: stretch;
+    min-width: 0;
+    min-height: var(--analysis-compact-upload-height);
+    margin-bottom: var(--analysis-pane-gap);
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+#page-report-analysis .report-workbench-upload:has(.upload-empty) { display: block; min-height: 0; }
+#page-report-analysis #report-upload-zone {
+    box-sizing: border-box;
+    flex: 0 1 38%;
+    min-width: 0;
+    min-height: var(--analysis-compact-upload-height);
+    width: auto;
+    max-height: none;
+    margin: 0;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--report-surface);
+    border: 1px solid var(--report-edge);
+    border-radius: var(--analysis-pane-radius);
+}
+#page-report-analysis #report-upload-zone:not(.upload-empty) {
+    flex: 0 1 38%;
+    min-height: var(--analysis-compact-upload-height);
+    height: var(--analysis-compact-upload-height);
+    max-height: var(--analysis-compact-upload-height);
+    border: 1px solid var(--report-edge);
+}
+#page-report-analysis #report-upload-zone.upload-empty {
+    flex: 0 0 auto;
+    height: clamp(200px, 32vh, 290px);
+    min-height: 200px;
+    max-height: 290px;
+    width: 100%;
+    border: 1px dashed var(--border-light);
+    background: var(--report-stage);
+}
+#page-report-analysis #report-upload-zone:hover {
+    background: color-mix(in srgb, var(--report-accent) 5%, var(--report-stage));
+    border-color: var(--report-accent-line);
+}
+#page-report-analysis #report-upload-zone.drag-over {
+    border-color: var(--report-accent);
+    background: var(--report-accent-wash);
+    transform: none;
+}
+#page-report-analysis .report-upload-content {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
+    gap: 10px;
+    padding: 0;
+}
+#page-report-analysis .report-upload-mark,
+#page-report-analysis .report-active-icon {
+    display: grid;
+    place-items: center;
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    border-radius: 7px;
+    background: var(--report-accent-wash);
+    color: var(--report-accent);
+}
+#page-report-analysis .report-upload-mark > .ui-icon { width: 19px; height: 19px; }
+#page-report-analysis .report-upload-content .analysis-upload-copy {
+    flex: 1 1 auto;
+    width: auto;
+    max-width: none;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    text-align: left;
+}
+#page-report-analysis .analysis-upload-title {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#page-report-analysis .analysis-upload-copy .upload-instructions {
+    margin: 5px 0 0;
+    color: var(--report-muted);
+    font-size: var(--analysis-control-font-size);
+    line-height: 1.5;
+}
+#page-report-analysis .report-upload-content > button,
+#page-report-analysis .report-overview-actions > button,
+#page-report-analysis .report-failure-action {
+    box-sizing: border-box;
+    flex: 0 0 auto;
+    min-width: 0;
+    width: auto;
+    height: var(--analysis-control-height);
+    min-height: var(--analysis-control-height);
+    padding: 5px 11px;
+    margin: 0;
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    background: var(--lighter-bg);
+    color: var(--text-primary);
+    font-size: var(--analysis-control-font-size);
+    font-weight: 550;
+    white-space: nowrap;
+    box-shadow: none;
+    transform: none;
+}
+#page-report-analysis .report-upload-content > button:hover,
+#page-report-analysis .report-overview-actions > button:hover,
+#page-report-analysis .report-failure-action:hover {
+    background: var(--report-hover);
+    border-color: var(--report-accent-line);
+    transform: none;
+}
+#page-report-analysis #report-upload-zone.upload-empty .report-upload-content {
+    gap: 14px;
+    flex-wrap: wrap;
+    max-width: min(750px, 95%);
+}
+#page-report-analysis #report-upload-zone.upload-empty .analysis-upload-copy { flex: 0 1 auto; width: auto; }
+#page-report-analysis #report-upload-zone.upload-empty .analysis-upload-title { font-size: 15px; }
+#page-report-analysis .report-active-file {
+    box-sizing: border-box;
+    flex: 1 1 62%;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 12px;
+    padding: 11px 14px;
+    background: var(--report-surface);
+    border: 1px solid var(--report-edge);
+    border-radius: var(--analysis-pane-radius);
+}
+#page-report-analysis .report-active-file[hidden] { display: none; }
+#page-report-analysis .report-active-copy { flex: 1 1 auto; min-width: 0; }
+#page-report-analysis .report-active-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 650;
+}
+#page-report-analysis .report-active-status {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 6px;
+    color: var(--success-color);
+    font-size: 11px;
+}
+#page-report-analysis .report-active-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--success-color);
+}
+#page-report-analysis .report-active-progress {
+    height: 3px;
+    margin-top: 7px;
+    overflow: hidden;
+    background: var(--darker-bg);
+    border-radius: 3px;
+}
+#page-report-analysis .report-active-progress > span { display: block; width: 100%; height: 100%; background: var(--report-accent-line); }
+#page-report-analysis #report-analysis-result {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+    flex-direction: column;
+    gap: var(--analysis-pane-gap);
+    overflow: hidden;
+}
+#page-report-analysis #report-analysis-result > .report-result-card {
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--report-edge);
+    border-radius: var(--analysis-pane-radius);
+    background: var(--report-surface);
+    box-shadow: none;
+}
+#page-report-analysis .report-overview {
+    flex: 0 0 auto;
+    min-width: 0;
+    background: var(--analysis-workbench-surface);
+}
+#page-report-analysis .report-overview-line {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    height: var(--analysis-summary-row-height);
+    padding: 0 8px;
+}
+/* Keep metadata in the SAME row as the four metrics.  Narrow layouts
+   scroll the content inside this bar rather than growing its height. */
+#page-report-analysis #report-summary {
+    box-sizing: border-box;
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 0;
+    min-width: 0;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    scrollbar-width: thin;
+    overscroll-behavior-x: contain;
+    background: transparent;
+    border: 0;
+}
+#page-report-analysis #report-summary > :is(.report-summary-stats, .report-summary-context) {
+    display: contents;
+}
+#page-report-analysis #report-summary :is(.report-summary-stats, .report-summary-context) > div {
+    box-sizing: border-box;
+    display: inline-flex;
+    flex: 1 0 100px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 100px;
+    min-height: 30px;
+    height: 30px;
+    margin: 0;
+    padding: 0 10px;
+    border: 1px solid var(--report-edge);
+    border-radius: 5px;
+    background: var(--report-stage);
+}
+#page-report-analysis #report-summary .report-summary-stats > div {
+    min-height: 26px;
+}
+#page-report-analysis #report-summary .report-summary-context > .report-summary-report {
+    flex: 1.6 0 155px;
+    min-width: 155px;
+    max-width: none;
+}
+#page-report-analysis #report-summary .summary-label {
+    flex: 0 0 auto;
+    margin: 0;
+    color: var(--report-muted);
+    font-size: 11px;
+    white-space: nowrap;
+}
+#page-report-analysis #report-summary .summary-value {
+    min-width: 0;
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 650;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+#page-report-analysis #report-summary .report-summary-context .summary-value {
+    font-size: 11px;
+    font-weight: 600;
+}
+#page-report-analysis #report-summary .summary-value.pass { color: var(--success-color); }
+#page-report-analysis #report-summary .summary-value.fail { color: var(--danger-color); }
+#page-report-analysis #report-summary .summary-value.rate { color: var(--report-accent); }
+#page-report-analysis .report-overview-actions {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: 5px;
+    height: 100%;
+    border-left: 1px solid var(--report-edge);
+    padding-left: 8px;
+}
+#page-report-analysis #report-analysis-result .report-overview-actions > button {
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 var(--analysis-control-height);
+    width: var(--analysis-control-height);
+    min-width: var(--analysis-control-height);
+    height: var(--analysis-control-height);
+    min-height: var(--analysis-control-height);
+    margin: 0;
+    padding: 0;
+}
+#page-report-analysis .report-overview-actions .ui-icon {
+    width: 13px;
+    height: 13px;
+    color: var(--report-accent);
+}
+#page-report-analysis .report-section-head {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: var(--analysis-pane-heading-height);
+    margin: 0;
+    padding: 0 12px;
+    gap: 10px;
+    border-bottom: 1px solid var(--report-edge);
+    background: var(--report-raised);
+}
+#page-report-analysis #report-failures-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--text-primary);
+}
+#page-report-analysis #report-details { margin: 0; padding: 0 12px 9px; }
+#page-report-analysis #report-details:empty { display: none; }
+#page-report-analysis #report-details > .report-provenance {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 29px;
+    padding-top: 7px;
+    border-top: 1px solid var(--report-edge);
+}
+#page-report-analysis #report-details .report-provenance-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    max-width: 260px;
+    padding: 4px 7px;
+    background: var(--report-stage);
+    border: 1px solid var(--report-edge);
+    border-radius: 5px;
+    font-size: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#page-report-analysis #report-details .report-provenance-link {
+    box-sizing: border-box;
+    min-height: var(--analysis-control-height);
+    height: var(--analysis-control-height);
+    padding: 4px 8px;
+    background: var(--lighter-bg);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 11px;
+}
+#page-report-analysis #report-failures {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+#page-report-analysis .report-failure-heading { flex: 0 0 var(--analysis-pane-heading-height); }
+#page-report-analysis .report-failure-layout {
+    flex: 1 1 0;
+    display: grid;
+    grid-template-columns: minmax(255px, .35fr) minmax(0, .65fr);
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+#page-report-analysis .report-failure-layout:has(.report-failure-detail[hidden]) { grid-template-columns: minmax(0, 1fr); }
+#page-report-analysis #report-failure-list {
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: 0;
+    max-height: none;
+    overflow: auto;
+    padding: 10px;
+    background: var(--report-surface);
+    border-right: 1px solid var(--report-edge);
+    scrollbar-width: thin;
+    overscroll-behavior: contain;
+}
+#page-report-analysis #report-failure-list > .report-failure-card {
+    box-sizing: border-box;
+    margin: 0 0 6px;
+    padding: 0;
+    border: 1px solid var(--report-edge);
+    border-left: 2px solid transparent;
+    border-radius: 6px;
+    background: var(--report-raised);
+    overflow: hidden;
+}
+#page-report-analysis #report-failure-list > .report-failure-card:last-child { margin-bottom: 0; }
+#page-report-analysis #report-failure-list > .report-failure-card.selected {
+    border-color: var(--report-accent-line);
+    border-left-color: var(--report-accent);
+    background: var(--report-accent-wash);
+}
+#page-report-analysis .report-failure-select {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    width: 100%;
+    min-width: 0;
+    padding: 11px 12px;
+    text-align: left;
+    border: 0;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+#page-report-analysis .report-failure-select:hover { background: rgba(255,255,255,.025); }
+#page-report-analysis .report-failure-select:focus-visible { outline: 2px solid var(--report-accent); outline-offset: -2px; }
+#page-report-analysis .report-failure-module {
+    font-size: 12px;
+    font-weight: 650;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#page-report-analysis .report-failure-case {
+    color: var(--text-primary);
+    font: 11px/1.5 var(--ui-font-mono, Consolas, monospace);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#page-report-analysis .report-failure-preview {
+    color: var(--report-muted);
+    font: 10px/1.45 var(--ui-font-mono, Consolas, monospace);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#page-report-analysis .report-failure-status {
+    color: var(--danger-color);
+    font-size: 10px;
+    font-weight: 600;
+    flex: 0 0 auto;
+}
+#page-report-analysis .report-failure-item-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+#page-report-analysis .report-failure-item-top .report-failure-module { flex: 1 1 auto; }
+#page-report-analysis .report-failure-detail {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--report-stage);
+}
+#page-report-analysis .report-failure-detail[hidden] { display: none; }
+#page-report-analysis #report-failure-detail-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
+}
+#page-report-analysis .report-detail-heading {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex: 0 0 auto;
+    min-height: var(--analysis-pane-heading-height);
+    padding: 7px 13px;
+    border-bottom: 1px solid var(--report-edge);
+    background: var(--report-raised);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 650;
+}
+#page-report-analysis .report-detail-heading .ui-icon { color: var(--report-accent); }
+#page-report-analysis .report-detail-heading > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#page-report-analysis .report-detail-fields {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 10px 13px;
+    flex: 0 0 auto;
+}
+#page-report-analysis .report-detail-field {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    min-width: 0;
+    flex: 1 1 150px;
+    max-width: 390px;
+    padding: 7px 9px;
+    border: 1px solid var(--report-edge);
+    border-radius: 6px;
+    background: var(--report-surface);
+    font-size: 11px;
+}
+#page-report-analysis .report-detail-field > .report-detail-label { color: var(--report-muted); flex: 0 0 auto; }
+#page-report-analysis .report-detail-field > .report-detail-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--ui-font-mono, Consolas, monospace);
+}
+#page-report-analysis .report-detail-field.status > .report-detail-value { color: var(--danger-color); }
+#page-report-analysis .report-stack {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 0 13px 10px;
+    border: 1px solid var(--report-edge);
+    border-radius: 6px;
+    overflow: auto;
+    scrollbar-width: thin;
+    background: #16161d;
+    color: #d5d4dd;
+    font: 11px/1.55 var(--ui-font-mono, Consolas, monospace);
+}
+#page-report-analysis .report-stack-line { display: flex; min-width: max-content; min-height: 18px; }
+#page-report-analysis .report-stack-line:hover { background: rgba(255,255,255,.035); }
+#page-report-analysis .report-stack-number {
+    display: inline-block;
+    box-sizing: border-box;
+    flex: 0 0 48px;
+    padding: 0 12px 0 5px;
+    margin-right: 14px;
+    text-align: right;
+    color: #858394;
+    border-right: 1px solid rgba(255,255,255,.055);
+    user-select: none;
+}
+#page-report-analysis .report-stack-text { white-space: pre; }
+/* Keep selected-case operations visible at the right of the title rail. */
+#page-report-analysis .report-failure-heading { flex-wrap: nowrap; overflow: hidden; }
+#page-report-analysis .report-failure-header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex: 0 0 auto;
+    gap: 6px;
+    min-width: 0;
+    margin-left: auto;
+}
+#page-report-analysis .report-failure-header-actions:empty { display: none; }
+#page-report-analysis .report-failure-header-actions .report-failure-action {
+    box-sizing: border-box;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: auto;
+    min-width: 68px;
+    height: var(--analysis-control-height);
+    min-height: var(--analysis-control-height);
+    padding: 0 10px;
+    margin: 0;
+    line-height: 1;
+    white-space: nowrap;
+}
+#page-report-analysis .report-failure-action.reply { color: var(--report-accent); border-color: var(--report-accent-line); }
+#page-report-analysis .report-failure-action.test { color: var(--success-color); }
+#page-report-analysis .report-failure-action.diagnose { color: var(--text-primary); }
+#page-report-analysis .report-empty-success {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    justify-content: center;
+    min-height: 100%;
+    border: 0;
+    padding: 24px;
+    background: transparent;
+}
+@media (max-width: 1120px) {
+    #page-report-analysis .report-failure-layout { grid-template-columns: minmax(235px,.39fr) minmax(0,.61fr); }
+}
+@media (max-width: 850px) {
+    #page-report-analysis .report-workbench-upload { flex-wrap: wrap; }
+    #page-report-analysis #report-upload-zone:not(.upload-empty),
+    #page-report-analysis .report-active-file { flex: 1 1 100%; }
+    #page-report-analysis .report-failure-layout { grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(165px,.34fr) minmax(0,.66fr); }
+    #page-report-analysis #report-failure-list { border-right: 0; border-bottom: 1px solid var(--report-edge); }
+}
+@media (max-width: 600px) {
+    #page-report-analysis #report-upload-zone.upload-empty { min-height: 210px; }
+    #page-report-analysis .report-upload-content { flex-wrap: wrap; justify-content: flex-start; }
+    #page-report-analysis .report-upload-content .analysis-upload-copy { flex: 1 1 calc(100% - 50px); }
+    #page-report-analysis .report-upload-content > button { margin-left: 46px; }
+    #page-report-analysis .report-section-head { flex-wrap: wrap; height: auto; min-height: var(--analysis-pane-heading-height); padding: 6px 10px; }
+    #page-report-analysis .report-detail-fields { gap: 6px; }
+    #page-report-analysis .report-failure-heading { flex-wrap: nowrap; padding: 5px 8px; }
+    #page-report-analysis .report-failure-header-actions { gap: 4px; }
+    #page-report-analysis .report-failure-header-actions .report-failure-action {
+        min-width: 0;
+        padding: 0 6px;
+        font-size: 10px;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    #page-report-analysis .report-failure-select,
+    #page-report-analysis #report-analysis-result { animation: none; }
+}

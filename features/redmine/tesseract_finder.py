@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import functools
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -70,3 +72,53 @@ def configure_bundled_tesseract() -> bool:
     for key in ("LD_LIBRARY_PATH", "PATH", "TESSDATA_PREFIX"):
         os.environ[key] = env[key]
     return True
+
+
+@functools.lru_cache(maxsize=1)
+def usable_tesseract_cmd() -> str | None:
+    """Use a runnable bundled engine; fall back to distro Tesseract.
+
+    The bundled Tesseract 4 binary may depend on unavailable old libtiff or
+    giflib sonames on newer Linux distributions. Existence alone is not proof
+    it can load. The system engine is preferred over disabling OCR entirely.
+    """
+    bundled = bundled_tesseract_cmd()
+    if bundled:
+        try:
+            result = subprocess.run(
+                [bundled, "--version"],
+                env=bundled_tesseract_env(),
+                capture_output=True, timeout=5, check=False,
+            )
+            if result.returncode == 0:
+                return bundled
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return shutil.which("tesseract")
+
+
+def configure_usable_tesseract() -> str | None:
+    """Select a functional OCR binary and avoid mixing shared library stacks.
+
+    A prior bundled OCR call can have prepended tools/tesseract to the process
+    library search path. System Tesseract must not then import the bundled
+    libtesseract/liblept, which may depend on removed libtiff.so.5.
+    """
+    cmd = usable_tesseract_cmd()
+    if not cmd:
+        return None
+    if cmd == bundled_tesseract_cmd():
+        configure_bundled_tesseract()
+    else:
+        root = str(_tesseract_dir())
+        for key in ("LD_LIBRARY_PATH", "PATH"):
+            if key in os.environ:
+                values = [path for path in os.environ[key].split(os.pathsep)
+                          if path != root]
+                if values:
+                    os.environ[key] = os.pathsep.join(values)
+                else:
+                    os.environ.pop(key, None)
+        if os.environ.get("TESSDATA_PREFIX") == str(_tesseract_dir() / "tessdata"):
+            os.environ.pop("TESSDATA_PREFIX", None)
+    return cmd

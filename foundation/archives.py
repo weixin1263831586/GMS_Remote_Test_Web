@@ -134,6 +134,12 @@ def safe_extract_member_path(base_dir: str, member_name: str) -> str:
     base = os.path.abspath(base_dir)
     if target != base and not target.startswith(base + os.sep):
         raise ValueError(f'压缩包包含不安全路径: {member_name}')
+    # A pre-existing symlink inside an extraction directory must not cause
+    # an archive member to overwrite files outside that directory.
+    base_real = os.path.realpath(base)
+    target_real = os.path.realpath(target)
+    if os.path.commonpath((base_real, target_real)) != base_real:
+        raise ValueError(f'压缩包包含不安全路径: {member_name}')
     return target
 
 

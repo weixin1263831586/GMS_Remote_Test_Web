@@ -28,6 +28,37 @@ class DeviceLockManagerTests(unittest.TestCase):
 
             self.assertEqual(sorted(success for success, _ in results), [False, True])
 
+    def test_unlock_all_does_not_release_same_source_on_other_worker(self):
+        from features.devices.locks import DeviceLockManager
+
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / 'claims.sqlite3'
+            local = DeviceLockManager(db_path, local_worker_id='worker-a')
+            remote = DeviceLockManager(db_path, local_worker_id='worker-b')
+            ok, _ = local.lock_device('LOCAL', 'alice', 'Alice')
+            self.assertTrue(ok)
+            ok, _ = remote.lock_device('REMOTE', 'alice', 'Alice')
+            self.assertTrue(ok)
+            self.assertEqual(local.unlock_all('alice'), 1)
+            self.assertIsNone(local.get_lock_status('LOCAL'))
+            self.assertIsNotNone(remote.get_lock_status('REMOTE'))
+
+    def test_plain_unlock_cannot_release_cluster_job_of_same_owner(self):
+        from features.devices.locks import DeviceLockManager
+
+        with tempfile.TemporaryDirectory() as directory:
+            locks = DeviceLockManager(Path(directory) / 'claims.sqlite3')
+            ok, _ = locks.lock_devices(
+                ['CLUSTER'], 'alice', 'Alice',
+                source_id='job:123', source_type='cluster-job',
+            )
+            self.assertTrue(ok)
+            unlocked, _ = locks.unlock_device('CLUSTER', 'alice')
+            self.assertFalse(unlocked)
+            self.assertIsNotNone(locks.get_lock_status('CLUSTER'))
+            self.assertEqual(locks.unlock_all('alice'), 0)
+            self.assertIsNotNone(locks.get_lock_status('CLUSTER'))
+
     def test_refresh_locks_only_renews_devices_owned_by_client(self):
         from features.devices.locks import DeviceLockManager
 

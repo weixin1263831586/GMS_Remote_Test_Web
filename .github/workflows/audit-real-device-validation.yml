@@ -3,27 +3,57 @@ name: Audit one-shot Android real-device verification
 on:
   push:
     branches:
-      - audit/global-current-0acf952-20261117
+      - audit/global-current-1cd4167-20261118
     paths:
       - .github/workflows/audit-real-device-validation.yml
+      - tools/scripts/testing/resolve_soak_host_config.py
+      - tests/test_soak_host_config.py
+      - tests/soak/test_device_chain_soak.py
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# The scheduled nightly soak uses the same lab devices.
-concurrency:
-  group: nightly-android-soak
-  cancel-in-progress: false
-
+# Preflight is read-only and intentionally does not reserve lab hardware.
+# The actual device chain remains exclusive with scheduled nightly soak.
 jobs:
+  runner-preflight:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 10
+    steps:
+      - name: Verify registered on-premise actions-runner listener
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Runner: ${RUNNER_NAME} (${RUNNER_OS}/${RUNNER_ARCH})"
+          test "${RUNNER_NAME}" = "ats-041055-64g"
+          test -s "$HOME/GMS_Remote_Test_Web/actions-runner/.runner"
+          echo "User: $(id -un)"
+          test "$(id -un)" = "hcq"
+          echo "GitHub Actions workspace: ${GITHUB_WORKSPACE}"
+          if command -v adb >/dev/null 2>&1; then
+            adb version
+            adb devices -l
+          else
+            echo "::notice::No local adb; Worker-side ADB is verified by soak test"
+          fi
+          if command -v python3 >/dev/null 2>&1; then
+            python3 --version
+          fi
+          echo "Runner registration and listener dispatch confirmed"
+
   audited-device-chain:
-    runs-on: [self-hosted, linux, gms-android-lab]
+    needs: runner-preflight
+    runs-on: [self-hosted, linux, x64]
+    # Old audit workflows have an orphaned queue entry waiting for a lab-only
+    # label. Scope this verification to its dedicated single-job on-prem runner
+    # rather than let that stale workflow-level concurrency block dispatch.
+    # Cluster job leases and target BUSID checks still guard the shared DUT.
+    concurrency:
+      group: gms-audit-device-chain-1cd4167
+      cancel-in-progress: false
     timeout-minutes: 90
     env:
-      GMS_SOAK_BASE_URL: ${{ secrets.GMS_SOAK_BASE_URL }}
-      GMS_SOAK_USERNAME: ${{ secrets.GMS_SOAK_USERNAME }}
-      GMS_SOAK_PASSWORD: ${{ secrets.GMS_SOAK_PASSWORD }}
       GMS_SOAK_DEVICE_HOST: ${{ vars.GMS_SOAK_DEVICE_HOST }}
       GMS_SOAK_DEVICE_SERIAL: ${{ vars.GMS_SOAK_DEVICE_SERIAL }}
       GMS_SOAK_BUSIDS: ${{ vars.GMS_SOAK_BUSIDS }}
@@ -36,6 +66,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$RUNNER_NAME" = "ats-041055-64g" || {
+            echo "::error::Unexpected Runner: $RUNNER_NAME (expected ats-041055-64g)"
+            exit 1
+          }
           test -f "$HOME/GMS_Remote_Test_Web/actions-runner/.runner" || {
             echo "::error::This host is not ~/GMS_Remote_Test_Web/actions-runner; refusing to use its devices."
             exit 1
@@ -49,32 +83,20 @@ jobs:
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: "3.10"
-      - name: Install tests into runner Python
-        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
-      - name: Verify lab setup; never silently skip physical-device testing
+      - name: Prepare minimal isolated physical-test Python environment
         shell: bash
         run: |
           set -euo pipefail
-          echo "Runner name: ${RUNNER_NAME}"
-          if [[ -d "$HOME/GMS_Remote_Test_Web/actions-runner" ]]; then
-            echo "Expected actions-runner installation is present"
-          else
-            echo "Runner installation path differs from the requested home directory"
-          fi
-          test -n "$GMS_SOAK_BASE_URL"
-          test -n "$GMS_SOAK_USERNAME"
-          test -n "$GMS_SOAK_PASSWORD"
-          test -n "$GMS_SOAK_DEVICE_HOST"
-          test -n "$GMS_SOAK_BUSIDS"
-          test -n "$GMS_SOAK_WORKER_ID"
-      - name: Run focused repaired-code regression tests
-        run: |
-          python -m pytest -q \
-            features/assistant/tests/test_response_envelopes.py \
-            features/system/tests/test_audit_source_contracts.py \
-            features/redmine/tests/test_evidence_freshness_contract.py
+          # No Playwright, OCR, adbutils or complete development environment on
+          # the physical Worker filesystem. Those tests run in hosted CI.
+          venv="$RUNNER_TEMP/gms-device-venv"
+          python -m venv "$venv"
+          echo "GMS_TEST_PYTHON=$venv/bin/python" >> "$GITHUB_ENV"
+          "$venv/bin/python" -m pip install --disable-pip-version-check \
+            "pytest==9.1.1" "requests==2.34.2"
       - name: Verify concurrent sync exclusions across runner processes
-        run: python -m pytest -q tests/test_process_sync_guard.py
+        run: |
+          "$GMS_TEST_PYTHON" -m pytest -q --confcutdir=tests tests/test_process_sync_guard.py tests/test_soak_host_config.py
       - name: Observe local ADB devices if this runner hosts ADB
         shell: bash
         run: |
@@ -83,5 +105,60 @@ jobs:
           else
             echo "No local adb; controller-to-worker test uses remote Worker ADB"
           fi
+      - name: Resolve local host lab config without exporting credentials to GitHub
+        shell: bash
+        env:
+          GMS_SOAK_BASE_URL: ${{ vars.GMS_SOAK_BASE_URL || secrets.GMS_SOAK_BASE_URL }}
+          GMS_SOAK_USERNAME: ${{ secrets.GMS_SOAK_USERNAME }}
+          GMS_SOAK_PASSWORD: ${{ secrets.GMS_SOAK_PASSWORD }}
+          GMS_SOAK_SESSION_TOKEN: ${{ secrets.GMS_SOAK_SESSION_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          "$GMS_TEST_PYTHON" tools/scripts/testing/resolve_soak_host_config.py \
+            --local-root "$HOME/GMS_Remote_Test_Web/configs/local" \
+            --output "$RUNNER_TEMP/gms-soak-${GITHUB_RUN_ID}.env"
+      - name: Reclaim only Runner pip download cache before lab disk admission
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Runner filesystem free space before bounded cache maintenance:"
+          df -h "$HOME"
+          # Clearing pip's download cache does not remove installed packages,
+          # suite files, test results or any user-generated platform data.
+          "$GMS_TEST_PYTHON" -m pip cache purge || {
+            echo "::warning::pip cache purge unavailable; no other paths touched"
+          }
+          echo "Runner filesystem free space after maintenance:"
+          df -h "$HOME"
+          # Allow Worker heartbeat to refresh its disk availability before
+          # running strict admission (default: 50 GiB) on the Controller.
+          sleep 20
       - name: Controller to Worker to USB/IP to Tradefed to recovery
-        run: python -m pytest tests/soak/test_device_chain_soak.py -q -s
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/gms-soak-${GITHUB_RUN_ID}.env"
+          # The on-host Controller uses a private TLS certificate. Trust the
+          # deployed public CA/certificate without ever disabling verification.
+          # This only applies when the explicitly selected target is loopback.
+          case "$GMS_SOAK_BASE_URL" in
+            https://127.0.0.1:*|https://localhost:*)
+              certdir="$HOME/GMS_Remote_Test_Web/configs/secrets/certs"
+              if [[ -s "$certdir/gms-local-ca.crt" ]]; then
+                export REQUESTS_CA_BUNDLE="$certdir/gms-local-ca.crt"
+              elif [[ -s "$certdir/gms-local.crt" ]]; then
+                export REQUESTS_CA_BUNDLE="$certdir/gms-local.crt"
+              else
+                echo "::error::No readable Controller CA/certificate for local TLS verification"
+                exit 1
+              fi
+              echo "Controller HTTPS trust configured using deployed public certificate"
+              ;;
+          esac
+          "$GMS_TEST_PYTHON" -m pytest --confcutdir=tests tests/soak/test_device_chain_soak.py -q -s
+      - name: Remove temporary host lab credential file
+        if: always()
+        shell: bash
+        run: |
+          rm -f -- "$RUNNER_TEMP/gms-soak-${GITHUB_RUN_ID}.env"

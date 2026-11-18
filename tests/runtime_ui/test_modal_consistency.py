@@ -52,7 +52,7 @@ class ModalGlobalConsistencyTests(RuntimeUiHarness):
             page.close()
 
 
-    def test_firmware_share_grid_scrolls_both_axes_with_fixed_footer(self):
+    def test_firmware_share_grid_fits_desktop_and_scrolls_on_mobile(self):
         page = self.new_page()
         try:
             self.goto_shell(page)
@@ -103,10 +103,18 @@ class ModalGlobalConsistencyTests(RuntimeUiHarness):
                     })""")
                     self.assertEqual(metrics["overflowX"], "auto")
                     self.assertEqual(metrics["overflowY"], "auto")
-                    self.assertGreater(metrics["scrollW"], metrics["clientW"] + 30)
+                    if viewport["width"] >= 1000:
+                        # At desktop widths all five fields must fit without X-scrolling.
+                        self.assertLessEqual(metrics["scrollW"], metrics["clientW"] + 2)
+                        last_header = modal.locator(".firmware-share-col-actions").bounding_box()
+                        panel = table_area.bounding_box()
+                        self.assertLessEqual(last_header["x"] + last_header["width"], panel["x"] + panel["width"] + 1)
+                    else:
+                        self.assertGreater(metrics["scrollW"], metrics["clientW"] + 30)
+                        table_area.evaluate("el => el.scrollLeft = el.scrollWidth")
+                        self.assertGreater(table_area.evaluate("el => el.scrollLeft"), 0)
                     self.assertGreater(metrics["scrollH"], metrics["clientH"] + 20)
-                    table_area.evaluate("el => { el.scrollLeft = el.scrollWidth; el.scrollTop = el.scrollHeight; }")
-                    self.assertGreater(table_area.evaluate("el => el.scrollLeft"), 0)
+                    table_area.evaluate("el => el.scrollTop = el.scrollHeight")
                     self.assertGreater(table_area.evaluate("el => el.scrollTop"), 0)
                     bounds = modal.locator(".modal-content").bounding_box()
                     foot = footer.bounding_box()

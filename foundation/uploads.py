@@ -46,6 +46,12 @@ def safe_upload_target_path(
     target_abs = os.path.abspath(os.path.join(base_abs, relative_path))
     if os.path.commonpath([base_abs, target_abs]) != base_abs:
         raise ValueError('非法文件路径')
+    # Lexical containment alone does not catch a symlinked directory under
+    # the upload root pointing elsewhere. Resolve existing path components.
+    base_real = os.path.realpath(base_abs)
+    target_real = os.path.realpath(target_abs)
+    if os.path.commonpath([base_real, target_real]) != base_real:
+        raise ValueError('非法文件路径')
     return target_abs
 
 
@@ -54,7 +60,9 @@ def upload_temp_root(namespace: str = "gms_uploads") -> str:
 
     Prefers GMS_UPLOAD_DIR, then data_root/uploads, then OS temp dir.
     """
-    safe_namespace = os.path.basename(str(namespace or "gms_uploads").strip()) or "gms_uploads"
+    safe_namespace = os.path.basename(str(namespace or "gms_uploads").replace("\\", "/").strip())
+    if safe_namespace in {"", ".", ".."}:
+        safe_namespace = "gms_uploads"
     override = os.getenv("GMS_UPLOAD_DIR", "").strip()
     if override:
         base = Path(override)
@@ -152,15 +160,31 @@ def merge_files_to_path(
     destination: str,
     chunk_size: int = 1024 * 1024,
 ) -> int:
+    """Atomically publish a complete chunk merge.
+
+    A missing/unreadable chunk or disk write error must not expose a
+    truncated APK, firmware image or terminal-upload artifact as complete.
+    """
+    if chunk_size <= 0:
+        raise ValueError('chunk_size must be positive')
     bytes_written = 0
-    # 目标为裸文件名时 dirname 为空串，os.makedirs('') 会抛 FileNotFoundError。
-    parent_dir = os.path.dirname(destination)
-    if parent_dir:
-        os.makedirs(parent_dir, exist_ok=True)
-    with open(destination, 'wb') as output:
-        for source_path in source_paths:
-            with open(source_path, 'rb') as source:
-                while chunk := source.read(chunk_size):
-                    output.write(chunk)
-                    bytes_written += len(chunk)
+    parent_dir = os.path.dirname(os.path.abspath(destination))
+    os.makedirs(parent_dir, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='wb', dir=parent_dir, prefix='.gms-merge-', delete=False
+        ) as output:
+            temporary = output.name
+            for source_path in source_paths:
+                with open(source_path, 'rb') as source:
+                    while chunk := source.read(chunk_size):
+                        output.write(chunk)
+                        bytes_written += len(chunk)
+        os.replace(temporary, destination)
+    except BaseException:
+        if temporary is not None:
+            with suppress(FileNotFoundError):
+                os.remove(temporary)
+        raise
     return bytes_written

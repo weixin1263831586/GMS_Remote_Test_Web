@@ -2476,6 +2476,23 @@
         "title": "PlanSettingsRequest",
         "type": "object"
       },
+      "ProxyControlRequest": {
+        "properties": {
+          "action": {
+            "enum": [
+              "start",
+              "stop"
+            ],
+            "title": "Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "ProxyControlRequest",
+        "type": "object"
+      },
       "RadarConfig": {
         "properties": {
           "dashboard_url": {
@@ -23214,6 +23231,16 @@
           },
           {
             "in": "query",
+            "name": "report_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Report Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
@@ -25804,6 +25831,70 @@
           }
         },
         "summary": "List Utility Tools"
+      }
+    },
+    "/api/tools/vpn-proxy/control": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProxyControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Proxy Control Api Tools Vpn Proxy Control Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Proxy Control",
+        "tags": [
+          "vpn-proxy"
+        ]
+      }
+    },
+    "/api/tools/vpn-proxy/status": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Proxy Status Api Tools Vpn Proxy Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Proxy Status",
+        "tags": [
+          "vpn-proxy"
+        ]
       }
     },
     "/api/usbip/assignments": {

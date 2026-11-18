@@ -22,7 +22,23 @@
             .some(frame => frame.contentWindow === e.source);
         if (fromEmbeddedFrame && e.data && allowedTypes.has(e.data.type)) {
             if (typeof notifyOperationResult === 'function') {
-                notifyOperationResult(e.data.title, e.data.message, e.data.level || 'info');
+                // Preserve the category and structured identity when an
+                // embedded page forwards a notification to the shell. The
+                // previous three-argument call discarded navigation anchors.
+                const categories = {
+                    'redmine-agent-notification': 'redmine',
+                    'automation-notification': 'automation',
+                    'cluster-notification': 'cluster',
+                    'gms-update-monitor-notification': 'system',
+                    'gms-dashboard-notification': 'system',
+                };
+                const details = e.data.data && typeof e.data.data === 'object'
+                    && !Array.isArray(e.data.data) ? e.data.data : {};
+                notifyOperationResult(
+                    e.data.title, e.data.message, e.data.level || 'info',
+                    e.data.category || categories[e.data.type] || 'system',
+                    details
+                );
             }
         }
     });

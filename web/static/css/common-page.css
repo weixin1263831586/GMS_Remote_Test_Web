@@ -1024,14 +1024,16 @@ body.apk-resizing {
 }
 
 #agent-access-entry,
-#sdk-config-entry {
+#sdk-config-entry,
+#audit-outbox-entry {
     display: flex;
     align-items: stretch;
     border-left: 1px solid var(--border-color);
 }
 
 #agent-access-entry > .btn-xs,
-#sdk-config-entry > .btn-xs {
+#sdk-config-entry > .btn-xs,
+#audit-outbox-entry > .btn-xs {
     flex: 1;
 }
 

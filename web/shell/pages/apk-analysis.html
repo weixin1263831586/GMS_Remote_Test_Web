@@ -9,18 +9,17 @@
                 </div>
             {% include 'components/page-header-end.html' %}
 
-            <!-- 上传区域 -->
+            <!-- 上传与当前任务：空状态占整行，分析时变为紧凑双栏 -->
+            <div class="apk-intake-row">
             <div class="analysis-upload-frame">
                 <div id="apk-upload-zone" class="apk-upload-zone upload-empty">
                     <input type="file" id="apk-file-input" accept=".apk,.jar" style="display: none;" />
                     <div class="apk-upload-content">
-                        <div>📁</div>
+                        <div class="apk-upload-mark" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg></div>
                         <div class="analysis-upload-copy">
                             <div class="analysis-upload-title">拖拽 APK/JAR 文件到此处</div>
                             <div class="upload-instructions">
-                                支持 .apk 和 .jar 文件格式<br><br>
-                                1. 点击按钮"📤 选择 APK/JAR 文件"上传<br>
-                                2. 直接拖拽 APK/JAR 文件上传
+                                支持 .apk 和 .jar 文件格式，选择文件或直接拖拽上传后自动开始分析。
                             </div>
                         </div>
                         <button class="btn-xs" data-click="_actClickById" data-a0="apk-file-input">
@@ -38,8 +37,9 @@
                 <div class="apk-status-card">
                     <div class="apk-status-row">
                         <div class="apk-status-main">
+                            <span class="apk-active-artifact-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg></span>
                             <div id="apk-file-name">-</div>
-                            <div id="apk-analysis-state">准备分析...</div>
+                            <div id="apk-analysis-state" aria-live="polite">准备分析...</div>
                         </div>
                         <div class="apk-status-actions">
                             <button class="btn-xs" id="apk-btn-analyze" data-click="startApkAnalysis" style="display: none;"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg> 开始分析</button>
@@ -55,14 +55,16 @@
                 </div>
             </div>
 
+            </div>
+
             <!-- 分析结果区域 -->
             <div id="apk-analysis-result" style="display: none;">
                 <!-- 标签页导航 + 搜索框 -->
                 <div class="apk-tab-actions">
-                    <div class="apk-status-actions">
-                        <button class="filter-btn active" data-apk-tab="manifest" data-click="switchApkTab" data-a0="manifest"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> AndroidManifest</button>
-                        <button class="filter-btn" data-apk-tab="permissions" data-click="switchApkTab" data-a0="permissions"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg> 权限列表</button>
-                        <button class="filter-btn" data-apk-tab="source" data-click="switchApkTab" data-a0="source"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#terminal"></use></svg> 源码浏览</button>
+                    <div class="apk-status-actions" role="tablist" aria-label="APK 分析视图">
+                        <button class="filter-btn active" data-apk-tab="manifest" role="tab" aria-controls="apk-tab-manifest" aria-selected="true" data-click="switchApkTab" data-a0="manifest"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> AndroidManifest</button>
+                        <button class="filter-btn" data-apk-tab="permissions" role="tab" aria-controls="apk-tab-permissions" aria-selected="false" data-click="switchApkTab" data-a0="permissions"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg> 权限列表</button>
+                        <button class="filter-btn" data-apk-tab="source" role="tab" aria-controls="apk-tab-source" aria-selected="false" data-click="switchApkTab" data-a0="source"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#terminal"></use></svg> 源码浏览</button>
                     </div>
                     <div class="apk-search-container">
                         <input type="text" id="apk-file-search" class="apk-search-input" placeholder="🔍 搜索文件名..."
@@ -77,7 +79,7 @@
                 <div id="apk-search-results" class="apk-search-results"></div>
 
                 <!-- Manifest信息 -->
-                <div id="apk-tab-manifest" class="apk-tab-panel">
+                <div id="apk-tab-manifest" class="apk-tab-panel" role="tabpanel">
                     <div id="apk-manifest-info">
                         <!-- 动态生成 -->
                     </div>
@@ -88,7 +90,7 @@
                 </div>
 
                 <!-- 权限列表 -->
-                <div id="apk-tab-permissions" class="apk-tab-panel" style="display: none;">
+                <div id="apk-tab-permissions" class="apk-tab-panel" role="tabpanel" style="display: none;">
                     <div class="apk-section-title">🔐 权限列表 (<span id="apk-perm-count">0</span>)</div>
                     <div id="apk-permissions-list">
                         <!-- 动态生成 -->
@@ -96,17 +98,25 @@
                 </div>
 
                 <!-- 源码浏览 -->
-                <div id="apk-tab-source" class="apk-tab-panel" style="display: none;">
+                <div id="apk-tab-source" class="apk-tab-panel" role="tabpanel" style="display: none;">
                     <div class="apk-source-frame">
                         <div class="apk-source-layout fill">
-                            <div id="apk-source-tree" class="apk-source-tree">
-                                <!-- 动态生成文件树 -->
+                            <div class="apk-source-tree-pane">
+                                <div class="apk-source-tree-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#folder"></use></svg><span>源码文件树</span></div>
+                                <div id="apk-source-tree" class="apk-source-tree" aria-label="APK 源码文件树">
+                                    <!-- 动态生成文件树 -->
+                                </div>
                             </div>
-                            <div id="apk-source-resizer" class="apk-source-resizer" title="拖拽调整源码树宽度"></div>
+                            <div id="apk-source-resizer" class="apk-source-resizer" title="拖拽调整源码树宽度" role="separator" aria-label="拖动调整源码树宽度" aria-orientation="vertical"></div>
                             <div id="apk-file-viewer" style="display: none;">
                                 <div id="apk-file-tabs" class="apk-file-tabs"></div>
                                 <div id="apk-file-path" class="apk-file-path"></div>
                                 <pre id="apk-file-content"></pre>
+                            </div>
+                            <div id="apk-source-placeholder" class="apk-source-placeholder">
+                                <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#book"></use></svg>
+                                <strong>选择源码文件</strong>
+                                <span>从左侧文件树打开 Java、XML 或其他反编译文件</span>
                             </div>
                         </div>
                     </div>

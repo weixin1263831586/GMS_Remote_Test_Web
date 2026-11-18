@@ -4,7 +4,9 @@
 // 单独成文件只增加请求与路由白名单）。脚本顺序约束不变：本 chunk 在
 // embedded-workspace.js 之后加载，boot 逻辑仍在其就绪后执行；
 // dashEchartsStatus 先于 dash-charts/dash-render 初始化。
-window.GmsEmbeddedWorkspace && window.GmsEmbeddedWorkspace.markReady();
+// The shell must not reveal the iframe before page.js has selected its
+// initial tab and wired the controls. page.js signals ready synchronously
+// after that setup, without waiting for slow API refreshes.
 
 /* ECharts 仅从本地 vendor 加载，避免集群页面向第三方 CDN 发请求。 */
 (function () {
@@ -46,9 +48,14 @@ let clusterInitialRefreshSettled=false;
 let clusterRefreshInterval=null;
 let toastTimer=null;
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-// 数据区加载占位：超新星动画（.loading-orbit 舞台，样式见 loading-orbit.css）。
-// stage=true 让首屏占位与 shell 骨架共用视口原点，不受管理区滚动影响。
-const loadingOrbitHtml=(text,stage=false)=>`<div class="loading-orbit${stage?' loading-orbit--stage':''}" role="status" aria-label="${esc(text)}"><div class="loading-orbit-bar" aria-hidden="true"></div><div class="loading-orbit-cards" aria-hidden="true"><div class="loading-orbit-card"></div><div class="loading-orbit-card"></div><div class="loading-orbit-card"></div><div class="loading-orbit-card"></div></div><div class="loading-orbit-panels" aria-hidden="true"><div class="loading-orbit-panel"></div><div class="loading-orbit-panel"></div></div><span class="loading-orbit-text">${esc(text)}</span></div>`;
+// Distinguish a successful empty response from a first-load API error. Subsequent
+// refresh failures retain the last valid data instead of blanking the inventory.
+const clusterLoadedResources=new Set();
+const clusterLoadErrors={};
+const clusterFirstLoadFailed=key=>Boolean(clusterLoadErrors[key]&&!clusterLoadedResources.has(key));
+const clusterLoadFailureRow=(key,label,columns)=>clusterFirstLoadFailed(key)
+ ? `<tr class="cluster-load-failed"><td colspan="${columns}">${esc(label)}读取失败，请点击顶部「刷新」重试</td></tr>`
+ : null;
 const oneDecimal=value=>(Number(value)||0).toFixed(1);
 const relativeTime=value=>{const timestamp=Date.parse(value||'');if(!Number.isFinite(timestamp))return '-';const seconds=Math.max(0,Math.floor((Date.now()-timestamp)/1000));if(seconds<60)return `${seconds}秒前`;if(seconds<3600)return `${Math.floor(seconds/60)}分钟前`;if(seconds<86400)return `${Math.floor(seconds/3600)}小时前`;return `${Math.floor(seconds/86400)}天前`};
 async function api(path,options,retried=false){const r=await fetch(path,options),text=await r.text();let d={};try{d=text?JSON.parse(text):{}}catch(_){d={detail:text||r.statusText}}const detail=d.detail;if(r.status===403&&!retried&&detail&&typeof detail==='object'&&detail.elevation_required&&typeof window.parent?.requestElevatedAccess==='function'){const granted=await window.parent.requestElevatedAccess('执行集群敏感操作');if(granted)return api(path,options,true)}if(!r.ok||d.success===false){const message=typeof detail==='object'?(detail.message||JSON.stringify(detail)):(detail||d.error||`HTTP ${r.status}`);const error=new Error(message);if(r.status===403&&detail&&typeof detail==='object'&&detail.elevation_required)error.elevationRequired=true;throw error}return d}

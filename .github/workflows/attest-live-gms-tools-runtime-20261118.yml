@@ -1,0 +1,56 @@
+name: Attest GMS tools live generated bundles and process freshness
+
+on:
+  push:
+    branches: [verify/vpn-proxy-master-0066c998-20261118]
+    paths: [.github/workflows/attest-live-gms-tools-runtime-20261118.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  readonly-gms-tools:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 8
+    steps:
+      - name: Inspect GMS application and its deployed static assets
+        shell: bash
+        working-directory: /home/hcq/GMS_Remote_Test_Web
+        run: |
+          set -euo pipefail
+          echo 'GMS SOURCE HEAD'; git branch --show-current; git rev-parse HEAD
+          echo 'GMS tracked modifications'; git diff --name-only; git diff --cached --name-only
+          echo 'GMS process info'
+          systemctl show gms-web-app.service -p ActiveState -p ExecMainStartTimestamp -p WorkingDirectory -p MainPID
+          echo 'GMS modified runtime/endpoint source timestamps'
+          for p in features/system/vpn_proxy_api.py web/static/js/shell/shell-early-boot.js web/static/js/shell/shell-config.js; do
+            stat -c '%y %n' "$p" 2>/dev/null || :
+          done
+          echo 'GMS runtime bundle source references'
+          rg -n 'shell-style.css|shell-runtime.js' web features main.py app.py 2>/dev/null | head -45 || :
+          echo 'GMS vpn tools frontend references'
+          rg -l 'api/tools/vpn-proxy|vpn-proxy/status|vpnProxy' web/static/js 2>/dev/null | head -30 || :
+          echo 'Live bundle hash vs HTML version token'
+          python3 - <<'PY'
+          import hashlib,re,ssl,urllib.request
+          base="https://172.16.14.233:5001"
+          context=ssl._create_unverified_context()
+          def get(path):return urllib.request.urlopen(base+path,timeout=10,context=context).read()
+          html=get('/').decode('utf-8',errors='replace')
+          for name in ('/static/css/shell-style.css','/static/js/shell/shell-runtime.js'):
+              m=re.search(re.escape(name)+r'\?v=([a-f0-9]+)',html)
+              if not m:
+                  print(name,'missing version token');continue
+              supplied=m.group(1)
+              sha=hashlib.sha256(get(name)).hexdigest()
+              print(name,'etag_token=',supplied,'sha256_live=',sha,'match=',sha.startswith(supplied))
+          print('GMS root response bytes',len(html.encode()))
+          for path in ('/api/tools/vpn-proxy/status','/api/tools/vpn-proxy/clients'):
+              try:
+                  response=urllib.request.urlopen(base+path,timeout=7,context=context)
+                  print(path,'status=',response.status,'content-type=',response.headers.get('content-type'))
+              except urllib.error.HTTPError as exc:
+                  print(path,'HTTP status=',exc.code)
+              except Exception as exc:
+                  print(path,'request error=',type(exc).__name__,str(exc)[:100])
+          PY

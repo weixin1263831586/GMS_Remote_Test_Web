@@ -45,7 +45,8 @@ function renderNotificationList() {
     list.innerHTML = state.notifications.map(item => `
         <div class="notification-item ${escapeHtml(item.level)} ${item.read ? '' : 'unread'}"
              data-notification-id="${escapeHtml(item.id)}"
-             data-click="markNotificationRead" data-a0="${escapeHtml(item.id)}">
+             data-click="openNotification" data-a0="${escapeHtml(item.id)}"
+             role="button" tabindex="0" aria-label="查看通知：${escapeHtml(item.title)}">
             <div class="notification-level-dot"></div>
             <div>
                 <div class="notification-title">${escapeHtml(item.title)}</div>
@@ -87,8 +88,7 @@ function showBrowserNotification(notification, force = false) {
         });
         browserNotification.onclick = () => {
             window.focus();
-            closeNotificationPanel();
-            toggleNotificationPanel();
+            void openNotification(notification.id);
         };
     } catch (error) {
         debugLog('[Notification] Browser notification failed:', error);
@@ -229,6 +229,156 @@ async function requestBrowserNotificationPermission() {
     }
 }
 
+// Navigation relies on immutable IDs from the notification payload, never
+// on localized titles or user-supplied free-form URLs.
+function notificationDestination(item) {
+    if (!item) return null;
+    const data = item.data && typeof item.data === 'object' ? item.data : {};
+    const category = String(item.category || '').toLowerCase();
+    const text = key => typeof data[key] === 'string' ? data[key].trim() : '';
+    const jobId = text('cluster_job_id') || text('job_id');
+    const reportId = text('report_id');
+    const timestamp = text('report_timestamp') || text('timestamp');
+    const attemptId = text('attempt_id');
+    const workerId = text('worker_id');
+    const automationRunId = text('automation_run_id') || (
+        category === 'automation' ? text('run_id') : ''
+    );
+    const taskId = text('task_id');
+    const issues = text('redmine_issue_id') || text('issue_id');
+    const anchor = {
+        report_id: reportId, report_timestamp: timestamp,
+        cluster_job_id: jobId, attempt_id: attemptId,
+        automation_run_id: automationRunId, worker_id: workerId
+    };
+
+    const isTestCompletion = category === 'cluster'
+        && text('command_type') === 'start_test'
+        && text('status') === 'completed';
+    if (reportId || timestamp || isTestCompletion
+        || ((category === 'report' || category === 'reports') && jobId)) {
+        return {kind: 'report', anchor};
+    }
+    if (category === 'report-analysis') return {kind: 'page', page: 'report-analysis'};
+    if (category === 'report-download') return {kind: 'page', page: 'reports'};
+    if (automationRunId) return {kind: 'workspace', page: 'automation', context: {
+        automation_run_id: automationRunId, worker_id: workerId,
+        scope_mode: 'cluster'
+    }};
+    if (category === 'apk' && taskId) return {kind: 'apk', taskId};
+    if (jobId) return {kind: 'workspace', page: 'cluster', context: {
+        scope_mode: 'cluster', worker_id: workerId, cluster_job_id: jobId
+    }};
+    if (issues) return {kind: 'workspace', page: 'redmine-agent', context: {
+        redmine_issue_id: issues
+    }};
+    if (category === 'cluster' && workerId) return {
+        kind: 'workspace', page: 'cluster', context: {
+            scope_mode: 'cluster', worker_id: workerId, cluster_job_id: ''
+        }
+    };
+    if (['suite-download', 'suite-extract', 'suite', 'report-copy'].includes(category)) {
+        return {kind: 'workspace', page: 'test-suites', context: {
+            // A downloaded ZIP is not a deployed suite tools_path. Do not
+            // write archive_path into the global test execution selection.
+            worker_id: workerId
+        }};
+    }
+    if (['firmware', 'gsi-burn', 'device', 'devices'].includes(category)) {
+        const devices = Array.isArray(data.devices)
+            ? data.devices.filter(value => typeof value === 'string').slice(0, 16)
+            : [];
+        return {kind: 'workspace', page: 'devices', context: {
+            worker_id: workerId, device_ids: devices
+        }};
+    }
+    if (category === 'redmine') return {kind: 'page', page: 'redmine-agent'};
+    return null;
+}
+
+async function navigateFromNotification(destination) {
+    if (!destination) return false;
+    if (destination.kind === 'report') {
+        if (typeof window.focusReportFromNotification !== 'function') {
+            throw new Error('报告定位模块尚未加载');
+        }
+        const found = await window.focusReportFromNotification(destination.anchor);
+        if (found) {
+            switchPage('reports', null);
+            document.querySelector('#reports-table-body tr.notification-report-target')
+                ?.scrollIntoView({block: 'nearest', inline: 'nearest'});
+            return true;
+        }
+        const jobId = destination.anchor.cluster_job_id;
+        if (jobId) {
+            // A finished test may not have an indexed report yet. Open its
+            // *own* Job diagnostics, never an unrelated report row.
+            showToast('该任务的报告尚未找到，已打开对应任务详情', 'warning');
+            window.GmsWorkspace?.navigate('cluster', {
+                scope_mode: 'cluster', worker_id: destination.anchor.worker_id,
+                cluster_job_id: jobId
+            });
+            return true;
+        }
+        showToast('对应报告不存在或当前账号无权查看', 'warning');
+        return false;
+    }
+    if (destination.kind === 'apk') {
+        switchPage('apk-analysis', null);
+        if (typeof window.loadApkTaskHistory !== 'function'
+            || typeof restoreApkTask !== 'function') {
+            throw new Error('APK 分析模块尚未加载');
+        }
+        const tasks = await window.loadApkTaskHistory(false);
+        if (!tasks.some(task => task.task_id === destination.taskId)) {
+            showToast('对应 APK 任务不存在或已清理', 'warning');
+            return false;
+        }
+        await restoreApkTask(destination.taskId);
+        return true;
+    }
+    if (destination.kind === 'workspace') {
+        if (window.GmsWorkspace?.navigate) {
+            window.GmsWorkspace.navigate(destination.page, destination.context);
+        } else {
+            switchPage(destination.page, null);
+        }
+        return true;
+    }
+    if (destination.kind === 'page') {
+        switchPage(destination.page, null);
+        return true;
+    }
+    return false;
+}
+
+async function openNotification(id) {
+    const item = state.notifications.find(record => record.id === id);
+    if (!item) return;
+    // Do not block navigation on the read acknowledgment.
+    void markNotificationRead(id);
+    const target = notificationDestination(item);
+    if (!target) {
+        showToast('通知已读；该历史消息没有可定位的业务对象', 'info');
+        return;
+    }
+    closeNotificationPanel();
+    try {
+        await navigateFromNotification(target);
+    } catch (error) {
+        debugLog('[Notification] Navigation failed:', error);
+        showToast('通知定位失败：' + (error?.message || '请稍后重试'), 'warning');
+    }
+}
+
+document.getElementById('notification-list')?.addEventListener('keydown', event => {
+    if (!['Enter', ' '].includes(event.key)) return;
+    const item = event.target.closest?.('.notification-item[data-notification-id]');
+    if (!item) return;
+    event.preventDefault();
+    void openNotification(item.dataset.notificationId);
+});
+
 async function markNotificationRead(id) {
     const item = state.notifications.find(notification => notification.id === id);
     if (item && !item.read) {
@@ -280,6 +430,7 @@ window.toggleNotificationPanel = toggleNotificationPanel;
 window.closeNotificationPanel = closeNotificationPanel;
 window.requestBrowserNotificationPermission = requestBrowserNotificationPermission;
 window.markNotificationRead = markNotificationRead;
+window.openNotification = openNotification;
 window.markAllNotificationsRead = markAllNotificationsRead;
 window.clearNotifications = clearNotifications;
 window.renderNotificationList = renderNotificationList;

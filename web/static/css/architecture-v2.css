@@ -1,0 +1,214 @@
+/* System architecture v2: scoped visual language for all six canonical workflow views.
+   The workspace header/tabs still belong exclusively to workspace-tabs.css. */
+.architecture-v2 {
+  --arch-v2-purple:#a583f5;
+  --arch-v2-blue:#56b9ff;
+  --arch-v2-teal:#36d5b3;
+  --arch-v2-gold:#edbd55;
+  --arch-v2-panel:#1b1b27;
+  --arch-v2-stroke:#3a3851;
+  --arch-v2-muted:#a9a5bc;
+  --arch-access:#ae86f7;
+  --arch-control:#55bcff;
+  --arch-worker:#efbe57;
+  --arch-resource:#39d9a8;
+  --arch-data:#58c8ff;
+  --arch-command:#b99dff;
+  --arch-node:#141525;
+  background:#15151e;
+}
+.architecture-v2 main{padding:12px 14px 24px;max-width:none}
+.architecture-v2 .lead{font-size:11px;line-height:1.45;padding:0 2px;margin:0 0 11px;color:var(--arch-v2-muted)}
+.architecture-v2 .arch-pane{min-width:0}
+.architecture-v2 .arch-v2-panel,
+.architecture-v2 .arch-v2-info-panel{
+  margin:0;min-width:0;overflow:hidden;
+  border-radius:10px;border:1px solid var(--arch-v2-stroke);
+  background:linear-gradient(145deg,#1c1b2a 0%,#171823 85%);
+}
+.architecture-v2 .arch-v2-panel{padding:0}
+.architecture-v2 .arch-v2-heading{
+  min-height:46px;padding:11px 15px;
+  display:flex;justify-content:space-between;align-items:center;gap:12px;
+  border-bottom:1px solid #393648;
+}
+.architecture-v2 .arch-v2-heading h2{font-size:14px;font-weight:750;line-height:1.35;margin:0;color:#e9e4f7}
+.architecture-v2 .arch-v2-hint{font-size:10px;color:var(--arch-v2-muted);white-space:nowrap}
+.architecture-v2 .arch-v2-intro{font-size:11px;line-height:1.6;color:#bcb5d1;margin:0;padding:11px 15px 9px}
+.architecture-v2 .arch-v2-platform-layout{display:grid;grid-template-columns:minmax(0,1fr) 200px;align-items:stretch;gap:12px;padding:12px}
+.architecture-v2 .arch-v2-map-scroll{
+  min-width:0;overflow-x:auto;overscroll-behavior-inline:contain;
+  border:1px solid #373b58;border-radius:9px;
+  background:radial-gradient(ellipse 70% 45% at 56% 92%,rgba(73,41,157,.18),transparent),
+             linear-gradient(155deg,#171827,#11131e);
+  scrollbar-color:#645581 transparent;
+}
+.architecture-v2 .arch-v2-map-scroll:focus-visible{outline:2px solid #9c81ff;outline-offset:2px}
+.architecture-v2 .arch-v2-constellation{
+  position:relative;width:1120px;height:550px;margin:0 auto;
+  background-image:linear-gradient(rgba(105,88,166,.045) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(105,88,166,.045) 1px,transparent 1px);
+  background-size:34px 34px;
+}
+.architecture-v2 .arch-v2-constellation::after{
+  content:"";position:absolute;z-index:0;pointer-events:none;
+  bottom:6px;left:285px;width:780px;height:30px;border-radius:50%;
+  border:1px solid rgba(124,77,255,.42);box-shadow:0 0 23px rgba(110,62,251,.30),inset 0 0 20px rgba(75,107,255,.20);
+}
+.architecture-v2 .arch-v2-connectors{position:absolute;inset:0;z-index:1;pointer-events:none}
+.architecture-v2 .arch-v2-path{fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.architecture-v2 .arch-v2-path--control{stroke:#b99dff;filter:drop-shadow(0 0 3px rgba(169,119,255,.35))}
+.architecture-v2 .arch-v2-path--data{stroke:#4fc8ff;filter:drop-shadow(0 0 3px rgba(69,194,255,.4))}
+.architecture-v2 .arch-v2-path--report{stroke:#36dbb4}
+.architecture-v2 .arch-v2-path--dashed{stroke-dasharray:6 5}
+.architecture-v2 .arch-v2-edge-label{font-size:11px;font-weight:650;fill:#cbc0e5;text-anchor:middle;paint-order:stroke;stroke:#151525;stroke-width:5px;stroke-linejoin:round}
+.architecture-v2 .arch-v2-node{
+  position:absolute;z-index:2;box-sizing:border-box;
+  border:1.5px solid var(--node-edge);border-radius:12px;
+  padding:11px;background:linear-gradient(155deg,var(--node-bg),rgba(18,20,34,.96));
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--node-edge) 9%,transparent),
+             0 0 19px color-mix(in srgb,var(--node-edge) 15%,transparent),
+             inset 0 1px 12px rgba(255,255,255,.025);
+  color:#e8e3f1;
+}
+.architecture-v2 .arch-v2-node header{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;gap:4px;font-size:14px;font-weight:750;
+  margin:0 0 10px;color:#f7f4ff;
+}
+.architecture-v2 .arch-v2-node header small{font-size:10px;color:#c4bbd8;font-weight:500}
+.architecture-v2 .arch-v2-node-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.architecture-v2 .arch-v2-node-grid span{
+  display:flex;align-items:center;justify-content:center;min-width:0;
+  min-height:31px;border:1px solid color-mix(in srgb,var(--node-edge) 49%,#323147);
+  border-radius:6px;background:#1b1d2d;padding:5px 4px;
+  text-align:center;font-size:11px;line-height:1.35;
+}
+.architecture-v2 .arch-v2-node--access{--node-edge:#a976f3;--node-bg:#2b2046;left:24px;top:92px;width:216px;min-height:194px}
+.architecture-v2 .arch-v2-node--controller{--node-edge:#568aff;--node-bg:#242c61;left:388px;top:106px;width:347px;min-height:212px}
+.architecture-v2 .arch-v2-node--controller header{font-size:19px}
+.architecture-v2 .arch-v2-node--controller .arch-v2-node-grid span{min-height:33px}
+.architecture-v2 .arch-v2-node--worker{--node-edge:#4fbafa;--node-bg:#173452;left:872px;top:87px;width:220px;min-height:233px}
+.architecture-v2 .arch-v2-node--external{--node-edge:#a183db;--node-bg:#292140;left:24px;top:376px;width:243px;min-height:142px}
+.architecture-v2 .arch-v2-node--usb{--node-edge:#4baff8;--node-bg:#173048;left:345px;top:366px;width:205px;min-height:158px}
+.architecture-v2 .arch-v2-node--device{--node-edge:#31d8a7;--node-bg:#163b33;left:573px;top:366px;width:208px;min-height:158px}
+.architecture-v2 .arch-v2-node--adb{--node-edge:#42c7cd;--node-bg:#173b3f;left:804px;top:366px;width:215px;min-height:158px}
+.architecture-v2 .arch-v2-node--usb .arch-v2-node-grid span:last-child,
+.architecture-v2 .arch-v2-node--device .arch-v2-node-grid span:last-child,
+.architecture-v2 .arch-v2-node--adb .arch-v2-node-grid span:last-child{grid-column:1/-1}
+.architecture-v2 .arch-v2-map-sidebar{display:flex;flex-direction:column;min-width:0;gap:10px}
+.architecture-v2 .arch-v2-aside-card{
+  border:1px solid #38364d;border-radius:9px;background:#20202d;
+  padding:12px 10px;flex:1;
+}
+.architecture-v2 .arch-v2-aside-card h3{margin:0 0 12px;font-size:12px;color:#e5def6}
+.architecture-v2 .arch-v2-aside-card p{font-size:11px;line-height:1.65;color:#b7b0c8;margin:0 0 9px;display:flex;align-items:flex-start;gap:7px}
+.architecture-v2 .arch-v2-aside-card p:last-child{margin-bottom:0}
+.architecture-v2 .arch-v2-swatch{
+  width:18px;height:11px;flex:none;display:inline-block;
+  border:1px solid var(--swatch);background:color-mix(in srgb,var(--swatch) 17%,#1b192a);
+  border-radius:4px;margin-top:3px;
+}
+.architecture-v2 .arch-v2-swatch--access{--swatch:#a976f3}
+.architecture-v2 .arch-v2-swatch--control{--swatch:#568aff}
+.architecture-v2 .arch-v2-swatch--worker{--swatch:#efbd55}
+.architecture-v2 .arch-v2-swatch--device{--swatch:#31d8a7}
+.architecture-v2 .arch-v2-swatch--external{--swatch:#a183db}
+.architecture-v2 .arch-v2-bottom{display:grid;gap:12px;margin:12px 0 0}
+.architecture-v2 .arch-v2-bottom--platform{grid-template-columns:minmax(0,1.18fr) minmax(0,1fr)}
+.architecture-v2 .arch-v2-flow-bottom{grid-template-columns:repeat(3,minmax(0,1fr))}
+.architecture-v2 .arch-v2-info-panel{padding:0}
+.architecture-v2 .arch-v2-info-panel h2{
+  margin:0;padding:11px 13px;
+  font-size:12px;font-weight:750;line-height:1.35;color:#e9e4f7;
+  border-bottom:1px solid #3a374a;
+}
+.architecture-v2 .arch-v2-table-scroll{overflow-x:auto;max-width:100%}
+.architecture-v2 .arch-v2-info-panel table{
+  border-collapse:collapse;width:100%;min-width:530px;
+  font-size:11px;line-height:1.55;
+}
+.architecture-v2 .arch-v2-info-panel th,
+.architecture-v2 .arch-v2-info-panel td{
+  padding:8px 10px;text-align:left;border-bottom:1px solid #333145;
+}
+.architecture-v2 .arch-v2-info-panel th{color:#b9b3ca;background:#252437;font-weight:650}
+.architecture-v2 .arch-v2-info-panel td:first-child{color:#d9c8ff;font-weight:650;white-space:nowrap}
+.architecture-v2 .arch-v2-info-panel tr:last-child td{border-bottom:0}
+.architecture-v2 .arch-v2-timeline{margin:0;padding:8px 13px;list-style:none;counter-reset:arch-v2-count}
+.architecture-v2 .arch-v2-timeline li{
+  counter-increment:arch-v2-count;display:flex;align-items:center;gap:11px;
+  padding:7px 2px;font-size:11px;color:#ccc6db;border-bottom:1px solid #353247;
+}
+.architecture-v2 .arch-v2-timeline li:last-child{border-bottom:0}
+.architecture-v2 .arch-v2-timeline li::before{
+  content:counter(arch-v2-count,decimal-leading-zero);
+  min-width:30px;padding:3px 5px;text-align:center;border-radius:16px;
+  background:#554189;color:#eee5ff;font-size:10px;font-weight:700;
+}
+.architecture-v2 .arch-v2-mini{border-top:2px solid var(--mini-accent)}
+.architecture-v2 .arch-v2-mini--usb,.architecture-v2 .arch-v2-mini--worker{--mini-accent:#4baff8}
+.architecture-v2 .arch-v2-mini--access{--mini-accent:#ae86f7}
+.architecture-v2 .arch-v2-mini--risk{--mini-accent:#e5ba6c}
+.architecture-v2 .arch-v2-mini h2{display:flex;gap:9px;align-items:center}
+.architecture-v2 .arch-v2-mini p{font-size:11px;line-height:1.65;color:#beb7d0;padding:12px 14px;margin:0;min-height:76px}
+.architecture-v2 .arch-v2-step{
+  font-size:10px;padding:3px 6px;border-radius:18px;
+  background:color-mix(in srgb,var(--mini-accent) 25%,#292234);
+  color:#f3edff;
+}
+.architecture-v2 .arch-v2-svg-frame{
+  margin:0 12px 12px;border-color:#3d3854;border-radius:10px;
+  background:radial-gradient(ellipse 70% 65% at 48% 95%,rgba(79,62,179,.13),transparent),#14141f;
+}
+.architecture-v2 .arch-v2-svg-frame .topology-viewport{position:relative;overflow-x:auto}
+.architecture-v2 .arch-v2-svg-frame .topology-canvas{
+  padding:14px 12px;min-width:1208px;
+  background-image:radial-gradient(ellipse at 48% 95%,rgba(98,55,212,.13),transparent 60%);
+}
+.architecture-v2 .topology svg g[data-node]>rect{
+  stroke-width:2;
+  filter:drop-shadow(0 0 7px rgba(99,102,241,.20));
+}
+.architecture-v2 .topology svg g[data-node]:hover>rect{
+  fill:#242645;filter:drop-shadow(0 0 10px rgba(145,110,255,.38));
+}
+.architecture-v2 .topology svg g[data-source]>path{
+  stroke-width:2.3;stroke-linecap:round;
+  filter:drop-shadow(0 0 2px rgba(87,178,255,.34));
+}
+.architecture-v2 .topology svg text{paint-order:stroke;stroke:#151623;stroke-width:1px;stroke-linejoin:round}
+.architecture-v2 .arch-legend{border:1px solid #48415d;border-radius:9px;background:#20202d;padding:12px;gap:7px}
+.architecture-v2 .arch-legend>span{font-size:11px;color:#cbc4dd}
+.architecture-v2 .arch-legend>span.arch-role::before{box-shadow:0 0 8px var(--role-color)}
+.architecture-v2 .arch-details{
+  border:1px solid #39374c;border-radius:9px;padding:0;margin:12px 0 0;
+  background:#1a1a26;overflow:hidden;
+}
+.architecture-v2 .arch-details>summary{
+  color:#b9afe2;font-size:11px;list-style-position:inside;padding:12px 14px;
+}
+.architecture-v2 .arch-details[open]>summary{background:#242133;border-bottom:1px solid #3e3851}
+.architecture-v2 .arch-details>section{padding:12px;border:0}
+.architecture-v2 .arch-details>summary:hover{color:#e7ddff}
+.architecture-v2 :is(.arch-v2-mini,.arch-v2-map-scroll,.arch-v2-svg-frame) :focus-visible{outline:2px solid #b99dff;outline-offset:2px}
+@media(max-width:1370px){
+  .architecture-v2 .arch-v2-platform-layout{grid-template-columns:minmax(0,1fr)}
+  .architecture-v2 .arch-v2-map-sidebar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:1050px){
+  .architecture-v2 .arch-v2-flow-bottom{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .architecture-v2 .arch-v2-bottom--platform{grid-template-columns:1fr}
+}
+@media(max-width:680px){
+  .architecture-v2 main{padding:9px}
+  .architecture-v2 .arch-v2-heading{flex-wrap:wrap;padding:10px}
+  .architecture-v2 .arch-v2-hint{white-space:normal}
+  .architecture-v2 .arch-v2-platform-layout{padding:8px}
+  .architecture-v2 .arch-v2-map-sidebar,.architecture-v2 .arch-v2-flow-bottom{grid-template-columns:1fr}
+  .architecture-v2 .arch-v2-svg-frame{margin:0 7px 7px}
+  .architecture-v2 .arch-v2-mini p{min-height:0}
+}
+@media(prefers-reduced-motion:reduce){
+  .architecture-v2 .arch-v2-node{transition:none}
+}

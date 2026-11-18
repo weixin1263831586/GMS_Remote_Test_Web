@@ -11,66 +11,110 @@
                 </div>
             {% include 'components/page-header-end.html' %}
 
-            <!-- 审计日志主视图（原内容） -->
-            <div id="audit-main-view">
-            <div class="audit-stats page-stat-row">
-                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#shield"></use></svg></span><span class="workbench-stat-copy">
-                    <div class="page-stat-value tone-primary" id="audit-total-count">-</div>
-                    <div class="page-stat-label">审计记录</div></span></div>
-                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#monitor"></use></svg></span><span class="workbench-stat-copy">
-                    <div class="page-stat-value tone-success" id="audit-web-count">-</div>
-                    <div class="page-stat-label">Web访问</div></span></div>
-                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#terminal"></use></svg></span><span class="workbench-stat-copy">
-                    <div class="page-stat-value tone-warning" id="audit-cli-count">-</div>
-                    <div class="page-stat-label">CLI操作</div></span></div>
-                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#warning"></use></svg></span><span class="workbench-stat-copy">
-                    <div class="page-stat-value tone-danger" id="audit-error-count">-</div>
-                    <div class="page-stat-label">异常请求</div></span></div>
-            </div>
 
-            <div class="audit-filter-bar">
-                <select id="audit-source-filter" class="combo-box" data-change="loadSecurityAudit" data-a0="true">
-                    <option value="">全部来源</option>
-                    <option value="web">Web</option>
-                    <option value="cli">CLI</option>
-                </select>
-                <select id="audit-type-filter" class="combo-box" data-change="loadSecurityAudit" data-a0="true">
-                    <option value="">全部类型</option>
-                    <option value="page_view">页面访问</option>
-                    <option value="api">接口操作</option>
-                    <option value="page_visit">入口访问</option>
-                </select>
-                <input id="audit-search-input" class="entry-field" type="text" placeholder="搜索用户、IP、接口、页面" data-keydown="loadSecurityAudit" data-key="Enter" data-a0="true" />
-                <button class="btn-xs" data-click="loadSecurityAudit" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
-                <button class="btn-xs" data-click="exportSecurityAudit"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 导出</button>
-            </div>
+            <!-- 审计日志：统计、真实筛选及日志明细；视图切换仍在标题栏右上角。 -->
+            <div id="audit-main-view" class="audit-dashboard">
+                <div class="audit-stats page-stat-row" aria-label="已保留审计日志统计">
+                    <div class="page-stat-card workbench-stat audit-stat-card audit-stat-primary">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#shield"></use></svg></span>
+                        <span class="workbench-stat-copy"><span class="page-stat-label">审计记录</span><strong class="page-stat-value tone-primary" id="audit-total-count">-</strong><span class="audit-stat-note">当前保留日志</span></span>
+                    </div>
+                    <div class="page-stat-card workbench-stat audit-stat-card audit-stat-web">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#monitor"></use></svg></span>
+                        <span class="workbench-stat-copy"><span class="page-stat-label">Web 访问</span><strong class="page-stat-value tone-success" id="audit-web-count">-</strong><span class="audit-stat-note">Web 来源记录</span></span>
+                    </div>
+                    <div class="page-stat-card workbench-stat audit-stat-card audit-stat-cli">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#terminal"></use></svg></span>
+                        <span class="workbench-stat-copy"><span class="page-stat-label">CLI 操作</span><strong class="page-stat-value tone-warning" id="audit-cli-count">-</strong><span class="audit-stat-note">CLI 来源记录</span></span>
+                    </div>
+                    <div class="page-stat-card workbench-stat audit-stat-card audit-stat-error">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#warning"></use></svg></span>
+                        <span class="workbench-stat-copy"><span class="page-stat-label">异常请求</span><strong class="page-stat-value tone-danger" id="audit-error-count">-</strong><span class="audit-stat-note">HTTP 状态码 ≥ 400</span></span>
+                    </div>
+                </div>
 
-            <div class="audit-table-wrap list-table-wrap">
-                <table class="list-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 145px;">时间</th>
-                            <th style="width: 70px;">来源</th>
-                            <th style="width: 70px;">状态</th>
-                            <th style="width: 220px;">用户/IP</th>
-                            <th>操作</th>
-                            <th style="width: 80px;">耗时</th>
-                        </tr>
-                    </thead>
-                    <tbody id="security-audit-table-body">
-                        <tr>
-                            <td colspan="6" class="table-placeholder">加载中...</td>
-                        </tr>
-                    </tbody>
-                </table>
-                <div id="audit-load-more-wrapper" class="table-load-more"></div>
-            </div>
+                <div class="audit-filter-bar audit-log-filters" role="search" aria-label="筛选审计日志">
+                    <select id="audit-source-filter" class="combo-box" aria-label="来源" data-change="loadSecurityAudit" data-a0="true">
+                        <option value="">全部来源</option>
+                        <option value="web">Web</option>
+                        <option value="cli">CLI</option>
+                    </select>
+                    <select id="audit-type-filter" class="combo-box" aria-label="操作类型" data-change="loadSecurityAudit" data-a0="true">
+                        <option value="">全部类型</option>
+                        <option value="page_view">页面访问</option>
+                        <option value="api">接口操作</option>
+                        <option value="page_visit">入口访问</option>
+                    </select>
+                    <input id="audit-search-input" class="entry-field" type="search" aria-label="搜索审计日志" placeholder="搜索用户 / IP / 接口 / 页面" data-keydown="loadSecurityAudit" data-key="Enter" data-a0="true" />
+                    <button class="btn-xs audit-toolbar-button" type="button" data-click="loadSecurityAudit" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                    <button class="btn-xs audit-toolbar-button audit-toolbar-export" type="button" data-click="exportSecurityAudit"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 导出</button>
+                </div>
+
+                <div class="audit-content-grid">
+                    <section class="audit-log-panel" aria-label="安全审计日志">
+                        <div class="audit-panel-header">
+                            <div class="audit-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#shield"></use></svg><strong>安全审计日志</strong></div>
+                            <span class="audit-panel-caption">点击记录查看详情与关联日志</span>
+                        </div>
+                        <div class="audit-table-wrap list-table-wrap" role="region" aria-label="审计日志表格" tabindex="0">
+                            <table class="list-table audit-log-table">
+                                <thead><tr>
+                                    <th style="width: 156px;">时间</th>
+                                    <th style="width: 74px;">来源</th>
+                                    <th style="width: 66px;">状态</th>
+                                    <th style="width: 204px;">用户 / IP</th>
+                                    <th>操作</th>
+                                    <th style="width: 83px;">耗时</th>
+                                </tr></thead>
+                                <tbody id="security-audit-table-body"><tr><td colspan="6" class="table-placeholder">加载中...</td></tr></tbody>
+                            </table>
+                            <div id="audit-load-more-wrapper" class="table-load-more"></div>
+                        </div>
+                    </section>
+
+                    <aside class="audit-side-panels" aria-label="审计摘要与完整性">
+                        <section class="audit-side-card audit-source-card">
+                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#monitor"></use></svg><strong>访问来源分布</strong></div>
+                            <div class="audit-source-body">
+                                <div class="audit-source-donut" data-empty="true" role="img" aria-label="等待审计统计数据">
+                                    <div class="audit-donut-center"><strong class="audit-donut-total">-</strong><span>审计记录</span></div>
+                                </div>
+                                <div class="audit-source-legend">
+                                    <div class="audit-legend-row"><span class="audit-legend-dot audit-legend-web"></span><span>Web</span><strong class="audit-web-legend">-</strong></div>
+                                    <div class="audit-legend-row"><span class="audit-legend-dot audit-legend-cli"></span><span>CLI</span><strong class="audit-cli-legend">-</strong></div>
+                                    <div class="audit-legend-row audit-other-row" hidden><span class="audit-legend-dot audit-legend-other"></span><span>其他</span><strong class="audit-other-legend">-</strong></div>
+                                </div>
+                            </div>
+                            <div class="audit-side-footnote">来源分类与统计按当前保留日志计算，不随筛选变化</div>
+                        </section>
+                        <section class="audit-side-card audit-integrity-card">
+                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#shield"></use></svg><strong>日志完整性</strong></div>
+                            <div class="audit-integrity-content">
+                                <div class="audit-integrity-copy">
+                                    <div class="audit-integrity-state" data-state="idle" aria-live="polite"><span class="audit-integrity-mark" aria-hidden="true"></span><strong class="audit-integrity-label">尚未校验</strong></div>
+                                    <p class="audit-integrity-summary">核验当前日志的 HMAC 签名链</p>
+                                </div>
+                                <button class="btn-xs audit-integrity-check" type="button"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#shield"></use></svg> 校验</button>
+                            </div>
+                            <div class="audit-integrity-count" aria-live="polite">校验结果仅代表执行时的日志状态</div>
+                        </section>
+                        <section class="audit-side-card audit-notes-card">
+                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#warning"></use></svg><strong>审计说明</strong></div>
+                            <ul class="audit-notes-list">
+                                <li>记录 Web、CLI 来源的页面访问与接口操作</li>
+                                <li>查看详情和导出需具备管理员临时授权</li>
+                                <li>导出前会校验审计链完整性</li>
+                                <li>异常请求按 HTTP 状态码统计，不代表已确认安全风险</li>
+                            </ul>
+                        </section>
+                    </aside>
+                </div>
             </div>
 
             <!-- 历史邮件面板：邮件 outbox 台账（owner 视图；管理员可切全量）。
                  布局与审计日志同构：筛选栏（含管理员全量开关）+ 全宽块级表格。 -->
-            <div id="audit-outbox-panel" style="display: none;">
-                <div class="audit-filter-bar">
+            <div id="audit-outbox-panel" class="audit-mail-workspace" style="display: none;">
+                <div class="audit-filter-bar audit-mail-filters" role="search" aria-label="筛选历史邮件">
                     <select id="email-outbox-channel-filter" class="combo-box" data-change="loadAuditOutbox" data-a0="true">
                         <option value="">全部通道</option>
                         <option value="manual">手动发送</option>
@@ -83,15 +127,20 @@
                         <option value="true">成功</option>
                         <option value="false">失败</option>
                     </select>
-                    <input id="email-outbox-search-input" class="entry-field" type="text" placeholder="搜索收件人、主题" data-keydown="loadAuditOutbox" data-key="Enter" data-a0="true" />
+                    <input id="email-outbox-search-input" class="entry-field" type="search" aria-label="搜索邮件收件人或主题" placeholder="搜索收件人、主题" data-keydown="loadAuditOutbox" data-key="Enter" data-a0="true" />
                     <button class="btn-xs" data-click="loadAuditOutbox" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
                     <label id="email-outbox-all-users-label" style="display: none;">
                         <input type="checkbox" id="email-outbox-all-users" data-change="loadAuditOutbox" data-a0="true" />
                         全部用户
                     </label>
                 </div>
-                <div class="audit-table-wrap list-table-wrap">
-                    <table class="list-table">
+                <section class="audit-mail-panel" aria-label="历史邮件台账">
+                    <div class="audit-panel-header">
+                        <div class="audit-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#mail"></use></svg><strong>历史邮件台账</strong></div>
+                        <div class="audit-mail-meta"><span class="audit-mail-scope">默认仅显示本人记录</span><strong class="audit-mail-count" aria-live="polite">加载中...</strong></div>
+                    </div>
+                    <div class="audit-table-wrap list-table-wrap audit-mail-table-wrap">
+                    <table class="list-table audit-mail-table">
                         <thead>
                             <tr>
                                 <th style="width: 160px;">时间 (UTC)</th>
@@ -108,6 +157,7 @@
                         </tbody>
                     </table>
                     <div id="email-outbox-load-more-wrapper" class="table-load-more"></div>
-                </div>
+                    </div>
+                </section>
             </div>
         </div>

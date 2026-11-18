@@ -1,0 +1,104 @@
+/* vpn-proxy management uses the same tech-dialog frame, but a scrollable body. */
+:is(.modal,.modal-backdrop) .modal-content.tech-dialog--vpn-proxy {
+  width: min(850px, calc(100vw - 32px));
+  max-width: min(850px, calc(100vw - 32px));
+}
+.tech-dialog--vpn-proxy .modal-body {
+  overflow-y: auto;
+  display: grid;
+  gap: 12px;
+  max-height: min(70dvh, 640px);
+}
+.tech-dialog--vpn-proxy .vpn-proxy-panel-section {
+  border: 1px solid var(--tech-edge-soft);
+  background: var(--tech-panel);
+  border-radius: 10px;
+  padding: 12px;
+  min-width: 0;
+}
+.tech-dialog--vpn-proxy .vpn-proxy-panel-heading {
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 10px; margin-bottom: 8px;
+}
+.tech-dialog--vpn-proxy .vpn-proxy-panel-heading strong { font-size: 13px; }
+.tech-dialog--vpn-proxy .vpn-proxy-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.tech-dialog--vpn-proxy .vpn-proxy-status-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 8px;
+}
+.tech-dialog--vpn-proxy .vpn-proxy-stat {
+  background: var(--tech-input); border: 1px solid var(--tech-edge-soft);
+  border-radius: 7px; padding: 9px; min-width: 0;
+}
+.tech-dialog--vpn-proxy .vpn-proxy-stat span { display: block; font-size: 11px; color: var(--text-secondary); }
+.tech-dialog--vpn-proxy .vpn-proxy-stat strong { font-size: 13px; overflow-wrap: anywhere; }
+.tech-dialog--vpn-proxy .vpn-proxy-table-wrap { overflow-x: auto; max-height: 180px; overflow-y: auto; }
+.tech-dialog--vpn-proxy table { border-collapse: collapse; min-width: 500px; width: 100%; }
+.tech-dialog--vpn-proxy th, .tech-dialog--vpn-proxy td {
+  text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--tech-edge-soft);
+  font-size: 12px; white-space: nowrap;
+}
+.tech-dialog--vpn-proxy th { color: var(--text-secondary); font-weight: 600; }
+.tech-dialog--vpn-proxy .vpn-proxy-client-state { font-weight:600; }
+.tech-dialog--vpn-proxy .vpn-proxy-client-state.is-disabled { color:var(--danger-color); }
+.tech-dialog--vpn-proxy .vpn-proxy-client-state.is-enabled { color:var(--success-color); }
+.tech-dialog--vpn-proxy .vpn-proxy-client-toggle {
+  min-height:25px; padding:3px 9px; white-space:nowrap;
+  border:1px solid var(--tech-edge-soft); border-radius:5px;
+  background:var(--tech-input); color:var(--text-primary); cursor:pointer;
+}
+.tech-dialog--vpn-proxy .vpn-proxy-client-toggle:disabled {
+  opacity:0.5; cursor:not-allowed;
+}
+.tech-dialog--vpn-proxy .vpn-proxy-client-toggle:not(:disabled):hover {
+  border-color:var(--primary-light);
+}
+.tech-dialog--vpn-proxy .vpn-proxy-install-list { display:grid; gap:6px; }
+.tech-dialog--vpn-proxy .vpn-proxy-install-row {
+  display:grid; grid-template-columns:28px 72px minmax(0,1fr) 82px;
+  align-items:center; gap:8px; padding:6px 8px; min-width:0;
+  background:var(--tech-input); border:1px solid var(--tech-edge-soft); border-radius:7px;
+}
+.tech-dialog--vpn-proxy .vpn-proxy-install-glyph {
+  display:flex; align-items:center; justify-content:center;
+  width:28px; height:28px; box-sizing:border-box;
+  background:#493265; border:1px solid #674b89; border-radius:8px;
+  color:#e0b9ff; font-size:17px;
+}
+.tech-dialog--vpn-proxy .vpn-proxy-install-row label { font-size:12px; font-weight:600; }
+.tech-dialog--vpn-proxy .vpn-proxy-install-row input {
+  width:100%; min-width:0; height:29px; padding:5px 8px; text-overflow:ellipsis;
+  box-sizing:border-box; font:11px/1.4 var(--ui-font-mono,monospace);
+}
+.tech-dialog--vpn-proxy .vpn-proxy-install-row button { min-height:29px; height:29px; white-space:nowrap; }
+.tech-dialog--vpn-proxy .vpn-proxy-install-section > .vpn-proxy-hint { margin-top:7px; line-height:1.35; }
+@media(max-width:590px) {
+  .tech-dialog--vpn-proxy .vpn-proxy-install-row { grid-template-columns:24px 1fr 74px; }
+  .tech-dialog--vpn-proxy .vpn-proxy-install-row input { grid-column:1/3; grid-row:2; }
+  .tech-dialog--vpn-proxy .vpn-proxy-install-row button { grid-column:3; grid-row:2; }
+}
+.tech-dialog--vpn-proxy .vpn-proxy-hint {
+  font-size: 11px; color: var(--text-secondary); line-height: 1.5; margin: 0;
+}
+.tech-dialog--vpn-proxy #vpn-proxy-error:not(:empty) {
+  color: var(--danger-color); border: 1px solid var(--danger-color);
+  border-radius: 6px; padding: 8px;
+}
+@media (max-width: 650px) {
+  .tech-dialog--vpn-proxy .vpn-proxy-status-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+
+/* Keep actions inside the modal's angled frame, not against its lower right border. */
+#vpn-proxy-modal .tech-dialog--vpn-proxy > .tech-dialog-actions {
+  padding: 8px 26px 22px !important;
+  min-height: 54px;
+  box-sizing: border-box;
+}
+.tech-dialog--vpn-proxy .vpn-proxy-install-glyph .tech-brand-icon {
+  width: 18px; height: 18px;
+  color: inherit;
+}
+@media(max-width:590px) {
+  #vpn-proxy-modal .tech-dialog--vpn-proxy > .tech-dialog-actions {
+    padding: 8px 20px 18px !important;
+  }
+}

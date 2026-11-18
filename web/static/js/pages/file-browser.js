@@ -432,6 +432,7 @@ function renderFileList(files) {
     const pathDisplay = document.getElementById('file-browser-current-path');
 
     pathDisplay.textContent = state.fileBrowser.currentPath;
+    pathDisplay.title = state.fileBrowser.currentPath || '';
 
     if (files.length === 0) {
         listContainer.innerHTML = '<div class="file-browser-item" style="cursor: default; color: var(--text-muted);">空目录</div>';

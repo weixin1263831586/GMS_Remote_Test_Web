@@ -122,6 +122,7 @@ async function loadSecurityAudit(reset = false) {
         securityAuditState.loaded = true;
         securityAuditState.currentFilterParams = requestedFilterKey;
         updateSecurityAuditStats(payload.stats || {});
+        updateAuditVisualSummary(payload.stats || {});
         return true;
     } catch (error) {
         if (requestGeneration !== securityAuditState.requestGeneration) return false;
@@ -215,20 +216,79 @@ function updateSecurityAuditStats(stats) {
     setText('audit-error-count', stats.errors);
 }
 
+function updateAuditVisualSummary(stats) {
+    const root = document.getElementById('page-security-audit');
+    if (!root) return;
+    const asCount = value => Math.max(0, Number.isFinite(Number(value)) ? Number(value) : 0);
+    const total = asCount(stats.total);
+    const web = Math.min(total, asCount(stats.web));
+    const cli = Math.min(Math.max(0, total - web), asCount(stats.cli));
+    const other = Math.max(0, total - web - cli);
+    const formatCount = count => Math.round(count).toLocaleString('zh-CN');
+    const legend = (count) => `${formatCount(count)} (${total ? (100 * count / total).toFixed(1) : '0.0'}%)`;
+    const donut = root.querySelector('.audit-source-donut');
+    if (!donut) return;
+    donut.style.setProperty('--audit-web-end', `${total ? 360 * web / total : 0}deg`);
+    donut.style.setProperty('--audit-cli-end', `${total ? 360 * (web + cli) / total : 0}deg`);
+    donut.dataset.empty = String(total === 0);
+    donut.setAttribute('aria-label', total ? `审计记录 ${formatCount(total)} 条，Web ${formatCount(web)} 条，CLI ${formatCount(cli)} 条，其他 ${formatCount(other)} 条` : '暂无审计记录');
+    root.querySelector('.audit-donut-total').textContent = formatCount(total);
+    root.querySelector('.audit-web-legend').textContent = legend(web);
+    root.querySelector('.audit-cli-legend').textContent = legend(cli);
+    root.querySelector('.audit-other-legend').textContent = legend(other);
+    root.querySelector('.audit-other-row').hidden = other === 0;
+}
+
+async function verifySecurityAuditIntegrity() {
+    const root = document.getElementById('page-security-audit');
+    const button = root?.querySelector('.audit-integrity-check');
+    if (!button || button.disabled) return;
+    const granted = await requestElevatedAccess('校验安全审计日志');
+    if (!granted) return;
+    const stateNode = root.querySelector('.audit-integrity-state');
+    const label = root.querySelector('.audit-integrity-label');
+    const summary = root.querySelector('.audit-integrity-summary');
+    const count = root.querySelector('.audit-integrity-count');
+    button.disabled = true;
+    stateNode.dataset.state = 'checking';
+    label.textContent = '校验中';
+    summary.textContent = '正在核验审计日志 HMAC 签名链…';
+    try {
+        const response = await apiCall('/api/security-audit/verify');
+        const result = response.data || {};
+        stateNode.dataset.state = 'valid';
+        label.textContent = '本次校验通过';
+        summary.textContent = '当前审计日志签名链完整';
+        count.textContent = `已校验 ${Number(result.signed_records || 0).toLocaleString('zh-CN')} 条签名记录 · 仅代表本次校验`;
+    } catch (error) {
+        const invalid = Number(error?.status) === 409;
+        stateNode.dataset.state = invalid ? 'invalid' : 'error';
+        label.textContent = invalid ? '校验未通过' : '校验未完成';
+        summary.textContent = invalid ? '审计签名链存在异常，请联系管理员核查' : '无法完成校验，请检查权限或服务状态';
+        count.textContent = error?.message || '请稍后重试';
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function bindAuditIntegrityCheck() {
+    const button = document.querySelector('#page-security-audit .audit-integrity-check');
+    if (!button || button.dataset.auditBound) return;
+    button.dataset.auditBound = 'true';
+    button.addEventListener('click', verifySecurityAuditIntegrity);
+}
+
 function getAuditSourceLabel(source) {
-    if (source === 'cli') {
-        return '<span style="color: var(--warning-color); font-weight: 600;">CLI</span>';
-    }
-    if (source === 'web') {
-        return '<span style="color: var(--success-color); font-weight: 600;">Web</span>';
-    }
-    return `<span style="color: var(--text-secondary);">${escapeHtml(source || '-')}</span>`;
+    const tone = source === 'web' ? 'web' : source === 'cli' ? 'cli' : 'other';
+    const label = source === 'web' ? 'Web' : source === 'cli' ? 'CLI' : source || '-';
+    return `<span class="audit-source-badge audit-source-${tone}">${escapeHtml(label)}</span>`;
 }
 
 function getAuditStatusLabel(statusCode) {
     const code = Number(statusCode || 0);
-    const color = code >= 500 ? 'var(--danger-color)' : code >= 400 ? 'var(--warning-color)' : 'var(--success-color)';
-    return `<span style="color: ${color}; font-weight: 600;">${code || '-'}</span>`;
+    if (!code) return '<span class="audit-status-badge audit-status-unknown">-</span>';
+    const tone = code >= 500 ? 'error' : code >= 400 ? 'warning' : code >= 200 && code < 400 ? 'success' : 'unknown';
+    return `<span class="audit-status-badge audit-status-${tone}">${code}</span>`;
 }
 
 function formatAuditTime(timestamp) {
@@ -265,29 +325,27 @@ function buildSecurityAuditRowsHtml(records) {
         const userIpText = `${record.username || 'unknown'} / ${record.client_ip || '-'}`;
         const path = record.page ? `#${record.page}` : (record.path || '');
         const detail = [
-            record.method ? `${record.method}` : '',
+            record.method || '',
             path,
             record.query && Object.keys(record.query).length ? JSON.stringify(record.query) : ''
         ].filter(Boolean).join(' ');
         const operation = record.operation || detail || '-';
         const operationLine = [operation, detail && detail !== operation ? detail : ''].filter(Boolean).join('  |  ');
+        const duration = record.action_type === 'page_view' ? '-' : `${Number(record.duration_ms || 0).toLocaleString('zh-CN')} ms`;
         const rowTitle = [
             '点击查看审计详情',
             `时间: ${formatAuditTime(record.timestamp)}`,
             `用户/IP: ${userIpText}`,
             `操作: ${operationLine}`,
         ].join('\n');
-
         return `
-            <tr data-audit-id="${escapeHtml(record.id || '')}" style="border-bottom: 1px solid var(--border-color); cursor: pointer; height: 34px;" title="${escapeHtml(rowTitle)}">
-                <td style="padding: 7px 8px; font-size: 12px; color: var(--text-secondary); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(formatAuditTime(record.timestamp))}</td>
-                <td style="padding: 7px 8px; font-size: 12px; text-align: center; white-space: nowrap;">${getAuditSourceLabel(record.source)}</td>
-                <td style="padding: 7px 8px; font-size: 12px; text-align: center; white-space: nowrap;">${getAuditStatusLabel(record.status_code)}</td>
-                <td style="padding: 7px 8px; font-size: 12px; color: var(--text-secondary); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(userIpText)}</td>
-                <td style="padding: 7px 8px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    <span style="color: var(--text-primary); font-weight: 600;">${escapeHtml(operationLine)}</span>
-                </td>
-                <td style="padding: 7px 8px; font-size: 12px; color: var(--text-secondary); text-align: center; white-space: nowrap;">${escapeHtml(String(record.duration_ms ?? 0))} ms</td>
+            <tr class="audit-log-row" data-audit-id="${escapeHtml(record.id || '')}" title="${escapeHtml(rowTitle)}">
+                <td class="audit-time-cell">${escapeHtml(formatAuditTime(record.timestamp))}</td>
+                <td class="audit-source-cell">${getAuditSourceLabel(record.source)}</td>
+                <td class="audit-status-cell">${getAuditStatusLabel(record.status_code)}</td>
+                <td class="audit-user-cell" title="${escapeHtml(userIpText)}">${escapeHtml(userIpText)}</td>
+                <td class="audit-operation-cell" title="${escapeHtml(operationLine)}">${escapeHtml(operationLine)}</td>
+                <td class="audit-duration-cell">${escapeHtml(duration)}</td>
             </tr>
         `;
     }).join('');
@@ -513,8 +571,8 @@ function renderAuditOutboxRows(items, { append = false } = {}) {
     }
     const html = items.map((item) => {
         const state = item.sent
-            ? '<span style="color: var(--success-color);">✓ 成功</span>'
-            : `<span style="color: var(--danger-color);" title="${escapeJsAttr(item.error || '')}">✗ 失败</span>`;
+            ? '<span class="audit-mail-state sent">成功</span>'
+            : `<span class="audit-mail-state failed" title="${escapeJsAttr(item.error || '')}">✗ 失败</span>`;
         const channelLabel = AUDIT_OUTBOX_CHANNEL_LABELS[item.channel]
             || escapeJsAttr(item.channel || '未知');
         const ref = item.ref_type && item.ref_id
@@ -524,7 +582,6 @@ function renderAuditOutboxRows(items, { append = false } = {}) {
         // 全部进悬停提示，行内不再堆叠两行文本。
         const toText = (item.to_addrs || []).join(', ');
         const senderText = item.username || '系统';
-        const previewText = item.body_preview ? `｜${item.body_preview.slice(0, 100)}` : '';
         const hoverTitle = [
             `发件人: ${senderText}`,
             `主题: ${item.subject || ''}`,
@@ -532,12 +589,12 @@ function renderAuditOutboxRows(items, { append = false } = {}) {
             item.error ? `错误: ${item.error}` : '',
             item.ref_type ? `关联: ${item.ref_type}:${item.ref_id}` : '',
         ].filter(Boolean).join('\n');
-        return `<tr data-outbox-id="${escapeHtml(item.id || '')}" style="border-bottom: 1px solid var(--border-color); cursor: pointer;">
-            <td style="padding: 6px 8px; text-align: center; font-size: 12px; white-space: nowrap;" title="${escapeJsAttr(formatOutboxTime(item.created_at))} (UTC)">${escapeHtml(formatOutboxTime(item.created_at))}</td>
-            <td style="padding: 6px 8px; text-align: center; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeJsAttr(((item.username || '系统')) + (item.ref_type ? ` ↳${item.ref_type}:${item.ref_id}` : ''))}">${channelLabel}${ref}</td>
-            <td style="padding: 6px 8px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeJsAttr(toText)}">${escapeHtml(toText)}</td>
-            <td style="padding: 6px 8px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeJsAttr(hoverTitle)}">${escapeHtml(String(item.subject || ''))}</td>
-            <td style="padding: 6px 8px; text-align: center; font-size: 12px; white-space: nowrap;">${state}</td>
+        return `<tr class="audit-mail-row" data-outbox-id="${escapeHtml(item.id || '')}">
+            <td class="audit-mail-time" title="${escapeJsAttr(formatOutboxTime(item.created_at))} (UTC)">${escapeHtml(formatOutboxTime(item.created_at))}</td>
+            <td class="audit-mail-channel" title="${escapeJsAttr(((item.username || '系统')) + (item.ref_type ? ` ↳${item.ref_type}:${item.ref_id}` : ''))}">${channelLabel}${ref}</td>
+            <td class="audit-mail-recipient" title="${escapeJsAttr(toText)}">${escapeHtml(toText)}</td>
+            <td class="audit-mail-subject" title="${escapeJsAttr(hoverTitle)}">${escapeHtml(String(item.subject || ''))}</td>
+            <td class="audit-mail-result">${state}</td>
         </tr>`;
     }).join('');
     if (append) {
@@ -657,15 +714,19 @@ async function loadAuditOutbox(reset = false, append = false) {
         auditOutboxState.hasMore = (auditOutboxState.offset + auditOutboxState.limit) < (data.total || 0);
         auditOutboxState.offset += items.length;
         auditOutboxState.loaded = true;
+        const mailCount = document.querySelector('#audit-outbox-panel .audit-mail-count');
+        if (mailCount) mailCount.textContent = `共 ${Number(data.total || 0).toLocaleString('zh-CN')} 条`;
         renderAuditOutboxRows(items, { append });
         const wrapper = $('email-outbox-load-more-wrapper');
         if (wrapper) {
             wrapper.innerHTML = auditOutboxState.hasMore
                 ? `<button class="btn-xs" data-click="loadAuditOutboxMore">加载更多（共 ${data.total} 条）</button>`
-                : (items.length ? `<span style="color: var(--text-secondary); font-size: 12px;">共 ${data.total} 条</span>` : '');
+                : (items.length ? '<span class="audit-mail-list-complete">已显示全部记录 · 点击记录查看详情</span>' : '');
         }
     } catch (error) {
         if (!append) {
+            const mailCount = document.querySelector('#audit-outbox-panel .audit-mail-count');
+            if (mailCount) mailCount.textContent = '加载失败';
             tbody.innerHTML = `
                 <tr><td colspan="5" style="padding: 40px; text-align: center; color: var(--danger-color);">
                     加载历史邮件失败: ${escapeHtml(error.message)}
@@ -685,6 +746,7 @@ function auditViewTabsEnsureVisible() {
     if (!state.authReady) return;
     const tabs = document.getElementById('audit-view-tabs');
     if (tabs) tabs.style.display = 'flex';
+    bindAuditIntegrityCheck();
 }
 
 runAfterAuthReady(auditViewTabsEnsureVisible);

@@ -131,3 +131,61 @@ code { color: var(--green); }
 .arch-details > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .arch-details > summary:focus-visible { outline: 2px solid var(--arch-access); outline-offset: 4px; }
 .arch-details section { border: 0; padding: 12px 0 0; margin-bottom: 0; background: none; }
+
+
+/* System overview topology (static): four stages, separate transport channels, integrations. */
+.arch-system-map,.arch-system-bottom>section{padding:0;overflow:hidden;margin:12px 0;border:1px solid var(--line);border-radius:9px;background:#1b1b24}
+.arch-system-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid var(--line)}
+.arch-system-map h2,.arch-system-bottom h2{font-size:13px;color:var(--text);font-weight:700;margin:0}
+.arch-system-heading>span{color:var(--muted);font-size:11px}
+.arch-system-layout{display:grid;grid-template-columns:minmax(0,1fr) 215px;gap:12px;padding:12px}
+.arch-system-graph{min-width:0;background:#181821;border:1px solid #393545;border-radius:8px;padding:12px}
+.arch-system-chain{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:stretch;gap:24px}
+.arch-system-stage{position:relative;min-width:0;background:linear-gradient(150deg,var(--stage-bg),#1b1b26);border:1px solid var(--stage-edge);border-radius:8px;padding:9px}
+.arch-system-stage:not(:last-child)::after{content:"→";position:absolute;right:-20px;top:calc(50% - 17px);color:#b8a8d1;font-size:23px;line-height:34px}
+.arch-system-stage--access{--stage-edge:#8760b5;--stage-bg:#282039}
+.arch-system-stage--control{--stage-edge:#9979e9;--stage-bg:#32254b}
+.arch-system-stage--worker{--stage-edge:#5597e9;--stage-bg:#1b3350}
+.arch-system-stage--device{--stage-edge:#38b989;--stage-bg:#173a31}
+.arch-system-stage h3{display:flex;flex-direction:column;gap:2px;align-items:center;justify-content:center;min-height:37px;margin:0 0 6px;font-size:12px;font-weight:700;text-align:center;color:#f0eafa}
+.arch-system-stage h3 small{font-size:10px;font-weight:400;color:#bdb8cf}
+.arch-system-stage>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+.arch-system-stage>div span{display:flex;align-items:center;justify-content:center;min-height:28px;text-align:center;line-height:1.35;overflow-wrap:anywhere;font-size:10px;padding:4px;border-radius:5px;background:#1c1c28;border:1px solid #4e455d;color:#e4deec}
+.arch-system-paths{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0;font-size:10px;text-align:center;color:#c1bad3}
+.arch-system-paths span{padding:5px 3px;min-width:0;border-bottom:1px dashed #62567c;overflow-wrap:anywhere}
+.arch-system-channels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 10px}
+.arch-system-channel{min-height:62px;padding:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;text-align:center;background:var(--channel-bg);border:1px solid var(--channel-border);border-radius:7px}
+.arch-system-channel--usb{--channel-border:#4e9ad8;--channel-bg:#182e40}
+.arch-system-channel--adb{--channel-border:#39bbaa;--channel-bg:#193835}
+.arch-system-channel strong{font-size:12px;color:#edf0fa}
+.arch-system-channel span{font-size:10px;line-height:1.5;color:#c3c9d3}
+.arch-system-support{padding:9px 11px;border:1px solid #7862a9;background:#29213b;border-radius:7px}
+.arch-system-support strong{display:block;margin-bottom:7px;color:#cfbcff;font-size:11px}
+.arch-system-support>div{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}
+.arch-system-support>div span{padding:7px 3px;border:1px solid #665181;background:#201b2d;border-radius:5px;text-align:center;color:#ddd3ec;font-size:10px;overflow-wrap:anywhere}
+.arch-system-sidebar{min-width:0;display:flex;flex-direction:column;gap:10px}
+.arch-system-sidebar>div{padding:11px;background:#20202b;border:1px solid #3b3947;border-radius:8px}
+.arch-system-sidebar h3{font-size:12px;margin:0 0 8px;color:#edeaf5}
+.arch-system-sidebar p{margin:0 0 8px;color:#bab5c9;font-size:10px;line-height:1.5;display:flex;gap:7px;align-items:flex-start}
+.arch-system-sidebar p:last-child{margin:0}
+.arch-system-key{flex:none;display:inline-block;width:17px;height:10px;border-radius:3px;margin-top:2px;background:color-mix(in srgb,var(--key-color) 23%,transparent);border:1px solid var(--key-color)}
+.key-access{--key-color:#8760b5}.key-control{--key-color:#9979e9}.key-worker{--key-color:#5597e9}.key-device{--key-color:#38b989}.key-support{--key-color:#7862a9}
+.arch-system-bottom{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:12px}
+.arch-system-bottom>section{margin:0}
+.arch-system-bottom h2{padding:10px 13px;border-bottom:1px solid var(--line)}
+.arch-system-table-scroll{overflow-x:auto}
+.arch-system-modules table{width:100%;min-width:535px;border-collapse:collapse;font-size:11px}
+.arch-system-modules :is(th,td){padding:8px 10px;text-align:left;border-bottom:1px solid #373440;line-height:1.5}
+.arch-system-modules th{background:#24232e;color:#bdb5cf;font-weight:600}
+.arch-system-modules td:first-child{color:#e0d4ff;font-weight:650;white-space:nowrap}
+.arch-system-modules tr:last-child td{border-bottom:0}
+.arch-system-events ol{margin:0;padding:6px 13px;counter-reset:arch-step;list-style:none}
+.arch-system-events li{counter-increment:arch-step;display:flex;align-items:baseline;gap:9px;border-bottom:1px solid #383541;padding:8px 0;font-size:11px;color:#b9b4c6}
+.arch-system-events li:last-child{border-bottom:0}
+.arch-system-events li::before{content:counter(arch-step,decimal-leading-zero);border-radius:20px;padding:2px 5px;min-width:26px;background:#554280;color:#f5efff;text-align:center;font-size:10px;font-weight:700}
+.arch-system-events li strong{color:#ede9f5;white-space:nowrap}
+.arch-system-events li span{line-height:1.4}
+.arch-legacy-topology{margin:12px 0}
+@media(max-width:1300px){.arch-system-layout{grid-template-columns:1fr}.arch-system-sidebar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:980px){.arch-system-bottom{grid-template-columns:1fr}.arch-system-chain{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:11px}.arch-system-stage::after{display:none}}
+@media(max-width:620px){.arch-system-heading{flex-direction:column;align-items:flex-start;gap:4px}.arch-system-sidebar,.arch-system-chain,.arch-system-channels{grid-template-columns:1fr}.arch-system-support>div{grid-template-columns:repeat(2,minmax(0,1fr))}.arch-system-paths{grid-template-columns:1fr}.arch-system-events li{flex-wrap:wrap}}

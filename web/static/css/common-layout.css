@@ -1019,7 +1019,10 @@
     max-width: none;
 }
 
-/* 工具卡片操作按钮（tools-render.js 渲染，data-tools-action 委托分发）。 */
+/* 工具卡片操作按钮（tools-render.js 渲染，data-tools-action 委托分发）。
+   A compact 23px visible glyph is too small for keyboard/mouse/touch hit
+   testing; the minimum click target must be at least 24px tall. */
+.btn-act { min-height: 28px; display: inline-flex; align-items: center; justify-content: center; }
 .btn-act:hover { opacity: 0.8; }
 .btn-act.act-edit:hover { background: var(--primary-gradient); color: white; border-color: var(--primary-color); }
 .btn-act.act-danger:hover { background: var(--danger-color); color: white; border-color: var(--danger-color); }

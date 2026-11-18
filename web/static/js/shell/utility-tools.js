@@ -20,6 +20,15 @@ function toolsCategoryColor(catIndex) {
     return TOOLS_CATEGORY_PALETTE[i % TOOLS_CATEGORY_PALETTE.length];
 }
 const UT_BUILTIN_TOOLS = {
+    '常用工具': [
+        {
+            icon: '🌐',
+            title: 'vpn-proxy',
+            description: '管理本机 VPN HTTP/HTTPS 代理服务、查看接入客户端与复制客户端部署命令',
+            action: 'openVpnProxyPanel',
+            builtin_id: 'builtin-vpn-proxy'
+        }
+    ],
     '报告工具': [
         {
             icon: '📅',
@@ -178,6 +187,25 @@ function ut_loadToolsList() {
 }
 
 const UT_HIDDEN_BUILTINS_KEY = 'gms_utility_tools_hidden_builtins';
+const UT_HIDDEN_CATEGORIES_KEY = 'gms_utility_tools_hidden_categories';
+
+// Deleting a built-in category is a persistent user preference, not a reason
+// to re-create the category during built-in tool reconciliation.
+function ut_getHiddenCategories() {
+    try {
+        const values = JSON.parse(localStorage.getItem(UT_HIDDEN_CATEGORIES_KEY) || '[]');
+        return new Set(Array.isArray(values) ? values.filter(name => typeof name === 'string') : []);
+    } catch (_error) {
+        return new Set();
+    }
+}
+
+function ut_setCategoryHidden(category, hidden) {
+    const categories = ut_getHiddenCategories();
+    if (hidden) categories.add(category);
+    else categories.delete(category);
+    localStorage.setItem(UT_HIDDEN_CATEGORIES_KEY, JSON.stringify([...categories]));
+}
 
 function ut_getHiddenBuiltins() {
     try {
@@ -196,7 +224,9 @@ function ut_hideBuiltin(builtinId) {
 function ut_ensureBuiltInTools() {
     let changed = false;
     const hidden = ut_getHiddenBuiltins();
+    const hiddenCategories = ut_getHiddenCategories();
     Object.entries(UT_BUILTIN_TOOLS).forEach(([category, tools]) => {
+        if (hiddenCategories.has(category)) return;
         if (!ut_categorizedTools[category]) {
             ut_categorizedTools[category] = [];
             changed = true;
@@ -427,10 +457,8 @@ function ut_createToolCard(tool, category, index, cardColor) {
 
     // 卡片点击语义与原逐节点绑定一致：内置动作 > url 打开 > tool_id 下载。
     let clickAttrs = '';
-    if (tool.action === 'openWeeklyReport') {
-        clickAttrs = 'data-tools-action="builtin-open" data-builtin-action="openWeeklyReport"';
-    } else if (tool.action === 'shareFirmware') {
-        clickAttrs = 'data-tools-action="builtin-open" data-builtin-action="shareFirmware"';
+    if (['openWeeklyReport', 'shareFirmware', 'openVpnProxyPanel'].includes(tool.action)) {
+        clickAttrs = `data-tools-action="builtin-open" data-builtin-action="${tool.action}"`;
     } else if (tool.url) {
         clickAttrs = `data-tools-action="open-tool" data-url="${escapeIconAttr(tool.url)}"`;
     } else if (tool.tool_id && !isSyncTool) {
@@ -972,6 +1000,8 @@ function ut_saveCategory() {
         ut_categoryMeta[name] = ut_categoryMeta[ut_editingCategory] || UT_DEFAULT_CATEGORIES[ut_editingCategory] || {};
         delete ut_categorizedTools[ut_editingCategory];
         delete ut_categoryMeta[ut_editingCategory];
+        // Renaming away from a built-in category also suppresses the old name.
+        ut_setCategoryHidden(ut_editingCategory, true);
     }
     if (!ut_categorizedTools[name]) {
         ut_categorizedTools[name] = [];
@@ -981,6 +1011,10 @@ function ut_saveCategory() {
         icon,
     };
 
+    // Adding a formerly deleted category explicitly re-enables its built-ins.
+    const wasHidden = ut_getHiddenCategories().has(name);
+    ut_setCategoryHidden(name, false);
+    if (wasHidden) ut_ensureBuiltInTools();
     ut_saveCategories();
     ut_renderToolsGrid();
     ut_closeCategoryModal();
@@ -996,7 +1030,12 @@ function ut_editCategory(oldName) {
 }
 
 function ut_deleteCategory(categoryName) {
-    _deleteCategory(ut_categorizedTools, categoryName, [(cat) => delete ut_categoryMeta[cat]], ut_saveCategories, ut_renderToolsGrid);
+    _deleteCategory(ut_categorizedTools, categoryName, [
+        (cat) => {
+            delete ut_categoryMeta[cat];
+            ut_setCategoryHidden(cat, true);
+        }
+    ], ut_saveCategories, ut_renderToolsGrid);
 }
 
 function ut_updateCategorySelect() {
@@ -1038,6 +1077,7 @@ async function ut_loadToolDir(subpath) {
         state.fileBrowser.currentPath = data.path || '';
         const pathDisplay = document.getElementById('file-browser-current-path');
         pathDisplay.textContent = '可下载工具清单';
+        pathDisplay.title = '可下载工具清单';
         const listContainer = document.getElementById('file-browser-list');
         if (data.files.length === 0) {
             listContainer.innerHTML = '<div class="file-browser-item" style="cursor: default; color: var(--text-muted);">空目录</div>';

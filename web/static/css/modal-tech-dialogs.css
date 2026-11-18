@@ -370,3 +370,50 @@
 
 /* [hidden] must win over the base flex button-bar display for tabbed dialogs. */
 .tech-dialog > :is(.modal-buttons,.modal-footer,.modal-actions)[hidden] { display: none !important; }
+
+/* Compact Tailscale modal: five rows remain intact, with no blank help band. */
+#tailscale-info-modal .modal-content.tech-dialog--tailscale {
+  width:min(700px,calc(100vw - 32px)) !important;
+  max-width:min(700px,calc(100vw - 32px)) !important;
+}
+#tailscale-info-modal .tech-tailscale-body { padding:8px 12px 6px !important; }
+#tailscale-info-modal .tech-tailscale-rows { gap:5px; }
+#tailscale-info-modal .tech-tailscale-row {
+  grid-template-columns:28px 112px minmax(0,1fr) 68px;
+  min-height:46px; padding:5px 8px; gap:7px;
+}
+#tailscale-info-modal .tech-tailscale-help {
+  min-height:0; margin:5px 0 0 !important; padding:3px 2px !important;
+  gap:7px; line-height:1.35; align-items:flex-start;
+}
+#tailscale-info-modal .tech-hint-icon .ui-icon { width:16px; height:16px; }
+#tailscale-info-modal .tech-dialog-footer { min-height:43px; padding:5px 12px 8px !important; }
+@media(max-width:800px) {
+  #tailscale-info-modal .tech-tailscale-row {
+    grid-template-columns:28px 100px minmax(0,1fr) 68px;
+    grid-template-areas:none; gap:6px; padding:6px;
+  }
+  #tailscale-info-modal .tech-tailscale-row > :is(label,input,.tech-field-glyph,.tech-row-action) { grid-area:auto; }
+}
+@media(max-width:570px) {
+  #tailscale-info-modal .tech-tailscale-row {
+    grid-template-columns:28px minmax(0,1fr) 68px;
+    grid-template-areas:'icon label label' 'input input action';
+  }
+  #tailscale-info-modal .tech-tailscale-row > .tech-field-glyph { grid-area:icon; }
+  #tailscale-info-modal .tech-tailscale-row > label { grid-area:label; }
+  #tailscale-info-modal .tech-tailscale-row > input { grid-area:input; }
+  #tailscale-info-modal .tech-tailscale-row > .tech-row-action { grid-area:action; }
+}
+
+/* Match the angled Tailscale footer's visual safe area. */
+#tailscale-info-modal .tech-dialog--tailscale > .tech-dialog-footer {
+  padding: 6px 26px 22px !important;
+  min-height: 54px;
+  box-sizing: border-box;
+}
+@media(max-width:570px) {
+  #tailscale-info-modal .tech-dialog--tailscale > .tech-dialog-footer {
+    padding: 6px 20px 18px !important;
+  }
+}

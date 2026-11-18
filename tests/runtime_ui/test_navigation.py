@@ -1,11 +1,179 @@
 """Shell startup, page navigation and refresh lifecycle."""
 
+import json
 import re
 
 from tests.runtime_ui.harness import REPO_ROOT, RuntimeUiHarness, expect
 
 
 class RuntimeNavigationTests(RuntimeUiHarness):
+    def test_vpn_proxy_builtin_card_opens_management_panel_once(self):
+        page = self.new_page()
+        try:
+            # Existing localStorage data must not prevent newly added built-ins
+            # from appearing, nor should refreshing duplicate them.
+            page.add_init_script("""
+                localStorage.setItem('gms_utility_tools_categories', JSON.stringify({
+                    '常用工具': [{icon: '📦', title: '已有工具', tool_id: 'existing-tool'}],
+                    '测试工具': []
+                }));
+                localStorage.removeItem('gms_utility_tools_hidden_builtins');
+            """)
+            self.goto_shell(page)
+            page.evaluate("switchPage('tools', null)")
+            card = page.locator(
+                '#ut-grid .tool-card[data-tools-action="builtin-open"]'
+                '[data-builtin-action="openVpnProxyPanel"]'
+            )
+            expect(card).to_have_count(1)
+            expect(card.locator('.tool-title')).to_have_text('vpn-proxy')
+            self.assertIn('VPN HTTP/HTTPS', card.get_attribute('title') or '')
+            self.assertIn('已有工具', page.locator('#ut-grid').inner_text())
+
+            page.route('**/api/tools/vpn-proxy/status', lambda route: route.fulfill(
+                status=200, content_type='application/json',
+                body=json.dumps({'success': True, 'data': {
+                    'installed': True,
+                    'services': {'proxy': 'active', 'firewall': 'active',
+                                 'stats': 'active', 'installer': 'active'},
+                    'config': {'proxy_url': 'http://proxy.test:7897',
+                               'installer_enabled': True, 'allowed_clients': []},
+                    'clients': {'connected': [], 'recent': [],
+                                'sources': {'connections': True, 'access_log': True}},
+                    'install': {'linux': 'echo linux', 'windows': 'echo windows'},
+                    'stats_error': None,
+                }})
+            ))
+            page.evaluate("() => { window.open = () => { throw Error('unexpected external tab'); }; }")
+            card.click()
+            expect(page.locator('#vpn-proxy-modal')).to_have_class(re.compile('show'))
+            expect(page.locator('#vpn-proxy-status')).to_contain_text('运行中')
+            expect(page.locator('#vpn-proxy-linux-command')).to_have_value('echo linux')
+            page.locator('#vpn-proxy-close').click()
+            expect(page.locator('#vpn-proxy-modal')).not_to_have_class(re.compile('show'))
+
+            page.evaluate("ut_loadToolsList(); ut_loadToolsList();")
+            expect(card).to_have_count(1)
+            expect(card.locator('button[data-tools-action="hide-builtin"]')).to_have_count(1)
+            # Hide persists; built-in reconciliation must respect user's choice.
+            card.locator('button[data-tools-action="hide-builtin"]').click()
+            page.evaluate("ut_loadToolsList()")
+            expect(card).to_have_count(0)
+        finally:
+            page.close()
+
+    def test_deleted_report_category_survives_refresh_and_manual_readd(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("""() => {
+                localStorage.setItem('gms_utility_tools_categories', JSON.stringify({
+                    '报告工具': [{icon: '📅', title: '周报总结',
+                                  builtin_id: 'builtin-weekly-report'}],
+                    '测试工具': []
+                }));
+                localStorage.removeItem('gms_utility_tools_hidden_categories');
+                localStorage.removeItem('gms_utility_tools_hidden_builtins');
+                ut_loadToolsList();
+                switchPage('tools', null);
+            }""")
+            report = page.locator('#ut-grid .category-section[data-category="报告工具"]')
+            expect(report).to_have_count(1)
+
+            page.evaluate("() => { window.showConfirmDialog = async () => true; }")
+            page.evaluate("ut_deleteCategory('报告工具')")
+            expect(report).to_have_count(0)
+            hidden = page.evaluate(
+                "() => JSON.parse(localStorage.getItem('gms_utility_tools_hidden_categories'))"
+            )
+            self.assertIn('报告工具', hidden)
+
+            page.evaluate("ut_loadToolsList(); ut_loadToolsList();")
+            expect(report).to_have_count(0)
+            page.reload()
+            page.evaluate("switchPage('tools', null)")
+            expect(report).to_have_count(0)
+            self.assertNotIn('报告工具', page.evaluate(
+                "() => Object.keys(JSON.parse(localStorage.getItem('gms_utility_tools_categories')))"
+            ))
+            self.assertGreaterEqual(page.locator('#ut-grid .category-section').count(), 1)
+
+            # Recreating the name explicitly restores the built-in card.
+            page.evaluate("""() => {
+                ut_editingCategory = null;
+                document.getElementById('ut-category-name').value = '报告工具';
+                document.getElementById('ut-category-icon').value = '📅';
+                ut_saveCategory();
+            }""")
+            expect(report).to_have_count(1)
+            expect(report.locator('.tool-title')).to_contain_text('周报总结')
+            page.reload()
+            page.evaluate("switchPage('tools', null)")
+            expect(report).to_have_count(1)
+        finally:
+            page.close()
+
+    def test_vpn_proxy_client_access_controls_allow_reenable_after_disconnect(self):
+        page = self.new_page()
+        disabled = set()
+        requests = []
+
+        def status(route):
+            connected = [] if disabled else [
+                {'client': '172.16.14.66', 'connections': 2,
+                 'network': '172.16.14.0/24'}
+            ]
+            route.fulfill(status=200, content_type='application/json',
+                          body=json.dumps({'success': True, 'data': {
+                              'installed': True,
+                              'services': {'proxy': 'active', 'firewall': 'active',
+                                           'stats': 'active', 'installer': 'active'},
+                              'config': {'proxy_url': 'http://proxy.test:7897',
+                                         'allowed_clients': ['172.16.14.0/24']},
+                              'client_access': {'available': True,
+                                                'disabled': sorted(disabled),
+                                                'error': None},
+                              'clients': {'connected': connected, 'recent': [],
+                                          'sources': {'connections': True,
+                                                      'access_log': True}},
+                              'install': {'linux': '', 'windows': ''},
+                              'stats_error': None,
+                          }}))
+
+        def control(route):
+            request = json.loads(route.request.post_data)
+            requests.append(request)
+            if request['action'] == 'disable':
+                disabled.add(request['client'])
+            elif request['action'] == 'enable':
+                disabled.discard(request['client'])
+            route.fulfill(status=200, content_type='application/json',
+                          body=json.dumps({'success': True, 'data': request}))
+
+        try:
+            self.goto_shell(page)
+            page.route('**/api/tools/vpn-proxy/status', status)
+            page.route('**/api/tools/vpn-proxy/client-control', control)
+            page.evaluate('() => { window.showConfirmDialog = async () => true; }')
+            page.evaluate('openVpnProxyPanel()')
+            row = page.locator('#vpn-proxy-connected tr').filter(
+                has_text='172.16.14.66'
+            )
+            expect(row).to_have_count(1)
+            expect(row.locator('.vpn-proxy-client-toggle')).to_have_text('禁用')
+            row.locator('.vpn-proxy-client-toggle').click()
+            expect(row.locator('.vpn-proxy-client-state')).to_have_text('已禁用')
+            expect(row.locator('.vpn-proxy-client-toggle')).to_have_text('启用')
+            self.assertEqual(requests[-1], {'client': '172.16.14.66',
+                                            'action': 'disable'})
+            # The disabled client has no TCP connections, yet remains listed.
+            self.assertEqual(row.locator('td').nth(1).inner_text(), '—')
+            row.locator('.vpn-proxy-client-toggle').click()
+            expect(row.locator('.vpn-proxy-client-state')).to_have_text('允许访问')
+            self.assertEqual(requests[-1]['action'], 'enable')
+        finally:
+            page.close()
+
     def test_tools_pages_keep_long_lists_scrollable_after_repeated_navigation(self):
         page = self.new_page()
         try:
@@ -40,13 +208,68 @@ class RuntimeNavigationTests(RuntimeUiHarness):
                     self.assertGreater(geometry['scrollHeight'], geometry['clientHeight'])
                     self.assertGreater(geometry['scrollTop'], 0)
                     self.assertLessEqual(geometry['footerBottom'], geometry['pageBottom'])
-                    host.locator('.tools-add-category').click()
+                    self.assertEqual(host.locator('.tools-footer').count(), 1)
+                    self.assertEqual(page.locator(f'#page-{kind} .tools-header-add').count(), 0)
+                    host.locator('.tools-footer .tools-add-category').click()
                     modal = page.locator('#ut-category-modal' if kind == 'tools' else '#category-modal')
                     expect(modal).to_have_class(re.compile(r"show"))
                     page.keyboard.press('Escape')
                     expect(modal).not_to_have_class(re.compile(r"show"))
             self.assertEqual(page.locator('#tools-grid').count(), 1)
             self.assertEqual(page.locator('#ut-grid').count(), 1)
+        finally:
+            page.close()
+
+    def test_tools_and_websites_allow_scrolling_to_fourth_group_with_bottom_action(self):
+        """Every category stays reachable while the bottom add action remains visible."""
+        page = self.new_page()
+        try:
+            page.set_viewport_size({"width": 1792, "height": 856})
+            page.add_init_script("""
+                const data = {
+                    '测试工具': Array.from({length: 7}, (_, i) => ({
+                        icon: '✅', title: `Test ${i}`, url: 'https://example.test/'
+                    })),
+                    'Gerrit工具': [{icon:'📦',title:'Gerrit',url:'https://example.test/'}],
+                    '烧写工具': [{icon:'🔥',title:'Flash',url:'https://example.test/'}],
+                    '报告工具': [{icon:'📊',title:'Report',url:'https://example.test/'}]
+                };
+                for (const key of ['gms_tools_categories', 'gms_utility_tools_categories'])
+                    localStorage.setItem(key, JSON.stringify(data));
+            """)
+            self.goto_shell(page)
+            for kind in ('tools', 'websites'):
+                page.evaluate("kind => switchPage(kind, null)", kind)
+                host = page.locator(f'[data-tools-page="{kind}"]')
+                sections = host.locator('.category-section')
+                # Both pages initialize lazily; wait for the category grid
+                # to be populated instead of asserting during navigation.
+                page.wait_for_function(
+                    "kind => document.querySelector(`[data-tools-page=\"${kind}\"]`)"
+                    "?.querySelectorAll('.category-section').length >= 4",
+                    arg=kind,
+                )
+                self.assertGreaterEqual(sections.count(), 4)
+                geometry = host.evaluate("""host => {
+                    const element = host.querySelectorAll('.category-section')[3];
+                    element.scrollIntoView({block: 'end'});
+                    const scroll = host.querySelector('.tools-scroll').getBoundingClientRect();
+                    const last = element.getBoundingClientRect();
+                    const footer = host.querySelector('.tools-footer').getBoundingClientRect();
+                    return {
+                        visibleBottom: scroll.bottom,
+                        fourthBottom: last.bottom,
+                        visibleTop: scroll.top,
+                        fourthTop: last.top,
+                        footerTop: footer.top,
+                        footerBottom: footer.bottom,
+                        hostBottom: host.getBoundingClientRect().bottom
+                    };
+                }""")
+                self.assertGreaterEqual(geometry['fourthTop'], geometry['visibleTop'] - 2)
+                self.assertLessEqual(geometry['fourthBottom'], geometry['visibleBottom'] + 2)
+                self.assertGreaterEqual(geometry['footerTop'], geometry['visibleBottom'])
+                self.assertLessEqual(geometry['footerBottom'], geometry['hostBottom'] + 2)
         finally:
             page.close()
 
@@ -1013,3 +1236,12 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             self.assert_no_page_errors(page_errors)
         finally:
             page.close()
+
+def test_vpn_proxy_installer_single_line_markup_contract():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2] / 'web' / 'shell' / 'dialogs'
+    html = (root / 'vpn-proxy.html').read_text(encoding='utf-8')
+    assert html.count('class="vpn-proxy-install-row"') == 2
+    assert '<textarea id="vpn-proxy-linux-command"' not in html
+    assert 'data-click="copyVpnProxyLinux"' in html
+    assert 'data-click="copyVpnProxyWindows"' in html

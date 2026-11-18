@@ -5,7 +5,7 @@
 function toolsRenderCategoryHeader({ category, icon, count, addButtonBackground }) {
     const safeCategory = escapeIconAttr(category);
     return `
-            <div class="category-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); cursor: move;">
+            <div class="category-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; padding-bottom: 4px; border-bottom: 1px solid var(--border-color); cursor: move;">
                 <div style="display: flex; align-items: center;">
                     <span style="font-size: 16px; margin-right: 6px; cursor: grab;">${escapeHtml(icon)}</span>
                     <button type="button" data-tools-action="edit-category" data-category="${safeCategory}" style="padding: 0; border: 0; background: transparent; font-size: 16px; font-weight: 600; color: var(--text-primary); cursor: pointer;"><span class="category-name">${escapeHtml(category)}</span></button>

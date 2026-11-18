@@ -11,6 +11,8 @@ let reportsHasLoaded = false;
 let reportsLastLoadedAt = 0;
 let reportsLastQueryKey = '';
 let reportsRefreshInFlight = false;
+let notificationFocusedReport = null;
+let notificationReportFocusGeneration = 0;
 const REPORTS_REENTRY_CACHE_MS = 10000;
 const reportsRequests = new Map();
 
@@ -86,6 +88,7 @@ async function preloadTestReports(userOnly = false) {
 window.preloadTestReports = preloadTestReports;
 
 async function switchReportsWorker() {
+    notificationFocusedReport = null;
     const workerId = document.getElementById('reports-worker-filter')?.value || '';
     // Reports 筛选是查询条件，不是执行目标：只维护本页 filter 状态，
     // 绝不写 GmsWorkspace.worker_id / 同步其他页面的 Worker 选择器——
@@ -125,7 +128,7 @@ function ensureReportsPolling() {
     let lastReportsHash = null;
 
     reportsRefreshInterval = setInterval(async () => {
-        if (currentPage === 'reports' && !document.hidden && !reportsRefreshInFlight) {
+        if (currentPage === 'reports' && !document.hidden && !reportsRefreshInFlight && !notificationFocusedReport) {
             reportsRefreshInFlight = true;
             try {
                 if (reportsLoadedPages > 1) return;
@@ -172,6 +175,12 @@ function renderReportsPagination() {
 
 async function loadTestReports(userOnly = false, append = false, force = false) {
     const requestGeneration = ++reportsRequestGeneration;
+    if (force || append) notificationFocusedReport = null;
+    if (notificationFocusedReport) {
+        displayTestReports([notificationFocusedReport]);
+        renderNotificationReportFocus();
+        return;
+    }
     const tbody = document.getElementById('reports-table-body');
     const hadRenderedReports = Boolean(reportsHasLoaded && tbody?.children.length);
     if (tbody) tbody.setAttribute('aria-busy', 'true');
@@ -246,9 +255,73 @@ async function loadTestReports(userOnly = false, append = false, force = false) 
     }
 }
 
+// Resolve the immutable report identity independently of the user's current
+// Worker/owner filters and pagination. The backend applies ownership checks.
+async function focusReportFromNotification(context = {}) {
+    const generation = ++notificationReportFocusGeneration;
+    const id = String(context.report_id || '').trim();
+    const timestamp = String(context.report_timestamp || context.timestamp || '').trim();
+    const jobId = String(context.cluster_job_id || context.job_id || '').trim();
+    const runId = String(context.automation_run_id || context.run_id || '').trim();
+    if (!(id || timestamp || jobId || runId)) return false;
+
+    const params = new URLSearchParams();
+    if (id) params.set('report_id', id);
+    else if (timestamp) params.set('report_timestamp', timestamp);
+    else if (jobId) params.set('cluster_job_id', jobId);
+    else params.set('automation_run_id', runId);
+    params.set('limit', '100');
+    const response = await requestReportsData('/api/reports/list?' + params.toString());
+    if (generation !== notificationReportFocusGeneration) return false;
+    const candidates = Array.isArray(response.reports) ? response.reports : [];
+    const attempt = String(context.attempt_id || '');
+    const report = candidates.find(row =>
+        (!id || row.report_id === id) &&
+        (!timestamp || row.timestamp === timestamp) &&
+        (!jobId || row.cluster_job_id === jobId) &&
+        (!runId || row.automation_run_id === runId) &&
+        (!attempt || row.attempt_id === attempt)
+    );
+    if (!report) return false;
+
+    // An earlier page initialization request must not overwrite the exact row.
+    reportsRequestGeneration += 1;
+    notificationFocusedReport = report;
+    displayTestReports([report]);
+    document.getElementById('reports-table-body')?.setAttribute('aria-busy', 'false');
+    renderNotificationReportFocus();
+    const row = document.querySelector('#reports-table-body tr[data-report-id]');
+    row?.scrollIntoView({block: 'nearest', inline: 'nearest'});
+    return true;
+}
+
+function renderNotificationReportFocus() {
+    if (!notificationFocusedReport) return;
+    const row = document.querySelector('#reports-table-body tr');
+    row?.classList.add('notification-report-target');
+    const wrapper = document.getElementById('reports-load-more-wrapper');
+    if (!wrapper) return;
+    wrapper.replaceChildren();
+    const label = document.createElement('span');
+    label.className = 'notification-report-focus-label';
+    label.textContent = '已定位通知对应报告';
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'btn-xs';
+    back.textContent = '返回全部报告';
+    back.addEventListener('click', () => {
+        notificationReportFocusGeneration += 1;
+        notificationFocusedReport = null;
+        loadTestReports(currentUserFilter, false, true);
+    });
+    wrapper.append(label, back);
+}
+window.focusReportFromNotification = focusReportFromNotification;
+
 function toggleUserReports() {
     const checkbox = document.getElementById('filter-user-checkbox');
     currentUserFilter = checkbox.checked;
+    notificationFocusedReport = null;
 
     loadTestReports(currentUserFilter, false, true);
 }

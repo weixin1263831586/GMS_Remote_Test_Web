@@ -15,6 +15,7 @@
 | `configs/local/cluster.json` | 集群与 Controller 设置 | 本机配置，不入库 |
 | `configs/local/build_servers.json` | 构建主机与命令模板 | 本机配置，不入库 |
 | `configs/local/automation_profiles.json` | 自动化方案 | 本机配置，不入库 |
+| `configs/local/soak.json` | 实机验收专用显式目标（device_host、worker_id、busids 等）；不用于生产应用设置 | 本机配置，不入库；不得存放密码 |
 | `configs/local/layout.json` | 配置布局迁移标记 | 迁移工具维护 |
 | `configs/secrets/environment.json` | 密码、API Key、Bootstrap / Metrics / Webhook Token | 私密配置，不入库 |
 | `configs/secrets/runtime_credentials.json` | 加密 SSH 等运行配置凭据 | 私密配置，不入库 |

@@ -290,17 +290,18 @@ async def get_architecture():
     if os.path.exists(architecture_file):
         with open(architecture_file, encoding='utf-8') as f:
             content = f.read()
-        config = config_manager.load_config()
-        ui_defaults = config.get("ui_defaults") or {}
-        build_server = str(ui_defaults.get("architecture_build_server") or "未配置")
-        content = content.replace("{{BUILD_SERVER_LABEL}}", html.escape(build_server))
+        if "{{BUILD_SERVER_LABEL}}" in content:
+            config = config_manager.load_config()
+            ui_defaults = config.get("ui_defaults") or {}
+            build_server = str(ui_defaults.get("architecture_build_server") or "未配置")
+            content = content.replace("{{BUILD_SERVER_LABEL}}", html.escape(build_server))
         for placeholder, source_name in ARCHITECTURE_TOPOLOGIES.items():
-            topology_file = os.path.join(
-                PROJECT_ROOT, 'docs', 'architecture', source_name)
+            marker = f"{{{{{placeholder}}}}}"
+            if marker not in content:
+                continue
+            topology_file = os.path.join(PROJECT_ROOT, 'docs', 'architecture', source_name)
             with open(topology_file, encoding='utf-8') as source:
-                content = content.replace(
-                    f"{{{{{placeholder}}}}}",
-                    render_topology(source.read(), source_name=source_name))
+                content = content.replace(marker, render_topology(source.read(), source_name=source_name))
         return HTMLResponse(content=content)
     return JSONResponse(status_code=404, content={"error": "Architecture diagram not found"})
 

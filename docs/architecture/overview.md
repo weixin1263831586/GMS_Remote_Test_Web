@@ -47,7 +47,7 @@ USB/IP 数据面中设备**物理连接在 Source 主机**，Worker 使用 `vhci
 
 USB/IP 的 Source 端 bind 经受审计 SSH（ADR 0004）；远端 Worker 的 attach 经认证命令队列（ADR 0001），命令随 Poll 响应返回。测试与烧写图同时展示下发和 ACK / 状态回报，原生测试结果仍保留来源边界。
 
-六张 Web 图使用同一个 SVG 模板：统一 14px 节点字体、12px 箭头标签、208 × 72 节点框、直角连线和水平文字。紫色节点表示接入 / Agent，蓝色表示 Controller，黄色表示执行端，绿色表示资源 / 外部系统；蓝色实线表示数据或回执，紫色虚线表示控制调用。布局在 `features/system/topology_layouts.py`，角色、文本和有向边以各 `.mmd` 为准；新增节点或边时必须同步布局并通过几何契约检查。桌面图按相同画布等比适配，小屏在图内横向滚动。
+Web「系统架构」的六个默认视图由 `web/static/js/pages/architecture-scene-data.js` 提供静态场景节点与连线，`web/static/js/pages/architecture-scenes.js` 负责绘制；`web/static/css/architecture-scenes.css` 统一视觉样式。页面仅解释逻辑关系，不提供实时服务健康或成功率数据。`docs/architecture/*.mmd` 仍是协议角色与消息方向的规范源；`features/system/topology_layouts.py` 与 `features/system/topology_view.py` 负责由规范 Mermaid 生成独立 SVG，供架构契约与文本路由验证。场景变更应同时校对对应的 Mermaid 节点、箭头方向和设备资源归属。窄屏保持图内滚动；桌面缩放优先可读性，不强制裁掉节点内容。 **独立规范 SVG 渲染器**仍使用统一 14px 节点字体、12px 箭头标签；这些尺寸是 `topology_view.py` 的渲染常量，不代表 Web 默认交互视图的 CSS 字号。
 
 ## 四个主要角色
 

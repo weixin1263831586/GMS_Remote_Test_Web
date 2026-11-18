@@ -10,6 +10,7 @@ from foundation.files import create_zip_from_directory
 from foundation.networking import parse_host_address
 from foundation.uploads import (
     copy_fileobj_to_path,
+    merge_files_to_path,
     remote_home_file_path,
     safe_upload_target_path,
     upload_temp_root,
@@ -21,9 +22,62 @@ class SafePathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, self.assertRaises(ValueError):
             safe_extract_member_path(tmp, '../escape.txt')
 
+    def test_archive_member_rejects_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target_dir = root / 'extract'
+            outside = root / 'outside'
+            target_dir.mkdir()
+            outside.mkdir()
+            (target_dir / 'linked').symlink_to(outside, target_is_directory=True)
+            with self.assertRaises(ValueError):
+                safe_extract_member_path(str(target_dir), 'linked/overwrite.txt')
+
     def test_upload_target_rejects_absolute_path(self):
         with tempfile.TemporaryDirectory() as tmp, self.assertRaises(ValueError):
             safe_upload_target_path(tmp, '/etc/passwd')
+
+    def test_upload_target_rejects_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            upload_dir = root / 'uploads'
+            outside_dir = root / 'outside'
+            upload_dir.mkdir()
+            outside_dir.mkdir()
+            (upload_dir / 'external').symlink_to(outside_dir, target_is_directory=True)
+            with self.assertRaises(ValueError):
+                safe_upload_target_path(str(upload_dir), 'external/escaped.bin')
+
+    def test_merge_files_preserves_existing_destination_after_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chunk = root / 'chunk-0'
+            chunk.write_bytes(b'first-part')
+            destination = root / 'merged.bin'
+            destination.write_bytes(b'previous-complete-file')
+            with self.assertRaises(FileNotFoundError):
+                merge_files_to_path(
+                    [str(chunk), str(root / 'missing-chunk')],
+                    str(destination),
+                    chunk_size=3,
+                )
+            self.assertEqual(destination.read_bytes(), b'previous-complete-file')
+            self.assertEqual(list(root.glob('.gms-merge-*')), [])
+
+    def test_merge_files_publishes_only_completed_merge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / 'chunk-0'
+            second = root / 'chunk-1'
+            first.write_bytes(b'ABC')
+            second.write_bytes(b'DEF')
+            destination = root / 'merged.bin'
+            self.assertEqual(
+                merge_files_to_path([str(first), str(second)], str(destination), chunk_size=2),
+                6,
+            )
+            self.assertEqual(destination.read_bytes(), b'ABCDEF')
+            self.assertEqual(list(root.glob('.gms-merge-*')), [])
 
     def test_copy_fileobj_removes_partial_file_after_size_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -44,6 +98,11 @@ class SafePathTests(unittest.TestCase):
         # upload_temp_root prefers the managed data_root/uploads directory so
         # large uploads survive system /tmp cleanup; the namespace basename
         # is still sanitized and kept under that managed root.
+        self.assertEqual(root.parent.name, 'uploads')
+
+    def test_upload_temp_root_rejects_dot_namespace(self):
+        root = Path(upload_temp_root('..'))
+        self.assertEqual(root.name, 'gms_uploads')
         self.assertEqual(root.parent.name, 'uploads')
 
     def test_remote_home_file_path_rejects_unsafe_parts(self):

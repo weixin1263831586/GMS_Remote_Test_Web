@@ -328,6 +328,16 @@ function resetReportAnalysis() {
     if (detailsDiv) detailsDiv.innerHTML = '';
     if (failuresDiv) failuresDiv.style.display = 'none';
     if (failureList) failureList.innerHTML = '';
+    const failureActions = $('report-failure-header-actions');
+    if (failureActions) failureActions.replaceChildren();
+    const reportActiveFile = $('report-active-file');
+    if (reportActiveFile) reportActiveFile.hidden = true;
+    const reportActiveName = $('report-active-name');
+    if (reportActiveName) reportActiveName.textContent = '';
+    const reportFailureDetail = $('report-failure-detail');
+    if (reportFailureDetail) reportFailureDetail.hidden = true;
+    const reportFailureContent = $('report-failure-detail-content');
+    if (reportFailureContent) reportFailureContent.replaceChildren();
 
     if (uploadZone) {
         uploadZone.classList.add('upload-empty');

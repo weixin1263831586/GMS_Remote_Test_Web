@@ -47,8 +47,8 @@ DEVICE_BUSIDS = [
     if item.strip()
 ]
 WORKER_ID = os.getenv("GMS_SOAK_WORKER_ID", "")
-SUITE_KEY = os.getenv("GMS_SOAK_SUITE_KEY", "CTS")
-MODULE = os.getenv("GMS_SOAK_MODULE", "CtsSecurityTestCases")
+SUITE_KEY = os.getenv("GMS_SOAK_SUITE_KEY") or "CTS"
+MODULE = os.getenv("GMS_SOAK_MODULE") or "CtsSecurityTestCases"
 JOB_TIMEOUT_SECONDS = int(os.getenv("GMS_SOAK_JOB_TIMEOUT", "1800"))
 POLL_INTERVAL_SECONDS = int(os.getenv("GMS_SOAK_POLL_INTERVAL", "15"))
 
@@ -71,6 +71,8 @@ class SoakFoundation(unittest.TestCase):
         cls._log: list[str] = []
         cls.attached_by_soak = False
         cls.attached_serial = ""
+        cls.preexisting_session = False
+        cls.active_job_id = ""
         if SESSION_TOKEN:
             cls.session.cookies.set("gms_session", SESSION_TOKEN)
         elif USERNAME and PASSWORD:
@@ -126,11 +128,47 @@ class SoakFoundation(unittest.TestCase):
             if last.get("status") in {"completed", "failed", "cancelled"}:
                 return last
             time.sleep(POLL_INTERVAL_SECONDS)
+        # This job was created by this soak invocation; never cancel someone
+        # else's workload. Stop only our own timed-out CTS, then wait for both
+        # terminal state AND released device leases before allowing USB detach.
+        stopped = self._cancel_owned_timed_out_job(job_id)
         self.fail(
-            f"job {job_id} not terminal after {JOB_TIMEOUT_SECONDS}s "
-            f"(last status: {last.get('status')!r})\n"
-            f"recent calls:\n" + "\n".join(self._log[-10:])
+            f"CTS job {job_id} exceeded {JOB_TIMEOUT_SECONDS}s; "
+            f"last={last.get('status')!r}; "
+            f"cancelled_and_released={stopped}. "
+            "If False, leave USB/IP attached and investigate the Worker."
         )
+
+    def _cancel_owned_timed_out_job(self, job_id: str) -> bool:
+        if job_id != type(self).active_job_id:
+            raise AssertionError("Refusing to cancel an unowned CTS job")
+        try:
+            response = self._api(
+                "POST", f"/api/cluster/jobs/{job_id}/cancel", timeout=30,
+            )
+            if response.status_code != 200:
+                print("Owned timed-out CTS cancellation request rejected")
+                return False
+            # Controller may enter 'stopping' before the Worker terminates
+            # Tradefed and reports the final lease transaction.
+            deadline = time.monotonic() + 180
+            while time.monotonic() < deadline:
+                poll = self._api("GET", f"/api/cluster/jobs/{job_id}", timeout=15)
+                if poll.status_code == 200:
+                    job = poll.json().get("job") or {}
+                    if (
+                        job.get("status") in {"completed", "failed", "cancelled"}
+                        and job.get("leases")
+                        and all(lease.get("status") == "released"
+                                for lease in job["leases"])
+                    ):
+                        type(self).active_job_id = ""
+                        print("Owned CTS stopped or terminal; all leases released")
+                        return True
+                time.sleep(5)
+        except (requests.RequestException, AssertionError, ValueError, KeyError):
+            print("Timed-out CTS stop/lease confirmation failed")
+        return False
 
 
 class TestDeviceChainSoak(SoakFoundation):
@@ -169,40 +207,168 @@ class TestDeviceChainSoak(SoakFoundation):
         self.assertEqual(len(matching), 1, directory)
         self.assertIn(matching[0].get("status"), {"online", "busy"}, directory)
 
-    def test_02_usbip_attach_and_adb_visible(self):
-        self.assertTrue(DEVICE_HOST and WORKER_ID and DEVICE_BUSIDS)
-        baseline = self._adb_ready_serials(self._worker_devices())
-        response = self._api(
-            "POST", "/api/usbip/connect",
-            json_body={
-                "device_host": DEVICE_HOST, "worker_id": WORKER_ID,
-                "busids": DEVICE_BUSIDS, "manual_connect": True,
-            },
-            timeout=300,
+        # A previous GitHub run can end while Tradefed continues on the
+        # actual Worker. Never start a new hardware run over an active job.
+        jobs_response = self._api(
+            "GET", "/api/cluster/jobs",
+            params={"include_active": "true", "limit": 500},
         )
-        self.assertEqual(response.status_code, 200, response.text)
-        payload = response.json()
-        self.assertTrue(payload.get("success", False), payload)
-        type(self).attached_by_soak = True
-        deadline = time.monotonic() + 120
+        self.assertEqual(jobs_response.status_code, 200, "job inventory unavailable")
+        active = [
+            item for item in jobs_response.json().get("jobs") or []
+            if item.get("assigned_worker_id") == WORKER_ID
+            and item.get("status") not in {"completed", "failed", "cancelled"}
+        ]
+        self.assertFalse(
+            active,
+            "Selected Worker has unfinished platform jobs; refusing to "
+            "re-attach, create CTS, or detach USB/IP. "
+            "Inspect their termination and device leases first: "
+            + ", ".join(str(item.get("id") or "unknown") for item in active[:5]),
+        )
+
+    def _target_assignment(self) -> dict | None:
+        """Read persistent USB/IP ownership; never steal or detach another session."""
+        resp = self._api("GET", "/api/usbip/assignments")
+        self.assertEqual(resp.status_code, 200, "cannot inspect USB/IP ownership")
+        groups = resp.json().get("cluster_selections") or []
+        matches = [
+            group for group in groups
+            if group.get("device_host") == DEVICE_HOST
+            and DEVICE_BUSIDS[0] in (group.get("busids") or [])
+        ]
+        self.assertLessEqual(len(matches), 1, "duplicate USB/IP assignment")
+        if not matches:
+            return None
+        current = matches[0]
+        self.assertEqual(
+            current.get("worker_id"), WORKER_ID,
+            "configured USB/IP BUSID is owned by a different Worker",
+        )
+        return current
+
+    @staticmethod
+    def _select_serial(
+        available: set[str],
+        baseline: set[str],
+        reported: set[str],
+    ) -> str:
+        """Require an explicit or uniquely attributable DUT; never choose first."""
+        if DEVICE_SERIAL:
+            if reported and DEVICE_SERIAL not in reported:
+                raise AssertionError(
+                    "configured DUT serial differs from source USB/IP inventory"
+                )
+            return DEVICE_SERIAL if DEVICE_SERIAL in available else ""
+        if len(reported) == 1:
+            candidate = next(iter(reported))
+            return candidate if candidate in available else ""
+        # Only one entirely new device is an admissible fallback.
+        new_devices = available - baseline
+        return next(iter(new_devices)) if len(new_devices) == 1 else ""
+
+    def test_02_usbip_attach_and_adb_visible(self):
+        self.assertTrue(DEVICE_HOST and WORKER_ID and len(DEVICE_BUSIDS) == 1)
+        baseline = self._adb_ready_serials(self._worker_devices())
+        existing = self._target_assignment()
+        reported: set[str] = set()
+        transport_connected = False
+        adb_ready_at_attach = False
+
+        if existing:
+            state = (existing.get("statuses_by_busid") or {}).get(DEVICE_BUSIDS[0])
+            self.assertEqual(
+                state, "attached",
+                "USB/IP target has an existing uncertain session; refusing takeover",
+            )
+            reported = set(
+                (existing.get("device_serials_by_busid") or {})
+                .get(DEVICE_BUSIDS[0]) or []
+            )
+            self.assertTrue(
+                DEVICE_SERIAL or len(reported) == 1,
+                "pre-attached USB/IP target lacks a unique serial identifier",
+            )
+            type(self).preexisting_session = True
+            transport_connected = True
+            print("Target BUSID was already attached; keep existing session")
+        else:
+            response = self._api(
+                "POST", "/api/usbip/connect",
+                json_body={
+                    "device_host": DEVICE_HOST, "worker_id": WORKER_ID,
+                    "busids": DEVICE_BUSIDS, "manual_connect": True,
+                },
+                timeout=300,
+            )
+            self.assertEqual(response.status_code, 200, "USB/IP attach HTTP failure")
+            payload = response.json()
+            self.assertTrue(payload.get("success", False), "USB/IP attach rejected")
+            # A successful USB/IP transport request does NOT prove ADB readiness.
+            self.assertEqual(payload.get("worker_id"), WORKER_ID)
+            self.assertEqual(payload.get("busids"), DEVICE_BUSIDS)
+            type(self).attached_by_soak = True
+            transport_connected = bool(payload.get("transport_connected"))
+            adb_ready_at_attach = bool(payload.get("adb_ready"))
+            reported = {
+                str(serial) for serial in payload.get("device_serials") or []
+                if str(serial)
+            }
+            self.assertTrue(
+                transport_connected, "USB/IP attach returned without transport evidence"
+            )
+            print(
+                "USB/IP transport established; ADB ready in attach response:",
+                adb_ready_at_attach,
+            )
+
+        refreshed = False
+        start = time.monotonic()
+        deadline = start + 120
+        last_available: set[str] = set()
         while time.monotonic() < deadline:
-            available = self._adb_ready_serials(self._worker_devices())
-            new_devices = available - baseline
-            if DEVICE_SERIAL and DEVICE_SERIAL in new_devices:
-                type(self).attached_serial = DEVICE_SERIAL
+            last_available = self._adb_ready_serials(self._worker_devices())
+            matched = self._select_serial(last_available, baseline, reported)
+            if matched:
+                type(self).attached_serial = matched
+                print("Explicit DUT confirmed in the requested Worker's ADB pool")
                 return
-            if not DEVICE_SERIAL and len(new_devices) == 1:
-                type(self).attached_serial = next(iter(new_devices))
-                return
+            if not refreshed and time.monotonic() - start >= 10:
+                # Force an actual Worker adb inventory refresh, not just a
+                # Controller DB read; leave unrelated device state untouched.
+                refreshed = True
+                try:
+                    result = self._api(
+                        "POST", f"/api/cluster/workers/{WORKER_ID}/refresh",
+                        params={"inventory": "devices"}, timeout=30,
+                    )
+                    print("Worker inventory refresh HTTP:", result.status_code)
+                except requests.RequestException:
+                    print("Worker inventory refresh unreachable")
             time.sleep(5)
+        state = "unknown"
+        try:
+            state = str(
+                ((self._target_assignment() or {}).get("statuses_by_busid") or {})
+                .get(DEVICE_BUSIDS[0]) or "none"
+            )
+        except (AssertionError, requests.RequestException):
+            pass
         self.fail(
-            "USB/IP attach 后未在指定 Worker 上发现唯一的新设备；"
-            "请检查 BUSID/序列号及目标 Worker 的 ADB 心跳。"
+            "USB/IP transport connected, but target DUT never became ADB-ready "
+            "on its selected Worker; "
+            f"before={len(baseline)} current={len(last_available)} "
+            f"assigned_transport={state} "
+            f"initial_adb_ready={adb_ready_at_attach} "
+            f"inventory_refresh_attempted={refreshed}. "
+            "Check USB debugging authorization, device boot state, Worker ADB "
+            "server identity and USB/IP enumeration."
         )
 
     def test_03_short_module_job_completes_and_leases_released(self):
         serial = type(self).attached_serial
-        self.assertTrue(serial, "未确认新接入的真机序列号，禁止执行测试")
+        if not serial:
+            self.skipTest("USB/IP ADB identification did not pass; no CTS job submitted")
         devices = self._worker_devices()
         candidates = [
             d for d in devices
@@ -210,6 +376,62 @@ class TestDeviceChainSoak(SoakFoundation):
             and d.get("state") == "available"
         ]
         self.assertEqual(len(candidates), 1, devices)
+        self.assertFalse(
+            candidates[0].get("claimed"),
+            "Selected DUT has an existing lease/claim; refusing new CTS job",
+        )
+
+        # Use actual Worker test-runner state, not just its ADB inventory.
+        directory = self._api("GET", "/api/cluster/workers").json()
+        target = next(
+            (worker for worker in directory.get("workers") or []
+             if worker.get("id") == WORKER_ID), None,
+        )
+        self.assertIsNotNone(target, "Target Worker registration vanished")
+        agent_version = str(target.get("agent_version") or "")
+        self.assertFalse(
+            agent_version.startswith("controller-"),
+            "Selected Worker is a Controller-only inventory bridge, not a "
+            "Tradefed-capable Worker Agent. Install/start the actual Worker "
+            "Agent or choose its registered Worker ID in soak.json.",
+        )
+        self.assertIn(target.get("status"), {"online", "busy"})
+        self.assertFalse(
+            int(target.get("unknown_external_jobs") or 0),
+            "Worker reports an external Tradefed job; refusing to submit CTS",
+        )
+        self.assertLess(
+            int(target.get("running_jobs") or 0),
+            max(1, int(target.get("max_jobs") or 1)),
+            "Target Worker has no spare test execution slots",
+        )
+        # The Worker directory and scheduler share the same admission policy.
+        # A Worker can be busy and have free slots but still be ineligible
+        # because disk free space is under its configured safety floor.
+        admission = target.get("admission_reasons") or []
+        self.assertFalse(
+            target.get("admission_blocked") or admission,
+            "Selected Worker is not eligible for new CTS jobs: "
+            f"reasons={list(admission)}, "
+            f"disk_free_gb={target.get('disk_free_gb')}, "
+            f"memory_available_gb={target.get('memory_available_gb')}, "
+            f"running_jobs={target.get('running_jobs')}, "
+            f"max_jobs={target.get('max_jobs')}. "
+            "Restore Worker admission prerequisites before rerunning; "
+            "never bypass low-disk, in-use-device or external-Tradefed guards.",
+        )
+
+        # The suite listing may use a local compatibility scan even when
+        # the dispatch database has no suite inventory yet. Refresh the
+        # actual Worker and persisted suite inventory before selecting CTS.
+        refreshed = self._api(
+            "POST", f"/api/cluster/workers/{WORKER_ID}/refresh",
+            params={"inventory": "suites"}, timeout=45,
+        )
+        self.assertEqual(
+            refreshed.status_code, 200,
+            "Worker suite refresh failed; refusing a non-dispatchable CTS job",
+        )
         suites_response = self._api(
             "GET", "/api/cluster/suites", params={"worker_id": WORKER_ID},
         )
@@ -222,8 +444,17 @@ class TestDeviceChainSoak(SoakFoundation):
                  or str(item.get("suite_type") or "").upper() == SUITE_KEY.upper())
             and item.get("tools_path")
         ]
-        self.assertTrue(usable, f"Worker {WORKER_ID} 没有可执行的 {SUITE_KEY} 套件")
+        self.assertTrue(
+            usable,
+            f"Worker {WORKER_ID} has no advertised executable {SUITE_KEY} "
+            "suite after explicit inventory refresh",
+        )
         suite = usable[0]
+        self.assertIn(
+            str(candidates[0].get("transport") or "local_usb").lower(),
+            {"usbip", "local_usb", "adb_proxy"},
+            "Device transport not supported for CTS dispatch",
+        )
         suite_path = suite["tools_path"]
         created = self._api(
             "POST", "/api/cluster/jobs",
@@ -237,22 +468,45 @@ class TestDeviceChainSoak(SoakFoundation):
                     "suite_path": suite_path,
                     "test_type": str(suite["suite_type"]).lower(),
                     "module": MODULE,
+                    "test_case": os.getenv("GMS_SOAK_TEST_CASE", ""),
+                    "execution_timeout_seconds": JOB_TIMEOUT_SECONDS,
                 },
             },
             timeout=120,
         )
         self.assertEqual(
-            created.status_code, 200, f"{created.status_code}: {created.text[:500]}"
+            created.status_code, 200,
+            "CTS job admission failed; inspect Worker agent registration, "
+            "suite inventory, device transport, free disk/RAM, running "
+            "jobs and external Tradefed activity. "
+            f"HTTP {created.status_code}: {created.text[:350]} "
+            f"(worker_status={target.get('status')}, "
+            f"agent_version={agent_version[:40]}, "
+            f"device_transport={candidates[0].get('transport')}, "
+            f"suite_key={suite.get('suite_key')}, "
+            f"free_disk_gb={target.get('disk_free_gb')}, "
+            f"free_memory_gb={target.get('memory_available_gb')}, "
+            f"running_jobs={target.get('running_jobs')}, "
+            f"external_tradefed={target.get('unknown_external_jobs')})",
         )
         job = created.json()["job"]
         job_id = job["id"]
+        type(self).active_job_id = job_id
 
         final = self._wait_job_terminal(job_id)
+        # Never clear the job ownership guard until Controller and Worker
+        # have reconciled every associated physical-device lease.
+        leases = final.get("leases") or []
+        if (
+            final["status"] in {"completed", "failed", "cancelled"}
+            and leases
+            and all(lease.get("status") == "released" for lease in leases)
+        ):
+            type(self).active_job_id = ""
         self.assertEqual(
             final["status"], "completed",
             f"job ended as {final['status']}: {str(final.get('error'))[:300]}",
         )
-        leases = final.get("leases") or []
         self.assertTrue(leases, f"真机任务 {job_id} 无设备租约")
         for lease in leases:
             self.assertEqual(lease.get("status"), "released", lease)
@@ -260,8 +514,20 @@ class TestDeviceChainSoak(SoakFoundation):
         self.assertEqual(detail["status"], "completed")
 
     def test_04_usbip_detach_and_state_recovery(self):
-        self.assertTrue(type(self).attached_by_soak, "未接入 USB/IP，不能验证断开")
-        self.assertTrue(type(self).attached_serial, "未记录真机序列号")
+        if not type(self).attached_serial:
+            self.skipTest("DUT was not ADB-ready; cleanup handled by tearDownClass")
+        self.assertFalse(
+            type(self).active_job_id, "CTS job still active; refuse detach"
+        )
+        if type(self).preexisting_session:
+            # Never disconnect USB/IP sessions that predate this verification.
+            current = self._target_assignment()
+            self.assertIsNotNone(current, "preexisting USB/IP assignment vanished")
+            self.assertIn(type(self).attached_serial,
+                          self._adb_ready_serials(self._worker_devices()))
+            print("Preexisting USB/IP session retained and still ADB-ready")
+            return
+        self.assertTrue(type(self).attached_by_soak)
         response = self._api(
             "POST", "/api/usbip/disconnect",
             json_body={
@@ -286,6 +552,12 @@ class TestDeviceChainSoak(SoakFoundation):
         # Failure after attach must not strand a lab USB/IP session. Scope
         # cleanup to the busids owned by this invocation, never all devices.
         try:
+            if cls.attached_by_soak and cls.active_job_id:
+                raise AssertionError(
+                    "Job still potentially active; refusing unsafe USB/IP "
+                    f"detach of active job {cls.active_job_id}. "
+                    "Investigate job and release it before manual recovery."
+                )
             if cls.attached_by_soak:
                 response = cls.session.post(
                     f"{cls.base}/api/usbip/disconnect",

@@ -123,6 +123,8 @@ async function aoaExecuteRecorderInput(input, {refresh = true, pace = true} = {}
                            label: `${target.device} @ ${new Date().toISOString().slice(0, 19)}`},
                     });
                     aoaPanelState.calibration.record_id = saved.calibration.id;
+                    delete aoaPanelState.calibration.save_error;
+                    try { localStorage.setItem(key, JSON.stringify(aoaPanelState.calibration)); } catch (_) { /* storage unavailable */ }
                     aoaRenderCalibration();
                     showToast(`标定已保存：${saved.calibration.id}`, 'success');
                 } catch (error) {

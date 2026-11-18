@@ -125,11 +125,12 @@ def extract_image_ocr_text(
     try:
         # bundled_tesseract_cmd()/configure_bundled_tesseract() 首调后缓存，
         # 每图检查代价可忽略；与 analysis_attachments 共用同一捆绑二进制。
-        from .tesseract_finder import bundled_tesseract_cmd, configure_bundled_tesseract
+        from .tesseract_finder import (
+            configure_usable_tesseract,
+        )
 
-        cmd = bundled_tesseract_cmd()
+        cmd = configure_usable_tesseract()
         if cmd:
-            configure_bundled_tesseract()
             import pytesseract.pytesseract as _pt
 
             _pt.tesseract_cmd = cmd

@@ -46,7 +46,7 @@ def largest_dirs_under(root: Path, *, limit: int = 5) -> list[dict[str, Any]]:
     except OSError:
         return entries
     for child in iterator:
-        if not child.is_dir():
+        if not child.is_dir() or child.is_symlink():
             continue
         try:
             total = sum(
@@ -73,7 +73,7 @@ def _remove_file(path: Path) -> int:
 def _sweep_directory(
     directory: Path, *, max_age_seconds: float, part_only: bool = False
 ) -> tuple[int, int]:
-    if not directory.is_dir():
+    if not directory.is_dir() or directory.is_symlink():
         return 0, 0
     cutoff = time.time() - max_age_seconds
     freed = removed = 0
@@ -83,7 +83,7 @@ def _sweep_directory(
         return 0, 0
     for item in candidates:
         try:
-            if not item.is_file():
+            if not item.is_file() or item.is_symlink():
                 continue
             if part_only and not item.name.endswith(".part"):
                 continue
@@ -129,21 +129,24 @@ def _rmtree_stale_dirs(directory: Path, *, max_age_seconds: float) -> tuple[int,
     mtime: only verified-empty ones are pruned with rmdir(), so a
     stale-looking owner dir cannot take active sessions with it.
     """
-    if not directory.is_dir():
+    if not directory.is_dir() or directory.is_symlink():
         return 0, 0
     cutoff = time.time() - max_age_seconds
     freed = removed = 0
 
     def _contains_dir(path: Path) -> bool:
         try:
-            return any(item.is_dir() for item in path.iterdir())
+            return any(item.is_dir() and not item.is_symlink() for item in path.iterdir())
         except OSError:
             return True  # unreadable → fail closed, treat as grouping dir
 
     def _sweep(parent: Path) -> None:
         nonlocal freed, removed
         try:
-            subdirs = [item for item in parent.iterdir() if item.is_dir()]
+            subdirs = [
+                item for item in parent.iterdir()
+                if item.is_dir() and not item.is_symlink()
+            ]
         except OSError:
             subdirs = []
         for subdir in subdirs:
@@ -178,11 +181,11 @@ def _rmtree_stale_dirs(directory: Path, *, max_age_seconds: float) -> tuple[int,
     return freed, removed
 
 def _prune_empty_stage_dirs(stage_root: Path) -> None:
-    if not stage_root.is_dir():
+    if not stage_root.is_dir() or stage_root.is_symlink():
         return
     try:
         for run_dir in stage_root.iterdir():
-            if run_dir.is_dir() and not any(run_dir.iterdir()):
+            if run_dir.is_dir() and not run_dir.is_symlink() and not any(run_dir.iterdir()):
                 run_dir.rmdir()
     except OSError:
         pass
@@ -209,7 +212,7 @@ def _stage_candidates(
     """Shared candidate list for preview, dry-run and actual cleanup."""
     stage_cutoff = time.time() - stage_max_age_days * 86400
     candidates: list[dict[str, Any]] = []
-    if not stage_root.is_dir():
+    if not stage_root.is_dir() or stage_root.is_symlink():
         return candidates
     try:
         run_dirs = sorted(stage_root.iterdir())[:200]
@@ -219,7 +222,7 @@ def _stage_candidates(
     if protected is None:
         # fail closed：引用查询失败 → 所有候选标记不可删除。
         for run_dir in run_dirs:
-            if not run_dir.is_dir():
+            if not run_dir.is_dir() or run_dir.is_symlink():
                 continue
             for item in run_dir.iterdir():
                 try:
@@ -239,7 +242,7 @@ def _stage_candidates(
                     continue
         return candidates
     for run_dir in run_dirs:
-        if not run_dir.is_dir():
+        if not run_dir.is_dir() or run_dir.is_symlink():
             continue
         for item in run_dir.iterdir():
             try:

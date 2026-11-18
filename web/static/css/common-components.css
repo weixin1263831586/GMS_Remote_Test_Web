@@ -1487,6 +1487,19 @@ select option {
 .notification-item:hover {
     background: var(--light-bg);
 }
+.notification-item:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: -2px;
+}
+#reports-table-body tr.notification-report-target {
+    background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+    box-shadow: inset 3px 0 var(--primary-color);
+}
+.notification-report-focus-label {
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin-right: 10px;
+}
 
 .notification-item.unread {
     background: color-mix(in srgb, var(--primary-color) 8%, transparent);

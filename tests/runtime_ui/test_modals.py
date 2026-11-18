@@ -620,7 +620,8 @@ class RuntimeModalsTests(RuntimeUiHarness):
                     };
                 }"""
             )
-            self.assertAlmostEqual(report["width"], 820, delta=2)
+            # The current compact Tailscale panel intentionally uses 700px.
+            self.assertAlmostEqual(report["width"], 700, delta=2)
             self.assertLess(report["height"], 800)
             self.assertEqual(report["border"], "0px")
             self.assertTrue(report["clip"].startswith("polygon("), report)

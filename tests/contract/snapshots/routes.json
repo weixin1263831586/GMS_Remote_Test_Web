@@ -3294,6 +3294,24 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "path": "/api/tools/vpn-proxy/client-control"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/tools/vpn-proxy/control"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/tools/vpn-proxy/status"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/usbip/assignments"

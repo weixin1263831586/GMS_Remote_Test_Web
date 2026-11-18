@@ -7,135 +7,88 @@ function scheduleDashboardChartsResize(){
   Object.values(dashCharts).forEach(chart=>{if(chart&&!chart.isDisposed?.())chart.resize()});
  });
 }
+
 function initDashChartContainers(){
- const gaugesEl=document.querySelector('#dash-gauges');
- if(gaugesEl&&!gaugesEl.dataset.init){
-  gaugesEl.innerHTML='<div class="dash-panel-title" style="margin-bottom:2px">CPU / 内存 / 磁盘利用率</div><div class="dash-gauges-host-tabs" id="dash-gauges-host-tabs" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:0"></div><div id="dash-gauges-chart" style="width:100%;flex:1;min-height:120px"></div><div id="dash-gauges-detail" style="font-size:10px;color:var(--muted);text-align:center;padding-top:2px;border-top:1px solid var(--border);margin-top:0"></div>';
-  gaugesEl.dataset.init='1';
+ const resource=document.querySelector('#dash-gauges');
+ if(resource&&!resource.dataset.init){
+  resource.innerHTML='<div class="dash-panel-title"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#monitor"></use></svg>主机资源概览<span class="dash-panel-sub">CPU / 内存 / 磁盘实时利用率</span></div><div class="dash-gauges-host-tabs" id="dash-gauges-host-tabs"></div><div id="dash-gauges-chart" class="dash-resource-list"></div><div id="dash-gauges-detail" class="resource-summary"></div>';
+  resource.dataset.init='1';
  }
- const pieEl=document.querySelector('#dash-device-pie');
- if(pieEl&&!pieEl.dataset.init){
-  pieEl.innerHTML='<div class="dash-panel-title" id="dash-pie-title">设备状态分布</div><div id="dash-pie-hosts" style="display:flex;flex-wrap:nowrap;gap:4px;flex:1;min-height:0"></div>';
-  pieEl.dataset.init='1';
+ const devices=document.querySelector('#dash-device-pie');
+ if(devices&&!devices.dataset.init){
+  devices.innerHTML='<div class="dash-panel-title"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#device"></use></svg><span id="dash-pie-title">设备状态分布</span><span id="dash-device-legend" class="dash-device-legend"></span></div><div id="dash-pie-hosts" class="device-distribution"></div>';
+  devices.dataset.init='1';
  }
- const trendEl=document.querySelector('#dash-trend');
- if(trendEl&&!trendEl.dataset.init){
-  trendEl.innerHTML='<div class="dash-panel-title">资源趋势 (最近 24 小时)</div><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px"><div class="dash-trend-tabs" id="dash-trend-tabs" style="display:flex;gap:4px;flex-wrap:wrap"></div><span style="font-size:9px;color:'+dashColor.muted+';font-weight:400;white-space:nowrap"><span style="display:inline-block;width:8px;height:3px;border-radius:2px;background:'+dashColor.blue+';vertical-align:middle"></span> CPU% <span style="display:inline-block;width:8px;height:3px;border-radius:2px;background:'+dashColor.green+';vertical-align:middle;margin-left:4px"></span> 内存%</span></div><div id="dash-trend-chart" style="width:100%;flex:1;min-height:120px"></div>';
-  trendEl.dataset.init='1';
+ const trend=document.querySelector('#dash-trend');
+ if(trend&&!trend.dataset.init){
+  trend.innerHTML='<div class="dash-panel-title"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#trend"></use></svg>资源趋势 · 最近 24 小时<span class="dash-chart-legend"><span class="chart-legend-item"><i class="chart-legend-line" style="--line-color:#5b9af0"></i>CPU %</span><span class="chart-legend-item"><i class="chart-legend-line" style="--line-color:#3acb98"></i>内存 %</span></span></div><div id="dash-trend-tabs" class="dash-trend-tabs"></div><div class="dash-trend-chart-box"><div id="dash-trend-chart" style="width:100%;height:100%"></div></div>';
+  trend.dataset.init='1';
  }
 }
+
 function getDashChart(key,selector){
  if(dashCharts[key])return dashCharts[key];
  const el=document.querySelector(selector);
  if(!el)return null;
- const chart=echarts.init(el);
+ // The local ECharts bundle is loaded asynchronously. A refresh can finish
+ // first, so defer creating the trend chart until its onload re-renders.
+ if (!window.echarts || typeof window.echarts.init !== 'function') return null;
+ const chart=window.echarts.init(el);
  dashCharts[key]=chart;
  return chart;
 }
+
 let dashGaugesWorker='';
 function updateDashGauges(){
- const workers=state.workers.filter(w=>w.status!=='offline');
  const localId=localWorkerId();
- // Sort with local worker first
- workers.sort((a,b)=>(a.id===localId?-1:b.id===localId?1:0));
- const tabsEl=document.querySelector('#dash-gauges-host-tabs');
- if(tabsEl){
-  tabsEl.innerHTML=workers.map(w=>`<button class="dash-trend-btn${w.id===dashGaugesWorker?' active':''}" data-click="selectDashGaugesWorker" data-a0="${esc(w.id)}">${esc(w.name||w.id)}</button>`).join('');
- }
- if(!dashGaugesWorker&&workers.length)dashGaugesWorker=workers[0].id;
- const worker=workers.find(w=>w.id===dashGaugesWorker)||workers[0];
- if(!worker)return;
- const cpu=Number(worker.cpu_percent||0),mem=Number(worker.memory_percent||0);
- const diskTotal=Number(worker.disk_total_gb||0);
- const diskFree=Number(worker.disk_free_gb||0);
- const diskHasData=diskTotal>0;
- const diskUsed=diskHasData?100*(1-diskFree/diskTotal):0;
- const memTotal=Number(worker.memory_total_gb||0);
- const memAvail=Number(worker.memory_available_gb||0);
- const chart=getDashChart('gauges','#dash-gauges-chart');if(!chart)return;
- chart.setOption({
- series:[
-  {name:'CPU',type:'gauge',center:['16%','52%'],radius:'85%',min:0,max:100,startAngle:200,endAngle:-20,splitNumber:4,
-   axisLine:{lineStyle:{width:8,color:[[0.7,dashColor.green],[0.85,dashColor.yellow],[1,dashColor.red]]}},
-   axisTick:{show:false},splitLine:{length:8,lineStyle:{color:'#444'}},axisLabel:{distance:8,color:dashColor.muted,fontSize:8},
-   pointer:{width:3,length:'55%'},itemStyle:{color:cpu>=85?dashColor.red:cpu>=70?dashColor.yellow:dashColor.green},
-   detail:{valueAnimation:true,formatter:'{value}%',color:'#e7eaf0',fontSize:12,offsetCenter:[0,'28%']},title:{show:true,offsetCenter:[0,'52%'],color:dashColor.muted,fontSize:10},
-   data:[{value:Math.round(cpu*10)/10,name:'CPU'}]},
-  {name:'内存',type:'gauge',center:['50%','52%'],radius:'85%',min:0,max:100,startAngle:200,endAngle:-20,splitNumber:4,
-   axisLine:{lineStyle:{width:8,color:[[0.7,dashColor.green],[0.85,dashColor.yellow],[1,dashColor.red]]}},
-   axisTick:{show:false},splitLine:{length:8,lineStyle:{color:'#444'}},axisLabel:{distance:8,color:dashColor.muted,fontSize:8},
-   pointer:{width:3,length:'55%'},itemStyle:{color:mem>=85?dashColor.red:mem>=70?dashColor.yellow:dashColor.green},
-   detail:{valueAnimation:true,formatter:'{value}%',color:'#e7eaf0',fontSize:12,offsetCenter:[0,'28%']},title:{show:true,offsetCenter:[0,'52%'],color:dashColor.muted,fontSize:10},
-   data:[{value:Math.round(mem*10)/10,name:'内存'}]},
-  {name:'磁盘',type:'gauge',center:['84%','52%'],radius:'85%',min:0,max:100,startAngle:200,endAngle:-20,splitNumber:4,
-   axisLine:{lineStyle:{width:8,color:[[0.7,dashColor.green],[0.85,dashColor.yellow],[1,dashColor.red]]}},
-   axisTick:{show:false},splitLine:{length:8,lineStyle:{color:'#444'}},axisLabel:{distance:8,color:dashColor.muted,fontSize:8},
-   pointer:{show:diskHasData,width:3,length:'55%'},itemStyle:{color:diskUsed>=85?dashColor.red:diskUsed>=70?dashColor.yellow:dashColor.green},
-   detail:{valueAnimation:true,formatter:diskHasData?'{value}%':'N/A',color:'#e7eaf0',fontSize:diskHasData?12:10,offsetCenter:[0,'28%']},title:{show:true,offsetCenter:[0,'52%'],color:dashColor.muted,fontSize:10},
-   data:[{value:diskHasData?Math.round(diskUsed*10)/10:0,name:'磁盘'}]},
- ]
-});
- const detailEl=document.querySelector('#dash-gauges-detail');
- if(detailEl){
-  const memUsed=memTotal>0?(memTotal-memAvail):0;
-  const diskStr=diskTotal>0?`${oneDecimal(diskTotal-diskFree)}/${oneDecimal(diskTotal)}G`:(diskFree>0?`${oneDecimal(diskFree)}G 可用`:'未知');
-  detailEl.innerHTML=`CPU ${Math.round(cpu)}% · 内存 ${oneDecimal(memUsed)}/${oneDecimal(memTotal)}G · 磁盘 ${diskStr} · 负载 ${oneDecimal(worker.load_1m)}`;
- }
+ const workers=state.workers.slice().sort((a,b)=>(a.id===localId?-1:b.id===localId?1:String(a.name||a.id).localeCompare(String(b.name||b.id),undefined,{numeric:true})));
+ if(dashGaugesWorker&&!workers.some(w=>w.id===dashGaugesWorker))dashGaugesWorker='';
+ const selected=dashGaugesWorker?workers.filter(w=>w.id===dashGaugesWorker):workers;
+ const tabs=document.querySelector('#dash-gauges-host-tabs');
+ if(tabs)tabs.innerHTML=`<button class="dash-trend-btn${!dashGaugesWorker?' active':''}" data-click="selectDashGaugesWorker" data-a0="">全部 Worker (${workers.length})</button>`+workers.map(w=>`<button class="dash-trend-btn${w.id===dashGaugesWorker?' active':''}" data-click="selectDashGaugesWorker" data-a0="${esc(w.id)}">${esc(w.name||w.id)}</button>`).join('');
+ const metrics=document.querySelector('#dash-gauges-chart');if(!metrics)return;
+ const bar=(value,type)=>{
+  const valid=value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value));
+  if(!valid)return '<span class="dash-empty">未上报</span>';
+  const number=Math.max(0,Math.min(100,Number(value))),display=number.toFixed(1).replace(/\.0$/,'');
+  const color=number>=85?'#ef6572':number>=70?'#e8b956':type==='cpu'?'#5b9af0':'#3acb98';
+  return `<span class="resource-progress"><span class="resource-track"><span class="resource-fill" style="--progress:${number}%;--bar-color:${color}"></span></span><strong>${display}%</strong></span>`;
+ };
+ const row=worker=>{
+  const offline=worker.status==='offline';
+  const total=Number(worker.disk_total_gb||0),free=Number(worker.disk_free_gb||0);
+  const disk=total>0?Math.max(0,Math.min(100,100*(1-free/total))):null;
+  return `<tr><td><span class="resource-host-name" title="${esc(worker.name||worker.id)}">${esc(worker.name||worker.id)}</span><span class="resource-host-sub">${esc(worker.address||worker.hostname||'')} · ${worker.id===localId?'Controller':'Worker'}</span></td><td>${workerBadge(worker)}</td><td>${bar(offline?null:worker.cpu_percent,'cpu')}</td><td>${bar(offline?null:worker.memory_percent,'memory')}</td><td>${bar(offline?null:disk,'disk')}</td></tr>`;
+ };
+ metrics.innerHTML=selected.length?`<table class="dash-resource-table"><thead><tr><th style="width:24%">Worker / 主机</th><th style="width:12%">状态</th><th>CPU</th><th>内存</th><th>磁盘</th></tr></thead><tbody>${selected.map(row).join('')}</tbody></table>`:'<div class="dash-empty">暂无已注册主机</div>';
+ const footer=document.querySelector('#dash-gauges-detail');
+ if(footer)footer.textContent=dashGaugesWorker&&selected.length?
+ `主机 ${selected[0].id} · 可用内存 ${oneDecimal(selected[0].memory_available_gb)} GB · 剩余磁盘 ${oneDecimal(selected[0].disk_free_gb)} GB · 负载 ${oneDecimal(selected[0].load_1m)}`:
+ `共 ${workers.length} 台主机 · 实时数据分别来自各 Worker · 无数据时显示未上报`;
 }
+
 const dashStateColors={available:'#48c78e',external_busy:'#e5b94f',allocated:'#a78bfa',fastboot:'#4f8cff',offline:'#ef6572',unknown:'#6b7280'};
 const dashStateNames={available:'可用',external_busy:'外部占用',allocated:'已分配',fastboot:'Fastboot',unknown:'未知'};
+
 function updateDashDevicePie(){
- const titleEl=document.querySelector('#dash-pie-title');
- const hostsEl=document.querySelector('#dash-pie-hosts');if(!hostsEl)return;
+ const title=document.querySelector('#dash-pie-title'),body=document.querySelector('#dash-pie-hosts'),legend=document.querySelector('#dash-device-legend');
+ if(!body)return;
  const localId=localWorkerId();
- const workers=state.workers.filter(w=>w.status!=='offline').sort((a,b)=>(a.id===localId?-1:b.id===localId?1:0));
- const workerIds=new Set(workers.map(w=>w.id));
- const dashboardDevices=state.devices.filter(d=>d.state!=='offline');
- if(titleEl)titleEl.textContent='设备状态分布 ('+dashboardDevices.length+')';
- // Dispose charts for workers no longer present
- Object.keys(dashCharts).forEach(k=>{if(k.startsWith('pie_')){const wid=k.slice(4);if(!workerIds.has(wid)){dashCharts[k].dispose();delete dashCharts[k]}}});
- // Build/repair DOM structure only if worker set changed
- const currentIds=new Set(Array.from(hostsEl.querySelectorAll('[data-pie-worker]')).map(el=>el.dataset.pieWorker));
- const needRebuild=[...workerIds].sort().join(',')!==([...currentIds].sort().join(','));
- if(needRebuild){
-  hostsEl.innerHTML=workers.map(w=>{
-   const wdevs=dashboardDevices.filter(d=>d.worker_id===w.id);
-   return `<div data-pie-worker="${esc(w.id)}" style="display:flex;flex-direction:column;align-items:center;flex:1 1 0;min-width:0;min-height:0"><div class="dash-pie-host-label" style="font-size:10px;color:var(--blue);font-weight:600;margin-bottom:2px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(w.name||w.id)} (<span class="dash-pie-count">${wdevs.length}</span>)</div><div id="dash-pie-${esc(w.id)}" style="width:100%;flex:1;min-height:120px"></div></div>`;
-  }).join('');
-  // Dispose all pie charts to force re-init against new DOM
-  Object.keys(dashCharts).forEach(k=>{if(k.startsWith('pie_')){dashCharts[k].dispose();delete dashCharts[k]}});
- }
- workers.forEach(w=>{
-  const wdevs=dashboardDevices.filter(d=>d.worker_id===w.id);
-  const labelEl=hostsEl.querySelector(`[data-pie-worker="${CSS.escape(w.id)}"] .dash-pie-count`);
-  if(labelEl)labelEl.textContent=wdevs.length;
-  const el=document.querySelector('#dash-pie-'+CSS.escape(w.id));
-  if(!el)return;
-  const data=Object.entries(dashStateNames).map(([key,name])=>{
-   const count=wdevs.filter(d=>d.state===key).length;
-   return {name,value:count,itemStyle:{color:dashStateColors[key]},stateKey:key,workerId:w.id};
-  }).filter(d=>d.value>0);
-  let chart=dashCharts['pie_'+w.id];
-  if(!chart){chart=echarts.init(el);dashCharts['pie_'+w.id]=chart;
-   chart.setOption({
-    tooltip:{trigger:'item',
-     formatter:p=>{
-      const devs=wdevs.filter(d=>d.state===p.data.stateKey);
-      if(!devs.length)return p.name+': 0';
-      return `${p.name} (${devs.length})<br/>`+devs.map(d=>'· '+esc(d.serial)).sort().join('<br/>');
-     },
-     backgroundColor:'rgba(29,33,43,.95)',borderColor:'#303642',textStyle:{color:'#e7eaf0',fontSize:11},
-     extraCssText:'max-height:260px;overflow:auto;white-space:nowrap;'
-    },
-    series:[{type:'pie',radius:['30%','62%'],center:['50%','50%'],
-     label:{show:true,color:dashColor.text,fontSize:9,formatter:'{c}'},
-     labelLine:{length:4,length2:4},
-     itemStyle:{borderColor:'#1d212b',borderWidth:1}}]
-   });
-  }
-  chart.setOption({series:[{data:data.length?data:[{value:1,name:'无设备',itemStyle:{color:'#333'}}]}]});
- });
+ const workers=state.workers.filter(w=>w.status!=='offline').sort((a,b)=>(a.id===localId?-1:b.id===localId?1:String(a.name||a.id).localeCompare(String(b.name||b.id),undefined,{numeric:true})));
+ const active=state.devices.filter(d=>d.state!=='offline');
+ if(title)title.textContent=`设备状态分布 (${active.length})`;
+ const states=Object.keys(dashStateNames);
+ const counts=Object.fromEntries(states.map(k=>[k,active.filter(d=>d.state===k).length]));
+ if(legend)legend.innerHTML=states.filter(k=>counts[k]>0).map(k=>`<span class="device-legend-item"><i class="legend-dot" style="--dot:${dashStateColors[k]}"></i>${esc(dashStateNames[k])} ${counts[k]}</span>`).join('')||'<span>暂无在线设备</span>';
+ body.innerHTML=workers.map(worker=>{
+  const devices=active.filter(d=>d.worker_id===worker.id),total=devices.length;
+  const present=states.map(key=>({key,count:devices.filter(d=>d.state===key).length})).filter(x=>x.count>0);
+  const summary=present.map(({key,count})=>`${dashStateNames[key]} ${count}`).join(' · ')||'暂无设备';
+  const bars=total?present.map(({key,count})=>`<span class="dist-segment" style="width:${count*100/total}%;background:${dashStateColors[key]}" title="${esc(dashStateNames[key])}: ${count}"></span>`).join(''):'';
+  return `<div class="dist-row"><span class="dist-host" title="${esc(worker.name||worker.id)}">${esc(worker.name||worker.id)}</span><span class="dist-number">${total}</span><span class="dist-track">${bars}</span><span class="dist-summary" title="${esc(summary)}">${esc(summary)}</span></div>`;
+ }).join('')||'<div class="dash-empty">暂无在线 Worker</div>';
 }
+
 function renderDashPieDetail(){/* details now shown in tooltip */}
 async function updateDashTrend(force=false){
  const el=document.querySelector('#dash-trend');if(!el)return;

@@ -6,7 +6,7 @@ name: GMS modal staging validation (isolated Playwright)
 on:
   push:
     branches:
-      - audit/global-current-0acf952-20261117
+      - audit/global-current-1cd4167-20261118
     paths:
       - '.github/workflows/modal-staging-validation.yml'
       - 'tests/**'
@@ -17,14 +17,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: gms-modal-current-0acf952
+  group: gms-modal-current-1cd4167
   cancel-in-progress: true
 
 jobs:
   modal-ui:
     if: >-
       github.repository == 'weixin1263831586/GMS_Remote_Test_Web' &&
-      github.ref == 'refs/heads/audit/global-current-0acf952-20261117' &&
+      github.ref == 'refs/heads/audit/global-current-1cd4167-20261118' &&
       github.event_name == 'push' &&
       github.actor == 'weixin1263831586'
     runs-on: ubuntu-24.04
@@ -112,7 +112,7 @@ jobs:
   modal-inventory:
     if: >-
       github.repository == 'weixin1263831586/GMS_Remote_Test_Web' &&
-      github.ref == 'refs/heads/audit/global-current-0acf952-20261117' &&
+      github.ref == 'refs/heads/audit/global-current-1cd4167-20261118' &&
       github.event_name == 'push' &&
       github.actor == 'weixin1263831586'
     runs-on: ubuntu-24.04

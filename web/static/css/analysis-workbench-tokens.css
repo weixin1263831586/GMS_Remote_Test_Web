@@ -1,0 +1,27 @@
+/* Shared dimensional tokens: APK / Report analysis are sibling workbenches.
+   Intentionally do not override the global theme or other pages. */
+:is(#page-apk-analysis, #page-report-analysis) {
+    --analysis-workbench-stage: #17171d;
+    --analysis-workbench-surface: var(--card-bg);
+    --analysis-summary-row-height: 44px;
+    --analysis-control-height: 29px;
+    --analysis-compact-upload-height: 84px;
+    --analysis-tab-height: 44px;
+    --analysis-pane-heading-height: 39px;
+    --analysis-pane-radius: 8px;
+    --analysis-pane-gap: 9px;
+    --analysis-control-font-size: 11px;
+}
+
+/* Both pages intentionally share the SAME empty-state page and drop surfaces. */
+:is(#page-apk-analysis, #page-report-analysis) {
+    background: var(--page-background);
+}
+:is(#page-apk-analysis, #page-report-analysis) .analysis-upload-frame:has(.upload-empty) {
+    background: transparent;
+    box-shadow: none;
+}
+:is(#page-apk-analysis, #page-report-analysis)
+    :is(#apk-upload-zone.upload-empty, #report-upload-zone.upload-empty) {
+    background: var(--analysis-workbench-stage);
+}

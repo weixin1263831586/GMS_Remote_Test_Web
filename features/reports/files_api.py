@@ -150,6 +150,7 @@ async def list_reports(
     attempt_id: str = "",
     automation_run_id: str = "",
     report_timestamp: str = "",
+    report_id: str = "",
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
     cursor: str = "",
     test_type: str = "",
@@ -198,7 +199,16 @@ async def list_reports(
             # synthetic actor id (agent tokens share their owner's partition).
             else principal.resource_owner_id
         )
-        if report_timestamp:
+        if report_id:
+            # Exact notification deep links must use the immutable report ID,
+            # scoped in SQL to the authenticated account before decoration.
+            exact = test_report_db.get_report(
+                report_id,
+                owner_id=owner_filter,
+                include_all=owner_filter is None,
+            )
+            candidate_reports = [exact] if exact else []
+        elif report_timestamp:
             exact = get_accessible_report_by_timestamp(
                 test_report_db, request, report_timestamp
             )
@@ -237,7 +247,7 @@ async def list_reports(
         all_reports = [report for report in all_reports
                        if (not test_type or str(report.get("test_type") or "").upper() == test_type.strip().upper())
                        and (not status or report.get("status") == status.strip())]
-        has_more = not report_timestamp and len(all_reports) > limit
+        has_more = not (report_timestamp or report_id) and len(all_reports) > limit
         page = all_reports[:limit]
         next_cursor = _encode_report_cursor(page[-1]) if has_more and page else ""
         decorated_reports = [

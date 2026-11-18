@@ -5,11 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GMS Remote Test - 系统架构</title>
   <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
-  <link rel="stylesheet" href="/static/css/architecture-layers.css?v=20261116-clear-arrow-labels">
+  <link rel="stylesheet" href="/static/css/architecture-layers.css?v=20261118-system-overview">
   <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261116-tab-focus-ring">
+  <link rel="stylesheet" href="/static/css/architecture-v2.css?v=20261118-unified-topologies">
+  <link rel="stylesheet" href="/static/css/architecture-scenes.css?v=20261118-singleline-v7">
   <script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
 </head>
-<body>
+<body class="architecture-v2">
 <header class="arch-header workspace-header">
   <nav class="arch-tabs workspace-tabs" role="tablist" aria-label="架构视图切换">
     <button type="button" role="tab" class="arch-tab active workspace-tab" id="arch-tab-platform" data-arch="platform" aria-selected="true" aria-controls="arch-pane-platform">平台总览</button>
@@ -21,246 +23,60 @@
   </nav>
 </header>
 <main>
-  <p class="lead">Controller 统一认证和调度；Worker 主动轮询命令并回报状态；Agent Runtime 通过独立 Service Token 使用受控能力。切换上方六个视图，查看平台拓扑、USB/IP 接入、AOA 恢复、固件烧写、测试闭环及 Agent 工单分析。图中实线为数据或回报通路，紫色虚线为受控命令路径。</p>
-
-
-
-  <div class="arch-pane" id="arch-pane-platform" role="tabpanel" data-arch-pane="platform" aria-labelledby="arch-tab-platform">
-    <section aria-labelledby="topology-heading">
-      <h2 id="topology-heading">平台拓扑与通信方向</h2>
-      <div class="topology">
-        <div class="topology-viewport">
-          <div class="topology-canvas">
-            <div class="arch-legend" aria-label="流程图图例：角色和线型说明">
-              <span class="arch-role">接入 / Agent</span>
-              <span class="arch-role arch-role--control">Controller</span>
-              <span class="arch-role arch-role--worker">Worker / 执行</span>
-              <span class="arch-role arch-role--resource">资源 / 外部系统</span>
-              <span><i class="arch-legend-line" aria-hidden="true"></i>数据 / 回执</span>
-              <span><i class="arch-legend-line arch-legend-line--command" aria-hidden="true"></i>控制调用 / 命令</span>
-            </div>
-            {{PLATFORM_TOPOLOGY}}
-          </div>
-        </div>
+<div class="arch-pane" id="arch-pane-platform" role="tabpanel" data-arch-pane="platform" aria-labelledby="arch-tab-platform">
+    <section class="arch-v2-panel arch-v2-platform" aria-label="GMS 远程测试 · 平台系统拓扑">
+      <div class="arch-v2-platform-layout arch-scene-placeholder" role="status">加载平台架构视图…</div>
+    </section>
+    <div class="arch-v2-bottom arch-v2-bottom--platform">
+      <section class="arch-v2-info-panel"><h2>模块职责与依赖</h2><div class="arch-v2-table-scroll"><table><thead><tr><th>模块</th><th>职责边界</th><th>主要连接</th></tr></thead><tbody>
+        <tr><td>Controller</td><td>认证、任务与设备租约、状态审计</td><td>Web / Worker / 外部服务</td></tr><tr><td>Worker</td><td>Tradefed / ADB、结果与日志采集</td><td>Controller / Android</td></tr><tr><td>USB/IP</td><td>从 Source 导出 USB 设备并接入 Worker</td><td>Source / Worker</td></tr><tr><td>ADB Proxy</td><td>受控命令代理与设备路由</td><td>ADB 客户端 / 设备</td></tr><tr><td>外部协同</td><td>工单、代码、知识、受控构建</td><td>Redmine / Gerrit 等</td></tr>
+      </tbody></table></div></section>
+      <section class="arch-v2-info-panel"><h2>核心数据流（事件流）</h2><ol class="arch-v2-timeline"><li>请求接入与权限校验</li><li>资源选择与设备租约</li><li>Worker Poll / ACK 与测试执行</li><li>日志、原生结果与任务状态回传</li><li>报告索引与问题证据分析</li><li>结果追踪、修复与经验沉淀</li></ol></section>
+    </div>
       </div>
-    </section>
-    <details class="arch-details" open>
-      <summary>分层职责、部署与接入边界</summary>
-    <section class="layers-section" aria-labelledby="layers-heading">
-      <h2 id="layers-heading">系统分层架构</h2>
-      <p class="layers-intro">从用户入口到设备执行，按职责查看平台能力与结果归属。</p>
-      <figure class="architecture-layers" aria-labelledby="layers-heading" aria-describedby="layers-caption">
-        <div class="arch-layer arch-layer--access" role="group" aria-label="接入与规划层">
-          <div class="arch-layer-label"><strong>接入与规划</strong><span>ACCESS</span><small>用户与 Agent</small></div>
-          <div class="arch-layer-content">
-            <article class="arch-layer-item"><h3>Web 工作台</h3><p>设备管理、测试执行、实时日志、报告分析与 ATS 工作流。</p></article>
-            <article class="arch-layer-item"><h3>对话 Agent</h3><p>kkagent 规划项目工具调用，按需提问、预检和确认执行。</p></article>
-            <article class="arch-layer-item"><h3>外部 Agent Runtime</h3><p>Codex / Kimi / kkagent 通过 CLI / MCP 使用平台能力。</p></article>
-          </div>
-        </div>
-        <div class="arch-layer-bridge"><span>↓ HTTPS / WebSocket</span><span>Session / Service Token · <strong>Controller 校验权限</strong></span></div>
-        <div class="arch-layer arch-layer--controller" role="group" aria-label="Controller 控制与编排层">
-          <div class="arch-layer-label"><strong>控制与编排</strong><span>CONTROLLER</span><small>FastAPI 服务</small></div>
-          <div class="arch-layer-content">
-            <article class="arch-layer-item"><h3>认证与权限</h3><p>账号会话、Token、scope / ACL，以及受控操作审批。</p></article>
-            <article class="arch-layer-item"><h3>任务与设备调度</h3><p>ATS 编排、Cluster Job、类型化命令队列、设备 Claim / Lease。</p></article>
-            <article class="arch-layer-item"><h3>报告与证据分析</h3><p>报告索引、工单取证与结论复核、APK / SDK 版本绑定和知识检索。</p></article>
-            <article class="arch-layer-item"><h3>状态与审计</h3><p>SQLite 状态、执行回执、Artifact 引用与操作审计。</p></article>
-          </div>
-        </div>
-        <div class="arch-layer-bridge"><span>↑ Worker 发起注册 / Heartbeat / Poll / ACK</span><span>↓ <strong>命令随 Poll 响应返回</strong> · Worker Token / session / generation</span></div>
-        <div class="arch-layer arch-layer--worker" role="group" aria-label="Worker 执行与原始结果层">
-          <div class="arch-layer-label"><strong>执行与结果</strong><span>WORKER</span><small>Linux 测试主机</small></div>
-          <div class="arch-layer-content">
-            <article class="arch-layer-item"><h3>测试执行</h3><p>CTS / GTS / VTS / STS 套件，通过 Tradefed 执行任务。</p></article>
-            <article class="arch-layer-item"><h3>设备操作</h3><p>ADB / Fastboot、upgrade_tool 烧写、AOA 恢复与回放。</p></article>
-            <article class="arch-layer-item"><h3>原生结果与日志</h3><p>套件 results / logs 目录、XML / HTML 结果及执行日志。</p></article>
-            <article class="arch-layer-item"><h3>资源探测与回报</h3><p>设备与套件清单、执行状态、日志和 Artifact 回报。</p></article>
-          </div>
-        </div>
-        <div class="arch-layer-bridge"><span>↓ 本地 USB / USB/IP · ADB / Fastboot / AOA</span><span>按设备归属与来源能力执行</span></div>
-        <div class="arch-layer arch-layer--resources" role="group" aria-label="设备与接入资源层">
-          <div class="arch-layer-label"><strong>设备与接入</strong><span>RESOURCES</span><small>物理资源</small></div>
-          <div class="arch-layer-content">
-            <article class="arch-layer-item"><h3>Android 设备</h3><p>手机、平板与 TV；可直接连接 Worker，或通过 USB/IP 导入。</p></article>
-            <article class="arch-layer-item"><h3>USB Source 主机</h3><p>Windows / Linux 提供 USB/IP 接入；来源侧烧写能力见固件烧写视图。</p></article>
-          </div>
-        </div>
-        <div class="arch-integrations" role="group" aria-label="外部集成与构建资源">
-          <article class="arch-integration"><h3>工单与代码平台</h3><p>Redmine · Gerrit · OpenGrok，提供工单、评审与源码检索。</p></article>
-          <article class="arch-integration"><h3>模型与知识服务</h3><p>按配置接入模型服务与知识源，为规划、取证和诊断提供支持。</p></article>
-          <article class="arch-integration"><h3>构建主机 · {{BUILD_SERVER_LABEL}}</h3><p>Controller 经受审计 SSH 执行器调用受控构建模板。</p></article>
-        </div>
-        <figcaption id="layers-caption"><strong>报告入口按来源区分：</strong>Worker 的原生结果从“测试套件”浏览器访问；Controller 已登记的报告从“报告管理”访问。<br>Agent 提供规划与分析，Controller 校验和调度，Worker 按命令执行并回报。</figcaption>
-      </figure>
-    </section>
-
-
-
-    <section aria-labelledby="roles-title">
-      <h2 id="roles-title">部署角色</h2>
-      <div class="grid roles">
-        <article class="card access"><h3>Web Browser</h3><p>通过 HTTPS、Session Cookie 和 WebSocket 访问 Controller。</p></article>
-        <article class="card agent"><h3>Agent Runtime</h3><p>Codex / Kimi / kkagent 使用 <code>gms-rt</code> CLI 与 MCP；Service Token、scope、ACL 和 Approval Token 均由 Controller 校验。</p></article>
-        <article class="card"><h3>FastAPI Controller</h3><p>Web UI、认证、任务调度、SQLite 状态、报告、审计与外部系统集成。生产入口为 HTTPS。</p></article>
-        <article class="card source"><h3>Build / External Services</h3><p>受审计 SSH 连接 {{BUILD_SERVER_LABEL}}；集成 Redmine、Gerrit、AI 与 OpenGrok。</p></article>
-      </div>
-    </section>
-
-    <section aria-labelledby="control-title">
-      <h2 id="control-title">控制平面</h2>
-      <p class="note">Worker 使用 Worker Token 主动发送 Heartbeat / Poll / ACK，回传 Job 状态和 Artifact。命令随 Poll 响应返回，随后由 Worker 执行 Tradefed / ADB / Fastboot。</p>
-    </section>
-
-    <section aria-labelledby="worker-title">
-      <h2 id="worker-title">Worker 与测试执行</h2>
-      <div class="grid workers">
-        <article class="card worker"><h3>Linux Worker A</h3><ul><li>CTS / GTS / VTS / STS 套件</li><li>本地 USB 或 USB/IP 导入设备</li><li>Job 日志、结果和 Artifact 回传</li></ul></article>
-        <article class="card worker"><h3>Linux Worker B</h3><ul><li>独立能力与设备清单</li><li>Device Claim / Lease 所有权</li><li>断线后按 generation 重新注册</li></ul></article>
-      </div>
-    </section>
-
-    <section aria-labelledby="device-title">
-      <h2 id="device-title">设备数据平面与 USB/IP 接入示例</h2>
-      <div class="grid sources">
-        <article class="card source"><h3>Local USB</h3><p>Android 设备直接连接 Worker，由本机 ADB / Fastboot / upgrade_tool 使用。</p></article>
-        <article class="card source"><h3>Windows USB Source</h3><p><code>usbipd-win</code> 提供 USB/IP；完整固件烧写可交还 Source Agent 执行。</p></article>
-        <article class="card source"><h3>Linux USB Source</h3><p>支持 USB/IP 共享、分配和重连；完整固件烧写能力按支持矩阵 fail closed。</p></article>
-      </div>
-      <p class="note">USB/IP 是设备接入示例，不代表平台整体拓扑。不同来源的固件烧写能力并不相同；完整数据面见「USB/IP 接入」视图。</p>
-    </section>
-    </details>
-  </div>
 
   <div class="arch-pane" id="arch-pane-usbip" role="tabpanel" data-arch-pane="usbip" aria-labelledby="arch-tab-usbip" hidden>
-    <section aria-labelledby="usbip-topology-heading">
-      <h2 id="usbip-topology-heading">USB/IP：物理 Source 与 Worker 虚拟总线</h2>
-      <p class="arch-flow-intro">Windows / Linux 是两种可选来源；设备始终物理连接 Source，Worker 通过虚拟 USB 总线使用设备。图中节点表示角色或资源。</p>
-      <div class="topology">
-        <div class="topology-viewport">
-          <div class="topology-canvas">
-            {{USBIP_TOPOLOGY}}
-          </div>
-        </div>
-      </div>
+    <section class="arch-v2-panel arch-v2-flow" aria-label="USB/IP · 物理设备远程接入">
+      <div class="arch-v2-svg-frame arch-scene-placeholder" role="status">加载 USBIP 架构视图…</div>
     </section>
-    <details class="arch-details" open>
-      <summary>执行职责与关键边界</summary>
-    <section aria-labelledby="usbip-sources-title">
-      <h2 id="usbip-sources-title">接入链路分层</h2>
-      <div class="grid sources">
-        <article class="card source"><h3>Source 侧（Windows / Linux）</h3><p><code>usbipd-win</code> 或 Linux <code>usbipd</code> 把本机 USB 设备以 USB/IP 协议暴露在 TCP 3240；设备仍物理插在 Source 主机。</p></article>
-        <article class="card worker"><h3>Worker 侧（usbip attach）</h3><p>Worker attach 远端共享后通过 vhci_hcd 得到虚拟 USB 总线；设备物理上始终连接 Source。ADB / Fastboot / Tradefed 在 Worker 侧使用对应设备。</p></article>
-        <article class="card"><h3>Controller 协调</h3><p>Source 绑定经受审计 SSH（ADR 0004），Worker attach 经认证命令队列（ADR 0001）；USB/IP 设备的整包烧写不跨链路维持重枚举，按 ADR 0005 把设备所有权交还 Source Host 执行，期间暂停通用重连 watchdog。</p></article>
-      </div>
-      <p class="note">USB/IP 链路无法跨越 ADB → Loader → ADB 的多次 USB 重枚举：断开即设备离线，Worker 以清单与心跳上报实际状态，Controller 不假设远端设备仍然存在。</p>
-    </section>
-    </details>
+    <div class="arch-v2-bottom arch-v2-flow-bottom"><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--usb"><h2><span class="arch-v2-step">01</span>接入链路</h2><p>物理 Android 设备 → Windows/Linux USB Source → Worker 虚拟总线</p></article><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--worker"><h2><span class="arch-v2-step">02</span>职责与边界</h2><p>Source 负责导出，Worker attach 与测试，Controller 处理权限、租约和指令</p></article><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--risk"><h2><span class="arch-v2-step">03</span>故障与恢复</h2><p>USB 重枚举可能断开映射；完整烧写须依来源能力交还 Source 执行</p></article></div>
+
   </div>
 
   <div class="arch-pane" id="arch-pane-aoa" role="tabpanel" data-arch-pane="aoa" aria-labelledby="arch-tab-aoa" hidden>
-    <section aria-labelledby="aoa-topology-heading">
-      <h2 id="aoa-topology-heading">AOA 恢复与回放拓扑</h2>
-      <div class="topology">
-        <div class="topology-viewport">
-          <div class="topology-canvas">
-            {{AOA_TOPOLOGY}}
-          </div>
-        </div>
-      </div>
+    <section class="arch-v2-panel arch-v2-flow" aria-label="AOA · 开机向导恢复与回放">
+      <div class="arch-v2-svg-frame arch-scene-placeholder" role="status">加载 AOA 架构视图…</div>
     </section>
-    <details class="arch-details" open>
-      <summary>执行职责与关键边界</summary>
-    <section aria-labelledby="aoa-layers-title">
-      <h2 id="aoa-layers-title">执行链路分层</h2>
-      <div class="grid sources">
-        <article class="card access"><h3>AOA 工作台（Web）</h3><p>录制 / 回放 / 标定 Profile；Profile 按 owner 隔离存储，回放过程支持暂停 / 继续 / 终止（control_id 语义）。</p></article>
-        <article class="card worker"><h3>Worker 回放</h3><p><code>run_aoa_sequence</code> 按物理 USB 端口绑定执行 AOAv2 控制：启动 Accessory，注入 HID 触点 / 按键序列驱动开机向导。</p></article>
-        <article class="card agent"><h3>ADB 就绪判定</h3><p>回放结束 ≠ ADB 已恢复：Worker 对 device 态做 <code>adb shell true</code> 往返校验，unauthorized 需要人工在设备上确认授权弹窗。</p></article>
-      </div>
-      <p class="note">AOA 执行成功与 ADB 恢复是两个独立事实；结果里如实带回 adb_state，由调用方决定后续动作。</p>
-    </section>
-    </details>
+    <div class="arch-v2-bottom arch-v2-flow-bottom"><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--access"><h2><span class="arch-v2-step">01</span>Profile / 回放</h2><p>工作台录制与标定；Profile 按 owner 隔离，回放支持暂停、恢复与终止</p></article><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--worker"><h2><span class="arch-v2-step">02</span>执行链路</h2><p>Worker 绑定物理 USB 端口，以 AOAv2 注入 HID 触点与按键</p></article><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--risk"><h2><span class="arch-v2-step">03</span>ADB 就绪判定</h2><p>回放完成不等于 USB 调试就绪；必须执行 ADB 往返检查</p></article></div>
+
   </div>
 
   <div class="arch-pane" id="arch-pane-firmware" role="tabpanel" data-arch-pane="firmware" aria-labelledby="arch-tab-firmware" hidden>
-    <section aria-labelledby="firmware-topology-heading">
-      <h2 id="firmware-topology-heading">固件烧写：本地 Worker / USB/IP Source 两条路径</h2>
-      <div class="topology">
-        <div class="topology-viewport">
-          <div class="topology-canvas">
-            {{FIRMWARE_TOPOLOGY}}
-          </div>
-        </div>
-      </div>
+    <section class="arch-v2-panel arch-v2-flow" aria-label="固件烧写 · 模式切换与结果验证">
+      <div class="arch-v2-svg-frame arch-scene-placeholder" role="status">加载 FIRMWARE 架构视图…</div>
     </section>
-    <details class="arch-details" open>
-      <summary>执行职责与关键边界</summary>
-    <section aria-labelledby="firmware-layers-title">
-      <h2 id="firmware-layers-title">烧写链路分层</h2>
-      <div class="grid sources">
-        <article class="card access"><h3>Web 烧写入口</h3><p>固件分片上传与断点续传；烧写入口按设备所在 Worker 解析，跨 Worker 入口 fail closed。</p></article>
-        <article class="card worker"><h3>Worker 烧写执行</h3><p>本地 USB 设备由 Worker 接收类型化命令执行 <code>upgrade_tool</code> / fastboot；设备在 Loader / Rockusb 重枚举，成功后重启。</p></article>
-        <article class="card agent"><h3>AOA 恢复接续（可选）</h3><p>烧写成功与 ADB 就绪分离上报：可接续 AOA 恢复旅程（向导 → USB 调试），失败时提示单独调试而无需重新烧写。</p></article>
-      </div>
-      <p class="note">完整固件烧写与 ADB 恢复是两个独立阶段。USB/IP 来源设备必须先暂停重连、detach 并复核所有权交还；Windows Source Agent 执行 RKDevTool 文件队列。Linux USB Source 的整包固件烧写尚未实现，直接拒绝（fail closed，ADR 0005）。恢复判定以 adb liveness 为准。</p>
-    </section>
-    </details>
+    <div class="arch-v2-bottom arch-v2-flow-bottom"><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--access"><h2><span class="arch-v2-step">01</span>烧写阶段</h2><p>固件校验 → 设备识别 → 进入支持的模式 → 烧写 → 结果校验</p></article><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--worker"><h2><span class="arch-v2-step">02</span>执行与所有权</h2><p>本地 Worker 可执行 upgrade_tool / fastboot；来源设备先交还 Source</p></article><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--risk"><h2><span class="arch-v2-step">03</span>失败保护</h2><p>Loader / MaskROM 重枚举不可假设持续在线；Linux Source 不支持的整包烧写拒绝执行</p></article></div>
+
   </div>
 
   <div class="arch-pane" id="arch-pane-test-flow" role="tabpanel" data-arch-pane="test-flow" aria-labelledby="arch-tab-test-flow" hidden>
-    <section aria-labelledby="test-flow-heading">
-      <h2 id="test-flow-heading">GMS 测试执行与结果闭环</h2>
-      <p class="arch-flow-intro">从受控资源预检到 Worker 执行、结果归属和可选诊断。原生测试结果与已登记报告是两个入口，不能混为同一个持久化存储。</p>
-      <div class="topology">
-        <div class="topology-viewport">
-          <div class="topology-canvas">
-            {{TEST_FLOW_TOPOLOGY}}
-          </div>
-        </div>
-      </div>
+    <section class="arch-v2-panel arch-v2-flow" aria-label="GMS 测试 · 执行与结果闭环">
+      <div class="arch-v2-svg-frame arch-scene-placeholder" role="status">加载 TEST / FLOW 架构视图…</div>
     </section>
-    <details class="arch-details" open>
-      <summary>执行职责与关键边界</summary>
-    <section aria-labelledby="test-flow-details">
-      <h2 id="test-flow-details">关键执行边界</h2>
-      <div class="grid roles">
-        <article class="card"><h3>01 · 接入与预检</h3><p>权限、设备归属、Claim / Lease、Worker 可用性和测试套件检查；不可用时拒绝执行而不是盲目选择设备。</p></article>
-        <article class="card worker"><h3>02 · 异步执行</h3><p>Controller 持久化任务并入队；Worker 主动 Poll、ACK，在本地运行 Tradefed 并回报状态。</p></article>
-        <article class="card source"><h3>03 · 结果归属</h3><p>原始 <code>results / logs</code> 来自 Worker 套件目录；报告管理只呈现 Controller 已登记的报告。</p></article>
-        <article class="card agent"><h3>04 · 分析与重试</h3><p>诊断、知识检索和 Redmine 反馈可按需接续。Worker 失联触发状态回收，不代表测试可跨主机自动续跑。</p></article>
-      </div>
-    </section>
-    </details>
+    <div class="arch-v2-bottom arch-v2-flow-bottom"><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--access"><h2><span class="arch-v2-step">01</span>执行阶段</h2><p>权限预检 → 资源租约 → Worker Poll → Tradefed 运行 → 结果回报</p></article><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--worker"><h2><span class="arch-v2-step">02</span>职责边界</h2><p>Controller 分配任务；Worker 维护原生日志与结果，平台索引已登记报告</p></article><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--risk"><h2><span class="arch-v2-step">03</span>闭环与产物</h2><p>按证据分析问题，可关联 Redmine 与 Gerrit；失联不等于跨主机续跑</p></article></div>
+
   </div>
 
   <div class="arch-pane" id="arch-pane-agent-analysis" role="tabpanel" data-arch-pane="agent-analysis" aria-labelledby="arch-tab-agent-analysis" hidden>
-    <section aria-labelledby="agent-flow-heading">
-      <h2 id="agent-flow-heading">对话 Agent → Redmine 工单分析</h2>
-      <p class="arch-flow-intro">Agent 负责理解意图和工具发现；Controller 校验后入队；后台分析 Worker 取证、召回官方引用并完成模型分析与逐段复核；Agent 按 run_id 查询结果。</p>
-      <div class="topology">
-        <div class="topology-viewport">
-          <div class="topology-canvas">
-            {{AGENT_ANALYSIS_TOPOLOGY}}
-          </div>
-        </div>
-      </div>
+    <section class="arch-v2-panel arch-v2-flow" aria-label="Agent · 证据诊断与复核">
+      <div class="arch-v2-svg-frame arch-scene-placeholder" role="status">加载 AGENT / ANALYSIS 架构视图…</div>
     </section>
-    <details class="arch-details" open>
-      <summary>执行职责与关键边界</summary>
-    <section aria-labelledby="agent-flow-details">
-      <h2 id="agent-flow-details">任务状态与安全约束</h2>
-      <div class="grid roles">
-        <article class="card agent"><h3>模型规划</h3><p>kkagent 输出受控工具调用；不直接使用未知 Shell、设备凭据或绕过审批调用 Worker。</p></article>
-        <article class="card"><h3>属主隔离</h3><p>按用户配置的 Redmine 校验工单引用；同一会话运行中禁止重复入队，返回唯一 <code>run_id</code>。</p></article>
-        <article class="card worker"><h3>状态跟踪</h3><p>pending → snapshotting / analyzing → completed / partial / failed / cancelled，监控结果回传原会话。</p></article>
-        <article class="card source"><h3>报告回送</h3><p>仅消费本次运行结果，不用历史报告冒充当前结论。取消 Agent 跟踪不等于取消 Redmine 后台分析任务。</p></article>
-      </div>
-      <p class="note">Mainline / Critical Fix / 安全补丁在取证预检阶段召回匹配记录与正文；模型分析后逐段复核。分析 Worker 属于 Redmine 后台服务，与设备执行 Worker 的命令队列分开。模型结论以可追溯证据和真实回执为准。</p>
-    </section>
-    </details>
+    <div class="arch-v2-bottom arch-v2-flow-bottom"><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--access"><h2><span class="arch-v2-step">01</span>诊断路径</h2><p>上下文与工单 → 预采集日志、APK、SDK / 代码证据 → 分析复核</p></article><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--worker"><h2><span class="arch-v2-step">02</span>执行与追踪</h2><p>Controller 返回 run_id，后台分析状态独立跟踪并回送当前运行结果</p></article><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--risk"><h2><span class="arch-v2-step">03</span>安全与沉淀</h2><p>按工单属主隔离，引用可追溯；取消 Agent 跟踪不等于取消后台任务</p></article></div>
+
   </div>
 </main>
 <script src="/static/js/pages/architecture-view.js?v=20261116-clear-arrow-labels" defer></script>
+<script src="/static/js/pages/architecture-scene-data.js?v=20261118-singleline-v7" defer></script>
+<script src="/static/js/pages/architecture-scenes.js?v=20261118-singleline-v7" defer></script>
 </body>
 </html>

@@ -12,7 +12,7 @@ name: CI
 on:
   push:
     # 全仓库校验分支使用与 main 相同门禁；结束后移除分支规则。
-    branches: [main, audit/global-current-0acf952-20261117]
+    branches: [main, audit/global-current-1cd4167-20261118]
   pull_request:
     branches: [main]
 

@@ -51,14 +51,38 @@ def test_wrong_tessdata_directory_is_corrected_and_paths_remain_idempotent(bundl
 
 
 def test_real_bundled_engine_can_load_languages_after_partial_environment_repair(monkeypatch):
-    command = finder.bundled_tesseract_cmd()
+    finder.usable_tesseract_cmd.cache_clear()
+    command = finder.usable_tesseract_cmd()
     if command is None:
-        pytest.skip("bundled tesseract is not installed")
+        pytest.skip("No usable Tesseract engine installed")
     root = finder._tesseract_dir()
     monkeypatch.setattr(finder, "_configured", None)
     with patch.dict(os.environ, {"LD_LIBRARY_PATH": str(root), "PATH": "/usr/bin"}, clear=True):
-        assert finder.configure_bundled_tesseract()
+        assert finder.configure_usable_tesseract() == command
         result = subprocess.run([command, "--list-langs"], capture_output=True, text=True, timeout=5)
+    finder.usable_tesseract_cmd.cache_clear()
     assert result.returncode == 0, result.stderr
     languages = result.stdout.splitlines()
     assert "eng" in languages and "chi_sim" in languages
+
+
+
+def test_falls_back_to_system_when_bundled_runtime_cannot_load(monkeypatch):
+    finder.usable_tesseract_cmd.cache_clear()
+    monkeypatch.setattr(finder, "bundled_tesseract_cmd", lambda: "/missing/legacy-engine")
+    monkeypatch.setattr(finder, "bundled_tesseract_env", lambda: dict(os.environ))
+    monkeypatch.setattr(finder.shutil, "which", lambda name: "/usr/bin/tesseract")
+    assert finder.usable_tesseract_cmd() == "/usr/bin/tesseract"
+    finder.usable_tesseract_cmd.cache_clear()
+
+
+
+def test_system_fallback_does_not_inherit_bundled_library_paths(monkeypatch):
+    finder.usable_tesseract_cmd.cache_clear()
+    root = finder._tesseract_dir()
+    monkeypatch.setattr(finder, "usable_tesseract_cmd", lambda: "/usr/bin/tesseract")
+    monkeypatch.setenv("LD_LIBRARY_PATH", str(root) + ":/usr/lib")
+    monkeypatch.setenv("TESSDATA_PREFIX", str(root / "tessdata"))
+    assert finder.configure_usable_tesseract() == "/usr/bin/tesseract"
+    assert os.environ["LD_LIBRARY_PATH"] == "/usr/lib"
+    assert "TESSDATA_PREFIX" not in os.environ

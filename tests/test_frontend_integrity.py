@@ -185,8 +185,13 @@ class FrontendIntegrityTests(unittest.TestCase):
             cluster_page,
         )
         self.assertNotIn("offline:'离线'", cluster_page[names_start:names_end])
+        # 设备分布由环形图改为按 Worker 堆叠条，仍必须排除离线设备。
         self.assertIn(
-            "设备状态分布 ('+dashboardDevices.length+')",
+            "const active=state.devices.filter(d=>d.state!=='offline')",
+            cluster_page,
+        )
+        self.assertIn(
+            "设备状态分布 (${active.length})",
             cluster_page,
         )
         self.assertIn(
@@ -255,7 +260,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("scheduleDeferredPagePreload(initialPage)", navigation)
         self.assertIn("const clusterModeReady = initializeClusterMode()", navigation)
         self.assertIn("await Promise.all([clusterModeReady, configReady])", navigation)
-        self.assertIn("test-reports.js?v=20260812-stable-surfaces", shell)
+        self.assertIn("test-reports.js?v=20261118-notice-report-focus", shell)
         self.assertIn("navigation.js?v=20261112-primary-gradient", shell)
         self.assertIn("testTypeLower === 'apts'", navigation)
         self.assertIn("APTS使用GTS测试套件", navigation)
@@ -641,19 +646,24 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_architecture_page_matches_controller_worker_control_plane(self):
         architecture = read_text("web/templates/architecture.html")
+        scene_data = read_text("web/static/js/pages/architecture-scene-data.js")
+        renderer = read_text("web/static/js/pages/architecture-scenes.js")
 
         for label in (
-            "FastAPI Controller",
-            "Agent Runtime",
+            "Controller",
             "Linux Worker A",
             "Linux Worker B",
-            "Heartbeat / Poll / ACK",
-            "Windows USB Source",
-            "Linux USB Source",
+            "Heartbeat / Poll",
+            "Windows Source",
+            "Linux Source",
+            "USB/IP",
+            "ADB",
         ):
-            self.assertIn(label, architecture)
-        self.assertIn("命令随 Poll 响应返回", architecture)
-        self.assertIn("生产入口为 HTTPS", architecture)
+            self.assertIn(label, scene_data)
+        self.assertIn("architecture-scene-data.js", architecture)
+        self.assertIn("architecture-scenes.js", architecture)
+        self.assertIn("arch-scene-wires", renderer)
+        self.assertNotIn("<details", architecture)
         self.assertNotIn("http://&lt;test_host&gt;:5001", architecture)
 
     def test_suite_share_links_keep_slashes_readable(self):
@@ -742,7 +752,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         shell = read_shell_bundle()
         notifications = read_text("web/static/js/notifications.js")
 
-        self.assertIn("notifications.js?v=20260903-toggle-ready", shell)
+        self.assertIn("notifications.js?v=20261118-targeted-notice-navigation", shell)
         self.assertNotIn('onclick="toggleNotificationPanel()"', shell)
         self.assertIn('id="notification-toggle" class="notification-toggle" title="消息通知" disabled', shell)
         self.assertIn(

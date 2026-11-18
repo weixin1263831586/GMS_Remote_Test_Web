@@ -51,6 +51,19 @@ function initApkAnalysisPage() {
 
     if (uploadZone.dataset.initialized === 'true') return;
     uploadZone.dataset.initialized = 'true';
+    const tabBar = document.querySelector('#page-apk-analysis [role="tablist"]');
+    tabBar?.addEventListener('keydown', (event) => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        const tabs = [...tabBar.querySelectorAll('[data-apk-tab]')];
+        const current = tabs.indexOf(document.activeElement);
+        if (current < 0) return;
+        const next = event.key === 'Home' ? 0
+            : event.key === 'End' ? tabs.length - 1
+            : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+        event.preventDefault();
+        switchApkTab(tabs[next].dataset.apkTab);
+        tabs[next].focus({preventScroll: true});
+    });
 
     // 绑定拖拽事件
     uploadZone.addEventListener('dragover', (e) => {
@@ -576,6 +589,7 @@ function renderApkSourceItems(items, container, parentPath) {
 
         const itemHeader = document.createElement('div');
         itemHeader.className = `apk-tree-item ${item.type}`;
+        itemHeader.classList.toggle('selected', item.type === 'file' && item.path === window.apkActiveFilePath);
         itemHeader.setAttribute('data-apk-path', item.path);
 
         const nameSpan = document.createElement('span');
@@ -648,6 +662,11 @@ function renderApkFileTabs() {
     });
 
     viewer.style.display = window.apkOpenFiles.size ? 'flex' : 'none';
+    const placeholder = $('apk-source-placeholder');
+    if (placeholder) placeholder.hidden = window.apkOpenFiles.size > 0;
+    document.querySelectorAll('#apk-source-tree .apk-tree-item.file').forEach(item => {
+        item.classList.toggle('selected', item.dataset.apkPath === window.apkActiveFilePath);
+    });
 }
 
 function activateApkFileTab(filePath, targetLine = null) {
@@ -883,7 +902,10 @@ function switchApkTab(tabName, {persist = true} = {}) {
         try { window.sessionStorage.setItem(APK_ANALYSIS_TAB_STORAGE_KEY, target); } catch (_error) {}
     }
     document.querySelectorAll('[data-apk-tab]').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.apkTab === target);
+        const active = btn.dataset.apkTab === target;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        btn.tabIndex = active ? 0 : -1;
     });
 
     $('apk-tab-manifest').style.display = target === 'manifest' ? 'flex' : 'none';

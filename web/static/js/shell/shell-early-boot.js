@@ -124,17 +124,23 @@
         // - 普通 F5 / Ctrl+R：sessionStorage 里的页签视图键保留 → 刷新后
         //   恢复刷新前页签（设备管理「AOA工作台」/ 用户管理「Agent 接入 /
         //   SDK 配置」/ 安全审计「历史邮件」）。
-        // - Ctrl+Shift+R（Cmd+Shift+R）强制刷新：先清掉页签视图键，刷新后
-        //   各页回到默认页签（设备列表 / 用户列表 / 审计日志）。
-        // 浏览器菜单触发的硬性刷新感知不到，属已知边界。
+        // - Ctrl+Shift+R（Cmd+Shift+R）及可拦截的 Ctrl+F5：清空页签视图键，
+        //   下次加载回到各页面第一个 Tab（包括主机集群 Dashboard）。
+        // iframe 内键盘事件由对应页面处理；浏览器菜单触发的硬刷新
+        // 不一定会下发键盘事件，是浏览器平台的已知限制。
         window.addEventListener('keydown', function(e) {
-            if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return;
             var key = String(e.key || '').toLowerCase();
-            if (key !== 'r') return;
+            var forceReload = ((e.ctrlKey || e.metaKey) && e.shiftKey && key === 'r')
+                || (e.ctrlKey && key === 'f5');
+            if (!forceReload) return;
             try {
                 sessionStorage.removeItem('gms_devices_view');
                 sessionStorage.removeItem('gms_users_view');
                 sessionStorage.removeItem('gms_audit_view');
+                sessionStorage.removeItem('gms_cluster_active_tab');
+                // A one-shot marker also overrides an iframe URL restored with
+                // ?tab=management, which otherwise wins over sessionStorage.
+                sessionStorage.setItem('gms_cluster_force_dashboard_once', '1');
             } catch (_error) { /* sessionStorage 不可用时无页签可恢复 */ }
         }, true);
 

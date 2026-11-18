@@ -78,6 +78,37 @@ class RuntimeLoadingOrbitHandoffTests(RuntimeUiHarness):
                         self.assertEqual(len(held_documents), 1)
                         held_documents.pop().continue_()
                         frame = frame_node.element_handle().content_frame()
+                        if name == 'cluster':
+                            # Cluster management uses the compact table
+                            # skeleton, not the legacy full-screen orbit.
+                            frame.wait_for_selector(
+                                '#workers .cluster-loading-message', state='attached'
+                            )
+                            page.wait_for_function(
+                                'id => document.getElementById(id).closest(".embedded-frame-shell")'
+                                '.dataset.frameState === "ready"', arg=frame_id,
+                            )
+                            bounds = frame.evaluate("""() => {
+                                const pane = document.querySelector('#tab-management');
+                                const workers = document.querySelector('#workers');
+                                const label = workers.querySelector('.cluster-loading-message');
+                                return {
+                                    tabVisible: !pane.hidden,
+                                    skeletonHeight: label.getBoundingClientRect().height,
+                                    right: workers.getBoundingClientRect().right,
+                                    viewport: window.innerWidth,
+                                };
+                            }""")
+                            self.assertTrue(bounds['tabVisible'], bounds)
+                            self.assertGreater(bounds['skeletonHeight'], 0, bounds)
+                            self.assertLessEqual(bounds['right'], bounds['viewport'] + 1, bounds)
+                            page.evaluate("switchPage('test', null)")
+                            page.evaluate("switchPage('cluster', null)")
+                            frame.wait_for_selector(
+                                '#workers .cluster-loading-message', state='attached'
+                            )
+                            page.evaluate("switchPage('test', null)")
+                            continue
                         frame.wait_for_selector('.loading-orbit-bar', state='attached')
                         stage = frame.locator('.loading-orbit').first
                         hidden = stage.evaluate(GEOMETRY)
@@ -102,7 +133,9 @@ class RuntimeLoadingOrbitHandoffTests(RuntimeUiHarness):
                         page.evaluate('name => switchPage(name, null)', name)
                         self.assert_same_origin(stage.evaluate(GEOMETRY), f'{name} after re-entry')
                         page.evaluate("switchPage('test', null)")
-                self.assertEqual(len(centers), 4)
+                # Three other dashboards share the orbit design; cluster
+                # uses the separately verified table skeleton.
+                self.assertEqual(len(centers), 3)
                 self.assertLessEqual(max(value for _, value in centers) - min(value for _, value in centers), 0.6,
                                      msg=f'Dashboard centers differ at {width}x{height}: {centers}')
             finally:

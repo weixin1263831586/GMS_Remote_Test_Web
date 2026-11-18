@@ -1,0 +1,167 @@
+name: Audit on-prem repository and live feature validation
+
+on:
+  push:
+    # Audit branch deliberately validates every module change, not only
+    # edits to the audit scripts. Runner jobs are independent of CI jobs.
+    branches: [audit/global-current-1cd4167-20261118]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-host-full-validation-1cd4167
+  cancel-in-progress: true
+
+jobs:
+  repository-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.10"
+      - name: Install bundled OCR runtime dependency on ephemeral CI host
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
+          # Newer Ubuntu uses libtiff6: bundled Tesseract 4 can still require
+          # libtiff.so.5; the runtime selector falls back to this system build.
+          tesseract --list-langs | tee "$RUNNER_TEMP/tesseract-languages.txt"
+          grep -qx 'eng' "$RUNNER_TEMP/tesseract-languages.txt"
+          grep -qx 'chi_sim' "$RUNNER_TEMP/tesseract-languages.txt"
+      - name: Install full test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - name: Validate live-probe catalogue and collect all non-device tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_live_module_audit.py tests/test_soak_host_config.py
+          python -m pytest --collect-only -q \
+            features worker_agent/tests tests/architecture tests/contract \
+            tests/integration tests/unit tests/quality tests/reliability \
+            > "$RUNNER_TEMP/gms-test-collection.txt"
+          tail -n 1 "$RUNNER_TEMP/gms-test-collection.txt"
+      - name: Repository-wide feature and Worker regression in isolated scratch
+        shell: bash
+        env:
+          GMS_SKIP_RUNTIME_ENV: "1"
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          mkdir -p "$RUNNER_TEMP/gms-audit-home"
+          # Do not override GMS_DATA_ROOT globally: tests with isolated
+          # project_root must derive separate data roots, not share one store.
+          unset GMS_DATA_ROOT
+          set +e
+          HOME="$RUNNER_TEMP/gms-audit-home" \
+            python -m pytest -q \
+              features worker_agent/tests tests/architecture tests/contract \
+              tests/integration tests/unit tests/quality tests/reliability \
+              --junitxml="$RUNNER_TEMP/gms-full-regression.xml"
+          code=$?
+          echo "$code" > "$RUNNER_TEMP/gms-full-regression.exit"
+          exit 0
+      - name: Upload full repository JUnit and collection evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gms-repository-regression-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/gms-test-collection.txt
+            ${{ runner.temp }}/gms-full-regression.xml
+            ${{ runner.temp }}/gms-full-regression.exit
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Require complete and passing repository regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$RUNNER_TEMP/gms-full-regression.exit"
+          test "$(cat "$RUNNER_TEMP/gms-full-regression.exit")" = 0
+
+  live-on-host:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 20
+    steps:
+      - name: Verify target host and dedicated Runner identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = "ats-041055-64g"
+          test "$(id -un)" = "hcq"
+          test -s "$HOME/GMS_Remote_Test_Web/actions-runner/.runner"
+          echo "Live Controller on registered host; no service restart or device writes"
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.10"
+      - name: Install minimal isolated live-probe dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/gms-live-venv"
+          "$RUNNER_TEMP/gms-live-venv/bin/python" -m pip install --disable-pip-version-check "requests==2.34.2"
+      - name: Authenticated read-only live feature-module verification
+        shell: bash
+        env:
+          GMS_SOAK_BASE_URL: ${{ vars.GMS_SOAK_BASE_URL || secrets.GMS_SOAK_BASE_URL }}
+          GMS_SOAK_USERNAME: ${{ secrets.GMS_SOAK_USERNAME }}
+          GMS_SOAK_PASSWORD: ${{ secrets.GMS_SOAK_PASSWORD }}
+          GMS_SOAK_SESSION_TOKEN: ${{ secrets.GMS_SOAK_SESSION_TOKEN }}
+          GMS_SOAK_DEVICE_HOST: ${{ vars.GMS_SOAK_DEVICE_HOST }}
+          GMS_SOAK_DEVICE_SERIAL: ${{ vars.GMS_SOAK_DEVICE_SERIAL }}
+          GMS_SOAK_BUSIDS: ${{ vars.GMS_SOAK_BUSIDS }}
+          GMS_SOAK_WORKER_ID: ${{ vars.GMS_SOAK_WORKER_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          cfg="$RUNNER_TEMP/gms-live-lab.env"
+          trap 'rm -f -- "$cfg"' EXIT
+          "$RUNNER_TEMP/gms-live-venv/bin/python" tools/scripts/testing/resolve_soak_host_config.py \
+            --local-root "$HOME/GMS_Remote_Test_Web/configs/local" --output "$cfg"
+          source "$cfg"
+          case "$GMS_SOAK_BASE_URL" in
+            https://127.0.0.1:*|https://localhost:*)
+              certdir="$HOME/GMS_Remote_Test_Web/configs/secrets/certs"
+              if [[ -s "$certdir/gms-local-ca.crt" ]]; then
+                export REQUESTS_CA_BUNDLE="$certdir/gms-local-ca.crt"
+              elif [[ -s "$certdir/gms-local.crt" ]]; then
+                export REQUESTS_CA_BUNDLE="$certdir/gms-local.crt"
+              else
+                echo "::error::No on-host Controller CA certificate"
+                exit 1
+              fi
+              ;;
+          esac
+          set +e
+          "$RUNNER_TEMP/gms-live-venv/bin/python" tools/scripts/testing/audit_live_modules.py \
+            --output "$RUNNER_TEMP/gms-live-modules.json" \
+            --host-repo "$HOME/GMS_Remote_Test_Web"
+          code=$?
+          echo "$code" > "$RUNNER_TEMP/gms-live-modules.exit"
+          exit 0
+      - name: Upload read-only live feature results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gms-live-module-audit-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/gms-live-modules.json
+            ${{ runner.temp }}/gms-live-modules.exit
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Require successful critical live interfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$RUNNER_TEMP/gms-live-modules.exit"
+          test "$(cat "$RUNNER_TEMP/gms-live-modules.exit")" = 0

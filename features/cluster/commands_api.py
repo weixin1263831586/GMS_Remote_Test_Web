@@ -282,6 +282,17 @@ def _notify_start_test_result(command: dict[str, Any]) -> None:
             "command_id": str(command.get("id") or ""),
             "worker_id": worker_id,
             "job_id": job_id,
+            "cluster_job_id": job_id,
+            "attempt_id": str(job.get("current_attempt_id") or ""),
+            # A completed job can be inspected by report_id even after it has
+            # left the first page of report history. Missing report artifacts
+            # are handled by the client as a link to this exact Job.
+            "report_id": (
+                f"cluster:{job_id}:{job['current_attempt_id']}"
+                if status == "completed" and job.get("current_attempt_id")
+                else ""
+            ),
+            "report_timestamp": f"cluster-{job_id}" if status == "completed" else "",
             "command_type": "start_test",
             "status": status,
         },

@@ -1,47 +1,58 @@
 <div class="container page-content page-ui-rework" id="page-report-analysis">
-            {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">📈</span> 报告分析{% include 'components/page-header-end.html' %}
+    {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">📈</span> 报告分析{% include 'components/page-header-end.html' %}
 
-            <!-- 拖拽上传区域 -->
-            <div class="analysis-upload-frame">
-                <div id="report-upload-zone" class="report-upload-zone upload-empty">
-                    <input type="file" id="report-file-input" accept=".xml,.zip,.rar,.tar,.tar.gz" style="display: none;" />
-                    <input type="file" id="report-folder-input" webkitdirectory directory style="display: none;" />
-                    <div class="report-upload-content">
-                        <div>📁</div>
-                        <div class="analysis-upload-copy">
-                            <div class="analysis-upload-title">拖拽测试报告到此处</div>
-                            <div class="upload-instructions">
-                                支持 .zip、.rar、.xml、.tar.gz 等文件格式<br><br>
-                                1. 点击按钮"📤 上传报告"上传<br>
-                                2. 直接拖拽测试报告上传<br>
-                                3. 直接拖拽 Redmine 附件上传
-                            </div>
-                        </div>
-                        <button class="btn-xs" data-click="_actClickById" data-a0="report-file-input">
-                            <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg> 上传报告
-                        </button>
-                    </div>
-                    <div class="report-upload-progress" id="report-upload-progress">
-                        <div class="report-upload-progress-bar" id="report-progress-fill" style="width: 0%"></div>
-                    </div>
+    <!-- Analysis workbench: same 84px compact intake and 29px controls as APK. -->
+    <div class="analysis-upload-frame report-workbench-upload">
+        <div id="report-upload-zone" class="report-upload-zone upload-empty">
+            <input type="file" id="report-file-input" accept=".xml,.zip,.rar,.tar,.tar.gz" style="display:none">
+            <input type="file" id="report-folder-input" webkitdirectory directory style="display:none">
+            <div class="report-upload-content">
+                <span class="report-upload-mark" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg></span>
+                <div class="analysis-upload-copy">
+                    <div class="analysis-upload-title">拖拽测试报告到此处</div>
+                    <div class="upload-instructions">支持 XML、ZIP、RAR、TAR.GZ 文件以及 Redmine 附件拖拽</div>
                 </div>
+                <button class="btn-xs" type="button" data-click="_actClickById" data-a0="report-file-input">
+                    <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg> 上传报告
+                </button>
             </div>
-
-            <!-- 分析结果区域 -->
-            <div id="report-analysis-result" style="display: none;">
-                <div class="report-result-card">
-                    <button class="btn-xs report-float-action" data-click="sendReportAnalysisEmail" title="将本报告分析结果作为 HTML 邮件发送"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#mail"></use></svg> 发送邮件</button>
-                    <button class="btn-xs report-float-action" data-click="resetReportAnalysis">清除</button>
-
-                    <div id="report-summary" class="report-summary-grid"></div>
-                    <div id="report-details" class="report-details"></div>
-                </div>
-
-                <div id="report-failures" class="report-result-card" style="display: none;">
-                    <div class="report-section-head">
-                        <div id="report-failures-title">❌ 失败用例</div>
-                    </div>
-                    <div id="report-failure-list" class="report-failure-list"></div>
-                </div>
+            <div class="report-upload-progress" id="report-upload-progress">
+                <div class="report-upload-progress-bar" id="report-progress-fill" style="width:0%"></div>
             </div>
         </div>
+        <div id="report-active-file" class="report-active-file" hidden>
+            <span class="report-active-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#archive"></use></svg></span>
+            <div class="report-active-copy">
+                <div id="report-active-name" class="report-active-name" title=""></div>
+                <div class="report-active-status"><span class="report-active-dot"></span>解析完成</div>
+                <div class="report-active-progress" aria-hidden="true"><span></span></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="report-analysis-result" class="report-workbench-result" style="display:none">
+        <section class="report-result-card report-overview">
+            <!-- One compact row: stats, report metadata and icon-only actions. -->
+            <div class="report-overview-line">
+                <div id="report-summary" class="report-summary-grid"></div>
+                <div class="report-overview-actions" role="group" aria-label="报告操作">
+                    <button class="btn-xs" type="button" data-click="sendReportAnalysisEmail" aria-label="发送邮件" title="发送报告分析邮件"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#mail"></use></svg></button>
+                    <button class="btn-xs" type="button" data-click="resetReportAnalysis" aria-label="清除" title="清除当前报告"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#close"></use></svg></button>
+                </div>
+            </div>
+            <div id="report-details" class="report-details"></div>
+        </section>
+        <section id="report-failures" class="report-result-card report-failure-workspace" style="display:none">
+            <div class="report-section-head report-failure-heading">
+                <div id="report-failures-title">失败用例</div>
+                <div id="report-failure-header-actions" class="report-failure-header-actions" role="group" aria-label="选中失败用例操作"></div>
+            </div>
+            <div class="report-failure-layout">
+                <div id="report-failure-list" class="report-failure-list" aria-label="失败用例列表"></div>
+                <section id="report-failure-detail" class="report-failure-detail" aria-label="失败用例详情" hidden>
+                    <div id="report-failure-detail-content"></div>
+                </section>
+            </div>
+        </section>
+    </div>
+</div>

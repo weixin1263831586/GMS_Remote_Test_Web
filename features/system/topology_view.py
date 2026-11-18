@@ -9,7 +9,7 @@ import math
 import re
 from itertools import pairwise
 
-from .topology_layouts import LAYOUTS, RESOURCE, Point, Port
+from .topology_layouts import ACCESS, CONTROL, LAYOUTS, RESOURCE, WORKER, Point, Port
 
 
 NODE = re.compile(r'^(\w+)\[\(?"([^"]+)"\)?\]$')
@@ -233,7 +233,20 @@ def render_topology(source: str, source_name: str = 'platform-topology.mmd') -> 
         f'width="{CANVAS_W}" height="{height:g}" role="img" aria-labelledby="{title_id}" '
         f'data-topology-source="{html.escape(source_name, quote=True)}">',
         f'<title id="{title_id}">GMS Remote Test 拓扑：{html.escape(source_name)}</title>',
-        f'<defs>{_marker(arrow_id, DATA_STROKE)}{_marker(arrow_id + "-cmd", CMD_STROKE)}</defs>',
+        (f'<defs>{_marker(arrow_id, DATA_STROKE)}{_marker(arrow_id + "-cmd", CMD_STROKE)}'
+         + ''.join(
+             f'<linearGradient id="{ident}-node-{kind}" x1="0" y1="0" x2="1" y2="1">'
+             f'<stop offset="0%" stop-color="{top}"/>'
+             f'<stop offset="100%" stop-color="#141627"/>'
+             '</linearGradient>'
+             for kind, top in (('access', '#36234f'), ('control', '#23365d'),
+                               ('worker', '#403323'), ('resource', '#1a3b36'))
+         )
+         + f'<radialGradient id="{ident}-halo"><stop offset="0%" stop-color="#7353e3" '
+         'stop-opacity=".24"/><stop offset="100%" stop-color="#7353e3" stop-opacity="0"/>'
+         '</radialGradient></defs>'),
+        (f'<ellipse cx="620" cy="{height - 34:g}" rx="420" ry="34" '
+         f'fill="url(#{ident}-halo)" aria-hidden="true"/>'),
         *edge_markup,
     ]
     for name, label in nodes.items():
@@ -242,10 +255,14 @@ def render_topology(source: str, source_name: str = 'platform-topology.mmd') -> 
             raise ValueError(f'Topology node needs a shorter label: {label}')
         x, y = layout.positions[name]
         stroke = layout.kinds.get(name, RESOURCE)
+        kind = ('access' if stroke == ACCESS else 'control' if stroke == CONTROL
+                else 'worker' if stroke == WORKER else 'resource')
         parts.append(
             f'<g data-node="{name}">'
             f'<rect x="{x - NODE_W / 2:g}" y="{y - NODE_H / 2:g}" width="{NODE_W}" height="{NODE_H}" '
-            f'rx="10" fill="var(--arch-node, #0f172a)" stroke="{stroke}" stroke-width="1.5"/>'
+            f'rx="12" fill="url(#{ident}-node-{kind})" stroke="{stroke}" stroke-width="2"/>'
+            f'<circle cx="{x - NODE_W / 2 + 16:g}" cy="{y - NODE_H / 2 + 15:g}" '
+            f'r="4" fill="{stroke}" fill-opacity=".78"/>'
             f'{_text(x, y, lines, NODE_FONT_SIZE, NODE_LINE_H, 600)}</g>'
         )
     return ''.join([*parts, '</svg>'])

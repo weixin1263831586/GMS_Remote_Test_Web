@@ -87,6 +87,7 @@ def cluster_page():
 def cluster_ui_asset(ui_asset: str):
     """Cluster 页面脚本统一路由（CSP 收紧后禁止 inline <script>）。
 
+    - tab-boot.js: CSP 安全的头部脚本，首帧绘制前选择正确 Tab；
     - page.js: 入口 chunk（事件接线与初始化，最后加载）；
     - state.js: 顶层状态与共享助手（最先加载）；开头含 embedded-workspace
       就绪标记与 ECharts 本地 vendor 加载器（原 page-boot.js /
@@ -96,7 +97,7 @@ def cluster_ui_asset(ui_asset: str):
       page.html 按 script 顺序引用，拼接语义等价拆分前单文件。
     """
     if ui_asset not in {
-        "page.js", "modal-controller.js",
+        "page.js", "tab-boot.js", "modal-controller.js",
         "state.js", "jobs.js", "workers.js", "dash-charts.js",
         "dash-render.js", "library.js", "management.js",
     }:

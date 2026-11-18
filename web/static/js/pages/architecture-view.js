@@ -11,17 +11,6 @@
     const STORAGE_KEY = 'gms_architecture_view';
     const tabs = Array.from(document.querySelectorAll('.arch-tab'));
     const panes = Array.from(document.querySelectorAll('[data-arch-pane]'));
-    const legend = document.querySelector('.arch-legend');
-
-    function alignLegend() {
-        const canvas = legend?.closest('.topology-canvas');
-        if (!canvas || !canvas.getClientRects().length) return;
-        const rects = Array.from(canvas.querySelectorAll('svg [data-node] > rect'));
-        if (!rects.length) return;
-        const top = Math.min(...rects.map((rect) => rect.getBoundingClientRect().top));
-        legend.style.marginTop = `${top - canvas.getBoundingClientRect().top}px`;
-    }
-
     function showArch(name, persist) {
         if (!panes.some((pane) => pane.dataset.archPane === name)) name = 'platform';
         tabs.forEach((tab) => {
@@ -33,9 +22,7 @@
         panes.forEach((pane) => {
             const active = pane.dataset.archPane === name;
             pane.hidden = !active;
-            if (active && legend) pane.querySelector('.topology-canvas')?.prepend(legend);
         });
-        alignLegend();
         if (persist === false) return;
         try { window.sessionStorage.setItem(STORAGE_KEY, name); } catch (_error) {}
         try {
@@ -45,12 +32,6 @@
             window.history.replaceState({}, '', url.toString());
         } catch (_error) {}
     }
-
-    const diagramResize = new ResizeObserver(alignLegend);
-    panes.forEach((pane) => {
-        const svg = pane.querySelector('.topology svg');
-        if (svg) diagramResize.observe(svg);
-    });
 
     tabs.forEach((tab) => {
         tab.addEventListener('click', () => showArch(tab.dataset.arch));

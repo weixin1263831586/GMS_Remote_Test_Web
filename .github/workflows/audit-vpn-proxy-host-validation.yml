@@ -1,0 +1,95 @@
+name: Read-only VPN proxy deployment and GMS integration check
+
+on:
+  push:
+    branches: [audit/global-current-1cd4167-20261118]
+    paths:
+      - .github/workflows/audit-vpn-proxy-host-validation.yml
+      - tools/scripts/testing/audit_vpn_proxy_host.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vpn-proxy-on-host:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 15
+    steps:
+      - name: Verify dedicated actions-runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = "ats-041055-64g"
+          test "$(id -un)" = "hcq"
+          test -s "$HOME/GMS_Remote_Test_Web/actions-runner/.runner"
+          test -d "$HOME/vpn-proxy/.git"
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Prepare isolated Python
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/vpn-check-venv"
+          "$RUNNER_TEMP/vpn-check-venv/bin/python" -m pip install --disable-pip-version-check "requests==2.34.2"
+      - name: Resolve existing local Controller target (credentials never logged)
+        env:
+          GMS_SOAK_BASE_URL: ${{ vars.GMS_SOAK_BASE_URL || secrets.GMS_SOAK_BASE_URL }}
+          GMS_SOAK_USERNAME: ${{ secrets.GMS_SOAK_USERNAME }}
+          GMS_SOAK_PASSWORD: ${{ secrets.GMS_SOAK_PASSWORD }}
+          GMS_SOAK_SESSION_TOKEN: ${{ secrets.GMS_SOAK_SESSION_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          "$RUNNER_TEMP/vpn-check-venv/bin/python" tools/scripts/testing/resolve_soak_host_config.py \
+            --local-root "$HOME/GMS_Remote_Test_Web/configs/local" \
+            --output "$RUNNER_TEMP/vpn-check.env"
+      - name: Audit live state without changing any proxy or client state
+        env:
+          GMS_SOAK_BASE_URL: ${{ vars.GMS_SOAK_BASE_URL || secrets.GMS_SOAK_BASE_URL }}
+          GMS_SOAK_USERNAME: ${{ secrets.GMS_SOAK_USERNAME }}
+          GMS_SOAK_PASSWORD: ${{ secrets.GMS_SOAK_PASSWORD }}
+          GMS_SOAK_SESSION_TOKEN: ${{ secrets.GMS_SOAK_SESSION_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/vpn-check.env"
+          case "$GMS_SOAK_BASE_URL" in
+            https://127.0.0.1:*|https://localhost:*)
+              certdir="$HOME/GMS_Remote_Test_Web/configs/secrets/certs"
+              if [[ -s "$certdir/gms-local-ca.crt" ]]; then
+                export REQUESTS_CA_BUNDLE="$certdir/gms-local-ca.crt"
+              elif [[ -s "$certdir/gms-local.crt" ]]; then
+                export REQUESTS_CA_BUNDLE="$certdir/gms-local.crt"
+              else
+                echo "::error::Local GMS certificate unavailable"
+                exit 1
+              fi ;;
+          esac
+          set +e
+          "$RUNNER_TEMP/vpn-check-venv/bin/python" tools/scripts/testing/audit_vpn_proxy_host.py \
+            --vpn-root "$HOME/vpn-proxy" \
+            --gms-root "$HOME/GMS_Remote_Test_Web" \
+            --master-sha "0066c998c856a0cef86ffa7184e2e46cf3fa83b7" \
+            --output "$RUNNER_TEMP/vpn-proxy-host-report.json"
+          result=$?
+          echo "$result" > "$RUNNER_TEMP/vpn-proxy-host-report.exit"
+          exit 0
+      - name: Delete local temporary credentials
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/vpn-check.env"
+      - name: Upload sanitized audit report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vpn-proxy-host-audit-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/vpn-proxy-host-report.json
+            ${{ runner.temp }}/vpn-proxy-host-report.exit
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Fail if deployment is not ready
+        run: |
+          test -s "$RUNNER_TEMP/vpn-proxy-host-report.exit"
+          test "$(cat "$RUNNER_TEMP/vpn-proxy-host-report.exit")" = 0

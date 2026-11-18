@@ -138,9 +138,12 @@ class DeviceLockManager:
         if claim["owner_id"] != client_id:
             return False, f"设备 {device_id} 被其他用户锁定，无法解锁"
         source = self._source_id(client_id, source_id)
-        if source_id and claim["source_id"] != source:
+        # Never let a generic unlock revoke a firmware, cluster job or
+        # reservation lease held by the same owner. The caller must identify
+        # the operation's exact source.
+        if claim["source_id"] != source:
             return False, f"设备 {device_id} 属于另一个运行中的操作"
-        self.registry.release(claim["source_id"], device_keys=[device["device_key"]])
+        self.registry.release(source, device_keys=[device["device_key"]])
         return True, f"设备 {device_id} 解锁成功"
 
     def force_unlock_device(self, device_id: str) -> tuple[bool, str | None]:
@@ -226,9 +229,19 @@ class DeviceLockManager:
         )
         if source_id:
             records = [row for row in records if row["source_id"] == source_id]
+        else:
+            # Generic unlock-all is for manual local locks only. Running
+            # jobs, reservations and firmware operations own their release.
+            records = [row for row in records if row["source_type"] == "local"]
         released = 0
         for source in {row["source_id"] for row in records}:
-            released += self.registry.release(source)
+            device_keys = [
+                row["device_key"] for row in records
+                if row["source_id"] == source
+            ]
+            # A source ID is not necessarily unique to a Worker. Never use
+            # an unscoped source release after filtering by worker/owner.
+            released += self.registry.release(source, device_keys=device_keys)
         return released
 
 

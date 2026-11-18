@@ -1,4 +1,4 @@
-%% 设备物理连接在 Source；Worker 看到的是 vhci_hcd 虚拟 USB，不是二次物理设备。
+%% Windows / Linux Source 是二选一的物理连接路径；Worker 看到的是 vhci_hcd 虚拟 USB，不是二次物理设备。
 flowchart TB
     DevSrc["Android 设备（物理 USB）"]
     WinSrc["Windows Source / usbipd-win"]
@@ -16,5 +16,5 @@ flowchart TB
     DevWorker -->|"本地 USB 语义"| Tools
     Ctrl -.->|"SSH / bind"| WinSrc
     Ctrl -.->|"SSH / bind"| LinuxSrc
-    Ctrl -.->|"Poll / attach"| Worker
-    Worker -->|"清单 / ACK"| Ctrl
+    Ctrl -.->|"Poll 响应 / attach"| Worker
+    Worker -->|"Poll / ACK"| Ctrl

@@ -16,8 +16,7 @@ from features.redmine.analysis_common import MAX_FAILURE_LINES, _truncate
 from features.redmine.cert_rules import detect_certification_errors
 from features.redmine.models import RedmineAttachment
 from features.redmine.tesseract_finder import (
-    bundled_tesseract_cmd,
-    configure_bundled_tesseract,
+    configure_usable_tesseract,
 )
 from features.redmine.utils import sanitize_attachment_filename
 
@@ -225,9 +224,8 @@ class AttachmentAnalysisMixin:
         try:
             # bundled_tesseract_cmd() and configure_bundled_tesseract() are both
             # cached after the first call, so this per-image check stays cheap.
-            cmd = bundled_tesseract_cmd()
+            cmd = configure_usable_tesseract()
             if cmd:
-                configure_bundled_tesseract()
                 import pytesseract.pytesseract as _pt
                 _pt.tesseract_cmd = cmd
             with Image.open(path) as image:
