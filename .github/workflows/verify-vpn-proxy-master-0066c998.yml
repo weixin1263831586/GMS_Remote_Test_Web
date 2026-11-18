@@ -12,11 +12,11 @@ permissions:
 
 concurrency:
   group: vpn-proxy-local-0066c998
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   vpn-proxy-readonly:
-    runs-on: [self-hosted, linux, gms-android-lab]
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 15
     defaults:
       run:
